@@ -21,9 +21,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::protocol::{
-    ApplyOp, CollectionId, CommandKind, EntryProp, Key, MenuItemId, MenuItemKind, MenuProp, Prop,
-    PropValue, Record, SectionProp, SignalId, Transaction, TxOp, Value, ValueType, WidgetId,
-    WidgetKind, WindowId, WindowProp,
+    ApplyOp, CollectionId, CommandKind, EntryProp, Key, MenuItemId, MenuItemKind, MenuProp,
+    Occurrence, Prop, PropValue, Record, SectionProp, SignalId, Transaction, TxOp, UndoDelta,
+    UndoEntry, UndoOrder, Value, ValueType, WidgetId, WidgetKind, WindowId, WindowProp,
 };
 
 /// Internal instance ids live above this bit; guest widget ids below it.
@@ -211,6 +211,156 @@ struct MenuItem {
     role: Option<String>,
 }
 
+// --- The undo ledger (docs/undo-plan.md D2, D3, §3) ---------------------
+
+/// One window's history, newest LAST. `done` is what an undo walks;
+/// `redo` is what a redo walks, and any new step clears it.
+///
+/// ONE ORDERED LIST, NOT TWO STACKS. The whole point of banking typing
+/// episodes beside groups is that the user's history has no holes and no
+/// interleave: "ask the focused text first" and "ask the most recent
+/// first" are the same question, because a group commit clears the
+/// focused field's native stack (A1) and every episode therefore begins
+/// with an empty one. Nothing in a native stack can reach past the
+/// frontier episode's start.
+#[derive(Default)]
+struct Ledger {
+    done: Vec<LedgerEntry>,
+    redo: Vec<LedgerEntry>,
+}
+
+enum LedgerEntry {
+    /// A transaction the app named, with BOTH directions of its delta.
+    /// Both are computed once, at apply, from state the core already
+    /// holds — the forward one is not a re-run of anything.
+    Group {
+        label: String,
+        inverse: UndoDelta,
+        forward: UndoDelta,
+    },
+    /// The run of text_changed occurrences on one field between clears.
+    Episode(Episode),
+}
+
+/// A banked run of edits on one field.
+///
+/// The core tracks this PURELY from the occurrence stream it already
+/// receives — never by reading the widget, which the no-mirror-reads
+/// doctrine forbids and which nothing here needs.
+struct Episode {
+    field: WidgetId,
+    /// The field's text when the run started.
+    before: String,
+    /// The high-water text: where ordinary typing has taken the field.
+    /// A native undo walking backwards does NOT move this, so a redo of
+    /// a banked episode still knows where to go.
+    after: String,
+    /// Where the field is NOW. Equal to `after` except mid-walk.
+    current: String,
+    /// Still the frontier: further edits extend it rather than opening a
+    /// new one. Closed by a group commit, by a programmatic write that
+    /// changes the text, or by an event naming another field.
+    open: bool,
+}
+
+/// Where an undo request should go (D6, widened to §3's three-way).
+///
+/// A4: the "can the focused widget undo?" question is asked ONCE, by
+/// name, and answered per backend — never re-expressed as a fifth
+/// hard-coded predicate the way the role filters were.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UndoRoute {
+    /// The focused text widget's own stack answers: call its native
+    /// Undo, then report the result back through `note_native_undo`.
+    Native,
+    /// The core answers: call `undo`/`redo`.
+    Core,
+    /// Nothing to undo; the command is inert and should read disabled.
+    Nothing,
+}
+
+/// A group under construction: the pre-state of everything the batch has
+/// touched so far.
+///
+/// Kept for two jobs at once — computing the inverse at the end, and
+/// PUTTING THE SCENE BACK if a later op turns out to be one the core
+/// cannot invert. A refused group therefore leaves the scene exactly as
+/// it was, which the menu barrier already promises for signals and this
+/// extends to collections.
+struct GroupCapture {
+    window: WindowId,
+    label: String,
+    /// First touch wins, the rollback map's rule. None = the entry did
+    /// not exist before the batch.
+    entries: Vec<(EntryRef, Option<(u32, Record)>)>,
+    /// Instance key orders, captured only when an op can move something
+    /// — position is the one thing per-entry statements cannot carry.
+    orders: Vec<((CollectionId, PathKey), Vec<Key>)>,
+}
+
+/// What an op costs an undoable group (D4, narrowed by A2).
+enum UndoVerdict {
+    /// The core can derive its inverse from state it keeps.
+    Invertible,
+    /// A pure effect: permitted, and simply not restored. Undo restores
+    /// state; it does not restore where you were looking.
+    PureEffect,
+    /// Refused, under this wire name.
+    Refused(&'static str),
+}
+
+fn undo_verdict(op: &TxOp) -> UndoVerdict {
+    match op {
+        TxOp::WriteSignal { .. }
+        | TxOp::CollectionInsert { .. }
+        | TxOp::CollectionUpdate { .. }
+        | TxOp::CollectionUpdateField { .. }
+        | TxOp::CollectionRemove { .. }
+        | TxOp::CollectionMove { .. } => UndoVerdict::Invertible,
+        // Focus is the only pure effect built; scroll_to joins it when
+        // it lands. Clear is NOT one — it destroys widget-owned text
+        // the core never held, so it cannot be put back.
+        TxOp::WidgetCommand {
+            command: CommandKind::Focus,
+            ..
+        } => UndoVerdict::PureEffect,
+        TxOp::WidgetCommand {
+            command: CommandKind::Clear,
+            ..
+        } => UndoVerdict::Refused("clear"),
+        TxOp::UndoGroup { .. } => UndoVerdict::Refused("a second undo_group"),
+        TxOp::CreateSignal { .. } => UndoVerdict::Refused("create_signal"),
+        TxOp::CreateWidget { .. } => UndoVerdict::Refused("create_widget"),
+        TxOp::SetProperty { .. } => UndoVerdict::Refused("set_property"),
+        TxOp::AddChild { .. } => UndoVerdict::Refused("add_child"),
+        TxOp::Mount { .. } => UndoVerdict::Refused("mount"),
+        TxOp::SetWindowProp { .. } => UndoVerdict::Refused("set_window_prop"),
+        TxOp::CreateWindow { .. } => UndoVerdict::Refused("create_window"),
+        TxOp::DestroyWindow { .. } => UndoVerdict::Refused("destroy_window"),
+        TxOp::ShowAlert(_) => UndoVerdict::Refused("show_alert"),
+        TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
+        TxOp::Copy(_) => UndoVerdict::Refused("copy"),
+        TxOp::ReadClipboard { .. } => UndoVerdict::Refused("read_clipboard"),
+        TxOp::PushEntry { .. } => UndoVerdict::Refused("push_entry"),
+        TxOp::PopEntry { .. } => UndoVerdict::Refused("pop_entry"),
+        TxOp::SetEntryProp { .. } => UndoVerdict::Refused("set_entry_prop"),
+        TxOp::AddSection { .. } => UndoVerdict::Refused("add_section"),
+        TxOp::SelectSection { .. } => UndoVerdict::Refused("select_section"),
+        TxOp::SetSectionProp { .. } => UndoVerdict::Refused("set_section_prop"),
+        TxOp::MenuItemCreate { .. } => UndoVerdict::Refused("menu_item_create"),
+        TxOp::MenuItemAppend { .. } => UndoVerdict::Refused("menu_item_append"),
+        TxOp::MenubarAppend { .. } => UndoVerdict::Refused("menubar_append"),
+        TxOp::ContextAttach { .. } => UndoVerdict::Refused("context_attach"),
+        TxOp::ContextAttachNode { .. } => UndoVerdict::Refused("context_attach_node"),
+        TxOp::SetMenuProp { .. } => UndoVerdict::Refused("set_menu_prop"),
+        TxOp::CreateCollection { .. } => UndoVerdict::Refused("create_collection"),
+        TxOp::CreateFor { .. } => UndoVerdict::Refused("create_for"),
+        TxOp::CreateWhen { .. } => UndoVerdict::Refused("create_when"),
+        TxOp::VariantCase { .. } => UndoVerdict::Refused("variant_case"),
+        TxOp::TemplateEnd => UndoVerdict::Refused("template_end"),
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Scene {
     signals: HashMap<SignalId, Value>,
@@ -285,6 +435,19 @@ pub(crate) struct Scene {
     next_internal: u64,
     next_when_site: u64,
     next_scope: u64,
+    /// One undo ledger per window (docs/undo-plan.md §3). Keyed by the
+    /// window a group NAMES: the core cannot derive it — a signal write
+    /// addresses no surface, and the scene keeps no widget-to-window map
+    /// — so `undo_group` carries it and every episode entry point takes
+    /// it from the backend, which knows.
+    ledgers: HashMap<WindowId, Ledger>,
+    /// The text the core has SEEN each field hold: seeded by every
+    /// programmatic write it resolves, advanced by every text_changed it
+    /// is told about. NOT A MIRROR READ — nothing here ever asks a
+    /// widget anything; this is the core's record of what it watched go
+    /// past, and it exists because an episode's before-image is the text
+    /// as of the event BEFORE the first one in the run.
+    field_text: HashMap<WidgetId, String>,
 }
 
 /// The choice kinds: one selection among label-children options.
@@ -852,13 +1015,69 @@ impl Scene {
         // Template scopes currently open; while non-empty, creation
         // records describe a blueprint instead of executing.
         let mut scopes: Vec<TplScope> = Vec::new();
+        // The undo group this batch declared at its head, if any, with
+        // the pre-state of everything it has touched so far (D2/D3).
+        let mut group: Option<GroupCapture> = None;
 
-        for op in tx {
+        for (at, op) in tx.into_iter().enumerate() {
             if !scopes.is_empty() {
                 self.declare(op, &mut scopes, &mut out);
                 continue;
             }
+            // A marked batch is checked op by op BEFORE anything runs:
+            // the refusal has to happen while the scene can still be put
+            // back (D4/A2).
+            if let Some(cap) = &mut group {
+                match undo_verdict(&op) {
+                    UndoVerdict::Invertible => Self::capture_for_undo(
+                        &self.collections,
+                        &self.coll_instances,
+                        &op,
+                        cap,
+                    ),
+                    UndoVerdict::PureEffect => {}
+                    UndoVerdict::Refused(name) => {
+                        let cap = group.take().expect("just matched");
+                        self.rollback_group(&cap, &rollback);
+                        panic!(
+                            "kaya: the undo group {:?} contains {name}, which the core \
+                             cannot invert — an undoable group holds signal writes and \
+                             collection deltas, because undo restores STATE and state is \
+                             signals plus collections (focus is permitted and simply not \
+                             restored). Bind the property to a signal, or drop \
+                             undoable() from this transaction. Nothing was applied.",
+                            cap.label
+                        );
+                    }
+                }
+            }
             match op {
+                TxOp::UndoGroup { window, label } => {
+                    // HEAD OF BATCH, ONCE. A transaction is a bare list
+                    // with no header, so this position is the whole
+                    // grammar: anywhere else and "which ops does it
+                    // cover" would have two answers.
+                    assert!(
+                        at == 0,
+                        "kaya: undo_group is record {} of this transaction — it must be \
+                         the FIRST, because a transaction has no header and the marker's \
+                         position is what says which ops the group covers",
+                        at + 1
+                    );
+                    crate::wire::check_undo_label(&label, "undo_group");
+                    assert!(
+                        window == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&window),
+                        "kaya: undo group {label:?} names unknown window {window:?} — \
+                         create_window first (0 is the primary)"
+                    );
+                    group = Some(GroupCapture {
+                        window,
+                        label,
+                        entries: Vec::new(),
+                        orders: Vec::new(),
+                    });
+                }
                 TxOp::CreateSignal { id, initial } => {
                     let clash = self.signals.insert(id, initial).is_some();
                     assert!(!clash, "kaya: signal id {id:?} already exists");
@@ -1650,8 +1869,18 @@ impl Scene {
                 let value = self.signals[id].clone();
                 for (item, prop) in bound {
                     if let Err(msg) = self.check_menu_binding_domain(item, prop, &value) {
-                        for (sid, old) in &rollback {
-                            self.signals.insert(*sid, old.clone());
+                        // A marked batch can put its COLLECTION edits
+                        // back too, not just its signals: the group
+                        // captured their pre-state on first touch. Same
+                        // promise either way — a rejected batch leaves
+                        // the scene as it was.
+                        match group.take() {
+                            Some(cap) => self.rollback_group(&cap, &rollback),
+                            None => {
+                                for (sid, old) in &rollback {
+                                    self.signals.insert(*sid, old.clone());
+                                }
+                            }
                         }
                         panic!("{msg}");
                     }
@@ -1659,7 +1888,29 @@ impl Scene {
             }
         }
 
-        for id in dirty {
+        self.fan_out_signals(&dirty, &mut out);
+
+        // EVERY programmatic text write this batch produced, read off
+        // the ops themselves rather than from the four sites that emit
+        // them. One place, and it cannot be bypassed by a fifth site:
+        // this is what advances the core's record of each field's text
+        // and what closes an episode when an app write changes it
+        // (D7, narrowed by A3 to writes that actually differ).
+        self.absorb_text_writes(&out);
+
+        if let Some(cap) = group {
+            self.bank_group(cap, &dirty, &rollback, &mut out);
+        }
+        out
+    }
+
+    /// The end-of-batch fan-out: every dirtied signal reaches everything
+    /// bound to it. Its own method because an INVERSE takes the same
+    /// path — a restored signal has to reach its widgets exactly as the
+    /// write that is being undone did, and two copies of this walk would
+    /// agree right up until they didn't.
+    fn fan_out_signals(&mut self, dirty: &[SignalId], out: &mut Vec<ApplyOp>) {
+        for id in dirty.iter().copied() {
             let value = self.signals[&id].clone();
             if let Some(bound) = self.bindings.get(&id) {
                 for (widget, prop) in bound {
@@ -1707,10 +1958,653 @@ impl Scene {
                 }
             }
             if let Value::Bool(on) = value {
-                self.toggle_whens(id, on, &mut out);
+                self.toggle_whens(id, on, out);
             }
         }
-        out
+    }
+
+    // --- Undo: capture, bank, refuse (docs/undo-plan.md D3/D4) ----------
+
+    /// One collection entry, as it stands now. `None` = no such entry.
+    fn entry_state(
+        instances: &HashMap<(CollectionId, PathKey), CollInstance>,
+        id: CollectionId,
+        path: &PathKey,
+        key: &Key,
+    ) -> Option<(u32, Record)> {
+        instances
+            .get(&(id, path.clone()))
+            .and_then(|inst| inst.entries.get(key))
+            .cloned()
+    }
+
+    /// Snapshot what an about-to-run delta op is going to disturb.
+    ///
+    /// FIRST TOUCH WINS, the rollback map's rule: the pre-state of the
+    /// whole batch is what an inverse needs, not the state between two
+    /// of its own ops. Takes the tables rather than `&self` so it can be
+    /// called while the capture is borrowed out of the loop.
+    fn capture_for_undo(
+        collections: &HashMap<CollectionId, CollDecl>,
+        instances: &HashMap<(CollectionId, PathKey), CollInstance>,
+        op: &TxOp,
+        cap: &mut GroupCapture,
+    ) {
+        // A delta naming a collection or instance that does not exist is
+        // about to panic on its own terms; capturing nothing is right.
+        let mut entry = |id: CollectionId, path: &[Value], key: &Value| {
+            if !collections.contains_key(&id) {
+                return;
+            }
+            let path: PathKey = path.iter().map(Key::from_value).collect();
+            let key = Key::from_value(key);
+            let at: EntryRef = (id, path.clone(), key.clone());
+            if cap.entries.iter().any(|(had, _)| *had == at) {
+                return;
+            }
+            let state = Self::entry_state(instances, id, &path, &key);
+            cap.entries.push((at, state));
+        };
+        let mut order = |id: CollectionId, path: &[Value]| {
+            let path: PathKey = path.iter().map(Key::from_value).collect();
+            if cap.orders.iter().any(|((c, p), _)| *c == id && *p == path) {
+                return;
+            }
+            if let Some(inst) = instances.get(&(id, path.clone())) {
+                cap.orders.push(((id, path), inst.order.clone()));
+            }
+        };
+        match op {
+            TxOp::CollectionInsert { id, path, key, .. }
+            | TxOp::CollectionRemove { id, path, key } => {
+                entry(*id, path, key);
+                // These change WHICH keys are in the order, so the
+                // instance's order is part of the pre-state.
+                order(*id, path);
+            }
+            TxOp::CollectionMove { id, path, key, .. } => {
+                entry(*id, path, key);
+                order(*id, path);
+            }
+            TxOp::CollectionUpdate { id, path, key, .. }
+            | TxOp::CollectionUpdateField { id, path, key, .. } => entry(*id, path, key),
+            // Signals need no capture here: `apply`'s rollback map
+            // already holds every pre-transaction value, on first write.
+            _ => {}
+        }
+    }
+
+    /// Put the scene back to where a group found it, emitting nothing.
+    ///
+    /// The silence is the point: this runs on the refusal path, where
+    /// the batch's ApplyOps die with the panic and no backend ever saw
+    /// them. Signals first (the menu barrier's own restore), then
+    /// entries, then orders — the same sequence an inverse uses, for the
+    /// same reason: an entry cannot be positioned before it exists.
+    fn rollback_group(&mut self, cap: &GroupCapture, rollback: &HashMap<SignalId, Value>) {
+        for (id, old) in rollback {
+            self.signals.insert(*id, old.clone());
+        }
+        for ((id, path, key), state) in &cap.entries {
+            let inst = match self.coll_instances.get_mut(&(*id, path.clone())) {
+                Some(inst) => inst,
+                None => continue,
+            };
+            match state {
+                Some(entry) => {
+                    if inst.entries.insert(key.clone(), entry.clone()).is_none() {
+                        inst.order.push(key.clone());
+                    }
+                }
+                None => {
+                    inst.entries.remove(key);
+                    inst.order.retain(|k| k != key);
+                }
+            }
+        }
+        for ((id, path), order) in &cap.orders {
+            if let Some(inst) = self.coll_instances.get_mut(&(*id, path.clone())) {
+                inst.order = order.clone();
+            }
+        }
+    }
+
+    /// Close the group: compute both directions, push it onto the
+    /// window's ledger, and tell the backend to clear the focused
+    /// field's native history.
+    ///
+    /// THE CLEAR IS THE KEYSTONE (A1, §3). It runs on every group
+    /// commit, unconditionally, because the core does not know what is
+    /// focused and the backend that does can no-op in a nanosecond. What
+    /// it buys: every episode begins with an empty native stack, so the
+    /// native stack can never reach past the frontier episode's start,
+    /// so one ledger read newest-first IS the user's history. The
+    /// episode was banked before the clear, so no history is lost — only
+    /// granularity.
+    fn bank_group(
+        &mut self,
+        cap: GroupCapture,
+        dirty: &[SignalId],
+        rollback: &HashMap<SignalId, Value>,
+        out: &mut Vec<ApplyOp>,
+    ) {
+        let mut inverse = UndoDelta::default();
+        let mut forward = UndoDelta::default();
+        for id in dirty {
+            inverse.signals.push((*id, rollback[id].clone()));
+            forward.signals.push((*id, self.signals[id].clone()));
+        }
+        for ((id, path, key), was) in &cap.entries {
+            let now = Self::entry_state(&self.coll_instances, *id, path, key);
+            if &now == was {
+                continue; // the batch wrote it back to where it was
+            }
+            inverse.entries.push(UndoEntry {
+                collection: *id,
+                path: path_values(path),
+                key: key.to_value(),
+                state: was.clone(),
+            });
+            forward.entries.push(UndoEntry {
+                collection: *id,
+                path: path_values(path),
+                key: key.to_value(),
+                state: now,
+            });
+        }
+        for ((id, path), was) in &cap.orders {
+            let now = match self.coll_instances.get(&(*id, path.clone())) {
+                Some(inst) => inst.order.clone(),
+                None => continue,
+            };
+            if &now == was {
+                continue;
+            }
+            inverse.orders.push(UndoOrder {
+                collection: *id,
+                path: path_values(path),
+                keys: was.iter().map(Key::to_value).collect(),
+            });
+            forward.orders.push(UndoOrder {
+                collection: *id,
+                path: path_values(path),
+                keys: now.iter().map(Key::to_value).collect(),
+            });
+        }
+        let ledger = self.ledgers.entry(cap.window).or_default();
+        // The frontier episode is banked as it stands; whatever the user
+        // typed keeps its place in the order, and only its granularity
+        // is spent by the clear below.
+        if let Some(LedgerEntry::Episode(ep)) = ledger.done.last_mut() {
+            ep.open = false;
+        }
+        ledger.done.push(LedgerEntry::Group {
+            label: cap.label,
+            inverse,
+            forward,
+        });
+        // A new step invalidates the forward history — the rule every
+        // undo system has, and the one the platforms apply to their own
+        // text stacks on the next keystroke.
+        ledger.redo.clear();
+        out.push(ApplyOp::ClearUndo { window: cap.window });
+    }
+
+    /// Read every programmatic text write out of a finished batch's ops.
+    ///
+    /// ON THE OPS, NOT AT THE FOUR EMISSION SITES. A const set, a
+    /// bind-time set, the end-of-batch signal flush, an element binding
+    /// re-resolving, and `clear` all reach a field the same way — as one
+    /// of these two ops — so reading them here is the only place that
+    /// cannot be bypassed by a sixth site nobody remembers to visit.
+    ///
+    /// A3: only a write that CHANGES the text closes an episode. An app
+    /// that mirrors a field into a signal and writes it back would
+    /// otherwise lose its typing history on every keystroke.
+    fn absorb_text_writes(&mut self, out: &[ApplyOp]) {
+        let mut writes: Vec<(WidgetId, String)> = Vec::new();
+        for op in out {
+            match op {
+                ApplyOp::SetProp {
+                    id,
+                    prop: Prop::Text,
+                    value: Value::Str(text),
+                } => writes.push((*id, text.clone())),
+                ApplyOp::Command {
+                    id,
+                    command: CommandKind::Clear,
+                } => writes.push((*id, String::new())),
+                _ => {}
+            }
+        }
+        for (id, text) in writes {
+            // Only the text-bearing INTERACTIVE kinds carry a native
+            // undo stack; a label's text is not an edit history. A
+            // stamped copy's kind is not in the widget table (its
+            // blueprint holds it), so an internal id is admitted.
+            let editable = match self.widgets.get(&id) {
+                Some(kind) => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
+                None => id.0 & INTERNAL_BIT != 0,
+            };
+            if !editable {
+                continue;
+            }
+            let changed = self.field_text.get(&id).map(String::as_str) != Some(text.as_str());
+            self.field_text.insert(id, text);
+            if changed {
+                self.close_episodes_on(id);
+            }
+        }
+    }
+
+    /// A programmatic write landed on this field: any open episode on it
+    /// is over. Across every ledger, because the core knows the widget
+    /// and not its window — the scene keeps no widget-to-window map, and
+    /// a field lives in exactly one window anyway.
+    fn close_episodes_on(&mut self, field: WidgetId) {
+        for ledger in self.ledgers.values_mut() {
+            if let Some(LedgerEntry::Episode(ep)) = ledger.done.last_mut() {
+                if ep.field == field {
+                    ep.open = false;
+                }
+            }
+        }
+    }
+
+    // --- Undo: episode banking (docs/undo-plan.md §3) -------------------
+
+    /// A text_changed the backend is about to deliver to the guest,
+    /// shown to the ledger on the way past.
+    ///
+    /// This is banking: the run of edits on one field between clears is
+    /// ONE ledger entry, opened by the first event and extended by each
+    /// one after. Nothing is copied — the two images plus the current
+    /// position are all a coarse restore needs, and they are what a
+    /// textarea-scale payload can afford.
+    ///
+    /// `focused` is the backend's answer for the field this event names.
+    /// An event on an UNFOCUSED field closes the episode as it stands:
+    /// the user is no longer there, so nothing further belongs to it.
+    ///
+    /// NOT for a text_changed the core itself provoked by routing a
+    /// native undo — that one goes to `note_native_undo`, which walks
+    /// the episode backwards instead of extending it forwards.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn note_text_changed(
+        &mut self,
+        window: WindowId,
+        field: WidgetId,
+        text: &str,
+        focused: bool,
+    ) {
+        let before = self
+            .field_text
+            .get(&field)
+            .cloned()
+            .unwrap_or_default();
+        self.field_text.insert(field, text.to_owned());
+        let ledger = self.ledgers.entry(window).or_default();
+        // Typing is a new step: the forward history dies here, which is
+        // the same rule the platforms apply to their own text stacks.
+        ledger.redo.clear();
+        match ledger.done.last_mut() {
+            Some(LedgerEntry::Episode(ep)) if ep.open && ep.field == field => {
+                ep.after = text.to_owned();
+                ep.current = text.to_owned();
+                if ep.after == ep.before {
+                    // Typed all the way back to where the run started:
+                    // the entry describes nothing and would be a step
+                    // that does nothing.
+                    ledger.done.pop();
+                } else if !focused {
+                    ep.open = false;
+                }
+            }
+            _ => {
+                if let Some(LedgerEntry::Episode(ep)) = ledger.done.last_mut() {
+                    ep.open = false;
+                }
+                ledger.done.push(LedgerEntry::Episode(Episode {
+                    field,
+                    before,
+                    after: text.to_owned(),
+                    current: text.to_owned(),
+                    open: focused,
+                }));
+            }
+        }
+    }
+
+    /// The text_changed a NATIVE undo produced, plus the field's own
+    /// answer to "can you still undo?".
+    ///
+    /// Walks the frontier episode backwards rather than extending it. It
+    /// ends three ways, and the third is the interesting one:
+    ///
+    /// - the text reached the before-image: the episode is CONSUMED, and
+    ///   the next undo takes whatever is under it;
+    /// - the field can still undo: the episode stays OPEN at its current
+    ///   position, and further typing extends it (the platform's own
+    ///   rule that a keystroke kills the redo history is inherited, not
+    ///   fought);
+    /// - the field is EXHAUSTED without having reached the before-image,
+    ///   which means the platform coalesced across the episode's start.
+    ///   A1's clear is supposed to make that unreachable — so this arm
+    ///   falls back to the coarse restore and its test's job is to prove
+    ///   the arm cannot be entered.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn note_native_undo(
+        &mut self,
+        window: WindowId,
+        field: WidgetId,
+        text: &str,
+        can_undo: bool,
+    ) -> Option<(Vec<ApplyOp>, Occurrence)> {
+        self.field_text.insert(field, text.to_owned());
+        let ledger = self.ledgers.entry(window).or_default();
+        let ep = match ledger.done.last_mut() {
+            Some(LedgerEntry::Episode(ep)) if ep.field == field => ep,
+            _ => return None,
+        };
+        ep.current = text.to_owned();
+        if ep.current == ep.before {
+            ledger.done.pop();
+            return None;
+        }
+        if can_undo {
+            return None;
+        }
+        // Exhausted mid-episode: finish the job the coarse way.
+        let mut out = Vec::new();
+        let occurrence = self.restore_episode_backwards(window, &mut out);
+        occurrence.map(|occ| (out, occ))
+    }
+
+    // --- Undo: routing and the two entry points (D6, §3) ----------------
+
+    /// Where an undo should go: the focused field's own stack, the
+    /// core's ledger, or nowhere.
+    ///
+    /// `focused_can_undo` is A4's named query, answered by the backend
+    /// (CanUndo, canUndo, undoManager.canUndo) and consumed here — ONE
+    /// expression of the question, not a fifth hard-coded predicate.
+    /// Enablement is this same call: `Nothing` is what a disabled
+    /// Edit>Undo means, computed live at activation the way paste's
+    /// offer-meets-accepts already is.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn route_undo(
+        &self,
+        window: WindowId,
+        focused: Option<WidgetId>,
+        focused_can_undo: bool,
+    ) -> UndoRoute {
+        match self.ledgers.get(&window).and_then(|l| l.done.last()) {
+            None => UndoRoute::Nothing,
+            Some(LedgerEntry::Episode(ep))
+                if ep.open && Some(ep.field) == focused && focused_can_undo =>
+            {
+                UndoRoute::Native
+            }
+            Some(_) => UndoRoute::Core,
+        }
+    }
+
+    /// Redo's twin. The frontier episode redoes NATIVELY while it is
+    /// partly undone — the platform still holds those steps, and taking
+    /// them back coarsely would throw away granularity the user can see.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn route_redo(
+        &self,
+        window: WindowId,
+        focused: Option<WidgetId>,
+        focused_can_redo: bool,
+    ) -> UndoRoute {
+        let ledger = match self.ledgers.get(&window) {
+            Some(ledger) => ledger,
+            None => return UndoRoute::Nothing,
+        };
+        if let Some(LedgerEntry::Episode(ep)) = ledger.done.last() {
+            if ep.open
+                && Some(ep.field) == focused
+                && focused_can_redo
+                && ep.current != ep.after
+            {
+                return UndoRoute::Native;
+            }
+        }
+        if ledger.redo.is_empty() {
+            UndoRoute::Nothing
+        } else {
+            UndoRoute::Core
+        }
+    }
+
+    /// Undo the newest ledger entry: apply its inverse, move it to the
+    /// redo side, and say what was put back.
+    ///
+    /// ONE OCCURRENCE AND NOTHING ELSE (D5). The inverse is a
+    /// programmatic write, so the echo doctrine silences everything it
+    /// touches — which is why the occurrence carries the whole restored
+    /// state rather than a notification.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn undo(&mut self, window: WindowId) -> Option<(Vec<ApplyOp>, Occurrence)> {
+        let mut out = Vec::new();
+        let occurrence = self.restore_episode_backwards(window, &mut out)?;
+        Some((out, occurrence))
+    }
+
+    /// The undo body, shared with the exhausted-episode fallback.
+    fn restore_episode_backwards(
+        &mut self,
+        window: WindowId,
+        out: &mut Vec<ApplyOp>,
+    ) -> Option<Occurrence> {
+        let entry = self.ledgers.get_mut(&window)?.done.pop()?;
+        let (label, delta, back) = match entry {
+            LedgerEntry::Group {
+                label,
+                inverse,
+                forward,
+            } => {
+                let delta = inverse.clone();
+                (
+                    label.clone(),
+                    delta,
+                    LedgerEntry::Group {
+                        label,
+                        inverse,
+                        forward,
+                    },
+                )
+            }
+            LedgerEntry::Episode(mut ep) => {
+                // The coarse restore: the core writes the before-image
+                // itself, which by D7 clears that field's native stack
+                // — one correctly-ordered step, at the granularity a
+                // banked episode has left.
+                let delta = UndoDelta {
+                    texts: vec![(ep.field, ep.before.clone())],
+                    ..UndoDelta::default()
+                };
+                ep.current = ep.before.clone();
+                ep.open = false;
+                // EMPTY LABEL: a typing episode has no authored name and
+                // kaya invents none ("Undo Typing" is an Apple
+                // convention, not a scene string).
+                (String::new(), delta, LedgerEntry::Episode(ep))
+            }
+        };
+        self.apply_delta(&delta, out);
+        self.ledgers.entry(window).or_default().redo.push(back);
+        Some(Occurrence::Undone {
+            window,
+            label,
+            delta,
+        })
+    }
+
+    /// Redo the newest undone entry. Symmetric in every respect: the
+    /// forward delta was computed at apply, beside the inverse, so a
+    /// redo re-runs no handler and re-derives nothing.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn redo(&mut self, window: WindowId) -> Option<(Vec<ApplyOp>, Occurrence)> {
+        let entry = self.ledgers.get_mut(&window)?.redo.pop()?;
+        let (label, delta, back) = match entry {
+            LedgerEntry::Group {
+                label,
+                inverse,
+                forward,
+            } => {
+                let delta = forward.clone();
+                (
+                    label.clone(),
+                    delta,
+                    LedgerEntry::Group {
+                        label,
+                        inverse,
+                        forward,
+                    },
+                )
+            }
+            LedgerEntry::Episode(mut ep) => {
+                let delta = UndoDelta {
+                    texts: vec![(ep.field, ep.after.clone())],
+                    ..UndoDelta::default()
+                };
+                ep.current = ep.after.clone();
+                (String::new(), delta, LedgerEntry::Episode(ep))
+            }
+        };
+        let mut out = Vec::new();
+        self.apply_delta(&delta, &mut out);
+        self.ledgers.entry(window).or_default().done.push(back);
+        Some((
+            out,
+            Occurrence::Redone {
+                window,
+                label,
+                delta,
+            },
+        ))
+    }
+
+    /// Put a delta's state back into the scene and emit what the backend
+    /// must do about it.
+    ///
+    /// THE ORDER IS THE CORRECTNESS. Signals first, so bound widgets
+    /// follow their props. Then entries, so everything the order names
+    /// exists. Then orders, so position is decided once and by the run
+    /// that owns it. Then texts, which are the only part that touches
+    /// widget-owned state and does so as an ordinary programmatic write.
+    fn apply_delta(&mut self, delta: &UndoDelta, out: &mut Vec<ApplyOp>) {
+        let from = out.len();
+        let mut dirty: Vec<SignalId> = Vec::new();
+        for (id, value) in &delta.signals {
+            let current = self
+                .signals
+                .get_mut(id)
+                .unwrap_or_else(|| panic!("kaya: undo writes unknown signal {id:?}"));
+            check_type(current, value, &format!("signal {id:?}"));
+            *current = value.clone();
+            if !dirty.contains(id) {
+                dirty.push(*id);
+            }
+        }
+        self.fan_out_signals(&dirty, out);
+        for entry in &delta.entries {
+            let path: PathKey = entry.path.iter().map(Key::from_value).collect();
+            let key = Key::from_value(&entry.key);
+            let now = Self::entry_state(&self.coll_instances, entry.collection, &path, &key);
+            match (&entry.state, now.is_some()) {
+                (Some((variant, record)), true) => self.update_entry(
+                    entry.collection,
+                    entry.path.clone(),
+                    entry.key.clone(),
+                    *variant,
+                    record.clone(),
+                    out,
+                ),
+                (Some((variant, record)), false) => self.insert_entry(
+                    entry.collection,
+                    entry.path.clone(),
+                    entry.key.clone(),
+                    *variant,
+                    record.clone(),
+                    out,
+                ),
+                (None, true) => self.remove_entry(
+                    entry.collection,
+                    entry.path.clone(),
+                    entry.key.clone(),
+                    out,
+                ),
+                (None, false) => {}
+            }
+        }
+        for order in &delta.orders {
+            let path: PathKey = order.path.iter().map(Key::from_value).collect();
+            let keys: Vec<Key> = order.keys.iter().map(Key::from_value).collect();
+            self.restore_order(order.collection, &path, &keys, out);
+        }
+        for (field, text) in &delta.texts {
+            self.field_text.insert(*field, text.clone());
+            out.push(ApplyOp::SetProp {
+                id: *field,
+                prop: Prop::Text,
+                value: Value::Str(text.clone()),
+            });
+        }
+        // An inverse is a programmatic write like any other, so D7 holds
+        // for it too: restoring a signal bound to a field's text ends
+        // that field's run and resets its native history. Read off the
+        // ops this call added, the same one place a forward batch reads
+        // its own from — the texts run above is already reconciled, so
+        // it passes through as a no-change.
+        let added = out.split_off(from);
+        self.absorb_text_writes(&added);
+        out.extend(added);
+    }
+
+    /// Restore an instance's key order, and its stamped copies with it.
+    ///
+    /// RIGHT TO LEFT, each copy moved before the one already placed
+    /// after it: the last entry appends, and every earlier one anchors
+    /// on its successor, so the container ends in exactly this order
+    /// whatever it held before. O(entries) rather than O(change),
+    /// deliberately — an order is not a set of independent facts, and a
+    /// minimal move sequence would be a second reconciler.
+    fn restore_order(
+        &mut self,
+        id: CollectionId,
+        path: &PathKey,
+        keys: &[Key],
+        out: &mut Vec<ApplyOp>,
+    ) {
+        match self.coll_instances.get_mut(&(id, path.clone())) {
+            Some(inst) => inst.order = keys.to_vec(),
+            None => return,
+        }
+        let container = match self.for_sites.get(&(id, path.clone())) {
+            Some(site) => site.container,
+            None => return, // not rendered: the table alone is the state
+        };
+        let mut anchor: Option<WidgetId> = None;
+        for key in keys.iter().rev() {
+            let roots = match self.stamps.get(&(id, path.clone(), key.clone())) {
+                Some(stamp) => stamp.roots.clone(),
+                None => continue,
+            };
+            for child in &roots {
+                out.push(ApplyOp::MoveChild {
+                    parent: container,
+                    child: *child,
+                    before: anchor,
+                });
+            }
+            if let Some(first) = roots.first() {
+                anchor = Some(*first);
+            }
+        }
     }
 
     /// The user's back affordance popped an entry natively (predictive
@@ -5744,5 +6638,706 @@ mod tests {
         );
         assert_eq!(scene.window_menus[&WindowId(2)], vec![MenuItemId(3)]);
         assert!(scene.window_shortcuts[&WindowId(2)].contains("primary+s"));
+    }
+
+    // --- Undo (docs/undo-plan.md D2-D5, A1-A3, §3) ----------------------
+
+    /// signal 1 (Str), widget 1 column, widget 2 ENTRY, widget 3 label
+    /// bound to signal 1, collection 1 rendered by For id 4 with template
+    /// node 10 bound to the element's one field.
+    fn undo_scene() -> Transaction {
+        vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: v("one") },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Entry },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(3),
+                prop: Prop::Text,
+                value: PropValue::Signal(SignalId(1)),
+            },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]
+    }
+
+    fn group(label: &str) -> TxOp {
+        TxOp::UndoGroup {
+            window: DEFAULT_WINDOW,
+            label: label.to_string(),
+        }
+    }
+
+    fn keys(scene: &Scene) -> Vec<Key> {
+        scene.coll_instances[&(CollectionId(1), vec![])].order.clone()
+    }
+
+    fn cleared(ops: &[ApplyOp]) -> usize {
+        ops.iter()
+            .filter(|op| matches!(op, ApplyOp::ClearUndo { .. }))
+            .count()
+    }
+
+    fn set_texts(ops: &[ApplyOp]) -> Vec<(u64, String)> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetProp {
+                    id,
+                    prop: Prop::Text,
+                    value: Value::Str(text),
+                } => Some((id.0, text.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_group_undoes_and_redoes_a_signal() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        let ops = scene.apply(vec![
+            group("rename"),
+            TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+        ]);
+        assert_eq!(scene.signals[&SignalId(1)], v("two"));
+        // A1: the group's commit tells the backend to reset the focused
+        // field's native history, exactly once.
+        assert_eq!(cleared(&ops), 1);
+
+        let (ops, occ) = scene.undo(DEFAULT_WINDOW).expect("one group to undo");
+        assert_eq!(scene.signals[&SignalId(1)], v("one"));
+        // The label bound to the signal follows, the way it followed the
+        // forward write: an inverse takes the ordinary fan-out.
+        assert_eq!(set_texts(&ops), vec![(3, "one".to_string())]);
+        match occ {
+            Occurrence::Undone { window, label, delta } => {
+                assert_eq!(window, DEFAULT_WINDOW);
+                assert_eq!(label, "rename");
+                assert_eq!(delta.signals, vec![(SignalId(1), v("one"))]);
+                assert!(delta.entries.is_empty() && delta.texts.is_empty());
+            }
+            other => panic!("wanted Undone, got {other:?}"),
+        }
+
+        let (ops, occ) = scene.redo(DEFAULT_WINDOW).expect("one group to redo");
+        assert_eq!(scene.signals[&SignalId(1)], v("two"));
+        assert_eq!(set_texts(&ops), vec![(3, "two".to_string())]);
+        match occ {
+            Occurrence::Redone { label, delta, .. } => {
+                assert_eq!(label, "rename");
+                assert_eq!(delta.signals, vec![(SignalId(1), v("two"))]);
+            }
+            other => panic!("wanted Redone, got {other:?}"),
+        }
+        // And back to empty at both ends.
+        assert!(scene.redo(DEFAULT_WINDOW).is_none());
+        scene.undo(DEFAULT_WINDOW).expect("still undoable");
+        assert!(scene.undo(DEFAULT_WINDOW).is_none());
+    }
+
+    #[test]
+    fn a_group_undoes_and_redoes_collection_deltas() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![
+            insert(1, vec![], "a", "Alpha"),
+            insert(1, vec![], "b", "Beta"),
+        ]);
+        // One group: insert a third, retitle the first, drop the second,
+        // and reorder — every delta shape at once.
+        scene.apply(vec![
+            group("shuffle"),
+            insert(1, vec![], "c", "Gamma"),
+            TxOp::CollectionUpdate {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("a"),
+                variant: 0,
+                record: vec![v("Alpha!")],
+            },
+            TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: v("b") },
+            TxOp::CollectionMove {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("c"),
+                before: Some(v("a")),
+            },
+        ]);
+        assert_eq!(keys(&scene), vec![Key::Str("c".into()), Key::Str("a".into())]);
+
+        let (_, occ) = scene.undo(DEFAULT_WINDOW).expect("one group to undo");
+        assert_eq!(keys(&scene), vec![Key::Str("a".into()), Key::Str("b".into())]);
+        let entries = &scene.coll_instances[&(CollectionId(1), vec![])].entries;
+        assert_eq!(entries[&Key::Str("a".into())], (0, vec![v("Alpha")]));
+        assert_eq!(entries[&Key::Str("b".into())], (0, vec![v("Beta")]));
+        assert!(!entries.contains_key(&Key::Str("c".into())));
+        let Occurrence::Undone { delta, .. } = &occ else {
+            panic!("wanted Undone, got {occ:?}");
+        };
+        // A STATEMENT OF THE RESTORED STATE: c is gone, a and b are what
+        // they were, and the order names the whole instance.
+        let gone: Vec<&Value> = delta
+            .entries
+            .iter()
+            .filter(|e| e.state.is_none())
+            .map(|e| &e.key)
+            .collect();
+        assert_eq!(gone, vec![&v("c")]);
+        assert_eq!(delta.orders.len(), 1);
+        assert_eq!(delta.orders[0].keys, vec![v("a"), v("b")]);
+
+        scene.redo(DEFAULT_WINDOW).expect("one group to redo");
+        assert_eq!(keys(&scene), vec![Key::Str("c".into()), Key::Str("a".into())]);
+        let entries = &scene.coll_instances[&(CollectionId(1), vec![])].entries;
+        assert_eq!(entries[&Key::Str("a".into())], (0, vec![v("Alpha!")]));
+        assert!(!entries.contains_key(&Key::Str("b".into())));
+    }
+
+    #[test]
+    fn an_update_field_undoes_to_the_field_it_replaced() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![insert(1, vec![], "a", "Alpha")]);
+        scene.apply(vec![
+            group("retitle"),
+            TxOp::CollectionUpdateField {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("a"),
+                variant: 0,
+                field: 0,
+                value: v("Omega"),
+            },
+        ]);
+        let (ops, _) = scene.undo(DEFAULT_WINDOW).expect("one group to undo");
+        assert_eq!(
+            scene.coll_instances[&(CollectionId(1), vec![])].entries[&Key::Str("a".into())],
+            (0, vec![v("Alpha")])
+        );
+        // The stamped label follows: the element binding re-resolves the
+        // way a forward write makes it.
+        assert!(set_texts(&ops).iter().any(|(_, t)| t == "Alpha"));
+        // No order group: nothing moved, so nothing says it did.
+        let (_, occ) = (0, scene.undo(DEFAULT_WINDOW));
+        assert!(occ.is_none(), "one step, one entry");
+    }
+
+    #[test]
+    fn a_batch_that_writes_a_value_back_banks_nothing_about_it() {
+        // The inverse is computed against the PRE-BATCH state, so an op
+        // that returns a thing to where it started leaves the delta
+        // silent about it rather than carrying a no-op statement.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![insert(1, vec![], "a", "Alpha")]);
+        scene.apply(vec![
+            group("churn"),
+            TxOp::CollectionUpdateField {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("a"),
+                variant: 0,
+                field: 0,
+                value: v("Beta"),
+            },
+            TxOp::CollectionUpdateField {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("a"),
+                variant: 0,
+                field: 0,
+                value: v("Alpha"),
+            },
+        ]);
+        let (_, occ) = scene.undo(DEFAULT_WINDOW).expect("the group is still a step");
+        let Occurrence::Undone { delta, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert!(delta.entries.is_empty(), "nothing actually changed");
+    }
+
+    #[test]
+    fn focus_rides_in_a_group_and_is_not_restored() {
+        // A2: a handler that appends a row and focuses it is the
+        // ordinary shape, and refusing it would refuse ordinary code.
+        // Undo restores state; it does not restore where you were
+        // looking, so nothing about the focus comes back.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        let ops = scene.apply(vec![
+            group("add"),
+            insert(1, vec![], "a", "Alpha"),
+            TxOp::WidgetCommand { widget: WidgetId(2), command: CommandKind::Focus },
+        ]);
+        assert!(ops
+            .iter()
+            .any(|op| matches!(op, ApplyOp::Command { command: CommandKind::Focus, .. })));
+        let (ops, _) = scene.undo(DEFAULT_WINDOW).expect("one group to undo");
+        assert!(keys(&scene).is_empty());
+        assert!(
+            !ops.iter().any(|op| matches!(op, ApplyOp::Command { .. })),
+            "a pure effect is permitted, never replayed backwards"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "contains create_widget, which the core cannot invert")]
+    fn a_group_refuses_an_op_it_cannot_invert() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![
+            group("build"),
+            TxOp::CreateWidget { id: WidgetId(99), kind: WidgetKind::Label },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "contains clear, which the core cannot invert")]
+    fn a_group_refuses_clear() {
+        // Clear destroys widget-owned text the core never held. It is
+        // the op that looks like a pure effect and is not.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![
+            group("wipe"),
+            TxOp::WidgetCommand { widget: WidgetId(2), command: CommandKind::Clear },
+        ]);
+    }
+
+    #[test]
+    fn a_refused_group_leaves_the_scene_exactly_as_it_was() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![insert(1, vec![], "a", "Alpha")]);
+        let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scene.apply(vec![
+                group("half"),
+                TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+                insert(1, vec![], "b", "Beta"),
+                TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: v("a") },
+                // The op that cannot be inverted arrives LAST, after
+                // three that already landed.
+                TxOp::SetWindowProp {
+                    window: DEFAULT_WINDOW,
+                    prop: WindowProp::Title,
+                    value: PropValue::Const(v("nope")),
+                },
+            ]);
+        }));
+        assert!(refused.is_err(), "the group must be refused");
+        assert_eq!(scene.signals[&SignalId(1)], v("one"), "the signal is back");
+        assert_eq!(keys(&scene), vec![Key::Str("a".into())], "the table is back");
+        assert!(
+            scene.ledgers.get(&DEFAULT_WINDOW).is_none_or(|l| l.done.is_empty()),
+            "a refused group is not a step"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "it must be the FIRST")]
+    fn the_group_marker_must_lead_the_batch() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![
+            TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+            group("late"),
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "contains a second undo_group")]
+    fn one_name_per_step() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![group("first"), group("second")]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has an empty label")]
+    fn a_group_must_be_named() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![TxOp::UndoGroup {
+            window: DEFAULT_WINDOW,
+            label: String::new(),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "names unknown window")]
+    fn a_group_names_a_live_window() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![TxOp::UndoGroup {
+            window: WindowId(7),
+            label: "stray".into(),
+        }]);
+    }
+
+    #[test]
+    fn ledgers_are_per_window() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![TxOp::CreateWindow { window: WindowId(2) }]);
+        scene.apply(vec![
+            TxOp::UndoGroup { window: WindowId(2), label: "aux".into() },
+            TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+        ]);
+        assert!(
+            scene.undo(DEFAULT_WINDOW).is_none(),
+            "the primary's history is not the auxiliary's"
+        );
+        assert!(scene.undo(WindowId(2)).is_some());
+        assert_eq!(scene.signals[&SignalId(1)], v("one"));
+    }
+
+    // --- Episode banking ------------------------------------------------
+
+    fn episode(scene: &Scene, window: WindowId) -> Option<(&str, &str, &str, bool)> {
+        match scene.ledgers.get(&window)?.done.last()? {
+            LedgerEntry::Episode(ep) => {
+                Some((&ep.before, &ep.after, &ep.current, ep.open))
+            }
+            _ => None,
+        }
+    }
+
+    fn depth(scene: &Scene, window: WindowId) -> usize {
+        scene.ledgers.get(&window).map(|l| l.done.len()).unwrap_or(0)
+    }
+
+    #[test]
+    fn typing_banks_one_episode_however_many_keystrokes() {
+        // DELTAS, NOT COPIES: the run of edits is two images and a
+        // cursor, so a textarea does not double its own memory in the
+        // log for every character.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        for text in ["m", "mi", "mil", "milk"] {
+            scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), text, true);
+        }
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 1);
+        assert_eq!(episode(&scene, DEFAULT_WINDOW), Some(("", "milk", "milk", true)));
+    }
+
+    #[test]
+    fn typing_back_to_the_start_of_a_run_removes_it() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "m", true);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "", true);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 0, "a step that does nothing is not a step");
+    }
+
+    #[test]
+    fn an_event_on_an_unfocused_field_closes_the_episode() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
+        assert_eq!(episode(&scene, DEFAULT_WINDOW).map(|e| e.3), Some(true));
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milky", false);
+        assert_eq!(
+            episode(&scene, DEFAULT_WINDOW),
+            Some(("", "milky", "milky", false)),
+            "the user is no longer there, so nothing further belongs to this run"
+        );
+    }
+
+    #[test]
+    fn a_programmatic_write_that_changes_the_text_closes_the_episode() {
+        // D7, and A3's narrowing right beside it: an app that mirrors a
+        // field into a signal and writes the SAME text back must not
+        // lose the run it is mirroring.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![TxOp::CreateSignal { id: SignalId(2), initial: v("") }]);
+        scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(2),
+            prop: Prop::Text,
+            value: PropValue::Signal(SignalId(2)),
+        }]);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
+        // The echo an app makes: same text back through the signal.
+        scene.apply(vec![TxOp::WriteSignal { id: SignalId(2), value: v("milk") }]);
+        assert_eq!(
+            episode(&scene, DEFAULT_WINDOW).map(|e| e.3),
+            Some(true),
+            "A3: a write that changes nothing takes nothing away"
+        );
+        // A write that really changes it ends the run.
+        scene.apply(vec![TxOp::WriteSignal { id: SignalId(2), value: v("bread") }]);
+        assert_eq!(episode(&scene, DEFAULT_WINDOW).map(|e| e.3), Some(false));
+    }
+
+    #[test]
+    fn a_group_commit_banks_the_frontier_episode_and_clears_the_native_stack() {
+        // The keystone: after this, everything in the field's native
+        // stack is strictly newer than everything in the ledger.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
+        let ops = scene.apply(vec![
+            group("add todo"),
+            TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+        ]);
+        assert_eq!(cleared(&ops), 1);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 2);
+        match &scene.ledgers[&DEFAULT_WINDOW].done[0] {
+            LedgerEntry::Episode(ep) => assert!(!ep.open, "banked, and closed by the clear"),
+            other => panic!("wanted the episode under the group, got a {}", match other {
+                LedgerEntry::Group { label, .. } => label.as_str(),
+                LedgerEntry::Episode(_) => unreachable!(),
+            }),
+        }
+    }
+
+    #[test]
+    fn the_interleave_walks_back_b_then_x_then_a() {
+        // §2's hole, closed. Under two bare stacks this undoes as b, a,
+        // X — both text edits first, because they live on the other
+        // stack — and the user passes through a state that never
+        // existed. One ledger gives the order things happened in.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "a", true);
+        scene.apply(vec![
+            group("X"),
+            TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+        ]);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "ab", true);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 3);
+
+        let (ops, occ) = scene.undo(DEFAULT_WINDOW).expect("b");
+        assert_eq!(set_texts(&ops), vec![(2, "a".to_string())]);
+        let Occurrence::Undone { label, delta, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert_eq!(label, "", "a typing episode carries no authored name");
+        assert_eq!(delta.texts, vec![(WidgetId(2), "a".to_string())]);
+
+        let (_, occ) = scene.undo(DEFAULT_WINDOW).expect("X");
+        let Occurrence::Undone { label, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert_eq!(label, "X");
+        assert_eq!(scene.signals[&SignalId(1)], v("one"));
+
+        let (ops, _) = scene.undo(DEFAULT_WINDOW).expect("a");
+        assert_eq!(set_texts(&ops), vec![(2, String::new())]);
+        assert!(scene.undo(DEFAULT_WINDOW).is_none(), "no holes, and no more");
+
+        // And forward again, in the order they happened.
+        let (ops, _) = scene.redo(DEFAULT_WINDOW).expect("a");
+        assert_eq!(set_texts(&ops), vec![(2, "a".to_string())]);
+        let (_, occ) = scene.redo(DEFAULT_WINDOW).expect("X");
+        let Occurrence::Redone { label, .. } = &occ else {
+            panic!("wanted Redone");
+        };
+        assert_eq!(label, "X");
+        assert_eq!(scene.signals[&SignalId(1)], v("two"));
+        let (ops, _) = scene.redo(DEFAULT_WINDOW).expect("b");
+        assert_eq!(set_texts(&ops), vec![(2, "ab".to_string())]);
+    }
+
+    #[test]
+    fn routing_asks_the_focused_field_first_and_the_ledger_otherwise() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        assert_eq!(
+            scene.route_undo(DEFAULT_WINDOW, Some(WidgetId(2)), true),
+            UndoRoute::Nothing,
+            "an empty ledger is a disabled Edit>Undo"
+        );
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
+        assert_eq!(
+            scene.route_undo(DEFAULT_WINDOW, Some(WidgetId(2)), true),
+            UndoRoute::Native,
+            "the frontier episode on the focused field is the platform's"
+        );
+        assert_eq!(
+            scene.route_undo(DEFAULT_WINDOW, Some(WidgetId(2)), false),
+            UndoRoute::Core,
+            "A4's query said no: the coarse restore answers"
+        );
+        assert_eq!(
+            scene.route_undo(DEFAULT_WINDOW, Some(WidgetId(3)), true),
+            UndoRoute::Core,
+            "another widget has focus, so the episode is not frontier-live"
+        );
+        scene.apply(vec![
+            group("X"),
+            TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+        ]);
+        assert_eq!(
+            scene.route_undo(DEFAULT_WINDOW, Some(WidgetId(2)), true),
+            UndoRoute::Core,
+            "a group is the newest entry, so the core answers whatever has focus"
+        );
+    }
+
+    #[test]
+    fn a_native_undo_that_reaches_the_before_image_consumes_the_episode() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "mi", true);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
+        // The platform coalesced the run into one step of its own.
+        let fallback = scene.note_native_undo(DEFAULT_WINDOW, WidgetId(2), "", false);
+        assert!(fallback.is_none(), "the before-image was reached; no coarse restore");
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 0);
+    }
+
+    #[test]
+    fn a_partial_native_undo_leaves_the_episode_open_and_typing_extends_it() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk bread", true);
+        let fallback = scene.note_native_undo(DEFAULT_WINDOW, WidgetId(2), "milk ", true);
+        assert!(fallback.is_none());
+        assert_eq!(
+            episode(&scene, DEFAULT_WINDOW),
+            Some(("", "milk bread", "milk ", true)),
+            "current sits between the images; the high-water is untouched"
+        );
+        assert_eq!(
+            scene.route_redo(DEFAULT_WINDOW, Some(WidgetId(2)), true),
+            UndoRoute::Native,
+            "the platform still holds the forward steps"
+        );
+        // Further typing extends the SAME run, and the platform's own
+        // rule that a keystroke kills the redo history is inherited.
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk eggs", true);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 1);
+        assert_eq!(
+            episode(&scene, DEFAULT_WINDOW),
+            Some(("", "milk eggs", "milk eggs", true))
+        );
+    }
+
+    #[test]
+    fn an_exhausted_native_stack_short_of_the_before_image_falls_back_to_the_coarse_restore() {
+        // The arm A1's clear is supposed to make unreachable — see the
+        // test below, which is the one that proves it cannot be entered
+        // through the ordinary lifecycle. Reached here only by lying to
+        // the core about CanUndo, which is what a platform that
+        // coalesced across the episode start would look like.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk bread", true);
+        let (ops, occ) = scene
+            .note_native_undo(DEFAULT_WINDOW, WidgetId(2), "milk ", false)
+            .expect("exhausted short of the before-image");
+        assert_eq!(set_texts(&ops), vec![(2, String::new())]);
+        let Occurrence::Undone { delta, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert_eq!(delta.texts, vec![(WidgetId(2), String::new())]);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 0);
+    }
+
+    #[test]
+    fn the_clear_puts_the_exhausted_case_out_of_reach() {
+        // THE KEYSTONE, asserted rather than assumed: every episode
+        // begins with an empty native stack, so a native undo can walk
+        // the frontier episode and physically nothing else. Provoke the
+        // shape that would break it — a group commits mid-run, then the
+        // user types again — and the new run's before-image is where the
+        // clear left the field, so walking it back cannot pass the
+        // group.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
+        let ops = scene.apply(vec![
+            group("add todo"),
+            TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+        ]);
+        assert_eq!(cleared(&ops), 1, "the native stack is empty from here");
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk ", true);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk bread", true);
+        // The furthest the platform can walk is this run's start.
+        let fallback = scene.note_native_undo(DEFAULT_WINDOW, WidgetId(2), "milk", false);
+        assert!(
+            fallback.is_none(),
+            "the walk reached the before-image, which is where the clear put it"
+        );
+        // What is left under it is the group, in order — not the older
+        // typing, which the platform can no longer see.
+        match scene.ledgers[&DEFAULT_WINDOW].done.last() {
+            Some(LedgerEntry::Group { label, .. }) => assert_eq!(label, "add todo"),
+            _ => panic!("the group must be the next step back"),
+        }
+    }
+
+    #[test]
+    fn an_inverse_that_rewrites_a_field_ends_that_field_s_run() {
+        // An inverse is a programmatic write like any other, so D7 does
+        // not stop applying just because the core is the one writing:
+        // restoring a signal bound to a field's text ends the run the
+        // user was in, and the next keystroke starts a new one from
+        // where the inverse left the field.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![TxOp::CreateSignal { id: SignalId(2), initial: v("") }]);
+        scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(2),
+            prop: Prop::Text,
+            value: PropValue::Signal(SignalId(2)),
+        }]);
+        scene.apply(vec![
+            group("draft"),
+            TxOp::WriteSignal { id: SignalId(2), value: v("hello") },
+        ]);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "hello!", true);
+        assert_eq!(episode(&scene, DEFAULT_WINDOW).map(|e| e.3), Some(true));
+
+        // Undoing the group rewrites the field back to "": the run the
+        // user was in cannot survive that.
+        let (ops, _) = scene.undo(DEFAULT_WINDOW).expect("the episode is the newest step");
+        assert_eq!(
+            set_texts(&ops),
+            vec![(2, "hello".to_string())],
+            "the episode walks back to where the group's write left the field"
+        );
+        let (ops, _) = scene.undo(DEFAULT_WINDOW).expect("then the group");
+        assert!(set_texts(&ops).iter().any(|(id, t)| *id == 2 && t.is_empty()));
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "x", true);
+        assert_eq!(
+            episode(&scene, DEFAULT_WINDOW),
+            Some(("", "x", "x", true)),
+            "the new run starts where the inverse left the field"
+        );
+    }
+
+    #[test]
+    fn the_core_never_reads_a_widget_for_an_episode() {
+        // The before-image comes from the occurrence stream and the
+        // programmatic writes the core resolved — nothing else. A field
+        // the core has never heard of starts empty, and one it has
+        // written starts from what it wrote.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![TxOp::SetProperty {
+            widget: WidgetId(2),
+            prop: Prop::Text,
+            value: PropValue::Const(v("draft")),
+        }]);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "drafts", true);
+        assert_eq!(
+            episode(&scene, DEFAULT_WINDOW),
+            Some(("draft", "drafts", "drafts", true)),
+            "the run starts where the core last saw the field, not at empty"
+        );
     }
 }

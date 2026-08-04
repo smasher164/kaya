@@ -62,6 +62,8 @@ pub const TX_SHOW_FILE_DIALOG: u16 = 34;
 /// The clipboard pair: one clip out, one privileged read in.
 pub const TX_COPY: u16 = 35;
 pub const TX_READ_CLIPBOARD: u16 = 36;
+/// The head-of-batch undo group marker (docs/undo-plan.md D2).
+pub const TX_UNDO_GROUP: u16 = 37;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -90,6 +92,11 @@ pub const APPLY_SET_MENU_PROP: u16 = 23;
 pub const APPLY_PRESENT_FILE_DIALOG: u16 = 24;
 pub const APPLY_COPY: u16 = 25;
 pub const APPLY_READ_CLIPBOARD: u16 = 26;
+/// Reset the focused editable's NATIVE undo history in this window
+/// (docs/undo-plan.md A1). Targetless on purpose: the core does not know
+/// what is focused and never will — the backends do, and each already
+/// asks itself that question for role enablement.
+pub const APPLY_CLEAR_UNDO: u16 = 27;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -707,6 +714,14 @@ pub fn decode_transaction_with_blobs(
                 let accepting = clip_str(Some(r.value()), "accept list");
                 TxOp::ReadClipboard { request, accepting }
             }
+            TX_UNDO_GROUP => {
+                let window = WindowId(r.u64());
+                let label = match r.value() {
+                    Value::Str(s) => s,
+                    other => panic!("kaya: undo group label is {other:?}, wanted a string"),
+                };
+                TxOp::UndoGroup { window, label }
+            }
             TX_SHOW_FILE_DIALOG => {
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
@@ -901,6 +916,169 @@ pub(crate) fn file_dialog_result_body(
         write_value(&mut b, &Value::Str(f.local_path.clone()), &mut Vec::new());
     }
     b
+}
+
+/// An undo group's label, validated at the root the way every other
+/// authored grammar is (the check_custom_id stance: the rule lives once,
+/// where the wire is, so it fails identically in eight languages).
+///
+/// NON-EMPTY IS THE WHOLE RULE. The label is what a user-facing Undo
+/// item would say and what an `undone` occurrence carries, so an empty
+/// one is a typo rather than an anonymous group — and the empty label is
+/// already taken: it is how a TYPING EPISODE identifies itself on that
+/// same occurrence (docs/undo-plan.md §3), so an anonymous group would
+/// be indistinguishable from the native tier.
+pub(crate) fn check_undo_label(label: &str, what: &str) {
+    assert!(
+        !label.is_empty(),
+        "kaya: {what} has an empty label — name the step ({}), because \
+         the empty label already means \"a typing episode\" on the \
+         undone occurrence and an anonymous group would be \
+         indistinguishable from the native tier",
+        "tx.undoable(\"add todo\")"
+    );
+}
+
+/// An undo or redo's answer on the wire: the window, the four run
+/// counts, the label, then one flat Values list holding the runs in
+/// order — signal pairs, text pairs, arity-first entry groups,
+/// arity-first order groups. See the `undone` spec record for the exact
+/// group layouts; this is the ONE encoder, and `redone` is byte-identical
+/// so the two directions cannot drift.
+pub(crate) fn undo_body(
+    window: WindowId,
+    label: &str,
+    delta: &crate::protocol::UndoDelta,
+) -> Vec<u8> {
+    let mut values: Vec<Value> = Vec::new();
+    for (signal, value) in &delta.signals {
+        values.push(Value::I64(signal.0 as i64));
+        values.push(value.clone());
+    }
+    for (widget, text) in &delta.texts {
+        values.push(Value::I64(widget.0 as i64));
+        values.push(Value::Str(text.clone()));
+    }
+    for entry in &delta.entries {
+        let (present, variant, record) = match &entry.state {
+            Some((variant, record)) => (1i64, *variant as i64, record.as_slice()),
+            None => (0, 0, [].as_slice()),
+        };
+        // size counts ITSELF: 5 fixed ints + the path + the key + the
+        // record. A reader takes the size first and needs nothing else.
+        let size = 6 + entry.path.len() + record.len();
+        values.push(Value::I64(size as i64));
+        values.push(Value::I64(entry.collection.0 as i64));
+        values.push(Value::I64(present));
+        values.push(Value::I64(variant));
+        values.push(Value::I64(entry.path.len() as i64));
+        values.extend(entry.path.iter().cloned());
+        values.push(entry.key.clone());
+        values.extend(record.iter().cloned());
+    }
+    for order in &delta.orders {
+        let size = 3 + order.path.len() + order.keys.len();
+        values.push(Value::I64(size as i64));
+        values.push(Value::I64(order.collection.0 as i64));
+        values.push(Value::I64(order.path.len() as i64));
+        values.extend(order.path.iter().cloned());
+        values.extend(order.keys.iter().cloned());
+    }
+    let mut b = Vec::new();
+    b.extend_from_slice(&window.0.to_le_bytes());
+    b.extend_from_slice(&(delta.signals.len() as u32).to_le_bytes());
+    b.extend_from_slice(&(delta.texts.len() as u32).to_le_bytes());
+    b.extend_from_slice(&(delta.entries.len() as u32).to_le_bytes());
+    b.extend_from_slice(&(delta.orders.len() as u32).to_le_bytes());
+    write_value(&mut b, &Value::Str(label.to_owned()), &mut Vec::new());
+    b.extend_from_slice(&(values.len() as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for v in &values {
+        write_value(&mut b, v, &mut Vec::new());
+    }
+    b
+}
+
+/// Read an undo body back — what a guest's generated parser does, in
+/// one place, so the encoding above is pinned by a round trip rather
+/// than by eight readers agreeing with it by luck. Panics on a
+/// malformed body; a bad one is a broken encoder, not bad input.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn decode_undo_body(
+    body: &[u8],
+) -> (WindowId, String, crate::protocol::UndoDelta) {
+    use crate::protocol::{UndoDelta, UndoEntry, UndoOrder};
+    let mut r = Reader { buf: body, at: 0, blobs: &|_| None };
+    let window = WindowId(r.u64());
+    let signals = r.u32() as usize;
+    let texts = r.u32() as usize;
+    let entries = r.u32() as usize;
+    let orders = r.u32() as usize;
+    let label = match r.value() {
+        Value::Str(s) => s,
+        other => panic!("kaya: undo label is {other:?}, wanted a string"),
+    };
+    let flat = r.record();
+    let mut at = 0;
+    let mut next = |n: usize| {
+        let s = flat
+            .get(at..at + n)
+            .unwrap_or_else(|| panic!("kaya: undo delta is truncated"))
+            .to_vec();
+        at += n;
+        s
+    };
+    let int = |v: &Value| match v {
+        Value::I64(n) => *n,
+        other => panic!("kaya: undo delta wanted an integer, got {other:?}"),
+    };
+    let mut delta = UndoDelta::default();
+    for _ in 0..signals {
+        let pair = next(2);
+        delta
+            .signals
+            .push((SignalId(int(&pair[0]) as u64), pair[1].clone()));
+    }
+    for _ in 0..texts {
+        let pair = next(2);
+        let text = match &pair[1] {
+            Value::Str(s) => s.clone(),
+            other => panic!("kaya: undo text is {other:?}, wanted a string"),
+        };
+        delta.texts.push((WidgetId(int(&pair[0]) as u64), text));
+    }
+    for _ in 0..entries {
+        let head = next(5);
+        let size = int(&head[0]) as usize;
+        let path_len = int(&head[4]) as usize;
+        let rest = next(size - 5);
+        let path: Path = rest[..path_len].to_vec();
+        let key = rest[path_len].clone();
+        let state = if int(&head[2]) != 0 {
+            Some((int(&head[3]) as u32, rest[path_len + 1..].to_vec()))
+        } else {
+            None
+        };
+        delta.entries.push(UndoEntry {
+            collection: CollectionId(int(&head[1]) as u64),
+            path,
+            key,
+            state,
+        });
+    }
+    for _ in 0..orders {
+        let head = next(3);
+        let size = int(&head[0]) as usize;
+        let path_len = int(&head[2]) as usize;
+        let rest = next(size - 3);
+        delta.orders.push(UndoOrder {
+            collection: CollectionId(int(&head[1]) as u64),
+            path: rest[..path_len].to_vec(),
+            keys: rest[path_len..].to_vec(),
+        });
+    }
+    assert_eq!(at, flat.len(), "kaya: undo delta has trailing values");
+    (window, label, delta)
 }
 
 /// The privileged read's answer on the wire: request id, the clip kind
@@ -1408,6 +1586,9 @@ impl Writer {
                     write_value(b, &Value::Str(accepting.clone()), blobs);
                 })
             }
+            ApplyOp::ClearUndo { window } => self.record(APPLY_CLEAR_UNDO, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+            }),
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
@@ -1701,6 +1882,10 @@ impl Writer {
                     })
                     .collect();
                 write_values(b, &flat, blobs);
+            }),
+            TxOp::UndoGroup { window, label } => self.record(TX_UNDO_GROUP, |b, blobs| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                write_value(b, &Value::Str(label.clone()), blobs);
             }),
             TxOp::Copy(clip) => self.record(TX_COPY, |b, blobs| {
                 write_clip(b, clip, blobs);
@@ -2411,6 +2596,57 @@ mod tests {
             let _reserved = r.u32();
             assert_eq!(read_representation(kind, r.path()), Some(clip));
         }
+    }
+
+    /// The undo payload's four runs survive the trip, INCLUDING the
+    /// shapes a reader gets wrong: a record with more fields than the
+    /// fixed head, an absent entry with no record at all, a non-empty
+    /// instance path, and an order group whose length differs from the
+    /// entry count. Eight generated parsers will each write this walk
+    /// once; the encoder is pinned here so they have something to agree
+    /// with.
+    #[test]
+    fn undo_bodies_round_trip() {
+        use crate::protocol::{UndoDelta, UndoEntry, UndoOrder};
+        let delta = UndoDelta {
+            signals: vec![
+                (SignalId(3), Value::from("one")),
+                (SignalId(9), Value::Bool(true)),
+            ],
+            texts: vec![(WidgetId(2), "milk bread".into())],
+            entries: vec![
+                UndoEntry {
+                    collection: CollectionId(1),
+                    path: vec![],
+                    key: Value::from("a"),
+                    state: Some((0, vec![Value::from("Alpha"), Value::Bool(false)])),
+                },
+                UndoEntry {
+                    collection: CollectionId(1),
+                    path: vec![Value::from("g1"), Value::I64(4)],
+                    key: Value::I64(7),
+                    state: None,
+                },
+            ],
+            orders: vec![UndoOrder {
+                collection: CollectionId(1),
+                path: vec![],
+                keys: vec![Value::from("a"), Value::from("b"), Value::from("c")],
+            }],
+        };
+        let body = undo_body(WindowId(2), "shuffle", &delta);
+        assert!(body.len() % 8 == 0, "bodies must stay 8-aligned for the ring");
+        let (window, label, back) = decode_undo_body(&body);
+        assert_eq!(window, WindowId(2));
+        assert_eq!(label, "shuffle");
+        assert_eq!(back, delta);
+        // The empty payload is a real one: an episode redo carries a
+        // text and nothing else, and a label-only record must decode.
+        let bare = undo_body(WindowId(0), "", &UndoDelta::default());
+        assert_eq!(
+            decode_undo_body(&bare),
+            (WindowId(0), String::new(), UndoDelta::default())
+        );
     }
 
     #[test]

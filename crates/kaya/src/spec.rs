@@ -858,6 +858,40 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   is not that one. An empty answer covers denied, \
                   absent, and nothing-we-accept alike.",
         },
+        Record {
+            kind: 37,
+            name: "undo_group",
+            fields: &[f("window", FieldTy::U64), f("label", FieldTy::Value)],
+            payload: None,
+            doc: "Mark this transaction as ONE undoable step in `window`'s \
+                  ledger, under `label` (a non-empty Str, validated at the \
+                  root like every other authored grammar). MUST BE THE \
+                  FIRST RECORD OF THE BATCH and may appear once: a \
+                  transaction is a bare list with no header, so \
+                  per-transaction metadata has nowhere else to live, and \
+                  head-of-batch is the one position that cannot be \
+                  ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A \
+                  BINDING CONVENTION, so both interpreters and check-verbs \
+                  see it and a binding that forgets to emit it fails a \
+                  byte-compared scene instead of grouping wrong in \
+                  silence.\n\n\
+                  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked \
+                  batch may hold signal writes and the five collection \
+                  deltas, whose inverse the core derives from state it \
+                  already keeps. PURE EFFECTS — focus today, scroll when \
+                  it lands — are permitted and simply not restored (A2): \
+                  undo restores state, not where you were looking. \
+                  Anything else (const prop sets, create/destroy/mount, \
+                  window/nav/section/menu structure, clear, commands, \
+                  dialog and clipboard requests) is REFUSED at apply, \
+                  loudly, naming the op — an app that wants a widget \
+                  property undoable binds it to a signal, which is the \
+                  reactive doctrine saying what it already said. A refused \
+                  group leaves the scene exactly as it was.\n\n\
+                  The window is explicit because the core cannot derive \
+                  it: a signal write names no surface, and the scene keeps \
+                  no widget-to-window map. 0 is the primary.",
+        },
     ],
     apply: &[
         Record {
@@ -1167,6 +1201,36 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   accepted kind. Exactly one answer per request, always: \
                   the guest's handler retires on it.",
         },
+        Record {
+            kind: 27,
+            name: "clear_undo",
+            fields: &[f("window", FieldTy::U64)],
+            payload: None,
+            doc: "Reset the NATIVE undo history of whatever editable holds \
+                  the keyboard focus in this window; do nothing if that is \
+                  nothing (docs/undo-plan.md A1). TARGETLESS ON PURPOSE — \
+                  the core does not know what is focused and by doctrine \
+                  never will (there are no widget mirror reads), while \
+                  every backend already asks itself exactly this question \
+                  to compute role enablement. Per-platform spelling, one \
+                  semantics: GTK's begin/end_irreversible_action bracket, \
+                  WinUI's ClearUndoRedoHistory, Compose's \
+                  undoState.clearHistory, AppKit's removeAllActions on the \
+                  first responder's manager AFTER the value has reached \
+                  AppKit.\n\n\
+                  THE KEYSTONE OF THE LEDGER (docs/undo-plan.md §3): the \
+                  core emits this when an undo GROUP commits, so \
+                  everything left in a native stack is strictly newer than \
+                  everything in the core's ledger. The episode was banked \
+                  before the clear, so the clear costs no history — it \
+                  costs GRANULARITY, and it is what makes \"ask the \
+                  focused text first\" mean \"ask the most recent first\". \
+                  The OTHER trigger — a programmatic write that CHANGES a \
+                  field's text (D7, narrowed by A3) — rides no record: the \
+                  backend is already standing at its set_prop/command arm \
+                  with the widget in hand and the old text to compare \
+                  against, which is a comparison the core cannot make.",
+        },
     ],
     occurrence: &[
         Record {
@@ -1423,6 +1487,88 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   lands here too when it comes: Android built \
                   onReceiveContent as ONE api for paste, drop and \
                   autofill, and Wayland uses one data offer for both.",
+        },
+        Record {
+            kind: 17,
+            name: "undone",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("signals", FieldTy::U32),
+                f("texts", FieldTy::U32),
+                f("entries", FieldTy::U32),
+                f("orders", FieldTy::U32),
+                f("label", FieldTy::Value),
+                f("delta", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "kaya routed an undo, and this is what the CORE put back \
+                  (docs/undo-plan.md D5). `label` is the group's authored \
+                  name, or EMPTY for a typing episode — kaya invents no \
+                  user-facing strings, and \"Undo Typing\" is an Apple \
+                  convention scene strings do not carry.\n\n\
+                  APPLYING AN INVERSE EMITS NOTHING ELSE. It is \
+                  programmatic by construction, so the echo doctrine \
+                  covers it — no text_changed for the text this restores, \
+                  no value_changed for the signals, no section_selected. \
+                  That is exactly why the payload is fat: this record is \
+                  the ONLY thing the app hears, so the eight bindings \
+                  update their mirrors from it the way they already \
+                  journal a rollback, and mirror drift across eight \
+                  languages has ONE source instead of eight \
+                  reimplementations.\n\n\
+                  A STATEMENT OF THE RESTORED STATE, NOT A REPLAY OF OPS. \
+                  The reader does not re-derive anything: every group says \
+                  what a thing now IS, so applying the payload twice is \
+                  the same as applying it once. `delta` is one flat list \
+                  read as FOUR RUNS in this order — the \
+                  grouping-is-the-encoding shape file_dialog_result uses, \
+                  with the counts in the fixed head the way copy carries \
+                  them:\n\n\
+                  1. `signals` PAIRS: I64 signal id, then its restored \
+                  value.\n\
+                  2. `texts` PAIRS: I64 widget id, then its restored Str. \
+                  A coarse episode restore is a programmatic write, so \
+                  nothing else would ever tell an app that folds \
+                  text_changed into its model.\n\
+                  3. `entries` GROUPS, each ARITY-FIRST so a reader needs \
+                  no schema: I64 size (values in this group, including the \
+                  size itself), I64 collection, I64 flags (bit 0 = the \
+                  entry EXISTS; clear means it is gone), I64 variant, I64 \
+                  path_len, path_len instance-path key values, the entry's \
+                  key value, then the record's fields — size says how \
+                  many, and an absent entry carries none.\n\
+                  4. `orders` GROUPS, arity-first likewise: I64 size, I64 \
+                  collection, I64 path_len, path_len path key values, then \
+                  the instance's keys IN ORDER. Present only for \
+                  instances whose order the step changed, because \
+                  position is the one thing per-entry statements cannot \
+                  carry.",
+        },
+        Record {
+            kind: 18,
+            name: "redone",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("signals", FieldTy::U32),
+                f("texts", FieldTy::U32),
+                f("entries", FieldTy::U32),
+                f("orders", FieldTy::U32),
+                f("label", FieldTy::Value),
+                f("delta", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The undone record's twin, byte-identical in layout (one \
+                  encoder writes both, so the two directions cannot \
+                  drift): kaya routed a redo, and this is the state the \
+                  core put back. Symmetric in every respect — same silence \
+                  from the echo doctrine, same four runs, same \
+                  statement-not-replay reading. A redo of a group restores \
+                  the values that group wrote; a redo of a banked typing \
+                  episode restores its after-image. Only the FRONTIER \
+                  episode redoes natively, and that one does not come \
+                  through here: it is the platform's own stack moving, \
+                  which emits its ordinary text_changed (the A6 gap, \
+                  bounded by the clear).",
         },
     ],
     enums: &[
@@ -1746,6 +1892,7 @@ mod tests {
             ("show_file_dialog", wire::TX_SHOW_FILE_DIALOG),
             ("copy", wire::TX_COPY),
             ("read_clipboard", wire::TX_READ_CLIPBOARD),
+            ("undo_group", wire::TX_UNDO_GROUP),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -1785,6 +1932,7 @@ mod tests {
                 ("present_file_dialog", wire::APPLY_PRESENT_FILE_DIALOG),
                 ("copy", wire::APPLY_COPY),
                 ("read_clipboard", wire::APPLY_READ_CLIPBOARD),
+                ("clear_undo", wire::APPLY_CLEAR_UNDO),
             ]
         );
         // THE SAME TABLE SHAPE AS THE TWO ABOVE, and it was not always:
@@ -1814,6 +1962,8 @@ mod tests {
                 ("file_dialog_result", crate::ring::REC_FILE_DIALOG_RESULT),
                 ("clipboard_result", crate::ring::REC_CLIPBOARD_RESULT),
                 ("pasted", crate::ring::REC_PASTED),
+                ("undone", crate::ring::REC_UNDONE),
+                ("redone", crate::ring::REC_REDONE),
             ]
         );
     }

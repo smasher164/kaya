@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x408bcf69e0ad2bfdL
+let spec_hash = 0x44b8c0a4228f2b33L
 
 let value_bool = 1
 let value_i64 = 2
@@ -140,6 +140,7 @@ let tx_kind_set_menu_prop = 33
 let tx_kind_show_file_dialog = 34
 let tx_kind_copy = 35
 let tx_kind_read_clipboard = 36
+let tx_kind_undo_group = 37
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -166,6 +167,7 @@ let apply_kind_set_menu_prop = 23
 let apply_kind_present_file_dialog = 24
 let apply_kind_copy = 25
 let apply_kind_read_clipboard = 26
+let apply_kind_clear_undo = 27
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -182,6 +184,8 @@ let occ_kind_menu_value_changed = 13
 let occ_kind_file_dialog_result = 14
 let occ_kind_clipboard_result = 15
 let occ_kind_pasted = 16
+let occ_kind_undone = 17
+let occ_kind_redone = 18
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -476,6 +480,12 @@ let tx_read_clipboard request accepting =
   finish tx_kind_read_clipboard (fun b ->
       Buffer.add_int64_le b request;
       encode_value b accepting)
+
+(* Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary. *)
+let tx_undo_group window label =
+  finish tx_kind_undo_group (fun b ->
+      Buffer.add_int64_le b window;
+      encode_value b label)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -1241,7 +1251,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in

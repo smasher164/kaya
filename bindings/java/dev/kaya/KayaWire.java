@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x408bcf69e0ad2bfdL;
+    public static final long SPEC_HASH = 0x44b8c0a4228f2b33L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -138,6 +138,7 @@ public final class KayaWire {
     public static final short TX_KIND_SHOW_FILE_DIALOG = 34;
     public static final short TX_KIND_COPY = 35;
     public static final short TX_KIND_READ_CLIPBOARD = 36;
+    public static final short TX_KIND_UNDO_GROUP = 37;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -164,6 +165,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_PRESENT_FILE_DIALOG = 24;
     public static final short APPLY_KIND_COPY = 25;
     public static final short APPLY_KIND_READ_CLIPBOARD = 26;
+    public static final short APPLY_KIND_CLEAR_UNDO = 27;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -180,6 +182,8 @@ public final class KayaWire {
     public static final short OCC_KIND_FILE_DIALOG_RESULT = 14;
     public static final short OCC_KIND_CLIPBOARD_RESULT = 15;
     public static final short OCC_KIND_PASTED = 16;
+    public static final short OCC_KIND_UNDONE = 17;
+    public static final short OCC_KIND_REDONE = 18;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -545,6 +549,14 @@ public final class KayaWire {
         ByteBuffer b = begin(TX_KIND_READ_CLIPBOARD);
         b.putLong(request);
         encodeValue(b, accepting);
+        return finish(b);
+    }
+
+    /** Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary. */
+    public static byte[] txUndoGroup(long window, Object label) {
+        ByteBuffer b = begin(TX_KIND_UNDO_GROUP);
+        b.putLong(window);
+        encodeValue(b, label);
         return finish(b);
     }
 
@@ -1275,7 +1287,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE) {
             return null;
         }
         long id = b.getLong(8);

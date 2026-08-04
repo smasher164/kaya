@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x408bcf69e0ad2bfd;
+    public const ulong SpecHash = 0x44b8c0a4228f2b33;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -137,6 +137,7 @@ static class KayaWire
     public const ushort TxKindShowFileDialog = 34;
     public const ushort TxKindCopy = 35;
     public const ushort TxKindReadClipboard = 36;
+    public const ushort TxKindUndoGroup = 37;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -163,6 +164,7 @@ static class KayaWire
     public const ushort ApplyKindPresentFileDialog = 24;
     public const ushort ApplyKindCopy = 25;
     public const ushort ApplyKindReadClipboard = 26;
+    public const ushort ApplyKindClearUndo = 27;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -179,6 +181,8 @@ static class KayaWire
     public const ushort OccKindFileDialogResult = 14;
     public const ushort OccKindClipboardResult = 15;
     public const ushort OccKindPasted = 16;
+    public const ushort OccKindUndone = 17;
+    public const ushort OccKindRedone = 18;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -599,6 +603,15 @@ static class KayaWire
         w.Write(request);
         EncodeValue(w, accepting);
         return Finish(stream, w, TxKindReadClipboard);
+    }
+
+    /// Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary.
+    public static byte[] TxUndoGroup(ulong window, object label)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        EncodeValue(w, label);
+        return Finish(stream, w, TxKindUndoGroup);
     }
 
     /// set_property with a constant text value.
@@ -1340,7 +1353,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)

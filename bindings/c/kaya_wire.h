@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x408bcf69e0ad2bfdULL
+#define KAYA_SPEC_HASH 0x44b8c0a4228f2b33ULL
 
 
 /* Create a signal holding `initial`. */
@@ -451,6 +451,14 @@ static inline void kaya_tx_read_clipboard(KayaTx *tx, uint64_t request, KayaVal 
     size_t start = kaya_wire_begin(tx, KAYA_TX_READ_CLIPBOARD);
     kaya_wire_u64(tx, request);
     kaya_wire_value(tx, accepting);
+    kaya_wire_end(tx, start);
+}
+
+/* Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary. */
+static inline void kaya_tx_undo_group(KayaTx *tx, uint64_t window, KayaVal label) {
+    size_t start = kaya_wire_begin(tx, KAYA_TX_UNDO_GROUP);
+    kaya_wire_u64(tx, window);
+    kaya_wire_value(tx, label);
     kaya_wire_end(tx, start);
 }
 

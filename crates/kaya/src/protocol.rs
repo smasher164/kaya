@@ -508,6 +508,26 @@ pub enum Occurrence {
         path: Path,
         clip: Representation,
     },
+    /// kaya routed an undo, and this is what the CORE put back
+    /// (docs/undo-plan.md D5). `label` is the group's authored name, or
+    /// EMPTY for a typing episode. Applying an inverse emits nothing
+    /// else — it is programmatic, so the echo doctrine covers it — which
+    /// is exactly why the payload is complete: this is the only thing
+    /// the app hears, and every binding updates its mirror from it.
+    Undone {
+        window: WindowId,
+        label: String,
+        delta: UndoDelta,
+    },
+    /// The Undone twin, same payload, opposite direction. Only a
+    /// FRONTIER typing episode redoes natively, and that one never
+    /// arrives here: it is the platform's own stack moving, reported by
+    /// its ordinary TextChanged.
+    Redone {
+        window: WindowId,
+        label: String,
+        delta: UndoDelta,
+    },
     /// The core is gone and no further occurrences will arrive; the app
     /// loop should end. First member of the lifecycle vocabulary.
     Shutdown,
@@ -607,6 +627,49 @@ impl Value {
 /// One collection entry's value: one Value per schema field, positional.
 /// A scalar collection is the one-field case.
 pub type Record = Vec<Value>;
+
+/// What an undo or a redo PUT BACK: the core-authoritative statement of
+/// the restored state (docs/undo-plan.md D5).
+///
+/// A STATEMENT, NOT A REPLAY. Every member says what a thing now IS, so
+/// a mirror that applies one twice is still correct and a binding needs
+/// no diffing of its own. The core owns the truth; eight bindings fold
+/// the same payload the way they already fold a rollback journal, which
+/// is what keeps mirror drift to one implementation instead of eight.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UndoDelta {
+    /// Signal id -> its restored value.
+    pub signals: Vec<(SignalId, Value)>,
+    /// Widget id -> its restored text. A coarse episode restore is a
+    /// programmatic write, so nothing else would ever tell an app that
+    /// folds TextChanged into its model.
+    pub texts: Vec<(WidgetId, String)>,
+    /// Collection entries, present or gone.
+    pub entries: Vec<UndoEntry>,
+    /// Instance orders, for the instances whose order the step changed
+    /// — position is the one thing per-entry statements cannot carry.
+    pub orders: Vec<UndoOrder>,
+}
+
+/// One collection entry's restored state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UndoEntry {
+    pub collection: CollectionId,
+    /// The instance path: one key per enclosing For, empty at top level.
+    pub path: Path,
+    pub key: Value,
+    /// The variant and record it holds, or None when the restored state
+    /// does not have this entry at all.
+    pub state: Option<(u32, Record)>,
+}
+
+/// One collection instance's restored key order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UndoOrder {
+    pub collection: CollectionId,
+    pub path: Path,
+    pub keys: Vec<Value>,
+}
 
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
@@ -1113,6 +1176,14 @@ pub enum PropValue {
 /// scope they create live things, as in milestone 1.
 #[derive(Debug)]
 pub enum TxOp {
+    /// Mark this transaction as ONE undoable step in `window`'s ledger.
+    /// MUST BE THE FIRST OP OF THE BATCH and may appear once — a
+    /// transaction is a bare list with no header, so head-of-batch is
+    /// the only unambiguous home for per-transaction metadata
+    /// (docs/undo-plan.md D2). A marked batch holds signal writes and
+    /// collection deltas; focus is permitted and not restored; anything
+    /// else is refused at apply, naming the op.
+    UndoGroup { window: WindowId, label: String },
     CreateSignal { id: SignalId, initial: Value },
     WriteSignal { id: SignalId, value: Value },
     CreateWidget { id: WidgetId, kind: WidgetKind },
@@ -1286,6 +1357,12 @@ pub enum ApplyOp {
     Copy(ClipOut),
     /// Answer a privileged read with the first accepted representation.
     ReadClipboard { request: u64, accepting: String },
+    /// Reset the NATIVE undo history of whatever editable holds the
+    /// keyboard focus in this window; do nothing if that is nothing.
+    /// Targetless because the core does not know what is focused and by
+    /// doctrine never will, while every backend already asks itself the
+    /// same question for role enablement (docs/undo-plan.md A1).
+    ClearUndo { window: WindowId },
     /// Push a navigation entry onto the window's stack, hidden until
     /// a mount presents it. The covered root stays alive.
     PushEntry { window: WindowId, entry: WindowId },
@@ -1470,6 +1547,14 @@ impl OccSink {
                     let tag = crate::wire::click_tag(group.0, &path);
                     let body = crate::wire::value_changed_body(&tag, index);
                     ring.push_record(crate::ring::REC_MENU_VALUE_CHANGED, &body);
+                }
+                Occurrence::Undone { window, label, delta } => {
+                    let body = crate::wire::undo_body(window, &label, &delta);
+                    ring.push_record(crate::ring::REC_UNDONE, &body);
+                }
+                Occurrence::Redone { window, label, delta } => {
+                    let body = crate::wire::undo_body(window, &label, &delta);
+                    ring.push_record(crate::ring::REC_REDONE, &body);
                 }
                 Occurrence::Shutdown => ring.set_shutdown(),
             },

@@ -125,6 +125,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceMenuToggled { .. }
             | Occurrence::MenuValueChanged { .. }
             | Occurrence::InstanceMenuValueChanged { .. } => {}
+            Occurrence::Undone { .. } | Occurrence::Redone { .. } => {}
             Occurrence::Shutdown => break,
         }
     }

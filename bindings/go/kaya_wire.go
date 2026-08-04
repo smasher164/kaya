@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x408bcf69e0ad2bfd
+	SpecHash uint64 = 0x44b8c0a4228f2b33
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -139,6 +139,7 @@ const (
 	txShowFileDialog = 34
 	txCopy = 35
 	txReadClipboard = 36
+	txUndoGroup = 37
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -165,6 +166,7 @@ const (
 	applyPresentFileDialog = 24
 	applyCopy = 25
 	applyReadClipboard = 26
+	applyClearUndo = 27
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -181,6 +183,8 @@ const (
 	occFileDialogResult = 14
 	occClipboardResult = 15
 	occPasted = 16
+	occUndone = 17
+	occRedone = 18
 )
 
 func pad8(b []byte) []byte {
@@ -572,6 +576,14 @@ func TxReadClipboard(request uint64, accepting any) []byte {
 	b := beginRecord(txReadClipboard)
 	b = binary.LittleEndian.AppendUint64(b, request)
 	b = encodeValue(b, accepting)
+	return endRecord(b)
+}
+
+// TxUndoGroup: Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary.
+func TxUndoGroup(window uint64, label any) []byte {
+	b := beginRecord(txUndoGroup)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = encodeValue(b, label)
 	return endRecord(b)
 }
 
@@ -1481,7 +1493,7 @@ func parseClip(rec []byte, at int) (ClipValues, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])

@@ -3292,6 +3292,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }),
             );
         }
+        // A1's clear reaches the focused editable through GTK's
+        // begin/end_irreversible_action bracket — the undo milestone's
+        // GTK arm, not this slice (docs/undo-plan.md §1, §4).
+        ApplyOp::ClearUndo { .. } => crate::depth_stub("undo"),
         ApplyOp::PresentFileDialog(spec) => {
             // GNOME's own picker: gtk::FileDialog (4.10+), presented on
             // the requesting window and answered exactly once through

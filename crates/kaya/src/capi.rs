@@ -74,6 +74,14 @@ pub const KAYA_OCCURRENCE_FILE_DIALOG_RESULT: u16 = 14;
 /// paths and would silently omit `= ring::X`.
 pub const KAYA_OCCURRENCE_CLIPBOARD_RESULT: u16 = 15;
 pub const KAYA_OCCURRENCE_PASTED: u16 = 16;
+/// The undo pair (spec `undone`/`redone`): kaya routed an undo or a
+/// redo, and this is what the core put back — u64 window, u32 signal
+/// count, u32 text count, u32 entry count, u32 order count, the Str
+/// label, then one flat value list holding those four runs in order.
+/// Applying an inverse emits nothing else, so this record is the whole
+/// of what an app hears.
+pub const KAYA_OCCURRENCE_UNDONE: u16 = 17;
+pub const KAYA_OCCURRENCE_REDONE: u16 = 18;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -92,6 +100,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_FILE_DIALOG_RESULT == ring::REC_FILE_DIALOG_RESULT
         && KAYA_OCCURRENCE_CLIPBOARD_RESULT == ring::REC_CLIPBOARD_RESULT
         && KAYA_OCCURRENCE_PASTED == ring::REC_PASTED
+        && KAYA_OCCURRENCE_UNDONE == ring::REC_UNDONE
+        && KAYA_OCCURRENCE_REDONE == ring::REC_REDONE
 );
 
 /// Transaction record kinds (guest -> core, via kaya_submit). Layouts,
@@ -183,6 +193,14 @@ pub const KAYA_TX_SET_MENU_PROP: u16 = 33;
 pub const KAYA_TX_SHOW_FILE_DIALOG: u16 = 34;
 pub const KAYA_TX_COPY: u16 = 35;
 pub const KAYA_TX_READ_CLIPBOARD: u16 = 36;
+
+/// Mark this transaction as ONE undoable step in a window's ledger:
+/// u64 window (0 = primary), then a non-empty Str label. MUST BE THE
+/// FIRST RECORD OF THE BATCH — a transaction has no header, so the
+/// marker's position is what says which ops it covers. A marked batch
+/// holds signal writes and collection deltas; focus is permitted and not
+/// restored; anything else is refused at apply, naming the op.
+pub const KAYA_TX_UNDO_GROUP: u16 = 37;
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -345,9 +363,17 @@ pub const KAYA_APPLY_PRESENT_FILE_DIALOG: u16 = 24;
 /// kaya_emit_clipboard_result, empty included.
 pub const KAYA_APPLY_COPY: u16 = 25;
 pub const KAYA_APPLY_READ_CLIPBOARD: u16 = 26;
+
+/// Reset the NATIVE undo history of whatever editable holds the keyboard
+/// focus in this window; do nothing if that is nothing. Body: u64 window.
+/// Targetless on purpose — the core does not know what is focused and by
+/// doctrine never will, while the backend already asks itself the same
+/// question for role enablement.
+pub const KAYA_APPLY_CLEAR_UNDO: u16 = 27;
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
         && KAYA_APPLY_READ_CLIPBOARD == wire::APPLY_READ_CLIPBOARD
+        && KAYA_APPLY_CLEAR_UNDO == wire::APPLY_CLEAR_UNDO
 );
 const _: () = assert!(
     KAYA_APPLY_CREATE == wire::APPLY_CREATE
@@ -606,7 +632,7 @@ const _: () = assert!(
 // thing to notice (the spacing-prop lesson, occurrence spelling). A
 // new spec occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 16,
+    crate::spec::SPEC.occurrence.len() == 18,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -2174,6 +2200,7 @@ mod tests {
             ("show_file_dialog", KAYA_TX_SHOW_FILE_DIALOG),
             ("copy", KAYA_TX_COPY),
             ("read_clipboard", KAYA_TX_READ_CLIPBOARD),
+            ("undo_group", KAYA_TX_UNDO_GROUP),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -2202,6 +2229,7 @@ mod tests {
             ("present_file_dialog", KAYA_APPLY_PRESENT_FILE_DIALOG),
             ("copy", KAYA_APPLY_COPY),
             ("read_clipboard", KAYA_APPLY_READ_CLIPBOARD),
+            ("clear_undo", KAYA_APPLY_CLEAR_UNDO),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

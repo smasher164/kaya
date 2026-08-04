@@ -520,10 +520,84 @@ impl AppCtx {
                     // handler that never returns shows up as the NEXT
                     // occurrence going unclaimed.
                     crate::stall::taken();
+                    // An undo moved core state without a transaction, so
+                    // the model mirror has to follow or every read-back
+                    // is stale. HERE, at the ONE place both the raw loop
+                    // and Messages::next take their occurrences from —
+                    // doing it in Messages alone would leave the floor
+                    // wrong, and the floor is the documented fallback.
+                    match &occ {
+                        Occurrence::Undone { delta, .. } | Occurrence::Redone { delta, .. } => {
+                            self.absorb_undo(delta)
+                        }
+                        _ => {}
+                    }
                     return occ;
                 }
                 Err(_) => return Occurrence::Shutdown,
             }
+        }
+    }
+
+    /// Fold an undo's payload into the collection mirror.
+    ///
+    /// The rollback journal in reverse: `Tx`'s Drop restores a snapshot
+    /// because nothing was shipped, while an undo restores a delta
+    /// because everything WAS — the core already moved, and the mirror
+    /// is what would otherwise be left behind. Same machinery, opposite
+    /// case, and the payload is core-authoritative so nothing here
+    /// re-derives anything.
+    ///
+    /// Signals and text are not mirrored by this binding (there is no
+    /// read-back for either, by doctrine), so the two runs that carry
+    /// them pass straight to the app's own handler.
+    fn absorb_undo(&self, delta: &crate::protocol::UndoDelta) {
+        let mut model = self.model.borrow_mut();
+        for entry in &delta.entries {
+            let instances = model.entry(entry.collection).or_default();
+            let at = match instances.iter().position(|i| i.path == entry.path) {
+                Some(at) => at,
+                None => {
+                    instances.push(Instance {
+                        path: entry.path.clone(),
+                        entries: Vec::new(),
+                    });
+                    instances.len() - 1
+                }
+            };
+            let table = &mut instances[at].entries;
+            match &entry.state {
+                Some((variant, record)) => {
+                    match table.iter_mut().find(|(k, _, _)| k == &entry.key) {
+                        Some((_, v, r)) => {
+                            *v = *variant;
+                            *r = record.clone();
+                        }
+                        None => table.push((entry.key.clone(), *variant, record.clone())),
+                    }
+                }
+                None => table.retain(|(k, _, _)| k != &entry.key),
+            }
+        }
+        for order in &delta.orders {
+            let Some(instances) = model.get_mut(&order.collection) else {
+                continue;
+            };
+            let Some(instance) = instances.iter_mut().find(|i| i.path == order.path) else {
+                continue;
+            };
+            // Position by the payload's list, keeping anything the
+            // payload does not name at the end: the delta describes one
+            // instance's whole order, and an entry it never mentions is
+            // one this undo did not touch.
+            let mut sorted: Vec<(Value, u32, Record)> = Vec::with_capacity(instance.entries.len());
+            for key in &order.keys {
+                if let Some(at) = instance.entries.iter().position(|(k, _, _)| k == key) {
+                    sorted.push(instance.entries.remove(at));
+                }
+            }
+            sorted.append(&mut instance.entries);
+            instance.entries = sorted;
         }
     }
 
@@ -1011,6 +1085,52 @@ impl<'a> Tx<'a> {
             .and_then(|instances| instances.iter().find(|i| i.path == instance.path))
             .map(|i| i.entries.len())
             .unwrap_or(0)
+    }
+
+    /// Make this transaction ONE undoable step, under `label`.
+    ///
+    /// The unit of undo is a NAMED GROUP declared at the opener, not
+    /// every transaction: handlers fire per-gesture transactions
+    /// constantly and most of them are consequences rather than intents,
+    /// and a per-keystroke editor would earn one step per character —
+    /// the exact problem grouping exists to solve. So a group is opt-in,
+    /// which is also what keeps a collaborative app free to own its own
+    /// history (docs/undo-plan.md D2, D8).
+    ///
+    /// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at the
+    /// head: a handler naturally builds first and names the step when it
+    /// knows what the step was, and the wire's head-of-batch rule should
+    /// not turn that into a footgun.
+    ///
+    /// WHAT A GROUP MAY HOLD is the reactive half — signal writes and
+    /// collection deltas, whose inverse the core derives from state it
+    /// already keeps. Focus is permitted and not restored. Anything else
+    /// (a const property write, creating a widget, showing a dialog)
+    /// fails at apply, naming the op: undo restores state, and state is
+    /// signals plus collections. The app hears the result as
+    /// [`Messages::on_undone`].
+    pub fn undoable(&mut self, label: impl Into<String>) {
+        self.undoable_in(crate::protocol::DEFAULT_WINDOW, label);
+    }
+
+    /// [`Tx::undoable`] against an auxiliary window's ledger. Each
+    /// window has its own history, because Undo in one window has never
+    /// meant "revert what happened in another".
+    pub fn undoable_in(&mut self, window: WindowId, label: impl Into<String>) {
+        assert!(
+            !self
+                .ops
+                .iter()
+                .any(|op| matches!(op, TxOp::UndoGroup { .. })),
+            "kaya: this transaction is already an undo group — one name per step"
+        );
+        self.ops.insert(
+            0,
+            TxOp::UndoGroup {
+                window,
+                label: label.into(),
+            },
+        );
     }
 
     pub fn signal(&mut self, initial: impl Into<Value>) -> SignalId {
@@ -2232,6 +2352,11 @@ pub struct Messages<M> {
     clip_reads: RefCell<
         HashMap<u64, Box<dyn Fn(Option<crate::protocol::Representation>) -> M>>,
     >,
+    /// Per-window and PERSISTENT — the on_section_selected shape, not
+    /// the one-shot request shape: a window's history is walked as many
+    /// times as the user likes, and the ledger is per window.
+    undone: RefCell<HashMap<u64, Box<dyn Fn(String, crate::protocol::UndoDelta) -> M>>>,
+    redone: RefCell<HashMap<u64, Box<dyn Fn(String, crate::protocol::UndoDelta) -> M>>>,
 }
 
 type Mapper<M> = Box<dyn Fn(&Occurrence) -> Option<M>>;
@@ -2256,6 +2381,8 @@ impl<M> Messages<M> {
             alerts: RefCell::new(HashMap::new()),
             dialogs: RefCell::new(HashMap::new()),
             clip_reads: RefCell::new(HashMap::new()),
+            undone: RefCell::new(HashMap::new()),
+            redone: RefCell::new(HashMap::new()),
         }
     }
 
@@ -2568,6 +2695,41 @@ impl<M> Messages<M> {
         );
     }
 
+    /// Bind the undone handler to ONE window: fires each time kaya
+    /// routes an undo there, with the group's label (EMPTY for a typing
+    /// episode) and what the core put back.
+    ///
+    /// NOT ONE-SHOT — the on_section_selected stance rather than the
+    /// alert's. A history is walked as often as the user likes, and the
+    /// registration outlives every step. Per window because the ledger
+    /// is: Undo in one window has never meant "revert what happened in
+    /// another".
+    ///
+    /// THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
+    /// programmatic write, so the echo doctrine silences every
+    /// occurrence it would otherwise cause — no TextChanged for the text
+    /// it restored, no ValueChanged for the signals. The binding has
+    /// already folded this payload into its own collection mirror before
+    /// the handler runs; this is where an app folds it into ITS model.
+    pub fn on_undone(
+        &self,
+        window: WindowId,
+        f: impl Fn(String, crate::protocol::UndoDelta) -> M + 'static,
+    ) {
+        self.undone.borrow_mut().insert(window.0, Box::new(f));
+    }
+
+    /// The [`Messages::on_undone`] twin. A frontier typing episode
+    /// redoes on the platform's own stack and reports itself as an
+    /// ordinary edit, so it does not arrive here.
+    pub fn on_redone(
+        &self,
+        window: WindowId,
+        f: impl Fn(String, crate::protocol::UndoDelta) -> M + 'static,
+    ) {
+        self.redone.borrow_mut().insert(window.0, Box::new(f));
+    }
+
     /// Bind the one-shot result handler to a clipboard read. The answer
     /// is at most one representation; `None` covers every way the
     /// platform declines to hand one over, and it is not an error.
@@ -2664,6 +2826,20 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceMenuValueChanged { group, .. } => {
                     self.menu_items.borrow().get(&group.0).and_then(|f| f(&occ))
                 }
+                // NOT one-shot, and keyed by window: a history is walked
+                // as often as the user likes. The collection mirror was
+                // already reconciled in AppCtx::next, so a handler that
+                // reads back sees the restored state.
+                Occurrence::Undone { window, label, delta } => self
+                    .undone
+                    .borrow()
+                    .get(&window.0)
+                    .map(|f| f(label.clone(), delta.clone())),
+                Occurrence::Redone { window, label, delta } => self
+                    .redone
+                    .borrow()
+                    .get(&window.0)
+                    .map(|f| f(label.clone(), delta.clone())),
             };
             if let Some(m) = mapped {
                 return Some(m);
@@ -4603,7 +4779,9 @@ mod tests {
                     | Occurrence::InstanceMenuValueChanged { .. }
                     | Occurrence::ClipboardResult { .. }
                     | Occurrence::Pasted { .. }
-                    | Occurrence::InstancePasted { .. } => {}
+                    | Occurrence::InstancePasted { .. }
+                    | Occurrence::Undone { .. }
+                    | Occurrence::Redone { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }
@@ -5110,5 +5288,178 @@ mod tests {
     #[should_panic(expected = "unknown modifier")]
     fn shortcut_with_two_keys_is_rejected() {
         super::normalize_shortcut("primary+s+t");
+    }
+
+    // --- Undo (docs/undo-plan.md D2, D5) --------------------------------
+
+    /// The marker rides at the head however late it is named. A handler
+    /// naturally builds first and knows what the step WAS afterwards, so
+    /// the wire's head-of-batch rule must not turn ordinary code into a
+    /// footgun.
+    #[test]
+    fn undoable_puts_the_marker_at_the_head_whenever_it_is_called() {
+        use crate::protocol::TxOp;
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        tx.insert(&todos, "a", Todo { title: "milk".into(), done: false });
+        tx.undoable("add todo");
+        match &tx.ops[0] {
+            TxOp::UndoGroup { window, label } => {
+                assert_eq!(*window, crate::protocol::DEFAULT_WINDOW);
+                assert_eq!(label, "add todo");
+            }
+            other => panic!("the marker is not at the head: {other:?}"),
+        }
+        assert_eq!(
+            tx.ops
+                .iter()
+                .filter(|op| matches!(op, TxOp::UndoGroup { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "already an undo group")]
+    fn a_transaction_takes_one_name() {
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+        let mut tx = ctx.begin();
+        tx.undoable("first");
+        tx.undoable("second");
+    }
+
+    /// THE MIRROR FOLLOWS THE CORE, and it follows it at `AppCtx::next`
+    /// — the one place the raw loop and Messages both take occurrences
+    /// from. An undo moved core state without a transaction, so a mirror
+    /// that did not reconcile would answer every read-back with state
+    /// the core has already left behind.
+    #[test]
+    fn an_undone_delta_reconciles_the_model_mirror() {
+        use crate::protocol::{
+            Occurrence, UndoDelta, UndoEntry, UndoOrder, DEFAULT_WINDOW,
+        };
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        for key in ["a", "b"] {
+            tx.insert(&todos, key, Todo { title: key.into(), done: false });
+        }
+        tx.commit();
+
+        // What the core would send after undoing "add c, retitle a,
+        // drop b, reorder": every run at once.
+        let delta = UndoDelta {
+            signals: vec![],
+            texts: vec![],
+            entries: vec![
+                UndoEntry {
+                    collection: todos.id,
+                    path: vec![],
+                    key: Value::from("c"),
+                    state: None,
+                },
+                UndoEntry {
+                    collection: todos.id,
+                    path: vec![],
+                    key: Value::from("a"),
+                    state: Some((0, vec![Value::from("Alpha"), Value::Bool(true)])),
+                },
+            ],
+            orders: vec![UndoOrder {
+                collection: todos.id,
+                path: vec![],
+                keys: vec![Value::from("b"), Value::from("a")],
+            }],
+        };
+        occ_tx
+            .send(Inbox::Occ(Occurrence::Undone {
+                window: DEFAULT_WINDOW,
+                label: "shuffle".into(),
+                delta,
+            }))
+            .unwrap();
+        // The RAW loop, deliberately: the floor is the documented
+        // fallback, so it cannot be the tier that misses this.
+        let occ = ctx.next();
+        assert!(matches!(occ, Occurrence::Undone { .. }));
+
+        let tx = ctx.begin();
+        assert_eq!(
+            tx.items(&todos),
+            vec![
+                (Value::from("b"), Todo { title: "b".into(), done: false }),
+                (Value::from("a"), Todo { title: "Alpha".into(), done: true }),
+            ],
+            "the payload's order and states, not the mirror's memory of them"
+        );
+    }
+
+    /// Per window and PERSISTENT — the section handler's stance, not the
+    /// alert's: a history is walked as often as the user likes.
+    #[test]
+    fn on_undone_and_on_redone_stay_registered() {
+        use crate::protocol::{Occurrence, UndoDelta, DEFAULT_WINDOW};
+
+        #[derive(Debug, PartialEq)]
+        enum Msg {
+            Undid(String),
+            Redid(String),
+        }
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+        let msgs = super::Messages::<Msg>::new();
+        msgs.on_undone(DEFAULT_WINDOW, |label, _| Msg::Undid(label));
+        msgs.on_redone(DEFAULT_WINDOW, |label, _| Msg::Redid(label));
+
+        let undone = |window| {
+            Inbox::Occ(Occurrence::Undone {
+                window,
+                label: "add todo".into(),
+                delta: UndoDelta::default(),
+            })
+        };
+        // EVERYTHING QUEUED, THEN THE CHANNEL CLOSED, and only then
+        // read. `next` blocks until something maps, so a version of this
+        // test that sent one at a time would HANG rather than fail if
+        // the registration turned out to be one-shot — and a negative
+        // test that hangs is not a test. Closing the channel first turns
+        // "nothing maps" into Shutdown, which is None.
+        for occ in [
+            undone(DEFAULT_WINDOW),
+            undone(DEFAULT_WINDOW),
+            Inbox::Occ(Occurrence::Redone {
+                window: DEFAULT_WINDOW,
+                label: "add todo".into(),
+                delta: UndoDelta::default(),
+            }),
+            // Another window's history is not this one's.
+            undone(crate::protocol::WindowId(2)),
+        ] {
+            occ_tx.send(occ).unwrap();
+        }
+        drop(occ_tx);
+        assert_eq!(msgs.next(&ctx), Some(Msg::Undid("add todo".into())));
+        assert_eq!(
+            msgs.next(&ctx),
+            Some(Msg::Undid("add todo".into())),
+            "the registration outlives its first step"
+        );
+        assert_eq!(msgs.next(&ctx), Some(Msg::Redid("add todo".into())));
+        assert_eq!(msgs.next(&ctx), None, "unmapped folds into nothing");
     }
 }

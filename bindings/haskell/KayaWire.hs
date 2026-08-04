@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x408bcf69e0ad2bfd
+specHash = 0x44b8c0a4228f2b33
 
 valueBool :: Word32
 valueBool = 1
@@ -272,6 +272,8 @@ txKindCopy :: Word16
 txKindCopy = 35
 txKindReadClipboard :: Word16
 txKindReadClipboard = 36
+txKindUndoGroup :: Word16
+txKindUndoGroup = 37
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -324,6 +326,8 @@ applyKindCopy :: Word16
 applyKindCopy = 25
 applyKindReadClipboard :: Word16
 applyKindReadClipboard = 26
+applyKindClearUndo :: Word16
+applyKindClearUndo = 27
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -356,6 +360,10 @@ occKindClipboardResult :: Word16
 occKindClipboardResult = 15
 occKindPasted :: Word16
 occKindPasted = 16
+occKindUndone :: Word16
+occKindUndone = 17
+occKindRedone :: Word16
+occKindRedone = 18
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -531,6 +539,10 @@ txCopy present fileCount customCount reps = wireRecord txKindCopy (word32LE pres
 -- Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
 txReadClipboard :: Word64 -> Value -> Builder
 txReadClipboard request accepting = wireRecord txKindReadClipboard (word64LE request <> encodeValue accepting)
+
+-- Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary.
+txUndoGroup :: Word64 -> Value -> Builder
+txUndoGroup window label = wireRecord txKindUndoGroup (word64LE window <> encodeValue label)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -1126,7 +1138,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64

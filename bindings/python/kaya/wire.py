@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x408bcf69e0ad2bfd
+SPEC_HASH = 0x44b8c0a4228f2b33
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -136,6 +136,7 @@ TX_SET_MENU_PROP = 33
 TX_SHOW_FILE_DIALOG = 34
 TX_COPY = 35
 TX_READ_CLIPBOARD = 36
+TX_UNDO_GROUP = 37
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -162,6 +163,7 @@ APPLY_SET_MENU_PROP = 23
 APPLY_PRESENT_FILE_DIALOG = 24
 APPLY_COPY = 25
 APPLY_READ_CLIPBOARD = 26
+APPLY_CLEAR_UNDO = 27
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -178,6 +180,8 @@ OCC_MENU_VALUE_CHANGED = 13
 OCC_FILE_DIALOG_RESULT = 14
 OCC_CLIPBOARD_RESULT = 15
 OCC_PASTED = 16
+OCC_UNDONE = 17
+OCC_REDONE = 18
 
 
 def _pad(b):
@@ -370,6 +374,10 @@ def tx_copy(present, file_count, custom_count, reps):
 def tx_read_clipboard(request, accepting):
     """Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike."""
     return record(TX_READ_CLIPBOARD, struct.pack("<Q", request) + _enc.value(accepting))
+
+def tx_undo_group(window, label):
+    """Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary."""
+    return record(TX_UNDO_GROUP, struct.pack("<Q", window) + _enc.value(label))
 
 
 def tx_set_text(widget_id, text):
@@ -846,7 +854,7 @@ def parse_occurrence(buf):
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # The alert's one answer: id + u32 choice (ALERT_CHOICE_*).

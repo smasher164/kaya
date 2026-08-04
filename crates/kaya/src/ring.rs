@@ -45,6 +45,10 @@ pub const REC_FILE_DIALOG_RESULT: u16 = 14;
 /// arrives because the user pasted.
 pub const REC_CLIPBOARD_RESULT: u16 = 15;
 pub const REC_PASTED: u16 = 16;
+/// The undo pair (docs/undo-plan.md D5/§3): kaya routed an undo or a
+/// redo, and this says what the CORE put back. Same body shape for both.
+pub const REC_UNDONE: u16 = 17;
+pub const REC_REDONE: u16 = 18;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian

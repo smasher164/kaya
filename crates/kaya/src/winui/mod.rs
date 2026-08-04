@@ -4356,6 +4356,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let clip = materialize_clipboard(&accepting)?;
             core.occurrences.send(Occurrence::ClipboardResult { request, clip });
         }
+        // A1's clear reaches the focused editable through
+        // ClearUndoRedoHistory — the undo milestone's WinUI arm, not
+        // this slice (docs/undo-plan.md §1, §4).
+        ApplyOp::ClearUndo { .. } => crate::depth_stub("undo"),
         ApplyOp::PresentFileDialog(spec) => {
             // The Shell's common item dialog, which is what Windows
             // means by a file picker.

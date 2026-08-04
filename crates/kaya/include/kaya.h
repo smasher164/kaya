@@ -50,6 +50,14 @@
 
 #define REC_PASTED 16
 
+/**
+ * The undo pair (docs/undo-plan.md D5/§3): kaya routed an undo or a
+ * redo, and this says what the CORE put back. Same body shape for both.
+ */
+#define REC_UNDONE 17
+
+#define REC_REDONE 18
+
 #define HEADER_SIZE 8
 
 #define TX_CREATE_SIGNAL 1
@@ -127,6 +135,11 @@
 
 #define TX_READ_CLIPBOARD 36
 
+/**
+ * The head-of-batch undo group marker (docs/undo-plan.md D2).
+ */
+#define TX_UNDO_GROUP 37
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -178,6 +191,14 @@
 #define APPLY_COPY 25
 
 #define APPLY_READ_CLIPBOARD 26
+
+/**
+ * Reset the focused editable's NATIVE undo history in this window
+ * (docs/undo-plan.md A1). Targetless on purpose: the core does not know
+ * what is focused and never will — the backends do, and each already
+ * asks itself that question for role enablement.
+ */
+#define APPLY_CLEAR_UNDO 27
 
 #define VALUE_BOOL 1
 
@@ -459,6 +480,18 @@
 #define KAYA_OCCURRENCE_PASTED 16
 
 /**
+ * The undo pair (spec `undone`/`redone`): kaya routed an undo or a
+ * redo, and this is what the core put back — u64 window, u32 signal
+ * count, u32 text count, u32 entry count, u32 order count, the Str
+ * label, then one flat value list holding those four runs in order.
+ * Applying an inverse emits nothing else, so this record is the whole
+ * of what an app hears.
+ */
+#define KAYA_OCCURRENCE_UNDONE 17
+
+#define KAYA_OCCURRENCE_REDONE 18
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -593,6 +626,16 @@
 #define KAYA_TX_READ_CLIPBOARD 36
 
 /**
+ * Mark this transaction as ONE undoable step in a window's ledger:
+ * u64 window (0 = primary), then a non-empty Str label. MUST BE THE
+ * FIRST RECORD OF THE BATCH — a transaction has no header, so the
+ * marker's position is what says which ops it covers. A marked batch
+ * holds signal writes and collection deltas; focus is permitted and not
+ * restored; anything else is refused at apply, naming the op.
+ */
+#define KAYA_TX_UNDO_GROUP 37
+
+/**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
  * geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
@@ -705,6 +748,15 @@
 #define KAYA_APPLY_COPY 25
 
 #define KAYA_APPLY_READ_CLIPBOARD 26
+
+/**
+ * Reset the NATIVE undo history of whatever editable holds the keyboard
+ * focus in this window; do nothing if that is nothing. Body: u64 window.
+ * Targetless on purpose — the core does not know what is focused and by
+ * doctrine never will, while the backend already asks itself the same
+ * question for role enablement.
+ */
+#define KAYA_APPLY_CLEAR_UNDO 27
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply

@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x408bcf69e0ad2bfd
+let kayaSpecHash: UInt64 = 0x44b8c0a4228f2b33
 
 struct KayaTx {
     var bytes = Data()
@@ -401,6 +401,14 @@ struct KayaTx {
         let start = self.begin(UInt16(KAYA_TX_READ_CLIPBOARD))
         self.u64(request)
         self.value(accepting)
+        self.end(start)
+    }
+
+    /// Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary.
+    mutating func undoGroup(_ window: UInt64, _ label: KayaValue) {
+        let start = self.begin(UInt16(KAYA_TX_UNDO_GROUP))
+        self.u64(window)
+        self.value(label)
         self.end(start)
     }
 
@@ -1350,6 +1358,8 @@ func kayaParseOccurrence(_ rec: [UInt8])
             || kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT)
             || kind == UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT)
             || kind == UInt16(KAYA_OCCURRENCE_PASTED)
+            || kind == UInt16(KAYA_OCCURRENCE_UNDONE)
+            || kind == UInt16(KAYA_OCCURRENCE_REDONE)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
