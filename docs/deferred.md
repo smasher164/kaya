@@ -30,24 +30,14 @@ by construction and has never demonstrated; and it forces undo/redo,
 which core can offer far more cheaply than any framework that does not
 own the state (see the undo note in this file).
 
-- **Clipboard — mac + all eight bindings + GTK (2026-08-03) + WinUI
-  (2026-08-03) green; fan-out continues.** The protocol, the SwiftUI
-  arms, all eight binding surfaces with a guest each, the three edit
-  roles, the ratified custom-id grammar (mime-shaped —
-  docs/clipboard-plan.md §5b finding 4), the GTK arm with its wayland
-  serial recipe (§5b finding 3), and the WinUI arm on classic Win32
-  with its measured ledger (§6: per-connection ssh clipboards, the
-  CF_HTML construction/parse pair, the MemoryStream rule, the
-  PNG-vs-DIB cut, the stowed-exception activation refresh) are in.
-  Lane counts: mac 232, linux 426, windows 145. WHAT REMAINS: the
-  Compose arm + the Android helper APK that gives that lane a foreign
-  reader, then the iOS arm — and for iOS SPECIFICALLY: measure
-  UIPasteboard's charge for a SLASHED custom type before writing it —
-  macOS's two write APIs disagreed about one (NSPasteboardItem
-  rejects, the board-level path serves; §5b finding 4), and iOS may
-  fork the same way. Then validate-all for the milestone.
-  The edit roles are no longer deferred — `cut`, `copy` and `paste`
-  joined the closed role vocabulary beside `settings`.
+- ~~**Clipboard**~~ — COMPLETE 2026-08-04: all five backends, all
+  eight bindings, every lane green in the full matrix (mac 232, linux
+  426, windows 145, ios 46, android 50; three consecutive ALL PASS
+  runs plus a confirming exit-0). The measured record is
+  docs/clipboard-plan.md §0-§9; the fan-out's defect harvest (most of
+  it pre-existing) is in docs/traps.md and this file's checked-off
+  entries. Editor prerequisites remaining after this: undo/redo,
+  dirty-state window titles, find.
 
 - **DEFERRED — wayland lane session architecture (researched
   2026-08-03, no trigger yet).** The GTK clipboard work pinned two
