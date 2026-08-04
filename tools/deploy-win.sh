@@ -814,6 +814,17 @@ leg_pids=()
 
 run_one_suite() {
     local name="$1" slot="$2"
+    # A LANE THAT DECLARED ITS VM DEAD STAYS DEAD. The unreachable
+    # diagnosis below used to return from ONE leg while the lane walked
+    # every remaining leg into its own 300-try timeout — 96 minutes of
+    # burning after the lane had already printed "this lane is over"
+    # (measured 2026-08-03, the first clipboard matrix). A diagnosis
+    # the code does not act on is the same class as a guard nobody
+    # runs.
+    if [ -f "$LEGS_DIR/.vm-dead" ]; then
+        echo "$name: skipped — the VM was declared unreachable earlier in this lane" >&2
+        return 1
+    fi
     run_ssh "del C:\\kaya\\out_$name.txt 2>nul & schtasks /create /tn kaya_$name /tr \"wscript C:\\kaya\\run-hidden.vbs run_$name.cmd $slot\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_$name >nul"
     local tries=0
     until run_ssh "type C:\\kaya\\out_$name.txt" 2>/dev/null | grep -q "EXIT="; do
@@ -837,9 +848,11 @@ run_one_suite() {
                 echo "$name: THE VM IS UNREACHABLE mid-lane — the guest OS hung," \
                     "not the guests (utmctl will still say \"started\"; that is the" \
                     "documented class in docs/traps.md). This lane is over; every" \
-                    "remaining leg would just burn its own timeout. Most likely" \
-                    "cause is host contention: the windows lane is reliable" \
-                    "standalone and degrades under the full five-lane matrix." >&2
+                    "remaining leg fails fast against the .vm-dead flag instead of" \
+                    "burning its own timeout. Most likely cause is host contention:" \
+                    "the windows lane is reliable standalone and degrades under the" \
+                    "full five-lane matrix." >&2
+                touch "$LEGS_DIR/.vm-dead"
                 return 1
             fi
             kill_guests
