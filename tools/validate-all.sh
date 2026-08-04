@@ -121,10 +121,35 @@ if [ "$MODE" = parallel ]; then
         # legitimately slower lane raises its number in the same commit
         # that makes it slower, which is the conversation worth forcing.
         case "$name" in
-            mac) budget=400 ;;
+            # 540 since 2026-08-04, raised in the commit that made the
+            # lane slower, as this block asks. The lane's own phases grew
+            # ~19s (core-build+gates 116->127s: check-jni, the new
+            # check-steps clauses and their self-tests, swift-typecheck
+            # now compiling tools/ios/clipctl, and -warnings-as-errors on
+            # the interpreter builds); the rest is five-lane contention.
+            # Measured on a quiet host, three consecutive matrices:
+            # 420s, 428s, 442s.
+            mac) budget=540 ;;
             linux) budget=300 ;;
-            windows) budget=400 ;;
-            ios) budget=300 ;;
+            # 480 since 2026-08-03, and the ceiling moved in the commit
+            # that made the lane slower, as this block asks. Two
+            # measured reasons, neither a change in kind: filedialog_java
+            # used to ABORT at 4s (the COM apartment defect) and now runs
+            # its scene to the end, and the lane's four
+            # contention-sensitive legs (stall_rust, panels_*) each take
+            # 20-26s longer under five concurrent lanes. Everything else
+            # is unchanged — the per-leg median delta against a
+            # standalone run is MINUS one second, which is the check that
+            # says no work was added to every leg.
+            windows) budget=480 ;;
+            # 420 since 2026-08-04, same protocol. The lane gained two
+            # measured warm-ups this day: picker_warm (the Files-app
+            # launch that stops the first picker after a boot opening at
+            # the container root, docs/traps.md) and clip_relay_check
+            # (the pasteboard-isolation proof, clipboard-plan.md §8
+            # finding 7). Measured on a quiet host, three consecutive
+            # matrices: 311s, 320s, 322s.
+            ios) budget=420 ;;
             android) budget=250 ;;
             *) budget=0 ;;
         esac
