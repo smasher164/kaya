@@ -286,7 +286,10 @@ struct CoreState {
     /// window's catalog (the harness's target, the sections-precedent
     /// scoping). Gates the shortcut verb: a chord no catalog action
     /// owns is a silent no-op — checked before any OS-global
-    /// injection (docs/traps.md).
+    /// injection (docs/traps.md). It also DISPATCHES every chord: the
+    /// key hook resolves the pressed spelling here (The chord route),
+    /// so what the verb gates on and what the app answers cannot
+    /// disagree.
     menu_shortcuts: HashMap<String, u64>,
     /// The harness's OPEN context menu: anchor widget id plus the
     /// flyout handle, kept until Closed is awaited (the staged
@@ -2381,9 +2384,10 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
 /// its attachment.
 /// Attach a chord to a native item — every LEAF command may carry one
 /// (a checkable item and one option of a group as readily as a plain
-/// action), and the accelerator IS the dispatch: its default
-/// invocation raises the same Click the pointer path does, so tooltip
-/// display and key handling both come from the platform.
+/// action). The accelerator is DRESS, not dispatch: WinUI draws the
+/// chord text beside the item from it, and the key hook above eats the
+/// keystroke before any default action of it can run (see The chord
+/// route for the measurement that moved dispatch there).
 fn attach_accelerator(
     accels: &windows_collections::IVector<KeyboardAccelerator>,
     shortcut: &str,
@@ -2397,22 +2401,12 @@ fn attach_accelerator(
     let accel = KeyboardAccelerator::new()?;
     accel.SetKey(key)?;
     accel.SetModifiers(mods)?;
-    // An accelerator's DEFAULT action is a UI Automation pattern
-    // lookup, prioritized Invoke > Toggle > Selection, and ONLY Invoke
-    // raises Click. MenuFlyoutItem has Invoke, which is why plain
-    // commands worked; ToggleMenuFlyoutItem and RadioMenuFlyoutItem
-    // expose Toggle and SelectionItem, so their chords did nothing
-    // this backend could hear. Handling Invoked and marking it handled
-    // is the documented override: it skips the pattern lookup and
-    // sends every leaf kind down the ONE activation path a click
-    // takes.
     // The default action is a UI Automation pattern lookup — Invoke,
-    // else Toggle, else Selection. Invoke (plain command) and
-    // SelectionItem (one option of a group) both raise Click, this
-    // backend's one dispatch path, so those kinds ride the platform
-    // whole. Toggle raises nothing, which is why a checkable command's
-    // chord goes through the key hook above; its accelerator stays here
-    // for the chord text WinUI draws beside the item.
+    // else Toggle, else Selection — and it is dead code from this
+    // backend's side now: the hook consumes the key first, so the
+    // lookup never runs. It is recorded because it is what the split
+    // route rested on, and what a future reader tempted to hand chords
+    // back to XAML would have to re-establish.
     accels.Append(&accel)?;
     Ok(())
 }
@@ -2513,21 +2507,46 @@ fn build_menu_items(
 
 
 
-// --- The checkable-chord route (Win32) ---------------------------------
+// --- The chord route (Win32) -------------------------------------------
 //
-// ToggleMenuFlyoutItem is the one leaf kind whose KeyboardAccelerator
-// WinUI never matches. Measured on the VM, with the chord genuinely
-// injected: a plain command's accelerator fires (Invoke pattern), one
-// option of a group fires (SelectionItem pattern), and a checkable
-// command's does nothing — not the pattern, not an explicit Invoked
-// handler, not a copy on the MenuBar or on the content Grid, and not a
-// collapsed companion item.
-//
-// So that kind takes its dispatch from the window's own message
-// stream, where a real keystroke lives before XAML sees it. The hook is
+// EVERY chord this catalog owns dispatches from here. The hook is
 // THREAD-scoped (never global): it watches this UI thread's key-downs,
 // matches the canonical spelling against the same catalog table the
-// verb gates on, and consumes only a chord this catalog owns.
+// verb gates on, performs the state change the platform would have
+// performed, and consumes only a chord this catalog owns — so the
+// accelerator route cannot double-fire behind it.
+//
+// It used to serve ONE kind. ToggleMenuFlyoutItem is the one leaf kind
+// whose KeyboardAccelerator WinUI never matches: measured on the VM,
+// with the chord genuinely injected, a plain command's accelerator
+// fires (Invoke pattern), one option of a group fires (SelectionItem
+// pattern), and a checkable command's does nothing — not the pattern,
+// not an explicit Invoked handler, not a copy on the MenuBar or on the
+// content Grid, and not a collapsed companion item. So the checkable
+// kind came here and the other two rode the platform.
+//
+// THAT SPLIT WAS A RACE, and what it raced was how far behind the UI
+// thread had fallen — which is exactly what the chord BEFORE it put
+// there. Measured 2026-08-03, commands scene, one leg 16 times: the
+// group-option chord (primary+2, the accelerator route) landed 67ms
+// and 81ms after the preceding chord's activation in the two runs that
+// passed, and within 42ms in all fourteen that failed. Failed means
+// LOST, not late: no Click, no occurrence, and nothing for the
+// harness's five seconds of polling to find, while the same chord
+// fires normally seconds later. The hook saw every one of those
+// keystrokes and resolved every one against menu_shortcuts — right
+// item, right kind, modifiers correct at message-retrieval time — so
+// the chord was always in the window and only the platform's dispatch
+// of it went missing. A scene that presses one chord, waits for its
+// occurrence and presses the next walks into that window by
+// construction, which is why it read as an intermittent WinUI-only
+// failure of the step AFTER a menu mutation.
+//
+// The whole point of this route is that it does not depend on XAML's
+// input pipeline having caught up: the message-time key state is read
+// as the message is retrieved, and the answer comes from kaya's own
+// table. The accelerators stay attached for the chord TEXT WinUI draws
+// beside each item, which is all they are now for.
 unsafe extern "system" {
     fn SetWindowsHookExW(id: i32, proc_: HookProc, module: isize, thread: u32) -> isize;
     fn CallNextHookEx(hook: isize, code: i32, wparam: usize, lparam: isize) -> isize;
@@ -2590,23 +2609,50 @@ unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> i
                 let core = core.as_ref()?;
                 let item = *core.menu_shortcuts.get(&spelling)?;
                 let kind = core.menu_models.get(&item)?.kind;
-                (kind == MenuItemKind::Toggle).then_some(item)
+                Some((item, kind, menu_effective_enabled(core, item)))
             });
-            if let Some(item) = hit {
-                // The native owns the immediate user change, exactly as
-                // it does for a click; menu_user_activate mirrors from
-                // it and emits.
-                let _ = CORE.with_borrow(|core| -> windows_core::Result<()> {
-                    let Some(core) = core.as_ref() else { return Ok(()) };
-                    if let Some(MenuNative::Toggle(native)) =
-                        core.menu_natives.get(&(MenuAttachment::Window(0), item))
-                    {
-                        let now = native.IsChecked()?;
-                        native.SetIsChecked(!now)?;
-                    }
-                    Ok(())
-                });
-                menu_user_activate(item, MenuAttachment::Window(0));
+            if let Some((item, kind, enabled)) = hit {
+                // A disabled item is INERT, exactly as native chrome
+                // leaves it — the chord is still this catalog's, so it
+                // is eaten rather than sprayed at whatever is behind.
+                if enabled {
+                    // The native owns the immediate user change, exactly
+                    // as it does for a click; menu_user_activate mirrors
+                    // from it and emits. EXHAUSTIVE over the kind: a new
+                    // leaf kind that may carry a chord fails to COMPILE
+                    // here rather than reaching a catch-all that leaves
+                    // its chord dispatching nothing.
+                    let _ = CORE.with_borrow(|core| -> windows_core::Result<()> {
+                        let Some(core) = core.as_ref() else { return Ok(()) };
+                        let native = core.menu_natives.get(&(MenuAttachment::Window(0), item));
+                        match kind {
+                            MenuItemKind::Toggle => {
+                                if let Some(MenuNative::Toggle(native)) = native {
+                                    let now = native.IsChecked()?;
+                                    native.SetIsChecked(!now)?;
+                                }
+                            }
+                            // One option of a group: checking it is what
+                            // the platform's own Select() does, and the
+                            // shared GroupName clears the sibling.
+                            MenuItemKind::RadioOption => {
+                                if let Some(MenuNative::Option(native)) = native {
+                                    native.SetIsChecked(true)?;
+                                }
+                            }
+                            // A plain command owns no state of its own.
+                            MenuItemKind::Action => {}
+                            // Not leaf kinds: menu_shortcuts holds only
+                            // what takes_shortcut admits, and the rebuild
+                            // is the one writer.
+                            MenuItemKind::Menu
+                            | MenuItemKind::RadioGroup
+                            | MenuItemKind::Separator => {}
+                        }
+                        Ok(())
+                    });
+                    menu_user_activate(item, MenuAttachment::Window(0));
+                }
                 return 1; // consumed: this catalog owns the chord
             }
         }
@@ -2770,20 +2816,24 @@ fn invoke_menu_native(native: &MenuNative) -> windows_core::Result<()> {
 }
 
 
-/// The PREMISE this backend's chord dispatch rests on, checked once per
-/// process — not flag-gated, because a silent change here is a
-/// double-fire or a dead chord.
+/// The PREMISE the peer-invoke route rests on, checked once per process
+/// — not flag-gated, because a silent change here is a dead harness
+/// activation or a checkmark that never moves.
 ///
-/// A KeyboardAccelerator's default action is a UI Automation pattern
-/// lookup, and only Invoke raises Click (this backend's one dispatch
-/// path). `MenuFlyoutItem` has Invoke, so a plain command's chord rides
-/// the platform whole. `ToggleMenuFlyoutItem` does NOT, which is the
-/// entire reason a checkable command's chord goes through a
-/// thread-scoped key hook instead (docs/traps.md). If a future WinUI
-/// gives the toggle peer an Invoke pattern, the platform would raise
-/// Click AND the hook would fire — two occurrences for one chord — so
-/// the premise fails loudly here rather than as a doubled occurrence in
-/// somebody's app.
+/// [`invoke_menu_native`] asks an item's automation peer for Invoke
+/// FIRST and falls back to Toggle, which is the platform's own
+/// priority. `MenuFlyoutItem` has Invoke, so a plain command activates
+/// through it; `ToggleMenuFlyoutItem` does NOT, so a checkable command
+/// reaches Toggle and its checkmark moves. A future WinUI that changed
+/// either answer would silently reroute the harness's activation — an
+/// item that cannot be invoked at all, or a toggle invoked instead of
+/// toggled — so the premise fails loudly here rather than as a scene
+/// that stopped observing anything.
+///
+/// The CHORD route no longer rests on any of this: every chord this
+/// catalog owns dispatches from the thread key hook and is consumed
+/// there, so no accelerator's default action runs (see The chord
+/// route).
 fn assert_chord_premise() {
     static CHECKED: OnceLock<()> = OnceLock::new();
     if CHECKED.set(()).is_err() {
@@ -2803,15 +2853,16 @@ fn assert_chord_premise() {
             .is_ok();
         assert!(
             action_invokes,
-            "kaya: MenuFlyoutItem lost its Invoke automation pattern — a plain \
-             command's chord no longer raises Click, and this backend's \
-             accelerator dispatch is dead (docs/traps.md)"
+            "kaya: MenuFlyoutItem lost its Invoke automation pattern — the \
+             harness's menu_activate has no pattern left to drive, so a plain \
+             command can no longer be activated at all (docs/traps.md)"
         );
         assert!(
             !toggle_invokes,
-            "kaya: ToggleMenuFlyoutItem GAINED an Invoke automation pattern — its \
-             chord now raises Click on its own, so the thread-scoped key hook \
-             would fire a SECOND occurrence. Retire the hook (docs/traps.md)"
+            "kaya: ToggleMenuFlyoutItem GAINED an Invoke automation pattern — \
+             invoke_menu_native prefers Invoke, so a checkable command would be \
+             INVOKED instead of toggled and its checkmark would never move \
+             (docs/traps.md)"
         );
         Ok(())
     })();
