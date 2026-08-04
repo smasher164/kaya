@@ -1,0 +1,14 @@
+// The pin question's NEGATIVE evidence, proven rather than asserted:
+// compile this file to see material3 1.3.1 reject TextField(state:).
+// Renamed .kt.disabled so the probe's normal build stays green; the
+// run script copies it to .kt for one deliberately-failing build.
+package dev.kaya.undoprobe
+
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.material3.TextField
+import androidx.compose.runtime.Composable
+
+@Composable
+fun PinNegative(state: TextFieldState) {
+    TextField(state = state)
+}

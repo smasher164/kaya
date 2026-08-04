@@ -1,0 +1,39 @@
+diff --git a/crates/kaya/Cargo.toml b/crates/kaya/Cargo.toml
+index d537d15..1fdf9e8 100644
+--- a/crates/kaya/Cargo.toml
++++ b/crates/kaya/Cargo.toml
+@@ -267,6 +267,11 @@ path = "../../guests/rust/commands.rs"
+ name = "a11y"
+ path = "../../guests/rust/a11y.rs"
+ 
++# TEMPORARY: the throwaway undo-probe guest (docs/undo-plan.md §0) — revert.
++[[example]]
++name = "undoprobe"
++path = "../../tools/win/undoprobe/guest.rs"
++
+ # Android has no native process entry (Zygote forks the process and an
+ # Activity is the way in), so the Android packaging of milestone 0 is a
+ # cdylib exporting the JNI entry rather than a bin.
+diff --git a/crates/kaya/src/winui/mod.rs b/crates/kaya/src/winui/mod.rs
+index 4623a88..a57adcc 100644
+--- a/crates/kaya/src/winui/mod.rs
++++ b/crates/kaya/src/winui/mod.rs
+@@ -21,6 +21,9 @@
+     clippy::all
+ )]
+ mod bindings;
++// TEMPORARY probe hook (docs/undo-plan.md §0, P3-win/P4/P5) — revert.
++#[path = "../../../../tools/win/undoprobe/probe.rs"]
++mod undoprobe;
+ 
+ use std::cell::RefCell;
+ use std::collections::HashMap;
+@@ -5610,6 +5613,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
+ 
+     // The first transaction may already be queued; drain now.
+     drain_transactions();
++    // TEMPORARY probe hook (docs/undo-plan.md §0) — revert.
++    undoprobe::maybe_spawn();
+     Ok(())
+ }
+ 
