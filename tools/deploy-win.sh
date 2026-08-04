@@ -140,7 +140,31 @@ if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; t
     # `utmctl start` on a started VM is a no-op — the old loop waited
     # five minutes and gave up. Force the wedged case down first.
     if "$(utmctl_bin)" status "$VM_NAME" 2>/dev/null | grep -qi started; then
-        echo "== $HOST unreachable but VM \"$VM_NAME\" reports started; force-restarting =="
+        # WAIT BEFORE KILLING: "started but unreachable" is the shape of a
+        # guest that BUGCHECKED and is rebooting, not only of one that
+        # hung. Killing it there costs twice — the crash dump is written
+        # to the pagefile and only converts to C:\Windows\Minidump on the
+        # NEXT boot, so a kill five seconds in erases the evidence (7 of
+        # 12 crashes left no dump that way), and a power cut mid-boot is
+        # what corrupted this VM's boot volume on 2026-08-04. A reboot
+        # takes about a minute; only a guest that misses that whole
+        # window is genuinely wedged.
+        echo "== $HOST unreachable; giving \"$VM_NAME\" 3 minutes to finish a possible bugcheck reboot =="
+        booted=0
+        waited=0
+        while [ "$waited" -lt 180 ]; do
+            if ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; then
+                echo "== $HOST came back on its own after ${waited}s (a crash reboot, not a wedge) =="
+                booted=1
+                break
+            fi
+            sleep 10
+            waited=$((waited + 10))
+        done
+    fi
+    if [ "${booted:-0}" = 0 ] &&
+        "$(utmctl_bin)" status "$VM_NAME" 2>/dev/null | grep -qi started; then
+        echo "== $HOST still unreachable after 3 minutes; force-restarting =="
         "$(utmctl_bin)" stop --kill "$VM_NAME" || true
         tries=0
         while "$(utmctl_bin)" status "$VM_NAME" 2>/dev/null | grep -qi started; do
@@ -152,7 +176,7 @@ if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; t
             sleep 5
         done
     fi
-    echo "== $HOST unreachable; starting VM \"$VM_NAME\" =="
+    [ "${booted:-0}" = 0 ] && echo "== $HOST unreachable; starting VM \"$VM_NAME\" =="
     "$(utmctl_bin)" start "$VM_NAME"
     tries=0
     until ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; do
@@ -164,6 +188,20 @@ if ! ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'exit 0' 2>/dev/null; t
         sleep 5
     done
     sleep 30
+    # AND SAY WHETHER THE GUEST CRASHED, because "the VM was
+    # unreachable" reads as host contention and was recorded as such in
+    # docs/traps.md for two weeks while the guest was really
+    # BUGCHECKING — twelve times, all viogpudo.sys+0xB52C, the first
+    # 2h25m after the matrix went concurrent. A dump written to the
+    # pagefile only becomes a file on the boot AFTER the crash, so this
+    # is the first moment it can be seen.
+    latest_dump=$(ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$HOST" \
+        'powershell -NoProfile -Command "Get-ChildItem C:\Windows\Minidump\*.dmp -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1 -ExpandProperty Name"' \
+        2>/dev/null | tr -d '\r')
+    if [ -n "$latest_dump" ]; then
+        echo "== the guest's newest crash dump is $latest_dump — if that is from this run," \
+            "the VM did not hang, it BUGCHECKED (docs/traps.md, the viogpudo class) =="
+    fi
 fi
 timing vm-ready
 
@@ -332,11 +370,17 @@ esac
 # helper does NOT fix it, because the foreground right is granted to the
 # process that received the input, which was the helper.
 #
-# Zero means SetForegroundWindow always succeeds. SystemParametersInfo
-# applies it to the LIVE session (a registry write alone waits for the
-# next logon), so both are done.
+# Zero means SetForegroundWindow always succeeds. The registry write
+# seeds the NEXT logon; the live session is done by the desktop warm-up
+# below, which calls SystemParametersInfo from INSIDE that session.
+#
+# It used to be called from here, over ssh, and could not work:
+# measured 2026-08-04, the console session still read 2147483647 after
+# every deploy that day, because an ssh session is session 0 with its
+# own window station and SPI applies per window station. This check is
+# left reading the registry — it is the part a write from here can
+# affect — and the warm-up reports the live value it actually changed.
 run_ssh 'reg add "HKCU\Control Panel\Desktop" /v ForegroundLockTimeout /t REG_DWORD /d 0 /f >nul'
-run_ssh 'powershell -NoProfile -Command "$s=\"[DllImport(\`\"user32.dll\`\")] public static extern bool SystemParametersInfo(uint a, uint b, IntPtr c, uint d);\"; $t=Add-Type -MemberDefinition $s -Name Spi -Namespace W -PassThru; $null=$t::SystemParametersInfo(0x2001,0,[IntPtr]::Zero,2)"' >/dev/null 2>&1 || true
 fglock="$(run_ssh 'reg query "HKCU\Control Panel\Desktop" /v ForegroundLockTimeout' 2>/dev/null | tr -d '\r')"
 case "$fglock" in
     *0x0*) ;;
@@ -463,6 +507,7 @@ deploy_stamp() {
             "$ROOT"/tools/guest/*.vbs \
             "$ROOT/tools/guest/minimal-resources.pri" \
             "$ROOT/tools/guest/shot.ps1" \
+            "$ROOT/tools/guest/desk-warm.ps1" \
             "$ROOT"/bindings/go/*.go \
             "$ROOT"/guests/csharp/*.cs "$ROOT/guests/csharp/kaya-guests.csproj" \
             "$ROOT"/bindings/csharp/*.cs \
@@ -490,6 +535,7 @@ else
         "$ROOT"/tools/guest/*.vbs \
         "$ROOT/tools/guest/minimal-resources.pri" \
         "$ROOT/tools/guest/shot.ps1" \
+        "$ROOT/tools/guest/desk-warm.ps1" \
         "$HOST:C:/kaya/" || {
         # WHAT TO DO NEXT, because scp's own message ("dest open ...:
         # Failure") names neither the cause nor the fix. A copy of
@@ -944,6 +990,97 @@ drain_suites() {
     done
     leg_names=()
 }
+
+# WILL THIS DESKTOP HAND A WINDOW THE FOREGROUND? Asked once, here,
+# before any leg — because ten legs per lane bet on the answer and
+# nothing on this side of the ssh connection can see it.
+#
+# Every chord-injecting leg (menus_*, commands_*) raises the guest
+# window and confirms it before pressing anything. When the desktop
+# refuses, each dies 3s later with "could not foreground the guest
+# window for shortcut injection", which reads as a WinUI bug and is not
+# one; the rest of the lane passes, because nothing else needs the
+# foreground. That happened on 2026-08-04 after a VM restart, cost a
+# lane, and was cleared by a reboot — a remedy that lived in a human's
+# head.
+#
+# THE STATE IS INVISIBLE FROM SSH. An ssh session has its own window
+# station (`query session` marks it `>services`, session 0): it cannot
+# see the input desktop, and a toast has no title to list. So the
+# question is asked from where the legs ask it, an interactive
+# scheduled task, and answered the way they answer it — a real window
+# and a real SetForegroundWindow, ESC and ALT taps included
+# (tools/guest/desk-warm.ps1 carries the measurements; docs/traps.md
+# carries the class).
+#
+# Cheap (~3s) because it runs every lane, and LOUD when it fails: a
+# warm-up that silently did not work would only move the confusion
+# later.
+desk_warm() {
+    local out="" verdict="" tries=0
+    run_ssh "del C:\\kaya\\out_deskwarm.txt 2>nul & schtasks /create /tn kaya_deskwarm /tr \"wscript C:\\kaya\\run-hidden.vbs desk-warm.cmd\" /sc once /st 00:00 /it /rl highest /f >nul && schtasks /run /tn kaya_deskwarm >nul"
+    while :; do
+        out=$(run_ssh 'cmd /c type C:\kaya\out_deskwarm.txt' 2>/dev/null | tr -d '\r' || true)
+        case "$out" in *DESKWARMEXIT=*) break ;; esac
+        tries=$((tries + 1))
+        if [ "$tries" -gt 80 ]; then
+            echo "deploy-win: the desktop warm-up never answered." >&2
+            echo "  It runs as an interactive scheduled task, which needs a LOGGED-IN" >&2
+            echo "  console session — 'query session' showing console/Active. If nothing" >&2
+            echo "  is signed in at the VM's console window, no leg can run either:" >&2
+            echo "  sign in through UTM, or restart the VM, and re-run." >&2
+            echo "  What it had written so far:" >&2
+            printf '%s\n' "$out" >&2
+            return 1
+        fi
+        sleep 0.5
+    done
+    verdict=$(printf '%s\n' "$out" | grep -o 'deskwarm\.verdict=[A-Z]*' | cut -d= -f2 | head -1)
+    if [ "$verdict" = OK ]; then
+        # One line on the happy path, carrying what it had to get past:
+        # a Start menu left open on the VM shows up here as the holder.
+        echo "== desktop warm ($(printf '%s\n' "$out" | grep -E 'deskwarm\.(tries|ms|before)=' | tr '\n' ' ')) =="
+        return 0
+    fi
+    echo "deploy-win: THE GUEST DESKTOP WILL NOT HAND OVER THE FOREGROUND." >&2
+    printf '%s\n' "$out" | grep '^deskwarm\.' >&2
+    case "$(printf '%s\n' "$out" | grep -o 'deskwarm\.reason=[a-z]*' | cut -d= -f2 | head -1)" in
+        inputdesktop)
+            echo "  The console session is LOCKED, or a secure desktop (a UAC prompt) is" >&2
+            echo "  up: input goes to a different desktop than the one the legs' windows" >&2
+            echo "  live on. Injected keys land there too, so the backend's ESC and ALT" >&2
+            echo "  are delivered somewhere else and every menus_*/commands_* leg would" >&2
+            echo "  fail after 3s. Nothing over ssh can clear it — an ssh session cannot" >&2
+            echo "  reach the interactive desktop at all." >&2
+            echo "  Sign in at the VM's console window in UTM, or restart the VM:" >&2
+            echo "    $(utmctl_bin) stop --kill \"$VM_NAME\" && $(utmctl_bin) start \"$VM_NAME\"" >&2
+            echo "  (the guest signs itself back in), then re-run." >&2
+            ;;
+        foreground)
+            echo "  A window is holding the foreground through both remedies the backend" >&2
+            echo "  tries — the ESC that dismisses a menu and the bare ALT that releases a" >&2
+            echo "  foreground lock. A notification toast is the usual one and has no" >&2
+            echo "  title, so the class and owning process above are the identification" >&2
+            echo "  (docs/traps.md: a shell toast holds the foreground)." >&2
+            echo "  Look at it — the picture ends the search in two minutes:" >&2
+            echo "    ssh $HOST 'schtasks /create /tn kaya_shot /tr \"wscript C:\\kaya\\run-hidden.vbs shot.cmd\" /sc once /st 00:00 /it /rl highest /f && schtasks /run /tn kaya_shot'" >&2
+            echo "    scp $HOST:C:/kaya/shot.png ." >&2
+            echo "  Dismiss it, or restart the VM, then re-run." >&2
+            ;;
+        *)
+            echo "  The warm-up answered without a verdict this script understands." >&2
+            ;;
+    esac
+    return 1
+}
+# The diagnostic verbs are exempt: they exist to interrogate a VM that
+# is already sick, and a warm-up refusing to start one of them would
+# take away the tool you reach for when this fails.
+case "$SUITE" in
+    probe=*|enable-dumps|crash-report|analyze-dump) ;;
+    *) desk_warm || exit 1 ;;
+esac
+timing desk-warm
 
 status=0
 rec_suite_start
