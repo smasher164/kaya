@@ -44,6 +44,21 @@ func SumOf[K Key, T any](tx *Tx, prototypes ...T) SumCollection[K, T] {
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
+	// An undone entry names its own constructor: the variant is the
+	// discriminant the forward insert witnessed, so the mirror gets the
+	// same struct back behind T.
+	tx.app.shapes[c.id] = undoShape{
+		key: restoreKey[K](),
+		value: func(variant uint32, fields []any) any {
+			if int(variant) >= len(variants) {
+				panic(fmt.Sprintf(
+					"kaya: an undone entry names variant %d of a %d-constructor sum",
+					variant, len(variants)))
+			}
+			v := variants[variant]
+			return restoreRecord(v.typ, v.info, fields)
+		},
+	}
 	tx.emit(TxCreateCollection(c.id, schemas))
 	return SumCollection[K, T]{c, variants}
 }

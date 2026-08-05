@@ -1484,6 +1484,29 @@ func parseClip(rec []byte, at int) (ClipValues, int) {
 	return clip, at
 }
 
+// parseValue decodes one wire value at `at` and returns the offset
+// after it. Blobs are redeemed and RELEASED here, as parseClip does:
+// an occurrence blob is a table handle nothing else retires.
+func parseValue(rec []byte, at int) (any, int) {
+	vtype := binary.LittleEndian.Uint32(rec[at:])
+	vlen := int(binary.LittleEndian.Uint32(rec[at+4:]))
+	body := rec[at+8 : at+8+vlen]
+	var v any
+	switch vtype {
+	case ValueBool:
+		v = body[0] != 0
+	case ValueI64:
+		v = int64(binary.LittleEndian.Uint64(body))
+	case ValueF64:
+		v = math.Float64frombits(binary.LittleEndian.Uint64(body))
+	case ValueBlob:
+		v = occurrenceBlob(binary.LittleEndian.Uint64(body))
+	default:
+		v = string(body)
+	}
+	return v, at + 8 + (vlen+7)&^7
+}
+
 // ParseOccurrence decodes one occurrence record (header included).
 // keys is nil when id is a widget id; otherwise id is a template
 // node id and keys is the copy's key path, outermost first. payload
@@ -1531,6 +1554,87 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 	if kind == occClipboardResult {
 		clip, _ := parseClip(rec, 16)
 		return kind, id, nil, clip, true
+	}
+	if kind == occUndone || kind == occRedone {
+		// The window is the id; then the four run LENGTHS, the
+		// group's label (EMPTY for a typing episode), and one
+		// flat values tail the runs cut up in order.
+		signals := int(binary.LittleEndian.Uint32(rec[16:]))
+		texts := int(binary.LittleEndian.Uint32(rec[20:]))
+		entries := int(binary.LittleEndian.Uint32(rec[24:]))
+		orders := int(binary.LittleEndian.Uint32(rec[28:]))
+		at := 32
+		label, at := parseValue(rec, at)
+		count := int(binary.LittleEndian.Uint32(rec[at:]))
+		at += 8 // count, reserved
+		flat := make([]any, count)
+		for i := range flat {
+			flat[i], at = parseValue(rec, at)
+		}
+		read := 0
+		next := func(n int) []any {
+			if read+n > len(flat) {
+				panic("kaya: an undo delta is truncated")
+			}
+			out := flat[read : read+n]
+			read += n
+			return out
+		}
+		num := func(v any) int64 {
+			n, isInt := v.(int64)
+			if !isInt {
+				panic("kaya: an undo delta wanted an integer")
+			}
+			return n
+		}
+		var delta UndoDelta
+		for i := 0; i < signals; i++ {
+			pair := next(2)
+			delta.Signals = append(delta.Signals,
+				UndoSignal{Signal: uint64(num(pair[0])), Value: pair[1]})
+		}
+		for i := 0; i < texts; i++ {
+			pair := next(2)
+			text, _ := pair[1].(string)
+			delta.Texts = append(delta.Texts,
+				UndoText{Widget: uint64(num(pair[0])), Text: text})
+		}
+		for i := 0; i < entries; i++ {
+			// size, collection, flags (bit 0 = the entry EXISTS),
+			// variant, path_len — then the path, the key, and the
+			// record's fields. size counts itself.
+			head := next(5)
+			size := int(num(head[0]))
+			pathLen := int(num(head[4]))
+			body := next(size - 5)
+			entry := UndoEntry{
+				Collection: uint64(num(head[1])),
+				Path:       append([]any(nil), body[:pathLen]...),
+				Key:        body[pathLen],
+				Present:    num(head[2]) != 0,
+				Variant:    uint32(num(head[3])),
+			}
+			if entry.Present {
+				entry.Record = append([]any(nil), body[pathLen+1:]...)
+			}
+			delta.Entries = append(delta.Entries, entry)
+		}
+		for i := 0; i < orders; i++ {
+			head := next(3)
+			size := int(num(head[0]))
+			pathLen := int(num(head[2]))
+			body := next(size - 3)
+			delta.Orders = append(delta.Orders, UndoOrder{
+				Collection: uint64(num(head[1])),
+				Path:       append([]any(nil), body[:pathLen]...),
+				Keys:       append([]any(nil), body[pathLen:]...),
+			})
+		}
+		if read != len(flat) {
+			panic("kaya: an undo delta has trailing values")
+		}
+		name, _ := label.(string)
+		return kind, id, nil, undoReport{label: name, delta: delta}, true
 	}
 	if kind == occCloseRequested || kind == occWindowClosed || kind == occEntryPopped || kind == occBackRequested {
 		// Surface lifecycle records carry the surface id alone —

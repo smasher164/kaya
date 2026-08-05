@@ -488,6 +488,35 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\treturn clip, at");
     c.line("}");
     c.line("");
+    // One wire value, for the readers whose body is a list of them
+    // rather than a fixed field row. parseClip predates it and keeps its
+    // own inline copy; the undo runs below are what made a named one
+    // worth having.
+    if !crate::undo_occurrence_names(spec).is_empty() {
+        c.line("// parseValue decodes one wire value at `at` and returns the offset");
+        c.line("// after it. Blobs are redeemed and RELEASED here, as parseClip does:");
+        c.line("// an occurrence blob is a table handle nothing else retires.");
+        c.line("func parseValue(rec []byte, at int) (any, int) {");
+        c.line("\tvtype := binary.LittleEndian.Uint32(rec[at:])");
+        c.line("\tvlen := int(binary.LittleEndian.Uint32(rec[at+4:]))");
+        c.line("\tbody := rec[at+8 : at+8+vlen]");
+        c.line("\tvar v any");
+        c.line("\tswitch vtype {");
+        c.line("\tcase ValueBool:");
+        c.line("\t\tv = body[0] != 0");
+        c.line("\tcase ValueI64:");
+        c.line("\t\tv = int64(binary.LittleEndian.Uint64(body))");
+        c.line("\tcase ValueF64:");
+        c.line("\t\tv = math.Float64frombits(binary.LittleEndian.Uint64(body))");
+        c.line("\tcase ValueBlob:");
+        c.line("\t\tv = occurrenceBlob(binary.LittleEndian.Uint64(body))");
+        c.line("\tdefault:");
+        c.line("\t\tv = string(body)");
+        c.line("\t}");
+        c.line("\treturn v, at + 8 + (vlen+7)&^7");
+        c.line("}");
+        c.line("");
+    }
     c.line("// ParseOccurrence decodes one occurrence record (header included).");
     c.line("// keys is nil when id is a widget id; otherwise id is a template");
     c.line("// node id and keys is the copy's key path, outermost first. payload");
@@ -548,6 +577,108 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("\tif kind == occ{} {{", camel(name)));
         c.line("\t\tclip, _ := parseClip(rec, 16)");
         c.line("\t\treturn kind, id, nil, clip, true");
+        c.line("\t}");
+    }
+    // ONE STEP CAME BACK, and the payload is a STATEMENT OF THE RESTORED
+    // STATE rather than a replay of ops: four counted runs cut out of one
+    // flat Values tail, in the fixed order signals, texts, entries,
+    // orders (docs/undo-plan.md D5; wire::undo_body). Its own arm for the
+    // file_dialog_result reason — the generic tail would take the SIGNAL
+    // COUNT for a key-path length and read the label's bytes as keys.
+    //
+    // It builds the hand-written tier's UndoDelta directly, the way this
+    // parser already builds PickedFile: a taste-free twin would be four
+    // more structs that exist only to be copied.
+    let undo = crate::undo_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == occ{}", camel(n)))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !undo.is_empty() {
+        c.line(&format!("\tif {undo} {{"));
+        c.line("\t\t// The window is the id; then the four run LENGTHS, the");
+        c.line("\t\t// group's label (EMPTY for a typing episode), and one");
+        c.line("\t\t// flat values tail the runs cut up in order.");
+        c.line("\t\tsignals := int(binary.LittleEndian.Uint32(rec[16:]))");
+        c.line("\t\ttexts := int(binary.LittleEndian.Uint32(rec[20:]))");
+        c.line("\t\tentries := int(binary.LittleEndian.Uint32(rec[24:]))");
+        c.line("\t\torders := int(binary.LittleEndian.Uint32(rec[28:]))");
+        c.line("\t\tat := 32");
+        c.line("\t\tlabel, at := parseValue(rec, at)");
+        c.line("\t\tcount := int(binary.LittleEndian.Uint32(rec[at:]))");
+        c.line("\t\tat += 8 // count, reserved");
+        c.line("\t\tflat := make([]any, count)");
+        c.line("\t\tfor i := range flat {");
+        c.line("\t\t\tflat[i], at = parseValue(rec, at)");
+        c.line("\t\t}");
+        // A truncated or over-long tail is a broken ENCODER, not bad
+        // input: it dies here rather than handing an app half a step.
+        c.line("\t\tread := 0");
+        c.line("\t\tnext := func(n int) []any {");
+        c.line("\t\t\tif read+n > len(flat) {");
+        c.line("\t\t\t\tpanic(\"kaya: an undo delta is truncated\")");
+        c.line("\t\t\t}");
+        c.line("\t\t\tout := flat[read : read+n]");
+        c.line("\t\t\tread += n");
+        c.line("\t\t\treturn out");
+        c.line("\t\t}");
+        c.line("\t\tnum := func(v any) int64 {");
+        c.line("\t\t\tn, isInt := v.(int64)");
+        c.line("\t\t\tif !isInt {");
+        c.line("\t\t\t\tpanic(\"kaya: an undo delta wanted an integer\")");
+        c.line("\t\t\t}");
+        c.line("\t\t\treturn n");
+        c.line("\t\t}");
+        c.line("\t\tvar delta UndoDelta");
+        c.line("\t\tfor i := 0; i < signals; i++ {");
+        c.line("\t\t\tpair := next(2)");
+        c.line("\t\t\tdelta.Signals = append(delta.Signals,");
+        c.line("\t\t\t\tUndoSignal{Signal: uint64(num(pair[0])), Value: pair[1]})");
+        c.line("\t\t}");
+        c.line("\t\tfor i := 0; i < texts; i++ {");
+        c.line("\t\t\tpair := next(2)");
+        c.line("\t\t\ttext, _ := pair[1].(string)");
+        c.line("\t\t\tdelta.Texts = append(delta.Texts,");
+        c.line("\t\t\t\tUndoText{Widget: uint64(num(pair[0])), Text: text})");
+        c.line("\t\t}");
+        // Arity-first groups: `size` counts itself, so a reader takes it
+        // first and needs no schema.
+        c.line("\t\tfor i := 0; i < entries; i++ {");
+        c.line("\t\t\t// size, collection, flags (bit 0 = the entry EXISTS),");
+        c.line("\t\t\t// variant, path_len — then the path, the key, and the");
+        c.line("\t\t\t// record's fields. size counts itself.");
+        c.line("\t\t\thead := next(5)");
+        c.line("\t\t\tsize := int(num(head[0]))");
+        c.line("\t\t\tpathLen := int(num(head[4]))");
+        c.line("\t\t\tbody := next(size - 5)");
+        c.line("\t\t\tentry := UndoEntry{");
+        c.line("\t\t\t\tCollection: uint64(num(head[1])),");
+        c.line("\t\t\t\tPath:       append([]any(nil), body[:pathLen]...),");
+        c.line("\t\t\t\tKey:        body[pathLen],");
+        c.line("\t\t\t\tPresent:    num(head[2]) != 0,");
+        c.line("\t\t\t\tVariant:    uint32(num(head[3])),");
+        c.line("\t\t\t}");
+        c.line("\t\t\tif entry.Present {");
+        c.line("\t\t\t\tentry.Record = append([]any(nil), body[pathLen+1:]...)");
+        c.line("\t\t\t}");
+        c.line("\t\t\tdelta.Entries = append(delta.Entries, entry)");
+        c.line("\t\t}");
+        c.line("\t\tfor i := 0; i < orders; i++ {");
+        c.line("\t\t\thead := next(3)");
+        c.line("\t\t\tsize := int(num(head[0]))");
+        c.line("\t\t\tpathLen := int(num(head[2]))");
+        c.line("\t\t\tbody := next(size - 3)");
+        c.line("\t\t\tdelta.Orders = append(delta.Orders, UndoOrder{");
+        c.line("\t\t\t\tCollection: uint64(num(head[1])),");
+        c.line("\t\t\t\tPath:       append([]any(nil), body[:pathLen]...),");
+        c.line("\t\t\t\tKeys:       append([]any(nil), body[pathLen:]...),");
+        c.line("\t\t\t})");
+        c.line("\t\t}");
+        c.line("\t\tif read != len(flat) {");
+        c.line("\t\t\tpanic(\"kaya: an undo delta has trailing values\")");
+        c.line("\t\t}");
+        c.line("\t\tname, _ := label.(string)");
+        c.line("\t\treturn kind, id, nil, undoReport{label: name, delta: delta}, true");
         c.line("\t}");
     }
     let id_only = crate::id_only_occurrence_names(spec)

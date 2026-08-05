@@ -1542,7 +1542,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   the instance's keys IN ORDER. Present only for \
                   instances whose order the step changed, because \
                   position is the one thing per-entry statements cannot \
-                  carry.",
+                  carry — and an insert or a remove CHANGES the order \
+                  (every key after it moves), so those emit one too; \
+                  move-only is a misreading this sentence has already \
+                  cost one binding author.",
         },
         Record {
             kind: 18,

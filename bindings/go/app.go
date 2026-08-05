@@ -134,6 +134,16 @@ type App struct {
 	menuToggledNode   map[uint64]func(*Tx, []any, bool)
 	menuSelected      map[uint64]func(*Tx, int)
 	menuSelectedNode  map[uint64]func(*Tx, []any, int)
+	// The undo tables, keyed by WINDOW and never one-shot: a history is
+	// walked as often as the user likes, and each window has its own
+	// ledger (docs/undo-plan.md §3).
+	undone         map[uint64]func(*Tx, string, UndoDelta)
+	redone         map[uint64]func(*Tx, string, UndoDelta)
+	// How each collection's entries come BACK from an undo: the payload
+	// is wire values and the mirror holds guest values, so the shape is
+	// recorded where the type is known (declaration) and used where it
+	// is not (the occurrence loop).
+	shapes         map[uint64]undoShape
 	model          map[uint64][]*instance
 	// Collections declared inside a For's template: removing a parent
 	// entry tears down the copy and every instance inside it, so the
@@ -194,6 +204,9 @@ func NewApp() *App {
 		menuToggledNode:   make(map[uint64]func(*Tx, []any, bool)),
 		menuSelected:      make(map[uint64]func(*Tx, int)),
 		menuSelectedNode:  make(map[uint64]func(*Tx, []any, int)),
+		undone:         make(map[uint64]func(*Tx, string, UndoDelta)),
+		redone:         make(map[uint64]func(*Tx, string, UndoDelta)),
+		shapes:         make(map[uint64]undoShape),
 		model:          make(map[uint64][]*instance),
 		children:       make(map[uint64][]uint64),
 		derived:        make(map[uint64][]func(*Tx)),
@@ -347,11 +360,17 @@ func (a *App) purgeChildren(coll uint64, prefix []any) {
 
 // A collection declared inside a For's template is torn down with its
 // copies: record the edge so the model purges along it.
+//
+// Every collection also records HOW ITS ENTRIES COME BACK from an undo
+// (App.shapes). The scalar shape is the default because the untyped
+// handle IS a one-field collection; the typed constructors overwrite it
+// with their own (CollectionOf, SumOf) the moment they know T.
 func (a *App) registerCollection(id uint64) {
 	if len(a.openFors) > 0 {
 		parent := a.openFors[len(a.openFors)-1]
 		a.children[parent] = append(a.children[parent], id)
 	}
+	a.shapes[id] = scalarShape
 }
 
 // Tx is one transaction: everything queued inside Build (or a handler)
@@ -367,6 +386,10 @@ type Tx struct {
 	// a construction chain (Widget.Grow) on a widget that outlived its
 	// build must die loudly, not append into an orphaned record list.
 	closed bool
+	// Set by Undoable: this transaction already names an undo step, and
+	// a second name is a guest bug rather than a second group (the wire
+	// admits one head-of-batch marker per batch).
+	undoGroup bool
 }
 
 type pendingDerived struct {
@@ -2129,6 +2152,17 @@ const (
 	RolePaste = "paste"
 )
 
+// The two history commands. Like the clipboard three they act on what is
+// focused and compute their own enablement — but one tier deeper
+// (docs/undo-plan.md D6): they ask the FOCUSED widget first, so mid-
+// typing Undo means the typing and after an app action it means the
+// action. An app that names no group still gets working text undo from
+// these items, because the first tier is the platform's own.
+const (
+	RoleUndo = "undo"
+	RoleRedo = "redo"
+)
+
 // Role declares this action a standard command (actions only —
 // root-checked). The declaration is uniform; PLACEMENT is each host's
 // business: macOS shows RoleSettings in the application menu, everyone
@@ -2391,6 +2425,238 @@ func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
 	return n
 }
 
+// --- Undo: one history over two tiers (docs/undo-plan.md D1-D6, §3) ---
+
+// Undoable makes this transaction ONE undoable step, under label.
+//
+// The unit of undo is a NAMED GROUP declared at the opener, not every
+// transaction: handlers fire per-gesture transactions constantly and
+// most of them are consequences rather than intents, and a per-keystroke
+// editor would earn one step per character — the exact problem grouping
+// exists to solve. So a group is opt-in, which is also what keeps a
+// collaborative app free to own its own history (docs/undo-plan.md D2,
+// D8).
+//
+// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at the
+// head: a handler naturally builds first and names the step when it
+// knows what the step was, and the wire's head-of-batch rule should not
+// turn that into a footgun.
+//
+// WHAT A GROUP MAY HOLD is the reactive half — signal writes and
+// collection deltas, whose inverse the core derives from state it
+// already keeps. Focus is permitted and not restored. Anything else (a
+// const property write, creating a widget, Clear, showing a dialog)
+// fails at apply, naming the op: undo restores state, and state is
+// signals plus collections. The app hears the result as App.OnUndone.
+func (tx *Tx) Undoable(label string) {
+	tx.UndoableIn(0, label)
+}
+
+// UndoableIn is Undoable against an auxiliary window's ledger. Each
+// window has its own history, because Undo in one window has never
+// meant "revert what happened in another".
+func (tx *Tx) UndoableIn(window uint64, label string) {
+	if tx.undoGroup {
+		panic("kaya: this transaction is already an undo group — one name per step")
+	}
+	// Through the ONE chokepoint, so a dead transaction refuses this
+	// like every other write; the rotate below moves what emit queued.
+	tx.emit(TxUndoGroup(window, label))
+	head := tx.records[len(tx.records)-1]
+	copy(tx.records[1:], tx.records[:len(tx.records)-1])
+	tx.records[0] = head
+	tx.undoGroup = true
+}
+
+// OnUndone binds the undone handler to ONE window: it fires each time
+// kaya routes an undo there, with the group's label (EMPTY for a typing
+// episode — kaya invents no user-facing strings) and what the core put
+// back.
+//
+// NOT ONE-SHOT, the OnSelected stance rather than the alert's. A history
+// is walked as often as the user likes, and the registration outlives
+// every step.
+//
+// THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
+// programmatic write, so the echo doctrine silences every occurrence it
+// would otherwise cause — no text_changed for the text it restored, no
+// value_changed for the signals. The binding has already folded this
+// payload into its own collection mirror before the handler runs (so
+// Tx.Len answers about the restored state); this is where an app folds
+// it into ITS model.
+func (a *App) OnUndone(window uint64, fn func(*Tx, string, UndoDelta)) {
+	a.undone[window] = fn
+}
+
+// OnRedone is the OnUndone twin. A frontier typing episode redoes on the
+// platform's own stack and reports itself as an ordinary edit, so it
+// does not arrive here.
+func (a *App) OnRedone(window uint64, fn func(*Tx, string, UndoDelta)) {
+	a.redone[window] = fn
+}
+
+// UndoDelta is what an undo or a redo PUT BACK: the core-authoritative
+// statement of the restored state (docs/undo-plan.md D5).
+//
+// A STATEMENT, NOT A REPLAY. Every member says what a thing now IS, so
+// a mirror that applies one twice is still correct and no binding
+// diffs anything of its own.
+type UndoDelta struct {
+	// Signals restored to a value: the reactive half's whole vocabulary
+	// on the scalar side.
+	Signals []UndoSignal
+	// Fields whose text the core put back. A coarse episode restore is a
+	// programmatic write, so nothing else would ever tell an app that
+	// folds text_changed into its model.
+	Texts []UndoText
+	// Collection entries, present or gone.
+	Entries []UndoEntry
+	// Instance orders, for the instances whose order the step changed —
+	// position is the one thing per-entry statements cannot carry.
+	Orders []UndoOrder
+}
+
+// UndoSignal is one signal's restored value.
+type UndoSignal struct {
+	Signal uint64
+	Value  any
+}
+
+// UndoText is one field's restored text.
+type UndoText struct {
+	Widget uint64
+	Text   string
+}
+
+// UndoEntry is one collection entry's restored state. Present is false
+// when the restored state does not have this entry at all; Record then
+// carries no fields.
+type UndoEntry struct {
+	Collection uint64
+	// The instance path: one key per enclosing For, empty at top level.
+	Path    []any
+	Key     any
+	Present bool
+	Variant uint32
+	Record  []any
+}
+
+// UndoOrder is one collection instance's restored key order.
+type UndoOrder struct {
+	Collection uint64
+	Path       []any
+	Keys       []any
+}
+
+// undoShape is how one collection's entries come back from an undo: the
+// payload is wire values, the mirror holds guest values (a T for a
+// record collection, a constructor struct for a sum, the scalar itself
+// for the untyped handle), so the translation is recorded at the
+// declaration that knows the type.
+type undoShape struct {
+	key   func(any) any
+	value func(variant uint32, fields []any) any
+}
+
+// The untyped handle's shape: one Str field, and the mirror holds it as
+// it arrived.
+var scalarShape = undoShape{
+	key: func(k any) any { return k },
+	value: func(_ uint32, fields []any) any {
+		if len(fields) == 0 {
+			return nil
+		}
+		return fields[0]
+	},
+}
+
+// undoReport is one decoded step: the payload the generated decoder
+// (ParseOccurrence) hands the loop for the two undo records, with the
+// window riding the tuple's id the way every other occurrence's subject
+// does. Unexported because no guest ever names it — an app hears the
+// label and the delta as OnUndone's arguments.
+type undoReport struct {
+	label string
+	delta UndoDelta
+}
+
+// absorbUndo folds an undo's payload into the collection mirror.
+//
+// The rollback journal in reverse: Build's abort restores a snapshot
+// because nothing was shipped, while an undo restores a delta because
+// everything WAS — the core already moved, and the mirror is what would
+// otherwise be left behind. Same machinery, opposite case, and the
+// payload is core-authoritative so nothing here re-derives anything.
+//
+// Signals and text are not mirrored by this binding (there is no
+// read-back for either, by doctrine), so the two runs that carry them
+// pass straight to the app's own handler.
+func (a *App) absorbUndo(delta UndoDelta) {
+	for _, e := range delta.Entries {
+		shape, known := a.shapes[e.Collection]
+		if !known {
+			shape = scalarShape
+		}
+		key := shape.key(e.Key)
+		in := a.instanceOf(e.Collection, e.Path)
+		if in == nil {
+			if !e.Present {
+				continue
+			}
+			in = &instance{path: append([]any(nil), e.Path...)}
+			a.model[e.Collection] = append(a.model[e.Collection], in)
+		}
+		if !e.Present {
+			kept := in.entries[:0]
+			for _, entry := range in.entries {
+				if entry.Key != key {
+					kept = append(kept, entry)
+				}
+			}
+			in.entries = kept
+			continue
+		}
+		value := shape.value(e.Variant, e.Record)
+		replaced := false
+		for i := range in.entries {
+			if in.entries[i].Key == key {
+				in.entries[i].Value = value
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			in.entries = append(in.entries, Entry{key, value})
+		}
+	}
+	for _, o := range delta.Orders {
+		shape, known := a.shapes[o.Collection]
+		if !known {
+			shape = scalarShape
+		}
+		in := a.instanceOf(o.Collection, o.Path)
+		if in == nil {
+			continue
+		}
+		// Position by the payload's list, keeping anything the payload
+		// does not name at the end: the delta describes one instance's
+		// whole order, and an entry it never mentions is one this undo
+		// did not touch.
+		sorted := make([]Entry, 0, len(in.entries))
+		for _, k := range o.Keys {
+			key := shape.key(k)
+			for i := range in.entries {
+				if in.entries[i].Key == key {
+					sorted = append(sorted, in.entries[i])
+					in.entries = append(in.entries[:i], in.entries[i+1:]...)
+					break
+				}
+			}
+		}
+		in.entries = append(sorted, in.entries...)
+	}
+}
+
 // OnClick registers a handler for a live widget's clicks.
 func (a *App) OnClick(w Widget, fn func(*Tx)) {
 	a.widgetHandlers[w.id] = fn
@@ -2465,6 +2731,7 @@ func (a *App) Run() int {
 			choice, _ := payload.(uint32)
 			files, _ := payload.([]PickedFile)
 			clipValues, isClip := payload.(ClipValues)
+			undo, isUndo := payload.(undoReport)
 			switch {
 			case kind == occButtonClicked && len(keys) == 0:
 				if fn := a.widgetHandlers[id]; fn != nil {
@@ -2555,6 +2822,20 @@ func (a *App) Run() int {
 				if fn := a.nodePastes[id]; fn != nil && isClip {
 					clip := representation(clipValues)
 					a.dispatch(func(tx *Tx) { fn(tx, keys, clip) })
+				}
+			// An undo moved core state without a transaction, so the
+			// model mirror follows HERE, before any handler and whether
+			// or not one is registered — an app that never asked to hear
+			// about undo still reads its own collection back correctly.
+			// The window is the id; the ledger is per window.
+			case (kind == occUndone || kind == occRedone) && isUndo:
+				a.absorbUndo(undo.delta)
+				table := a.undone
+				if kind == occRedone {
+					table = a.redone
+				}
+				if fn := table[id]; fn != nil {
+					a.dispatch(func(tx *Tx) { fn(tx, undo.label, undo.delta) })
 				}
 			case kind == occFileDialogResult:
 				// One-shot like the alert, and the id retires with it.

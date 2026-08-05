@@ -11,7 +11,20 @@
 -- while C blocks; the -threaded runtime is required. Link against
 -- libkaya at build time; kaya_run must own the process main thread, and
 -- GHC's main runs bound to it.
-module KayaRuntime (kayaRun, kayaSubmit, pollOccurrence, waitOccurrences, wake, registerBlob, openPicked) where
+module KayaRuntime
+  ( kayaRun,
+    kayaSubmit,
+    pollOccurrence,
+    waitOccurrences,
+    wake,
+    registerBlob,
+    openPicked,
+    UndoDelta (..),
+    UndoEntry (..),
+    UndoOrder (..),
+    emptyUndoDelta,
+  )
+where
 
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
@@ -29,7 +42,15 @@ import GHC.IO.Handle.FD (fdToHandle)
 import System.IO (Handle)
 import System.IO.Unsafe (unsafePerformIO)
 
-import KayaWire (ClipValues, Value, parseOccurrence, specHash)
+import KayaWire
+  ( ClipValues,
+    Value (..),
+    occKindRedone,
+    occKindUndone,
+    parseOccurrence,
+    parseValue,
+    specHash,
+  )
 
 foreign import ccall safe "kaya_run"
   c_kaya_run :: IO Int32
@@ -179,6 +200,124 @@ waitOccurrences = do
   more <- c_kaya_wait_occurrences
   return (more /= CBool 0)
 
+-- | What an undo or a redo PUT BACK: the core-authoritative statement
+-- of the restored state (docs/undo-plan.md D5).
+--
+-- A STATEMENT, NOT A REPLAY. Every member says what a thing now IS, so
+-- applying one twice is the same as applying it once and no reader
+-- diffs anything of its own. Ids are raw — the newtypes over them
+-- ('Widget', 'Signal') carry no Eq, so wrapping would buy a guest
+-- nothing it could use.
+data UndoDelta = UndoDelta
+  { -- | Signal id -> its restored value.
+    undoSignals :: ![(Word64, Value)],
+    -- | Widget id -> its restored text. A coarse episode restore is a
+    -- programmatic write, so nothing else would ever tell an app that
+    -- folds text_changed into its own model.
+    undoTexts :: ![(Word64, String)],
+    -- | Collection entries, present or gone.
+    undoEntries :: ![UndoEntry],
+    -- | Instance orders, for the instances whose order the step moved
+    -- — position is the one thing per-entry statements cannot carry.
+    undoOrders :: ![UndoOrder]
+  }
+
+-- | One collection entry's restored state; 'ueState' is Nothing when
+-- the restored state does not have this entry at all.
+data UndoEntry = UndoEntry
+  { ueCollection :: !Word64,
+    uePath :: ![Value],
+    ueKey :: !Value,
+    ueState :: !(Maybe (Word32, [Value]))
+  }
+
+-- | One collection instance's restored key order.
+data UndoOrder = UndoOrder
+  { uoCollection :: !Word64,
+    uoPath :: ![Value],
+    uoKeys :: ![Value]
+  }
+
+-- | The empty statement: an occurrence carrying nothing back.
+emptyUndoDelta :: UndoDelta
+emptyUndoDelta = UndoDelta [] [] [] []
+
+-- Decode an undone\/redone record: u64 window, the four run counts,
+-- the Str label, then ONE flat value list read as those four runs in
+-- order (kaya.h, KAYA_OCCURRENCE_UNDONE; crates\/kaya\/src\/wire.rs
+-- undo_body).
+--
+-- HAND-WRITTEN BESIDE A GENERATED PARSER, and deliberately so: this
+-- record's body is four COUNTED RUNS, which the generated
+-- parseOccurrence's one shape (kind, id, keys, payload, clip) has
+-- nowhere to put — the same reason the picker's three-values-per-file
+-- are regrouped a tier up. Malformed input is a broken encoder rather
+-- than bad data, so every case that cannot happen fails loudly.
+parseUndo :: Ptr Word8 -> IO (Word64, String, UndoDelta)
+parseUndo rec = do
+  window <- peekByteOff rec 8 :: IO Word64
+  signals <- peekByteOff rec 16 :: IO Word32
+  texts <- peekByteOff rec 20 :: IO Word32
+  entries <- peekByteOff rec 24 :: IO Word32
+  orders <- peekByteOff rec 28 :: IO Word32
+  (labelValue, afterLabel) <- parseValue rec 32
+  count <- peekByteOff rec afterLabel :: IO Word32
+  let readValues 0 _ acc = return (reverse acc)
+      readValues n at acc = do
+        (v, next) <- parseValue rec at
+        readValues (n - 1 :: Word32) next (v : acc)
+  -- The Values block's own header is {u32 count, u32 reserved}.
+  flat <- readValues count (afterLabel + 8) []
+  let label = case labelValue of
+        VStr s -> s
+        other -> error ("kaya: undo label is " ++ show other ++ ", wanted a string")
+      int (VI64 n) = n
+      int other = error ("kaya: undo delta wanted an integer, got " ++ show other)
+      -- Each run consumes its own prefix and hands the rest on: a
+      -- reader that stopped short would silently read the NEXT run's
+      -- values as its own, so the leftover is checked at the end.
+      takeRun 0 rest acc _ = (reverse acc, rest)
+      takeRun n rest acc step = case step rest of
+        (one, rest') -> takeRun (n - 1 :: Word32) rest' (one : acc) step
+      pair (i : v : rest) = ((fromIntegral (int i) :: Word64, v), rest)
+      pair _ = error "kaya: undo delta is truncated"
+      text (i : VStr s : rest) = ((fromIntegral (int i) :: Word64, s), rest)
+      text _ = error "kaya: undo text is truncated or not a string"
+      -- ARITY-FIRST: size counts itself, so a reader needs no schema.
+      entry (size : collection : present : variant : pathLen : rest) =
+        let body = fromIntegral (int size) - 5
+            (mine, rest') = splitAt body rest
+            plen = fromIntegral (int pathLen)
+            (path, keyAndRecord) = splitAt plen mine
+         in case keyAndRecord of
+              (key : record) ->
+                ( UndoEntry
+                    (fromIntegral (int collection))
+                    path
+                    key
+                    ( if int present /= 0
+                        then Just (fromIntegral (int variant), record)
+                        else Nothing
+                    ),
+                  rest'
+                )
+              [] -> error "kaya: undo entry has no key"
+      entry _ = error "kaya: undo entry is truncated"
+      order (size : collection : pathLen : rest) =
+        let body = fromIntegral (int size) - 3
+            (mine, rest') = splitAt body rest
+            plen = fromIntegral (int pathLen)
+            (path, keys) = splitAt plen mine
+         in (UndoOrder (fromIntegral (int collection)) path keys, rest')
+      order _ = error "kaya: undo order is truncated"
+      (signalRun, afterSignals) = takeRun signals flat [] pair
+      (textRun, afterTexts) = takeRun texts afterSignals [] text
+      (entryRun, afterEntries) = takeRun entries afterTexts [] entry
+      (orderRun, leftover) = takeRun orders afterEntries [] order
+  if null leftover
+    then return (window, label, UndoDelta signalRun textRun entryRun orderRun)
+    else error "kaya: undo delta has trailing values"
+
 -- Read the next occurrence if one is ready, WITHOUT blocking; Nothing
 -- means the ring is empty right now.
 --
@@ -186,8 +325,12 @@ waitOccurrences = do
 -- nextOccurrence, because the app thread has a SECOND source of work:
 -- actions posted from other threads. A single blocking read would park
 -- inside C with no way back out to run them.
+--
+-- The undo pair rides the same tuple as everything else: the window in
+-- the id slot (the section_selected precedent), the label as the
+-- payload, and the restored state in the last member.
 pollOccurrence ::
-  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues))
+  IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe UndoDelta))
 pollOccurrence = do
   Ring dat capacity headPtr tailPtr h <- ring
   let mask = capacity - 1
@@ -198,7 +341,19 @@ pollOccurrence = do
           else do
             let at = fromIntegral (hh .&. mask)
             size <- peekByteOff dat at :: IO Word32
-            parsed <- parseOccurrence occurrenceBlob (dat `plusPtr` at)
+            kind <- peekByteOff dat (at + 4) :: IO Word16
+            parsed <-
+              if kind == occKindUndone || kind == occKindRedone
+                then do
+                  (w, label, delta) <- parseUndo (dat `plusPtr` at)
+                  return (Just (kind, w, [], Just (VStr label), Nothing, Just delta))
+                else do
+                  ordinary <- parseOccurrence occurrenceBlob (dat `plusPtr` at)
+                  return
+                    ( fmap
+                        (\(k, ident, keys, payload, clip) -> (k, ident, keys, payload, clip, Nothing))
+                        ordinary
+                    )
             -- Word32 wraps on its own; hand the space back with release.
             let hh' = hh + size
             storeReleaseU32 headPtr hh'

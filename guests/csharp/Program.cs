@@ -41,6 +41,7 @@ static class Program
             case "confirm": ConfirmScene.Run(); break;
             case "filedialog": FileDialogScene.Run(); break;
             case "clipboard": ClipboardScene.Run(); break;
+            case "undo": UndoScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;

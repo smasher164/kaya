@@ -160,6 +160,11 @@ executable layout
   main-is: layout.hs
   build-depends: kaya-guests
 
+executable undo
+  import: shared
+  main-is: undo.hs
+  build-depends: kaya-guests
+
 executable encodebench
   import: shared
   main-is: encodebench.hs

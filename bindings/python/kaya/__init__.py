@@ -199,6 +199,7 @@ class Signal:
 
     def _derive(self, compute):
         derived = _Derived(_app._next("signal"), self, compute)
+        _app._signals[derived.id] = derived
         _records().append(wire.tx_create_signal(derived.id, derived._mirror))
         self._dependents.append(derived)
         return derived
@@ -599,6 +600,7 @@ class _BoundCollection:
                 "kaya: derive on the collection itself, not an instance — drop the at()"
             )
         derived = _CollectionDerived(_app._next("signal"), self, compute)
+        _app._signals[derived.id] = derived
         _records().append(wire.tx_create_signal(derived.id, derived._mirror))
         self._owner._derived.append(derived)
         _journal_once(
@@ -873,6 +875,42 @@ class Collection(_BoundCollection):
                 "`with cases.case(Cls) as el:` per constructor"
             )
         return _ForTrace(self)
+
+    def _decode(self, variant, fields, current):
+        """Rebuild a model value from an undo delta's wire record.
+
+        THE MIRROR HOLDS THE APP'S OWN OBJECT — that is what makes
+        `items()` the model rather than a second copy — so a restored
+        entry has to be reassembled from the wire fields the core kept.
+        An entry the mirror still holds is UPDATED IN PLACE, the patch()
+        stance: a dataclass field the wire never carried (a handler, a
+        cached thing) survives the undo instead of being dropped.
+        """
+        spec = self._variants[variant]
+        for value in fields:
+            if isinstance(value, wire.BlobHandle):
+                # NOT REDEEMABLE, and loudly so: undo_body writes delta
+                # values through the batch-local encoder, so a blob
+                # field arrives as an index into a table that was
+                # thrown away (crates/kaya/src/wire.rs). Silently
+                # storing the handle would put a stranger in the app's
+                # model.
+                raise NotImplementedError(
+                    "kaya: this undo step restores a collection entry with "
+                    "a bytes field, and the core's undo payload cannot "
+                    "carry blob bytes yet (wire.rs undo_body encodes them "
+                    "as a batch-local handle with no table behind it). "
+                    "Keep bytes fields out of undoable groups until that "
+                    "lands."
+                )
+        if spec.cls is None:
+            return fields[0]
+        names = list(spec.fields)  # schema order == wire order
+        if isinstance(current, spec.cls):
+            for name, value in zip(names, fields):
+                setattr(current, name, value)
+            return current
+        return spec.cls(**dict(zip(names, fields)))
 
     def _variant_for(self, value):
         """The constructor a model value holds — the discriminant every
@@ -1280,6 +1318,46 @@ def _representation(payload):
     return None
 
 
+class UndoDelta:
+    """What one step put back: the CORE-AUTHORITATIVE restored state, and
+    never a replay of the ops that undid it (docs/undo-plan.md D5).
+
+    Four runs, each a list:
+
+    - `signals` — (signal id, restored value) pairs.
+    - `texts` — (widget id, restored text) pairs. THE ONLY NOTIFICATION
+      THERE IS for that text: restoring a typing episode is a
+      programmatic write, and a programmatic write never echoes, so an
+      app that folds `text_changed` into its own model — which is every
+      app, the field being uncontrolled — would go stale on exactly this
+      step if the payload did not carry it.
+    - `entries` — (collection id, instance path, key, state), with state
+      None where the restored state does not have that entry at all and
+      (variant, wire fields) where it does.
+    - `orders` — (collection id, instance path, that instance's keys in
+      order); position is the one thing per-entry statements cannot
+      carry.
+
+    THE COLLECTION MIRRORS ARE ALREADY RECONCILED from this payload
+    before your handler runs, so `len(todos)` and `todos.items()` answer
+    about the restored state. Signals and text are not mirrored by this
+    binding (there is no read-back for either, by doctrine), which is
+    why those two runs are handed to the app instead.
+    """
+
+    __slots__ = ("signals", "texts", "entries", "orders")
+
+    def __init__(self, signals, texts, entries, orders):
+        self.signals = signals
+        self.texts = texts
+        self.entries = entries
+        self.orders = orders
+
+    def __repr__(self):
+        return (f"UndoDelta(signals={self.signals!r}, texts={self.texts!r}, "
+                f"entries={self.entries!r}, orders={self.orders!r})")
+
+
 def _accept_list(kinds):
     """Join an accept list: the closed kinds by name plus any custom
     ids, space separated.
@@ -1580,6 +1658,16 @@ ROLE_CUT = "cut"
 ROLE_COPY = "copy"
 ROLE_PASTE = "paste"
 
+#: The two history commands, on the same terms. They ask the FOCUSED
+#: widget first — a text field answers with its own typing history where
+#: it has one — and otherwise the window's ledger answers, which is what
+#: an editor user expects: mid-typing, Undo means the typing; after a
+#: structural action, Undo means the action (docs/undo-plan.md D6). An
+#: app that names no group still gets working text undo from these two,
+#: because the first tier is the platform's.
+ROLE_UNDO = "undo"
+ROLE_REDO = "redo"
+
 
 def _menu_require_catalog(scope):
     """A chord and a role both need a window catalog as their home: the
@@ -1723,8 +1811,65 @@ def window_size(width, height):
     _records().append(wire.tx_set_window_height(0, float(height)))
 
 
+#: The undo-group record's kind, in the two header bytes `record()`
+#: frames it with — how `undoable` recognises a marker it already put at
+#: the head, without unpacking anything.
+_UNDO_GROUP_TAG = wire.TX_UNDO_GROUP.to_bytes(2, "little")
+
+
+def undoable(label, window=0):
+    """Make THIS transaction one undoable step in `window`'s history,
+    under `label` — one call, and it is the app's whole undo surface
+    (docs/undo-plan.md D2).
+
+    The name is what the step is called; everything else in this
+    transaction is what the step did. The core keeps the inverse of what
+    the batch did to signals and collections and hands it back through
+    the window's `on_undone`, so there is no undo stack to write, no
+    command objects, and no re-run of any handler.
+
+    THE AMBIENT TIER SPELLS IT AS A CALL, not as a keyword on
+    `app.build()`, because a handler does not open its own transaction —
+    the binding does (`App._dispatch`), and a second scope inside a
+    handler raises. The label is usually computed in the handler
+    ("add milk"), so it could not ride the declaration either. The
+    marker goes AT THE HEAD of the batch wherever this call sits in the
+    body: a handler naturally builds first and knows what the step was
+    afterwards, and the wire's head-of-batch rule must not turn that
+    into a footgun.
+
+    THE UNDOABLE SET IS THE REACTIVE HALF (D4): signal writes and the
+    five collection deltas, whose inverse the core derives from state it
+    already keeps. Pure effects (focus) ride along and are simply not
+    restored — undo restores state, not where you were looking (A2).
+    Anything else in the same transaction — `clear`, create/destroy,
+    structure, const props, commands, dialog and clipboard requests — is
+    REFUSED at apply, loudly, naming the op, and the scene is left
+    exactly as it was. An app that wants a widget property undoable
+    binds it to a signal.
+    """
+    text = _text_value("undoable", label)
+    if not text:
+        raise ValueError(
+            "kaya: an undo group needs a name — the EMPTY label is taken: "
+            "it is how a typing episode identifies itself on the same "
+            "occurrence, so an anonymous group would be indistinguishable "
+            "from the native tier"
+        )
+    records = _records()
+    if records and records[0][4:6] == _UNDO_GROUP_TAG:
+        raise RuntimeError(
+            "kaya: this transaction is already an undo group — one name "
+            "per step"
+        )
+    records.insert(0, wire.tx_undo_group(int(window), text))
+
+
 def signal(initial):
     handle = Signal(_app._next("signal"), initial)
+    # By id, for the undo path: a restored value arrives as a signal id
+    # and has to reach the binding's own cache (App._absorb_undo).
+    _app._signals[handle.id] = handle
     _records().append(wire.tx_create_signal(handle.id, initial))
     return handle
 
@@ -1735,6 +1880,11 @@ def collection(record_type=None):
     dataclass IS the schema (wire-typed fields, declaration order), and
     `element.field` / `patch(key, field=...)` project it."""
     handle = Collection(_app._next("collection"), record_type)
+    # THE UNDO PATH ARRIVES BY ID, not by handle: an `undone` payload
+    # names the collections it restored the way the core knows them, so
+    # the binding needs the way back. Registered here because this is
+    # the one place a collection is born.
+    _app._collections[handle._id] = handle
     _records().append(
         wire.tx_create_collection(handle._id,
                                   [v.schema for v in handle._variants])
@@ -2285,6 +2435,17 @@ class App:
         # rule: handlers scope to the thing that creates them.
         self._close_requested = {}
         self._window_closed = {}
+        # Per-window history handlers, keyed the same way and NOT
+        # one-shot: a history is walked as often as the user likes. Undo
+        # in one window has never meant "revert what happened in another
+        # one", so the ledger and its two handlers are per surface.
+        self._undone = {}
+        self._redone = {}
+        # Collections and signals by their core id, for the undo path:
+        # an `undone` payload names them rather than handing back
+        # handles.
+        self._collections = {}
+        self._signals = {}
         self._node_handlers = {}
         # Work handed over by other threads, waiting to run as
         # transactions on the app thread. THE ONLY STATE HERE TOUCHED
@@ -2304,10 +2465,21 @@ class App:
         else:
             self._widget_handlers[(kind, handle.id)] = fn
 
+    def _register_history(self, window_id, on_undone, on_redone):
+        """Seat a surface's two history handlers. Per window and NOT
+        one-shot (the on_section_selected stance, not the alert's): a
+        history is walked as often as the user likes, so both outlive
+        every step."""
+        if on_undone is not None:
+            self._undone[int(window_id)] = on_undone
+        if on_redone is not None:
+            self._redone[int(window_id)] = on_redone
+
     def create_window(self, window_id, title=None, width=None, height=None,
                       veto_close=None, list_detail=None,
                       sections_presentation=None,
-                      on_close_requested=None, on_closed=None):
+                      on_close_requested=None, on_closed=None,
+                      on_undone=None, on_redone=None):
         """An auxiliary surface's scene scope: create_window plus its
         props on entry, and the single top-level container mounts INTO
         IT on exit. Capability-gated — a phone host rejects at the
@@ -2319,11 +2491,13 @@ class App:
         closed; answer with kaya.destroy_window to agree.
         on_closed() fires when the non-veto auxiliary is chrome-closed
         (informational; destroy_window reconciles) and retires with
-        it."""
+        it. on_undone(label, delta) / on_redone(label, delta) fire each
+        time kaya routes an undo at THIS surface — see App.window."""
         if on_close_requested is not None:
             self._close_requested[int(window_id)] = on_close_requested
         if on_closed is not None:
             self._window_closed[int(window_id)] = on_closed
+        self._register_history(window_id, on_undone, on_redone)
         return _TxScope(
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close,
@@ -2332,7 +2506,8 @@ class App:
 
     def window(self, title=None, width=None, height=None, veto_close=None,
                list_detail=None, sections_presentation=None,
-               on_close_requested=None, on_closed=None):
+               on_close_requested=None, on_closed=None,
+               on_undone=None, on_redone=None):
         """The scene scope: an ambient transaction whose single
         top-level container mounts into the default window on exit.
         The attribute set is EXACTLY create_window's — a window's
@@ -2344,11 +2519,21 @@ class App:
         stack as list-detail, and WHICH way it presents is the
         platform's answer (DESIGN.md, Adaptive list-detail);
         `sections_presentation` is the ADVISORY sections hint
-        (kaya.SECTIONS_AUTO/BAR/SIDEBAR)."""
+        (kaya.SECTIONS_AUTO/BAR/SIDEBAR).
+
+        on_undone(label, delta) fires each time kaya routes an undo at
+        this surface, with the group's label — EMPTY for a typing
+        episode kaya took back itself, which the app spells however it
+        likes — and the whole restored state (kaya.UndoDelta). Per
+        window and PERSISTENT: a history is walked as often as the user
+        likes, so it never retires. on_redone is its twin. Neither
+        fires for a native-tier undo the platform's own affordance
+        drove (docs/undo-plan.md A6)."""
         if on_close_requested is not None:
             self._close_requested[0] = on_close_requested
         if on_closed is not None:
             self._window_closed[0] = on_closed
+        self._register_history(0, on_undone, on_redone)
         return _TxScope(
             self, mount_on_exit=True, title=title, width=width, height=height,
             veto_close=veto_close, list_detail=list_detail,
@@ -2494,6 +2679,65 @@ class App:
         # is the only way it hears about it.
         runtime.wake()
 
+    def _absorb_undo(self, delta):
+        """Fold an undo's payload into the collection mirrors.
+
+        The rollback journal in reverse: an abandoned transaction
+        restores a snapshot because nothing was shipped, while an undo
+        restores a delta because everything WAS — the core already
+        moved, and the mirror is what would otherwise be left behind.
+        Same machinery, opposite case, and the payload is
+        core-authoritative so nothing here re-derives anything.
+
+        BEFORE THE HANDLER AND WITHOUT ONE. An app that registered no
+        on_undone still has a mirror, and `len(todos)` after a routed
+        undo must answer about the restored state either way.
+
+        A signal has no read-back and no mirror the app can see, by
+        doctrine — but this binding keeps the last written value to skip
+        no-op DERIVED writes, and an undo moves signals behind that
+        cache. So the cache follows the payload, which is why the
+        `signals` run is read here as well as handed to the app: the
+        core says what the value is, and a derived signal the group
+        wrote is an ordinary signal in that same run. Text is neither
+        mirrored nor cached, and passes straight through.
+        """
+        for signal_id, value in delta.signals:
+            sig = self._signals.get(signal_id)
+            if sig is not None:
+                sig._mirror = value
+        for coll_id, path, key, state in delta.entries:
+            coll = self._collections.get(coll_id)
+            if coll is None:
+                continue
+            table = coll._instances.setdefault(tuple(path), {})
+            if state is None:
+                table.pop(key, None)
+                # The core tore the copy down, taking descendant
+                # collection instances with it; the mirrors follow, the
+                # way `remove` already makes them.
+                prefix = tuple(path) + (key,)
+                for child in coll._children:
+                    child._purge(prefix)
+                continue
+            variant, fields = state
+            table[key] = coll._decode(variant, fields, table.get(key))
+        for coll_id, path, keys in delta.orders:
+            coll = self._collections.get(coll_id)
+            if coll is None:
+                continue
+            table = coll._instances.get(tuple(path))
+            if table is None:
+                continue
+            # Position by the payload's list, keeping anything it does
+            # not name at the end: the delta states one instance's whole
+            # order, and an entry it never mentions is one this undo did
+            # not touch. Insertion-ordered dicts have no move, so the
+            # named keys are re-added in order and the rest follow.
+            for key in list(keys) + [k for k in table if k not in keys]:
+                if key in table:
+                    table[key] = table.pop(key)
+
     def _drain_posted(self):
         """Run everything posted, each as its own transaction, in order.
 
@@ -2579,6 +2823,27 @@ class App:
                 handler = self._clipboard_handlers.pop(ident, None)
                 if handler is not None:
                     self._dispatch(handler, _representation(payload))
+                continue
+            if kind in (wire.OCC_UNDONE, wire.OCC_REDONE):
+                # ONE STEP CAME BACK. ident is the window whose ledger
+                # moved, and the payload is the label plus the whole
+                # restored state.
+                #
+                # NOT one-shot: a history is walked as often as the user
+                # likes, so both registrations outlive every step (the
+                # on_section_selected stance, not the alert's).
+                #
+                # THE MIRRORS FOLLOW FIRST, and unconditionally: an undo
+                # moved core state without a transaction, so a model
+                # read after one is stale otherwise — including in an
+                # app that registered no handler at all.
+                label, signals, texts, entries, orders = payload
+                delta = UndoDelta(signals, texts, entries, orders)
+                self._absorb_undo(delta)
+                table = self._undone if kind == wire.OCC_UNDONE else self._redone
+                handler = table.get(ident)
+                if handler is not None:
+                    self._dispatch(handler, label, delta)
                 continue
             if kind in (wire.OCC_MENU_ACTIVATED, wire.OCC_MENU_TOGGLED,
                         wire.OCC_MENU_VALUE_CHANGED):

@@ -226,7 +226,12 @@ extension KayaAppTx {
         precondition(
             schemas.count >= 2,
             "kaya: a sum needs two constructors or more (collection(of:) declares a record)")
-        return KayaSumCollection(collection: collectionWithVariants(schemas))
+        let c = collectionWithVariants(schemas)
+        // The record factory's decoder, variant-aware: an undo's
+        // payload names the constructor it restored (see
+        // KayaApp.registerDecoder).
+        app.registerDecoder(c.id) { variant, values in T(variant: variant, values: values) }
+        return KayaSumCollection(collection: c)
     }
 
     /// The template eliminator: a product of arms, one per

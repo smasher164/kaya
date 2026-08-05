@@ -74,7 +74,7 @@ dotnet run --project tools/kaya-csgen -- guests/csharp || exit 1
 env -u DEVELOPER_DIR -u SDKROOT swift run --disable-automatic-resolution \
     --package-path tools/kaya-swift-gen \
     kaya-swift-gen guests/swift/feed.swift guests/swift/todos.swift \
-    guests/swift/reorder.swift || exit 1
+    guests/swift/reorder.swift guests/swift/undo.swift || exit 1
 
 GENERATED=('guests/*_kaya.go' 'guests/*Kaya.java' 'guests/*Kaya.cs' 'guests/*+Kaya.swift')
 if [ "${1:-}" = --check ]; then

@@ -263,6 +263,13 @@ extension KayaAppTx {
     /// Declare a collection of T records; the struct is the schema.
     /// Returns the typed root handle.
     func collection<T: KayaRecord>(of _: T.Type) -> KayaRecordCollection<T> {
-        KayaRecordCollection(collection: collectionWithSchema(T.kayaSchema))
+        let c = collectionWithSchema(T.kayaSchema)
+        // HOW AN UNDO REBUILDS THIS COLLECTION'S MODEL ENTRIES. The
+        // mirror keeps T itself, and an undo's payload carries wire
+        // fields — this declaration is the only place T is known, so
+        // the constructor is left here rather than reconstructed from
+        // an erased entry later.
+        app.registerDecoder(c.id) { _, values in T(values: values) }
+        return KayaRecordCollection(collection: c)
     }
 }

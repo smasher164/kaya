@@ -413,8 +413,12 @@ refuses "$T/scene-settled.rs" "$GTK" "$WINUI" "$SWIFTUI" "$T/compose-no-paste.kt
 # A HARD-CODED ROLE SET THAT FELL BEHIND MUST FAIL — the recorded site
 # (gtk.rs's refresh filter), perturbed by dropping one role from the set
 # alone, everything else about the backend intact.
-hits="$(perturb "$GTK" 'matches!\(item\.role\.as_str\(\), "cut" \| "copy" \| "paste"\)' \
-    'matches!(item.role.as_str(), "cut" | "copy")' "$T/gtk-short-set.rs")"
+# The set as the FAN-OUT left it (undo/redo joined 2026-08-04); the
+# perturbation drops one role from the full set so the shape matches
+# the file as it IS — the self-test refused an unchanged copy when
+# this pattern lagged the fan-out, which is exactly its job.
+hits="$(perturb "$GTK" 'matches!\(item\.role\.as_str\(\), "cut" \| "copy" \| "paste" \| "undo" \| "redo"\)' \
+    'matches!(item.role.as_str(), "cut" | "copy" | "paste" | "undo")' "$T/gtk-short-set.rs")"
 applied "$hits" "the gtk role-set perturbation"
 refuses "$T/scene-settled.rs" "$T/gtk-short-set.rs" "$WINUI" "$SWIFTUI" "$COMPOSE" \
     "a hard-coded role set names" "a GTK enablement filter that lost a role"

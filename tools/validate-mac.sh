@@ -474,7 +474,11 @@ build_go() {
     mkdir -p target/go-guests
     local guest pids=() names=() logs
     logs="$(mktemp -d)"
-    for guest in $SCENES encodebench; do
+    # DEPTH_SCENES too: a depth slice's guests arrive one language at a
+    # time, and the directory test below is what decides — a scene whose
+    # Go guest has not landed yet is skipped, not a build failure.
+    for guest in $SCENES $DEPTH_SCENES encodebench; do
+        [ -d "guests/go/$guest" ] || continue
         go build -o "target/go-guests/$guest" "dev.kaya/guests/go/$guest" \
             >"$logs/$guest.log" 2>&1 &
         pids+=($!)
@@ -500,7 +504,10 @@ build_swift() {
     # gets its own staging dir and the compiles pool.
     mkdir -p target/swift-guests
     local guest pids=() names=()
-    for guest in $SCENES; do
+    # DEPTH_SCENES too: a depth slice's guests arrive one language at a
+    # time, and the file test below is what decides — a scene whose
+    # Swift guest has not landed yet is skipped, not a build failure.
+    for guest in $SCENES $DEPTH_SCENES; do
         [ -f "guests/swift/$guest.swift" ] || continue
         local dir="target/swift-guests/.stage-$guest"
         rm -rf "$dir"
@@ -532,6 +539,23 @@ build_swift() {
     return "$status"
 }
 
+build_c() {
+    # THE C FLOOR, ON THIS LANE FOR THE FIRST TIME. The floor guests
+    # were a linux-suite exclusive (tools/linux/run-suites.sh), which
+    # made every floor scene's mac behaviour a thing nobody had ever
+    # observed; they build and pass here unchanged, because kaya::run
+    # dlopens the SwiftUI interpreter for a C guest exactly as it does
+    # for a Go or Swift one.
+    #
+    # ONE SCENE, not the Makefile's eleven: this lane runs one C leg, and a
+    # guest built here and run nowhere is the false-coverage shape
+    # check-steps was written against. SCENES is a command-line
+    # override, so the Makefile keeps one list and the linux suite keeps
+    # building all of them.
+    make -C guests/c SCENES=undo TARGET_DIR="$ROOT/target/debug" \
+        OUT="$ROOT/target/c-guests"
+}
+
 build_java() {
     # The shared binding + the desktop transport + every scene + the
     # Main selector, one javac.
@@ -550,6 +574,7 @@ run_build csharp build_csharp
 run_build go build_go
 run_build swift build_swift
 run_build java build_java
+run_build c build_c
 build_status=0
 i=0
 for pid in "${build_pids[@]}"; do
@@ -865,6 +890,38 @@ KAYA_SELFTEST_SCRIPT="$(scene_script undo)"
 export KAYA_SELFTEST_SCRIPT
 drain
 run undo-rust-swiftui env KAYA_SELFTEST=undo target/debug/examples/undo
+drain
+# The AMBIENT tier's undo guest: a handler does not open its transaction
+# here, so the group is named from inside it (kaya.undoable) and the
+# clear that finishes the form is posted as the second one — same two
+# commits, same order, same expected strings.
+run undo-python-swiftui env KAYA_SELFTEST=undo python3 guests/python/undo.py
+drain
+# The HANDLE tier's undo guest, beside its clipboard sibling: the group
+# is named on the transaction the handler was handed (tx.Undoable), and
+# the clear that finishes the form is the posted second one — Go's
+# spelling of "another transaction, right after this one", since a
+# handler already holds one and Build-in-Build is refused.
+run undo-go-swiftui env KAYA_SELFTEST=undo target/go-guests/undo
+drain
+# The C floor's undo guest: the same script, the same expected strings,
+# and the head-of-batch undo_group record spelled out — invariant 5's
+# documentation tier, and the only reader of the undone/redone body that
+# decodes it by hand instead of through a binding's fold.
+run undo-c-swiftui env KAYA_SELFTEST=undo target/c-guests/undo
+drain
+run undo-haskell-swiftui env KAYA_SELFTEST=undo "$(hs_bin undo)"
+drain
+run undo-swift-swiftui env KAYA_SELFTEST=undo target/swift-guests/undo
+drain
+run undo-csharp-swiftui env KAYA_SELFTEST=undo KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+drain
+run undo-ocaml-swiftui env KAYA_SELFTEST=undo KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/undo.exe
+drain
+run undo-java-swiftui env KAYA_SELFTEST=undo KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"

@@ -134,4 +134,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wl-clipboard xclip wtype wayland-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# The undo milestone's typing verb (docs/undo-plan.md A8): a scene that
+# asserts a field's NATIVE undo history has to fill it the way a user
+# does, so `type` delivers real key events and never a text write — a
+# write would wipe the very history the scene came to observe (D7).
+# Wayland already has its injector here (wtype, above); X11's is XTEST,
+# and xdotool is the only client for it in the archive. Measured in this
+# image: under bare Xvfb with no window manager GDK already holds the
+# input focus, so `xdotool type` lands on the app with no focus command,
+# while `xdotool type --window` (XSendEvent) delivers NOTHING to GTK4 —
+# GDK4 reads XI2 events and a synthetic core event is not one.
+#
+# A trailing layer on purpose, per the note above.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xdotool \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /work

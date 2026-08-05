@@ -96,6 +96,9 @@ for arg in "$@"; do
         filedialog_rust|filedialog_python|filedialog_go|filedialog_csharp|filedialog_java) SUITE="$arg" ;;
         commands_rust|commands_python|commands_go|commands_csharp|commands_java) SUITE="$arg" ;;
         clipboard_rust|clipboard_python|clipboard_go|clipboard_csharp|clipboard_java) SUITE="$arg" ;;
+        # A DEPTH SCENE, so rust alone (docs/undo-plan.md §4's fan-out):
+        # the other eight guests land with the `undoable` sweep.
+        undo_rust) SUITE="$arg" ;;
         # These two were wired as legs without arms here, so a single
         # leg could not be re-run in isolation — the one-leg-repeatedly
         # loop is the only practical way to characterise a rare flake.
@@ -221,7 +224,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-undo}"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -1327,6 +1330,26 @@ case "$SUITE" in
         run_suite listdetail_go
         run_suite listdetail_csharp
         run_suite listdetail_java
+        drain_suites
+        # The undo scene: two tiers behind one Edit>Undo, and the
+        # ledger that orders them (docs/undo-plan.md). A DEPTH SCENE —
+        # rust only until the `undoable` sweep lands the other eight
+        # guests — and it belongs in THIS serial block rather than the
+        # depth block above, for the menus reason exactly: its `type`
+        # verb puts REAL KEYSTROKES on the system input queue and
+        # foregrounds the guest to do it, so a concurrent leg's
+        # SetForegroundWindow would take the typing. Two legs typing at
+        # one desktop do not fail cleanly — the characters go to
+        # whichever window won, and the scene reads it as a backend
+        # that dropped input.
+        #
+        # NOT PINNED BY check-steps' menu_serial CLAUSE, which matches
+        # `run_suite (menus|filedialog)_` by name: that pattern must
+        # grow an `undo` arm, or a future refactor can re-pool this leg
+        # with nothing to say so. Named in the arm's report as the one
+        # gate this slice could not extend itself (tools/check-steps.sh
+        # belongs to no single arm).
+        run_suite undo_rust
         drain_suites
         # The menus scene — every language, each leg ALONE between
         # drains, never in the pool above. WinUI shortcut injection is

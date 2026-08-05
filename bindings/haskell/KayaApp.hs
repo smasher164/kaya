@@ -39,6 +39,13 @@ module KayaApp
     post,
     buildTx,
     submitTx,
+    undoableTx,
+    undoableTxIn,
+    onUndone,
+    onRedone,
+    UndoDelta (..),
+    UndoEntry (..),
+    UndoOrder (..),
     dispatch,
     onClick,
     onClickNode,
@@ -192,6 +199,8 @@ module KayaApp
     roleCut,
     roleCopy,
     rolePaste,
+    roleUndo,
+    roleRedo,
     menuAppend,
     menuOptions,
   )
@@ -218,7 +227,18 @@ import Control.Exception (SomeException, catch, evaluate)
 import System.IO (hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
 
-import KayaRuntime (kayaRun, kayaSubmit, pollOccurrence, registerBlob, wake, waitOccurrences)
+import KayaRuntime
+  ( UndoDelta (..),
+    UndoEntry (..),
+    UndoOrder (..),
+    emptyUndoDelta,
+    kayaRun,
+    kayaSubmit,
+    pollOccurrence,
+    registerBlob,
+    wake,
+    waitOccurrences,
+  )
 import qualified KayaRuntime as R
 import System.IO (Handle)
 import qualified KayaWire as W
@@ -923,6 +943,23 @@ roleCopy = "copy"
 
 rolePaste :: String
 rolePaste = "paste"
+
+-- | The two history commands — the same gesture layer one tier deeper
+-- (docs/undo-plan.md D6). They ask the FOCUSED widget first: a text
+-- field whose own edit history has something to give answers before the
+-- app's ledger does, which is what an editor user expects — mid-typing,
+-- Undo means the typing; after a structural action, Undo means the
+-- action. Enablement is that same question, asked live at activation.
+--
+-- AN APP OPTS IN TO THE OTHER TIER BY NAMING ITS STEPS ('undoableTx')
+-- and hears the result through 'onUndone'. An app that names none still
+-- gets working text undo from these two items, because the first tier
+-- is the platform's own.
+roleUndo :: String
+roleUndo = "undo"
+
+roleRedo :: String
+roleRedo = "redo"
 
 -- | Menu item construction attributes — the config-list spelling over
 -- a closed GADT indexed by anchor scope. Label and enablement are
@@ -2197,6 +2234,12 @@ data App = App
     appBackRequested :: IORef (Map.Map Word64 (IO ())),
     appAlertHandlers :: IORef (Map.Map Word64 (Word32 -> IO ())),
     appNextAlert :: IORef Word64,
+    -- The undo ledger's two reports, keyed by WINDOW: a history is
+    -- per window, and so is the registration that hears it walked.
+    -- NOT one-shot (the section_selected stance): a user walks a
+    -- history as often as they like.
+    appUndone :: IORef (Map.Map Word64 (String -> UndoDelta -> IO ())),
+    appRedone :: IORef (Map.Map Word64 (String -> UndoDelta -> IO ())),
     appFileDialogHandlers :: IORef (Map.Map Word64 ([PickedFile] -> IO ())),
     -- Clipboard reads share the alert's request/result grammar and so
     -- its table shape: one-shot, keyed by request id.
@@ -2318,6 +2361,105 @@ register app pending = case pending of
 submitTx :: App -> Build () -> IO ()
 submitTx app b = buildTx app b
 
+-- | 'buildTx' as ONE undoable step, named @label@ (docs/undo-plan.md
+-- D2): @undoableTx app ("add " ++ draft) $ do insertRecord ...@.
+--
+-- THE ENTRY POINT TAKES THE NAME because this binding's transaction is
+-- AMBIENT — a 'Build' is a pure state function with no handle to hang a
+-- name on, so the three ambient bindings each spell the group at the
+-- scope that opens it (Python a keyword argument, OCaml a labelled
+-- optional, Haskell this variant) while the five handle bindings spell
+-- it on the transaction object. Same semantics everywhere; the idiom
+-- decides only the spelling. It also makes the wire's head-of-batch
+-- rule unfalsifiable here: the marker is emitted before @body@ runs, so
+-- no call order can put it anywhere but first.
+--
+-- THE UNIT OF UNDO IS A NAMED GROUP, NOT EVERY TRANSACTION. Handlers
+-- fire per-gesture transactions constantly and most of them are
+-- consequences rather than intents, and a per-keystroke editor would
+-- earn one step per character — the exact problem grouping exists to
+-- solve. So a group is opt-in, which is also what keeps a collaborative
+-- app free to own its own history (D8).
+--
+-- WHAT A GROUP MAY HOLD is the reactive half — signal writes and
+-- collection deltas, whose inverse the core derives from state it
+-- already keeps. Focus is permitted and simply not restored. Anything
+-- else (a const property write, creating a widget, 'clearWidget',
+-- showing a dialog) fails at apply, naming the op: undo restores STATE,
+-- and state is signals plus collections. An app that wants a widget
+-- property undoable binds it to a signal. The label must be non-empty —
+-- the empty one is how a typing EPISODE names itself on the same
+-- occurrence. The result comes back through 'onUndone'.
+undoableTx :: App -> String -> Build a -> IO a
+undoableTx app = undoableTxIn app 0
+
+-- | 'undoableTx' against an auxiliary window's ledger. Each window has
+-- its own history, because Undo in one window has never meant "revert
+-- what happened in another".
+undoableTxIn :: App -> Word64 -> String -> Build a -> IO a
+undoableTxIn app windowId label body =
+  buildTx app (emitB (W.txUndoGroup windowId (W.VStr label)) >> body)
+
+-- | Hear an undo kaya routed in @windowId@: the step's label — EMPTY
+-- for a typing episode, since kaya invents no user-facing strings — and
+-- what the core put back.
+--
+-- NOT ONE-SHOT, the 'addSection' stance rather than the alert's: a
+-- history is walked as often as the user likes, so the registration
+-- outlives every step. Per window because the ledger is.
+--
+-- THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
+-- programmatic write, so the echo doctrine silences every occurrence it
+-- would otherwise cause — no text_changed for the text it restored, no
+-- value_changed for the signals. This binding has already folded the
+-- payload into its own collection model before the handler runs (so
+-- 'count' and 'recordItems' answer about the restored state); this is
+-- where an app folds it into ITS own state.
+onUndone :: App -> Word64 -> (String -> UndoDelta -> IO ()) -> IO ()
+onUndone app windowId handler =
+  modifyIORef' (appUndone app) (Map.insert windowId handler)
+
+-- | The 'onUndone' twin. A frontier typing episode redoes on the
+-- platform's own stack and reports itself as an ordinary edit, so that
+-- one does not arrive here.
+onRedone :: App -> Word64 -> (String -> UndoDelta -> IO ()) -> IO ()
+onRedone app windowId handler =
+  modifyIORef' (appRedone app) (Map.insert windowId handler)
+
+-- Fold an undo's payload into the collection model.
+--
+-- The rollback journal in reverse: an abandoned Build restores nothing
+-- because nothing was shipped, while an undo restores a delta because
+-- everything WAS — the core already moved, and the model is what would
+-- otherwise be left behind. The payload is core-authoritative, so
+-- nothing here re-derives anything. Signals and text are not mirrored
+-- by this binding (there is no read-back for either, by doctrine), so
+-- those two runs pass straight to the app's handler.
+absorbUndo :: App -> UndoDelta -> IO ()
+absorbUndo app delta = modifyIORef' (appModel app) fold
+  where
+    fold (model, children) = (foldl order (foldl entry model (undoEntries delta)) (undoOrders delta), children)
+    entry model e = case ueState e of
+      Just (variant, record) -> modelSet (ueCollection e) (uePath e) (ueKey e) variant record model
+      -- The entry is gone in the restored state. Its own instance
+      -- only: the payload states what each entry IS, and an instance
+      -- it never names is one this undo did not touch.
+      Nothing -> Map.adjust (map (drop1 (uePath e) (ueKey e))) (ueCollection e) model
+    drop1 path key i
+      | iPath i == path = i {iEntries = filter ((/= key) . fst) (iEntries i)}
+      | otherwise = i
+    order model o = Map.adjust (map (place o)) (uoCollection o) model
+    place o i
+      | iPath i == uoPath o =
+          -- Positioned by the payload's list, keeping anything it does
+          -- not name at the end: the delta describes one instance's
+          -- whole order, and an entry it never mentions is one this
+          -- undo did not move.
+          let named = [(k, v) | k <- uoKeys o, Just v <- [lookup k (iEntries i)]]
+              rest = filter ((`notElem` uoKeys o) . fst) (iEntries i)
+           in i {iEntries = named ++ rest}
+      | otherwise = i
+
 onClick :: App -> Widget -> IO () -> IO ()
 onClick app (Widget n) handler =
   modifyIORef' (appWidgetHandlers app) (Map.insert n handler)
@@ -2427,6 +2569,8 @@ newApp =
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef 0
+    <*> newIORef Map.empty -- appUndone
+    <*> newIORef Map.empty -- appRedone
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef 0
@@ -2511,7 +2655,7 @@ dispatchLoop app = do
     Nothing -> do
       more <- waitOccurrences
       if more then dispatchLoop app else return () -- shutdown
-    Just (kind, ident, keys, payload, clip)
+    Just (kind, ident, keys, payload, clip, undone)
       | kind == W.occKindTextChanged -> do
           let content = case payload of Just (W.VStr s) -> s; _ -> ""
           case keys of
@@ -2618,6 +2762,23 @@ dispatchLoop app = do
           writeIORef (appAlertHandlers app) (Map.delete ident handlers)
           dispatch (mapM_ ($ choice) (Map.lookup ident handlers))
           dispatchLoop app
+      -- The undo pair keys the per-WINDOW tables (ident is the window;
+      -- the label rides as the payload). NOT one-shot — a history is
+      -- walked as often as the user likes.
+      --
+      -- THE MODEL IS RECONCILED FIRST, and unconditionally: the core
+      -- moved without a transaction, so an app reading `count` inside
+      -- the handler must see the restored state, and an app with no
+      -- handler at all must not be left with a stale model.
+      | kind == W.occKindUndone || kind == W.occKindRedone -> do
+          let delta = maybe emptyUndoDelta id undone
+              label = case payload of Just (W.VStr s) -> s; _ -> ""
+          absorbUndo app delta
+          handlers <-
+            readIORef
+              (if kind == W.occKindUndone then appUndone app else appRedone app)
+          dispatch (mapM_ (\h -> h label delta) (Map.lookup ident handlers))
+          dispatchLoop app
       -- Menu occurrences key the menu-item tables — their own id
       -- space, so neither widget nor node ids can collide with them.
       -- Node-anchored context items carry the stamped copy's keys
@@ -2652,11 +2813,11 @@ dispatchLoop app = do
               handlers <- readIORef (appMenuSelectedNode app)
               dispatch (mapM_ (\h -> h keys index) (Map.lookup ident handlers))
           dispatchLoop app
-    Just (_, ident, [], _, _) -> do
+    Just (_, ident, [], _, _, _) -> do
       handlers <- readIORef (appWidgetHandlers app)
       dispatch (mapM_ id (Map.lookup ident handlers))
       dispatchLoop app
-    Just (_, ident, keys, _, _) -> do
+    Just (_, ident, keys, _, _, _) -> do
       handlers <- readIORef (appNodeHandlers app)
       dispatch (mapM_ ($ keys) (Map.lookup ident handlers))
       dispatchLoop app

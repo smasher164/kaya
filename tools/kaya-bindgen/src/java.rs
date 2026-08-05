@@ -491,6 +491,93 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("        return new ClipValues(kind, values);");
     c.line("    }");
     c.line("");
+    // One Value, type-generic, with the offset handed back — the same
+    // decode the key loop and the payload switch do inline. Extracted
+    // because the undo answer reads an unbounded LIST of them and a
+    // fourth copy of the switch is a fourth place for the blob arm to
+    // go missing.
+    c.line("    /** One Value at {@code next[0]}, which advances past it.");
+    c.line("     * Blobs are redeemed and RELEASED here: a handle must never");
+    c.line("     * reach an app. */");
+    c.line("    public static Object parseValue(byte[] rec, ByteBuffer b, int[] next) {");
+    c.line("        int at = next[0];");
+    c.line("        int vtype = b.getInt(at);");
+    c.line("        int vlen = b.getInt(at + 4);");
+    c.line("        next[0] = at + 8 + ((vlen + 7) & ~7);");
+    c.line("        switch (vtype) {");
+    c.line("            case VALUE_BOOL: return rec[at + 8] != 0;");
+    c.line("            case VALUE_I64: return b.getLong(at + 8);");
+    c.line("            case VALUE_F64: return b.getDouble(at + 8);");
+    c.line("            case VALUE_BLOB: return KayaRing.occurrenceBlob(b.getLong(at + 8));");
+    c.line("            default:");
+    c.line("                return new String(rec, at + 8, vlen, StandardCharsets.UTF_8);");
+    c.line("        }");
+    c.line("    }");
+    c.line("");
+    // The undo answer's taste-free shape, on ClipValues' stance: the
+    // decoder cuts the flat tail into its four runs, and the sum-typed
+    // surface over it is the hand-written tier's.
+    if !crate::undo_occurrence_names(spec).is_empty() {
+        c.line("    /** One collection entry's restored state, as the decoder");
+        c.line("     * hands it over. {@code present} false is \"the restored");
+        c.line("     * state does not have this entry at all\", and then");
+        c.line("     * {@code variant} and {@code fields} are empty. */");
+        c.line("    public static final class UndoEntryValues {");
+        c.line("        public final long collection;");
+        c.line("        public final List<Object> path;");
+        c.line("        public final Object key;");
+        c.line("        public final boolean present;");
+        c.line("        public final int variant;");
+        c.line("        public final List<Object> fields;");
+        c.line("");
+        c.line("        UndoEntryValues(long collection, List<Object> path, Object key,");
+        c.line("                boolean present, int variant, List<Object> fields) {");
+        c.line("            this.collection = collection;");
+        c.line("            this.path = path;");
+        c.line("            this.key = key;");
+        c.line("            this.present = present;");
+        c.line("            this.variant = variant;");
+        c.line("            this.fields = fields;");
+        c.line("        }");
+        c.line("    }");
+        c.line("");
+        c.line("    /** One collection instance's restored key order — position");
+        c.line("     * is the one thing per-entry statements cannot carry. */");
+        c.line("    public static final class UndoOrderValues {");
+        c.line("        public final long collection;");
+        c.line("        public final List<Object> path;");
+        c.line("        public final List<Object> keys;");
+        c.line("");
+        c.line("        UndoOrderValues(long collection, List<Object> path, List<Object> keys) {");
+        c.line("            this.collection = collection;");
+        c.line("            this.path = path;");
+        c.line("            this.keys = keys;");
+        c.line("        }");
+        c.line("    }");
+        c.line("");
+        c.line("    /** One undone/redone step as the decoder hands it over: the");
+        c.line("     * group's label (EMPTY for a typing episode) and the four");
+        c.line("     * counted runs cut out of the flat Values tail. A STATEMENT");
+        c.line("     * OF THE RESTORED STATE, never a replay of ops — signals and");
+        c.line("     * texts arrive as flattened (id, value) pairs. */");
+        c.line("    public static final class UndoValues {");
+        c.line("        public final String label;");
+        c.line("        public final List<Object> signals;");
+        c.line("        public final List<Object> texts;");
+        c.line("        public final List<UndoEntryValues> entries;");
+        c.line("        public final List<UndoOrderValues> orders;");
+        c.line("");
+        c.line("        UndoValues(String label, List<Object> signals, List<Object> texts,");
+        c.line("                List<UndoEntryValues> entries, List<UndoOrderValues> orders) {");
+        c.line("            this.label = label;");
+        c.line("            this.signals = signals;");
+        c.line("            this.texts = texts;");
+        c.line("            this.entries = entries;");
+        c.line("            this.orders = orders;");
+        c.line("        }");
+        c.line("    }");
+        c.line("");
+    }
     c.line("    /** Decode one occurrence record (header included); null for pad");
     c.line("     * or unknown kinds. */");
     c.line("    public static Occ parseOccurrence(byte[] rec) {");
@@ -572,6 +659,85 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        // keys the handler; the first rides as the payload.");
         c.line(&format!("        if ({id_pair}) {{"));
         c.line("            return new Occ(kind, b.getLong(16), java.util.List.of(), id);");
+        c.line("        }");
+    }
+    // ONE STEP CAME BACK. Its own arm for the file_dialog_result reason
+    // and then some: the body is a window, four RUN LENGTHS, the label,
+    // and one flat Values tail the runs cut up (docs/undo-plan.md D5;
+    // wire::undo_body). The generic tail below would take `window` for a
+    // widget id and the SIGNAL COUNT for a key-path length, then read
+    // the label's bytes as keys. The window keys the handler — the
+    // ledger is per window — exactly as section_selected's second id
+    // does.
+    let undo = crate::undo_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("kind == OCC_KIND_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(" || ");
+    if !undo.is_empty() {
+        c.line(&format!("        if ({undo}) {{"));
+        c.line("            int signalCount = b.getInt(16);");
+        c.line("            int textCount = b.getInt(20);");
+        c.line("            int entryCount = b.getInt(24);");
+        c.line("            int orderCount = b.getInt(28);");
+        c.line("            int[] cursor = { 32 };");
+        c.line("            String label = (String) parseValue(rec, b, cursor);");
+        c.line("            int flatCount = b.getInt(cursor[0]);");
+        c.line("            cursor[0] += 8; // count + reserved");
+        c.line("            List<Object> flat = new ArrayList<>(flatCount);");
+        c.line("            for (int i = 0; i < flatCount; i++) {");
+        c.line("                flat.add(parseValue(rec, b, cursor));");
+        c.line("            }");
+        c.line("            int taken = 0;");
+        c.line("            List<Object> signals = new ArrayList<>(signalCount * 2);");
+        c.line("            for (int i = 0; i < signalCount * 2; i++) {");
+        c.line("                signals.add(flat.get(taken++));");
+        c.line("            }");
+        c.line("            List<Object> texts = new ArrayList<>(textCount * 2);");
+        c.line("            for (int i = 0; i < textCount * 2; i++) {");
+        c.line("                texts.add(flat.get(taken++));");
+        c.line("            }");
+        // Arity-first groups: `size` counts itself, so a reader takes it
+        // and needs nothing else.
+        c.line("            List<UndoEntryValues> entries = new ArrayList<>(entryCount);");
+        c.line("            for (int i = 0; i < entryCount; i++) {");
+        c.line("                // Arity-first: `size` counts itself, so a reader");
+        c.line("                // takes it and needs nothing else.");
+        c.line("                int size = (int) (long) (Long) flat.get(taken);");
+        c.line("                long coll = (Long) flat.get(taken + 1);");
+        c.line("                boolean present = (Long) flat.get(taken + 2) != 0L;");
+        c.line("                int variant = (int) (long) (Long) flat.get(taken + 3);");
+        c.line("                int pathLen = (int) (long) (Long) flat.get(taken + 4);");
+        c.line("                List<Object> body = new ArrayList<>(");
+        c.line("                        flat.subList(taken + 5, taken + size));");
+        c.line("                taken += size;");
+        c.line("                entries.add(new UndoEntryValues(coll,");
+        c.line("                        List.copyOf(body.subList(0, pathLen)), body.get(pathLen),");
+        c.line("                        present, present ? variant : 0,");
+        c.line("                        present ? List.copyOf(body.subList(pathLen + 1, body.size()))");
+        c.line("                                : List.of()));");
+        c.line("            }");
+        c.line("            List<UndoOrderValues> orders = new ArrayList<>(orderCount);");
+        c.line("            for (int i = 0; i < orderCount; i++) {");
+        c.line("                int size = (int) (long) (Long) flat.get(taken);");
+        c.line("                long coll = (Long) flat.get(taken + 1);");
+        c.line("                int pathLen = (int) (long) (Long) flat.get(taken + 2);");
+        c.line("                List<Object> body = new ArrayList<>(");
+        c.line("                        flat.subList(taken + 3, taken + size));");
+        c.line("                taken += size;");
+        c.line("                orders.add(new UndoOrderValues(coll,");
+        c.line("                        List.copyOf(body.subList(0, pathLen)),");
+        c.line("                        List.copyOf(body.subList(pathLen, body.size()))));");
+        c.line("            }");
+        // A truncated or over-long body is a broken ENCODER, not bad
+        // input, and it fails here rather than handing the app half a
+        // step — the read-in-threes rule the picker already follows.
+        c.line("            if (taken != flat.size()) {");
+        c.line("                throw new IllegalStateException(");
+        c.line("                        \"kaya: undo delta has trailing values\");");
+        c.line("            }");
+        c.line("            return new Occ(kind, id, java.util.List.of(),");
+        c.line("                    new UndoValues(label, signals, texts, entries, orders));");
         c.line("        }");
     }
     c.line("        int pathLen = b.getInt(16);");

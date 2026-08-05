@@ -304,10 +304,48 @@ struct CoreState {
     /// it. The root admits the prop on entries and textareas
     /// (scene.rs), whose identity tags entry_tags already carries.
     accepts: HashMap<u64, String>,
-    /// A clipboard surface appeared (accepts / copy / read): the
-    /// refresh sites consult it, so the scenes that never touch the
-    /// clipboard pay nothing for the role recomputation.
-    clipboard_armed: bool,
+    /// A ROLE surface appeared — an authored role, or a clipboard
+    /// surface (accepts / copy / read): the refresh sites consult it, so
+    /// the scenes that declare no role at all pay nothing for the
+    /// recomputation.
+    ///
+    /// IT USED TO BE `clipboard_armed`, and the undo roles are why it is
+    /// not. Undo's enablement is a live question in a scene that never
+    /// touches the clipboard (docs/undo-plan.md D6), so a flag armed by
+    /// clipboard traffic alone would leave Edit>Undo showing whatever
+    /// enablement it was BORN with — the mac arm's finding 2, one move
+    /// over.
+    roles_armed: bool,
+    /// What the LEDGER has been shown for each field — the last text
+    /// `bank_text_changed` handed the core.
+    ///
+    /// THE `type` VERB'S SETTLE READS IT, and that is the whole reason
+    /// it exists (contract point 4: the verb blocks until every
+    /// character is "delivered AND processed"). On this backend
+    /// TextChanged is raised ASYNCHRONOUSLY, so the CONTROL shows the
+    /// typed text a beat before kaya has been told about it — and a
+    /// verb that settled on the control alone returns into a
+    /// `menu_activate "Edit>Undo"` whose routing then asks a ledger that
+    /// has not heard of the last keystroke. MEASURED, as the first
+    /// windows leg of this scene: the undo took the STAR GROUP instead
+    /// of the typing, one entry too deep, and the field kept the text
+    /// the user had just typed.
+    banked_text: HashMap<u64, String>,
+    /// Q2's LEDGER-QUIET BRACKET (docs/undo-plan.md §3, the "report it
+    /// once" rule): field id -> the text a native undo THIS BACKEND
+    /// ROUTED left in the widget, recorded when the sample was taken.
+    ///
+    /// A BRACKET AND NOT A FLAG-WITH-A-TIMER, for the reason the mac arm
+    /// reached from the opposite premise and this one MEASURED: a routed
+    /// `TextBox.Undo()` raises the control's ordinary TextChanged a
+    /// runloop turn LATER (7ms in the probe, `inside_undo_call=false`),
+    /// long after a boolean set and cleared around the call would be
+    /// gone. Matching the sampled TEXT is exact, needs no clock, and
+    /// self-clears — the entry is consumed by the edit it was written
+    /// for. Only the BANKING is suppressed; the occurrence still reaches
+    /// the app, because the field is uncontrolled and a native undo is
+    /// an edit like any other from the app's side.
+    ledger_quiet: HashMap<u64, String>,
 }
 
 /// One section's materialized state: the pane Grid (the mount
@@ -353,7 +391,7 @@ struct MenuModel {
     /// none). PLACEMENT is inert here (no dress-owned application
     /// menu), but the clipboard roles change BEHAVIOR: activation
     /// performs the command on the focused widget, and enablement
-    /// folds in role_enabled (refresh_clipboard_roles).
+    /// folds in role_enabled (refresh_role_enablement).
     role: String,
     shortcut: String,
     children: Vec<u64>,
@@ -387,7 +425,7 @@ impl MenuNative {
         }
     }
 
-    /// The write side of the same flag — what refresh_clipboard_roles
+    /// The write side of the same flag — what refresh_role_enablement
     /// stamps the intersection enablement through. The rebuild writes
     /// structural enablement alone, so every rebuild is followed by a
     /// role refresh.
@@ -483,8 +521,8 @@ fn defer_role_refresh() {
         let handler = DispatcherQueueHandler::new(|| {
             CORE.with_borrow(|core| {
                 if let Some(core) = core.as_ref() {
-                    if core.clipboard_armed {
-                        refresh_clipboard_roles(core);
+                    if core.roles_armed {
+                        refresh_role_enablement(core);
                     }
                 }
             });
@@ -2581,8 +2619,8 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
     // The rebuild stamped STRUCTURAL enablement alone onto the fresh
     // natives, which would un-gray a role item whose clipboard half
     // says no — the role factor goes back on top.
-    if core.clipboard_armed {
-        refresh_clipboard_roles(core);
+    if core.roles_armed {
+        refresh_role_enablement(core);
     }
     Ok(())
 }
@@ -2827,6 +2865,18 @@ unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> i
                 // A disabled item is INERT, exactly as native chrome
                 // leaves it — the chord is still this catalog's, so it
                 // is eaten rather than sprayed at whatever is behind.
+                //
+                // WHICH IS WHY THE UNDO ROUTING LIVES ON THIS PATH
+                // (docs/undo-plan.md §1.1, measured): a focused TextBox
+                // never sees Ctrl+Z once this catalog owns the chord —
+                // the hook returns 1 and the WM_KEYDOWN never reaches
+                // XAML — so native text undo would die in every field of
+                // the app if dispatch alone happened here. It does not:
+                // `menu_user_activate` below performs the undo role, and
+                // that role ASKS THE FOCUSED FIELD FIRST
+                // (perform_undo_role -> undo_route -> CanUndo). The
+                // eaten chord is answered by the same tier the key would
+                // have reached, plus the ledger the key could not.
                 if enabled {
                     // The native owns the immediate user change, exactly
                     // as it does for a click; menu_user_activate mirrors
@@ -2915,7 +2965,9 @@ fn menu_user_activate(item: u64, attachment: MenuAttachment) {
         // this route does not consult — so it is recomputed here, the
         // same freshness rule the harness activation applies (the mac
         // finding, docs/clipboard-plan.md §3).
-        if matches!(role.as_str(), "cut" | "copy" | "paste") && !role_enabled(core, &role) {
+        if matches!(role.as_str(), "cut" | "copy" | "paste" | "undo" | "redo")
+            && !role_enabled(core, &role)
+        {
             return;
         }
         let noun = match attachment {
@@ -2926,11 +2978,20 @@ fn menu_user_activate(item: u64, attachment: MenuAttachment) {
         };
         match kind {
             MenuItemKind::Action => {
-                // A clipboard role PERFORMS rather than reports: the
-                // item is the platform's own command acting on the
-                // focused widget, so no menu occurrence goes up (the
-                // rule every arm shares; DESIGN.md — gestures are
-                // commands).
+                // A GESTURE ROLE PERFORMS RATHER THAN REPORTS: the item
+                // is the platform's own command acting on the focused
+                // widget, so no menu occurrence goes up (the rule every
+                // arm shares; DESIGN.md — gestures are commands).
+                //
+                // UNDO FIRST, and not by accident: an undo is not a
+                // clipboard command (the mac arm splits the same two
+                // functions the same way), and this is the ONE dispatch
+                // both the chord hook and the harness activation reach,
+                // so the routing cannot be true on one path and absent
+                // on the other.
+                if perform_undo_role(core, &role) {
+                    return;
+                }
                 if perform_clipboard_role(core, &role) {
                     return;
                 }
@@ -3441,17 +3502,164 @@ fn editable_by_id(core: &CoreState, id: u64) -> Option<TextBox> {
         .map(|i| core.textareas[i].clone())
 }
 
-/// Whether a clipboard role's command can act right now; a non-role
-/// item answers true and pays nothing. THE SAME RULE AS THE OTHER
-/// ARMS (kayaRoleEnabled, gtk's role_enabled): paste is the
-/// INTERSECTION of what the clipboard offers and what the focused
-/// widget accepts — a widget that declared NOTHING still pastes (the
-/// platform inserts), so an undeclared target enables on the text
-/// offer alone. Cut and copy need a focused editable.
+/// D7/A1's clear, in this platform's one available spelling.
+///
+/// MEASURED A NO-OP, AND CALLED ANYWAY (§1.1, re-verified by this arm's
+/// probe: CanUndo true -> SetText -> false -> explicit clear -> false).
+/// Setting `TextBox.Text` resets the control's undo buffer by itself, so
+/// D7's semantics already hold on Windows before any code is added. The
+/// call costs one COM hop on a path that already crosses COM, it makes
+/// the uniform rule visible and greppable beside GTK's
+/// begin/end_irreversible_action and Compose's undoState.clearHistory(),
+/// and it is the ONLY lever left if a future WinUI stops resetting on
+/// the Text setter — WinUI 3 having already dropped WPF's
+/// IsUndoEnabled, which had exactly these semantics (A5). A guard that
+/// is redundant today is cheap; finding out later that the redundancy
+/// was carrying the rule is not.
+///
+/// A3 IS THE CALLER'S: every call site sits inside a text-DIFFERS
+/// branch, because an app that mirrors a field into a signal and writes
+/// it back would otherwise lose the user's native history on every
+/// keystroke.
+fn clear_native_undo(field: &TextBox) {
+    if let Err(e) = field.ClearUndoRedoHistory() {
+        eprintln!("kaya: winui ClearUndoRedoHistory failed: {}", e.message());
+    }
+}
+
+/// EPISODE BANKING (docs/undo-plan.md §3), on the way past.
+///
+/// Every user edit of a text field is shown to the ledger before the
+/// occurrence goes to the app: the run of edits on one field between
+/// clears is ONE ledger entry, opened by the first event and extended by
+/// each one after. The core owns all of that; the backend contributes
+/// the two facts only it can see — WHICH FIELD, and whether it is
+/// FOCUSED (an event on an unfocused field closes the episode as it
+/// stands).
+///
+/// FROM THE HANDLER, WHICH IS THE ONE PLACE A USER EDIT PASSES. The
+/// programmatic paths do not come through here: they bump the swallow
+/// counter and the core absorbs their writes from the apply ops
+/// (`Scene::absorb_text_writes`), which is the site that cannot be
+/// bypassed by a sixth write path.
+///
+/// `with_borrow_mut` and not a deferred hop, deliberately: a bank that
+/// landed a tick later could arrive AFTER the routing question that
+/// depends on it, which is the silent class this milestone exists to
+/// close. The borrow is safe because this backend's TextChanged is
+/// raised ASYNCHRONOUSLY — the fact the swallow counters already stand
+/// on, and re-measured for a routed `Undo()` by this arm's probe
+/// (`inside_undo_call=false` on every raise).
+fn bank_text_changed(id: u64, text: &str) {
+    CORE.with_borrow_mut(|core| {
+        let Some(core) = core.as_mut() else { return };
+        // THE LEDGER HAS BEEN SHOWN THIS TEXT, whichever way the next
+        // few lines go: a quiet echo was reported through
+        // `note_native_undo` and an ordinary edit is banked below, and
+        // the `type` verb's settle is asking "has kaya seen it", not
+        // "which path did it take".
+        core.banked_text.insert(id, text.to_owned());
+        // Q2's ledger-quiet bracket: this edit is the echo of a native
+        // undo THIS BACKEND ROUTED, and `note_native_undo` already
+        // reported it with the backend's own sample. Banking it again
+        // would restate the walk's position as a new high-water and
+        // erase the walk the redo side needs.
+        if core.ledger_quiet.get(&id).map(String::as_str) == Some(text) {
+            core.ledger_quiet.remove(&id);
+            return;
+        }
+        let focused = focused_editable_id(core) == Some(id);
+        let window = ledger_window(core);
+        core.scene
+            .note_text_changed(window, WidgetId(id), text, focused);
+    });
+}
+
+/// A4's ONE named query — "can the focused widget undo?" — answered in
+/// this platform's vocabulary and asked nowhere else in this file.
+///
+/// D6 already named four hard-coded role filters as silent-failure
+/// sites; a fifth expression of this same question is the shape A4
+/// exists to refuse. The core's `route_undo` consumes the answer.
+fn focused_can_undo(core: &CoreState) -> bool {
+    focused_editable_id(core)
+        .and_then(|id| editable_by_id(core, id))
+        .and_then(|field| field.CanUndo().ok())
+        .unwrap_or(false)
+}
+
+/// Redo's twin, same contract.
+fn focused_can_redo(core: &CoreState) -> bool {
+    focused_editable_id(core)
+        .and_then(|id| editable_by_id(core, id))
+        .and_then(|field| field.CanRedo().ok())
+        .unwrap_or(false)
+}
+
+/// THE LEDGER'S WINDOW, in one named place.
+///
+/// §3's ledger is per window, and this backend cannot name a widget's
+/// window: it keeps no widget-to-window map (roots and titles are keyed
+/// by window, children are not), and every other window-scoped decision
+/// here already stands on the primary — the chord hook dispatches
+/// `MenuAttachment::Window(0)`, and the harness resolves menu paths
+/// against `menu_windows[&0]`. §1.1 recorded the same gap from the
+/// probe's side ("Not measured: multi-window and auxiliary-window
+/// fields"). So the assumption is stated ONCE, here, rather than spelled
+/// five times: typing in an auxiliary window banks into the primary's
+/// ledger. When aux windows grow one, this function is the single site
+/// that changes.
+fn ledger_window(_core: &CoreState) -> WindowId {
+    WindowId(0)
+}
+
+/// Where an undo would go RIGHT NOW.
+///
+/// ASKED ONCE AND USED TWICE — enablement and activation are the same
+/// question (D6: "enablement is that same question, computed live at
+/// activation exactly as paste's offer∩accepts is"), and `Nothing` IS
+/// what a disabled Edit>Undo means.
+///
+/// AND THE ANSWER IS THE CORE'S, not this layer's. What the backend
+/// contributes is the pair only it can see — what is focused, and
+/// whether that field's own stack has anything (A4's named query above)
+/// — and the ledger decides against them. A second routing rule written
+/// here would be a fifth hard-coded predicate of exactly the kind D6
+/// records as the silent-failure shape.
+fn undo_route(core: &CoreState) -> crate::scene::UndoRoute {
+    core.scene.route_undo(
+        ledger_window(core),
+        focused_editable_id(core).map(WidgetId),
+        focused_can_undo(core),
+    )
+}
+
+/// Redo's twin. On the frontier episode redo stays NATIVE while the
+/// episode is partly undone — the platform still holds those steps, and
+/// taking them back coarsely would throw away granularity the user can
+/// see. That judgement is the ledger's too; this asks with `CanRedo`.
+fn redo_route(core: &CoreState) -> crate::scene::UndoRoute {
+    core.scene.route_redo(
+        ledger_window(core),
+        focused_editable_id(core).map(WidgetId),
+        focused_can_redo(core),
+    )
+}
+
+/// Whether a role's command can act right now; a non-role item answers
+/// true and pays nothing. THE SAME RULE AS THE OTHER ARMS
+/// (kayaRoleEnabled, gtk's role_enabled): paste is the INTERSECTION of
+/// what the clipboard offers and what the focused widget accepts — a
+/// widget that declared NOTHING still pastes (the platform inserts), so
+/// an undeclared target enables on the text offer alone. Cut and copy
+/// need a focused editable. Undo and redo ask the ROUTE, which is the
+/// same call their activation makes, so the two cannot drift (A4).
 /// IsClipboardFormatAvailable needs no open, so this is cheap enough
 /// for every refresh site.
 fn role_enabled(core: &CoreState, role: &str) -> bool {
     match role {
+        "undo" => undo_route(core) != crate::scene::UndoRoute::Nothing,
+        "redo" => redo_route(core) != crate::scene::UndoRoute::Nothing,
         "cut" | "copy" => focused_editable_id(core).is_some(),
         "paste" => {
             let Some(id) = focused_editable_id(core) else {
@@ -3473,7 +3681,7 @@ fn role_enabled(core: &CoreState, role: &str) -> bool {
     }
 }
 
-/// Recompute the clipboard roles' enablement onto the REAL chrome.
+/// Recompute the role items' enablement onto the REAL chrome.
 /// THE MAC FINDING, spelled WinUI (docs/clipboard-plan.md §3):
 /// enablement is the intersection of what the clipboard offers and
 /// what the focused widget accepts, and both move long after the bar
@@ -3481,10 +3689,18 @@ fn role_enabled(core: &CoreState, role: &str) -> bool {
 /// this runs wherever enablement can change hands: a role or accepts
 /// list lands, a copy goes out, the clipboard or the focus changes,
 /// the coalesced rebuild restamps structural enablement — and before
-/// a harness activation.
-fn refresh_clipboard_roles(core: &CoreState) {
+/// a harness activation OR READ.
+///
+/// THE ROLE SET IS ONE OF D6's FOUR RECORDED SILENT-FAILURE SITES
+/// (docs/undo-plan.md, and tools/check-roles.sh's third clause holds it
+/// open): an item whose role is outside this `matches!` never has its
+/// enablement recomputed at all, and on this backend a disabled item is
+/// refused by BOTH the invoke pipeline and the chord hook — so a role
+/// missing here is a command nothing can activate. It must name every
+/// gesture role in MENU_ROLES.
+fn refresh_role_enablement(core: &CoreState) {
     for (&id, model) in &core.menu_models {
-        if !matches!(model.role.as_str(), "cut" | "copy" | "paste") {
+        if !matches!(model.role.as_str(), "cut" | "copy" | "paste" | "undo" | "redo") {
             continue;
         }
         let on = menu_effective_enabled(core, id) && role_enabled(core, model.role.as_str());
@@ -3494,6 +3710,138 @@ fn refresh_clipboard_roles(core: &CoreState) {
             }
         }
     }
+}
+
+/// Perform an UNDO role. Answers whether it WAS one, so a clipboard
+/// role and then a plain action fall through behind it.
+///
+/// SPLIT FROM THE CLIPBOARD PERFORM ON PURPOSE, the way the mac arm
+/// splits it: an undo is not a clipboard command, it answers from two
+/// tiers rather than one, and tools/check-roles.sh reads the UNION of
+/// this file's `perform_*_role` functions for exactly this reason.
+///
+/// THIS IS ALSO WHERE THE CHORD LANDS. §1.1's measured finding is that
+/// kaya's thread-scoped keyboard hook STEALS Ctrl+Z from a focused
+/// TextBox the moment `MenuRole::Undo` carries the chord — the menu
+/// fires and the field never sees the key, and a DISABLED item eats it
+/// just as dead. So the routing cannot sit beside the dispatch; it has
+/// to BE the dispatch. `key_hook` resolves the chord and calls
+/// `menu_user_activate`, which calls this, so the hook's own path
+/// answers the native tier — and the accelerator stays attached as
+/// dress, so the menu keeps drawing "Ctrl+Z" and agrees with the
+/// field's own context menu (P4).
+fn perform_undo_role(core: &mut CoreState, role: &str) -> bool {
+    match role {
+        "undo" => {
+            match undo_route(core) {
+                crate::scene::UndoRoute::Native => native_walk(core, false),
+                crate::scene::UndoRoute::Core => core_walk(core, false),
+                // Inert, and it says so in the chrome: enablement IS
+                // this route (role_enabled), recomputed live.
+                crate::scene::UndoRoute::Nothing => {}
+            }
+            true
+        }
+        "redo" => {
+            match redo_route(core) {
+                crate::scene::UndoRoute::Native => native_walk(core, true),
+                crate::scene::UndoRoute::Core => core_walk(core, true),
+                crate::scene::UndoRoute::Nothing => {}
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// THE NATIVE TIER, and THE RECONCILIATION SAMPLE with it (§3).
+///
+/// The core walks its frontier episode backwards from three facts — the
+/// field, the text the walk landed on, and whether the field can still
+/// undo — and the backend's job is to take that sample at the one moment
+/// it is true. MEASURED on this platform (the arm's probe, §1 of the
+/// arm record): the text and `CanUndo` read the instant `Undo()` returns
+/// are already final, so the sample is synchronous here. That is the
+/// opposite of macOS, where SwiftUI syncs the model a turn later — which
+/// is why the sample is taken from the CONTROL in both arms.
+///
+/// AND §3a's QUESTION IS ANSWERED "YES" HERE, so this function does NOT
+/// report the text change itself. `TextBox.Undo()` raises the control's
+/// ordinary TextChanged 7ms later (measured), which is the very event
+/// the entry's handler rides, so the app hears the edit through the
+/// channel it always hears edits through. Only the LEDGER would hear it
+/// twice, and `ledger_quiet` is the bracket that stops it.
+///
+/// THE THIRD FACT IS `CanUndo` IN BOTH DIRECTIONS, deliberately. It is
+/// not "did this walk have more to give" — it is the core's test for the
+/// one case A1's clear is meant to make unreachable: a platform that
+/// coalesced ACROSS the episode's start and can no longer walk back to
+/// the before-image. A redo reporting `CanRedo` there would answer false
+/// at the end of a forward walk and send the core backwards.
+fn native_walk(core: &mut CoreState, redo: bool) {
+    // NO FOCUSED EDITABLE, NO WALK. Routing only answers Native where a
+    // focused field reported CanUndo, so this cannot fire on the
+    // ratified path — and a missing field must not read as the empty
+    // string, which would wipe the episode through the sample.
+    let Some(id) = focused_editable_id(core) else {
+        return;
+    };
+    let Some(field) = editable_by_id(core, id) else {
+        return;
+    };
+    let called = if redo { field.Redo() } else { field.Undo() };
+    if let Err(e) = called {
+        eprintln!("kaya: winui native {} failed: {}", if redo { "redo" } else { "undo" }, e.message());
+        return;
+    }
+    let text = lf(field.Text().map(|t| t.to_string()).unwrap_or_default());
+    let can_undo = field.CanUndo().unwrap_or(false);
+    // The bracket goes in BEFORE anything can arrive (the raise is a
+    // runloop turn away, but the order is not this code's to assume).
+    core.ledger_quiet.insert(id, text.clone());
+    let window = ledger_window(core);
+    let fallback = core.scene.note_native_undo(window, WidgetId(id), &text, can_undo);
+    // Usually nothing comes back — the walk already happened in the
+    // widget. The exception is the exhausted-mid-episode case above,
+    // which finishes the job coarsely and reports like any core undo.
+    if let Some((ops, occurrence)) = fallback {
+        deliver_undo(core, ops, occurrence);
+    }
+}
+
+/// THE CORE TIER: routing cases 2 and 3 (§3) — the ledger's newest entry
+/// is a group, or an episode that is no longer frontier-live, and the
+/// core applies the inverse itself.
+fn core_walk(core: &mut CoreState, redo: bool) {
+    let window = ledger_window(core);
+    let answer = if redo {
+        core.scene.redo(window)
+    } else {
+        core.scene.undo(window)
+    };
+    if let Some((ops, occurrence)) = answer {
+        deliver_undo(core, ops, occurrence);
+    }
+}
+
+/// The restore, then the report — IN THAT ORDER, which is the same rule
+/// the presentation-side entry point states (capi.rs's `with_undo_scene`:
+/// the ops are queued in front of the pump before the occurrence goes
+/// out). The occurrence is what makes the app apply its own transaction,
+/// and that transaction must not overtake the restore it is reacting to.
+/// Here the ops are applied outright rather than queued, because this
+/// backend IS the pump and holds the scene.
+fn deliver_undo(core: &mut CoreState, ops: Vec<ApplyOp>, occurrence: Occurrence) {
+    for op in ops {
+        apply(core, op).expect("kaya: applying an undo op failed");
+    }
+    // The chrome an undo restored may have changed what the roles can do
+    // (a restored row, a moved focus), and the item that fired is about
+    // to be asked again.
+    if core.roles_armed {
+        refresh_role_enablement(core);
+    }
+    core.occurrences.send(occurrence);
 }
 
 /// Perform a clipboard role on the focused widget. Answers whether it
@@ -3588,6 +3936,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("entries carry a tag");
                     let handler_tag = tag.clone();
+                    let bank_id = id.0;
                     let field_for_handler = field.clone();
                     let swallow =
                         std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -3608,6 +3957,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             return Ok(());
                         }
                         let text = lf(field_for_handler.Text()?.to_string());
+                        // The ledger sees it BEFORE the app does (§3).
+                        bank_text_changed(bank_id, &text);
                         sink.send_text_tag(&handler_tag, &text);
                         Ok(())
                     });
@@ -3784,6 +4135,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("textareas carry a tag");
                     let handler_tag = tag.clone();
+                    let bank_id = id.0;
                     let field_for_handler = field.clone();
                     let swallow =
                         std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -3800,6 +4152,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             return Ok(());
                         }
                         let text = lf(field_for_handler.Text()?.to_string());
+                        // The ledger sees it BEFORE the app does (§3).
+                        bank_text_changed(bank_id, &text);
                         sink.send_text_tag(&handler_tag, &text);
                         Ok(())
                     });
@@ -4303,14 +4657,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // and the role items resync now.
                 MenuProp::Role => {
                     model.role = crate::protocol::prop_str(&value).to_owned();
-                    refresh_clipboard_roles(core);
+                    // AN AUTHORED ROLE IS ITSELF THE ARMING. Undo's
+                    // enablement moves in a scene that never touches the
+                    // clipboard, so the flag cannot be clipboard traffic
+                    // any more (see `roles_armed`).
+                    core.roles_armed = true;
+                    refresh_role_enablement(core);
                 }
             }
             core.menus_touched = true;
         }
 
         ApplyOp::Copy(clip) => {
-            core.clipboard_armed = true;
+            core.roles_armed = true;
             // Five formats in ONE open, descending clip value —
             // custom, files, image, html, text — the canonical order
             // (§1), which is preference (first-set) order on this
@@ -4345,10 +4704,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             })();
             unsafe { windows::Win32::System::DataExchange::CloseClipboard()? };
             result?;
-            refresh_clipboard_roles(core);
+            refresh_role_enablement(core);
         }
         ApplyOp::ReadClipboard { request, accepting } => {
-            core.clipboard_armed = true;
+            core.roles_armed = true;
             // Answered exactly once; None IS an answer — the
             // universal no (denied, absent, unfocused and
             // nothing-accepted alike). Win32 reads are synchronous
@@ -4356,10 +4715,29 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let clip = materialize_clipboard(&accepting)?;
             core.occurrences.send(Occurrence::ClipboardResult { request, clip });
         }
-        // A1's clear reaches the focused editable through
-        // ClearUndoRedoHistory — the undo milestone's WinUI arm, not
-        // this slice (docs/undo-plan.md §1, §4).
-        ApplyOp::ClearUndo { .. } => crate::depth_stub("undo"),
+        // A1: a core undo group committed, so the focused editable's
+        // native history goes with it (the episode was banked before the
+        // clear, so nothing is lost but granularity).
+        //
+        // THIS IS THE KEYSTONE (§3): every episode begins with an EMPTY
+        // native stack, so the native stack can never reach past the
+        // current episode's start, "ask the focused text first" IS "ask
+        // the most recent first", and the interleave the literature
+        // calls selective undo becomes unconstructible rather than
+        // merely unlikely. It is load-bearing on THIS lane in a way the
+        // plan did not anticipate: WinUI coalesces a whole typing run
+        // into ONE native step (measured), so without the clear a single
+        // Ctrl+Z would walk back past the group.
+        //
+        // TARGETLESS BY DESIGN — the record carries a window and no
+        // widget, because the core does not know what is focused and
+        // this backend does.
+        ApplyOp::ClearUndo { window } => {
+            let _ = window;
+            if let Some(field) = focused_editable_id(core).and_then(|id| editable_by_id(core, id)) {
+                clear_native_undo(&field);
+            }
+        }
         ApplyOp::PresentFileDialog(spec) => {
             // The Shell's common item dialog, which is what Windows
             // means by a file picker.
@@ -4566,6 +4944,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
                         field.SetText(&HSTRING::from(&s))?;
+                        clear_native_undo(field);
                     }
                 }
                 (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
@@ -4645,8 +5024,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     } else {
                         core.accepts.insert(id.0, list);
                     }
-                    core.clipboard_armed = true;
-                    refresh_clipboard_roles(core);
+                    core.roles_armed = true;
+                    refresh_role_enablement(core);
                 }
                 (NativeWidget::Grid2D(_), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
@@ -4910,6 +5289,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
                         field.SetText(&HSTRING::new())?;
+                        clear_native_undo(field);
                         if let Some(tag) = core.entry_tags.get(&id.0) {
                             core.occurrences.send_text_tag(tag, "");
                         }
@@ -5339,6 +5719,15 @@ unsafe extern "system" {
     /// its WNDPROC consumers, matching this block's convention.
     fn AddClipboardFormatListener(hwnd: isize) -> i32;
     fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
+    /// The `type` verb's character-to-keystroke mapping, asked of the
+    /// ACTIVE KEYBOARD LAYOUT rather than hard-coded: the low byte is
+    /// the virtual key, the high byte the shift state (bit 0 shift,
+    /// bit 1 control, bit 2 alt). A table of our own would be a US
+    /// layout wearing a platform's name — `!` and `"` do not live on
+    /// the same keys everywhere — and the verb's contract is printable
+    /// ASCII, not a keycap set.
+    #[cfg(feature = "harness")]
+    fn VkKeyScanW(ch: u16) -> i16;
     fn CallWindowProcW(
         prev: isize,
         hwnd: isize,
@@ -5608,7 +5997,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             open_context: None,
             menus_touched: false,
             accepts: HashMap::new(),
-            clipboard_armed: false,
+            roles_armed: false,
+            banked_text: HashMap::new(),
+            ledger_quiet: HashMap::new(),
         });
     });
 
@@ -5717,6 +6108,62 @@ impl WinUiStage {
     /// fail-fasted or hung the moment the settles stopped hiding the
     /// materialization window). Actions keep on_ui: their targets are
     /// proven by a preceding expect, so an error there IS a bug.
+    /// Foreground the guest and CONFIRM it before injecting anything.
+    ///
+    /// SHARED BY THE TWO VERBS THAT PUT REAL KEYS ON THE SYSTEM INPUT
+    /// QUEUE — `shortcut` and `type` — because the queue is OS-GLOBAL
+    /// and the failure it protects against is the same for both:
+    /// keystrokes landing in whatever window happens to be frontmost.
+    /// Failing to take the foreground fails the leg LOUDLY rather than
+    /// spraying input at a bystander. (A bounded confirmation poll, not
+    /// a lifecycle sleep.)
+    fn foreground_guest(what: &str) {
+        let hwnd = Self::on_ui(|core| {
+            let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+            native.window_handle()
+        });
+        let mut confirmed = false;
+        for attempt in 0..150 {
+            if unsafe { GetForegroundWindow() } == hwnd {
+                confirmed = true;
+                break;
+            }
+            unsafe { SetForegroundWindow(hwnd) };
+            if attempt == 10 {
+                // An ACTIVE MENU categorically blocks SetForegroundWindow
+                // — "no menus are active" is one of the documented
+                // preconditions, so retrying and the ALT tap below can
+                // never win against an open Start menu. ESC dismisses it.
+                // This is not hypothetical: an unattended run on
+                // 2026-07-25 lost two legs to a Start menu left open by
+                // an earlier wedged run, which held the foreground until
+                // something else happened to dismiss it. Nothing about
+                // that required a human at the VM.
+                unsafe {
+                    keybd_event(0x1B, 0, 0, 0);
+                    keybd_event(0x1B, 0, 2, 0);
+                }
+            }
+            if attempt == 50 {
+                // The classic foreground-lock release: a bare ALT tap
+                // grants the next SetForegroundWindow call.
+                unsafe {
+                    keybd_event(0x12, 0, 0, 0);
+                    keybd_event(0x12, 0, 2, 0);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            confirmed,
+            "kaya: could not foreground the guest window for {what} \
+             injection after 3s (an ACTIVE MENU blocks SetForegroundWindow \
+             outright — a Start menu or popup left open on the VM is the \
+             usual cause; ESC and the ALT foreground-lock release were \
+             both tried)"
+        );
+    }
+
     fn on_ui_read<T: Send + 'static>(
         f: impl FnOnce(&CoreState) -> windows_core::Result<T> + Send + 'static,
     ) -> windows_core::Result<T> {
@@ -5758,8 +6205,8 @@ impl crate::harness::Stage for WinUiStage {
             // enablement on a DEFERRED tick, so without this a
             // focus-then-activate script races that tick (measured:
             // the clipboard scene's first Edit>Paste, rust leg).
-            if core.clipboard_armed {
-                refresh_clipboard_roles(core);
+            if core.roles_armed {
+                refresh_role_enablement(core);
             }
             let (roots, flyout, attachment) = match &core.open_context {
                 Some((widget, flyout)) => (
@@ -6221,6 +6668,18 @@ impl crate::harness::Stage for WinUiStage {
         use crate::harness::MenuAspect;
         let path = path.to_owned();
         Self::on_ui_read(move |core| {
+            // THE HARNESS *READ* NEEDS THE SAME FRESHNESS THE
+            // ACTIVATION HAS. menu_activate and shortcut both refresh
+            // before they act; this read did not, so it answered with
+            // whatever enablement the item last had stamped on it — and
+            // no scene caught it, because none until undo.steps asserts
+            // an enablement that MOVES with no menu traffic in between
+            // (typing changes what Edit>Undo can do). The mac arm hit
+            // exactly this from the other side, where NSMenu.update()
+            // validated nothing (§3a's second finding).
+            if core.roles_armed {
+                refresh_role_enablement(core);
+            }
             // Open-context EXCLUSIVITY: while presented, the context
             // menu owns resolution — a miss reads as the retryable
             // "no such item", never a bar fallback.
@@ -6309,8 +6768,8 @@ impl crate::harness::Stage for WinUiStage {
                 // Same freshness rule as menu_activate: the chord may
                 // land on a role item whose enablement is a deferred
                 // tick stale.
-                if core.clipboard_armed {
-                    refresh_clipboard_roles(core);
+                if core.roles_armed {
+                    refresh_role_enablement(core);
                 }
                 Ok(core.menu_shortcuts.contains_key(&spec))
             }
@@ -6329,54 +6788,7 @@ impl crate::harness::Stage for WinUiStage {
              (the leaf kinds that may carry one are action, toggle, and \
              radio option)"
         );
-        let hwnd = Self::on_ui(|core| {
-            let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
-            native.window_handle()
-        });
-        // Foreground the guest and CONFIRM it before pressing
-        // anything; failing to take foreground fails the leg loudly
-        // rather than spraying the chord at whatever else is focused.
-        // (A bounded confirmation poll, not a lifecycle sleep.)
-        let mut confirmed = false;
-        for attempt in 0..150 {
-            if unsafe { GetForegroundWindow() } == hwnd {
-                confirmed = true;
-                break;
-            }
-            unsafe { SetForegroundWindow(hwnd) };
-            if attempt == 10 {
-                // An ACTIVE MENU categorically blocks SetForegroundWindow
-                // — "no menus are active" is one of the documented
-                // preconditions, so retrying and the ALT tap below can
-                // never win against an open Start menu. ESC dismisses it.
-                // This is not hypothetical: an unattended run on
-                // 2026-07-25 lost two legs to a Start menu left open by
-                // an earlier wedged run, which held the foreground until
-                // something else happened to dismiss it. Nothing about
-                // that required a human at the VM.
-                unsafe {
-                    keybd_event(0x1B, 0, 0, 0);
-                    keybd_event(0x1B, 0, 2, 0);
-                }
-            }
-            if attempt == 50 {
-                // The classic foreground-lock release: a bare ALT tap
-                // grants the next SetForegroundWindow call.
-                unsafe {
-                    keybd_event(0x12, 0, 0, 0);
-                    keybd_event(0x12, 0, 2, 0);
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
-        assert!(
-            confirmed,
-            "kaya: could not foreground the guest window for shortcut \
-             injection after 3s (an ACTIVE MENU blocks SetForegroundWindow \
-             outright — a Start menu or popup left open on the VM is the \
-             usual cause; ESC and the ALT foreground-lock release were \
-             both tried)"
-        );
+        Self::foreground_guest("shortcut");
 
         // The REAL KeyboardAccelerator path: the chord goes onto the
         // system input queue; XAML routes it to the accelerator whose
@@ -6435,8 +6847,131 @@ impl crate::harness::Stage for WinUiStage {
     /// exactly where a stand-in would lie: a text write here would look
     /// like typing and would CLEAR the native history the scene came to
     /// observe, turning a missing arm into a passing leg.
-    fn type_text(&self, _text: &str) {
-        crate::depth_stub("undo")
+    /// The real-keystroke typing verb (docs/undo-plan.md A8), to the
+    /// contract's six points (crates/kaya/src/harness.rs).
+    ///
+    /// 1. THE PLATFORM'S OWN INPUT PATH: `keybd_event` puts each
+    ///    character on the SYSTEM INPUT QUEUE, the same call the
+    ///    `shortcut` verb uses and the same queue kaya's own chord hook
+    ///    watches — so the field's native undo stack fills exactly as a
+    ///    user's typing fills it. A `SetText` here would look like typing
+    ///    and would CLEAR the very history a native-tier scene exists to
+    ///    observe (§1.1's harness consequence).
+    /// 2. WHATEVER HOLDS FOCUS RECEIVES IT: nothing is addressed. The
+    ///    keys go on the queue and Windows routes them; kaya looks the
+    ///    focused field up only to place the caret and to know when the
+    ///    text has landed.
+    /// 3. IT APPENDS: the caret goes to the END with nothing selected
+    ///    before the first keystroke. MEASURED FREE ON THIS LANE (a
+    ///    programmatic Focus() leaves the caret where it was and selects
+    ///    nothing, and the selection move spends no undo step and raises
+    ///    no TextChanged) — and done anyway, because macOS selects a
+    ///    field's whole contents on focus and ONE script is compared
+    ///    byte-for-byte on all five lanes.
+    /// 4. IT BLOCKS UNTIL THE TEXT HAS LANDED: the settle below polls
+    ///    the CONTROL until it shows the full string. An action is not
+    ///    retried, and the action that follows this one in the scene is
+    ///    `menu_activate "Edit>Undo"` — a race there reads as a broken
+    ///    undo rather than a missed keystroke.
+    /// 5. NO SYNTHETIC COALESCING: one key-down/key-up pair per
+    ///    character, in order. Whether the platform merges them into one
+    ///    native step is the platform's business — and on this one it
+    ///    merges the WHOLE RUN (measured), which is why A1's clear at
+    ///    the episode boundary is load-bearing here.
+    /// 6. PRINTABLE ASCII ONLY: `parse` refuses anything else, and the
+    ///    per-character mapping is asked of the ACTIVE LAYOUT
+    ///    (VkKeyScanW) rather than hard-coded.
+    fn type_text(&self, text: &str) {
+        let text = text.to_owned();
+        // The caret first, and the field's text before the run — both
+        // read from the FOCUSED editable, which is the platform's answer
+        // to "who receives this", not kaya's.
+        let before = Self::on_ui(|core| {
+            let Some(id) = focused_editable_id(core) else {
+                return Ok(None);
+            };
+            let Some(field) = editable_by_id(core, id) else {
+                return Ok(None);
+            };
+            let now = lf(field.Text()?.to_string());
+            let n = now.chars().count() as i32;
+            field.SetSelectionStart(n)?;
+            field.SetSelectionLength(0)?;
+            Ok(Some((id, now)))
+        });
+        Self::foreground_guest("type");
+        const KEYEVENTF_KEYUP: u32 = 0x2;
+        for ch in text.chars() {
+            let scan = unsafe { VkKeyScanW(ch as u16) };
+            assert!(
+                scan != -1,
+                "kaya: type {text:?}: the active keyboard layout has no key for {ch:?} \
+                 (parse admits printable ASCII, which every layout can type)"
+            );
+            let vk = (scan & 0xff) as u8;
+            let shifts = (scan >> 8) & 0x7;
+            let mut mods: Vec<u8> = Vec::new();
+            if shifts & 1 != 0 {
+                mods.push(0x10); // VK_SHIFT
+            }
+            if shifts & 2 != 0 {
+                mods.push(0x11); // VK_CONTROL
+            }
+            if shifts & 4 != 0 {
+                mods.push(0x12); // VK_MENU
+            }
+            unsafe {
+                for &m in &mods {
+                    keybd_event(m, 0, 0, 0);
+                }
+                keybd_event(vk, 0, 0, 0);
+                keybd_event(vk, 0, KEYEVENTF_KEYUP, 0);
+                for &m in mods.iter().rev() {
+                    keybd_event(m, 0, KEYEVENTF_KEYUP, 0);
+                }
+            }
+        }
+        // Point 4, and on this backend "processed" means MORE THAN THE
+        // CONTROL SHOWING IT. TextChanged is raised asynchronously, so
+        // the widget holds the typed text a beat before kaya has been
+        // told — and the action this verb exists to precede is
+        // `menu_activate "Edit>Undo"`, whose routing asks the LEDGER.
+        // Settling on the control alone is how the first windows leg of
+        // this scene undid the star group instead of the typing.
+        //
+        // So the condition is the ledger's own view of the field
+        // (`banked_text`, written beside every `note_text_changed`),
+        // which is exactly "every character delivered AND processed"
+        // spelled in the vocabulary of a backend whose change events
+        // are async. Nothing focused is legitimate under the contract
+        // ("the keys go where the platform sends them"), so there is
+        // nothing to wait for and a following assertion reports it.
+        let Some((id, before)) = before else { return };
+        let want = format!("{before}{text}");
+        for _ in 0..400 {
+            let seen = Self::on_ui_read(move |core| Ok(core.banked_text.get(&id).cloned()))
+                .unwrap_or(None);
+            if seen.as_deref() == Some(want.as_str()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // NOT A PANIC, and not silence either: the keys were injected,
+        // so what follows is a real observation of a real state, and the
+        // scene's own `expect` is the verdict. This line is what tells
+        // whoever reads the transcript that the verb knew.
+        let shown = Self::on_ui_read(move |core| {
+            Ok(editable_by_id(core, id)
+                .and_then(|field| field.Text().ok())
+                .map(|t| lf(t.to_string())))
+        })
+        .unwrap_or(None);
+        eprintln!(
+            "kaya: type {text:?}: the ledger never saw {want:?} within 2s of injection \
+             (the field shows {shown:?}) — either the keystrokes went onto the system \
+             input queue and something else took them, or the field's TextChanged never \
+             reached bank_text_changed"
+        );
     }
 
     fn set_text(&self, t: crate::harness::Target, text: &str) {

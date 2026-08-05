@@ -41,7 +41,7 @@ eval "$(opam env 2>/dev/null)" || true
 SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
-DEPTH_SCENES=""
+DEPTH_SCENES="undo"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -893,6 +893,23 @@ for proto in x11 wayland; do
     drain
     run "$proto" clipboard-java env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    drain
+    # The undo scene: one history over two tiers, walked newest-first
+    # (docs/undo-plan.md §3). A DEPTH slice — rust-only here until the
+    # seven other bindings spell `undoable`, when it moves into SCENES.
+    #
+    # ALONE BETWEEN DRAINS, and on this lane that is CORRECTNESS rather
+    # than insurance: the `type` verb delivers REAL key events, which
+    # both protocols route to whatever holds the session's focus. On
+    # wayland the injector is a transient virtual keyboard, and a
+    # keyboard on the seat makes keyboard focus EXCLUSIVE across the
+    # compositor eight pooled legs share (measured 2026-08-03 — a
+    # session-held one broke three unrelated legs' expect_focused). The
+    # drains give the typing no neighbour to reach. On x11 each leg
+    # already owns its Xvfb, and the bracket costs one leg's worth of
+    # pool there.
+    run "$proto" undo-rust env KAYA_SELFTEST=undo \
+        "$CARGO_TARGET_DIR/debug/examples/undo"
     drain
 done
 drain

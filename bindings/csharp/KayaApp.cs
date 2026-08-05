@@ -304,6 +304,12 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx>> backRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> sectionSelected = new();
     internal readonly Dictionary<ulong, Action<Tx>> windowClosed = new();
+    // The ledger's two reports, keyed by WINDOW because the ledger is
+    // (docs/undo-plan.md §3). NOT one-shot, and that is the whole
+    // difference from the alert's table: a history is walked as often as
+    // the user likes, so the registration outlives every step.
+    internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> undone = new();
+    internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> redone = new();
     internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
     internal readonly Dictionary<ulong, Action<Tx, List<PickedFile>>> fileDialogs = new();
     // Clipboard reads share the alert's request/result grammar and so
@@ -321,6 +327,14 @@ sealed class KayaApp
     // declared-inside-a-For edges the model purges along when a parent
     // entry's copy is torn down.
     internal readonly Dictionary<ulong, List<KayaInstance>> Model = new();
+    // How to turn one collection's WIRE fields back into the object the
+    // model keeps, per collection id: (variant, fields, the entry the
+    // mirror still holds or null) -> the value. Registered where the
+    // type is known (KayaRecords.CollectionOf, KayaSums.SumOf, and the
+    // scalar Tx.Collection), because only an undo travels this
+    // direction — every other write hands the model the guest's own
+    // object and encodes a copy for the wire.
+    internal readonly Dictionary<ulong, Func<uint, List<object>, object, object>> Rehydrate = new();
     // Signal mirrors and dependents, for binding-maintained derived
     // signals; the ambient app/tx pair exists because the comparison
     // operators are static and a Signal is only an id (one app per
@@ -391,6 +405,73 @@ sealed class KayaApp
             if (instance.Path.Count == path.Count && PathEq(instance.Path, path, path.Count))
                 return instance;
         return null;
+    }
+
+    /// Fold an undo's payload into the mirrors.
+    ///
+    /// THE ROLLBACK JOURNAL IN REVERSE: Tx.Rollback restores a snapshot
+    /// because nothing was shipped, while an undo restores a delta
+    /// because everything WAS — the core already moved, and the mirror
+    /// is what would otherwise be left behind. Same machinery, opposite
+    /// case, and the payload is core-authoritative, so nothing here
+    /// re-derives anything.
+    ///
+    /// NO DERIVED RECOMPUTE, deliberately. A derived signal's write rode
+    /// the same transaction as the mutation that caused it, so it was
+    /// inside the group and the core restored it too — recomputing here
+    /// would write a value the ledger never banked, outside any
+    /// transaction, and drift the two apart on the next step.
+    internal void AbsorbUndo(UndoDelta delta)
+    {
+        foreach (var signal in delta.Signals)
+            SignalMirrors[signal.Signal] = signal.Value;
+        foreach (var entry in delta.Entries)
+        {
+            if (!Model.TryGetValue(entry.Collection, out var instances))
+                Model[entry.Collection] = instances = new List<KayaInstance>();
+            var instance = InstanceOf(entry.Collection, entry.Path);
+            if (instance == null)
+                instances.Add(instance = new KayaInstance(entry.Path));
+            int at = instance.Entries.FindIndex(e => Equals(e.Key, entry.Key));
+            if (entry.State is { } state)
+            {
+                object current = at >= 0 ? instance.Entries[at].Value : null;
+                object value =
+                    Rehydrate.TryGetValue(entry.Collection, out var rehydrate)
+                        ? rehydrate(state.Variant, state.Fields, current)
+                        : (state.Fields.Count > 0 ? state.Fields[0] : null);
+                var pair = new KeyValuePair<object, object>(entry.Key, value);
+                if (at >= 0)
+                    instance.Entries[at] = pair;
+                else
+                    instance.Entries.Add(pair);
+            }
+            else if (at >= 0)
+            {
+                instance.Entries.RemoveAt(at);
+            }
+        }
+        foreach (var order in delta.Orders)
+        {
+            var instance = InstanceOf(order.Collection, order.Path);
+            if (instance == null)
+                continue;
+            // Position by the payload's list, keeping anything it does
+            // not name at the end: the delta states one instance's whole
+            // order, and an entry it never mentions is one this step did
+            // not touch.
+            var sorted = new List<KeyValuePair<object, object>>(instance.Entries.Count);
+            foreach (var key in order.Keys)
+            {
+                int at = instance.Entries.FindIndex(e => Equals(e.Key, key));
+                if (at < 0)
+                    continue;
+                sorted.Add(instance.Entries[at]);
+                instance.Entries.RemoveAt(at);
+            }
+            sorted.AddRange(instance.Entries);
+            instance.Entries = sorted;
+        }
     }
 
     /// Run `build` with a fresh transaction and submit it atomically. A
@@ -631,6 +712,26 @@ sealed class KayaApp
                     var clip = Representation.From(payload as KayaWire.ClipValues);
                     Dispatch(tx => fn(tx, clip));
                 }
+            }
+            // kaya routed an undo (or a redo), and this is what the CORE
+            // put back. The id is the WINDOW: one ledger per window.
+            //
+            // THE MIRROR FOLLOWS FIRST, and unconditionally. An undo
+            // moved core state without a transaction, so the model would
+            // otherwise be left behind — and a handler reads Count and
+            // Items expecting the RESTORED state, which is the whole
+            // reason the payload is fat. Absorbing before the lookup
+            // also keeps a window that registered no handler honest:
+            // the mirror is the binding's, not the app's.
+            else if (kind == KayaWire.OccKindUndone || kind == KayaWire.OccKindRedone)
+            {
+                var step = (UndoStep)payload;
+                AbsorbUndo(step.Delta);
+                var table = kind == KayaWire.OccKindUndone ? undone : redone;
+                // NOT one-shot: a history is walked as often as the user
+                // likes, so the registration outlives every step.
+                if (table.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, step.Label, step.Delta));
             }
             // A paste rides a click tag verbatim, so it arrives on the
             // ordinary widget/node split — one record kind, the key
@@ -900,6 +1001,46 @@ sealed class Tx
                 instances.RemoveAll(i => KayaApp.PathEq(i.Path, prefix, prefix.Count));
             PurgeChildren(kid, prefix);
         }
+    }
+
+    // Set by Undoable: one name per step, and the check needs a flag
+    // because the marker itself is opaque bytes by then.
+    bool undoGroup;
+
+    /// Make this transaction ONE undoable step, under `label`.
+    ///
+    /// The unit of undo is a NAMED GROUP declared at the opener, not
+    /// every transaction: handlers fire per-gesture transactions
+    /// constantly and most of them are consequences rather than intents,
+    /// and a per-keystroke editor would earn one step per character —
+    /// the exact problem grouping exists to solve. So a group is opt-in,
+    /// which is also what keeps a collaborative app free to own its own
+    /// history (docs/undo-plan.md D2, D8).
+    ///
+    /// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at the
+    /// head: a handler naturally builds first and names the step when it
+    /// knows what the step was, and the wire's head-of-batch rule should
+    /// not turn that into a footgun.
+    ///
+    /// WHAT A GROUP MAY HOLD is the reactive half — signal writes and
+    /// collection deltas, whose inverse the core derives from state it
+    /// already keeps. Focus is permitted and not restored. Anything else
+    /// (a const property write, creating a widget, Clear, showing a
+    /// dialog) fails at apply, naming the op: undo restores state, and
+    /// state is signals plus collections. The app hears the result as
+    /// the window construct's onUndone.
+    public void Undoable(string label) => UndoableIn(0, label);
+
+    /// Undoable against an auxiliary window's ledger. Each window has
+    /// its own history, because Undo in one window has never meant
+    /// "revert what happened in another".
+    public void UndoableIn(ulong window, string label)
+    {
+        if (undoGroup)
+            throw new InvalidOperationException(
+                "kaya: this transaction is already an undo group — one name per step");
+        undoGroup = true;
+        Records.Insert(0, KayaWire.TxUndoGroup(window, label));
     }
 
     public Signal Signal(object initial)
@@ -1241,6 +1382,9 @@ sealed class Tx
         var c = App.NextCollection();
         App.RegisterCollection(c.Id);
         Records.Add(KayaWire.TxCreateCollection(c.Id, new[] { new uint[] { KayaWire.ValueStr } }));
+        // A scalar collection IS its one field, so an undo puts the
+        // value back as it stands.
+        App.Rehydrate[c.Id] = (_, fields, _) => fields.Count > 0 ? fields[0] : null;
         return c;
     }
 
@@ -1511,6 +1655,8 @@ sealed class Tx
         bool? vetoClose = null, bool? listDetail = null,
         long? sectionsPresentation = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
+        Action<Tx, string, UndoDelta>? onUndone = null,
+        Action<Tx, string, UndoDelta>? onRedone = null,
         MenuItem[]? menus = null, ulong id = 0)
     {
         if (title is { } t) Records.Add(KayaWire.TxSetWindowTitle(id, t));
@@ -1522,6 +1668,18 @@ sealed class Tx
             Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, sp));
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
         if (onClosed is { } c) App.windowClosed[id] = c;
+        // The ledger's reports ride the window construct like the
+        // lifecycle handlers, and for the same reason: the ledger is per
+        // window, so the window is what they scope to. Each fires every
+        // time kaya routes an undo (or a redo) there, with the group's
+        // label — EMPTY for a typing episode — and what the core put
+        // back. THE DELTA IS THE ONLY NOTIFICATION: applying an inverse
+        // is a programmatic write, so the echo doctrine silences every
+        // occurrence it would otherwise cause. The binding has already
+        // folded the payload into its own mirrors when the handler runs;
+        // this is where an app folds it into ITS model.
+        if (onUndone is { } u) App.undone[id] = u;
+        if (onRedone is { } re) App.redone[id] = re;
         // The menubar rides the window construct (the window-attribute
         // unification rule): menus: appends top-level grouping nodes
         // (Menu or RadioGroup) to this window's command catalog, in
@@ -1546,11 +1704,13 @@ sealed class Tx
         bool? vetoClose = null, bool? listDetail = null,
         long? sectionsPresentation = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
+        Action<Tx, string, UndoDelta>? onUndone = null,
+        Action<Tx, string, UndoDelta>? onRedone = null,
         MenuItem[]? menus = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
         Window(title, width, height, vetoClose, listDetail, sectionsPresentation,
-            onCloseRequested, onClosed, menus, id);
+            onCloseRequested, onClosed, onUndone, onRedone, menus, id);
     }
 
     /// Request a modal alert (the request/result grammar), named
@@ -1877,6 +2037,16 @@ sealed class Tx
     public const string RoleCut = "cut";
     public const string RoleCopy = "copy";
     public const string RolePaste = "paste";
+
+    /// The same gesture layer one tier deeper. Undo and Redo act on the
+    /// FOCUSED widget first — a text field whose own stack has something
+    /// to give answers before the core's ledger does — and configure
+    /// their own enablement from that same question, which is why they
+    /// are roles and not app-authored actions (docs/undo-plan.md D6).
+    /// An app declares the two items and writes nothing else: the
+    /// routing is kaya's, not the app's.
+    public const string RoleUndo = "undo";
+    public const string RoleRedo = "redo";
 
     /// An action — a leaf command firing exactly one menu_activated
     /// occurrence (menu click OR its shortcut: ONE occurrence, one

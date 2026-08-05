@@ -116,6 +116,32 @@ sealed class RecordInfo
         return value;
     }
 
+    /// The wire direction an undo travels: one entry's fields as the
+    /// core states them, back into the object the model keeps. Only an
+    /// undo needs it — every other write hands the model the guest's own
+    /// object and encodes a copy for the wire.
+    ///
+    /// GUEST-ONLY CONSTRUCTOR PARAMETERS NEVER TRAVELLED, so they come
+    /// from the entry the mirror still holds (an undone update), and
+    /// from the type's default when there is none (an undone remove,
+    /// putting an entry back that the mirror had dropped). Undo restores
+    /// state, and the state the core holds is the wire fields.
+    internal object FromWire(IReadOnlyList<object> fields, object current)
+    {
+        var parameters = Ctor.GetParameters();
+        var args = new object[parameters.Length];
+        bool sameShape = current != null && current.GetType() == Ctor.DeclaringType;
+        for (int i = 0; i < args.Length; i++)
+            args[i] = sameShape
+                ? Getters[i](current)
+                : (parameters[i].ParameterType.IsValueType
+                    ? Activator.CreateInstance(parameters[i].ParameterType)
+                    : null);
+        for (int wire = 0; wire < WireToCtor.Length && wire < fields.Count; wire++)
+            args[WireToCtor[wire]] = fields[wire];
+        return Ctor.Invoke(args);
+    }
+
     internal object WithField(object record, uint wireIndex, object value)
     {
         var args = new object[Getters.Length];
@@ -268,7 +294,11 @@ static class KayaRecords
     public static RecordCollection<T> CollectionOf<T>(this Tx tx)
     {
         var info = RecordInfo.Of(typeof(T));
-        return new RecordCollection<T>(tx.CollectionWithSchema(info.Schema), info);
+        var c = tx.CollectionWithSchema(info.Schema);
+        // How an undo puts one of this collection's entries back: the
+        // record type is the schema in this direction too.
+        tx.App.Rehydrate[c.Id] = (_, fields, current) => info.FromWire(fields, current);
+        return new RecordCollection<T>(c, info);
     }
 
     /// The field token for the property a selector expression names:

@@ -319,6 +319,164 @@ func kayaRepresentation(_ clip: KayaClipValues?) -> KayaRepresentation? {
     }
 }
 
+/// What an undo (or a redo) PUT BACK — the core-authoritative statement
+/// of the restored state, never a replay of ops (docs/undo-plan.md D5).
+///
+/// APPLYING AN INVERSE EMITS NOTHING ELSE: it is programmatic by
+/// construction, so the echo doctrine covers it — no text_changed for
+/// the text this restored, no value_changed for the signals. That is
+/// why the payload is fat. This binding folds the two runs it MIRRORS
+/// (signals, collection entries and orders) before the handler runs, so
+/// a read-back inside the handler answers about the restored state; the
+/// runs it does not mirror pass through for the app to fold.
+///
+/// Every group says what a thing now IS, so applying this twice is the
+/// same as applying it once.
+struct KayaUndoDelta {
+    /// Signal id -> its restored value.
+    let signals: [(signal: UInt64, value: KayaValue)]
+    /// Widget id -> its restored text. A coarse episode restore is a
+    /// programmatic write, so NOTHING ELSE would ever tell an app that
+    /// folds text_changed into its own model (which is every app — the
+    /// field is uncontrolled).
+    let texts: [(widget: UInt64, text: String)]
+    /// Collection entries, present or gone.
+    let entries: [KayaUndoEntry]
+    /// Instance orders, for the instances whose order the step changed
+    /// — position is the one thing per-entry statements cannot carry.
+    let orders: [KayaUndoOrder]
+}
+
+/// One collection entry's restored state.
+struct KayaUndoEntry {
+    let collection: UInt64
+    /// The instance path: one key per enclosing For, empty at top level.
+    let path: [KayaValue]
+    let key: KayaValue
+    /// The variant and the record's wire fields, or nil when the
+    /// restored state does not have this entry at all.
+    let state: (variant: UInt32, fields: [KayaValue])?
+}
+
+/// One collection instance's restored key order.
+struct KayaUndoOrder {
+    let collection: UInt64
+    let path: [KayaValue]
+    let keys: [KayaValue]
+}
+
+/// Decode an undone/redone record body (kind 17/18, one layout for
+/// both — one encoder writes them, so one reader reads them).
+///
+/// HAND-WRITTEN AND NOT GENERATED, deliberately: the generated
+/// kayaParseOccurrence reads the widget/keys/payload shape every other
+/// record has, and this record's head is four counts followed by one
+/// flat Values block read as four RUNS. The dispatch loop branches on
+/// the kind BEFORE that parser sees the bytes.
+func kayaParseUndo(_ rec: [UInt8]) -> (window: UInt64, label: String, delta: KayaUndoDelta)? {
+    rec.withUnsafeBytes { raw -> (UInt64, String, KayaUndoDelta)? in
+        guard raw.count >= 32 else { return nil }
+        var at = 8
+        func u32() -> Int {
+            let v = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+            at += 4
+            return Int(v)
+        }
+        let window = raw.loadUnaligned(fromByteOffset: at, as: UInt64.self)
+        at += 8
+        let nSignals = u32(), nTexts = u32(), nEntries = u32(), nOrders = u32()
+        // Values self-pad to 8 and concatenate, so one reader walks the
+        // label and the flat tail alike.
+        func value() -> KayaValue? {
+            guard at + 8 <= raw.count else { return nil }
+            let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+            let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+            guard at + 8 + vlen <= raw.count else { return nil }
+            var out: KayaValue
+            switch vtype {
+            case UInt32(KAYA_VALUE_BOOL):
+                out = .bool(raw[at + 8] != 0)
+            case UInt32(KAYA_VALUE_I64):
+                out = .i64(Int64(bitPattern:
+                    raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+            case UInt32(KAYA_VALUE_F64):
+                out = .f64(Double(bitPattern:
+                    raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+            case UInt32(KAYA_VALUE_BLOB):
+                out = .blob(raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self))
+            default:
+                out = .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+            }
+            at += 8 + ((vlen + 7) & ~7)
+            return out
+        }
+        guard case .str(let label)? = value() else { return nil }
+        // The flat tail's own count, then its reserved word.
+        guard at + 8 <= raw.count else { return nil }
+        let flatCount = u32()
+        at += 4
+        var flat: [KayaValue] = []
+        for _ in 0..<flatCount {
+            guard let v = value() else { return nil }
+            flat.append(v)
+        }
+        var i = 0
+        func take(_ n: Int) -> [KayaValue]? {
+            guard i + n <= flat.count else { return nil }
+            defer { i += n }
+            return Array(flat[i..<(i + n)])
+        }
+        func int(_ v: KayaValue) -> Int? {
+            guard case .i64(let n) = v else { return nil }
+            return Int(n)
+        }
+        var signals: [(signal: UInt64, value: KayaValue)] = []
+        for _ in 0..<nSignals {
+            guard let pair = take(2), let id = int(pair[0]) else { return nil }
+            signals.append((signal: UInt64(id), value: pair[1]))
+        }
+        var texts: [(widget: UInt64, text: String)] = []
+        for _ in 0..<nTexts {
+            guard let pair = take(2), let id = int(pair[0]),
+                case .str(let text) = pair[1]
+            else { return nil }
+            texts.append((widget: UInt64(id), text: text))
+        }
+        // ARITY FIRST, so a reader needs no schema: size counts itself.
+        var entries: [KayaUndoEntry] = []
+        for _ in 0..<nEntries {
+            guard let head = take(1), let size = int(head[0]), size >= 6,
+                let rest = take(size - 1),
+                let collection = int(rest[0]), let present = int(rest[1]),
+                let variant = int(rest[2]), let pathLen = int(rest[3]),
+                pathLen + 4 < rest.count
+            else { return nil }
+            let path = Array(rest[4..<(4 + pathLen)])
+            let key = rest[4 + pathLen]
+            let fields = Array(rest[(5 + pathLen)...])
+            entries.append(KayaUndoEntry(
+                collection: UInt64(collection), path: path, key: key,
+                state: present != 0 ? (variant: UInt32(variant), fields: fields) : nil))
+        }
+        var orders: [KayaUndoOrder] = []
+        for _ in 0..<nOrders {
+            guard let head = take(1), let size = int(head[0]), size >= 3,
+                let rest = take(size - 1),
+                let collection = int(rest[0]), let pathLen = int(rest[1]),
+                pathLen + 2 <= rest.count
+            else { return nil }
+            orders.append(KayaUndoOrder(
+                collection: UInt64(collection),
+                path: Array(rest[2..<(2 + pathLen)]),
+                keys: Array(rest[(2 + pathLen)...])))
+        }
+        return (
+            window, label,
+            KayaUndoDelta(signals: signals, texts: texts, entries: entries, orders: orders)
+        )
+    }
+}
+
 /// Join an accept list: the closed kinds by name plus any custom ids,
 /// space separated.
 ///
@@ -542,6 +700,19 @@ final class KayaApp {
     private var nextFileDialog: UInt64 = 0
     private var windowClosed: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var nodeToggles: [UInt64: (KayaAppTx, [KayaValue], Bool) throws -> Void] = [:]
+    // The two history occurrences, keyed by WINDOW — one ledger per
+    // window (docs/undo-plan.md §3) — and PERSISTENT, the
+    // section-selected stance rather than the alert's one-shot: a
+    // history is walked as often as the user likes.
+    private var undone: [UInt64: (KayaAppTx, String, KayaUndoDelta) throws -> Void] = [:]
+    private var redone: [UInt64: (KayaAppTx, String, KayaUndoDelta) throws -> Void] = [:]
+    // How to rebuild a model entry from the wire fields an undo hands
+    // back, per collection. The model keeps NATIVE values (a KayaValue
+    // for a scalar collection, the guest's own struct or enum for a
+    // record or sum one), and only the type that declared the
+    // collection can make one — so each factory leaves its constructor
+    // here at declaration, which is the only moment the type is known.
+    private var elementDecoders: [UInt64: (UInt32, [KayaValue]) -> Any] = [:]
     // Menu dispatch tables, keyed by MENU ITEM id — their own id
     // space, separate from every widget/node table ("two tables,
     // always" — now N tables, still always). The node flavors receive
@@ -715,6 +886,69 @@ final class KayaApp {
         -> [(key: KayaValue, value: Any)]
     {
         model[coll]?.first { $0.path == path }?.entries ?? []
+    }
+
+    /// Record how this collection's elements are built from wire
+    /// fields; called by every collection factory at declaration.
+    func registerDecoder(_ coll: UInt64, _ decode: @escaping (UInt32, [KayaValue]) -> Any) {
+        elementDecoders[coll] = decode
+    }
+
+    /// Fold an undo's payload into the mirrors this binding keeps.
+    ///
+    /// THE ROLLBACK JOURNAL IN REVERSE: a rolled-back transaction
+    /// restores a snapshot because nothing was shipped; an undo
+    /// restores a delta because everything WAS — the core has already
+    /// moved, and the mirror is what would otherwise be left behind.
+    /// Same machinery, opposite case, and the payload is
+    /// core-authoritative so nothing here re-derives anything.
+    ///
+    /// NOT INSIDE A TRANSACTION, and it must not be: the core moved
+    /// without one, so these writes describe state that is already
+    /// true. Sending records would apply the undo a second time.
+    /// Signals are mirrored here for the same reason (a derived signal
+    /// reads its source's mirror), and the derived recompute does NOT
+    /// re-run: whatever the group wrote to a derived signal is in this
+    /// same payload, restored by the core that owns it.
+    fileprivate func absorbUndo(_ delta: KayaUndoDelta) {
+        for (signal, value) in delta.signals {
+            signalMirrors[signal] = value
+        }
+        for entry in delta.entries {
+            // The same two calls an ordinary mutation makes, so an
+            // undone entry and a removed one leave the model in the
+            // same shape (descendant instances purged included) — one
+            // implementation of each rule, not a second copy here.
+            guard let state = entry.state else {
+                modelRemove(entry.collection, entry.path, entry.key)
+                continue
+            }
+            guard let decode = elementDecoders[entry.collection] else {
+                preconditionFailure(
+                    "kaya: collection \(entry.collection) came back from an undo with no "
+                        + "element decoder — every collection registers one at declaration")
+            }
+            modelSet(
+                entry.collection, entry.path, entry.key,
+                decode(state.variant, state.fields))
+        }
+        for order in delta.orders {
+            guard var instances = model[order.collection],
+                let at = instances.firstIndex(where: { $0.path == order.path })
+            else { continue }
+            // Position by the payload's list, keeping anything it does
+            // not name at the end: the delta describes one instance's
+            // whole order, and an entry it never mentions is one this
+            // undo did not touch.
+            var sorted: [(key: KayaValue, value: Any)] = []
+            for key in order.keys {
+                if let slot = instances[at].entries.firstIndex(where: { $0.key == key }) {
+                    sorted.append(instances[at].entries.remove(at: slot))
+                }
+            }
+            instances[at].entries = sorted + instances[at].entries
+            model[order.collection] = instances
+        }
     }
 
     func nextSignal() -> KayaSignal {
@@ -951,6 +1185,31 @@ final class KayaApp {
         sectionSelected[section] = handler
     }
 
+    /// kaya routed an undo in this window, and this is what the CORE
+    /// put back (internal: the window construct registers at
+    /// declaration — handlers scope to the thing that creates them, and
+    /// the ledger is per window).
+    ///
+    /// PER WINDOW AND PERSISTENT, never one-shot: a history is walked
+    /// as often as the user likes. The label is the group's authored
+    /// name, or EMPTY for a typing episode — kaya invents no
+    /// user-facing strings, so the word for that is the app's to spell.
+    func onUndone(
+        _ window: UInt64, _ handler: @escaping (KayaAppTx, String, KayaUndoDelta) throws -> Void
+    ) {
+        undone[window] = handler
+    }
+
+    /// The onUndone twin, same payload, opposite direction. Only a
+    /// FRONTIER typing episode redoes natively, and that one never
+    /// arrives here: it is the platform's own stack moving, reported by
+    /// its ordinary text_changed.
+    func onRedone(
+        _ window: UInt64, _ handler: @escaping (KayaAppTx, String, KayaUndoDelta) throws -> Void
+    ) {
+        redone[window] = handler
+    }
+
     private func dispatchLoop() {
         var record: UnsafePointer<UInt8>?
         while true {
@@ -971,6 +1230,27 @@ final class KayaApp {
             // routinely kilobytes.
             guard let start = record else { continue }
             let buf = [UInt8](UnsafeBufferPointer(start: start, count: Int(size)))
+            // THE TWO HISTORY RECORDS ARE READ FIRST, and by their own
+            // parser: their head is four counts and one flat Values
+            // block, not the widget/keys/payload shape every other
+            // record has, so the general parser must never see these
+            // bytes. An undo moved core state without a transaction, so
+            // the mirrors are folded HERE, before the handler — a
+            // read-back inside it answers about the restored state.
+            let recKind = buf.withUnsafeBytes {
+                $0.loadUnaligned(fromByteOffset: 4, as: UInt16.self)
+            }
+            if recKind == UInt16(KAYA_OCCURRENCE_UNDONE)
+                || recKind == UInt16(KAYA_OCCURRENCE_REDONE)
+            {
+                guard let (window, label, delta) = kayaParseUndo(buf) else { continue }
+                absorbUndo(delta)
+                let table = recKind == UInt16(KAYA_OCCURRENCE_UNDONE) ? undone : redone
+                if let handler = table[window] {
+                    dispatch { try build { tx in try handler(tx, label, delta) } }
+                }
+                continue
+            }
             guard let (kind, id, keys, payload, files, clip) = kayaParseOccurrence(buf)
             else { continue }
             var text: String?
@@ -1241,6 +1521,9 @@ final class KayaAppTx {
     // thread, so the guard has to be total.
     private var storage = KayaTx()
     private var closed = false
+    /// Whether undoable() has already named this batch — one name per
+    /// step, and the marker is a head-of-batch singleton on the wire.
+    private var named = false
     var tx: KayaTx {
         get {
             alive()
@@ -1318,6 +1601,46 @@ final class KayaAppTx {
         if signalJournal.index(forKey: id) == nil {
             signalJournal[id] = app.signalMirrors[id]
         }
+    }
+
+    /// Make this transaction ONE undoable step, under `label`, in
+    /// `window`'s ledger (docs/undo-plan.md D2).
+    ///
+    /// The unit of undo is a NAMED GROUP declared at the opener, not
+    /// every transaction: handlers fire per-gesture transactions
+    /// constantly and most of them are consequences rather than
+    /// intents, and a per-keystroke editor would earn one step per
+    /// character — the exact problem grouping exists to solve. So a
+    /// group is opt-in, which is also what keeps a collaborative app
+    /// free to own its own history.
+    ///
+    /// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at
+    /// the head: a handler naturally builds first and names the step
+    /// when it knows what the step was, and the wire's head-of-batch
+    /// rule should not turn that into a footgun.
+    ///
+    /// WHAT A GROUP MAY HOLD is the reactive half — signal writes and
+    /// collection deltas, whose inverse the core derives from state it
+    /// already keeps. Focus is permitted and not restored. Anything
+    /// else (a const property write, creating a widget, clear, showing
+    /// a dialog) fails at apply, naming the op: undo restores state,
+    /// and state is signals plus collections. The app hears the result
+    /// through the window construct's onUndone.
+    ///
+    /// Each window has its own history, because Undo in one window has
+    /// never meant "revert what happened in another"; 0 is the primary.
+    func undoable(_ label: String, window: UInt64 = 0) {
+        precondition(
+            !named,
+            "kaya: this transaction is already an undo group — one name per step")
+        named = true
+        // THE HEAD OF THE BATCH, wherever the call sits: a transaction
+        // is a bare list of records with no header, so the marker's
+        // position IS its association with the batch.
+        var head = KayaTx()
+        head.undoGroup(window, .str(label))
+        head.bytes.append(tx.bytes)
+        tx = head
     }
 
     func signal(_ initial: KayaValue) -> KayaSignal {
@@ -1706,6 +2029,9 @@ final class KayaAppTx {
     func collection() -> KayaCollection {
         let c = app.nextCollection()
         app.registerCollection(c.id)
+        // A scalar collection's element IS its one wire value, so the
+        // undo decoder is the identity (see registerDecoder).
+        app.registerDecoder(c.id) { _, values in values[0] }
         tx.createCollection(c.id, [[UInt32(KAYA_VALUE_STR)]])
         return c
     }
@@ -2071,6 +2397,8 @@ final class KayaAppTx {
         listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
+        onUndone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
+        onRedone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
         menus: [KayaMenuItem]? = nil
     ) {
         tx.createWindow(id)
@@ -2079,6 +2407,7 @@ final class KayaAppTx {
             vetoClose: vetoClose, listDetail: listDetail,
             sectionsPresentation: sectionsPresentation,
             onCloseRequested: onCloseRequested, onClosed: onClosed,
+            onUndone: onUndone, onRedone: onRedone,
             menus: menus)
     }
 
@@ -2094,6 +2423,8 @@ final class KayaAppTx {
         listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
+        onUndone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
+        onRedone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
         menus: [KayaMenuItem]? = nil
     ) {
         if let title { tx.setWindowTitle(id, title) }
@@ -2106,6 +2437,12 @@ final class KayaAppTx {
         }
         if let onCloseRequested { app.onCloseRequested(id, onCloseRequested) }
         if let onClosed { app.onWindowClosed(id, onClosed) }
+        // The history handlers ride the window construct because the
+        // LEDGER is per window: one ordered history per surface, so the
+        // registration scopes to the thing that owns it. Persistent —
+        // a history is walked as often as the user likes.
+        if let onUndone { app.onUndone(id, onUndone) }
+        if let onRedone { app.onRedone(id, onRedone) }
         // The menubar rides the window construct (the window-attribute
         // unification rule): menus: appends top-level grouping nodes
         // (menu or radioGroup) to this window's command catalog, in
@@ -2205,6 +2542,21 @@ final class KayaAppTx {
     static let roleCut = "cut"
     static let roleCopy = "copy"
     static let rolePaste = "paste"
+
+    /// The two history commands, and the same gesture layer one tier
+    /// deeper (docs/undo-plan.md D6). They ask the FOCUSED widget
+    /// first — a text field whose own edit history has something to
+    /// give answers before the app's ledger does, which is what an
+    /// editor user expects: mid-typing, Undo means the typing; after a
+    /// structural action, Undo means the action. Enablement is that
+    /// same question, computed live at activation.
+    ///
+    /// AN APP OPTS IN TO THE OTHER TIER BY NAMING ITS STEPS
+    /// (tx.undoable) and hears the result as the window construct's
+    /// onUndone. An app that names none still gets working text undo
+    /// from these items, because the first tier is the platform's.
+    static let roleUndo = "undo"
+    static let roleRedo = "redo"
 
     /// An action — a leaf command firing exactly one menu_activated
     /// occurrence (menu click OR its shortcut: ONE occurrence, one

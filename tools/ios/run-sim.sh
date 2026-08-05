@@ -1485,6 +1485,21 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on commands-swiftui "$APP" dev.kaya.commandsswiftui commands-swiftui \
         commands commands
+
+    # The undo scene, the DEPTH slice's fan-out (rust only until the
+    # sweep): ONE history walked newest-first over two tiers — the
+    # field's own _UITextUndoManager and the core's ledger — through the
+    # Edit>Undo role. This is the one leg in any lane that types with
+    # REAL text input (the `type` verb) rather than set_text, because a
+    # programmatic write clears the very history the first tier is made
+    # of (D7), and on this platform the input path is UIKeyInput's
+    # insertText — the method the system keyboard itself calls, iOS
+    # having no way to post a key event in process (docs/undo-plan.md
+    # §1.3, and swift/KayaSwiftUI.swift's kayaTypeAtFocus).
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example undo
+    APP=$(make_bundle undors-swiftui dev.kaya.undoswiftui "$TARGET_DIR/examples/undo")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on undo-swiftui "$APP" dev.kaya.undoswiftui undo-swiftui undo undo
     drain
     timing swiftui-build+legs
 fi

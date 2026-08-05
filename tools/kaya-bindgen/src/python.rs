@@ -450,7 +450,70 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        window, section = struct.unpack_from(\"<QQ\", buf, 8)");
         c.line("        return kind, section, [], window");
     }
-c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
+    // ONE STEP CAME BACK. The payload is a STATEMENT OF THE RESTORED
+    // STATE rather than a replay of ops: four counted runs cut out of
+    // one flat Values tail, in the fixed order signals, texts, entries,
+    // orders (docs/undo-plan.md D5; wire::undo_body). Its own arm for
+    // the file_dialog_result reason — the generic tail below would take
+    // `window` for a widget id and the SIGNAL COUNT for a key-path
+    // length, and read the label's bytes as keys.
+    let undo = crate::undo_occurrence_names(spec)
+        .iter()
+        .map(|n| format!("OCC_{}", n.to_uppercase()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !undo.is_empty() {
+        c.line(&format!("    if kind in ({undo},):"));
+        c.line("        # One undone/redone step: the window, four run");
+        c.line("        # lengths, the group's label, then ONE flat values");
+        c.line("        # tail the runs cut up — signals, texts, entries,");
+        c.line("        # orders, in that order. The payload is the whole");
+        c.line("        # RESTORED STATE, never a replay of ops.");
+        c.line("        window, n_signals, n_texts, n_entries, n_orders = \\");
+        c.line("            struct.unpack_from(\"<QIIII\", buf, 8)");
+        c.line("        at = 32");
+        c.line("        label, at = parse_value(buf, at)");
+        c.line("        count, _reserved = struct.unpack_from(\"<II\", buf, at)");
+        c.line("        at += 8");
+        c.line("        flat = []");
+        c.line("        for _ in range(count):");
+        c.line("            value, at = parse_value(buf, at)");
+        c.line("            flat.append(value)");
+        c.line("        i = 0");
+        c.line("        signals = []");
+        c.line("        for _ in range(n_signals):");
+        c.line("            signals.append((flat[i], flat[i + 1]))");
+        c.line("            i += 2");
+        c.line("        texts = []");
+        c.line("        for _ in range(n_texts):");
+        c.line("            texts.append((flat[i], flat[i + 1]))");
+        c.line("            i += 2");
+        // Arity-first, so each group carries its own size and a reader
+        // needs nothing else: 5 fixed values, then the instance path,
+        // the key, and the record — `size` counts itself.
+        c.line("        entries = []");
+        c.line("        # Arity-first groups: `size` counts itself, so a");
+        c.line("        # reader takes it and needs nothing else.");
+        c.line("        for _ in range(n_entries):");
+        c.line("            size, coll, present, variant, path_len = flat[i:i + 5]");
+        c.line("            body = flat[i + 5:i + size]");
+        c.line("            i += size");
+        c.line("            state = (variant, body[path_len + 1:]) if present else None");
+        c.line("            entries.append((coll, tuple(body[:path_len]), body[path_len], state))");
+        c.line("        orders = []");
+        c.line("        for _ in range(n_orders):");
+        c.line("            size, coll, path_len = flat[i:i + 3]");
+        c.line("            body = flat[i + 3:i + size]");
+        c.line("            i += size");
+        c.line("            orders.append((coll, tuple(body[:path_len]), body[path_len:]))");
+        // A truncated or over-long body is a broken ENCODER, not bad
+        // input, and it fails here rather than handing the app half a
+        // step (the read-in-threes rule the picker already follows).
+        c.line("        if i != len(flat):");
+        c.line("            raise ValueError(\"kaya: undo delta has trailing values\")");
+        c.line("        return kind, window, [], (label, signals, texts, entries, orders)");
+    }
+    c.line("    ident, path_len = struct.unpack_from(\"<QI\", buf, 8)");
     c.line("    keys = []");
     c.line("    at = 24");
     c.line("    for _ in range(path_len):");

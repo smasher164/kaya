@@ -188,7 +188,11 @@ public final class KayaSums {
             infos[i] = KayaRecords.Info.of(constructors[i]);
             schemas[i] = infos[i].schema;
         }
-        return new SumCollection<>(tx.collectionWithVariants(schemas), variants, infos);
+        KayaApp.Collection handle = tx.collectionWithVariants(schemas);
+        // The undo delta names the constructor it restored, so the sum's
+        // rebuild picks the arm rather than assuming one.
+        tx.registerRebuild(handle.id, (variant, fields) -> infos[variant].fromWire(fields));
+        return new SumCollection<>(handle, variants, infos);
     }
 
     /**

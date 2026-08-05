@@ -8,6 +8,13 @@
 // SignalDeps) are in reach; Dispatch is private, so the boundary test
 // covers the rollback and the dispatch wrapper stays compile-visible
 // only.
+//
+// It has since become the place for every C# surface fact a SCENE
+// cannot see — the menu constructors' record emission, and now the undo
+// group's head-of-batch rule and the mirror fold an undone/redone
+// payload drives. A scene asserts what the user sees; a marker in the
+// wrong place or a payload folded into the wrong mirror can still leave
+// one platform's scene passing.
 
 using System;
 using System.Collections.Generic;
@@ -218,6 +225,90 @@ static class AbortCheck
             Check(CountKind(tx.Records, before, KayaWire.TxKindMenubarAppend) == 0,
                 "reopen re-anchored the bar");
         });
+
+        // THE UNDO SURFACE (docs/undo-plan.md D2, D5). Three facts no
+        // scene can see, for the same reason the menu section above
+        // exists: the scene asserts what the USER sees, and a group
+        // marker in the wrong place or a payload folded into the wrong
+        // mirror can still produce a passing scene on one platform.
+        app.Build(tx =>
+        {
+            int before = tx.Records.Count;
+            var s = tx.Signal("a");
+            tx.Write(s, "b");
+            // NAMED AFTER THE WORK, which is how a handler is written —
+            // it builds first and knows what the step was afterwards —
+            // and the marker must still LEAD the batch, because the wire
+            // reads it head-of-batch.
+            tx.Undoable("step");
+            Check(RecKind(tx.Records[before]) == KayaWire.TxKindUndoGroup,
+                "Undoable did not put the group marker at the head of the batch");
+            Check(CountKind(tx.Records, before, KayaWire.TxKindUndoGroup) == 1,
+                "Undoable queued the wrong undo_group count");
+            bool threw = false;
+            try { tx.Undoable("again"); }
+            catch (InvalidOperationException) { threw = true; }
+            Check(threw, "a second Undoable must refuse — one name per step");
+        });
+
+        // The fold an undone/redone payload drives, on the mirror side:
+        // the core already moved, so a mirror that does not follow makes
+        // every read-back stale. This is the ONE direction the wire
+        // travels wire-fields-to-object, so it is the one the record
+        // type's schema is used in reverse.
+        RecordCollection<Todo> notes = default;
+        app.Build(tx =>
+        {
+            notes = tx.CollectionOf<Todo>();
+            notes.Insert(tx, "a", new Todo("milk", false));
+            notes.Insert(tx, "b", new Todo("tea", false));
+        });
+        var undone = new UndoDelta();
+        // "a" is gone (an undone insert), "b" is restored with the
+        // fields the core states, and a third entry the mirror never had
+        // comes back from nothing (an undone remove).
+        undone.Entries.Add(new UndoEntry
+        {
+            Collection = notes.Collection.Id,
+            Key = "a",
+            State = null,
+        });
+        undone.Entries.Add(new UndoEntry
+        {
+            Collection = notes.Collection.Id,
+            Key = "b",
+            State = (0u, new List<object> { "tea", true }),
+        });
+        undone.Entries.Add(new UndoEntry
+        {
+            Collection = notes.Collection.Id,
+            Key = "c",
+            State = (0u, new List<object> { "cocoa", false }),
+        });
+        undone.Orders.Add(new UndoOrder
+        {
+            Collection = notes.Collection.Id,
+            Keys = new List<object> { "c", "b" },
+        });
+        undone.Signals.Add(new UndoSignal(counter.Id, "restored"));
+        app.AbsorbUndo(undone);
+        app.Build(tx =>
+        {
+            var items = notes.Items(tx);
+            Check(!items.Exists(e => Equals(e.Key, "a")),
+                "the undo fold did not drop the entry the payload says is gone");
+            Check(items.Exists(e => Equals(e.Key, "c")),
+                "the undo fold did not add the entry the payload says is back");
+            Check(items.Count == 2, "the undo fold left the wrong entry count");
+            Check(Equals(items[0].Key, "c") && Equals(items[1].Key, "b"),
+                "the undo fold did not reorder by the payload's key order");
+            Check(items[1].Value == new Todo("tea", true),
+                "the undo fold did not rebuild the record from the wire fields");
+            Check(items[0].Value == new Todo("cocoa", false),
+                "the undo fold did not restore an entry the mirror had dropped");
+        });
+        Check(Equals(app.SignalMirrors[counter.Id], "restored"),
+            "the undo fold did not follow the signal mirror");
 
         // An aborted append drops its menu records with everything
         // else (records die with the tx; nothing ships) and the app

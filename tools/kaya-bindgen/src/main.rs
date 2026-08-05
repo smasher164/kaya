@@ -375,6 +375,32 @@ pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
         .collect()
 }
 
+/// Occurrences carrying an UNDO DELTA: a window, four u32 run lengths,
+/// the group's `label`, and one flat `delta` Values tail the runs cut up
+/// (`undone` and `redone` — docs/undo-plan.md D5, and
+/// `wire::undo_body`'s counts-in-the-head encoding).
+///
+/// DERIVED on the id_only stance, and it has to be: the generic tail
+/// every parser falls through to reads {u64 id, u32 path_len} and would
+/// take `window` for a widget and the SIGNAL COUNT for a key-path
+/// length, then read the label's bytes as keys. A third delta-shaped
+/// occurrence added by hand-copied lists would meet that silently in
+/// whichever of the 8 parsers nobody remembered.
+pub(crate) fn undo_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
+    spec.occurrence
+        .iter()
+        .filter(|r| {
+            let n = r.fields.len();
+            n >= 2
+                && r.fields[n - 2].name == "label"
+                && matches!(r.fields[n - 2].ty, kaya::spec::FieldTy::Value)
+                && r.fields[n - 1].name == "delta"
+                && matches!(r.fields[n - 1].ty, kaya::spec::FieldTy::Values)
+        })
+        .map(|r| r.name)
+        .collect()
+}
+
 /// Click-shaped occurrences without a payload (button_clicked,
 /// menu_activated): {u64 id, u32 path_len, u32 reserved}, then the
 /// key path. The 7 generic parsers fall through to the click path via

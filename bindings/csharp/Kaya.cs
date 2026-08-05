@@ -12,6 +12,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
+using System.Text;
 using System.Threading;
 
 /// One file the picker answered with: a handle to redeem, a display
@@ -94,6 +95,62 @@ abstract record Representation
         }
     }
 }
+
+/// One signal the core put back: its id and its restored value.
+readonly record struct UndoSignal(ulong Signal, object Value);
+
+/// One field's restored text. A coarse episode restore is a
+/// programmatic write, so nothing else would ever tell an app that
+/// folds OnChange into its own model (docs/undo-plan.md D5).
+readonly record struct UndoText(ulong Widget, string Text);
+
+/// One collection entry's restored state. State is null when the
+/// restored state does not have this entry at all — the entry is gone,
+/// which is what undoing an insert means.
+sealed class UndoEntry
+{
+    public ulong Collection;
+    /// The instance path: one key per enclosing For, empty at top level.
+    public List<object> Path = new();
+    public object Key;
+    public (uint Variant, List<object> Fields)? State;
+}
+
+/// One collection instance's restored key order — position is the one
+/// thing per-entry statements cannot carry, so it travels separately
+/// and only for the instances a step actually reordered.
+sealed class UndoOrder
+{
+    public ulong Collection;
+    public List<object> Path = new();
+    public List<object> Keys = new();
+}
+
+/// What an undo or a redo PUT BACK: the core-authoritative statement of
+/// the restored state (docs/undo-plan.md D5).
+///
+/// A STATEMENT, NOT A REPLAY. Every member says what a thing now IS, so
+/// a mirror that applies one twice is still correct and no binding
+/// diffs anything of its own. The core owns the truth; the eight
+/// bindings fold the same payload the way they already fold a rollback
+/// journal, which is what keeps mirror drift to one implementation
+/// instead of eight.
+sealed class UndoDelta
+{
+    /// Signal id -> its restored value.
+    public readonly List<UndoSignal> Signals = new();
+    /// Widget id -> its restored text.
+    public readonly List<UndoText> Texts = new();
+    /// Collection entries, present or gone.
+    public readonly List<UndoEntry> Entries = new();
+    /// Instance orders, for the instances whose order the step changed.
+    public readonly List<UndoOrder> Orders = new();
+}
+
+/// One step off the ledger, as the decoder hands it over: the group's
+/// authored name — EMPTY for a typing episode, since kaya invents no
+/// user-facing strings — and what the core put back.
+sealed record UndoStep(string Label, UndoDelta Delta);
 
 static class Kaya
 {
@@ -254,6 +311,126 @@ static class Kaya
     public static ulong RegisterBlob(byte[] data) =>
         kaya_blob_register(data, (nuint)data.Length);
 
+    /// One value at `at`, advancing past it (header plus payload,
+    /// padded to eight). A blob is redeemed and RELEASED here, exactly
+    /// as the generated ParseClip does it: the pointer borrows core
+    /// memory that the release frees, and an occurrence blob's handle
+    /// has no batch boundary to retire it.
+    static object ReadValue(byte[] rec, ref int at)
+    {
+        uint vtype = BitConverter.ToUInt32(rec, at);
+        int vlen = (int)BitConverter.ToUInt32(rec, at + 4);
+        object value = vtype switch
+        {
+            KayaWire.ValueBool => rec[at + 8] != 0,
+            KayaWire.ValueI64 => BitConverter.ToInt64(rec, at + 8),
+            KayaWire.ValueF64 => BitConverter.ToDouble(rec, at + 8),
+            KayaWire.ValueBlob => OccurrenceBlob(BitConverter.ToUInt64(rec, at + 8)),
+            _ => (object)Encoding.UTF8.GetString(rec, at + 8, vlen),
+        };
+        at += 8 + ((vlen + 7) & ~7);
+        return value;
+    }
+
+    static long AsInt(object v) =>
+        v is long n ? n
+        : throw new InvalidOperationException(
+            $"kaya: the undo delta wanted an integer, got {v?.GetType().Name ?? "null"}");
+
+    /// Decode an `undone` / `redone` record — the two occurrence kinds
+    /// the GENERATED parser cannot read.
+    ///
+    /// WHY THIS IS HAND-WRITTEN AND WHY IT IS IN FRONT. kaya-bindgen
+    /// emits the record's constants and puts its kind in
+    /// ParseOccurrence's accept list (both derive from the spec), but
+    /// the body shape — four run counts, a label, then one flat value
+    /// list read as four runs — is not one the generator models. Handed
+    /// this record, ParseOccurrence reads the `signals` count as a key
+    /// path length and the `entries`/`orders` counts as a value header,
+    /// then walks off the end of the record. So the kind is checked
+    /// BEFORE the generated parser is called, not after it fails.
+    ///
+    /// `id` is the WINDOW, because the ledger is per window (§3): Undo
+    /// in one window has never meant "revert what happened in another".
+    static bool ParseUndo(
+        byte[] rec, out ushort kind, out ulong id, out List<object> keys, out object payload)
+    {
+        kind = BitConverter.ToUInt16(rec, 4);
+        keys = new List<object>();
+        id = BitConverter.ToUInt64(rec, 8);
+        int signals = (int)BitConverter.ToUInt32(rec, 16);
+        int texts = (int)BitConverter.ToUInt32(rec, 20);
+        int entries = (int)BitConverter.ToUInt32(rec, 24);
+        int orders = (int)BitConverter.ToUInt32(rec, 28);
+        int at = 32;
+        string label = ReadValue(rec, ref at) as string ?? "";
+        int count = (int)BitConverter.ToUInt32(rec, at);
+        at += 8; // the count and its reserved word
+        var flat = new List<object>(count);
+        for (int i = 0; i < count; i++)
+            flat.Add(ReadValue(rec, ref at));
+
+        var delta = new UndoDelta();
+        int k = 0;
+        List<object> Next(int n)
+        {
+            if (k + n > flat.Count)
+                throw new InvalidOperationException("kaya: the undo delta is truncated");
+            var run = flat.GetRange(k, n);
+            k += n;
+            return run;
+        }
+        for (int i = 0; i < signals; i++)
+        {
+            var pair = Next(2);
+            delta.Signals.Add(new UndoSignal((ulong)AsInt(pair[0]), pair[1]));
+        }
+        for (int i = 0; i < texts; i++)
+        {
+            var pair = Next(2);
+            delta.Texts.Add(new UndoText((ulong)AsInt(pair[0]), pair[1] as string ?? ""));
+        }
+        // Both group runs are ARITY-FIRST — size counts itself — so a
+        // reader needs no schema and a record it cannot interpret still
+        // advances by exactly the right distance.
+        for (int i = 0; i < entries; i++)
+        {
+            var head = Next(5);
+            int size = (int)AsInt(head[0]);
+            int pathLen = (int)AsInt(head[4]);
+            var rest = Next(size - 5);
+            var entry = new UndoEntry
+            {
+                Collection = (ulong)AsInt(head[1]),
+                Path = rest.GetRange(0, pathLen),
+                Key = rest[pathLen],
+            };
+            // Bit 0 of the flags says the entry EXISTS; clear means the
+            // restored state does not have it.
+            if ((AsInt(head[2]) & 1) != 0)
+                entry.State = ((uint)AsInt(head[3]),
+                    rest.GetRange(pathLen + 1, rest.Count - pathLen - 1));
+            delta.Entries.Add(entry);
+        }
+        for (int i = 0; i < orders; i++)
+        {
+            var head = Next(3);
+            int size = (int)AsInt(head[0]);
+            int pathLen = (int)AsInt(head[2]);
+            var rest = Next(size - 3);
+            delta.Orders.Add(new UndoOrder
+            {
+                Collection = (ulong)AsInt(head[1]),
+                Path = rest.GetRange(0, pathLen),
+                Keys = rest.GetRange(pathLen, rest.Count - pathLen),
+            });
+        }
+        if (k != flat.Count)
+            throw new InvalidOperationException("kaya: the undo delta has trailing values");
+        payload = new UndoStep(label, delta);
+        return true;
+    }
+
     /// Block for the next occurrence; false when the core has shut
     /// down. keys is empty when id is a widget id, else id is a
     /// template node id and keys is the stamped copy's key path,
@@ -291,7 +468,10 @@ static class Kaya
             uint size = *(uint*)at;
             byte[] rec = new byte[size];
             Marshal.Copy((IntPtr)at, rec, 0, (int)size);
-            bool valid = KayaWire.ParseOccurrence(rec, out kind, out id, out keys, out payload);
+            ushort peek = BitConverter.ToUInt16(rec, 4);
+            bool valid = peek == KayaWire.OccKindUndone || peek == KayaWire.OccKindRedone
+                ? ParseUndo(rec, out kind, out id, out keys, out payload)
+                : KayaWire.ParseOccurrence(rec, out kind, out id, out keys, out payload);
             h += size;
             Volatile.Write(ref *head, h); // release: hand the space back
             if (valid)

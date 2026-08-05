@@ -77,6 +77,17 @@ public final class KayaApp {
 
     public static final String ROLE_PASTE = "paste";
 
+    /** The same gesture layer one tier deeper (docs/undo-plan.md D6).
+     * Undo asks the FOCUSED widget first — a text widget whose native
+     * stack has something to give answers before the core's ledger does
+     * — and works out its own enablement from that same question, which
+     * is why these are roles and not app-authored actions. An app that
+     * declares them writes nothing else for undo except
+     * {@link Tx#undoable}. */
+    public static final String ROLE_UNDO = "undo";
+
+    public static final String ROLE_REDO = "redo";
+
     /**
      * A container's cross-axis child placement (the align spec enum;
      * wire values pinned by the generated KayaWire constants).
@@ -128,6 +139,19 @@ public final class KayaApp {
             new java.util.HashMap<>();
     private final java.util.Map<Long, PasteHandler> nodePastes = new java.util.HashMap<>();
     private long nextClipboardRead;
+    // Undo/redo handlers, keyed by WINDOW because the ledger is: Undo in
+    // one window has never meant "revert what happened in another". NOT
+    // one-shot — the section-selected stance rather than the alert's; a
+    // history is walked as often as the user likes.
+    private final java.util.Map<Long, UndoHandler> undone = new java.util.HashMap<>();
+    private final java.util.Map<Long, UndoHandler> redone = new java.util.HashMap<>();
+    // How to rebuild a collection entry's model value from the wire
+    // fields an undo hands back. Registered where the collection is
+    // declared, because that is the only place the guest's type is
+    // known — the model keeps the guest's own object, while the delta
+    // is core-authoritative wire values.
+    final Map<Long, java.util.function.BiFunction<Integer, List<Object>, Object>> rebuild =
+            new HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> windowClosed = new java.util.HashMap<>();
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
     // The ambient parent stack: containers push their id around their
@@ -177,6 +201,56 @@ public final class KayaApp {
      * keys, then the new 0-based option index. */
     public interface MenuSelectHandler {
         void accept(Tx tx, List<Object> keys, int index);
+    }
+
+    /** One signal the undo put back. */
+    public record UndoSignal(long signal, Object value) {}
+
+    /** One field's restored text.
+     *
+     * <p>THE DELTA IS THE ONLY NOTIFICATION for this run: restoring a
+     * typing episode is a programmatic write, and a programmatic write
+     * never echoes, so an app folding {@code onChange} into its own
+     * model would go stale on exactly this step if the payload did not
+     * carry it (docs/undo-plan.md D5). */
+    public record UndoText(long widget, String text) {}
+
+    /** One collection entry's restored state. {@code present} false is
+     * "the restored state does not have this entry at all", and then
+     * {@code variant} and {@code fields} are empty. */
+    public record UndoEntry(
+            long collection,
+            List<Object> path,
+            Object key,
+            boolean present,
+            int variant,
+            List<Object> fields) {}
+
+    /** One collection instance's restored key order — position is the
+     * one thing per-entry statements cannot carry. */
+    public record UndoOrder(long collection, List<Object> path, List<Object> keys) {}
+
+    /**
+     * What an undo or a redo PUT BACK: the core-authoritative statement
+     * of the restored state (docs/undo-plan.md D5).
+     *
+     * <p>A STATEMENT, NOT A REPLAY. Every member says what a thing now
+     * IS, so a mirror that applies one twice is still correct and no
+     * binding diffs anything of its own. The core owns the truth; the
+     * eight bindings fold the same payload the way they already fold a
+     * rollback journal, which is what keeps mirror drift to one
+     * implementation instead of eight.
+     */
+    public record UndoDelta(
+            List<UndoSignal> signals,
+            List<UndoText> texts,
+            List<UndoEntry> entries,
+            List<UndoOrder> orders) {}
+
+    /** An undo's or a redo's handler: the group's authored label (EMPTY
+     * for a typing episode) and what the core put back. */
+    public interface UndoHandler {
+        void accept(Tx tx, String label, UndoDelta delta);
     }
 
     // The collection is the model — the only copy: every mutation op
@@ -1506,6 +1580,60 @@ public final class KayaApp {
         }
 
         /**
+         * The head-of-batch undo marker, or null. Held apart from
+         * {@code records} rather than inserted at index 0, for two
+         * reasons that agree: the wire's rule is that the marker LEADS
+         * the batch while the call may sit anywhere in the chain, and
+         * {@link #emit} is the one and only append (a second
+         * {@code records.add} would be a write that skipped the
+         * liveness check — see tools/check-tx-liveness.sh). Prepended by
+         * {@link #submitIfAny}.
+         */
+        private byte[] undoGroup;
+
+        /**
+         * Make this transaction ONE undoable step, under {@code label}.
+         *
+         * <p>The unit of undo is a NAMED GROUP declared at the opener,
+         * not every transaction: handlers fire per-gesture transactions
+         * constantly and most of them are consequences rather than
+         * intents, and a per-keystroke editor would earn one step per
+         * character — the exact problem grouping exists to solve. So a
+         * group is opt-in, which is also what keeps a collaborative app
+         * free to own its own history (docs/undo-plan.md D2, D8).
+         *
+         * <p>CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides
+         * at the head: a handler naturally builds first and names the
+         * step when it knows what the step was, and the wire's
+         * head-of-batch rule should not turn that into a footgun.
+         *
+         * <p>WHAT A GROUP MAY HOLD is the reactive half — signal writes
+         * and collection deltas, whose inverse the core derives from
+         * state it already keeps. Focus is permitted and not restored.
+         * Anything else (a const property write, creating a widget,
+         * clear, showing a dialog) fails at apply, naming the op: undo
+         * restores state, and state is signals plus collections. The app
+         * hears the result through {@link KayaApp#onUndone}.
+         */
+        public void undoable(String label) {
+            undoableIn(0, label);
+        }
+
+        /**
+         * {@link #undoable} against an auxiliary window's ledger. Each
+         * window has its own history, because Undo in one window has
+         * never meant "revert what happened in another".
+         */
+        public void undoableIn(long window, String label) {
+            alive();
+            if (undoGroup != null) {
+                throw new IllegalStateException(
+                        "kaya: this transaction is already an undo group — one name per step");
+            }
+            undoGroup = KayaWire.txUndoGroup(window, label);
+        }
+
+        /**
          * A Tx is valid ONLY inside the build or handler that made it,
          * on the app thread. To mutate from anywhere else, post.
          */
@@ -1529,6 +1657,16 @@ public final class KayaApp {
 
         void registerDerived(long coll, Consumer<Tx> recompute) {
             pendingDerived.add(Map.entry(coll, recompute));
+        }
+
+        /** How an undo's wire fields become this collection's model
+         * value; see {@link KayaApp#absorbUndo}. Registered at
+         * declaration, unconditionally — collection ids are never
+         * reused, so a rolled-back build leaves a decoder nothing can
+         * name. */
+        void registerRebuild(
+                long coll, java.util.function.BiFunction<Integer, List<Object>, Object> decoder) {
+            rebuild.put(coll, decoder);
         }
 
         /** Every derived signal rooted at this collection, recomputed
@@ -1563,6 +1701,20 @@ public final class KayaApp {
                 derived.computeIfAbsent(entry.getKey(), k -> new ArrayList<>()).add(entry.getValue());
             }
             pendingDerived.clear();
+            if (undoGroup != null) {
+                // THE MARKER LEADS THE BATCH. A transaction is a bare
+                // list with no header, so per-transaction metadata has
+                // nowhere else to live and head-of-batch is the one
+                // position that cannot be ambiguous — the core refuses
+                // it anywhere else.
+                byte[][] batch = new byte[records.size() + 1][];
+                batch[0] = undoGroup;
+                for (int i = 0; i < records.size(); i++) {
+                    batch[i + 1] = records.get(i);
+                }
+                KayaRing.submit(KayaWire.tx(batch));
+                return;
+            }
             if (!records.isEmpty()) {
                 KayaRing.submit(KayaWire.tx(records.toArray(new byte[0][])));
             }
@@ -2837,6 +2989,151 @@ public final class KayaApp {
         nodePastes.put(n.id, handler);
     }
 
+    /**
+     * Bind the undone handler to ONE window: fires each time kaya routes
+     * an undo there, with the group's label (EMPTY for a typing episode)
+     * and what the core put back.
+     *
+     * <p>NOT ONE-SHOT — the onSelected stance rather than the alert's. A
+     * history is walked as often as the user likes, and the registration
+     * outlives every step. Per window because the ledger is: Undo in one
+     * window has never meant "revert what happened in another".
+     *
+     * <p>THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
+     * programmatic write, so the echo doctrine silences every occurrence
+     * it would otherwise cause — no onChange for the text it restored,
+     * no value change for the signals. This binding has already folded
+     * the payload into its own collection model before the handler runs;
+     * this is where an app folds it into ITS model.
+     */
+    public void onUndone(long window, UndoHandler handler) {
+        undone.put(window, handler);
+    }
+
+    /**
+     * The {@link #onUndone} twin. A FRONTIER typing episode redoes on
+     * the platform's own stack and reports itself as an ordinary edit,
+     * so it does not arrive here.
+     */
+    public void onRedone(long window, UndoHandler handler) {
+        redone.put(window, handler);
+    }
+
+    /**
+     * Fold an undo's payload into the collection model.
+     *
+     * <p>The rollback journal in reverse: a rolled-back Tx restores a
+     * snapshot because nothing was shipped, while an undo restores a
+     * delta because everything WAS — the core already moved, and the
+     * model is what would otherwise be left behind. Same machinery,
+     * opposite case, and the payload is core-authoritative so nothing
+     * here re-derives anything.
+     *
+     * <p>Signals and text are not mirrored by this binding (there is no
+     * read-back for either, by doctrine), so those two runs pass
+     * straight to the app's own handler.
+     */
+    private void absorbUndo(UndoDelta delta) {
+        for (UndoEntry entry : delta.entries()) {
+            List<Instance> instances =
+                    model.computeIfAbsent(entry.collection(), k -> new ArrayList<>());
+            Instance instance = null;
+            for (Instance candidate : instances) {
+                if (candidate.path.equals(entry.path())) {
+                    instance = candidate;
+                    break;
+                }
+            }
+            if (instance == null) {
+                instance = new Instance(entry.path());
+                instances.add(instance);
+            }
+            if (!entry.present()) {
+                instance.entries.removeIf(e -> java.util.Objects.equals(e.key, entry.key()));
+                continue;
+            }
+            // THE WIRE HANDS BACK WIRE FIELDS AND THE MODEL HOLDS THE
+            // GUEST'S OWN OBJECT, so the entry is rebuilt through the
+            // decoder the collection registered when it was declared —
+            // the one place the guest's type is known. An untyped
+            // collection's decoder is the identity on its single field.
+            Object value = rebuildEntry(entry.collection(), entry.variant(), entry.fields());
+            boolean replaced = false;
+            for (int i = 0; i < instance.entries.size(); i++) {
+                if (java.util.Objects.equals(instance.entries.get(i).key, entry.key())) {
+                    instance.entries.set(i, new Entry(entry.key(), value));
+                    replaced = true;
+                    break;
+                }
+            }
+            if (!replaced) {
+                instance.entries.add(new Entry(entry.key(), value));
+            }
+        }
+        for (UndoOrder order : delta.orders()) {
+            Instance instance = instanceOf(order.collection(), order.path());
+            if (instance == null) {
+                continue;
+            }
+            // Position by the payload's list, keeping anything it does
+            // not name at the end: the delta describes one instance's
+            // whole order, and an entry it never mentions is one this
+            // undo did not touch.
+            List<Entry> sorted = new ArrayList<>(instance.entries.size());
+            for (Object key : order.keys()) {
+                for (int i = 0; i < instance.entries.size(); i++) {
+                    if (java.util.Objects.equals(instance.entries.get(i).key, key)) {
+                        sorted.add(instance.entries.remove(i));
+                        break;
+                    }
+                }
+            }
+            sorted.addAll(instance.entries);
+            instance.entries.clear();
+            instance.entries.addAll(sorted);
+        }
+    }
+
+    /**
+     * The decoder's taste-free shape, typed: flattened (id, value) pairs
+     * become records, and the entry/order groups keep theirs. The
+     * generated parser owns the LAYOUT (counts in the head, one flat
+     * Values tail cut into four runs); this owns the SUM the app sees —
+     * the same split representation() already makes for a clip.
+     */
+    static UndoDelta undoDelta(KayaWire.UndoValues values) {
+        List<UndoSignal> signals = new ArrayList<>(values.signals.size() / 2);
+        for (int i = 0; i + 1 < values.signals.size(); i += 2) {
+            signals.add(new UndoSignal((Long) values.signals.get(i), values.signals.get(i + 1)));
+        }
+        List<UndoText> texts = new ArrayList<>(values.texts.size() / 2);
+        for (int i = 0; i + 1 < values.texts.size(); i += 2) {
+            texts.add(new UndoText(
+                    (Long) values.texts.get(i), (String) values.texts.get(i + 1)));
+        }
+        List<UndoEntry> entries = new ArrayList<>(values.entries.size());
+        for (KayaWire.UndoEntryValues entry : values.entries) {
+            entries.add(new UndoEntry(entry.collection, entry.path, entry.key,
+                    entry.present, entry.variant, entry.fields));
+        }
+        List<UndoOrder> orders = new ArrayList<>(values.orders.size());
+        for (KayaWire.UndoOrderValues order : values.orders) {
+            orders.add(new UndoOrder(order.collection, order.path, order.keys));
+        }
+        return new UndoDelta(signals, texts, entries, orders);
+    }
+
+    private Object rebuildEntry(long collection, int variant, List<Object> fields) {
+        java.util.function.BiFunction<Integer, List<Object>, Object> decoder =
+                rebuild.get(collection);
+        if (decoder != null) {
+            return decoder.apply(variant, fields);
+        }
+        // A collection declared through the plain handle holds one
+        // wire-typed value per entry, and that value IS the model's.
+        return fields.isEmpty() ? null : fields.get(0);
+    }
+
     /** Register a click handler for a live widget. */
     public void onClick(Widget w, Consumer<Tx> handler) {
         widgetHandlers.put(w.id, handler);
@@ -3174,6 +3471,23 @@ public final class KayaApp {
                 Representation clip = representation(occ.payload);
                 if (handler != null && clip != null) {
                     dispatch(tx -> handler.accept(tx, occ.keys, clip));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_UNDONE
+                    || occ.kind == KayaWire.OCC_KIND_REDONE) {
+                // kaya routed an undo: the id is the WINDOW whose ledger
+                // moved. NOT one-shot — a history is walked as often as
+                // the user likes.
+                UndoDelta delta = undoDelta((KayaWire.UndoValues) occ.payload);
+                // The model follows FIRST, and UNCONDITIONALLY: the core
+                // already moved without a transaction, so an app that
+                // registered no handler would otherwise read a stale
+                // count from the very next one it does run.
+                absorbUndo(delta);
+                UndoHandler handler =
+                        (occ.kind == KayaWire.OCC_KIND_UNDONE ? undone : redone).get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, ((KayaWire.UndoValues) occ.payload).label,
+                            delta));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_MENU_ACTIVATED && occ.keys.isEmpty()) {
                 // Menu occurrences key the menu-item tables — their

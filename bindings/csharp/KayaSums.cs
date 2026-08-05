@@ -163,6 +163,11 @@ static class KayaSums
             schemas[i] = infos[i].Schema;
         }
         var c = tx.CollectionWithVariants(schemas);
+        // How an undo puts one of this collection's entries back: the
+        // variant names the constructor, exactly as it does on the way
+        // out.
+        tx.App.Rehydrate[c.Id] =
+            (variant, fields, current) => infos[variant].FromWire(fields, current);
         return new SumCollection<T>(c, constructors, infos);
     }
 

@@ -143,8 +143,64 @@ func CollectionOf[K Key, T any](tx *Tx) RecordCollection[K, T] {
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
+	// How an undone entry of this collection becomes a T again: the
+	// payload is wire values, the mirror holds records, and this
+	// declaration is the only place that knows both.
+	tx.app.shapes[c.id] = undoShape{
+		key: restoreKey[K](),
+		value: func(_ uint32, fields []any) any {
+			return restoreRecord(reflect.TypeFor[T](), info, fields)
+		},
+	}
 	tx.emit(TxCreateCollection(c.id, [][]uint32{info.schema}))
 	return RecordCollection[K, T]{c, info}
+}
+
+// restoreKey coerces an undone entry's wire key to the key type this
+// collection's model holds: the wire has string and int64, a guest may
+// have declared a named type over either, and the mirror compares keys
+// with == over boxed values, where string("a") and ID("a") differ.
+func restoreKey[K Key]() func(any) any {
+	want := reflect.TypeFor[K]()
+	return func(key any) any {
+		v := reflect.ValueOf(key)
+		if !v.IsValid() || v.Type() == want || !v.CanConvert(want) {
+			return key
+		}
+		return v.Convert(want).Interface()
+	}
+}
+
+// restoreRecord rebuilds one record from an undone entry's wire fields,
+// positionally, through the same field indexes the forward encode uses.
+// A field the payload cannot fill is a broken encoder, not bad input,
+// so it panics naming the field rather than leaving a half-built record
+// in the mirror.
+func restoreRecord(t reflect.Type, info *recordInfo, fields []any) any {
+	if len(fields) != len(info.indexes) {
+		panic(fmt.Sprintf(
+			"kaya: an undone entry of %v carries %d fields, the schema has %d",
+			t, len(fields), len(info.indexes)))
+	}
+	record := reflect.New(t).Elem()
+	for wire, idx := range info.indexes {
+		field := record.Field(idx)
+		v := reflect.ValueOf(fields[wire])
+		if !v.IsValid() {
+			panic(fmt.Sprintf("kaya: an undone entry of %v has no value for %s",
+				t, t.Field(idx).Name))
+		}
+		if v.Type() != field.Type() {
+			if !v.CanConvert(field.Type()) {
+				panic(fmt.Sprintf(
+					"kaya: an undone entry of %v carries %T for %s, which is %v",
+					t, fields[wire], t.Field(idx).Name, field.Type()))
+			}
+			v = v.Convert(field.Type())
+		}
+		field.Set(v)
+	}
+	return record.Interface()
 }
 
 // FieldBy is the field token for the field a projection selects:

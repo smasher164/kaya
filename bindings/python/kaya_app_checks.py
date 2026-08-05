@@ -5,6 +5,7 @@ mirrors. Runs against the real bindings; the core is never entered
 (records queue, the process exits)."""
 
 import sys
+from dataclasses import dataclass
 
 import kaya
 
@@ -665,6 +666,141 @@ with app_menu.build():
         check("post-abort item outside any scope raises", False)
     except RuntimeError:
         check("post-abort item outside any scope raises", True)
+
+# ---- undo: naming a step, and the step that comes back --------------
+#
+# The ambient tier names its transaction from INSIDE, because a handler
+# does not open one (App._dispatch does). These pin the three rules that
+# spelling has to keep — head of batch, one name per step, and a name —
+# plus what an `undone` occurrence does to the mirrors before any
+# handler sees it (docs/undo-plan.md D2, D5).
+
+
+@dataclass
+class _Todo:
+    title: str
+
+
+app_undo = kaya.App()
+_undo_shipped = []
+_real_submit3 = kaya.runtime.submit
+kaya.runtime.submit = lambda *records: _undo_shipped.append(records)
+try:
+    # THE MARKER LEADS THE BATCH wherever the call sits in the body: a
+    # handler naturally builds first and knows what the step was
+    # afterwards, and the core refuses a group whose marker is not at
+    # index 0 — so the surface must not make that an ordering trap.
+    with app_undo.build():
+        undo_sig = kaya.signal("before")
+        undo_sig.set("after")
+        kaya.undoable("step")
+    check(
+        "undoable inserts the group marker at the head",
+        bool(_undo_shipped) and len(_undo_shipped[0]) == 3
+        and _undo_shipped[0][0][4:6] == kaya.wire.TX_UNDO_GROUP.to_bytes(
+            2, "little"),
+    )
+    with app_undo.build():
+        kaya.undoable("first")
+        try:
+            kaya.undoable("second")
+            check("one name per step", False)
+        except RuntimeError:
+            check("one name per step", True)
+    with app_undo.build():
+        try:
+            # The EMPTY label is taken: it is how a typing episode
+            # identifies itself on the same occurrence.
+            kaya.undoable("")
+            check("a group must be named", False)
+        except ValueError:
+            check("a group must be named", True)
+
+    undo_seen = []
+
+    def _undo_note(what, label, delta):
+        # READ THE MODEL FROM INSIDE THE HANDLER: what the mirror holds
+        # while the app is looking is the claim, not what it holds after
+        # a later step has moved it again.
+        undo_seen.append((what, label, list(delta.texts), len(undo_todos),
+                          undo_todos.get("t1"), undo_todos.keys()))
+
+    with app_undo.window(
+        on_undone=lambda label, delta: _undo_note("undone", label, delta),
+        on_redone=lambda label, delta: _undo_note("redone", label, delta),
+    ):
+        undo_todos = kaya.collection(_Todo)
+        with kaya.column():
+            kaya.label("todos")
+    with app_undo.build():
+        undo_todos.insert("t1", _Todo("milk"))
+        undo_todos.insert("t2", _Todo("tea"))
+        undo_todos.insert("t3", _Todo("jam"))
+finally:
+    kaya.runtime.submit = _real_submit3
+try:
+    kaya.undoable("no transaction")
+    check("undoable needs an ambient transaction", False)
+except RuntimeError:
+    check("undoable needs an ambient transaction", True)
+
+# Five steps come back: the entry goes; it comes back (at the end, the
+# way a re-inserted key lands); a delta that names nothing still reaches
+# the handler; an orders run restates the whole instance order; and the
+# last one lands on a window with NO handler at all.
+_undo_occs = [
+    (kaya.wire.OCC_UNDONE, 0, [],
+     ("add milk", [(undo_sig.id, "before")], [(7, "milk")],
+      [(undo_todos._id, (), "t1", None)], [])),
+    (kaya.wire.OCC_REDONE, 0, [],
+     ("add milk", [], [], [(undo_todos._id, (), "t1", (0, ["milk"]))], [])),
+    (kaya.wire.OCC_UNDONE, 0, [], ("star", [], [], [], [])),
+    # AN ORDER NOTHING ELSE PRODUCES: not the seed's and not the one the
+    # re-insert above leaves, so a run that never applied cannot pass
+    # this by looking like the state already there.
+    (kaya.wire.OCC_UNDONE, 0, [],
+     ("sort", [], [], [], [(undo_todos._id, (), ["t3", "t1", "t2"])])),
+    (kaya.wire.OCC_UNDONE, 9, [],
+     ("add milk", [], [], [(undo_todos._id, (), "t1", None)], [])),
+]
+_real_next2 = kaya.runtime.next_occurrence
+_real_submit4 = kaya.runtime.submit
+kaya.runtime.next_occurrence = lambda: _undo_occs.pop(0) if _undo_occs else None
+kaya.runtime.submit = lambda *records: None
+try:
+    app_undo._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next2
+    kaya.runtime.submit = _real_submit4
+check(
+    "an undone delta reconciles the model mirror before the handler",
+    undo_seen[:1] == [("undone", "add milk", [(7, "milk")], 2, None,
+                       ["t2", "t3"])],
+)
+check(
+    "a redone delta puts the entry back, rebuilt from the wire record",
+    undo_seen[1:2] == [("redone", "add milk", [], 3, _Todo("milk"),
+                        ["t2", "t3", "t1"])],
+)
+check(
+    "the history handlers stay registered — a history is walked twice",
+    len(undo_seen) == 4 and undo_seen[2][:2] == ("undone", "star"),
+)
+check(
+    "an orders run restates the instance's whole key order",
+    undo_seen[3][5] == ["t3", "t1", "t2"],
+)
+# A signal has no read-back, but the binding caches what it last wrote to
+# skip no-op DERIVED writes — and an undo moves signals behind that
+# cache. The payload is what puts it right.
+check(
+    "the signal cache follows the restored value",
+    undo_sig._mirror == "before",
+)
+check(
+    "the mirrors follow an undo nobody registered a handler for",
+    len(undo_todos) == 2,
+)
 
 sys.exit(1 if failures else 0)
 

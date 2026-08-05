@@ -114,6 +114,9 @@ public final class Main {
             case "commands":
                 app = Commands::app;
                 break;
+            case "undo":
+                app = Undo::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

@@ -178,6 +178,33 @@ public final class KayaRecords {
             return value;
         }
 
+        /**
+         * Rebuild a record from the wire fields an undo hands back.
+         *
+         * <p>The model keeps the guest's own object while an undo delta
+         * is core-authoritative WIRE VALUES, so the restored entry has
+         * to be reconstructed through the canonical constructor. Only
+         * the wire-typed components can be: a guest-only component was
+         * never on the wire, so it comes back at its default — the same
+         * bargain that makes it guest-only in the first place.
+         */
+        Object fromWire(List<Object> fields) {
+            Parameter[] parameters = ctor.getParameters();
+            Object[] args = new Object[parameters.length];
+            for (int i = 0; i < parameters.length; i++) {
+                args[i] = defaultValue(parameters[i].getType());
+            }
+            int n = Math.min(wireToComponent.length, fields.size());
+            for (int wire = 0; wire < n; wire++) {
+                args[wireToComponent[wire]] = fields.get(wire);
+            }
+            try {
+                return ctor.newInstance(args);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException("kaya: record reconstruction failed", e);
+            }
+        }
+
         Object withField(Object record, int wireIndex, Object value) {
             try {
                 Object[] args = new Object[accessors.length];
@@ -454,7 +481,12 @@ public final class KayaRecords {
      */
     public static <K, T> Collection<K, T> collectionOf(KayaApp.Tx tx, Class<T> type) {
         Info info = Info.of(type);
-        return new Collection<>(tx.collectionWithSchema(info.schema), info);
+        KayaApp.Collection handle = tx.collectionWithSchema(info.schema);
+        // How an undo's wire fields become this collection's model
+        // value. Registered HERE because this is the one place T is
+        // known — the model holds records, the delta holds wire values.
+        tx.registerRebuild(handle.id, (variant, fields) -> info.fromWire(fields));
+        return new Collection<>(handle, info);
     }
 
     /**

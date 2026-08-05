@@ -21,6 +21,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+// The entry/textarea path (docs/undo-plan.md §1.4): the foundation field
+// that owns a TextFieldState, plus the M3 dressing that makes it look
+// like the TextField it replaced. `undoState` and its five members are
+// the ONLY experimental surface here at foundation 1.7.5 — measured, by
+// removing the opt-in and reading the 21 errors.
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -42,10 +51,13 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 // Material 3 adaptive: Android's OWN list-detail container and the
 // arrangement it lays out from. Imported rather than written out
@@ -72,6 +84,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -94,6 +107,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -118,7 +132,53 @@ import kotlinx.coroutines.launch
  * core concern.
  */
 class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
+    /**
+     * KAYA'S MODEL MIRROR of the widget's text — what the app was last
+     * told, and what a label renders.
+     *
+     * For an entry or a textarea this is NO LONGER what the field reads
+     * from: [textState] is. The two are written together by
+     * [kayaWriteText] on kaya's side and reconciled by the observer in
+     * KayaTextField on the widget's side, and the DIFFERENCE between
+     * them is load-bearing rather than incidental — it is what tells a
+     * user edit apart from the echo of kaya's own write (the echo
+     * doctrine; docs/undo-plan.md §1.4's "two new failure classes").
+     */
     var text by mutableStateOf("")
+
+    /**
+     * THE TEXT WIDGET'S OWN STATE (entry/textarea only), and the reason
+     * this backend moved off `TextField(value:, onValueChange:)`.
+     *
+     * The legacy path is DISQUALIFIED, measured rather than argued
+     * (docs/undo-plan.md §1.4): `CoreTextField` remembers an INTERNAL
+     * `UndoManager` — unreachable by type, `it is internal in file` —
+     * Ctrl+Z drives it today, and kaya's programmatic writes ENTER it.
+     * Worst case measured on the emulator: a field the user never
+     * touched, one app write, one Ctrl+Z, and the field is EMPTY with
+     * `onValueChange` firing — i.e. kaya emits a phantom `text_changed`
+     * for an edit nobody made and the app's own write is lost, with the
+     * app's model dutifully following it down. There is no knob, no
+     * `canUndo`, and no `undo()` on that path, so neither D7 nor D6's
+     * native tier is expressible there at all.
+     *
+     * `TextFieldState` answers all three: a programmatic write CLEARS
+     * the history (D7 for free, both spellings), and
+     * `undoState.canUndo/undo()/redo()` are readable and callable, which
+     * is what D6's routing needs on the one platform where kaya's own
+     * menu item is the ONLY undo affordance a phone has (no hardware
+     * keyboard, and the text toolbar offers Copy/Paste/Cut with no Undo
+     * at API 35).
+     *
+     * `by lazy` because only two of the fourteen kinds have text to
+     * edit, and a `TextFieldState` per label would be a state object per
+     * node for nothing. NOT thread-safe by choice: every touch is on the
+     * UI thread (apply hops there, the harness goes through `onUi`),
+     * which is the same rule the rest of this model already keeps.
+     */
+    val textState by lazy(LazyThreadSafetyMode.NONE) {
+        androidx.compose.foundation.text.input.TextFieldState("")
+    }
     // The accessibility identifier and label (universal props). The
     // identifier is never spoken — it lowers to Modifier.testTag, which
     // is what surfaces as the automation key — while the label IS what
@@ -471,7 +531,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x408bcf69e0ad2bfduL
+    private const val SPEC_HASH: ULong = 0x44b8c0a4228f2b33uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -490,6 +550,20 @@ object KayaCompose {
      * asking for one back. */
     private const val APPLY_COPY = 25
     private const val APPLY_READ_CLIPBOARD = 26
+
+    /**
+     * A1's clear (docs/undo-plan.md §3): a core undo group committed, so
+     * the FOCUSED editable's native text-undo history goes with it.
+     *
+     * TARGETLESS ON THE WIRE BY DESIGN — the record names a window and
+     * nothing else, because the core does not know what holds focus and
+     * this backend does. It is the keystone of the ledger's total order:
+     * the episode was banked before the clear, so every episode begins
+     * with an EMPTY native stack, the native stack can never reach past
+     * the current episode's start, and "ask the focused text first" IS
+     * "ask the most recent first".
+     */
+    private const val APPLY_CLEAR_UNDO = 27
     private const val APPLY_PUSH_ENTRY = 12
     private const val APPLY_POP_ENTRY = 13
     private const val APPLY_SET_ENTRY_PROP = 14
@@ -831,7 +905,14 @@ object KayaCompose {
                     val prop = b.int
                     b.int // pad
                     when (prop) {
-                        PROP_TEXT -> KayaSceneModel.nodes[id]!!.text = kayaLf(readString(b))
+                        // D7 + A3 ride HERE, in the apply arm, rather
+                        // than at the authoring site: an inverse the
+                        // CORE writes (§3's coarse episode restore) is
+                        // an ordinary SetProp Text record, so it travels
+                        // the same clear a forward write does with
+                        // nothing special-casing it.
+                        PROP_TEXT ->
+                            kayaWriteText(KayaSceneModel.nodes[id]!!, kayaLf(readString(b)))
                         PROP_CHECKED -> KayaSceneModel.nodes[id]!!.checked = readBool(b)
                         PROP_VALUE -> KayaSceneModel.nodes[id]!!.value = readF64(b)
                         PROP_MIN -> KayaSceneModel.nodes[id]!!.minValue = readF64(b)
@@ -959,6 +1040,16 @@ object KayaCompose {
                     val request = b.long
                     val accepting = readString(b)
                     kayaAnswerClipboardRead(request, accepting)
+                }
+                APPLY_CLEAR_UNDO -> {
+                    // A1 (docs/undo-plan.md §3): { u64 window }, and
+                    // nothing else — the record is TARGETLESS because the
+                    // core cannot know what holds focus and this backend
+                    // can. Android is one Activity and one surface, so
+                    // the window is read and dropped: there is no second
+                    // surface for a focused field to be in.
+                    b.long // window
+                    kayaClearUndoForGroup()
                 }
                 APPLY_PRESENT_FILE_DIALOG -> {
                     b.long // window: 0, the one surface on this host
@@ -1255,8 +1346,16 @@ object KayaCompose {
                             // hears the empty edit through the same
                             // emission the TextField's change would
                             // make.
+                            //
+                            // THE EMISSION IS EXPLICIT AND THE OBSERVER
+                            // IS SILENT, which is the migration's shape
+                            // everywhere: kayaWriteText moves the model
+                            // and the widget together, so the snapshot
+                            // observer sees them agree and reports
+                            // nothing. A clear that emitted twice would
+                            // bank two episodes for one act.
                             val node = KayaSceneModel.nodes[id]!!
-                            node.text = ""
+                            kayaWriteText(node, "")
                             KayaPresent.emitTextChanged(
                                 node.tag, "", KayaSceneModel.focusedId == id, false)
                         }
@@ -1364,6 +1463,106 @@ object KayaCompose {
      * misresolved read (`row#0` once indexed the COLUMNS registry,
      * which is the false-verdict class).
      */
+    /**
+     * THE REAL-KEYSTROKE TYPING VERB (harness.rs `Stage::type_text`,
+     * whose six numbered points this implements), on Android.
+     *
+     * POINT 1 — THE PLATFORM'S OWN INPUT PATH. An app may not INJECT
+     * events (that is `INJECT_EVENTS`, a signature permission), but it
+     * may DISPATCH one into its own window, and measured, that reaches
+     * the focused field's key handler and drives the field's real undo
+     * stack: `dispatchKeyEvent(KEYCODE_Z + META_CTRL_ON)` undid typed
+     * text on both text paths (probe §4/H). So the verb needs no adb, no
+     * permission and no instrumentation here — which is more than GTK
+     * offers, and is what makes the delegated tier testable on this lane.
+     * The keycodes and meta state come from the platform's own
+     * `KeyCharacterMap`, so a capital letter really does arrive as
+     * shift-down, key-down, key-up, shift-up.
+     *
+     * POINT 2 — WHATEVER HOLDS FOCUS RECEIVES IT: the events go into the
+     * Activity's dispatch, and the platform resolves the destination. A
+     * keystroke's destination is the routing question D6 asks, and
+     * answering it here in kaya would make the verb agree with itself.
+     *
+     * POINT 3 — IT APPENDS, and on this platform it appends WITHOUT a
+     * caret move, which is measured rather than assumed. macOS is what
+     * makes point 3 a contract (making a field first responder SELECTS
+     * ITS WHOLE CONTENTS); Compose does no such thing — typing `tea`,
+     * focusing away, focusing back and typing `s` gives `teas`, and so
+     * does typing after a programmatic `setTextAndPlaceCursorAtEnd`. AND
+     * AN EXPLICIT CARET MOVE WOULD BE WRONG HERE: the only way to place
+     * the cursor from app code is `TextFieldState.edit {}`, which commits
+     * and therefore CLEARS the undo history — the verb would destroy the
+     * very stack it exists to build.
+     *
+     * POINT 4 — IT BLOCKS UNTIL THE TEXT HAS LANDED, past the widget AND
+     * past this backend's own observation, so the app has heard every
+     * keystroke before the next step runs. This is an ACTION, and actions
+     * are not retried: a following `menu_activate "Edit>Undo"` has none
+     * of the POLL_DEADLINE cover an `expect` would give it, and a race
+     * there reads as a broken undo rather than a missed keystroke.
+     *
+     * POINT 6 — PRINTABLE ASCII ONLY, and a character this keyboard
+     * layout cannot generate is a loud step failure rather than a
+     * silently dropped keystroke.
+     */
+    private fun kayaTypeAtFocus(activity: ComponentActivity, text: String): String? {
+        if (text.isEmpty()) return "type wants some text to type"
+        val map = android.view.KeyCharacterMap.load(
+            android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
+        for (c in text) {
+            val events = map.getEvents(charArrayOf(c))
+                ?: return "type: this keyboard layout cannot generate ${c.code} ($c)"
+            // ONE UI-THREAD HOP PER CHARACTER, so a runloop turn passes
+            // between them exactly as it does between a user's keystrokes.
+            onUi(activity) {
+                val now = android.os.SystemClock.uptimeMillis()
+                for (e in events) {
+                    // Rebuilt rather than replayed: the events a
+                    // KeyCharacterMap hands back carry zeroed timestamps
+                    // and no input source, and a key event with no source
+                    // is not the thing a keyboard delivers.
+                    activity.dispatchKeyEvent(
+                        KeyEvent(
+                            now, now, e.action, e.keyCode, 0, e.metaState,
+                            android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, e.scanCode, 0,
+                            android.view.InputDevice.SOURCE_KEYBOARD,
+                        ),
+                    )
+                }
+            }
+        }
+        kayaSettleTypedText(activity)
+        return null
+    }
+
+    /**
+     * Point 4's wait: the typing has landed when this backend's MODEL has
+     * caught up with the WIDGET, because that is one turn past the
+     * emission — the observer in KayaTextField assigns `node.text` and
+     * emits in the same step, so an agreeing pair means the app has heard
+     * every keystroke.
+     *
+     * A TIMEOUT IS NOT A VERDICT. Nothing focused is legitimate under the
+     * contract (point 2), and a following assertion is what reports the
+     * mismatch; this says so on the record and returns.
+     */
+    private fun kayaSettleTypedText(activity: ComponentActivity) {
+        repeat(200) {
+            val settled = onUi(activity) {
+                val node = kayaFocusedTextNode() ?: return@onUi true
+                node.text == kayaLf(node.textState.text.toString())
+            }
+            if (settled) return
+            Thread.sleep(5)
+        }
+        Log.e(
+            "kaya",
+            "KAYA_UNDO_TRACE: typed text never settled — the model and the widget " +
+                "still disagree after 1s, so the app has not heard the last keystrokes"
+        )
+    }
+
     private fun target(spec: String, kind: String, registry: List<KayaNode>): KayaNode? {
         val bits = spec.split('#')
         if (bits.size != 2 || bits[0] != kind) return null
@@ -1989,6 +2188,14 @@ object KayaCompose {
                     (kinds and CLIP_TEXT != 0 &&
                         offer.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN))
             }
+            // ASKED ONCE AND USED TWICE. `nothing` IS what a disabled
+            // Edit>Undo means (D6: "enablement is that same question,
+            // computed live at activation"), so the routing function
+            // answers both the enablement question and the activation
+            // question and the two cannot drift — which is A4's whole
+            // point, and why there is no second predicate here.
+            "undo" -> return kayaUndoRoute() != KayaUndoRoute.NOTHING
+            "redo" -> return kayaRedoRoute() != KayaUndoRoute.NOTHING
             else -> return true
         }
     }
@@ -2025,8 +2232,22 @@ object KayaCompose {
                     // the only caret position the model knows, and it
                     // is where Compose leaves the caret after a
                     // programmatic write.
+                    //
+                    // AND IT COSTS THE FIELD'S TYPING HISTORY, which is
+                    // a judgement this arm has to make out loud rather
+                    // than inherit (docs/undo-plan.md §1.4 names this
+                    // exact site). On every other platform kaya's paste
+                    // is a USER act and lands IN the native stack; on
+                    // TextFieldState there is measurably no public way to
+                    // make an app write undoable, so the insertion clears
+                    // the stack like any other write. What that costs is
+                    // GRANULARITY, not history: the episode was banked
+                    // off the observation stream before the clear, so the
+                    // ledger still walks the typing back — in one coarse
+                    // step instead of the platform's. That is A1's trade
+                    // arriving one site early, not a hole.
                     val pasted = kayaClipboardPlainText() ?: return true
-                    node.text = kayaLf(node.text + pasted)
+                    kayaWriteText(node, kayaLf(node.text + pasted))
                     KayaPresent.emitTextChanged(
                         node.tag, node.text, KayaSceneModel.focusedId == node.id, false)
                     return true
@@ -2039,6 +2260,47 @@ object KayaCompose {
                 val value = kayaMaterializeClipboard(node.accepts) ?: return true
                 KayaPresent.emitPasted(
                     node.tag, value.clip, value.text, value.bytes, value.locators, value.names)
+                return true
+            }
+            else -> return false
+        }
+    }
+
+    /**
+     * Perform an undo/redo role on the focused surface. Answers whether
+     * it WAS one, so a plain action falls through to its own dispatch —
+     * [kayaPerformClipboardRole]'s contract, for the same reason: a role
+     * item is the PLATFORM's command, not the app's action.
+     *
+     * A SEPARATE FUNCTION because an undo is not a clipboard command;
+     * tools/check-roles.sh anticipates the split (its perform anchor is
+     * the UNION of the `kayaPerform*Role` functions).
+     *
+     * ROUTING IS KAYA'S HERE, all of it (docs/undo-plan.md §1's table:
+     * "GTK and Compose route in kaya"), and Android leaves it no choice:
+     * measured, a focused text field CONSUMES Ctrl+Z whether or not it
+     * has anything to undo, and the Activity's shortcut route never sees
+     * it — so the platform gives D6's first half for free and its second
+     * half never. On a phone there is no hardware keyboard and the text
+     * toolbar carries no Undo at all, which makes THIS menu item the only
+     * undo affordance that exists on the platform.
+     */
+    internal fun kayaPerformUndoRole(role: String): Boolean {
+        when (role) {
+            "undo" -> {
+                when (kayaUndoRoute()) {
+                    KayaUndoRoute.NATIVE -> kayaNativeUndo(redo = false)
+                    KayaUndoRoute.CORE -> kayaCoreUndo()
+                    KayaUndoRoute.NOTHING -> {}
+                }
+                return true
+            }
+            "redo" -> {
+                when (kayaRedoRoute()) {
+                    KayaUndoRoute.NATIVE -> kayaNativeUndo(redo = true)
+                    KayaUndoRoute.CORE -> kayaCoreRedo()
+                    KayaUndoRoute.NOTHING -> {}
+                }
                 return true
             }
             else -> return false
@@ -2675,12 +2937,16 @@ object KayaCompose {
                         if (!ok) failures.add("no such target ${parts[1]}")
                     }
                     // THE REAL-KEYSTROKE TYPING VERB (docs/undo-plan.md
-                    // A8). This backend has not reached the undo slice,
-                    // and typing is where a stand-in would LIE: writing
-                    // the text would look like typing and would clear
-                    // the native history the scene came to observe, so a
-                    // missing arm would read as a passing leg.
-                    "type" -> depthStub("undo")
+                    // A8), whose whole reason for existing is that a
+                    // stand-in would LIE: writing the text would look
+                    // like typing and would CLEAR the native history the
+                    // scene came to observe, so a leg built out of
+                    // set_text would destroy what it came to see and pass
+                    // anyway.
+                    "type" ->
+                        kayaTypeAtFocus(activity, quoted(parts.drop(1)))?.let {
+                            failures.add(it)
+                        }
                     "set_text" -> {
                         val ok = onUi(activity) {
                             val node =
@@ -2688,7 +2954,12 @@ object KayaCompose {
                                     target(parts[1], "textarea", KayaSceneModel.textareas)
                                 else target(parts[1], "entry", KayaSceneModel.entryWidgets)
                             node?.also {
-                                it.text = kayaLf(quoted(parts.drop(2)))
+                                // Through kayaWriteText like every other
+                                // programmatic write: set_text IS one, and
+                                // it carries D7 with it — which is exactly
+                                // why the scene above cannot be written
+                                // with it.
+                                kayaWriteText(it, kayaLf(quoted(parts.drop(2))))
                                 KayaPresent.emitTextChanged(
                                     it.tag, it.text, KayaSceneModel.focusedId == it.id, false)
                             } != null
@@ -2702,11 +2973,25 @@ object KayaCompose {
                         // an image its decoded size ("WxH"/"0x0"),
                         // everything else reads label text —
                         // harness.rs's routing.
+                        //
+                        // THE TEXT KINDS READ THE WIDGET, not the model
+                        // mirror, and that became possible with the
+                        // migration: `TextFieldState` IS what the field
+                        // renders from. read_text's contract asks for
+                        // "what the user sees in the field, read from the
+                        // toolkit" precisely so the occurrence fold alone
+                        // cannot prove the screen — and a model read here
+                        // could no longer see a native undo that moved
+                        // the widget and not yet the mirror.
                         val got = onUi(activity) {
                             if (parts[1].startsWith("textarea"))
-                                target(parts[1], "textarea", KayaSceneModel.textareas)?.text
+                                target(parts[1], "textarea", KayaSceneModel.textareas)?.let {
+                                    kayaLf(it.textState.text.toString())
+                                }
                             else if (parts[1].startsWith("entry"))
-                                target(parts[1], "entry", KayaSceneModel.entryWidgets)?.text
+                                target(parts[1], "entry", KayaSceneModel.entryWidgets)?.let {
+                                    kayaLf(it.textState.text.toString())
+                                }
                             else if (parts[1].startsWith("image"))
                                 target(parts[1], "image", KayaSceneModel.images)?.imageSize
                             else if (parts[1].startsWith("progress"))
@@ -3620,6 +3905,343 @@ object KayaCompose {
 private fun kayaLf(s: String): String =
     if (s.contains('\r')) s.replace("\r\n", "\n").replace('\r', '\n') else s
 
+// ---- The native text-undo tier ------------------------------------
+//
+// TWO TIERS, ONE SURFACE (docs/undo-plan.md D1): text-local undo
+// delegates to the platform's own stack the way Cut/Copy/Paste do, and
+// app-state undo is the core's ledger. This section carries the
+// delegated half plus the three facts the core needs from a backend.
+//
+// §3a WAS ANSWERED BY MEASUREMENT HERE, NOT INHERITED, and the answer is
+// the OPPOSITE of the mac arm's. §0 argues for delegation partly on "a
+// native undo emits the ordinary text_changed — the channel already
+// exists"; §3a records that measured FALSE under SwiftUI, where the undo
+// runs on the field editor's own manager and never calls the binding's
+// setter. On Compose it is TRUE, and structurally rather than luckily:
+// `TextFieldState.text` IS snapshot state, `undoState.undo()` writes that
+// same state, and the observation this backend emits from is a snapshot
+// observer — there is no separate commit path for an undo to bypass.
+// Measured on emulator-5558, foundation 1.7.5:
+//
+//     type "abc"                -> tfsObserved=4 canUndo=true
+//     undoState.undo()          -> tfsObserved=5 text=""   canUndo=false
+//     undoState.redo()          -> tfsObserved=6 text="abc"
+//     hardware Ctrl+Z           -> tfsObserved=5 text=""
+//     programmatic write "PROG" -> tfsObserved=4 text="PROG" canUndo=false
+//
+// So this arm does NOT write the node's text itself the way the mac one
+// must. It rides the ordinary channel and brackets it ledger-quiet, which
+// is precisely what Q2's flag was built for.
+
+/**
+ * EVERY TOUCH OF `undoState`, in one place — which is what keeps the
+ * file's experimental opt-in to a single annotation at the smallest scope
+ * that covers it, instead of one per call site where a future
+ * experimental API could ride in unnoticed.
+ *
+ * `undoState` and its five members are the ONLY `@ExperimentalFoundationApi`
+ * surface this file uses at foundation 1.7.5 (measured: removing the
+ * opt-in in the probe produced 21 errors, all of them that one message,
+ * at exactly the `undoState`/`canUndo`/`canRedo`/`undo`/`redo`/
+ * `clearHistory` sites; `TextFieldState`, `edit {}`,
+ * `setTextAndPlaceCursorAtEnd`, `BasicTextField(state=)`,
+ * `TextFieldLineLimits` and `decorator` are all STABLE there).
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private object KayaUndoState {
+    fun canUndo(node: KayaNode): Boolean = node.textState.undoState.canUndo
+    fun canRedo(node: KayaNode): Boolean = node.textState.undoState.canRedo
+    fun undo(node: KayaNode) = node.textState.undoState.undo()
+    fun redo(node: KayaNode) = node.textState.undoState.redo()
+    fun clearHistory(node: KayaNode) = node.textState.undoState.clearHistory()
+}
+
+/**
+ * KAYA WRITES A TEXT WIDGET: the model and the widget together, and D7 +
+ * A3 with them.
+ *
+ * D7 (an app overwrite invalidates the field's edit history) is FREE on
+ * this backend and that is the whole reason for the migration:
+ * `setTextAndPlaceCursorAtEnd` calls `commitEdit`, which calls
+ * `TextUndoManager.clearHistory()`. The explicit `clearHistory()` beside
+ * it is a measured no-op kept as the RULE'S SPELLING — the same call the
+ * Windows arm makes for the same reason — so a reader looking for D7 on
+ * this backend finds a call rather than an inference.
+ *
+ * A3 IS THE GUARD AND IT IS NOT TIDINESS. Measured: even a no-op rewrite
+ * of identical text clears the history (B6). An app that mirrors a
+ * field's text into a signal and writes it back would therefore lose the
+ * user's typing history on EVERY KEYSTROKE. So the write itself is
+ * skipped when the text has not moved — on this platform the guard has to
+ * sit in front of the WRITE, not in front of the clear, because here the
+ * write IS the clear.
+ *
+ * The model is assigned either way, and assigned FIRST: the observer in
+ * KayaTextField reports what makes the two DIFFER, so a model that lagged
+ * the widget by even one collector turn would emit kaya's own write back
+ * to the app as if the user had typed it.
+ */
+internal fun kayaWriteText(node: KayaNode, next: String) {
+    node.text = next
+    // PROP_TEXT reaches labels and buttons too, and they have no field
+    // to write into: touching `textState` here would mint a state object
+    // per label for nothing and would spend a clear on a widget with no
+    // history. The model assignment above is the whole write for them,
+    // exactly as it was before the migration.
+    if (node.kind != KayaCompose.KIND_ENTRY && node.kind != KayaCompose.KIND_TEXTAREA) return
+    if (node.textState.text.contentEquals(next)) return
+    node.textState.setTextAndPlaceCursorAtEnd(next)
+    KayaUndoState.clearHistory(node)
+}
+
+/**
+ * A1 (docs/undo-plan.md §3): a core undo group committed, so the focused
+ * editable's native history goes with it — the episode was banked off the
+ * observation stream before the clear, so nothing is lost but
+ * granularity.
+ *
+ * THIS IS THE ONE SITE THAT NEEDS AN EXPLICIT `clearHistory()`. Every
+ * other clear in this arm is a write and clears by construction; this one
+ * must clear WITHOUT touching the text, and `undoState.clearHistory()` is
+ * measured to empty BOTH stacks while leaving the field's content alone.
+ *
+ * It is the keystone of the ledger's total order: every episode begins
+ * with an empty native stack, so the native stack can never reach past
+ * the current episode's start, and the interleave the literature calls
+ * selective undo becomes unconstructible rather than merely unlikely.
+ */
+internal fun kayaClearUndoForGroup() {
+    kayaFocusedTextNode()?.let { KayaUndoState.clearHistory(it) }
+}
+
+/**
+ * The focused widget, if it is one this arm's text tier applies to.
+ *
+ * The MODEL's focus and not the platform's, deliberately: kaya's focus is
+ * what every other command on this host acts through
+ * ([KayaCompose.kayaRoleEnabled]'s cut/copy/paste arms read the same
+ * thing), and the two agree because the model is what drives the
+ * FocusRequester in the first place.
+ */
+internal fun kayaFocusedTextNode(): KayaNode? {
+    val id = KayaSceneModel.focusedId ?: return null
+    val node = KayaSceneModel.nodes[id] ?: return null
+    return if (node.kind == KayaCompose.KIND_ENTRY || node.kind == KayaCompose.KIND_TEXTAREA) {
+        node
+    } else {
+        null
+    }
+}
+
+/**
+ * A4's ONE named query — "can the focused widget undo?" — answered in
+ * this platform's vocabulary and asked nowhere else in this file.
+ *
+ * D6 already named four hard-coded role filters as silent-failure sites;
+ * a fifth expression of this same question is the shape A4 exists to
+ * refuse. The core's `route_undo` consumes the answer.
+ */
+internal fun kayaFocusedCanUndo(): Boolean =
+    kayaFocusedTextNode()?.let { KayaUndoState.canUndo(it) } == true
+
+/** Redo's twin, same contract. */
+internal fun kayaFocusedCanRedo(): Boolean =
+    kayaFocusedTextNode()?.let { KayaUndoState.canRedo(it) } == true
+
+/**
+ * Where an undo can go: the focused text's own stack, the core's ledger,
+ * or nowhere — `Scene::route_undo`'s three answers, mirrored.
+ */
+enum class KayaUndoRoute {
+    NOTHING,
+    NATIVE,
+    CORE,
+}
+
+/**
+ * The ledger-quiet bracket around a native undo this backend ROUTED (§3,
+ * and the "report it once" rule): node id -> the text the walk left in
+ * the widget, recorded when the sample was taken.
+ *
+ * A BRACKET AND NOT A FLAG-WITH-A-TIMER, because the two reports of one
+ * native undo are not adjacent in time: the sample is taken the instant
+ * `undo()` returns, and the snapshot observer delivers the same text one
+ * frame LATER. A boolean set and cleared around the call would be long
+ * gone by then. Matching on the text the sample saw is exact, needs no
+ * clock, and self-clears — the entry is consumed by the edit it was
+ * written for. UI thread only, like the rest of this model.
+ */
+private val kayaNativeUndoEcho = HashMap<Long, String>()
+
+/** Is this edit the echo of a routed native undo? Consumes the record if
+ *  so — one bracket, one edit. */
+internal fun kayaTakeNativeUndoEcho(id: Long, text: String): Boolean {
+    if (kayaNativeUndoEcho[id] != text) return false
+    kayaNativeUndoEcho.remove(id)
+    return true
+}
+
+/**
+ * THE NATIVE TIER, performed: hand the walk to the field's own stack and
+ * report it to the ledger ONCE.
+ *
+ * The sample is taken IMMEDIATELY after the walk, from the widget rather
+ * than from the model, because the model is exactly one collector turn
+ * stale right here — and the same three facts the core needs
+ * (`note_native_undo`: the field, the text the walk landed on, whether it
+ * can still undo) are true only at that instant.
+ *
+ * THE THIRD FACT IS `canUndo` IN BOTH DIRECTIONS, deliberately, exactly
+ * as the mac arm sends it. It is not "did this walk have more to give" —
+ * it is the core's test for the one case A1's clear is meant to make
+ * unreachable, a platform that coalesced ACROSS the episode's start. A
+ * redo reporting `canRedo` there would answer false at the end of a
+ * forward walk and send the core backwards.
+ */
+internal fun kayaNativeUndo(redo: Boolean) {
+    val node = kayaFocusedTextNode() ?: return
+    if (redo) KayaUndoState.redo(node) else KayaUndoState.undo(node)
+    val text = kayaLf(node.textState.text.toString())
+    kayaNativeUndoEcho[node.id] = text
+    kayaNoteNativeUndo(node, text, KayaUndoState.canUndo(node))
+}
+
+// ---- The seam to the core's ledger --------------------------------
+//
+// BLOCKED, AND LOUDLY (docs/undo-plan.md §4's fan-out; the mac arm hit
+// the identical wall one phase earlier and recorded it the same way).
+//
+// The core's undo entry points EXIST and are exported as C symbols —
+// `kaya_undo_route`, `kaya_redo_route`, `kaya_undo`, `kaya_redo`,
+// `kaya_note_native_undo` (crates/kaya/src/capi.rs) — and the SwiftUI
+// interpreter reaches them through the KayaHostApi vtable. THIS
+// interpreter reaches the core only through the JNI natives registered in
+// `crates/kaya/src/android.rs` and declared in
+// `android/…/dev/kaya/KayaPresent.kt`, and neither file carries an undo
+// entry yet. Kotlin cannot call a C symbol without one: there is no
+// generic bridge, and every core query on this host (specHash, stalledMs,
+// nextCommands, blobData) is a registered native.
+//
+// So these five functions are the arm's side of a two-file change, and
+// they REFUSE rather than answer quietly: an undo route that guessed, or
+// a core undo that no-oped, would be indistinguishable from an empty
+// ledger — the exact silent class this milestone exists to close.
+// `depthStub` is the refusal, because it is the one spelling
+// tools/check-stubs.sh and tools/check-steps.sh both READ: between them
+// they hold the undo legs off tools/android/run-emulator.sh for exactly
+// as long as this seam is open, and hand them back the moment it closes.
+//
+// WHAT THE JNI NEEDS, from this side (the mirror of KayaHostApi's rows):
+//
+//     KayaPresent.undoRoute(window: Long, focused: Long, canUndo: Boolean): Int
+//     KayaPresent.redoRoute(window: Long, focused: Long, canRedo: Boolean): Int
+//     KayaPresent.undo(window: Long)
+//     KayaPresent.redo(window: Long)
+//     KayaPresent.noteNativeUndo(window: Long, field: Long, text: String,
+//                                canUndo: Boolean)
+//
+// The two route entries answer 0 NOTHING / 1 NATIVE / 2 CORE
+// (`Scene::route_undo`'s three answers; capi.rs's undo_route_code); an
+// unknown code is a protocol drift and must fail loudly rather than read
+// as "nothing to do". Then each body below becomes one line, and nothing
+// else in this file moves.
+//
+// Android is one Activity and one surface, so the window argument is 0
+// everywhere here — stated rather than crossed, the way android.rs states
+// it for the emit.
+
+/**
+ * Where an undo would go RIGHT NOW.
+ *
+ * ASKED ONCE AND USED TWICE — enablement and activation are the same
+ * question (D6), and NOTHING is what a disabled Edit>Undo means. Two
+ * expressions of it would drift, which is A4's whole point.
+ *
+ * AND THE ANSWER IS THE CORE'S, not this layer's. What the backend
+ * contributes is the pair only it can see — what is focused, and whether
+ * that field's own stack has anything ([kayaFocusedCanUndo]) — and the
+ * ledger decides against them. A routing rule written here would be a
+ * fifth hard-coded predicate of exactly the kind D6 records as the
+ * silent-failure shape.
+ */
+internal fun kayaUndoRoute(): KayaUndoRoute {
+    kayaUndoSeamNote("undo_route", "canUndo=${kayaFocusedCanUndo()}")
+    // return kayaRouteCode(
+    //     KayaPresent.undoRoute(0, KayaSceneModel.focusedId ?: 0, kayaFocusedCanUndo()))
+    depthStub("undo")
+}
+
+/**
+ * Redo's twin. On the frontier episode redo stays NATIVE while the
+ * episode is partly undone — the platform still holds those steps, and
+ * taking them back coarsely would throw away granularity the user sees.
+ * That judgement is the ledger's too; this asks with `canRedo`.
+ */
+internal fun kayaRedoRoute(): KayaUndoRoute {
+    kayaUndoSeamNote("redo_route", "canRedo=${kayaFocusedCanRedo()}")
+    depthStub("undo")
+}
+
+/**
+ * THE ONE REPORT OF A ROUTED NATIVE UNDO (§3). The core walks its
+ * frontier episode from three facts and ends the walk three ways —
+ * consumed at the before-image, still open with more to give, or
+ * exhausted short of it (the case A1's clear is supposed to make
+ * unreachable). All three are the core's to decide.
+ */
+internal fun kayaNoteNativeUndo(node: KayaNode, text: String, canUndo: Boolean) {
+    kayaUndoSeamNote("note_native_undo", "field=${node.id} text=$text canUndo=$canUndo")
+    // KayaPresent.noteNativeUndo(0, node.id, text, canUndo)
+    depthStub("undo")
+}
+
+/**
+ * The CORE tier: routing cases 2 and 3 (§3) — the ledger's newest entry
+ * is a group, or an episode that is no longer frontier-live, and the core
+ * applies the inverse itself.
+ *
+ * NOTHING COMES BACK, and that is the shape rather than an omission.
+ * Applying the inverse produces ordinary apply records, which reach this
+ * interpreter through the pump like every other write; the app hears one
+ * `undone` carrying the whole restored state. So the call is a request,
+ * the effects arrive on the two channels that already exist, and this
+ * layer keeps no copy of the ledger to disagree with.
+ */
+internal fun kayaCoreUndo() {
+    kayaUndoSeamNote("undo", "window=0")
+    // KayaPresent.undo(0)
+    depthStub("undo")
+}
+
+/** Redo's twin, symmetric in every respect (the forward delta was
+ *  computed at apply beside the inverse, so nothing is re-run). */
+internal fun kayaCoreRedo() {
+    kayaUndoSeamNote("redo", "window=0")
+    // KayaPresent.redo(0)
+    depthStub("undo")
+}
+
+/**
+ * Say WHICH core entry was wanted and with what, on the way to the
+ * refusal.
+ *
+ * A depth stub's own message names the scene and the doctrine, which is
+ * right for a reader who has never seen this file and useless for the one
+ * wiring the JNI. This line carries what the backend had computed at the
+ * moment it needed the core — the sample, the focus, the field's own
+ * answer — which is the half that is easy to get wrong and impossible to
+ * reconstruct afterwards.
+ */
+private fun kayaUndoSeamNote(entry: String, facts: String) {
+    Log.e(
+        "kaya",
+        "KAYA_UNDO_TRACE: the core's `$entry` has no JNI entry on this host " +
+            "($facts). Add it to KayaPresent.kt and register it in " +
+            "crates/kaya/src/android.rs beside emitTextChanged; the C symbol " +
+            "`kaya_$entry` already exists in crates/kaya/src/capi.rs."
+    )
+}
+
 /**
  * The context-menu anchor (DESIGN.md, Menus): a node carrying a
  * context catalog renders inside a long-press wrapper — the platform's
@@ -4038,63 +4660,107 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                     modifier = a11yTag,
                 )
             }
-        KayaCompose.KIND_TEXTAREA -> {
-            // The multi-line editor: the entry's exact contract
-            // (uncontrolled state, identity-tag emits, model-driven
-            // focus) over a multiline M3 TextField.
-            val focusRequester = remember { FocusRequester() }
-            TextField(
-                value = node.text,
-                onValueChange = { newValue ->
-                    val value = kayaLf(newValue)
-                    node.text = value
-                    KayaPresent.emitTextChanged(
-                        node.tag, value, KayaSceneModel.focusedId == node.id, false)
-                },
-                singleLine = false,
-                minLines = 3,
-                modifier = a11y
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { state ->
-                        if (state.isFocused) KayaSceneModel.focusedId = node.id
-                    },
-            )
-            LaunchedEffect(KayaSceneModel.focusedId) {
-                if (KayaSceneModel.focusedId == node.id) focusRequester.requestFocus()
-            }
+        // The multi-line editor: the entry's exact contract
+        // (uncontrolled state, identity-tag emits, model-driven focus)
+        // over a multiline field. One composable serves both kinds —
+        // they differed only in two arguments, and a second copy is a
+        // second place for the echo guard to be got wrong.
+        KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, singleLine = false)
+        KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, singleLine = true)
+    }
+}
+
+/**
+ * THE ENTRY AND THE TEXTAREA, on `BasicTextField(state:)` with M3
+ * dressing (docs/undo-plan.md §1.4).
+ *
+ * WHY NOT `TextField(value:, onValueChange:)` any more: that path's undo
+ * stack is an INTERNAL `UndoManager` the app cannot see, clear or ask,
+ * Ctrl+Z drives it, and kaya's writes enter it — see [KayaNode.textState]
+ * for the measured worst case. This shape is the only one on which D7
+ * (an app write invalidates the field's edit history) and D6's native
+ * tier (`undoState.canUndo` / `undo()`) can be expressed at all.
+ *
+ * AND IT NEEDS NO PIN BUMP, which was the open question §1.4 closed:
+ * material3 1.3.1 has no `TextField(state:)` overload (compile-proven —
+ * "None of the following candidates is applicable"), but
+ * `BasicTextField(state=)` + `TextFieldDefaults.DecorationBox` compiles
+ * and renders as a proper M3 filled field at kaya's own BOM. The cost is
+ * two opt-ins, each proven required by removing it.
+ *
+ * THE ECHO GUARD IS THE ONE NEW FAILURE CLASS, and it is why the
+ * observation is a comparison rather than a flag. `TextFieldState` has no
+ * `onValueChange`; the observation is `snapshotFlow { state.text }`, and
+ * MEASURED that channel fires for kaya's OWN writes too (the legacy
+ * path's `onValueChange` never did). Under the echo doctrine a
+ * programmatic write must not emit, so [kayaWriteText] moves the model
+ * and the widget together and this collector reports only what makes them
+ * DIFFER — which is exactly the set of edits kaya did not perform. A
+ * boolean set around the write would have to survive an unknown number of
+ * frames; the comparison is exact and self-clearing.
+ */
+// The M3 dressing is the file's SECOND and last experimental opt-in, and
+// it is proven required rather than assumed: removing it fails the
+// compile with "This material API is experimental" at the DecorationBox
+// call, one error, at material3 1.3.1.
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun KayaTextField(node: KayaNode, a11y: Modifier, singleLine: Boolean) {
+    val focusRequester = remember { FocusRequester() }
+    val interaction = remember { MutableInteractionSource() }
+    // ONE COLLECTOR PER NODE, keyed by the node itself: a destroy and
+    // re-create at the same id would otherwise keep observing a state
+    // nobody reads.
+    LaunchedEffect(node) {
+        snapshotFlow { node.textState.text.toString() }.collect { raw ->
+            val value = kayaLf(raw)
+            // The echo of kaya's own write: the model already says this.
+            if (value == node.text) return@collect
+            node.text = value
+            // Q2's LEDGER-QUIET bracket (docs/undo-plan.md §3a): if this
+            // edit is the echo of a native undo THIS BACKEND ROUTED, the
+            // change was already reported to the ledger once, with the
+            // sample taken at the moment it was true. The app still hears
+            // it — the field is uncontrolled and the app's model must
+            // follow — and only the banking is suppressed.
+            val quiet = kayaTakeNativeUndoEcho(node.id, value)
+            KayaPresent.emitTextChanged(
+                node.tag, value, KayaSceneModel.focusedId == node.id, quiet)
         }
-        KayaCompose.KIND_ENTRY -> {
-            // Uncontrolled toward the app: the node mirrors what the
-            // user types (Compose needs the state), and every edit is
-            // emitted with the entry's identity tag for the app to fold
-            // into its own model — nothing here is read back. Focus is
-            // model-driven the same way: the focus command lands as the
-            // scene's focusedId, walked into the platform focus system
-            // here, and a user-driven change flows back so the model
-            // stays truthful.
-            val focusRequester = remember { FocusRequester() }
-            TextField(
-                value = node.text,
-                onValueChange = { newValue ->
-                    val value = kayaLf(newValue)
-                    node.text = value
-                    KayaPresent.emitTextChanged(
-                        node.tag, value, KayaSceneModel.focusedId == node.id, false)
-                },
-                modifier = a11y
-                    .focusRequester(focusRequester)
-                    // Gain-only back-propagation: onFocusChanged also
-                    // fires with the initial unfocused state at attach,
-                    // and a loss branch there would clear a focusedId
-                    // the LaunchedEffect below has not yet requested.
-                    .onFocusChanged { state ->
-                        if (state.isFocused) KayaSceneModel.focusedId = node.id
-                    },
+    }
+    BasicTextField(
+        state = node.textState,
+        lineLimits =
+            if (singleLine) TextFieldLineLimits.SingleLine
+            else TextFieldLineLimits.MultiLine(minHeightInLines = 3),
+        interactionSource = interaction,
+        textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
+        modifier = a11y
+            .focusRequester(focusRequester)
+            // Gain-only back-propagation: onFocusChanged also fires with
+            // the initial unfocused state at attach, and a loss branch
+            // there would clear a focusedId the LaunchedEffect below has
+            // not yet requested.
+            .onFocusChanged { state ->
+                if (state.isFocused) KayaSceneModel.focusedId = node.id
+            },
+        // The M3 clothes the bare foundation field does not bring:
+        // container, indicator line and padding, so the two kinds look
+        // exactly as they did before the migration.
+        decorator = { inner ->
+            TextFieldDefaults.DecorationBox(
+                value = node.textState.text.toString(),
+                innerTextField = inner,
+                enabled = true,
+                singleLine = singleLine,
+                visualTransformation = VisualTransformation.None,
+                interactionSource = interaction,
+                contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(),
             )
-            LaunchedEffect(KayaSceneModel.focusedId) {
-                if (KayaSceneModel.focusedId == node.id) focusRequester.requestFocus()
-            }
-        }
+        },
+    )
+    LaunchedEffect(KayaSceneModel.focusedId) {
+        if (KayaSceneModel.focusedId == node.id) focusRequester.requestFocus()
     }
 }
 
@@ -4611,6 +5277,11 @@ fun kayaActivateMenuItem(item: KayaMenuItem, noun: ByteArray) {
             // to be commands. Enablement was re-derived one line above,
             // live — that is this host's "refresh before a harness
             // activation", satisfied by construction.
+            // An undo is asked FIRST and separately: it is not a
+            // clipboard command, and the two perform paths are disjoint
+            // by role so the order is documentation rather than
+            // precedence.
+            if (KayaCompose.kayaPerformUndoRole(item.role)) return
             if (KayaCompose.kayaPerformClipboardRole(item.role)) return
             KayaPresent.emitMenuActivated(item.id, noun)
         }

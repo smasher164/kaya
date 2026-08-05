@@ -71,6 +71,9 @@ mod filedialog;
 #[path = "clipboard.rs"]
 mod clipboard;
 
+#[path = "undo.rs"]
+mod undo;
+
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
 /// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
@@ -113,6 +116,13 @@ fn app(ctx: kaya::AppCtx) {
         Ok("a11y") => a11y::app(ctx),
         Ok("filedialog") => filedialog::app(ctx),
         Ok("clipboard") => clipboard::app(ctx),
+        // The undo scene. THE ARM COMES WITH THE LEG, which this file's
+        // own note below says the hard way: a leg wired without its arm
+        // here runs the milestone-2 scene against the undo script and
+        // fails every step for the wrong reason. tools/check-stubs.sh
+        // holds the leg itself off tools/android/run-emulator.sh until
+        // the Compose backend's core-tier seam closes.
+        Ok("undo") => undo::app(ctx),
         // The milestone-2 scene is the DEFAULT and says so: its leg
         // passes "1" (the selftest flag's original spelling, from
         // before the value doubled as a scene selector), and a build

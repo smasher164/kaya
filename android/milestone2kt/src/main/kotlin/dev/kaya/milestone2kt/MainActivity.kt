@@ -66,6 +66,13 @@ class MainActivity : ComponentActivity() {
             "menus" -> Menus::app
             "commands" -> Commands::app
             "clipboard" -> Clipboard::app
+            // The undo scene's guest is language-complete here; whether
+            // a leg RUNS it is the Compose arm's question, not this
+            // selector's (tools/check-stubs.sh reads the backend, not
+            // the switch). Registered so the leg has a scene to select
+            // the moment that arm lands, rather than silently running
+            // milestone2 against the undo script.
+            "undo" -> Undo::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

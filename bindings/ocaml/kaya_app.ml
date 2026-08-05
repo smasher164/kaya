@@ -90,6 +90,48 @@ type picked_file = { handle : int64; name : string; local_path : string }
    types — so compare what the image IS, never the bytes it arrived in.
    [Files] is plural INSIDE one representation, the same nesting
    text/uri-list and CF_HDROP already have. *)
+(* One collection entry's restored state, as the core states it.
+   [ue_state] is None when the step this undoes had no such entry at
+   all — "gone" is a state like any other, and the alternative (a
+   present/absent flag beside a dummy record) makes every reader check
+   two things. *)
+type undo_entry = {
+  ue_collection : int64;
+  (* The instance path: one key per enclosing For, empty at top level. *)
+  ue_path : Kaya_wire.value list;
+  ue_key : Kaya_wire.value;
+  ue_state : (int * Kaya_wire.value list) option;
+}
+
+(* One collection instance's restored key order — present only for the
+   instances whose order the step changed, because position is the one
+   thing per-entry statements cannot carry. *)
+type undo_order = {
+  uo_collection : int64;
+  uo_path : Kaya_wire.value list;
+  uo_keys : Kaya_wire.value list;
+}
+
+(* WHAT THE CORE PUT BACK, and a STATEMENT of it rather than a replay
+   of ops: every run says what a thing now IS, so applying it twice is
+   the same as applying it once.
+
+   APPLYING AN INVERSE EMITS NOTHING ELSE (the echo doctrine), which is
+   why this is fat: it is the ONLY thing an app hears about the step.
+   [ud_texts] is the one nothing else could ever carry — restoring a
+   typing episode is a programmatic write, so an app that folds
+   text_changed into its own model learns of it here or not at all. The
+   binding has already reconciled its collection mirror from
+   [ud_entries] and [ud_orders] before a handler runs; signals and text
+   are not mirrored by this binding (no read-back exists for either, by
+   doctrine), so those two runs are the app's own business. *)
+type undo_delta = {
+  ud_signals : (int64 * Kaya_wire.value) list;
+  ud_texts : (int64 * string) list;
+  ud_entries : undo_entry list;
+  ud_orders : undo_order list;
+}
+
 type representation =
   | Text of string
   | Html of string
@@ -141,6 +183,13 @@ type app = {
   widget_pastes : (int64, representation -> unit) Hashtbl.t;
   node_pastes : (int64, Kaya_wire.value list -> representation -> unit) Hashtbl.t;
   window_closed : (int64, unit -> unit) Hashtbl.t;
+  (* The history, per window and NOT one-shot: a history is walked as
+     often as the user likes, so these outlive every step (the
+     section_selected stance, not the alert's). Each receives the
+     group's label — empty for a typing episode, which kaya does not
+     name — and the whole restored state. *)
+  undone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
+  redone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
   node_toggles : (int64, Kaya_wire.value list -> bool -> unit) Hashtbl.t;
   (* The collection is the model — the only copy: every mutation op
      edits it and queues the wire delta in the same call, so reads
@@ -167,6 +216,12 @@ type app = {
 and tx = {
   app : app;
     mutable records : string list;
+  (* The undo group's (window, label), kept OUT of [records] because it
+     rides at the HEAD of the batch wherever [undoable] was called: a
+     handler builds first and names the step once it knows what the step
+     was, and the wire's head-of-batch rule must not turn that into a
+     footgun. Some twice is a guest bug ("one name per step"). *)
+  mutable undo_group : (int64 * string) option;
   mutable journal : (int64 * instance list) list;
   (* Deriveds registered in this transaction: promoted to the app
      registry on submit, abandoned with a rolled-back tx (their signals
@@ -251,6 +306,8 @@ let create () =
     widget_pastes = Hashtbl.create 4;
     node_pastes = Hashtbl.create 4;
     window_closed = Hashtbl.create 8;
+    undone_handlers = Hashtbl.create 4;
+    redone_handlers = Hashtbl.create 4;
     node_toggles = Hashtbl.create 8;
     model = Hashtbl.create 8;
     children = Hashtbl.create 8;
@@ -368,7 +425,9 @@ let recompute_derived tx cid path =
    model abandons the same writes before the exception continues. *)
 let build app (program : unit -> 'a) =
   require_app_thread ();
-  let tx = { app; records = []; journal = []; pending_derived = [] } in
+  let tx =
+    { app; records = []; undo_group = None; journal = []; pending_derived = [] }
+  in
   let outer = !ambient_tx in
   ambient_tx := Some tx;
   let restore () = ambient_tx := outer in
@@ -380,7 +439,18 @@ let build app (program : unit -> 'a) =
           Hashtbl.replace app.derived cid
             (Option.value ~default:[] (Hashtbl.find_opt app.derived cid) @ [ f ]))
         (List.rev tx.pending_derived);
-      if tx.records <> [] then Kaya_runtime.submit (List.rev tx.records);
+      (* The group marker leads the batch, whatever order the program
+         wrote it in — the wire has no header for per-transaction
+         metadata, so head-of-batch is the one position that cannot be
+         ambiguous. *)
+      let records =
+        match tx.undo_group with
+        | Some (window, label) ->
+            Kaya_wire.tx_undo_group window (Kaya_wire.Str label)
+            :: List.rev tx.records
+        | None -> List.rev tx.records
+      in
+      if records <> [] then Kaya_runtime.submit records;
       result
   | exception e ->
       restore ();
@@ -421,6 +491,39 @@ let dispatch app (program : unit -> unit) =
   with e ->
     Printf.eprintf "kaya: handler raised (transaction rolled back): %s\n%!"
       (Printexc.to_string e)
+
+(* Make this transaction ONE undoable step, under [label].
+
+   THE UNIT OF UNDO IS A NAMED GROUP, not every transaction: handlers
+   fire per-gesture transactions constantly and most of them are
+   consequences rather than intents, and a per-keystroke editor would
+   earn one step per character — the exact problem grouping exists to
+   solve. So a group is opt-in, which is also what keeps a
+   collaborative app free to own its own history (docs/undo-plan.md
+   D2, D8).
+
+   CALLABLE ANYWHERE IN THE TRANSACTION, and the marker still rides at
+   the head (see [build]): a handler naturally acts first and names the
+   step when it knows what the step was. The transaction is the unit —
+   this marks the ambient one and does not bracket a region of it, so
+   where the call sits changes nothing.
+
+   WHAT A GROUP MAY HOLD is the reactive half — signal writes and
+   collection deltas, whose inverse the core derives from state it
+   already keeps. Focus is permitted and simply not restored. Anything
+   else (a const property write, creating a widget, [clear], showing a
+   dialog) fails at apply, naming the op: undo restores state, and
+   state is signals plus collections. The app hears the result at
+   [~on_undone].
+
+   The window is a labelled optional because each window has its own
+   history — Undo in one window has never meant "revert what happened
+   in another" — and the primary is the default, as everywhere else. *)
+let undoable ?(window = 0L) label =
+  let tx = the_tx () in
+  if tx.undo_group <> None then
+    failwith "kaya: this transaction is already an undo group — one name per step";
+  tx.undo_group <- Some (window, label)
 
 let signal initial =
   let tx = the_tx () in
@@ -1049,7 +1152,7 @@ let derive rc compute =
    ~sections_presentation:(Int64.of_int
    Kaya_wire.sections_presentation_bar) ()]. *)
 let window ?title ?width ?height ?veto_close ?list_detail ?sections_presentation
-    ?on_close_requested ?on_closed ?menus ?(id = 0L) () =
+    ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ?(id = 0L) () =
   let tx = the_tx () in
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
@@ -1068,6 +1171,18 @@ let window ?title ?width ?height ?veto_close ?list_detail ?sections_presentation
     (fun f -> Hashtbl.replace tx.app.close_requested id f)
     on_close_requested;
   Option.iter (fun f -> Hashtbl.replace tx.app.window_closed id f) on_closed;
+  (* The history handlers ride the window construct for the same reason
+     the close ones do — a ledger is per window — and they are NOT
+     one-shot: the user walks a history as often as they like, so these
+     outlive every step. Each receives the step's label (empty for a
+     typing episode) and the state the core put back; the collection
+     mirror has already been reconciled from it when the handler runs.
+     [~on_undone] hears every undo kaya ROUTED, which is every one it
+     was asked for through the Undo role or the chord; an affordance
+     kaya does not intercept (a platform context menu) moves the field's
+     own stack and says nothing (docs/undo-plan.md A6). *)
+  Option.iter (fun f -> Hashtbl.replace tx.app.undone_handlers id f) on_undone;
+  Option.iter (fun f -> Hashtbl.replace tx.app.redone_handlers id f) on_redone;
   (* The menubar rides the window construct (the window-attribute
      unification rule): [~menus] realizes its thunks left to right —
      the curried-children convention, [w file] for a retained handle
@@ -1084,11 +1199,11 @@ let window ?title ?width ?height ?veto_close ?list_detail ?sections_presentation
    optional arguments are the OCaml spelling — the same set [window]
    takes. *)
 let create_window ?title ?width ?height ?veto_close ?sections_presentation
-    ?on_close_requested ?on_closed ?menus id =
+    ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_create_window id);
   window ?title ?width ?height ?veto_close ?sections_presentation
-    ?on_close_requested ?on_closed ?menus ~id ()
+    ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ~id ()
 
 (* Close and forget an auxiliary window — also the veto grammar's
    confirmation and the reconciliation after a chrome close. *)
@@ -1583,6 +1698,15 @@ let role_cut = "cut"
 let role_copy = "copy"
 let role_paste = "paste"
 
+(* The two history commands. ONE Edit>Undo covers both tiers: it asks
+   the focused text widget's own stack first and the window's ledger
+   otherwise, and works out its own enablement from the same question,
+   live at activation (docs/undo-plan.md D1, D6). An app declares the
+   items and writes nothing else — a scene that wants a step in the
+   ledger names it with [undoable]. *)
+let role_undo = "undo"
+let role_redo = "redo"
+
 (* Declare a retained action a standard command (actions only —
    root-checked). Uniform declaration, per-host placement; a role never
    invents a chord. Const-only. *)
@@ -2013,6 +2137,172 @@ let representation_of clip =
       end
       else None
 
+(* Cut one undone/redone body into the delta the app is handed.
+
+   THE LAYOUT IS COUNTS-IN-THE-HEAD (wire::undo_body): the window, four
+   u32 run lengths, the group's label, then ONE flat values tail those
+   runs cut up — signals, texts, entries, orders, in that order. Each
+   entry and order group is ARITY-FIRST, its own size leading it, so a
+   reader needs no schema and a record with more fields cannot shift
+   the group after it.
+
+   The window is NOT read here: it arrives in the record's id slot like
+   every other occurrence's identity, and reading the same fact twice is
+   how two readers come to disagree.
+
+   A body that does not add up is a broken ENCODER and not bad input,
+   so it raises rather than handing an app half a step — the picker's
+   read-in-threes rule. *)
+let decode_undo body =
+  let byte i = Char.code body.[i] in
+  let n_signals = Kaya_wire.u32_at byte 8 in
+  let n_texts = Kaya_wire.u32_at byte 12 in
+  let n_entries = Kaya_wire.u32_at byte 16 in
+  let n_orders = Kaya_wire.u32_at byte 20 in
+  let label, at = Kaya_wire.parse_value byte 24 in
+  let label = match label with Kaya_wire.Str s -> s | _ -> "" in
+  let count = Kaya_wire.u32_at byte at in
+  let at = ref (at + 8) in
+  let flat = Array.make (max count 1) (Kaya_wire.I64 0L) in
+  for i = 0 to count - 1 do
+    let v, next = Kaya_wire.parse_value byte !at in
+    flat.(i) <- v;
+    at := next
+  done;
+  (* Read position, not a fold: every run below takes what it needs and
+     leaves the cursor where the next one starts. Each step is its own
+     [let] because OCaml does not specify the order arguments of a pair
+     are evaluated in, and these all read the same cursor. *)
+  let pos = ref 0 in
+  let take () =
+    if !pos >= count then failwith "kaya: undo delta is truncated";
+    let v = flat.(!pos) in
+    incr pos;
+    v
+  in
+  let take_n n =
+    let rec go n acc = if n <= 0 then List.rev acc else go (n - 1) (take () :: acc) in
+    go n []
+  in
+  let i64 () = match take () with Kaya_wire.I64 n -> n | _ -> 0L in
+  let int () = Int64.to_int (i64 ()) in
+  let rec signals n acc =
+    if n = 0 then List.rev acc
+    else
+      let id = i64 () in
+      let value = take () in
+      signals (n - 1) ((id, value) :: acc)
+  in
+  let rec texts n acc =
+    if n = 0 then List.rev acc
+    else
+      let id = i64 () in
+      let text = match take () with Kaya_wire.Str s -> s | _ -> "" in
+      texts (n - 1) ((id, text) :: acc)
+  in
+  let rec entries n acc =
+    if n = 0 then List.rev acc
+    else begin
+      let start = !pos in
+      (* size, collection, flags, variant, path_len — then the path,
+         the key, and the record's fields. [size] counts itself. *)
+      let size = int () in
+      let collection = i64 () in
+      let flags = i64 () in
+      let variant = int () in
+      let path = take_n (int ()) in
+      let key = take () in
+      let fields = take_n (start + size - !pos) in
+      let state =
+        (* Bit 0 is "the entry EXISTS"; clear means the state this
+           restores does not have it at all. *)
+        if Int64.logand flags 1L <> 0L then Some (variant, fields) else None
+      in
+      entries (n - 1)
+        ({ ue_collection = collection; ue_path = path; ue_key = key; ue_state = state }
+        :: acc)
+    end
+  in
+  let rec orders n acc =
+    if n = 0 then List.rev acc
+    else begin
+      let start = !pos in
+      let size = int () in
+      let collection = i64 () in
+      let path = take_n (int ()) in
+      let keys = take_n (start + size - !pos) in
+      orders (n - 1)
+        ({ uo_collection = collection; uo_path = path; uo_keys = keys } :: acc)
+    end
+  in
+  let ud_signals = signals n_signals [] in
+  let ud_texts = texts n_texts [] in
+  let ud_entries = entries n_entries [] in
+  let ud_orders = orders n_orders [] in
+  if !pos <> count then failwith "kaya: undo delta has trailing values";
+  (label, { ud_signals; ud_texts; ud_entries; ud_orders })
+
+(* Fold an undo's payload into the collection mirror.
+
+   THE ROLLBACK JOURNAL IN REVERSE: an abandoned transaction restores a
+   snapshot because nothing was shipped, while an undo restores a delta
+   because everything WAS — the core has already moved, and the mirror
+   is what would otherwise be left behind. The payload is
+   core-authoritative, so nothing here re-derives anything. Signals and
+   text are not mirrored by this binding (no read-back exists for
+   either, by doctrine), so those two runs go straight to the app. *)
+let absorb_undo app delta =
+  List.iter
+    (fun e ->
+      let instances = instances_of app e.ue_collection in
+      let instances =
+        if List.exists (fun i -> i.path = e.ue_path) instances then instances
+        else instances @ [ { path = e.ue_path; entries = [] } ]
+      in
+      Hashtbl.replace app.model e.ue_collection
+        (List.map
+           (fun i ->
+             if i.path <> e.ue_path then i
+             else
+               match e.ue_state with
+               | Some state ->
+                   if List.mem_assoc e.ue_key i.entries then
+                     {
+                       i with
+                       entries =
+                         List.map
+                           (fun (k, v) -> (k, if k = e.ue_key then state else v))
+                           i.entries;
+                     }
+                   else { i with entries = i.entries @ [ (e.ue_key, state) ] }
+               | None ->
+                   { i with entries = List.filter (fun (k, _) -> k <> e.ue_key) i.entries })
+           instances))
+    delta.ud_entries;
+  List.iter
+    (fun o ->
+      Hashtbl.replace app.model o.uo_collection
+        (List.map
+           (fun i ->
+             if i.path <> o.uo_path then i
+             else
+               (* The payload's order first, then anything it does not
+                  name: the delta describes one instance's whole order,
+                  and an entry it never mentions is one this step did
+                  not touch. *)
+               let named =
+                 List.filter_map
+                   (fun k ->
+                     Option.map (fun v -> (k, v)) (List.assoc_opt k i.entries))
+                   o.uo_keys
+               in
+               let rest =
+                 List.filter (fun (k, _) -> not (List.mem k o.uo_keys)) i.entries
+               in
+               { i with entries = named @ rest })
+           (instances_of app o.uo_collection)))
+    delta.ud_orders
+
 let dispatch_loop app =
   (* Claim the thread before the first occurrence: every build after
      this point must happen here. *)
@@ -2025,7 +2315,7 @@ let dispatch_loop app =
     match Kaya_runtime.poll_occurrence () with
     | None ->
         if Kaya_runtime.wait_occurrences () then loop () else () (* shutdown *)
-    | Some (kind, id, keys, payload, clip) ->
+    | Some (kind, id, keys, payload, clip, undo) ->
         (if kind = Kaya_wire.occ_kind_text_changed then
            match (payload, keys) with
            | Some (Kaya_wire.Str text), [] ->
@@ -2138,6 +2428,33 @@ let dispatch_loop app =
            | Some rep, keys ->
                (match Hashtbl.find_opt app.node_pastes id with
                | Some handler -> dispatch app (fun () -> handler keys rep)
+               | None -> ()))
+         else if
+           kind = Kaya_wire.occ_kind_undone || kind = Kaya_wire.occ_kind_redone
+         then
+           (* ONE STEP CAME BACK, and this record is the whole of what
+              the app hears: applying an inverse is programmatic, so the
+              echo doctrine silences everything it did — no text_changed
+              for the text it restored, no value_changed for the
+              signals. NOT one-shot: a history is walked as often as the
+              user likes.
+
+              The mirror is reconciled BEFORE the handler and OUTSIDE
+              its transaction, and both halves matter. Before, so
+              [count] answers about the restored state. Outside, because
+              a handler that raises rolls back ITS edits and not the
+              core's — the core has already moved. *)
+           (match undo with
+           | None -> ()
+           | Some body ->
+               let label, delta = decode_undo body in
+               absorb_undo app delta;
+               let table =
+                 if kind = Kaya_wire.occ_kind_undone then app.undone_handlers
+                 else app.redone_handlers
+               in
+               (match Hashtbl.find_opt table id with
+               | Some handler -> dispatch app (fun () -> handler label delta)
                | None -> ()))
          else if kind = Kaya_wire.occ_kind_menu_activated then
            (* Menu occurrences key the menu-item tables — their own id

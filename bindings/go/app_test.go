@@ -325,6 +325,7 @@ func TestAClosedTransactionRefusesLoudly(t *testing.T) {
 		fn()
 	}
 	panics("a write", func() { escaped.Write(s, "after") })
+	panics("an undo group", func() { escaped.Undoable("late") })
 	panics("a signal declaration", func() { escaped.Signal("late") })
 	panics("a widget declaration", func() { escaped.LabelText("late") })
 	panics("a collection insert", func() { escaped.Insert(c, "k", "v") })
@@ -342,10 +343,26 @@ func TestAClosedTransactionRefusesLoudly(t *testing.T) {
 // callsites before this, spread over three files, and every one of them
 // was a place the check was already missing. A new direct append would
 // silently reopen the hole, and no compiler or vet pass would say so.
+//
+// EVERY SOURCE FILE OF THE PACKAGE, not a list of three: a list is a
+// thing to forget, and the file a future surface lands in is exactly the
+// one nobody adds. (Undo landed in app.go, but it could as easily have
+// been undo.go, and this test would have said nothing about it.)
 func TestEveryRecordGoesThroughTheOneChokepoint(t *testing.T) {
 	direct := regexp.MustCompile(`\.records = append\(`)
 	found := map[string]int{}
-	for _, name := range []string{"app.go", "records.go", "sums.go"} {
+	sources, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("reading the package directory: %v", err)
+	}
+	scanned := 0
+	for _, entry := range sources {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") ||
+			strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		scanned++
 		src, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("reading %s: %v", name, err)
@@ -353,6 +370,12 @@ func TestEveryRecordGoesThroughTheOneChokepoint(t *testing.T) {
 		if n := len(direct.FindAll(src, -1)); n > 0 {
 			found[name] = n
 		}
+	}
+	// A directory read that found nothing would pass this test while
+	// checking nothing at all.
+	if scanned < 4 {
+		t.Fatalf("scanned %d package sources — the walk stopped finding the "+
+			"package, so this test proves nothing", scanned)
 	}
 	// Exactly one, and it is emit's own body.
 	if len(found) != 1 || found["app.go"] != 1 {
@@ -461,4 +484,135 @@ func TestASelfPostWaitsForTheNextDrain(t *testing.T) {
 	if ran != 2 {
 		t.Fatalf("second drain left ran=%d, want 2", ran)
 	}
+}
+
+// --- Undo (docs/undo-plan.md D2, D5) --------------------------------
+
+// THE GROUP MARKER LEADS THE BATCH WHEREVER THE CALL SITS. A handler
+// naturally builds first and names the step once it knows what the step
+// was, and the wire admits the marker only as the FIRST record of the
+// batch — so Undoable rotates rather than appends, and nothing else
+// about the batch may move. A binding that got this wrong would not
+// fail loudly: the core reads a group marker mid-batch as a malformed
+// transaction, and the shape it is easiest to ship is a group that
+// silently covers the wrong ops.
+func TestUndoableLeadsTheBatchWhereverItIsCalled(t *testing.T) {
+	app := NewApp()
+	var s Signal[string]
+	var c Collection
+	app.Build(func(tx *Tx) {
+		s = tx.Signal("a")
+		c = tx.Collection()
+	})
+	app.Build(func(tx *Tx) {
+		tx.Write(s, "b")
+		tx.Insert(c, "k", "v")
+		tx.Undoable("add k") // named LAST, the handler's natural order
+		if n := countKind(tx.records, txUndoGroup); n != 1 {
+			t.Fatalf("queued %d undo_group records, want exactly 1", n)
+		}
+		if k := recKind(tx.records[0]); k != txUndoGroup {
+			t.Fatalf("the batch leads with kind %d, not the group marker (%d) — "+
+				"the wire admits it only at the head", k, txUndoGroup)
+		}
+		if window := binary.LittleEndian.Uint64(tx.records[0][8:16]); window != 0 {
+			t.Fatalf("Undoable named window %d, want the primary (0)", window)
+		}
+		// The rotate must not disturb the rest: the two writes stay in
+		// the order the handler made them.
+		rest := []uint16{recKind(tx.records[1]), recKind(tx.records[2])}
+		if rest[0] != txWriteSignal || rest[1] != txCollectionInsert {
+			t.Fatalf("the rotate reordered the batch: kinds after the marker %v", rest)
+		}
+	})
+	// The aux-window spelling names its own ledger.
+	app.Build(func(tx *Tx) {
+		tx.Write(s, "c")
+		tx.UndoableIn(7, "in seven")
+		if window := binary.LittleEndian.Uint64(tx.records[0][8:16]); window != 7 {
+			t.Fatalf("UndoableIn named window %d, want 7", window)
+		}
+	})
+}
+
+// ONE NAME PER STEP. A second call is a guest bug, not a second group:
+// the wire carries one marker per batch, so the alternative to the
+// panic is a name silently ignored.
+func TestASecondUndoableNameIsRefused(t *testing.T) {
+	app := NewApp()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("a second Undoable was accepted — one of the two names would " +
+				"have vanished with no error")
+		}
+		if msg, _ := r.(string); !strings.Contains(msg, "already an undo group") {
+			t.Fatalf("panicked with %v, want the one-name-per-step message", r)
+		}
+	}()
+	app.Build(func(tx *Tx) {
+		tx.Undoable("first")
+		tx.Undoable("second")
+	})
+}
+
+// AN UNDO MOVED CORE STATE WITHOUT A TRANSACTION, so the mirror follows
+// the payload or every read-back is stale — Tx.Len is what the undo
+// scene's "undid add milk, 0 total" is computed from. Entries arrive as
+// statements (present or gone) and orders as one instance's whole key
+// list, exactly as the Rust binding's absorb_undo folds them.
+func TestAnUndoneDeltaReconcilesTheModelMirror(t *testing.T) {
+	app := NewApp()
+	var c Collection
+	app.Build(func(tx *Tx) {
+		c = tx.Collection()
+		tx.Insert(c, "a", "one")
+		tx.Insert(c, "b", "two")
+		tx.Insert(c, "c", "three")
+	})
+	// What the core would send after undoing "insert c, retitle a" and
+	// putting the order back to c, b, a.
+	app.absorbUndo(UndoDelta{
+		Entries: []UndoEntry{
+			{Collection: c.id, Key: "c"},
+			{Collection: c.id, Key: "a", Present: true, Record: []any{"ONE"}},
+			{Collection: c.id, Key: "z", Present: true, Record: []any{"zed"}},
+		},
+		Orders: []UndoOrder{{Collection: c.id, Keys: []any{"z", "b", "a"}}},
+	})
+	app.Build(func(tx *Tx) {
+		if got := entryKeys(tx, c); !keysEqual(got, []any{"z", "b", "a"}) {
+			t.Fatalf("the mirror holds %v after the undo, want [z b a]", got)
+		}
+		if n := tx.Len(c); n != 3 {
+			t.Fatalf("Len reads %d after the undo, want 3", n)
+		}
+		items := tx.Items(c)
+		if items[2].Value != "ONE" {
+			t.Fatalf("a restored entry holds %v, want the payload's value", items[2].Value)
+		}
+	})
+}
+
+// AND A RECORD COLLECTION GETS ITS RECORDS BACK, not the wire's fields:
+// the mirror holds T values and Items type-asserts them, so a binding
+// that folded the payload verbatim would panic on the next read rather
+// than at the fold. Registered where the type is known (CollectionOf),
+// used where it is not (the occurrence loop).
+func TestAnUndoneDeltaRestoresRecordsNotWireFields(t *testing.T) {
+	app := NewApp()
+	var todos RecordCollection[string, checkTodo]
+	app.Build(func(tx *Tx) {
+		todos = CollectionOf[string, checkTodo](tx)
+		todos.Insert(tx, "t1", checkTodo{Title: "milk"})
+	})
+	app.absorbUndo(UndoDelta{Entries: []UndoEntry{
+		{Collection: todos.id, Key: "t1", Present: true, Record: []any{"tea"}},
+	}})
+	app.Build(func(tx *Tx) {
+		items := todos.Items(tx)
+		if len(items) != 1 || items[0].Value.Title != "tea" {
+			t.Fatalf("the mirror holds %v after the undo, want one checkTodo{tea}", items)
+		}
+	})
 }

@@ -474,6 +474,34 @@ struct CoreState {
     /// user, and both must reach the app through the widget's own
     /// path.
     apply_quiet: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Q2's bracket, spelled GTK (docs/undo-plan.md §3, the
+    /// "report a routed native undo ONCE" rule): while this is set, a
+    /// text change still EMITS — the field is uncontrolled and the app
+    /// must hear it — but is NOT banked, because this backend routed
+    /// the undo and reports it with its own sample through
+    /// `note_native_undo`.
+    ///
+    /// A FLAG AND NOT THE MAC ARM'S TEXT-MATCHED ECHO, because the two
+    /// reports are adjacent here: GTK's `changed` fires SYNCHRONOUSLY
+    /// inside the undo activation (measured — the arm's G0), so a
+    /// bracket set and cleared around that call cannot be outlived by
+    /// the edit it is bracketing. SwiftUI needed the text match because
+    /// its binding pushes a runloop turn later.
+    ledger_quiet: std::rc::Rc<std::cell::Cell<bool>>,
+    /// A4's answer for the ENTRY, which GTK gives no getter for: the
+    /// text widgets whose NATIVE undo stack has something in it.
+    ///
+    /// A GtkTextBuffer publishes `can-undo`; the GtkText behind a
+    /// GtkEntry publishes nothing at all, and its action muxer is
+    /// private (measured — `activate_action("text.undo")` answers TRUE
+    /// on an empty history, so it is not a proxy either). What kaya CAN
+    /// see is every event that moves that stack, because there are only
+    /// two: an edit through the platform's own input path fills it (the
+    /// `changed` handler below), and any programmatic write empties it
+    /// (measured, and the single chokepoint is `clear_native_undo`).
+    /// This set is that model, and it is the backend fact the core
+    /// cannot derive — not a second copy of the ledger.
+    native_dirty: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
     /// Indeterminate bars pulse on a shared ticker (GTK's activity
     /// mode is pulse-driven, not a property); membership here IS the
     /// indeterminate flag the observation reads.
@@ -620,6 +648,12 @@ fn drain_transactions() {
                 apply(core, op);
             }
         }
+        // A transaction can be an undo GROUP, and a group is a ledger
+        // entry: Edit>Undo's enablement moved with it. The clipboard
+        // roles' refresh list (focus, clipboard, role/accepts, copy)
+        // has no member that fires here, so the undo roles add the one
+        // moment that is theirs.
+        refresh_roles(core);
     });
 }
 
@@ -1150,7 +1184,7 @@ struct MenuItemState {
     /// PLACEMENT is inert here (no dress-owned home), but the
     /// clipboard roles change BEHAVIOR: activation performs the
     /// command on the focused widget, and enablement folds in
-    /// role_enabled (refresh_clipboard_roles).
+    /// role_enabled (refresh_roles).
     role: String,
     shortcut: String,
     parent: Option<u64>,
@@ -1353,6 +1387,11 @@ fn make_menu_action(core: &CoreState, id: u64, noun: &[Value]) -> Option<gio::Si
                 // The role is read at ACTIVATION time because the
                 // prop lands after the action is minted.
                 let role = menus.borrow().items[&id].role.clone();
+                // An undo is not a clipboard command, so it has its own
+                // performer — asked first, the mac arm's order.
+                if perform_undo_role(&role) {
+                    return;
+                }
                 if hub.perform_role(&role) {
                     return;
                 }
@@ -2296,28 +2335,503 @@ fn clipboard_offers_text(formats: &gdk::ContentFormats) -> bool {
         || formats.contains_type(glib::types::Type::STRING)
 }
 
-/// Recompute the clipboard roles' action enablement. THE MAC FINDING,
+/// Recompute the GESTURE roles' action enablement. THE MAC FINDING,
 /// spelled GTK (docs/clipboard-plan.md §3): enablement is the
 /// intersection of what the clipboard offers and what the focused
 /// widget accepts, and both move long after the bar was built. The
 /// GAction's enabled flag is what grays the row AND what refuses a
 /// harness activation, so this runs wherever enablement can change
 /// hands: focus moves, the clipboard changes, a role or accepts list
-/// lands, a copy goes out — and before a harness menu activation.
-/// menu_sync_enabled writes the STRUCTURAL enablement alone, so every
-/// site that calls it for a role-bearing tree follows with this.
-fn refresh_clipboard_roles(core: &CoreState) {
+/// lands, a copy goes out — and before a harness menu activation or
+/// read. menu_sync_enabled writes the STRUCTURAL enablement alone, so
+/// every site that calls it for a role-bearing tree follows with this.
+///
+/// UNDO AND REDO JOIN THE SAME FILTER, which is the D6 landing note
+/// (docs/undo-plan.md): a role outside this set never has its
+/// enablement recomputed at all, and on GTK the GAction's flag is also
+/// what refuses an activation — so a missing role here is a menu item
+/// that nothing can activate. Their enablement moves with the LEDGER
+/// rather than with the clipboard, so the ledger's own movers call this
+/// too (a transaction drain, a banked edit, an undo).
+fn refresh_roles(core: &CoreState) {
     let reg = core.menus.borrow();
     for (id, item) in &reg.items {
-        if !matches!(item.role.as_str(), "cut" | "copy" | "paste") {
+        if !matches!(item.role.as_str(), "cut" | "copy" | "paste" | "undo" | "redo") {
             continue;
         }
-        let on =
-            menu_effective_enabled(&reg, *id) && core.clipboard.role_enabled(&item.role);
+        let on = menu_effective_enabled(&reg, *id) && core.role_enabled(&item.role);
         for action in &item.actions {
             action.set_enabled(on);
         }
     }
+}
+
+// --- The undo tier (docs/undo-plan.md D6/D7/A1/A4, §3) -----------------
+//
+// GTK OWNS RAW CONTROLS, which is the whole difference between this arm
+// and the mac one. §3a's amendment says every arm must answer "does a
+// native undo reach kaya's model here?" BY MEASUREMENT; this backend's
+// answer is YES on both kinds, synchronously, on the ordinary `changed`
+// signal (measured in the container against the lane's own GTK: an
+// undo through GtkText's `text.undo` action and one through
+// GtkTextBuffer::undo each moved the text and each emitted `changed`).
+//
+// So the three channels §3a lists are not this arm's to add — the
+// emission already carries a native undo to the app, and it would
+// ALSO carry it to the ledger as ordinary typing. The work here is the
+// opposite one: SUPPRESS the banking half for an undo this backend
+// routed (ledger_quiet) and report it once, with a sample, through
+// `note_native_undo`.
+//
+// D7 IS FREE HERE TOO, and the §0 defect it was written for does not
+// exist on this backend: a programmatic `set_text` neither enters the
+// native stack nor survives beside it — it WIPES the field's history
+// by itself, on both kinds (measured; the same verdict the Windows
+// probe reached for TextBox). The explicit clear below is therefore
+// documentation of the rule, not the thing that buys it — except at
+// A1's call site, where nothing is written and the clear is the whole
+// operation.
+
+impl CoreState {
+    /// A4's ONE named query — "can the focused widget undo?" — answered
+    /// in this platform's vocabulary and asked nowhere else in this
+    /// file. The core's `route_undo` consumes it; a second expression of
+    /// the same question is the shape A4 exists to refuse.
+    ///
+    /// THE TWO KINDS ANSWER DIFFERENTLY BECAUSE GTK DOES. A
+    /// GtkTextBuffer publishes `can-undo`/`can-redo` and answers for
+    /// itself. The GtkText behind a GtkEntry publishes NOTHING — no
+    /// getter, and its action muxer is private (measured:
+    /// `gtk_widget_activate_action` returns TRUE for `text.undo` even
+    /// with an empty history, so it is not a proxy either) — so the
+    /// entry is answered from `native_dirty`, this backend's model of
+    /// the one thing it cannot read.
+    ///
+    /// THE MODEL IS EXACT BECAUSE THE STACK HAS ONLY TWO MOVERS, both
+    /// of which pass through this file: input through the platform's
+    /// own path fills it, and any programmatic write empties it
+    /// (measured). Where it could still be stale — a walk that
+    /// exhausted the stack without kaya routing it — the ACTIVATION
+    /// finds out: an undo with nothing left moves nothing and emits
+    /// nothing, which `perform_undo_role` reports as `can_undo = false`
+    /// so the core finishes the step coarsely from its own ledger.
+    ///
+    /// REDO ASKS THE SAME SET, and the imprecision costs nothing: the
+    /// core only consults it for a frontier episode it has just seen
+    /// walked backwards, where a native redo demonstrably exists.
+    fn focused_can_undo(&self, redo: bool) -> bool {
+        // The hub already resolves the focused widget across toplevels
+        // (a GtkEntry delegates to an internal GtkText, so the entry is
+        // never the toplevel's focus widget itself).
+        let Some(id) = self.clipboard.focused_widget_id() else {
+            return false;
+        };
+        match self.widgets.get(&WidgetId(id)) {
+            Some(NativeWidget::Textarea(view)) => {
+                let buffer = view.buffer();
+                if redo { buffer.can_redo() } else { buffer.can_undo() }
+            }
+            Some(NativeWidget::Entry(_)) => self.native_dirty.borrow().contains(&id),
+            _ => false,
+        }
+    }
+
+    /// Whether a text widget's NATIVE undo stack holds anything —
+    /// `focused_can_undo`'s question asked about a named widget, which
+    /// is what the typing verb needs to prove it typed for real.
+    #[cfg(feature = "harness")]
+    fn native_undo_filled(&self, id: WidgetId) -> bool {
+        match self.widgets.get(&id) {
+            Some(NativeWidget::Textarea(view)) => view.buffer().can_undo(),
+            Some(NativeWidget::Entry(_)) => self.native_dirty.borrow().contains(&id.0),
+            _ => false,
+        }
+    }
+
+    /// Whether a role's command can act right now — the enablement half
+    /// of every gesture role, in one place. Undo and redo ask the CORE
+    /// (the ledger decides against what this backend can see: what is
+    /// focused, and whether that field's own stack has anything); the
+    /// clipboard roles ask the hub, as they always have.
+    fn role_enabled(&self, role: &str) -> bool {
+        match role {
+            "undo" => self.undo_route(false) != crate::scene::UndoRoute::Nothing,
+            "redo" => self.undo_route(true) != crate::scene::UndoRoute::Nothing,
+            _ => self.clipboard.role_enabled(role),
+        }
+    }
+
+    /// Where an undo (or redo) would go RIGHT NOW.
+    ///
+    /// ASKED ONCE AND USED TWICE — enablement and activation are the
+    /// same question (D6: "enablement is that same question, computed
+    /// live at activation exactly as paste's offer∩accepts is"), and
+    /// `Nothing` IS what a disabled Edit>Undo means. And the answer is
+    /// the CORE's: this backend contributes only the pair it alone can
+    /// see, and the ledger decides.
+    fn undo_route(&self, redo: bool) -> crate::scene::UndoRoute {
+        let focused = self
+            .clipboard
+            .focused_widget_id()
+            .map(WidgetId)
+            .filter(|id| {
+                matches!(
+                    self.widgets.get(id),
+                    Some(NativeWidget::Entry(_) | NativeWidget::Textarea(_))
+                )
+            });
+        let window = self.undo_window();
+        let can = self.focused_can_undo(redo);
+        if redo {
+            self.scene.route_redo(window, focused, can)
+        } else {
+            self.scene.route_undo(window, focused, can)
+        }
+    }
+
+    /// Whose ledger an undo activation belongs to: the focused field's
+    /// window, and failing that the ACTIVE toplevel's — the nearest
+    /// thing this platform has to the mac arm's key window, and the
+    /// same question `focused_widget_id` already answers for the
+    /// clipboard. ASKED IN ONE PLACE because enablement and activation
+    /// must not disagree about which history they are talking about;
+    /// window 0 always exists, so a coarse answer is never a lost one.
+    fn undo_window(&self) -> WindowId {
+        self.clipboard
+            .focused_widget_id()
+            .map(WidgetId)
+            .and_then(|id| self.window_of_widget(id))
+            .or_else(|| active_window_id(self))
+            .unwrap_or(WindowId(0))
+    }
+
+    /// Which window's ledger a widget's edits belong to (§3 keeps one
+    /// ledger per window). Resolved from the toolkit rather than from a
+    /// map kaya would have to maintain: a widget's root IS its window,
+    /// and the aux table is small.
+    fn window_of_widget(&self, id: WidgetId) -> Option<WindowId> {
+        use gtk4::prelude::{Cast, WidgetExt};
+        let root = self.widgets.get(&id)?.widget().root()?;
+        let root = root.downcast::<gtk4::Window>().ok()?;
+        if root == self.window {
+            return Some(WindowId(0));
+        }
+        self.aux_windows
+            .iter()
+            .find(|(_, w)| **w == root)
+            .map(|(id, _)| WindowId(*id))
+    }
+
+    /// Reset ONE editable's native undo history — D7's spelling on this
+    /// backend, and A1's whole operation.
+    ///
+    /// Per kind, because GTK gives the two kinds different levers
+    /// (both measured to clear a REAL typed history and to touch no
+    /// text): the buffer takes an EMPTY irreversible-action bracket,
+    /// documented to discard the queue; the entry takes an
+    /// enable-undo toggle, which clears and leaves undo enabled.
+    fn clear_native_undo(&self, id: WidgetId) {
+        match self.widgets.get(&id) {
+            Some(NativeWidget::Entry(entry)) => {
+                use gtk4::prelude::EditableExt;
+                entry.set_enable_undo(false);
+                entry.set_enable_undo(true);
+            }
+            Some(NativeWidget::Textarea(view)) => {
+                let buffer = view.buffer();
+                buffer.begin_irreversible_action();
+                buffer.end_irreversible_action();
+            }
+            _ => return,
+        }
+        // THE SINGLE CHOKEPOINT, which is why the model of the entry's
+        // unreadable stack can live here and stay true.
+        self.native_dirty.borrow_mut().remove(&id.0);
+    }
+
+    /// The text a text widget is showing, LF-normalized the way every
+    /// other read out of this backend is.
+    fn text_of(&self, id: WidgetId) -> Option<String> {
+        match self.widgets.get(&id) {
+            Some(NativeWidget::Entry(entry)) => Some(lf(entry.text().to_string())),
+            Some(NativeWidget::Textarea(view)) => {
+                let b = view.buffer();
+                Some(lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string()))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// D7 + A3 at the quiet-write sites: a programmatic write to a text
+/// widget resets THAT widget's native undo history — but only when the
+/// write CHANGED the text.
+///
+/// A3 IS NOT TIDINESS HERE, it is the one thing this backend has to get
+/// right about D7: GTK's own `set_text` leaves the history alone when
+/// the text is identical (measured), so an app that mirrors a field
+/// into a signal and writes it back keeps its typing history — and an
+/// unconditional clear from kaya would be the thing that took it away.
+///
+/// Called from the APPLY ARMS rather than from the writing sites, so an
+/// inverse the CORE writes (§3's coarse episode restore) travels the
+/// same path a forward write does.
+fn note_quiet_text_write(core: &CoreState, id: WidgetId, previous: &str, next: &str) {
+    if previous == next {
+        return;
+    }
+    core.clear_native_undo(id);
+}
+
+/// The reconciliation sample (§3): what a NATIVE undo left behind.
+///
+/// The core walks its frontier episode backwards from three facts — the
+/// field, the text the walk landed on, and whether the field can still
+/// undo — and ends the walk three ways: consumed at the before-image,
+/// still open with more to give, or exhausted short of the before-image
+/// (the case A1's clear is meant to make unreachable, which falls back
+/// to the coarse restore).
+///
+/// THE THIRD FACT IN BOTH DIRECTIONS is `can_undo`, deliberately, the
+/// mac arm's rule for the mac arm's reason: it is not "did this walk
+/// have more to give" but the core's exhausted-walk test, and a redo
+/// answering `can_redo` there would report false at the end of a
+/// forward walk and send the core backwards.
+///
+/// On this backend the walk's own movement is what answers it for an
+/// entry (GTK publishes no can-undo for one): an activation with
+/// nothing left moves nothing, measured, so `moved` IS the platform's
+/// answer at exactly the moment the core asks.
+fn note_native_undo(core: &mut CoreState, field: WidgetId, moved: bool) {
+    let Some(text) = core.text_of(field) else { return };
+    let window = core.window_of_widget(field).unwrap_or(WindowId(0));
+    // CAN-UNDO IN BOTH DIRECTIONS, never can-redo: `can_redo` answers
+    // FALSE at the end of a forward walk, and the core would read that
+    // as an exhausted BACKWARD walk and coarse-restore to the
+    // before-image — undoing the redo it was just told about.
+    let can = match core.widgets.get(&field) {
+        Some(NativeWidget::Textarea(view)) => view.buffer().can_undo(),
+        _ => moved,
+    };
+    if let Some((ops, occurrence)) = core.scene.note_native_undo(window, field, &text, can) {
+        for op in ops {
+            apply(core, op);
+        }
+        core.occurrences.send(occurrence);
+    }
+}
+
+/// Perform an undo/redo role on the focused surface. Answers whether it
+/// WAS one, so a plain action falls through to its own dispatch —
+/// ClipboardHub::perform_role's contract, for the same reason: a role
+/// item is the PLATFORM's command, not the app's action.
+///
+/// ROUTING IS KAYA'S HERE, all of it (§1: "GTK and Compose route in
+/// kaya — no platform path exists"). GTK has no responder chain and no
+/// Edit-menu resolution of its own: the focused text's `text.undo`
+/// action is reachable, and nothing above it is.
+///
+/// DEFERRED TO AN IDLE, which is this file's standing discipline rather
+/// than a hedge: a menu action's handler may run while the harness
+/// holds the CORE borrow (the stage's `menu_activate` activates the
+/// REAL GAction from inside `on_main`), and both tiers of an undo need
+/// `&mut CoreState` — the core tier to apply the inverse, the native
+/// tier to hand the core its sample. The clipboard hub's enablement
+/// refresh already defers for exactly this reason. Ordering is not at
+/// risk: idle sources run FIFO, and every later harness verb is itself
+/// an idle queued after this one.
+fn perform_undo_role(role: &str) -> bool {
+    let redo = match role {
+        "undo" => false,
+        "redo" => true,
+        _ => return false,
+    };
+    glib::idle_add_local_once(move || {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return };
+            let route = core.undo_route(redo);
+            let window = core.undo_window();
+            match route {
+                crate::scene::UndoRoute::Native => {
+                    let Some(field) = core.clipboard.focused_widget_id().map(WidgetId) else {
+                        return;
+                    };
+                    let before = core.text_of(field).unwrap_or_default();
+                    // THE LEDGER-QUIET BRACKET (Q2). The change this
+                    // activation provokes still reaches the app through
+                    // the widget's own `changed` — the field is
+                    // uncontrolled — and is banked by nobody: this
+                    // function reports it once, with the sample below.
+                    core.ledger_quiet.set(true);
+                    match core.widgets.get(&field) {
+                        Some(NativeWidget::Entry(entry)) => {
+                            use gtk4::prelude::WidgetExt;
+                            let action = if redo { "text.redo" } else { "text.undo" };
+                            let delegate = gtk4::prelude::EditableExt::delegate(entry)
+                                .unwrap_or_else(|| entry.clone().upcast());
+                            let _ = delegate.activate_action(action, None);
+                        }
+                        Some(NativeWidget::Textarea(view)) => {
+                            let buffer = view.buffer();
+                            if redo {
+                                buffer.redo();
+                            } else {
+                                buffer.undo();
+                            }
+                        }
+                        _ => {}
+                    }
+                    core.ledger_quiet.set(false);
+                    let moved = core.text_of(field).unwrap_or_default() != before;
+                    // THE NATIVE TIER MUST ACTUALLY HAVE SOMETHING, and
+                    // under the harness that is provable rather than
+                    // hopeful. Routing sent this activation at the
+                    // field's own stack because the ledger's frontier
+                    // episode is live on it and this backend answered
+                    // "it can undo"; an activation that moves nothing
+                    // means the stack was EMPTY there. In a scene the
+                    // only ways that can happen are the two this
+                    // milestone must never ship: the characters never
+                    // travelled the platform's input path (a `type`
+                    // stand-in), or GTK stopped recording typed input.
+                    // Both would otherwise be SILENT — the core's coarse
+                    // restore below finishes the step and the scene
+                    // passes with the native tier untested. (No harness:
+                    // a user's own unintercepted Ctrl+Z can empty the
+                    // stack legitimately — GtkText's binding is live,
+                    // A6's gap — so shipped apps take the fallback.)
+                    #[cfg(feature = "harness")]
+                    assert!(
+                        moved || redo,
+                        "kaya: Edit>Undo routed to the NATIVE tier and the field's own \
+                         stack had nothing — its typing did not go in as key events \
+                         (harness.rs Stage::type_text, point 1), so the tier this scene \
+                         exists to exercise is empty and the core would have covered \
+                         for it (docs/undo-plan.md §3)"
+                    );
+                    if !moved {
+                        // The stack was empty where this backend's model
+                        // said it was not (an undo kaya did not route —
+                        // GtkText's own Ctrl+Z is live and unintercepted,
+                        // A6's gap on this backend). Correct the model
+                        // here, and let the core finish the step.
+                        core.native_dirty.borrow_mut().remove(&field.0);
+                    }
+                    // A REDO THAT MOVED NOTHING IS NOT REPORTED. The
+                    // core's third fact is the exhausted-walk test and
+                    // it runs BACKWARDS: fed a no-move on the forward
+                    // direction it would coarse-restore to the
+                    // before-image, which is the opposite of what was
+                    // asked. Nothing moved, so the core's picture is
+                    // already right.
+                    if moved || !redo {
+                        note_native_undo(core, field, moved);
+                    }
+                }
+                crate::scene::UndoRoute::Core => {
+                    let stepped = if redo {
+                        core.scene.redo(window)
+                    } else {
+                        core.scene.undo(window)
+                    };
+                    if let Some((ops, occurrence)) = stepped {
+                        for op in ops {
+                            apply(core, op);
+                        }
+                        core.occurrences.send(occurrence);
+                    }
+                }
+                // Inert: both tiers are empty, and the item reads
+                // disabled for the same reason (one question, asked
+                // once — the route above IS the enablement).
+                crate::scene::UndoRoute::Nothing => {}
+            }
+            refresh_roles(core);
+        });
+    });
+    true
+}
+
+/// Bank one text edit into the ledger (§3's episode banking), off the
+/// occurrence the widget just emitted.
+///
+/// THE TAG RESOLVES THE FIELD, not a captured id: the ledger keys on
+/// the widget id a programmatic write would name, and
+/// `Scene::text_field_of_tag` is the one resolver that says so — it
+/// answers None for a stamped collection row, whose typing is therefore
+/// not banked on any backend (uniform by construction rather than by
+/// coincidence).
+///
+/// DEFERRED, like everything else that needs `&mut CoreState` from a
+/// widget signal: `changed` fires during apply for a `clear`, and the
+/// stage's own `set_text` fires it while the harness holds the CORE
+/// borrow. Idle sources run FIFO, so edits bank in the order they
+/// happened and before any transaction the guest sends in reply — the
+/// occurrence that would provoke one leaves this handler after the bank
+/// is queued.
+fn bank_text_changed(tag: Vec<u8>, text: String, focused: bool) {
+    glib::idle_add_local_once(move || {
+        CORE.with_borrow_mut(|core| {
+            let Some(core) = core.as_mut() else { return };
+            let Some(field) = core.scene.text_field_of_tag(&tag) else {
+                return;
+            };
+            let window = core.window_of_widget(field).unwrap_or(WindowId(0));
+            core.scene.note_text_changed(window, field, &text, focused);
+            // A banked edit moves the ledger, and the ledger is what
+            // Edit>Undo's enablement reads.
+            refresh_roles(core);
+        });
+    });
+}
+
+/// The kaya text widget holding the keyboard focus IN ONE WINDOW —
+/// A1's target, which names a window rather than a widget.
+///
+/// Resolved from that window's own focus widget rather than from the
+/// hub's cross-toplevel answer: a group can commit in a window that is
+/// not the active one, and clearing the history of whatever field the
+/// user happens to be typing in elsewhere is the exact damage D7's
+/// focus guard exists to prevent.
+fn focused_text_in(core: &CoreState, window: WindowId) -> Option<WidgetId> {
+    use gtk4::prelude::{GtkWindowExt, WidgetExt};
+    let toplevel = if window.0 == 0 {
+        core.window.clone()
+    } else {
+        core.aux_windows.get(&window.0)?.clone()
+    };
+    let focus = GtkWindowExt::focus(&toplevel)?;
+    core.widgets
+        .iter()
+        .find(|(_, w)| {
+            matches!(w, NativeWidget::Entry(_) | NativeWidget::Textarea(_))
+                && (focus == w.widget() || focus.is_ancestor(&w.widget()))
+        })
+        .map(|(id, _)| *id)
+}
+
+/// The kaya window id of the ACTIVE toplevel, if one of kaya's is.
+fn active_window_id(core: &CoreState) -> Option<WindowId> {
+    use gtk4::prelude::GtkWindowExt;
+    if core.window.is_active() {
+        return Some(WindowId(0));
+    }
+    core.aux_windows
+        .iter()
+        .find(|(_, w)| w.is_active())
+        .map(|(id, _)| WindowId(*id))
+}
+
+/// Whether a text widget holds the keyboard focus, read the way
+/// `is_focused` reads it: a focused GtkEntry delegates to an internal
+/// GtkText, so the entry itself is never the toplevel's focus widget
+/// and FOCUS_WITHIN is the flag that answers.
+fn widget_focused(widget: &impl IsA<gtk4::Widget>) -> bool {
+    use gtk4::prelude::WidgetExt;
+    widget
+        .as_ref()
+        .state_flags()
+        .intersects(gtk4::StateFlags::FOCUSED | gtk4::StateFlags::FOCUS_WITHIN)
 }
 
 /// Choose the RICHEST representation the clipboard offers that the
@@ -2506,9 +3020,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("entries carry a tag");
                     let quiet = core.apply_quiet.clone();
+                    let ledger_quiet = core.ledger_quiet.clone();
+                    let dirty = core.native_dirty.clone();
+                    let wid = id.0;
                     entry.connect_changed(move |e| {
                         if !quiet.get() {
-                            sink.send_text_tag(&tag, &lf(e.text().to_string()));
+                            let text = lf(e.text().to_string());
+                            sink.send_text_tag(&tag, &text);
+                            // AND THE LEDGER HEARS IT TOO (§3's episode
+                            // banking), unless this backend routed the
+                            // undo that caused it and is reporting that
+                            // one itself (Q2's bracket). The focus flag
+                            // is sampled HERE, where it is true.
+                            if !ledger_quiet.get() {
+                                dirty.borrow_mut().insert(wid);
+                                bank_text_changed(tag.clone(), text, widget_focused(e));
+                            }
                         }
                     });
                     core.entries.push(entry.clone());
@@ -2625,12 +3152,26 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("textareas carry a tag");
                     let quiet = core.apply_quiet.clone();
+                    let ledger_quiet = core.ledger_quiet.clone();
+                    let dirty = core.native_dirty.clone();
+                    let wid = id.0;
                     let buffer = view.buffer();
+                    // A WEAK ref, not the view: the handler lives on the
+                    // buffer the view owns, so a strong one would be a
+                    // cycle that outlives the window.
+                    let weak_view = glib::WeakRef::<gtk4::TextView>::new();
+                    weak_view.set(Some(&view));
                     buffer.connect_changed(move |b| {
                         if !quiet.get() {
                             let text =
                                 lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string());
                             sink.send_text_tag(&tag, &text);
+                            if !ledger_quiet.get() {
+                                let focused =
+                                    weak_view.upgrade().is_some_and(|v| widget_focused(&v));
+                                dirty.borrow_mut().insert(wid);
+                                bank_text_changed(tag.clone(), text, focused);
+                            }
                         }
                     });
                     core.textareas.push(view.clone());
@@ -3114,7 +3655,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // alone, which would un-gray a role item whose
                     // clipboard half says no — the role factor goes
                     // back on top.
-                    refresh_clipboard_roles(core);
+                    refresh_roles(core);
                 }
                 MenuProp::Checked => {
                     // QUIET (the echo doctrine): set_state never fires
@@ -3190,7 +3731,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .get_mut(&item.0)
                         .expect("scene validated the item id")
                         .role = crate::protocol::prop_str(&value).to_owned();
-                    refresh_clipboard_roles(core);
+                    refresh_roles(core);
                 }
             }
         }
@@ -3275,7 +3816,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // per leg so it does not happen on the lane).
                 panic!("kaya: clipboard set_content failed: {e}");
             }
-            refresh_clipboard_roles(core);
+            refresh_roles(core);
         }
         ApplyOp::ReadClipboard { request, accepting } => {
             core.clipboard.armed.set(true);
@@ -3292,10 +3833,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }),
             );
         }
-        // A1's clear reaches the focused editable through GTK's
-        // begin/end_irreversible_action bracket — the undo milestone's
-        // GTK arm, not this slice (docs/undo-plan.md §1, §4).
-        ApplyOp::ClearUndo { .. } => crate::depth_stub("undo"),
+        // A1, THE KEYSTONE (docs/undo-plan.md §3): a core undo group
+        // committed, so the focused editable's native history goes with
+        // it. The episode was banked before the clear, so nothing is
+        // lost but granularity — and every episode after this one
+        // therefore begins with an EMPTY native stack, which is what
+        // makes "ask the focused text first" and "ask the most recent
+        // first" the same question.
+        //
+        // Targetless by design: the core does not know what is focused,
+        // and this backend already asks itself that for role
+        // enablement.
+        ApplyOp::ClearUndo { window } => {
+            if let Some(id) = focused_text_in(core, window) {
+                core.clear_native_undo(id);
+            }
+        }
         ApplyOp::PresentFileDialog(spec) => {
             // GNOME's own picker: gtk::FileDialog (4.10+), presented on
             // the requesting window and answered exactly once through
@@ -3485,14 +4038,24 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Entry(entry), Prop::Text, Value::Str(s)) => {
                     // Quiet: a property write is configuration, not a
                     // user edit (see apply_quiet).
+                    //
+                    // The before-image is read one line before the
+                    // write, which is the last moment it exists — D7's
+                    // clear is gated on it having CHANGED (A3).
+                    let previous = lf(entry.text().to_string());
                     core.apply_quiet.set(true);
                     entry.set_text(&s);
                     core.apply_quiet.set(false);
+                    note_quiet_text_write(core, id, &previous, &s);
                 }
                 (NativeWidget::Textarea(view), Prop::Text, Value::Str(s)) => {
+                    let buffer = view.buffer();
+                    let previous =
+                        lf(buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string());
                     core.apply_quiet.set(true);
-                    view.buffer().set_text(&s);
+                    buffer.set_text(&s);
                     core.apply_quiet.set(false);
+                    note_quiet_text_write(core, id, &previous, &s);
                 }
                 (NativeWidget::Checkbox(check), Prop::Text, Value::Str(s)) => {
                     check.set_label(Some(&s));
@@ -3612,7 +4175,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         core.clipboard.accepts.borrow_mut().insert(id.0, list);
                     }
                     core.clipboard.armed.set(true);
-                    refresh_clipboard_roles(core);
+                    refresh_roles(core);
                 }
                 (NativeWidget::Grid(grid), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
@@ -3928,11 +4491,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // through the widget's own path — the entry
                     // scene's second-add round depends on exactly
                     // this echo.
+                    //
+                    // It is still a PROGRAMMATIC write for D7's
+                    // purposes: what it destroys is widget-owned text
+                    // the user did not delete, so the edit history that
+                    // described it goes too.
+                    let previous = core.text_of(id).unwrap_or_default();
                     match widget {
                         NativeWidget::Entry(entry) => entry.set_text(""),
                         NativeWidget::Textarea(view) => view.buffer().set_text(""),
                         _ => panic!("kaya: clear on a non-text widget (scene validates kinds)"),
                     }
+                    note_quiet_text_write(core, id, &previous, "");
                 }
                 CommandKind::Focus => {
                     // grab_focus is per-window (the toplevel's focus
@@ -4096,7 +4666,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                         glib::idle_add_local_once(|| {
                             CORE.with_borrow(|core| {
                                 if let Some(core) = core.as_ref() {
-                                    refresh_clipboard_roles(core);
+                                    refresh_roles(core);
                                 }
                             });
                         });
@@ -4149,6 +4719,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 select_options: HashMap::new(),
                 select_models: HashMap::new(),
                 apply_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
+                ledger_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
+                native_dirty: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 indeterminate: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 columns: Vec::new(),
                 rows: Vec::new(),
@@ -4276,6 +4848,13 @@ fn foreign_clip_read(mime: &str) -> Vec<u8> {
 static CLIPBOARD_TAPPED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// The typing verb's twin of CLIPBOARD_TAPPED: the first run of keys
+/// into a process meets GDK's late wl_keyboard bind and holds the
+/// warm-up key longer for it.
+#[cfg(feature = "harness")]
+static TYPED_ONCE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// Wayland charges an input-event serial for TAKING the selection, and
 /// the charge is not one-time (docs/clipboard-plan.md §5b finding 3,
 /// all of it measured): the lane's headless seat has no input devices,
@@ -4398,7 +4977,7 @@ impl crate::harness::Stage for GtkStage {
             // activation. The GAction's enabled flag refuses a
             // disabled activation natively, so it must be CURRENT
             // before the route resolves.
-            refresh_clipboard_roles(core);
+            refresh_roles(core);
             // An OPEN context menu owns resolution EXCLUSIVELY while
             // presented — no bar fallback (the interpreters' rule).
             let open = *core.open_context.borrow();
@@ -4729,6 +5308,15 @@ impl crate::harness::Stage for GtkStage {
         Self::on_main(move |core| {
             use crate::harness::MenuAspect;
             use gtk4::gio::prelude::ActionExt;
+            // THE HARNESS-READ REFRESH — the mac arm's finding 2, which
+            // cost that leg a debugging round: enablement is recomputed
+            // at the moments it can change hands, and a harness READ is
+            // one of them exactly as a harness ACTIVATION is. Without
+            // this line `expect_menu "Edit>Undo" enabled` answers with
+            // whatever the item was born with, and no scene before this
+            // milestone's caught it because none asserts an enablement
+            // that MOVES.
+            refresh_roles(core);
             // TOTAL, the try_resolve style: a missing item is a
             // retryable miss — expect_menu doubles as the wait for a
             // catalog rebuild — never a panic. The OPEN context menu
@@ -4802,7 +5390,7 @@ impl crate::harness::Stage for GtkStage {
         Self::prime_if_clipboard_scene();
         let spelling = spelling.to_owned();
         Self::on_main(move |core| {
-            refresh_clipboard_roles(core);
+            refresh_roles(core);
             // The platform's own table: the application accelerator
             // map that set_accels_for_action filled — the exact table
             // GtkApplicationWindow's accel controller walks for a
@@ -4884,13 +5472,187 @@ impl crate::harness::Stage for GtkStage {
         });
     }
 
-    /// The real-keystroke typing verb (docs/undo-plan.md A8). This
-    /// backend has not reached the undo slice, and a keystroke is
-    /// exactly where a stand-in would lie: a text write here would look
-    /// like typing and would CLEAR the native history the scene came to
-    /// observe, turning a missing arm into a passing leg.
-    fn type_text(&self, _text: &str) {
-        crate::depth_stub("undo")
+    /// The real-keystroke typing verb (docs/undo-plan.md A8), to
+    /// harness.rs's six-point contract.
+    ///
+    /// 1. THE PLATFORM'S OWN INPUT PATH. The keys enter through the
+    ///    session's input machinery — a transient Wayland virtual
+    ///    keyboard (`wtype`, the tool the clipboard lane already
+    ///    installs and taps for its serial) or XTEST (`xdotool`) — so
+    ///    the field's native history fills exactly as a user's typing
+    ///    fills it. Measured: a programmatic insert fills NOTHING on
+    ///    this backend (a GtkText records no history for
+    ///    gtk_editable_insert_text), so a stand-in here would not merely
+    ///    be impure, it would leave the native tier empty and let a
+    ///    native-tier leg pass having observed nothing.
+    /// 2. WHATEVER HOLDS FOCUS RECEIVES IT: both tools deliver to the
+    ///    session's focused surface, so the platform answers the
+    ///    routing question and kaya never looks a widget up.
+    /// 3. IT APPENDS: the caret goes to the END with nothing selected
+    ///    first, which matters here because kaya's `focus` command is
+    ///    grab_focus and GTK selects an entry's contents on focus — the
+    ///    same trap macOS has, and one script is compared byte for byte
+    ///    on both.
+    /// 4. IT BLOCKS UNTIL THE TEXT HAS LANDED: the tool is run to
+    ///    completion and then the widget is polled until it shows what
+    ///    was typed. An `expect` after this verb would be a bounded
+    ///    retry, but `menu_activate "Edit>Undo"` — the reason the verb
+    ///    exists — is an action and has no such cover.
+    /// 5. NO SYNTHETIC COALESCING: one key event per character, in
+    ///    order; GTK merges a run into one undo step by itself
+    ///    (measured), which is the platform's business.
+    ///
+    /// THE FIRST KEYSTROKE IS LOST WITHOUT A WARM-UP on Wayland
+    /// (measured: `wtype tea` types "ea", every invocation): a fresh
+    /// virtual keyboard races GDK's wl_keyboard bind. The lane's own
+    /// answer is the press-hold-release of F24 — a key bound to nothing
+    /// that types nothing — and here it rides INSIDE the same
+    /// invocation, so the payload follows on a keyboard that is already
+    /// bound. X11 has no such race (XTEST types on the server's own
+    /// keyboard) and needs no warm-up.
+    fn type_text(&self, text: &str) {
+        assert!(
+            !text.starts_with('-'),
+            "kaya: type {text:?} begins with '-', which both injection tools read as an \
+             option — type text that does not, or teach this verb a tool that takes a \
+             payload on stdin"
+        );
+        // FIRST, LET THE PREVIOUS STEP'S CONSEQUENCES LAND — and this is
+        // correctness, measured by the lane rather than reasoned about.
+        // The scene clicks a button whose handler focuses the field and
+        // then types; an ACTION returns as soon as it is delivered, so
+        // the guest's `focus` transaction is still in flight. GTK's
+        // grab_focus SELECTS THE ENTRY'S CONTENTS, so a focus that lands
+        // between this verb's caret move and the keystrokes turns an
+        // append into a REPLACE: pooled eight wide, `type "s"` on a
+        // field holding "tea" read "s" on both protocols (2026-08-04),
+        // while the same leg alone passed six times running — the
+        // wayland warm-up hold happened to absorb the round trip and
+        // x11's zero-delay injection did not.
+        //
+        // Quiescence, bounded: drain what has arrived, and require
+        // several consecutive empty drains before typing. A guest that
+        // never goes quiet costs the deadline and then types anyway,
+        // because a stalled app is the following assertion's story to
+        // tell, not this verb's.
+        let settle = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        let mut quiet = 0;
+        while quiet < 3 && std::time::Instant::now() < settle {
+            let applied = Self::on_main_mut(|core| {
+                let mut n = 0usize;
+                while let Ok(tx) = core.transactions.try_recv() {
+                    for op in core.scene.apply(tx) {
+                        apply(core, op);
+                    }
+                    n += 1;
+                }
+                if n > 0 {
+                    refresh_roles(core);
+                }
+                n
+            });
+            quiet = if applied == 0 { quiet + 1 } else { 0 };
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        // Point 3, on the main context: a caret move, which is not an
+        // edit and spends no native undo step.
+        let target = Self::on_main(move |core| {
+            let id = core.clipboard.focused_widget_id().map(WidgetId)?;
+            match core.widgets.get(&id) {
+                Some(NativeWidget::Entry(entry)) => {
+                    gtk4::prelude::EditableExt::set_position(entry, -1);
+                }
+                Some(NativeWidget::Textarea(view)) => {
+                    let buffer = view.buffer();
+                    buffer.place_cursor(&buffer.end_iter());
+                }
+                // Nothing editable focused: the keys still go where the
+                // platform sends them (point 2), and a following
+                // assertion reports the mismatch (point 4's contract).
+                _ => return None,
+            }
+            Some((id, core.text_of(id).unwrap_or_default()))
+        });
+        let hold = if TYPED_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            "150"
+        } else {
+            // The first invocation in a process meets the same late
+            // bind the clipboard tap does; later ones meet only the
+            // per-invocation keyboard race, which any hold covers.
+            "800"
+        };
+        // THE CARET MOVE RIDES THE SAME INPUT STREAM as the characters,
+        // ahead of them: Ctrl+End is a real key event that goes to the
+        // end of the text and collapses any selection, so nothing the
+        // toolkit does between this verb's programmatic caret move and
+        // the first character can turn the run into a replace. The
+        // characters follow with the SMALLEST inter-key delay each tool
+        // takes (wtype refuses 0 — "Invalid sleep time", measured),
+        // which keeps the burst inside GDK's event reading rather than
+        // leaving idle-priority gaps for a late transaction to land in.
+        let (tool, args): (&str, Vec<&str>) = if linux_wayland_session() {
+            (
+                "wtype",
+                vec![
+                    "-P", "F24", "-s", hold, "-p", "F24", "-s", "20", "-M", "ctrl", "-k",
+                    "End", "-m", "ctrl", "-s", "10", "-d", "1", text,
+                ],
+            )
+        } else {
+            ("xdotool", vec!["key", "ctrl+End", "type", "--delay", "0", text])
+        };
+        let out = std::process::Command::new(tool)
+            .args(&args)
+            .output()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "kaya: the typing verb needs {tool}: {e} — the lane image installs it \
+                     (tools/linux/Dockerfile; docs/undo-plan.md A8)"
+                )
+            });
+        assert!(
+            out.status.success(),
+            "kaya: {tool} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // Point 4: every character delivered AND processed.
+        let Some((id, before)) = target else { return };
+        let want = format!("{before}{text}");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+        loop {
+            let now = Self::on_main(move |core| core.text_of(id).unwrap_or_default());
+            if now == want {
+                // AND THE KEYS FILLED THE NATIVE HISTORY, which is the
+                // whole reason this verb exists and the one thing a
+                // stand-in cannot fake. A `set_text` here would satisfy
+                // every assertion above AND every assertion in
+                // tools/scenes/undo.steps — the frontier undo would
+                // quietly fall to the core's coarse restore and the
+                // native tier would go untested while the leg went
+                // green. That is the failure this line refuses.
+                let filled = Self::on_main(move |core| core.native_undo_filled(id));
+                assert!(
+                    filled,
+                    "kaya: type {text:?} landed but the field's NATIVE undo history is \
+                     still empty — the characters did not travel the platform's own \
+                     input path (harness.rs Stage::type_text, point 1), and a \
+                     native-tier scene would pass having observed nothing"
+                );
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                // NOT a verdict — the contract says a following
+                // assertion reports the mismatch — but never silent
+                // either: a verb that gave up is the thing a reader of
+                // the failure will want to know about first.
+                eprintln!(
+                    "KAYA_UNDO_TRACE: type {text:?} never landed: the field holds {now:?}, \
+                     expected {want:?} after {tool} reported success"
+                );
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     fn set_text(&self, t: crate::harness::Target, text: &str) {
@@ -4898,13 +5660,27 @@ impl crate::harness::Stage for GtkStage {
         Self::on_main(move |core| {
             // The user path per kind: the buffer/entry change signal
             // fires and emits (the quiet guard is off).
-            if t.kind == crate::harness::TargetKind::Textarea {
+            let widget = if t.kind == crate::harness::TargetKind::Textarea {
                 let i = crate::harness::resolve(t.index, core.textareas.len());
                 core.textareas[i].buffer().set_text(&text);
-                return;
+                core.textareas[i].clone().upcast::<gtk4::Widget>()
+            } else {
+                let i = crate::harness::resolve(t.index, core.entries.len());
+                core.entries[i].set_text(&text);
+                core.entries[i].clone().upcast::<gtk4::Widget>()
+            };
+            // IT EMITS LIKE THE USER AND IT WRITES LIKE THE APP, and
+            // the second half is what the native stack sees: a
+            // programmatic write wipes a GTK field's undo history
+            // (measured), whatever the occurrence says. So the model of
+            // that stack is corrected here — otherwise a scene that
+            // set_texts a focused field and then activates Edit>Undo
+            // routes NATIVE into an empty stack and spends an
+            // activation discovering it.
+            if let Some((id, _)) = core.widgets.iter().find(|(_, w)| w.widget() == widget) {
+                let id = *id;
+                core.clear_native_undo(id);
             }
-            let i = crate::harness::resolve(t.index, core.entries.len());
-            core.entries[i].set_text(&text);
         });
     }
 

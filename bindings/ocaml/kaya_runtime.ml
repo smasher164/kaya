@@ -178,10 +178,12 @@ let register_blob data =
     (kaya_blob_register s (Unsigned.Size_t.of_int (String.length s)))
 
 (* Block for the next occurrence; None when the core has shut down.
-   Some (kind, id, keys, payload): keys are [] when the id is a widget
-   id, else the id is a template node id and the keys are the stamped
-   copy's key path, outermost first; payload is Some for text_changed
-   (a Str) and toggled (a Bool). *)
+   Some (kind, id, keys, payload, clip, undo): keys are [] when the id
+   is a widget id, else the id is a template node id and the keys are
+   the stamped copy's key path, outermost first; payload is Some for
+   text_changed (a Str) and toggled (a Bool); undo is the raw body of
+   an undone/redone record — the one payload with no slot of its own
+   (see the scan below). *)
 (* Read the next occurrence if one is ready, WITHOUT blocking; None
    means the ring is empty right now.
 
@@ -219,12 +221,40 @@ let poll_occurrence =
       else begin
         let at = !h land mask in
         let size = Kaya_wire.u32_at byte at in
-        let parsed = Kaya_wire.parse_occurrence (fun i -> byte (at + i)) in
+        let kind = Kaya_wire.u16_at byte (at + 4) in
+        (* AN UNDO STEP CANNOT RIDE THE SHARED TUPLE, so it travels as
+           its own bytes and Kaya_app cuts it up.
+           [parse_occurrence]'s slots are {id, keys, payload, clip}, and
+           an undone/redone carries a window, four run lengths, a label
+           and one flat delta tail — nothing that fits. Worse, the
+           generic tail it would fall through to reads {u64 id, u32
+           path_len}, which takes `window` for a widget and the SIGNAL
+           COUNT for a key-path length, then reads the label's bytes as
+           keys: junk, silently. So these two kinds never reach it.
+           The body is copied out of the ring HERE because the space is
+           handed back three lines below — a record does not wrap (the
+           writer pads), so the copy is one contiguous run. *)
+        let undo =
+          if kind = Kaya_wire.occ_kind_undone || kind = Kaya_wire.occ_kind_redone
+          then Some (String.init (size - 8) (fun i -> Char.chr (byte (at + 8 + i))))
+          else None
+        in
+        let parsed =
+          match undo with
+          (* The window rides where every other record's id does, and it
+             is what keys the per-window handler. *)
+          | Some _ ->
+              Some (kind, Int64.of_int (Kaya_wire.u32_at byte (at + 8)), [], None, None)
+          | None -> Kaya_wire.parse_occurrence (fun i -> byte (at + i))
+        in
         (* The cursors are u32 and wrap; OCaml ints are wider, so wrap by
            hand before handing the space back with a release store. *)
         h := (!h + size) land 0xFFFFFFFF;
         store_release_u32 head_addr !h;
-        match parsed with Some occ -> Some occ | None -> scan ()
+        match parsed with
+        | Some (kind, id, keys, payload, clip) ->
+            Some (kind, id, keys, payload, clip, undo)
+        | None -> scan ()
       end
     in
     scan ()

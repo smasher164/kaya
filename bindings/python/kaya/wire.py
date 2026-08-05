@@ -885,6 +885,49 @@ def parse_occurrence(buf):
         # first rides as the payload.
         window, section = struct.unpack_from("<QQ", buf, 8)
         return kind, section, [], window
+    if kind in (OCC_UNDONE, OCC_REDONE,):
+        # One undone/redone step: the window, four run
+        # lengths, the group's label, then ONE flat values
+        # tail the runs cut up — signals, texts, entries,
+        # orders, in that order. The payload is the whole
+        # RESTORED STATE, never a replay of ops.
+        window, n_signals, n_texts, n_entries, n_orders = \
+            struct.unpack_from("<QIIII", buf, 8)
+        at = 32
+        label, at = parse_value(buf, at)
+        count, _reserved = struct.unpack_from("<II", buf, at)
+        at += 8
+        flat = []
+        for _ in range(count):
+            value, at = parse_value(buf, at)
+            flat.append(value)
+        i = 0
+        signals = []
+        for _ in range(n_signals):
+            signals.append((flat[i], flat[i + 1]))
+            i += 2
+        texts = []
+        for _ in range(n_texts):
+            texts.append((flat[i], flat[i + 1]))
+            i += 2
+        entries = []
+        # Arity-first groups: `size` counts itself, so a
+        # reader takes it and needs nothing else.
+        for _ in range(n_entries):
+            size, coll, present, variant, path_len = flat[i:i + 5]
+            body = flat[i + 5:i + size]
+            i += size
+            state = (variant, body[path_len + 1:]) if present else None
+            entries.append((coll, tuple(body[:path_len]), body[path_len], state))
+        orders = []
+        for _ in range(n_orders):
+            size, coll, path_len = flat[i:i + 3]
+            body = flat[i + 3:i + size]
+            i += size
+            orders.append((coll, tuple(body[:path_len]), body[path_len:]))
+        if i != len(flat):
+            raise ValueError("kaya: undo delta has trailing values")
+        return kind, window, [], (label, signals, texts, entries, orders)
     ident, path_len = struct.unpack_from("<QI", buf, 8)
     keys = []
     at = 24

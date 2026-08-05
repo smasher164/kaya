@@ -1282,6 +1282,83 @@ public final class KayaWire {
         return new ClipValues(kind, values);
     }
 
+    /** One Value at {@code next[0]}, which advances past it.
+     * Blobs are redeemed and RELEASED here: a handle must never
+     * reach an app. */
+    public static Object parseValue(byte[] rec, ByteBuffer b, int[] next) {
+        int at = next[0];
+        int vtype = b.getInt(at);
+        int vlen = b.getInt(at + 4);
+        next[0] = at + 8 + ((vlen + 7) & ~7);
+        switch (vtype) {
+            case VALUE_BOOL: return rec[at + 8] != 0;
+            case VALUE_I64: return b.getLong(at + 8);
+            case VALUE_F64: return b.getDouble(at + 8);
+            case VALUE_BLOB: return KayaRing.occurrenceBlob(b.getLong(at + 8));
+            default:
+                return new String(rec, at + 8, vlen, StandardCharsets.UTF_8);
+        }
+    }
+
+    /** One collection entry's restored state, as the decoder
+     * hands it over. {@code present} false is "the restored
+     * state does not have this entry at all", and then
+     * {@code variant} and {@code fields} are empty. */
+    public static final class UndoEntryValues {
+        public final long collection;
+        public final List<Object> path;
+        public final Object key;
+        public final boolean present;
+        public final int variant;
+        public final List<Object> fields;
+
+        UndoEntryValues(long collection, List<Object> path, Object key,
+                boolean present, int variant, List<Object> fields) {
+            this.collection = collection;
+            this.path = path;
+            this.key = key;
+            this.present = present;
+            this.variant = variant;
+            this.fields = fields;
+        }
+    }
+
+    /** One collection instance's restored key order — position
+     * is the one thing per-entry statements cannot carry. */
+    public static final class UndoOrderValues {
+        public final long collection;
+        public final List<Object> path;
+        public final List<Object> keys;
+
+        UndoOrderValues(long collection, List<Object> path, List<Object> keys) {
+            this.collection = collection;
+            this.path = path;
+            this.keys = keys;
+        }
+    }
+
+    /** One undone/redone step as the decoder hands it over: the
+     * group's label (EMPTY for a typing episode) and the four
+     * counted runs cut out of the flat Values tail. A STATEMENT
+     * OF THE RESTORED STATE, never a replay of ops — signals and
+     * texts arrive as flattened (id, value) pairs. */
+    public static final class UndoValues {
+        public final String label;
+        public final List<Object> signals;
+        public final List<Object> texts;
+        public final List<UndoEntryValues> entries;
+        public final List<UndoOrderValues> orders;
+
+        UndoValues(String label, List<Object> signals, List<Object> texts,
+                List<UndoEntryValues> entries, List<UndoOrderValues> orders) {
+            this.label = label;
+            this.signals = signals;
+            this.texts = texts;
+            this.entries = entries;
+            this.orders = orders;
+        }
+    }
+
     /** Decode one occurrence record (header included); null for pad
      * or unknown kinds. */
     public static Occ parseOccurrence(byte[] rec) {
@@ -1335,6 +1412,65 @@ public final class KayaWire {
         // keys the handler; the first rides as the payload.
         if (kind == OCC_KIND_SECTION_SELECTED) {
             return new Occ(kind, b.getLong(16), java.util.List.of(), id);
+        }
+        if (kind == OCC_KIND_UNDONE || kind == OCC_KIND_REDONE) {
+            int signalCount = b.getInt(16);
+            int textCount = b.getInt(20);
+            int entryCount = b.getInt(24);
+            int orderCount = b.getInt(28);
+            int[] cursor = { 32 };
+            String label = (String) parseValue(rec, b, cursor);
+            int flatCount = b.getInt(cursor[0]);
+            cursor[0] += 8; // count + reserved
+            List<Object> flat = new ArrayList<>(flatCount);
+            for (int i = 0; i < flatCount; i++) {
+                flat.add(parseValue(rec, b, cursor));
+            }
+            int taken = 0;
+            List<Object> signals = new ArrayList<>(signalCount * 2);
+            for (int i = 0; i < signalCount * 2; i++) {
+                signals.add(flat.get(taken++));
+            }
+            List<Object> texts = new ArrayList<>(textCount * 2);
+            for (int i = 0; i < textCount * 2; i++) {
+                texts.add(flat.get(taken++));
+            }
+            List<UndoEntryValues> entries = new ArrayList<>(entryCount);
+            for (int i = 0; i < entryCount; i++) {
+                // Arity-first: `size` counts itself, so a reader
+                // takes it and needs nothing else.
+                int size = (int) (long) (Long) flat.get(taken);
+                long coll = (Long) flat.get(taken + 1);
+                boolean present = (Long) flat.get(taken + 2) != 0L;
+                int variant = (int) (long) (Long) flat.get(taken + 3);
+                int pathLen = (int) (long) (Long) flat.get(taken + 4);
+                List<Object> body = new ArrayList<>(
+                        flat.subList(taken + 5, taken + size));
+                taken += size;
+                entries.add(new UndoEntryValues(coll,
+                        List.copyOf(body.subList(0, pathLen)), body.get(pathLen),
+                        present, present ? variant : 0,
+                        present ? List.copyOf(body.subList(pathLen + 1, body.size()))
+                                : List.of()));
+            }
+            List<UndoOrderValues> orders = new ArrayList<>(orderCount);
+            for (int i = 0; i < orderCount; i++) {
+                int size = (int) (long) (Long) flat.get(taken);
+                long coll = (Long) flat.get(taken + 1);
+                int pathLen = (int) (long) (Long) flat.get(taken + 2);
+                List<Object> body = new ArrayList<>(
+                        flat.subList(taken + 3, taken + size));
+                taken += size;
+                orders.add(new UndoOrderValues(coll,
+                        List.copyOf(body.subList(0, pathLen)),
+                        List.copyOf(body.subList(pathLen, body.size()))));
+            }
+            if (taken != flat.size()) {
+                throw new IllegalStateException(
+                        "kaya: undo delta has trailing values");
+            }
+            return new Occ(kind, id, java.util.List.of(),
+                    new UndoValues(label, signals, texts, entries, orders));
         }
         int pathLen = b.getInt(16);
         List<Object> keys = new ArrayList<>();
