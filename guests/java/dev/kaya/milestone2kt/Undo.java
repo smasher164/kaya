@@ -11,11 +11,11 @@ import dev.kaya.KayaRecords;
  * <p>WHAT AN APP WRITES FOR UNDO IS ONE CALL PER STEP.
  * {@code tx.undoable(...)} names a transaction, and that name is the
  * step: the core keeps the inverse of what the batch did to signals and
- * collections, and hands it back through {@code onUndone}. There is no
- * undo stack in this file, no command objects, and no re-run of any
- * handler — an undo is a programmatic write of the state that was there
- * before, which is why it emits nothing and why the occurrence carries
- * the whole delta.
+ * collections, and hands it back through the window's {@code onUndone}.
+ * There is no undo stack in this file, no command objects, and no re-run
+ * of any handler — an undo is a programmatic write of the state that was
+ * there before, which is why it emits nothing and why the occurrence
+ * carries the whole delta.
  *
  * <p>THE FIELD'S OWN TYPING UNDO IS THE PLATFORM'S, and this app writes
  * nothing for it at all. Both tiers arrive through the same Edit&gt;Undo
@@ -53,22 +53,6 @@ final class Undo {
     @KayaGen(key = "String")
     record UndoTodo(String title) {}
 
-    /** The scene's handles, returned by the build body. */
-    private static final class Scene {
-        final KayaApp.Signal<String> status;
-        final KayaApp.Signal<String> history;
-        final KayaApp.Widget field;
-        final KayaRecords.Collection<String, UndoTodo> todos;
-
-        Scene(KayaApp.Signal<String> status, KayaApp.Signal<String> history,
-                KayaApp.Widget field, KayaRecords.Collection<String, UndoTodo> todos) {
-            this.status = status;
-            this.history = history;
-            this.field = field;
-            this.todos = todos;
-        }
-    }
-
     // The fold: widget-owned state arrives as occurrences; the app's
     // copy is this field, not a widget read.
     private static String draft = "";
@@ -87,19 +71,37 @@ final class Undo {
     static void app() {
         KayaApp app = new KayaApp();
 
-        Scene scene = app.build(tx -> {
+        app.build(tx -> {
             // THE GESTURE LAYER, one tier deeper: an app declares the
             // two items and writes nothing else. They act on the focused
             // widget, lower to the platform's own command where it has
             // one, and work out their own enablement from what is
             // focused and what the ledger holds.
-            KayaApp.MenuItem edit = tx.window(0).title("undo").menu("Edit");
+            KayaApp.WindowRef win = tx.window(0).title("undo");
+            KayaApp.MenuItem edit = win.menu("Edit");
             edit.item("Undo").role(KayaApp.ROLE_UNDO);
             edit.item("Redo").role(KayaApp.ROLE_REDO);
 
             KayaApp.Signal<String> status = tx.signal("no todos");
             KayaApp.Signal<String> history = tx.signal("history empty");
             var todos = UndoTodoKaya.collection(tx);
+
+            // THE HANDLERS RIDE THE WINDOW CONSTRUCT, because handlers
+            // scope to the thing that creates them and an undo is always
+            // some window's. Per window, and PERSISTENT: a history is
+            // walked as often as the user likes. The binding has already
+            // reconciled its collection model from this payload before
+            // the handler runs, which is why the count below answers
+            // about the restored state.
+            win.onUndone((t, label, delta) -> {
+                absorb(delta);
+                t.write(history,
+                        "undid " + what(label) + ", " + t.count(todos.handle) + " total");
+            }).onRedone((t, label, delta) -> {
+                absorb(delta);
+                t.write(history,
+                        "redid " + what(label) + ", " + t.count(todos.handle) + " total");
+            });
 
             KayaApp.Widget[] field = new KayaApp.Widget[1];
             KayaApp.Widget root = tx.column(() -> {
@@ -130,22 +132,6 @@ final class Undo {
             // question's other half.
             tx.focus(field[0]);
             tx.mount(root);
-            return new Scene(status, history, field[0], todos);
-        });
-
-        // Per window, and PERSISTENT: a history is walked as often as
-        // the user likes. The binding has already reconciled its
-        // collection model from this payload before the handler runs,
-        // which is why the count below answers about the restored state.
-        app.onUndone(0, (tx, label, delta) -> {
-            absorb(delta);
-            tx.write(scene.history,
-                    "undid " + what(label) + ", " + tx.count(scene.todos.handle) + " total");
-        });
-        app.onRedone(0, (tx, label, delta) -> {
-            absorb(delta);
-            tx.write(scene.history,
-                    "redid " + what(label) + ", " + tx.count(scene.todos.handle) + " total");
         });
 
         app.dispatchLoop();

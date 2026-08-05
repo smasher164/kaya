@@ -757,6 +757,41 @@ public final class KayaApp {
             return this;
         }
 
+        /**
+         * Binds the undone handler to THIS window (per-window — handlers
+         * scope to the thing that creates them, and the ledger is:
+         * Undo in one window has never meant "revert what happened in
+         * another"): fires each time kaya routes an undo here, with the
+         * group's authored label (EMPTY for a typing episode) and what
+         * the core put back.
+         *
+         * <p>NOT ONE-SHOT — the onSelected stance rather than the
+         * alert's. A history is walked as often as the user likes, and
+         * the registration outlives every step.
+         *
+         * <p>THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is
+         * a programmatic write, so the echo doctrine silences every
+         * occurrence it would otherwise cause — no onChange for the text
+         * it restored, no value change for the signals. This binding has
+         * already folded the payload into its own collection model
+         * before the handler runs; this is where an app folds it into
+         * ITS model.
+         */
+        public WindowRef onUndone(UndoHandler handler) {
+            app.undone.put(id, handler);
+            return this;
+        }
+
+        /**
+         * The {@link #onUndone} twin. A FRONTIER typing episode redoes
+         * on the platform's own stack and reports itself as an ordinary
+         * edit, so it does not arrive here.
+         */
+        public WindowRef onRedone(UndoHandler handler) {
+            app.redone.put(id, handler);
+            return this;
+        }
+
         /** The surface's title (title bar / switcher / task label). */
         public WindowRef title(String title) {
             tx.emit(KayaWire.txSetWindowTitle(id, title));
@@ -1613,7 +1648,7 @@ public final class KayaApp {
          * Anything else (a const property write, creating a widget,
          * clear, showing a dialog) fails at apply, naming the op: undo
          * restores state, and state is signals plus collections. The app
-         * hears the result through {@link KayaApp#onUndone}.
+         * hears the result through {@link WindowRef#onUndone}.
          */
         public void undoable(String label) {
             undoableIn(0, label);
@@ -2987,36 +3022,6 @@ public final class KayaApp {
      * a click on a live widget. */
     public void onPaste(Node n, PasteHandler handler) {
         nodePastes.put(n.id, handler);
-    }
-
-    /**
-     * Bind the undone handler to ONE window: fires each time kaya routes
-     * an undo there, with the group's label (EMPTY for a typing episode)
-     * and what the core put back.
-     *
-     * <p>NOT ONE-SHOT — the onSelected stance rather than the alert's. A
-     * history is walked as often as the user likes, and the registration
-     * outlives every step. Per window because the ledger is: Undo in one
-     * window has never meant "revert what happened in another".
-     *
-     * <p>THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
-     * programmatic write, so the echo doctrine silences every occurrence
-     * it would otherwise cause — no onChange for the text it restored,
-     * no value change for the signals. This binding has already folded
-     * the payload into its own collection model before the handler runs;
-     * this is where an app folds it into ITS model.
-     */
-    public void onUndone(long window, UndoHandler handler) {
-        undone.put(window, handler);
-    }
-
-    /**
-     * The {@link #onUndone} twin. A FRONTIER typing episode redoes on
-     * the platform's own stack and reports itself as an ordinary edit,
-     * so it does not arrive here.
-     */
-    public void onRedone(long window, UndoHandler handler) {
-        redone.put(window, handler);
     }
 
     /**

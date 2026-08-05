@@ -48,11 +48,11 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
-DEPTH_SCENES="undo"
+DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -874,10 +874,9 @@ run clipboard-java-swiftui env KAYA_SELFTEST=clipboard KAYA_LIB="$ROOT/target/de
 drain
 
 # The undo scene: one history over two tiers, walked newest-first
-# (docs/undo-plan.md §3). A DEPTH slice — the protocol, the core
-# ledger, the Rust surface and the SwiftUI arm — so it runs rust-only
-# here until the seven other bindings spell `undoable` and moves into
-# SCENES then.
+# (docs/undo-plan.md §3). Began as a DEPTH slice; the fan-out finished
+# 2026-08-04, all nine guests answer alike, and the scene graduated
+# from DEPTH_SCENES into SCENES — check-steps demands these legs now.
 #
 # ALONE BETWEEN DRAINS, and the reason is the `type` verb rather than
 # the scene: it delivers REAL KEYSTROKES, and a backend that ever

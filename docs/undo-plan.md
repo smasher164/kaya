@@ -634,5 +634,16 @@ Then the fan-out: GTK, WinUI, iOS, Compose arms (each with §1's
 measured spelling), the remaining seven bindings' `undoable`
 spellings, and the matrix.
 
+Surface amendment (2026-08-04, post-fan-out): this plan specified only
+the Rust `Messages` spelling, and the fan-out transcribed that shape
+into Go/Java/Haskell as app-global `OnUndone(window, fn)` — violating
+the ratified window-construct rule (DESIGN.md, Binding conventions)
+that no window attribute lives as a loose function outside the
+construct. Respelled: on_undone/on_redone are window-construct
+attributes in all seven construct bindings, `Messages::on_*(WindowId,
+...)` stays as Rust's sanctioned form, the C floor keeps matching on
+the record head, and check-sugar-surface now sweeps window handlers
+so the next window-scoped occurrence cannot ship the loose form.
+
 The depth slice: spec + core log + Rust surface + the SwiftUI mac arm
 + the scene, then the fan-out, per the sequencing doctrine.

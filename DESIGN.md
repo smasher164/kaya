@@ -336,11 +336,21 @@ one construct for a window's attributes — a prop chain (`tx.window(0)
 labeled function, a config list, or a scope, per the language's idiom
 — and the PRIMARY window's construct accepts exactly the
 created-window construct's attribute set (title, width/height,
-veto_close, list_detail, sections_presentation, the close handlers). The one
+veto_close, list_detail, sections_presentation, the close handlers,
+and the history handlers on_undone/on_redone — the undo ledger is
+per-window, so its observers are window attributes like any other).
+The one
 asymmetry left is semantic: the primary has no creation or
 destruction moment, because the process owns it. No window attribute
 lives as a loose function outside the construct — there are no
-shortcuts (`window_title` retired 2026-07-22; ratified). A
+shortcuts (`window_title` retired 2026-07-22; ratified — and
+re-violated once: the undo fan-out shipped app-global
+`OnUndone(window, fn)` in Go/Java/Haskell by transcribing Rust's
+Messages shape, caught 2026-08-04 and respelled; check-sugar-surface
+now sweeps window handlers so the third arrival of this pattern goes
+red instead of shipping). Rust's `Messages::on_*(WindowId, ...)`
+remains the sanctioned Rust form, and the C floor registers nothing
+by design — it matches on the occurrence record's head. A
 props-only primary construct is legal and mounts nothing — the
 sections shape, where the switcher IS the window content. Window-owned
 child declarations follow the same ownership: sections and the command

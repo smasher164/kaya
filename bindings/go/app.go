@@ -1852,6 +1852,37 @@ func (w WindowRef) OnClosed(fn func(*Tx)) WindowRef {
 	return w
 }
 
+// OnUndone binds the undone handler to THIS window: it fires each time
+// kaya routes an undo there, with the group's label (EMPTY for a typing
+// episode — kaya invents no user-facing strings) and what the core put
+// back. Per-window like the close handlers, and for the same reason the
+// ledger is: Undo in one window has never meant "revert what happened
+// in another".
+//
+// NOT ONE-SHOT, the OnSelected stance rather than the alert's. A history
+// is walked as often as the user likes, and the registration outlives
+// every step.
+//
+// THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
+// programmatic write, so the echo doctrine silences every occurrence it
+// would otherwise cause — no text_changed for the text it restored, no
+// value_changed for the signals. The binding has already folded this
+// payload into its own collection mirror before the handler runs (so
+// Tx.Len answers about the restored state); this is where an app folds
+// it into ITS model.
+func (w WindowRef) OnUndone(fn func(*Tx, string, UndoDelta)) WindowRef {
+	w.tx.app.undone[w.id] = fn
+	return w
+}
+
+// OnRedone is the OnUndone twin. A frontier typing episode redoes on the
+// platform's own stack and reports itself as an ordinary edit, so it
+// does not arrive here.
+func (w WindowRef) OnRedone(fn func(*Tx, string, UndoDelta)) WindowRef {
+	w.tx.app.redone[w.id] = fn
+	return w
+}
+
 // Id returns the window id, for MountIn.
 func (w WindowRef) Id() uint64 {
 	return w.id
@@ -2447,7 +2478,8 @@ func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
 // already keeps. Focus is permitted and not restored. Anything else (a
 // const property write, creating a widget, Clear, showing a dialog)
 // fails at apply, naming the op: undo restores state, and state is
-// signals plus collections. The app hears the result as App.OnUndone.
+// signals plus collections. The app hears the result through the window
+// construct's OnUndone.
 func (tx *Tx) Undoable(label string) {
 	tx.UndoableIn(0, label)
 }
@@ -2466,33 +2498,6 @@ func (tx *Tx) UndoableIn(window uint64, label string) {
 	copy(tx.records[1:], tx.records[:len(tx.records)-1])
 	tx.records[0] = head
 	tx.undoGroup = true
-}
-
-// OnUndone binds the undone handler to ONE window: it fires each time
-// kaya routes an undo there, with the group's label (EMPTY for a typing
-// episode — kaya invents no user-facing strings) and what the core put
-// back.
-//
-// NOT ONE-SHOT, the OnSelected stance rather than the alert's. A history
-// is walked as often as the user likes, and the registration outlives
-// every step.
-//
-// THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
-// programmatic write, so the echo doctrine silences every occurrence it
-// would otherwise cause — no text_changed for the text it restored, no
-// value_changed for the signals. The binding has already folded this
-// payload into its own collection mirror before the handler runs (so
-// Tx.Len answers about the restored state); this is where an app folds
-// it into ITS model.
-func (a *App) OnUndone(window uint64, fn func(*Tx, string, UndoDelta)) {
-	a.undone[window] = fn
-}
-
-// OnRedone is the OnUndone twin. A frontier typing episode redoes on the
-// platform's own stack and reports itself as an ordinary edit, so it
-// does not arrive here.
-func (a *App) OnRedone(window uint64, fn func(*Tx, string, UndoDelta)) {
-	a.redone[window] = fn
 }
 
 // UndoDelta is what an undo or a redo PUT BACK: the core-authoritative

@@ -41,8 +41,6 @@ module KayaApp
     submitTx,
     undoableTx,
     undoableTxIn,
-    onUndone,
-    onRedone,
     UndoDelta (..),
     UndoEntry (..),
     UndoOrder (..),
@@ -410,6 +408,8 @@ data Pending
   | PBackRequested !Word64 (IO ())
   | PCloseRequested !Word64 (IO ())
   | PWindowClosed !Word64 (IO ())
+  | PUndone !Word64 (String -> UndoDelta -> IO ())
+  | PRedone !Word64 (String -> UndoDelta -> IO ())
   | PChange !Word64 (String -> IO ())
   | PToggle !Word64 (Bool -> IO ())
   | PValue !Word64 (Double -> IO ())
@@ -753,7 +753,8 @@ count c = length <$> items c
 -- the thing that creates them): 'WOnCloseRequested' fires per chrome
 -- close while veto_close is armed (answer with 'destroyWindow' to
 -- agree); 'WOnClosed' fires when the non-veto auxiliary is
--- chrome-closed and retires with it.
+-- chrome-closed and retires with it; 'WOnUndone' and 'WOnRedone' hear
+-- this window's undo ledger.
 data WindowAttr
   = WTitle String
   | WSize Double Double
@@ -764,6 +765,29 @@ data WindowAttr
   | WSectionsPresentation Int64
   | WOnCloseRequested (IO ())
   | WOnClosed (IO ())
+  | -- | Hear an undo kaya routed in this window: the step's label —
+    -- EMPTY for a typing episode, since kaya invents no user-facing
+    -- strings — and what the core put back. The ledger is per window,
+    -- so its observer is a window attribute like any other, and the
+    -- handler reads no id to learn which window it is (the same reason
+    -- 'EOnPopped' rides the push).
+    --
+    -- NOT ONE-SHOT, the 'addSection' stance rather than the alert's: a
+    -- history is walked as often as the user likes, so the registration
+    -- outlives every step.
+    --
+    -- THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
+    -- programmatic write, so the echo doctrine silences every occurrence
+    -- it would otherwise cause — no text_changed for the text it
+    -- restored, no value_changed for the signals. This binding has
+    -- already folded the payload into its own collection model before
+    -- the handler runs (so 'count' and 'recordItems' answer about the
+    -- restored state); this is where an app folds it into ITS own state.
+    WOnUndone (String -> UndoDelta -> IO ())
+  | -- | The 'WOnUndone' twin. A frontier typing episode redoes on the
+    -- platform's own stack and reports itself as an ordinary edit, so
+    -- that one does not arrive here.
+    WOnRedone (String -> UndoDelta -> IO ())
   | -- | The menubar rides the window construct (the window-attribute
     -- unification rule): 'WMenus' realizes its inline Build actions in
     -- order and appends each top-level grouping node ('menu' or
@@ -788,6 +812,8 @@ window n = mapM_ apply
     apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
     apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
     apply (WOnClosed handler) = pendB (PWindowClosed n handler)
+    apply (WOnUndone handler) = pendB (PUndone n handler)
+    apply (WOnRedone handler) = pendB (PRedone n handler)
     apply (WMenus menus) =
       mapM_ (\m -> m >>= \(MItem i) -> emitB (W.txMenubarAppend n i)) menus
 
@@ -952,7 +978,7 @@ rolePaste = "paste"
 -- action. Enablement is that same question, asked live at activation.
 --
 -- AN APP OPTS IN TO THE OTHER TIER BY NAMING ITS STEPS ('undoableTx')
--- and hears the result through 'onUndone'. An app that names none still
+-- and hears the result through 'WOnUndone'. An app that names none still
 -- gets working text undo from these two items, because the first tier
 -- is the platform's own.
 roleUndo :: String
@@ -2346,6 +2372,10 @@ register app pending = case pending of
   PBackRequested n handler -> modifyIORef' (appBackRequested app) (Map.insert n handler)
   PCloseRequested n handler -> modifyIORef' (appCloseRequested app) (Map.insert n handler)
   PWindowClosed n handler -> modifyIORef' (appWindowClosed app) (Map.insert n handler)
+  -- The undo pair keys the same per-WINDOW tables the dispatch loop
+  -- reads; n is the window construct's id.
+  PUndone n handler -> modifyIORef' (appUndone app) (Map.insert n handler)
+  PRedone n handler -> modifyIORef' (appRedone app) (Map.insert n handler)
   PChange n handler -> modifyIORef' (appWidgetChanges app) (Map.insert n handler)
   PToggle n handler -> modifyIORef' (appWidgetToggles app) (Map.insert n handler)
   PValue n handler -> modifyIORef' (appWidgetValues app) (Map.insert n handler)
@@ -2389,7 +2419,7 @@ submitTx app b = buildTx app b
 -- and state is signals plus collections. An app that wants a widget
 -- property undoable binds it to a signal. The label must be non-empty —
 -- the empty one is how a typing EPISODE names itself on the same
--- occurrence. The result comes back through 'onUndone'.
+-- occurrence. The result comes back through 'WOnUndone'.
 undoableTx :: App -> String -> Build a -> IO a
 undoableTx app = undoableTxIn app 0
 
@@ -2399,32 +2429,6 @@ undoableTx app = undoableTxIn app 0
 undoableTxIn :: App -> Word64 -> String -> Build a -> IO a
 undoableTxIn app windowId label body =
   buildTx app (emitB (W.txUndoGroup windowId (W.VStr label)) >> body)
-
--- | Hear an undo kaya routed in @windowId@: the step's label — EMPTY
--- for a typing episode, since kaya invents no user-facing strings — and
--- what the core put back.
---
--- NOT ONE-SHOT, the 'addSection' stance rather than the alert's: a
--- history is walked as often as the user likes, so the registration
--- outlives every step. Per window because the ledger is.
---
--- THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
--- programmatic write, so the echo doctrine silences every occurrence it
--- would otherwise cause — no text_changed for the text it restored, no
--- value_changed for the signals. This binding has already folded the
--- payload into its own collection model before the handler runs (so
--- 'count' and 'recordItems' answer about the restored state); this is
--- where an app folds it into ITS own state.
-onUndone :: App -> Word64 -> (String -> UndoDelta -> IO ()) -> IO ()
-onUndone app windowId handler =
-  modifyIORef' (appUndone app) (Map.insert windowId handler)
-
--- | The 'onUndone' twin. A frontier typing episode redoes on the
--- platform's own stack and reports itself as an ordinary edit, so that
--- one does not arrive here.
-onRedone :: App -> Word64 -> (String -> UndoDelta -> IO ()) -> IO ()
-onRedone app windowId handler =
-  modifyIORef' (appRedone app) (Map.insert windowId handler)
 
 -- Fold an undo's payload into the collection model.
 --

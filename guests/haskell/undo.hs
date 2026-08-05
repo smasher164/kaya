@@ -8,10 +8,10 @@
    WHAT AN APP WRITES FOR UNDO IS ONE CALL PER STEP. 'undoableTx' names a
    transaction, and that name is the step: the core keeps the inverse of
    what the batch did to signals and collections, and hands it back
-   through 'onUndone'. There is no undo stack in this file, no command
-   objects, and no re-run of any handler — an undo is a programmatic
-   write of the state that was there before, which is why it emits
-   nothing and why the occurrence carries the whole delta.
+   through the window's 'WOnUndone'. There is no undo stack in this file,
+   no command objects, and no re-run of any handler — an undo is a
+   programmatic write of the state that was there before, which is why it
+   emits nothing and why the occurrence carries the whole delta.
 
    THE ENTRY POINT TAKES THE NAME because this binding's transaction is
    ambient: a Build is a pure state function with no handle to hang a
@@ -67,11 +67,38 @@ main = kayaMain $ \app -> do
   draftRef <- newIORef ""
   keyRef <- newIORef (0 :: Int)
 
-  (status, history, entryField, todos) <- buildTx app $ do
+  buildTx app $ do
+    status <- signal (VStr "no todos")
+    history <- signal (VStr "history empty")
+    todos <- collectionOf (Proxy :: Proxy Todo)
+
+    -- Per window, and PERSISTENT: a history is walked as often as the
+    -- user likes. The binding has already reconciled its collection
+    -- model from this payload before the handler runs, which is why
+    -- `count` below answers about the restored state.
+    --
+    -- THE DELTA IS THE ONLY NOTIFICATION for the text it put back:
+    -- restoring an episode is a programmatic write, and a programmatic
+    -- write never echoes, so an app that folds text_changed into its own
+    -- state — which is every app, the field being uncontrolled — would go
+    -- stale on exactly this step if the payload did not carry it (D5).
+    let walked verb label delta = do
+          case reverse (undoTexts delta) of
+            ((_, text) : _) -> writeIORef draftRef text
+            [] -> return ()
+          submitTx app $ do
+            total <- count (recordHandle todos)
+            writeSignal history (VStr (verb ++ " " ++ what label ++ ", " ++ show total ++ " total"))
+
     -- THE GESTURE LAYER, one tier deeper: an app declares the two items
     -- and writes nothing else. They act on the focused widget, lower to
     -- the platform's own command where it has one, and work out their
     -- own enablement from what is focused and what the ledger holds.
+    --
+    -- The two history handlers ride this same construct, because the
+    -- ledger is per window and a window's attributes are exactly what
+    -- its construct takes — nothing about a window is a loose function
+    -- registered after the fact.
     window
       0
       [ WTitle "undo",
@@ -82,11 +109,10 @@ main = kayaMain $ \app -> do
               [ item "Undo" [IRole roleUndo],
                 item "Redo" [IRole roleRedo]
               ]
-          ]
+          ],
+        WOnUndone (walked "undid"),
+        WOnRedone (walked "redid")
       ]
-    status <- signal (VStr "no todos")
-    history <- signal (VStr "history empty")
-    todos <- collectionOf (Proxy :: Proxy Todo)
 
     -- THE FIELD IS BUILT FIRST so the buttons can close over it: Build
     -- is a PURE state monad, so there is no IORef trick available
@@ -147,24 +173,3 @@ main = kayaMain $ \app -> do
     -- other half.
     focusWidget entryField
     mount root
-    return (status, history, entryField, todos)
-
-  -- Per window, and PERSISTENT: a history is walked as often as the
-  -- user likes. The binding has already reconciled its collection model
-  -- from this payload before the handler runs, which is why `count`
-  -- below answers about the restored state.
-  --
-  -- THE DELTA IS THE ONLY NOTIFICATION for the text it put back:
-  -- restoring an episode is a programmatic write, and a programmatic
-  -- write never echoes, so an app that folds text_changed into its own
-  -- state — which is every app, the field being uncontrolled — would go
-  -- stale on exactly this step if the payload did not carry it (D5).
-  let walked verb label delta = do
-        case reverse (undoTexts delta) of
-          ((_, text) : _) -> writeIORef draftRef text
-          [] -> return ()
-        submitTx app $ do
-          total <- count (recordHandle todos)
-          writeSignal history (VStr (verb ++ " " ++ what label ++ ", " ++ show total ++ " total"))
-  onUndone app 0 (walked "undid")
-  onRedone app 0 (walked "redid")

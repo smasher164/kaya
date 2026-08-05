@@ -4,10 +4,10 @@
 // WHAT AN APP WRITES FOR UNDO IS ONE CALL PER STEP. tx.Undoable(...)
 // names a transaction, and that name is the step: the core keeps the
 // inverse of what the batch did to signals and collections, and hands it
-// back through OnUndone. There is no undo stack in this file, no command
-// objects, and no re-run of any handler — an undo is a programmatic
-// write of the state that was there before, which is why it emits
-// nothing and why the occurrence carries the whole delta.
+// back through the window's OnUndone. There is no undo stack in this
+// file, no command objects, and no re-run of any handler — an undo is a
+// programmatic write of the state that was there before, which is why it
+// emits nothing and why the occurrence carries the whole delta.
 //
 // THE FIELD'S OWN TYPING UNDO IS THE PLATFORM'S, and this app writes
 // nothing for it at all. Both tiers arrive through the same Edit>Undo
@@ -71,12 +71,41 @@ func main() {
 	)
 
 	app.Build(func(tx *kaya.Tx) {
+		// THE HISTORY OBSERVERS RIDE THE WINDOW CONSTRUCT, beside the
+		// title, because the ledger they watch is per window. Persistent:
+		// a history is walked as often as the user likes. The binding has
+		// already reconciled its collection mirror from this payload
+		// before the handler runs, which is why tx.Len answers about the
+		// restored state.
+		//
+		// THE DELTA IS THE ONLY NOTIFICATION for the restored text:
+		// restoring an episode is a programmatic write, and a
+		// programmatic write never echoes, so an app that folds
+		// text_changed into its own model — which is every app, the field
+		// being uncontrolled — would go stale on exactly this step if the
+		// payload did not carry it (D5).
+		win := tx.Window(0).Title("undo").
+			OnUndone(func(tx *kaya.Tx, label string, delta kaya.UndoDelta) {
+				if n := len(delta.Texts); n > 0 {
+					draft = delta.Texts[n-1].Text
+				}
+				total := tx.Len(todos)
+				tx.Write(history, fmt.Sprintf("undid %s, %d total", what(label), total))
+			}).
+			OnRedone(func(tx *kaya.Tx, label string, delta kaya.UndoDelta) {
+				if n := len(delta.Texts); n > 0 {
+					draft = delta.Texts[n-1].Text
+				}
+				total := tx.Len(todos)
+				tx.Write(history, fmt.Sprintf("redid %s, %d total", what(label), total))
+			})
+
 		// THE GESTURE LAYER, one tier deeper: an app declares the two
 		// items and writes nothing else. They act on the focused widget,
 		// lower to the platform's own command where it has one, and work
 		// out their own enablement from what is focused and what the
 		// ledger holds.
-		edit := tx.Window(0).Title("undo").Menu("Edit")
+		edit := win.Menu("Edit")
 		edit.Item("Undo").Role(kaya.RoleUndo)
 		edit.Item("Redo").Role(kaya.RoleRedo)
 
@@ -145,31 +174,6 @@ func main() {
 		// question's other half.
 		tx.Focus(field)
 		tx.Mount(root)
-	})
-
-	// Per window, and PERSISTENT: a history is walked as often as the
-	// user likes. The binding has already reconciled its collection
-	// mirror from this payload before the handler runs, which is why
-	// tx.Len below answers about the restored state.
-	//
-	// THE DELTA IS THE ONLY NOTIFICATION for the restored text:
-	// restoring an episode is a programmatic write, and a programmatic
-	// write never echoes, so an app that folds text_changed into its own
-	// model — which is every app, the field being uncontrolled — would
-	// go stale on exactly this step if the payload did not carry it (D5).
-	app.OnUndone(0, func(tx *kaya.Tx, label string, delta kaya.UndoDelta) {
-		if n := len(delta.Texts); n > 0 {
-			draft = delta.Texts[n-1].Text
-		}
-		total := tx.Len(todos)
-		tx.Write(history, fmt.Sprintf("undid %s, %d total", what(label), total))
-	})
-	app.OnRedone(0, func(tx *kaya.Tx, label string, delta kaya.UndoDelta) {
-		if n := len(delta.Texts); n > 0 {
-			draft = delta.Texts[n-1].Text
-		}
-		total := tx.Len(todos)
-		tx.Write(history, fmt.Sprintf("redid %s, %d total", what(label), total))
 	})
 
 	os.Exit(app.Run())
