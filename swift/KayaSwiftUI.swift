@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x408bcf69e0ad2bfd
+let kayaSpecHash: UInt64 = 0x44b8c0a4228f2b33
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -42,6 +42,12 @@ private let applyPresentFileDialog: UInt16 = 24
 /// vocabulary; the arms that act on them are the next slice.
 private let applyCopy: UInt16 = 25
 private let applyReadClipboard: UInt16 = 26
+/// A1's clear (docs/undo-plan.md §3): a core undo group committed, so
+/// the focused editable's native history is dropped. TARGETLESS BY
+/// DESIGN — the core does not know what is focused, and this backend
+/// does (kayaScene.focusedId), exactly as it already resolves the
+/// focused widget for role enablement.
+private let applyClearUndo: UInt16 = 27
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
@@ -2103,11 +2109,30 @@ enum KayaHost {
         }
     }
 
-    static func emitText(_ tag: [UInt8], _ text: String) {
+    /// An entry edit, with the three facts the core's undo ledger cannot
+    /// derive and this layer is standing on (docs/undo-plan.md §3).
+    ///
+    /// TAKES THE NODE, NOT THE TAG, so those facts are read in ONE place:
+    /// the window whose ledger this run of typing belongs to, whether the
+    /// field holds focus, and whether the edit is LEDGER-QUIET. Five call
+    /// sites each answering for themselves is five chances to answer
+    /// differently, and the answers are the same three lookups every time.
+    ///
+    /// Quiet means: this backend ROUTED a native undo and reported it
+    /// with its own sample (kayaNoteNativeUndo), so the ordinary edit the
+    /// same undo provokes must not be banked a second time. The app still
+    /// hears it — the field is uncontrolled and the app's model follows
+    /// it — and only the banking is suppressed.
+    static func emitText(_ node: KayaNode, _ text: String) {
         let utf8 = Array(text.utf8)
-        tag.withUnsafeBufferPointer { t in
+        let quiet = kayaTakeNativeUndoEcho(node.id, text)
+        let focused = kayaScene.focusedId == node.id
+        let window = kayaWindowOf(node.id)
+        node.tag.withUnsafeBufferPointer { t in
             utf8.withUnsafeBufferPointer { s in
-                api.emit_text_changed(t.baseAddress, UInt(t.count), s.baseAddress, UInt(s.count))
+                api.emit_text_changed(
+                    t.baseAddress, UInt(t.count), s.baseAddress, UInt(s.count),
+                    window, focused ? 1 : 0, quiet ? 1 : 0)
             }
         }
     }
@@ -2362,6 +2387,13 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 let text = present & kayaClipText != 0 ? nextClipString() : nil
                 kayaCopyToPasteboard(
                     text: text, html: html, image: image, files: files, custom: custom)
+            case applyClearUndo:
+                // A1 (docs/undo-plan.md §3): a core undo group
+                // committed. TARGETLESS — the record names the window
+                // and nothing else, because the core does not know what
+                // is focused and this backend does.
+                let undoWindow = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaClearUndoForGroup(undoWindow)
             case applyReadClipboard:
                 let request = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let acceptLen = Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self))
@@ -2491,7 +2523,14 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 switch (prop, valueType) {
                 case (propText, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
-                    kayaScene.nodes[id]!.text = kayaLF(String(decoding: bytes, as: UTF8.self))
+                    let node = kayaScene.nodes[id]!
+                    // D7 + A3: a programmatic write resets the widget's
+                    // native undo history, and only when it CHANGED the
+                    // text. The before-image is read here because this
+                    // is the last moment it exists.
+                    let previous = node.text
+                    node.text = kayaLF(String(decoding: bytes, as: UTF8.self))
+                    kayaNoteQuietTextWrite(id, from: previous, to: node.text)
                 case (propChecked, valueBool):
                     kayaScene.nodes[id]!.checked = raw[body + 24] != 0
                 case (propValue, valueF64):
@@ -2635,8 +2674,14 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     // edit through the same emission the binding's set
                     // would make.
                     let node = kayaScene.nodes[id]!
+                    let previous = node.text
                     node.text = ""
-                    KayaHost.emitText(node.tag, "")
+                    KayaHost.emitText(node, "")
+                    // D7's other quiet-write site: Clear is a
+                    // programmatic write like any other, and the core
+                    // refuses it inside an undo group precisely because
+                    // it destroys widget-owned text.
+                    kayaNoteQuietTextWrite(id, from: previous, to: "")
                 case commandFocus:
                     kayaScene.focusedId = id
                 default:
@@ -3681,10 +3726,30 @@ private func kayaRunScript(_ script: String) {
                         return false
                     }
                     node.text = kayaLF(kayaQuoted(Array(parts[2...])))
-                    KayaHost.emitText(node.tag, node.text)
+                    KayaHost.emitText(node, node.text)
                     return true
                 }
                 if !ok { failures.append("no such target \(parts[1])") }
+            case "type":
+                // A8's verb: REAL KEYSTROKES at whatever holds focus.
+                // set_text cannot stand in for it — set_text is a
+                // programmatic write, and by D7 a programmatic write
+                // CLEARS the native history that a delegated-tier scene
+                // exists to observe. It takes no target because "who
+                // receives this key" is the platform's answer, and it
+                // is the same question D6's routing asks.
+                let typed = kayaQuoted(Array(parts[1...]))
+                #if os(macOS)
+                    if !kayaTypeAtFocus(typed) {
+                        failures.append(
+                            "type \"\(typed)\" reached no window — nothing was typed")
+                    }
+                #else
+                    // §1.3: iOS offers no in-process way to press a key
+                    // (the probe had to use insertText, which is not the
+                    // platform's input path). The fan-out's work.
+                    kayaDepthStub("undo", on: "ios")
+                #endif
             case "expect":
                 let want = kayaQuoted(Array(parts[2...]))
                 // The target kind picks the observation: an entry reads
@@ -5743,6 +5808,16 @@ func kayaMenuEffectiveEnabled(_ item: KayaMenuItemModel) -> Bool {
 func kayaRoleEnabled(_ role: String) -> Bool {
     #if os(macOS)
         switch role {
+        case "undo":
+            // A4: ONE named query, and enablement is the routing answer
+            // — `nothing` is what a disabled Edit>Undo means. This case
+            // is the fifth silent-failure site D6 named: a role the
+            // filter does not know falls to `default` and reports
+            // ENABLED forever, which is how an inert command gets
+            // shipped looking live.
+            return kayaUndoRoute() != .nothing
+        case "redo":
+            return kayaRedoRoute() != .nothing
         case "cut", "copy":
             guard let id = kayaScene.focusedId else { return false }
             return kayaScene.entryWidgets.contains(where: { $0.id == id })
@@ -5780,6 +5855,12 @@ func kayaRoleEnabled(_ role: String) -> Bool {
         // alert would raise it while the user was merely looking at a
         // menu.
         switch role {
+        case "undo", "redo":
+            // The phones' answer to this is NOT the desktop's: §1.3
+            // measured canPerformAction(undo:) false even when undo
+            // works, and no public API names the first responder to ask
+            // its manager instead. The fan-out writes it; this refuses.
+            kayaDepthStub("undo", on: "ios")
         case "cut", "copy":
             guard let id = kayaScene.focusedId else { return false }
             return kayaScene.entryWidgets.contains(where: { $0.id == id })
@@ -5830,6 +5911,10 @@ func kayaRoleEnabled(_ role: String) -> Bool {
 /// reached the read. This is that note for the door before it.
 func kayaRoleInertNote(_ item: KayaMenuItemModel, verb: String) {
     guard !item.role.isEmpty, !kayaMenuEffectiveEnabled(item) else { return }
+    if item.role == "undo" || item.role == "redo" {
+        kayaUndoInertNote(item, verb: verb)
+        return
+    }
     let board = kayaClipBoardNow()
     let target: String
     if let id = kayaScene.focusedId, let node = kayaScene.nodes[id] {
@@ -5848,6 +5933,644 @@ func kayaRoleInertNote(_ item: KayaMenuItemModel, verb: String) {
     FileHandle.standardError.write(Data(note.utf8))
 }
 
+
+/// ONE LINE WHEN AN UNDO ACTIVATION WAS INERT, naming WHICH of the
+/// three ways it can be.
+///
+/// The inert-paste precedent, in A6's spirit. An undo has one more way
+/// to do nothing than a paste does, and they are indistinguishable from
+/// outside: the app disabled the item, a grouping ancestor disabled it,
+/// or both tiers came up empty — no native stack under the focused
+/// widget and no ledger entry behind it. A scene sees `menu_activate
+/// "Edit>Undo"` report success and the text stay as it was, in a step
+/// that mentions neither stack.
+///
+/// It matters more here than for the clipboard because of A6's protocol
+/// gap: a native-tier undo is byte-identical to typing on the wire, so
+/// "the undo did nothing" and "the undo happened" already look alike to
+/// an app. This is the one place that can tell them apart.
+func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
+    let redo = item.role == "redo"
+    let route = redo ? kayaRedoRoute() : kayaUndoRoute()
+    let native = redo ? kayaFocusedCanRedo() : kayaFocusedCanUndo()
+    let focus: String
+    if let id = kayaScene.focusedId {
+        focus =
+            "node \(id) is focused and its native stack answers "
+            + "can\(redo ? "Redo" : "Undo")=\(native)"
+    } else {
+        focus = "nothing is focused, so there is no native stack to ask"
+    }
+    let why: String
+    if route == .nothing {
+        why = "both tiers are empty — no step in the field and none in the core ledger"
+    } else if !item.enabled {
+        why = "the app disabled the item itself"
+    } else {
+        why = "a grouping ancestor is disabled, so the inherited AND is false"
+    }
+    let note =
+        "KAYA_UNDO_TRACE: \(verb) did nothing — the \(item.role) command is "
+        + "disabled and a disabled item is inert. \(why); \(focus)\n"
+    FileHandle.standardError.write(Data(note.utf8))
+}
+
+// ---- The native text-undo tier ------------------------------------
+//
+// TWO TIERS, ONE SURFACE (docs/undo-plan.md D1): text-local undo
+// DELEGATES to the platform's own stacks the way cut/copy/paste do;
+// app-state undo is the core's ledger. This file carries the delegated
+// half, the hand-off, and the clears that keep the two ordered.
+//
+// THE TWO MANAGERS, measured (§1.2) and invisible from the SwiftUI
+// source: a kaya ENTRY is an AppKit NSTextField edited through the
+// window's FIELD EDITOR, whose undoManager is a private
+// NSCellUndoManager; a kaya TEXTAREA is an NSTextView whose undoManager
+// resolves to the WINDOW's. `firstResponder.undoManager` picks the
+// right one of the two without this layer having to know which kind is
+// focused — and NSText is the type both answer to (NSTextView is a
+// subclass, and so is the field editor), which is also how "is anything
+// editable focused" gets asked without a kind test.
+//
+// AND THE DEFECT THIS FIXES IS LIVE TODAY, worse here than the GTK one
+// the plan opens with: a programmatic write into a FOCUSED entry
+// REGISTERS an undo action and JOINS the open "Typing" group, so one
+// Cmd+Z throws away the user's typing AND the app's write together; on
+// a textarea it registers nothing but leaves a stale RANGE, and undo
+// turns "PROG" into "G" — a string that never existed in the model or
+// in what the user typed.
+
+#if os(macOS)
+    /// How long the clear waits for SwiftUI to push a written value into
+    /// the AppKit control before giving up on proving it: main-queue
+    /// turns, 1ms apart, so the budget is render-latency scale and a
+    /// wedged sync reports rather than hangs.
+    private let kayaUndoSyncTurns = 240
+
+    /// The AppKit text object serving what is focused — the entry's
+    /// field editor or the textarea's NSTextView — or nil when nothing
+    /// editable is focused. Scoped to one window when the caller knows
+    /// which (clear_undo names its window on the wire); across kaya's
+    /// windows otherwise, since a widget-to-window map exists in neither
+    /// this layer nor the core.
+    func kayaFocusedTextResponder(in window: UInt64? = nil) -> NSText? {
+        if let window {
+            return kayaNSWindows[window]?.firstResponder as? NSText
+        }
+        for host in kayaNSWindows.values {
+            if let text = host.firstResponder as? NSText { return text }
+        }
+        return nil
+    }
+
+    // The `type` verb's macOS half lives here too, because it is the
+    // same question from the other side: A8's verb exists so a scene
+    // can fill the native stack this tier delegates to.
+
+    /// The kaya window whose first responder is editing text — where a
+    /// synthesized key event has to be addressed for AppKit to route it
+    /// the way a real one is routed.
+    func kayaFocusedTextWindow() -> NSWindow? {
+        for host in kayaNSWindows.values where host.firstResponder is NSText {
+            return host
+        }
+        return nil
+    }
+
+    /// The same window, WAITED FOR.
+    ///
+    /// kaya's focus is a model fact the instant the focus command
+    /// applies, and `expect_focused` reads that model — but AppKit
+    /// installs the window's field editor a render later, and a leg runs
+    /// in a process that is not the active application. So the step
+    /// before a `type` can pass while the platform still has nowhere to
+    /// send a key, and the verb then reports "reached no window" for a
+    /// scene that did everything right. Measured: the same leg typed
+    /// fine on one run and found no window on the next, 14ms after the
+    /// window registered.
+    ///
+    /// Bounded by the same budget as the undo clear (render-latency
+    /// scale, one millisecond per turn), and NOT by activating the
+    /// process: `NSApp.activate` would take the user's focus and, under
+    /// a five-lane matrix, whichever leg happened to be typing.
+    func kayaAwaitTextWindow() -> NSWindow? {
+        for _ in 0..<kayaUndoSyncTurns {
+            if let window = DispatchQueue.main.sync(execute: { kayaFocusedTextWindow() }) {
+                return window
+            }
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        // The last resort the first cut had as its only resort: the key
+        // window is where a real keystroke would land if this process
+        // were frontmost.
+        return DispatchQueue.main.sync { NSApp.keyWindow }
+    }
+
+    /// The `type` verb's macOS half: real NSEvent key downs through
+    /// NSApp.sendEvent — the same path a hardware key takes into the
+    /// app, and the one this project has already measured filling the
+    /// native undo stack (the probe's typing legs armed canUndo, and so
+    /// does the negative test beside this arm).
+    ///
+    /// IN-PROCESS ON PURPOSE. CGEvent posting into the HID stream would
+    /// type at whatever is frontmost, which under a five-lane matrix is
+    /// rarely this process, and it charges the accessibility permission
+    /// besides — the kind of dependency that turns a lane red on a fresh
+    /// machine for reasons nothing in the log mentions.
+    ///
+    /// ONE EVENT PER CHARACTER, with the toolkit given a turn between
+    /// them: the contract says the characters arrive as separate key
+    /// events in order and each one emits the ordinary text_changed the
+    /// core banks its episode from.
+    func kayaTypeAtFocus(_ text: String) -> Bool {
+        guard let window = kayaAwaitTextWindow() else { return false }
+        let before = DispatchQueue.main.sync { () -> String? in
+            // CONTRACT POINT 3: TYPING APPENDS. macOS SELECTS a field's
+            // whole contents when it becomes first responder, so keys
+            // arriving at the selection REPLACE what is there — the same
+            // script would append on a lane whose platform leaves the
+            // caret at the end and replace on this one, and one script is
+            // compared byte-for-byte across all five (invariant 6). So
+            // the caret goes to the end first, which is what "type at the
+            // caret" means on every platform once the selection is empty.
+            //
+            // Before the keys and not between them: a selection change
+            // mid-run would break the field editor's own coalescing,
+            // which is the granularity the delegated tier is made of.
+            if let responder = kayaFocusedTextResponder() {
+                let end = (responder.string as NSString).length
+                responder.selectedRange = NSRange(location: end, length: 0)
+            }
+            return kayaScene.focusedId.flatMap { kayaScene.nodes[$0]?.text }
+        }
+        for ch in text {
+            let sent = DispatchQueue.main.sync { () -> Bool in
+                let key = String(ch)
+                for kind in [NSEvent.EventType.keyDown, .keyUp] {
+                    guard
+                        let event = NSEvent.keyEvent(
+                            with: kind, location: .zero, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime,
+                            windowNumber: window.windowNumber, context: nil,
+                            characters: key, charactersIgnoringModifiers: key,
+                            isARepeat: false, keyCode: 0)
+                    else { return false }
+                    NSApp.sendEvent(event)
+                }
+                return true
+            }
+            if !sent { return false }
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        kayaSettleTypedText(from: before)
+        return true
+    }
+
+    /// Contract point 4: block until the typed text has LANDED.
+    ///
+    /// An action is never retried, and the step after a `type` is
+    /// usually `menu_activate "Edit>Undo"` — an action too, with no
+    /// retry cover — so a keystroke still in flight would read as a
+    /// broken undo rather than as a missed key. Waits for the model the
+    /// app sees to MOVE and then hold still, which is one turn past the
+    /// binding that emitted text_changed.
+    ///
+    /// A timeout is not a verdict: nothing focused is a legitimate
+    /// state under this verb's contract (the keys go where the platform
+    /// sends them and a following assertion reports the mismatch), so
+    /// this reports and returns rather than failing the step.
+    func kayaSettleTypedText(from before: String?) {
+        var last: String?
+        var stable = 0
+        var moved = false
+        for _ in 0..<250 {
+            let now = DispatchQueue.main.sync { () -> String? in
+                kayaScene.focusedId.flatMap { kayaScene.nodes[$0]?.text }
+            }
+            moved = moved || now != before
+            if moved {
+                stable = now == last ? stable + 1 : 0
+                if stable >= 2 { return }
+            }
+            last = now
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+        if !moved {
+            let note =
+                "KAYA_UNDO_TRACE: type delivered its keys but the focused widget's text "
+                + "never moved — kaya's focus is node "
+                + "\(kayaScene.focusedId.map(String.init) ?? "nowhere") and the platform's "
+                + "first responder is "
+                + "\(kayaFocusedTextWindow()?.firstResponder.map { String(describing: type(of: $0)) } ?? "not editing text")\n"
+            FileHandle.standardError.write(Data(note.utf8))
+        }
+    }
+#endif
+
+/// Which surface's ledger a widget's typing belongs to (§3: one ledger
+/// per window).
+///
+/// THE CORE CANNOT ANSWER THIS and this layer can, which is why the
+/// window rides the edit emission: a scene keeps no widget-to-window map
+/// (Scene::ledgers says so in as many words), while the interpreter is
+/// literally rendering the widget inside a surface. The walk is the
+/// parent chain to a mounted root and then the surface holding it —
+/// windows, then the two in-window surfaces, which carry the window they
+/// were pushed or added into.
+///
+/// The primary is the answer for a widget with no mounted root above it
+/// (a live-zone build before its mount, say): window 0 always exists,
+/// and an episode banked there is at worst coarse, never lost.
+func kayaWindowOf(_ id: UInt64) -> UInt64 {
+    var top = id
+    while let parent = kayaScene.parents[top] { top = parent }
+    for (window, model) in kayaScene.windows where model.root?.id == top {
+        return window
+    }
+    for (entry, model) in kayaScene.navEntries where model.root?.id == top {
+        return kayaScene.entryWindow[entry] ?? 0
+    }
+    for (section, model) in kayaScene.sectionsById where model.root?.id == top {
+        return kayaScene.sectionWindow[section] ?? 0
+    }
+    return 0
+}
+
+/// The ledger-quiet bracket around a native undo this backend ROUTED
+/// (§3, and the "report it once" rule): field id -> the text the walk
+/// left in the widget, recorded when the sample was taken.
+///
+/// A BRACKET AND NOT A FLAG-WITH-A-TIMER, because the two reports of one
+/// native undo are not adjacent in time: kayaNoteNativeUndo samples the
+/// AppKit control the instant `undo:` returns, and SwiftUI pushes the
+/// same text through the binding a runloop turn LATER. A boolean set and
+/// cleared around the call would be long gone by then. Matching on the
+/// text the sample saw is exact, needs no clock, and self-clears — the
+/// entry is consumed by the edit it was written for.
+var kayaNativeUndoEcho: [UInt64: String] = [:]
+
+/// Record the text a routed native undo left in a field, so the ordinary
+/// edit that follows it is banked once rather than twice.
+func kayaNoteNativeUndoEcho(_ id: UInt64, _ text: String) {
+    kayaNativeUndoEcho[id] = text
+}
+
+/// Is this edit the echo of a routed native undo? Consumes the record if
+/// so — one bracket, one edit.
+func kayaTakeNativeUndoEcho(_ id: UInt64, _ text: String) -> Bool {
+    guard kayaNativeUndoEcho[id] == text else { return false }
+    kayaNativeUndoEcho.removeValue(forKey: id)
+    return true
+}
+
+/// A4's ONE named query — "can the focused widget undo?" — answered in
+/// this platform's vocabulary and asked nowhere else in this file.
+///
+/// D6 already named four hard-coded role filters as silent-failure
+/// sites; a fifth expression of this same question is the shape A4
+/// exists to refuse. The core's `route_undo` consumes the answer.
+func kayaFocusedCanUndo() -> Bool {
+    #if os(macOS)
+        return kayaFocusedTextResponder()?.undoManager?.canUndo == true
+    #else
+        // The phones diverge on every cell of §1.3 — a private
+        // _UITextUndoManager per field, no fall-through, and
+        // canPerformAction(undo:) answering false even when undo works
+        // — and no public API names this platform's first responder, so
+        // the query cannot even be ASKED the way it is above. The iOS
+        // arm is the fan-out, and this refuses rather than guesses.
+        kayaDepthStub("undo", on: "ios")
+    #endif
+}
+
+/// Redo's twin, same contract.
+func kayaFocusedCanRedo() -> Bool {
+    #if os(macOS)
+        return kayaFocusedTextResponder()?.undoManager?.canRedo == true
+    #else
+        kayaDepthStub("undo", on: "ios")
+    #endif
+}
+
+/// D7/A1's clear, ON THE FAR SIDE OF THE RENDER.
+///
+/// THE TRAP THIS FUNCTION IS SHAPED AROUND (§1.2, measured, and the one
+/// the probe fell into): a clear timed to the MODEL write is undone by
+/// the render that follows it. A kaya programmatic write is
+/// `node.text = …` on an @Observable class — no AppKit call at all —
+/// and SwiftUI notices the observation on a LATER runloop turn and
+/// pushes the value into the AppKit control. That push is what
+/// registers the undo action, so a clear that runs first clears an
+/// empty stack and the registration lands after it.
+///
+/// So the clear waits until the control PROVABLY shows the text that
+/// was written — the probe's loop-until-provable pattern — and only
+/// then removes the actions. A clear on the wrong side of the render
+/// passes any test that only checks the TEXT, which is why the negative
+/// test types, KEEPS focus, writes, and asserts canUndo == false.
+func kayaClearNativeUndo(in window: UInt64? = nil, expecting text: String, tries: Int = 0) {
+    #if os(macOS)
+        // Nothing editable focused: an unfocused write registers
+        // nothing (measured), so there is no history and no retry.
+        guard let responder = kayaFocusedTextResponder(in: window) else { return }
+        if responder.string != text {
+            // SUPERSEDED: the model has moved past the write this clear
+            // belongs to — a second write in the same batch, say — so
+            // the control will never show `text` and the later write's
+            // own clear covers the field. Both callers' expectation IS
+            // the focused node's model text, which is what makes this
+            // comparison the right one to make.
+            if kayaScene.focusedId.flatMap({ kayaScene.nodes[$0]?.text }) != text { return }
+            if tries < kayaUndoSyncTurns {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.001) {
+                    kayaClearNativeUndo(in: window, expecting: text, tries: tries + 1)
+                }
+                return
+            }
+            // NEVER PROVED. Clear anyway — the ratified rule is that an
+            // app overwrite invalidates the field's edit history, and
+            // the measured cost of NOT clearing is the corrupted string
+            // — but say so, because a sync that never lands means this
+            // arm's central assumption about the render moved.
+            let note =
+                "KAYA_UNDO_TRACE: the AppKit control never caught up with the written "
+                + "text after \(tries) turns (it holds \(responder.string.count) chars, "
+                + "the write was \(text.count)); clearing the field's undo history "
+                + "anyway — D7 is the rule, and a missed clear is the corrupting case\n"
+            FileHandle.standardError.write(Data(note.utf8))
+        }
+        responder.undoManager?.removeAllActions()
+    #endif
+}
+
+/// D7 + A3 at the quiet-write sites: a programmatic write to a text
+/// widget resets THAT widget's native undo history — but only when the
+/// write CHANGED the text (A3), and only when the widget is the focused
+/// one.
+///
+/// A3 is not tidiness: an app that mirrors a field's text into a signal
+/// and writes it back would otherwise lose native undo on every
+/// keystroke.
+///
+/// THE FOCUS GUARD IS CORRECTNESS, twice over. An unfocused write
+/// registers nothing on this platform (measured), so there is nothing
+/// to clear; and the clear resolves the FOCUSED responder, so a clear
+/// fired for a write into a background field would destroy the history
+/// of the field the user is actually typing in.
+///
+/// Called from the apply arms rather than from the two writing sites,
+/// so an inverse the CORE writes (§3's coarse episode restore) travels
+/// the same path a forward write does — which is the whole point of
+/// putting D7 where the record lands instead of where it was authored.
+///
+/// AND THE PHONES ARE NOT MISSING FROM THIS — they are MEASURED not to
+/// need it (§1.3): assigning through the SwiftUI binding lands on
+/// `UITextField.text` / `UITextView.text`, and UIKit discards the
+/// field's undo history itself when text is set programmatically, on
+/// both kinds. So iOS has D7's semantics already and the explicit clear
+/// would be a redundant no-op. That is a DIFFERENT verdict from the
+/// routing and the CanUndo query below, which diverge for real and
+/// carry a depth stub: this one is "the platform already does it", and
+/// the guard for it is an assertion that `canUndo == false` after a
+/// write, never "we called removeAllActions".
+func kayaNoteQuietTextWrite(_ id: UInt64, from previous: String, to next: String) {
+    guard previous != next else { return }
+    guard kayaScene.focusedId == id else { return }
+    #if os(macOS)
+        kayaClearNativeUndo(expecting: next)
+    #endif
+}
+
+/// A1: a core undo group committed, so the focused editable's native
+/// history goes with it (the episode was banked before the clear, so
+/// nothing is lost but granularity).
+///
+/// This is the keystone (§3): every episode begins with an EMPTY native
+/// stack, so the native stack can never reach past the current
+/// episode's start, "ask the focused text first" IS "ask the most
+/// recent first", and the interleave the literature calls selective
+/// undo becomes unconstructible rather than merely unlikely.
+func kayaClearUndoForGroup(_ window: UInt64) {
+    #if os(macOS)
+        // The expectation is the focused node's model text: once the
+        // control shows it, the render that would have re-registered
+        // has already happened.
+        let expected = kayaScene.focusedId.flatMap { kayaScene.nodes[$0]?.text } ?? ""
+        kayaClearNativeUndo(in: window, expecting: expected)
+    #endif
+}
+
+/// Where an undo can go: the focused text's own stack, the core's
+/// ledger, or nowhere — `Scene::route_undo`'s three answers, mirrored.
+enum KayaUndoRoute {
+    case nothing
+    case native
+    case core
+}
+
+/// Where an undo would go RIGHT NOW.
+///
+/// ASKED ONCE AND USED TWICE — enablement and activation are the same
+/// question (D6: "enablement is that same question, computed live at
+/// activation exactly as paste's offer∩accepts is"), and `nothing` IS
+/// what a disabled Edit>Undo means. Two expressions of it would drift,
+/// which is A4's whole point.
+///
+/// AND THE ANSWER IS THE CORE'S, not this layer's. What the backend
+/// contributes is the pair only it can see — what is focused, and
+/// whether that field's own stack has anything (A4's named query) — and
+/// the ledger decides against them. A second routing rule written here
+/// would be a fifth hard-coded predicate of exactly the kind D6 records
+/// as the silent-failure shape.
+func kayaUndoRoute() -> KayaUndoRoute {
+    #if os(macOS)
+        return kayaRouteCode(
+            KayaHost.api.undo_route(
+                kayaPresentedMenuWindow, kayaScene.focusedId ?? 0,
+                kayaFocusedCanUndo() ? 1 : 0))
+    #else
+        kayaDepthStub("undo", on: "ios")
+    #endif
+}
+
+/// Redo's twin. On the frontier episode redo stays NATIVE while the
+/// episode is partly undone — the platform still holds those steps, and
+/// taking them back coarsely would throw away granularity the user sees.
+/// That judgement is the ledger's too; this asks with `canRedo`.
+func kayaRedoRoute() -> KayaUndoRoute {
+    #if os(macOS)
+        return kayaRouteCode(
+            KayaHost.api.redo_route(
+                kayaPresentedMenuWindow, kayaScene.focusedId ?? 0,
+                kayaFocusedCanRedo() ? 1 : 0))
+    #else
+        kayaDepthStub("undo", on: "ios")
+    #endif
+}
+
+/// The vtable's three-way answer, in this file's vocabulary. An unknown
+/// code is a protocol drift, not a "nothing to do": the host and this
+/// interpreter would disagree about routing, silently, on every
+/// activation.
+func kayaRouteCode(_ code: UInt32) -> KayaUndoRoute {
+    switch code {
+    case 0: return .nothing
+    case 1: return .native
+    case 2: return .core
+    default:
+        fatalError("kaya: unknown undo route \(code) from the host — the vtable and this interpreter disagree")
+    }
+}
+
+/// Perform an undo/redo role on the focused surface. Answers whether it
+/// WAS one, so a plain action falls through to its own dispatch —
+/// kayaPerformClipboardRole's contract, for the same reason: a role
+/// item is the PLATFORM's command, not the app's action.
+///
+/// ROUTING (D6/§3): the focused text answers first when its own stack
+/// has something, and the core's ledger answers otherwise. On this
+/// platform the first half is free — `undo:` sent at the first
+/// responder travels AppKit's own resolution, which was measured to
+/// implement the ratified routing INCLUDING the fall-through (the
+/// second Cmd+Z fires the next manager up). The focused-CanUndo test in
+/// front of it is A4's query, and under A1's clear it agrees with the
+/// core's `route_undo` by construction: a group commit empties the
+/// focused field's stack, so "the field can undo" and "the frontier
+/// ledger entry is that field's open episode" are the same fact.
+///
+/// windowWillReturnUndoManager is DELIBERATELY not implemented: it was
+/// measured to capture none of the entry's typing (that lives on the
+/// private NSCellUndoManager) while merging a textarea's typing with
+/// anything kaya registered into ONE undo step. It buys nothing D6
+/// needs and creates a tier collision.
+func kayaPerformUndoRole(_ role: String) -> Bool {
+    #if os(macOS)
+        switch role {
+        case "undo":
+            switch kayaUndoRoute() {
+            case .native:
+                kayaSendToFocusedResponder(Selector(("undo:")))
+                kayaNoteNativeUndo(kayaPresentedMenuWindow)
+            case .core: kayaCoreUndo(kayaPresentedMenuWindow)
+            case .nothing: break
+            }
+            return true
+        case "redo":
+            switch kayaRedoRoute() {
+            case .native:
+                kayaSendToFocusedResponder(Selector(("redo:")))
+                kayaNoteNativeUndo(kayaPresentedMenuWindow)
+            case .core: kayaCoreRedo(kayaPresentedMenuWindow)
+            case .nothing: break
+            }
+            return true
+        default:
+            return false
+        }
+    #else
+        switch role {
+        case "undo", "redo":
+            // §1.3: the phones have no fall-through — `undo:` reaches
+            // the focused field's private manager and STOPS — so the
+            // two-step D6 leaves free on macOS has to be written by
+            // hand here. The fan-out's work, refused rather than faked.
+            kayaDepthStub("undo", on: "ios")
+        default:
+            return false
+        }
+    #endif
+}
+
+/// THE RECONCILIATION SAMPLE (§3): what a NATIVE undo left behind.
+///
+/// The core walks its frontier episode backwards from three facts — the
+/// field, the text the walk landed on, and whether the field can still
+/// undo — and it ends the walk three ways: consumed at the
+/// before-image, still open with more to give, or exhausted short of
+/// the before-image (the case A1's clear is supposed to make
+/// unreachable). All three are the core's to decide; the backend's job
+/// is to take the sample at the one moment it is true, which is
+/// immediately after the responder performed the undo, from the AppKit
+/// control rather than from the model (SwiftUI syncs the model a turn
+/// later, so the model is stale exactly here).
+///
+/// AND ON THIS PLATFORM THE SAMPLE IS ALSO HOW ANYONE ELSE FINDS OUT.
+/// MEASURED, and it overturns a premise §0 states for every backend:
+/// "a native undo emits the ordinary text_changed — the channel already
+/// exists". Through a SwiftUI TextField it does not. The undo runs on
+/// the field editor's own NSCellUndoManager and rewrites the editor's
+/// storage directly, bypassing the commit path that drives the binding's
+/// setter, so nothing calls it — measured on the real interpreter:
+///
+///     undo took=true resp=_SystemTextFieldFieldEditor mgr=NSCellUndoManager
+///     text teas->tea canUndo true->false model teas->teas
+///     +50ms text=tea model=teas
+///
+/// The control shows "tea", the model says "teas", and they stay that
+/// way. The premise holds where a backend owns a raw control (GTK's
+/// entry, a WinUI TextBox) and fails wherever a declarative layer sits
+/// between the widget and kaya's model — so this backend reports the
+/// change itself, in the three places a user edit would have reached:
+///
+/// 1. the node's text, or SwiftUI's next render pushes the stale model
+///    back into the control and the undo is visibly rolled back;
+/// 2. the app, through the ordinary text_changed emission — the field is
+///    uncontrolled, so an app folding edits into its own model learns
+///    this one the same way it learns every other;
+/// 3. the ledger, through `note_native_undo` — ONCE. The emission above
+///    is bracketed LEDGER-QUIET with the sampled text
+///    (kayaNoteNativeUndoEcho), which is what keeps one change from
+///    being banked twice, in either order.
+///
+/// THE THIRD FACT IS `canUndo` IN BOTH DIRECTIONS, deliberately. It is
+/// not "did this walk have more to give" — it is the core's test for the
+/// one case A1's clear is meant to make unreachable: a platform that
+/// coalesced ACROSS the episode's start and can no longer walk back to
+/// the before-image, which is where the coarse restore takes over. A
+/// redo that reported `canRedo` there would answer false at the end of a
+/// forward walk and send the core backwards.
+func kayaNoteNativeUndo(_ window: UInt64) {
+    #if os(macOS)
+        // NO RESPONDER, NO SAMPLE. Routing only sends the platform's
+        // undo where a text responder answered CanUndo, so this cannot
+        // fire on the ratified path — and if focus moved underneath it,
+        // an absent responder reads as the empty string, which would
+        // wipe the field through the model write below.
+        guard let field = kayaScene.focusedId, let node = kayaScene.nodes[field],
+            let responder = kayaFocusedTextResponder()
+        else { return }
+        let text = responder.string
+        let canUndo = responder.undoManager?.canUndo ?? false
+        node.text = text
+        kayaNoteNativeUndoEcho(field, text)
+        let utf8 = Array(text.utf8)
+        utf8.withUnsafeBufferPointer { s in
+            KayaHost.api.note_native_undo(
+                window, field, s.baseAddress, UInt(s.count), canUndo ? 1 : 0)
+        }
+        KayaHost.emitText(node, text)
+    #endif
+}
+
+/// The CORE tier: routing cases 2 and 3 (§3) — the ledger's newest
+/// entry is a group, or an episode that is no longer frontier-live, and
+/// the core applies the inverse itself.
+///
+/// NOTHING COMES BACK, and that is the shape rather than an omission.
+/// Applying the inverse produces ordinary apply records, which reach
+/// this interpreter through the pump like every other write; the app
+/// hears one `undone` carrying the whole restored state. So the call is
+/// a request, the effects arrive on the two channels that already exist,
+/// and this layer keeps no copy of the ledger to disagree with.
+func kayaCoreUndo(_ window: UInt64) {
+    KayaHost.api.undo(window)
+}
+
+/// Redo's twin, symmetric in every respect (the forward delta was
+/// computed at apply beside the inverse, so nothing is re-run).
+func kayaCoreRedo(_ window: UInt64) {
+    KayaHost.api.redo(window)
+}
 
 /// Send a standard editing command down the responder chain, starting
 /// at the FOCUSED window's first responder rather than at the
@@ -6055,6 +6778,7 @@ func kayaMenuUserActivate(_ item: KayaMenuItemModel, noun: [UInt8] = []) {
         // it acts on the focused widget and emits nothing of its own,
         // because there is nothing for the app to decide. kaya has no
         // selection API, which is exactly why these had to be commands.
+        if kayaPerformUndoRole(item.role) { return }
         if kayaPerformClipboardRole(item.role) { return }
         KayaHost.emitMenuActivated(item.id, noun)
     case menuKindToggle:
@@ -6158,6 +6882,16 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         switch aspect {
         case .enablement:
             guard let nsItem = kayaOwnedNSMenuItem(item.id) else { return "no such item" }
+            // A STANDARD COMMAND'S ENABLEMENT IS NOT A BUILD-TIME FACT,
+            // and this reader had no way to say so. The activation route
+            // refreshes (kayaMacMenuActivate) and a real user's menu
+            // opening refreshes (the delegate), but `update()` on a menu
+            // with autoenablesItems=false validates nothing and never
+            // reaches the delegate — measured: the undo scene typed into
+            // a field and this read still answered with the state the
+            // item was BORN with. One line, and it is the same line the
+            // activation path already runs, for the same reason.
+            kayaRefreshRoleEnablement()
             // VALIDATED state, not merely the state we set: AppKit
             // settles an item's enablement when its menu is about to
             // display, so this reads what the user's next click will
@@ -7229,7 +7963,7 @@ struct KayaEntry: View {
                 set: { newValue in
                     let value = kayaLF(newValue)
                     node.text = value
-                    KayaHost.emitText(node.tag, value)
+                    KayaHost.emitText(node, value)
                 })
         )
         .textFieldStyle(.roundedBorder)
@@ -7262,7 +7996,7 @@ struct KayaTextarea: View {
                 set: { newValue in
                     let value = kayaLF(newValue)
                     node.text = value
-                    KayaHost.emitText(node.tag, value)
+                    KayaHost.emitText(node, value)
                 })
         )
         .frame(width: 240, height: 96)

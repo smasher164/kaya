@@ -172,6 +172,10 @@ name = "clipboard"
 path = "../../guests/rust/clipboard.rs"
 
 [[example]]
+name = "undo"
+path = "../../guests/rust/undo.rs"
+
+[[example]]
 name = "confirm"
 path = "../../guests/rust/confirm.rs"
 

@@ -24,8 +24,24 @@ object KayaPresent {
     /**
      * Emit an entry edit: [tag] is the tag bytes delivered with the
      * entry's CREATE record, [text] the field's current content.
+     *
+     * [focused] and [quiet] are the undo ledger's (docs/undo-plan.md
+     * §3), and they ride here rather than on a second call because the
+     * alternative is two boundary crossings per keystroke. [focused]
+     * says whether the field this event names holds focus — an event on
+     * an unfocused field closes the typing episode as it stands.
+     * [quiet] is LEDGER-QUIET: a backend that ROUTES a native undo
+     * reports it once, with its own sample, and marks the ordinary
+     * report the same undo provokes so the change is not banked twice.
+     * The app still hears the edit either way; only the banking is
+     * suppressed.
      */
-    @JvmStatic external fun emitTextChanged(tag: ByteArray, text: String)
+    @JvmStatic external fun emitTextChanged(
+        tag: ByteArray,
+        text: String,
+        focused: Boolean,
+        quiet: Boolean,
+    )
 
     /**
      * Emit a checkbox flip: [tag] is the tag bytes delivered with the

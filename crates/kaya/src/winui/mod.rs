@@ -6430,6 +6430,15 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
+    /// The real-keystroke typing verb (docs/undo-plan.md A8). This
+    /// backend has not reached the undo slice, and a keystroke is
+    /// exactly where a stand-in would lie: a text write here would look
+    /// like typing and would CLEAR the native history the scene came to
+    /// observe, turning a missing arm into a passing leg.
+    fn type_text(&self, _text: &str) {
+        crate::depth_stub("undo")
+    }
+
     fn set_text(&self, t: crate::harness::Target, text: &str) {
         // Normalized on the way IN: the synthesized occurrence below
         // forwards this string to the guest, and CR-bearing input

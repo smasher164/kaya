@@ -21,6 +21,8 @@
 //!   toggle <kind>#<index> on|off
 //!   set_value <kind>#<index> <f64>
 //!   set_text <kind>#<index> "<text>"
+//!   type "<text>"                     (real keystrokes at the FOCUSED
+//!                                      widget — see Step::Type)
 //!   expect label#<index> "<text>"
 //!   expect entry#<index> "<text>"     (reads the field's displayed text)
 //!   expect image#<index> "<WxH>"      (reads the decoded image's size)
@@ -213,6 +215,32 @@ pub enum Step {
     Toggle(Target, bool),
     SetValue(Target, f64),
     SetText(Target, String),
+    /// Type the text at the FOCUSED widget as REAL PLATFORM KEYSTROKES
+    /// — the one verb `set_text` cannot stand in for, because the two
+    /// differ in exactly the thing the undo tier is about.
+    ///
+    /// `set_text` is a programmatic write, and by docs/undo-plan.md's D7
+    /// a programmatic write CLEARS the field's native undo history on
+    /// every platform (GTK's irreversible-action bracketing, WinUI's
+    /// measured wipe, iOS's automatic one, AppKit's removeAllActions,
+    /// Compose's TextFieldState). So a scene built out of set_text
+    /// cannot observe the delegated tier at all: it destroys the very
+    /// history it wants to assert. This verb puts characters on the
+    /// platform's own input path instead, so the native stack fills the
+    /// way a user's typing fills it and each character emits the
+    /// ordinary text_changed the core banks its episode from.
+    ///
+    /// THE TARGET IS WHATEVER HOLDS FOCUS, and it takes no target
+    /// argument on purpose: "who receives this key" is the platform's
+    /// answer, and it is the same question D6's routing asks. A scene
+    /// puts focus somewhere first (the guest's focus command, or a
+    /// click) and says so with `expect_focused` — an assertion, so it
+    /// waits — before typing.
+    ///
+    /// An action, silent like click: it APPENDS to whatever the widget
+    /// already holds and clears nothing. Two `type` steps in a row are
+    /// one run of typing.
+    Type(String),
     Expect(Target, String),
     /// Expect the container's label children to read, in child order,
     /// the given `|`-joined texts — the observation reorder ops are
@@ -447,6 +475,7 @@ impl Step {
             Step::Toggle { .. } => false,
             Step::SetValue { .. } => false,
             Step::SetText { .. } => false,
+            Step::Type { .. } => false,
             Step::Expect { .. } => true,
             Step::ExpectStall => true,
             Step::ExpectNoStall => true,
@@ -501,6 +530,59 @@ pub trait Stage: Send + 'static {
     fn toggle(&self, target: Target, on: bool);
     fn set_value(&self, target: Target, value: f64);
     fn set_text(&self, target: Target, text: &str);
+    /// Deliver `text` to the FOCUSED widget as real platform
+    /// keystrokes. No default: a backend that forgets it must fail to
+    /// compile rather than pass a native-undo leg vacuously.
+    ///
+    /// THE CONTRACT, spelled out because every backend implements it
+    /// separately and the whole point of the verb is that they agree
+    /// (CLAUDE.md invariant 1):
+    ///
+    /// 1. THE PLATFORM'S OWN INPUT PATH, never a text write. Each
+    ///    character goes in as a key event the toolkit did not
+    ///    manufacture for us — CGEvent/NSEvent on macOS, SendInput on
+    ///    Windows, gdk_event_put/key controller on GTK, the instrumented
+    ///    injection on Android — so the widget's NATIVE undo stack fills
+    ///    exactly as a user's typing fills it, and the field emits its
+    ///    ordinary `text_changed` per character. Setting the text and
+    ///    calling that "typing" is the one implementation that cannot
+    ///    be accepted: it wipes the native history (docs/undo-plan.md
+    ///    D7), which is the state a native-tier scene exists to observe.
+    /// 2. WHATEVER HOLDS FOCUS RECEIVES IT, resolved by the platform,
+    ///    not by kaya looking up a widget: a keystroke's destination is
+    ///    the routing question D6 asks, and answering it here in kaya
+    ///    would make the verb agree with itself. Nothing focused means
+    ///    the keys go where the platform sends them, which a following
+    ///    assertion will report as a mismatch.
+    /// 3. IT APPENDS. Before the first keystroke the insertion point
+    ///    goes to the END of the widget's current text with nothing
+    ///    selected — a caret move, which is not an edit and spends no
+    ///    native undo step — and the characters follow. macOS is what
+    ///    makes this a contract rather than tidiness: making a text
+    ///    field first responder SELECTS ITS WHOLE CONTENTS, so a verb
+    ///    that typed "wherever the caret happens to be" would append on
+    ///    one platform and replace on another, and one script is
+    ///    compared byte-for-byte on all five (invariant 6). Two `type`
+    ///    steps in a row are therefore one run of typing, and the scene
+    ///    controls the state by what it types.
+    /// 4. IT BLOCKS UNTIL THE TEXT HAS LANDED — every character
+    ///    delivered AND processed by the widget (the platform's input
+    ///    queue drained past the last key event) before it returns.
+    ///    This is an ACTION, and actions are not retried: the
+    ///    POLL_DEADLINE contract makes a following `expect` a bounded
+    ///    retry that would paper over a late delivery, but a following
+    ///    ACTION — `menu_activate "Edit>Undo"`, which is the whole
+    ///    reason this verb exists — has no such cover, and a race there
+    ///    reads as a broken undo rather than a missed keystroke.
+    /// 5. NO SYNTHETIC COALESCING. The characters arrive as separate key
+    ///    events in order, and whether the platform merges them into one
+    ///    native undo step is the platform's business — the scene asserts
+    ///    kaya's ledger, never the platform's granularity.
+    /// 6. PRINTABLE ASCII ONLY. `parse` refuses anything else, so a
+    ///    backend needs no key mapping beyond the set every platform
+    ///    types the same way; a control character or a composed
+    ///    character is an IME question, not a verb argument.
+    fn type_text(&self, text: &str);
     fn read_label(&self, target: Target) -> String;
     /// The displayed text of an entry — what the user sees in the
     /// field, read from the toolkit (the observation the clear command
@@ -837,6 +919,11 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .split_once(char::is_whitespace)
                     .ok_or_else(|| format!("set_text wants a target and a string: {line:?}"))?;
                 Step::SetText(parse_target(target)?, parse_string(text)?)
+            }
+            "type" => {
+                let text = parse_string(rest)?;
+                check_typing(&text).map_err(|e| format!("{e}: {line:?}"))?;
+                Step::Type(text)
             }
             "expect" => {
                 let (target, text) = rest
@@ -1244,6 +1331,41 @@ fn parse_quoted_prefix(spec: &str) -> Result<(String, &str), String> {
     Err(format!("unterminated quoted string: {spec:?}"))
 }
 
+/// What `type` may carry: a non-empty run of PRINTABLE ASCII.
+///
+/// The floor is set by what a real keystroke costs. Every backend has
+/// to turn each character into a key event with a keycode and
+/// modifiers, and the printable ASCII set is the one range where all
+/// five platforms agree on that mapping with no keyboard-layout or
+/// input-method machinery. Above it sits composition — dead keys, IME
+/// candidate windows, the Japanese-IME undo bug Flutter still carries
+/// (docs/undo-plan.md A5) — which is a research topic, not a verb
+/// argument, and one whose result would differ per lane anyway while
+/// scripts are compared byte-for-byte.
+///
+/// A LINE BREAK IS REFUSED FOR A SECOND REASON: Return is not a
+/// character but a command, and what it does depends on the widget it
+/// lands in — a newline in a textarea, activation in an entry, a
+/// dialog's default button beyond that. check-steps already refuses
+/// `set_text` of a `\n` into an entry for the same reason; this refuses
+/// it for every target, because the target here is whatever holds
+/// focus and the script cannot see which that is.
+fn check_typing(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("type wants some text to type".to_owned());
+    }
+    for c in text.chars() {
+        if !matches!(c, ' '..='~') {
+            return Err(format!(
+                "type {text:?} carries {c:?}, which is not printable ASCII — a \
+                 keystroke needs one keycode per character, and that mapping is \
+                 only platform-independent inside 0x20..0x7e"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// A menu path is labels joined with `>`: at least one label, every
 /// segment non-empty and byte-exact. No trimming — labels compare
 /// byte-for-byte across every language, so a segment padded with
@@ -1621,6 +1743,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
             }
             Step::SetText(t, s) => {
                 stage.set_text(*t, s);
+                None
+            }
+            Step::Type(s) => {
+                stage.type_text(s);
                 None
             }
             Step::SelectSection(i) => {
@@ -2546,6 +2672,55 @@ mod tests {
         assert!(verdict.contains("focused"), "{verdict}");
     }
 
+    /// `type` takes no target — the platform decides who receives a
+    /// keystroke — and reaches the stage as the text the script wrote,
+    /// verbatim, escapes and all.
+    #[test]
+    fn type_drives_the_stage_with_the_text_it_was_given() {
+        let steps = parse("expect entry#0 \"entry-text\"\ntype \"a b\"").unwrap();
+        assert_eq!(steps[1], Step::Type("a b".to_owned()));
+        SEEN.lock().unwrap().clear();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert!(
+            SEEN.lock().unwrap().iter().any(|s| s == "type a b"),
+            "{:?}",
+            SEEN.lock().unwrap()
+        );
+    }
+
+    /// The payload floor, refused at PARSE so no backend has to invent
+    /// a keycode for something the five platforms do not agree on: a
+    /// control character (Return is a command whose meaning depends on
+    /// the widget it lands in), a composed character (an IME question),
+    /// or nothing at all.
+    #[test]
+    fn type_refuses_what_a_keystroke_cannot_carry() {
+        assert!(parse("type \"a\\nb\"").is_err());
+        assert!(parse("type \"a\\rb\"").is_err());
+        assert!(parse("type \"héllo\"").is_err());
+        assert!(parse("type \"\"").is_err());
+        assert!(parse("type").is_err());
+        // ...and the whole printable range goes through, spaces
+        // included: a scene types words.
+        assert!(parse("type \"kaya 1.0 (x)\"").is_ok());
+    }
+
+    /// TYPING IS AN ACTION, not an observation: a script that only
+    /// types proves nothing, and the zero-expect guard has to say so.
+    /// The is_assertion match is exhaustive precisely so a new verb
+    /// cannot ship without landing on one side of this line.
+    #[test]
+    fn a_script_that_only_types_has_no_expects() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(parse("type \"milk\"").unwrap(), MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("no expects"), "{verdict}");
+    }
+
     /// A seed whose file is NOT THERE fails by name, rather than
     /// leaving the backend's wait to run out and blame the pasteboard.
     /// macOS's own tool is the reason this cannot be left to the
@@ -2591,6 +2766,9 @@ mod tests {
         fn toggle(&self, _: Target, _: bool) {}
         fn set_value(&self, _: Target, _: f64) {}
         fn set_text(&self, _: Target, _: &str) {}
+        fn type_text(&self, text: &str) {
+            self.seen.lock().unwrap().push(format!("type {text}"));
+        }
         fn read_label(&self, _: Target) -> String {
             "ok-text".into()
         }
@@ -2801,6 +2979,7 @@ mod tests {
             fn toggle(&self, _: Target, _: bool) {}
             fn set_value(&self, _: Target, _: f64) {}
             fn set_text(&self, _: Target, _: &str) {}
+            fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {
                 String::new()
             }
@@ -2955,6 +3134,7 @@ mod tests {
             fn toggle(&self, _: Target, _: bool) {}
             fn set_value(&self, _: Target, _: f64) {}
             fn set_text(&self, _: Target, _: &str) {}
+            fn type_text(&self, _: &str) {}
             fn read_label(&self, _: Target) -> String {
                 String::new()
             }

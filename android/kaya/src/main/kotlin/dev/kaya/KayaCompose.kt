@@ -215,22 +215,27 @@ var kayaDensity = 1.0
 var kayaRootSize = androidx.compose.ui.unit.IntSize.Zero
 var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
-// NO depthStub HERE ANY MORE, and its absence is the statement: the
-// Compose backend materializes every scene in tools/scenes, so the
-// helper has no caller left and dead code kept "for later" is exactly
-// what a reader has to reason about for nothing. The convention itself
-// is not gone — tools/lib/hand-rolled-stubs.py fails any refusal
-// written in a backend's own words and names the call to write
-// instead, and KayaSwiftUI still carries a live one for iOS. Re-add it
-// here the day this backend has to refuse something.
-//
-// AND THE DELETION IS DELIBERATE RATHER THAN AUTOMATIC. The helper
-// lived here through the clipboard depth slice, refusing two apply ops
-// and two harness verbs, and when the arms landed it went back to
-// having no callers — silently, because it was `internal` and
-// tools/detekt.yml only enables UnusedPrivateClass/Member/Property. No
-// gate would have said a word. This paragraph is the reminder that the
-// last call site's removal is what obliges the next one.
+/**
+ * The one spelling of "this backend has not reached that scene yet",
+ * the Kotlin twin of Rust's `depth_stub` and Swift's `kayaDepthStub`.
+ *
+ * A CALL AND NOT A SENTENCE, which is the whole point: check-stubs and
+ * check-steps both READ this call — one refuses a runner that wires a
+ * scene's legs while the backend is still here, the other stops
+ * demanding those legs — and a backend that refuses in its own words is
+ * invisible to both.
+ *
+ * IT CAME BACK FOR THE UNDO SLICE, exactly as its own deletion note
+ * asked: the helper lived here through the clipboard depth slice and
+ * was removed the day the arms landed, because dead code kept "for
+ * later" is what a reader has to reason about for nothing. The last
+ * call site's removal is what obliges the next one.
+ */
+internal fun depthStub(scene: String): Nothing =
+    error(
+        "kaya: the $scene scene is not yet materialized on this backend — " +
+            "it is a depth slice; see CLAUDE.md's sequencing"
+    )
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
@@ -1252,7 +1257,8 @@ object KayaCompose {
                             // make.
                             val node = KayaSceneModel.nodes[id]!!
                             node.text = ""
-                            KayaPresent.emitTextChanged(node.tag, "")
+                            KayaPresent.emitTextChanged(
+                                node.tag, "", KayaSceneModel.focusedId == id, false)
                         }
                         COMMAND_FOCUS -> KayaSceneModel.focusedId = id
                         else -> error("kaya: unknown command $command")
@@ -2021,7 +2027,8 @@ object KayaCompose {
                     // programmatic write.
                     val pasted = kayaClipboardPlainText() ?: return true
                     node.text = kayaLf(node.text + pasted)
-                    KayaPresent.emitTextChanged(node.tag, node.text)
+                    KayaPresent.emitTextChanged(
+                        node.tag, node.text, KayaSceneModel.focusedId == node.id, false)
                     return true
                 }
                 // The same walk the privileged read makes, and
@@ -2667,6 +2674,13 @@ object KayaCompose {
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
                     }
+                    // THE REAL-KEYSTROKE TYPING VERB (docs/undo-plan.md
+                    // A8). This backend has not reached the undo slice,
+                    // and typing is where a stand-in would LIE: writing
+                    // the text would look like typing and would clear
+                    // the native history the scene came to observe, so a
+                    // missing arm would read as a passing leg.
+                    "type" -> depthStub("undo")
                     "set_text" -> {
                         val ok = onUi(activity) {
                             val node =
@@ -2675,7 +2689,8 @@ object KayaCompose {
                                 else target(parts[1], "entry", KayaSceneModel.entryWidgets)
                             node?.also {
                                 it.text = kayaLf(quoted(parts.drop(2)))
-                                KayaPresent.emitTextChanged(it.tag, it.text)
+                                KayaPresent.emitTextChanged(
+                                    it.tag, it.text, KayaSceneModel.focusedId == it.id, false)
                             } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
@@ -4033,7 +4048,8 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                 onValueChange = { newValue ->
                     val value = kayaLf(newValue)
                     node.text = value
-                    KayaPresent.emitTextChanged(node.tag, value)
+                    KayaPresent.emitTextChanged(
+                        node.tag, value, KayaSceneModel.focusedId == node.id, false)
                 },
                 singleLine = false,
                 minLines = 3,
@@ -4062,7 +4078,8 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                 onValueChange = { newValue ->
                     val value = kayaLf(newValue)
                     node.text = value
-                    KayaPresent.emitTextChanged(node.tag, value)
+                    KayaPresent.emitTextChanged(
+                        node.tag, value, KayaSceneModel.focusedId == node.id, false)
                 },
                 modifier = a11y
                     .focusRequester(focusRequester)

@@ -564,6 +564,50 @@ Redo only at the frontier).
   routes, so dirty-state logic listens to one coherent stream; the
   ledger is the serializable half of session restoration.
 
+## §3a — AMENDMENT FROM THE LIVE LEG (2026-08-04): §0's "the channel
+## already exists" IS NOT TRUE OF EVERY BACKEND
+
+§0 argues for delegation partly on this: "because every kaya text
+widget is uncontrolled toward the app, a native undo emits the
+ordinary text_changed occurrence — the channel already exists, which
+is the decisive difference from the clipboard." The mac arm's first
+live leg measured that FALSE under SwiftUI:
+
+    undo took=true resp=_SystemTextFieldFieldEditor mgr=NSCellUndoManager
+    text teas->tea canUndo true->false model teas->teas
+    +50ms text=tea model=teas
+
+A native undo runs on the field editor's own NSCellUndoManager and
+rewrites the editor's storage directly, never touching the commit
+path that drives SwiftUI's binding setter. The control shows "tea",
+kaya's model says "teas", and they STAY diverged — the undo visibly
+worked on screen and no channel carried it.
+
+THE RULE THIS REPLACES THE PREMISE WITH: the premise holds where a
+backend owns a RAW control (GTK's GtkEntry, a WinUI TextBox) and
+FAILS wherever a declarative layer sits between the widget and the
+model. **Every arm must answer "does a native undo reach kaya's model
+here?" BY MEASUREMENT, not by inheriting this document's sentence.**
+Compose is the one to expect trouble from — same declarative shape,
+and §1.4 already disqualified its legacy path for an adjacent reason.
+
+WHERE THE CHANNEL IS ABSENT the arm reports the change itself, in the
+three places a user edit would have reached: the node's text (without
+it the next render pushes the stale model back and rolls the undo
+back on screen), the app (the ordinary emission — the field is
+uncontrolled), and the ledger via note_native_undo exactly ONCE, with
+the emission bracketed ledger-quiet. That bracket is Q2's suppression
+flag, designed before this finding existed and fitting it exactly.
+
+Two smaller findings from the same leg, both fixed, both worth
+carrying to the other arms: NSMenu.update() with autoenablesItems =
+false validates nothing and never reaches the delegate, so
+expect_menu read enablement the item was BORN with (no scene had
+caught it — none until this one asserts an enablement that MOVES);
+and the typing verb must wait for a text-editing responder, because
+kaya's focus is a model fact instantly while AppKit installs the
+field editor a render later and a leg is never the active app.
+
 ## §4 — the depth slice (spec → core → Rust → mac → scene)
 
 Per the sequencing doctrine, with banking in from the start:

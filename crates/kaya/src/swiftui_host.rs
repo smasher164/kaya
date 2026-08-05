@@ -124,7 +124,13 @@ impl crate::protocol::PickedSource for UrlSource {
 pub struct KayaHostApi {
     pub emit_clicked: unsafe extern "C" fn(*const u8, usize),
     pub next_commands: unsafe extern "C" fn(*mut u8, usize) -> usize,
-    pub emit_text_changed: unsafe extern "C" fn(*const u8, usize, *const u8, usize),
+    /// An entry edit: the widget's tag and its new text, plus the three
+    /// facts the undo ledger needs and only the backend holds — the
+    /// window whose ledger this run of typing belongs to, whether the
+    /// field is focused, and whether the edit is LEDGER-QUIET (the
+    /// backend routed a native undo and is reporting it through
+    /// note_native_undo instead). See kaya_emit_text_changed.
+    pub emit_text_changed: unsafe extern "C" fn(*const u8, usize, *const u8, usize, u64, u8, u8),
     pub emit_toggled: unsafe extern "C" fn(*const u8, usize, u8),
     pub emit_value_changed: unsafe extern "C" fn(*const u8, usize, f64),
     pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
@@ -182,6 +188,30 @@ pub struct KayaHostApi {
         unsafe extern "C" fn(u64, *const crate::capi::KayaRepresentation),
     pub emit_pasted:
         unsafe extern "C" fn(*const u8, usize, *const crate::capi::KayaRepresentation),
+    /// THE UNDO TIER (docs/undo-plan.md §3). The routing question is
+    /// asked once and used twice — enablement and activation are the
+    /// same call, so a greyed Edit>Undo and an inert one cannot drift:
+    /// `undo_route`/`redo_route` take the window, the focused widget (0
+    /// for none) and A4's one named query (the focused field's own
+    /// CanUndo), and answer 0 nothing / 1 the field's native stack / 2
+    /// the core's ledger.
+    ///
+    /// `undo`/`redo` are the core tier: they apply the newest entry's
+    /// inverse and emit `undone`/`redone` with the whole restored state.
+    /// They return nothing because both halves are core-side — the ops
+    /// go to the backend through next_commands like every other apply,
+    /// and the occurrence goes to the app through the sink.
+    ///
+    /// `note_native_undo` is the reconciliation sample after a NATIVE
+    /// undo the backend routed: the field, the text the walk landed on,
+    /// and whether it can still undo. The ordinary text_changed the same
+    /// undo provokes carries emit_text_changed's ledger-quiet flag, so
+    /// one change is reported once.
+    pub undo_route: extern "C" fn(u64, u64, u8) -> u32,
+    pub redo_route: extern "C" fn(u64, u64, u8) -> u32,
+    pub undo: extern "C" fn(u64),
+    pub redo: extern "C" fn(u64),
+    pub note_native_undo: unsafe extern "C" fn(u64, u64, *const u8, usize, u8),
     /// The stall watchdog's reading, for `expect_stall`. A READ rather
     /// than an emit, and it rides the vtable for the same reason every
     /// emit does: a direct symbol binds whichever kaya the loader
@@ -252,6 +282,11 @@ pub(crate) fn run() -> i32 {
         emit_menu_value_changed: crate::capi::kaya_emit_menu_value_changed,
         emit_clipboard_result: crate::capi::kaya_emit_clipboard_result,
         emit_pasted: crate::capi::kaya_emit_pasted,
+        undo_route: crate::capi::kaya_undo_route,
+        redo_route: crate::capi::kaya_redo_route,
+        undo: crate::capi::kaya_undo,
+        redo: crate::capi::kaya_redo,
+        note_native_undo: crate::capi::kaya_note_native_undo,
         stalled_ms: crate::capi::kaya_stalled_ms,
     };
     let run: extern "C" fn(*const KayaHostApi) -> i32 =

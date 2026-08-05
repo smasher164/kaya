@@ -893,6 +893,32 @@ count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
 
+- **Undo follow-ups carried out of the depth slice (2026-08-04).** All
+  reachable by a user, none by the scene, none blocking the fan-out;
+  each is a design call rather than a bug:
+  - **A fully-undone episode is not redoable.** A native undo that
+    walks an episode to its start pops it and pushes nothing to the
+    redo side, so Cmd+Shift+Z cannot bring the typing back. The
+    ledger would have to bank the consumed episode on the redo
+    stack — decide whether redo of native typing is kaya's business
+    at all (the native tier's own redo already handles it while the
+    field keeps focus).
+  - **A stamped copy's typing is not banked**: text_field_of_tag
+    answers None for a collection-instance copy because the scene
+    keeps no template-node-to-copy map. Coarser, not wrong — the
+    episode simply never opens, so those edits are outside the
+    ledger.
+  - **note_native_undo has no redo twin**; the mac arm passes
+    canUndo in both directions deliberately. Revisit with the first
+    arm whose platform distinguishes them.
+  - **The interpreter now writes a node's text on a routed native
+    undo** — correct under the post-user mirror rule (§3a), but the
+    first time the SwiftUI arm writes a widget's text outside an
+    apply record. Worth a second look when another arm needs the
+    same move.
+
+
+
 - ~~**DEFECT — filedialog_java is a coin flip on windows**~~ — FIXED
   2026-08-03, and GUARDED. The per-dialog STA thread ran
   `CoUninitialize()` the moment `Show()` returned, which "forces all

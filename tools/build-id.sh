@@ -96,6 +96,11 @@ GATES = {
     "check-targets": ["crates", "Cargo.toml", "Cargo.lock", ".cargo"],
     "check-sugar-surface": ["crates", "bindings"],
     "check-universal-props": ["crates", "bindings", "swift", "android"],
+    # The role vocabulary (crates/kaya/src/scene.rs) against the four
+    # backends that must know it. Same set as check-verbs minus the
+    # bindings: an authored role reaches the backends through the wire,
+    # so no binding sits between them.
+    "check-roles": ["crates", "swift", "android"],
     "check-verbs": ["crates", "bindings", "swift", "android"],
     # The JNI registration cross-check reads the two rust registration
     # modules, the Kotlin classes and the desktop Java class.

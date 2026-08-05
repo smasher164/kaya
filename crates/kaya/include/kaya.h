@@ -1079,7 +1079,21 @@ typedef struct KayaRecordButtonClicked {
 typedef struct KayaHostApi {
   void (*emit_clicked)(const uint8_t*, uintptr_t);
   uintptr_t (*next_commands)(uint8_t*, uintptr_t);
-  void (*emit_text_changed)(const uint8_t*, uintptr_t, const uint8_t*, uintptr_t);
+  /**
+   * An entry edit: the widget's tag and its new text, plus the three
+   * facts the undo ledger needs and only the backend holds — the
+   * window whose ledger this run of typing belongs to, whether the
+   * field is focused, and whether the edit is LEDGER-QUIET (the
+   * backend routed a native undo and is reporting it through
+   * note_native_undo instead). See kaya_emit_text_changed.
+   */
+  void (*emit_text_changed)(const uint8_t*,
+                            uintptr_t,
+                            const uint8_t*,
+                            uintptr_t,
+                            uint64_t,
+                            uint8_t,
+                            uint8_t);
   void (*emit_toggled)(const uint8_t*, uintptr_t, uint8_t);
   void (*emit_value_changed)(const uint8_t*, uintptr_t, double);
   const uint8_t *(*blob_data)(uint64_t, uintptr_t*);
@@ -1146,6 +1160,32 @@ typedef struct KayaHostApi {
    */
   void (*emit_clipboard_result)(uint64_t, const struct KayaRepresentation*);
   void (*emit_pasted)(const uint8_t*, uintptr_t, const struct KayaRepresentation*);
+  /**
+   * THE UNDO TIER (docs/undo-plan.md §3). The routing question is
+   * asked once and used twice — enablement and activation are the
+   * same call, so a greyed Edit>Undo and an inert one cannot drift:
+   * `undo_route`/`redo_route` take the window, the focused widget (0
+   * for none) and A4's one named query (the focused field's own
+   * CanUndo), and answer 0 nothing / 1 the field's native stack / 2
+   * the core's ledger.
+   *
+   * `undo`/`redo` are the core tier: they apply the newest entry's
+   * inverse and emit `undone`/`redone` with the whole restored state.
+   * They return nothing because both halves are core-side — the ops
+   * go to the backend through next_commands like every other apply,
+   * and the occurrence goes to the app through the sink.
+   *
+   * `note_native_undo` is the reconciliation sample after a NATIVE
+   * undo the backend routed: the field, the text the walk landed on,
+   * and whether it can still undo. The ordinary text_changed the same
+   * undo provokes carries emit_text_changed's ledger-quiet flag, so
+   * one change is reported once.
+   */
+  uint32_t (*undo_route)(uint64_t, uint64_t, uint8_t);
+  uint32_t (*redo_route)(uint64_t, uint64_t, uint8_t);
+  void (*undo)(uint64_t);
+  void (*redo)(uint64_t);
+  void (*note_native_undo)(uint64_t, uint64_t, const uint8_t*, uintptr_t, uint8_t);
   /**
    * The stall watchdog's reading, for `expect_stall`. A READ rather
    * than an emit, and it rides the vtable for the same reason every
@@ -1460,11 +1500,38 @@ void kaya_emit_value_changed(const uint8_t *tag, uintptr_t tag_len, double value
  * change handler would — `tag` is the tag bytes delivered with the
  * entry's CREATE record, `text`/`text_len` the field's current UTF-8
  * content. Do not combine with kaya_run.
+ *
+ * THE LAST THREE ARGUMENTS ARE THE UNDO LEDGER'S (docs/undo-plan.md
+ * §3), and they ride HERE rather than on a second entry point because
+ * the alternative was a `note_text_changed` call beside every emit —
+ * two ABI crossings per keystroke to carry facts the backend is already
+ * standing on:
+ *
+ * - `window`: which surface's ledger this run of typing belongs to. The
+ *   core cannot derive it (a scene keeps no widget-to-window map — see
+ *   `Scene::ledgers`), and the backend, which is rendering the widget
+ *   inside a window, can.
+ * - `focused`: whether the field this event names holds focus. An event
+ *   on an UNFOCUSED field closes the episode as it stands — the user is
+ *   no longer there. A backend that cannot tell passes 0 and the ledger
+ *   treats it as unfocused.
+ * - `quiet`: LEDGER-QUIET, apply_quiet's spirit for the banking stream.
+ *   A backend that ROUTES a native undo reports it once, through
+ *   `kaya_note_native_undo` with the sample it took at the widget; the
+ *   ordinary text_changed the same undo provokes is bracketed with this
+ *   flag so the same change is not banked twice, in either order (the
+ *   platforms differ on whether the emit lands before or after the
+ *   sample). The occurrence still goes to the app: the field is
+ *   uncontrolled and the app's model must follow it. Only the BANKING
+ *   is suppressed.
  */
 void kaya_emit_text_changed(const uint8_t *tag,
                             uintptr_t tag_len,
                             const uint8_t *text,
-                            uintptr_t text_len);
+                            uintptr_t text_len,
+                            uint64_t window,
+                            uint8_t focused,
+                            uint8_t quiet);
 
 /**
  * Presentation side: a menu action fired — a bar/overflow click, a
@@ -1498,6 +1565,60 @@ void kaya_emit_menu_value_changed(uint64_t item,
                                   const uint8_t *noun,
                                   uintptr_t noun_len,
                                   double index);
+
+/**
+ * Where an undo would go RIGHT NOW: 0 nowhere (the command is inert and
+ * reads disabled), 1 the focused field's own stack, 2 the core's ledger.
+ *
+ * `focused` is the widget the backend has focus on, 0 for none;
+ * `can_undo` is A4's one named query, answered in the platform's own
+ * vocabulary (CanUndo / canUndo / undoManager.canUndo). Enablement and
+ * activation are the SAME call, so the two cannot drift.
+ */
+uint32_t kaya_undo_route(uint64_t window, uint64_t focused, uint8_t can_undo);
+
+/**
+ * Redo's twin, with the field's `canRedo` in place of `canUndo`.
+ */
+uint32_t kaya_redo_route(uint64_t window, uint64_t focused, uint8_t can_redo);
+
+/**
+ * The core tier answers: apply the newest ledger entry's inverse and
+ * emit `undone` carrying the label and the whole restored state. The
+ * ops reach the backend through the pump like any other apply.
+ */
+void kaya_undo(uint64_t window);
+
+/**
+ * Redo's twin: the forward delta, computed at apply beside the inverse,
+ * so nothing is re-run and nothing is re-derived.
+ */
+void kaya_redo(uint64_t window);
+
+/**
+ * THE ONE REPORT OF A ROUTED NATIVE UNDO (docs/undo-plan.md §3): the
+ * field the backend sent the platform's own undo to, the text the walk
+ * landed on, and whether that field can still undo. The core walks its
+ * frontier episode from those three facts.
+ *
+ * The ordinary text_changed the same undo provokes carries the
+ * ledger-quiet flag on `kaya_emit_text_changed`, so this change is
+ * banked once no matter which of the two the platform delivers first.
+ *
+ * Usually there is nothing to apply — the walk already happened in the
+ * widget. The exception is a platform that exhausted its stack short of
+ * the episode's before-image, which falls back to the coarse restore
+ * and comes back with ops and an occurrence like any core-tier undo.
+ *
+ * # Safety
+ * `text`/`text_len` must describe a valid UTF-8 byte range, or be
+ * NULL/0 for the empty string.
+ */
+void kaya_note_native_undo(uint64_t window,
+                           uint64_t field,
+                           const uint8_t *text,
+                           uintptr_t text_len,
+                           uint8_t can_undo);
 
 /**
  * Presentation side: block until the next transaction, resolve it

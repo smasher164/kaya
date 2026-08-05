@@ -141,7 +141,7 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
             },
             NativeMethod {
                 name: "emitTextChanged".into(),
-                sig: "([BLjava/lang/String;)V".into(),
+                sig: "([BLjava/lang/String;ZZ)V".into(),
                 fn_ptr: present_emit_text as *mut _,
             },
             NativeMethod {
@@ -340,11 +340,21 @@ extern "system" fn present_emit(env: JNIEnv, _class: JClass, tag: JByteArray) {
     unsafe { crate::capi::kaya_emit_clicked(bytes.as_ptr(), bytes.len()) };
 }
 
+/// KayaPresent.emitTextChanged: the entry edit, plus the undo ledger's
+/// three facts (the window whose ledger the run belongs to, whether the
+/// field is focused, and whether the edit is ledger-quiet because the
+/// backend routed a native undo and reports it separately).
+///
+/// Android is single-window by construction — one Activity, one surface
+/// — so the window is the primary and Compose does not carry it across
+/// the boundary; the other two are the interpreter's to answer.
 extern "system" fn present_emit_text(
     mut env: JNIEnv,
     _class: JClass,
     tag: JByteArray,
     text: JString,
+    focused: jni::sys::jboolean,
+    quiet: jni::sys::jboolean,
 ) {
     let bytes = env
         .convert_byte_array(&tag)
@@ -359,6 +369,9 @@ extern "system" fn present_emit_text(
             bytes.len(),
             text.as_ptr(),
             text.len(),
+            crate::protocol::DEFAULT_WINDOW.0,
+            u8::from(focused != 0),
+            u8::from(quiet != 0),
         )
     };
 }

@@ -682,7 +682,14 @@ fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
 /// which kaya computes rather than handing the app a signal to compute
 /// it with, since kaya already knows what is focused, what the
 /// clipboard offers, and what the widget declared it accepts.
-pub(crate) const MENU_ROLES: &[&str] = &["settings", "cut", "copy", "paste"];
+/// `undo` and `redo` are the same gesture layer one tier deeper. They
+/// act on the FOCUSED widget first — a text widget whose native stack
+/// has something to give answers before the core's ledger does — and
+/// configure their own enablement from that same question, which is
+/// why they are roles and not app-authored actions (docs/undo-plan.md
+/// D6). tools/check-roles.sh holds every backend to this line.
+pub(crate) const MENU_ROLES: &[&str] =
+    &["settings", "cut", "copy", "paste", "undo", "redo"];
 
 fn check_menu_role(value: &Value) {
     let Value::Str(role) = value else {
@@ -2229,7 +2236,6 @@ impl Scene {
     /// NOT for a text_changed the core itself provoked by routing a
     /// native undo — that one goes to `note_native_undo`, which walks
     /// the episode backwards instead of extending it forwards.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn note_text_changed(
         &mut self,
         window: WindowId,
@@ -2242,6 +2248,27 @@ impl Scene {
             .get(&field)
             .cloned()
             .unwrap_or_default();
+        // AN EVENT THAT TELLS THE LEDGER NOTHING IT ALREADY KNOWS IS NOT
+        // A STEP. A COMMAND ACTS LIKE THE USER — `clear` deliberately
+        // echoes, so the field emits its own text_changed("") and the
+        // entry scene's second-add round depends on that (gtk.rs's Clear
+        // arm) — but `absorb_text_writes` already recorded the field as
+        // empty when the write went out. The echo therefore describes a
+        // run from "" to "", and pushing it would put a step that does
+        // nothing on top of the ledger: the user clicks add and the
+        // first Cmd+Z spends itself on the clear's shadow instead of
+        // taking back the add. That is the exact bug this milestone
+        // exists to fix, one move over.
+        //
+        // The extend arm below already drops an episode that has typed
+        // its way back to its own before-image, for the same reason
+        // stated once. This is that rule where the run has not started
+        // yet — and it is also why the redo stack survives: a report of
+        // no change is not new typing, so the forward history has no
+        // business dying on it.
+        if before == text {
+            return;
+        }
         self.field_text.insert(field, text.to_owned());
         let ledger = self.ledgers.entry(window).or_default();
         // Typing is a new step: the forward history dies here, which is
@@ -2249,9 +2276,32 @@ impl Scene {
         ledger.redo.clear();
         match ledger.done.last_mut() {
             Some(LedgerEntry::Episode(ep)) if ep.open && ep.field == field => {
-                ep.after = text.to_owned();
+                // A REPORT OF WHERE THE RUN ALREADY IS CANNOT BECOME THE
+                // NEW HIGH-WATER. `after` is where a redo goes; `current`
+                // is where the field is now, and they differ only while a
+                // native undo has walked the run backwards.
+                //
+                // A routed native undo is reported ONCE, by
+                // `note_native_undo`: the backend marks the ordinary
+                // text_changed its own undo provokes ledger-quiet, so that
+                // one never arrives here. This is the second line — a
+                // backend that forgets the mark delivers a text_changed
+                // restating the walk's position, and lowering `after` to
+                // it would erase the walk the redo side needs. The
+                // no-change return above catches that too, whenever the
+                // core's record of the field is current; this holds when
+                // it is not, and its test drives exactly that state
+                // because nothing else reaches this line.
+                //
+                // Ordinary typing is unaffected, mid-walk included: a new
+                // position is a new high-water, and the platform's own
+                // rule that a keystroke kills the native redo history is
+                // inherited rather than fought (§3).
+                if text != ep.current {
+                    ep.after = text.to_owned();
+                }
                 ep.current = text.to_owned();
-                if ep.after == ep.before {
+                if ep.current == ep.before {
                     // Typed all the way back to where the run started:
                     // the entry describes nothing and would be a step
                     // that does nothing.
@@ -2275,6 +2325,27 @@ impl Scene {
         }
     }
 
+    /// The field a text_changed's identity tag names — the ledger's half
+    /// of the emit, which carries the widget's stored tag rather than an
+    /// id (the backend never learns what the tag means; it hands back
+    /// what it was given).
+    ///
+    /// A STAMPED COPY IS NOT BANKED YET, and says so by answering None
+    /// rather than guessing: a copy's identity on this channel is
+    /// (template node, key path), and the ledger keys on the widget id
+    /// that a programmatic write to the same field would name — the map
+    /// between them is the one thing the scene does not keep (`stamps`
+    /// records a copy's widgets in creation order, not which template
+    /// node each came from). An editable collection row therefore has no
+    /// typing episode and its undo falls to the core tier, which is
+    /// coarser rather than wrong.
+    pub(crate) fn text_field_of_tag(&self, tag: &[u8]) -> Option<WidgetId> {
+        match crate::wire::decode_text_changed_tag(tag, "") {
+            Occurrence::TextChanged { id, .. } => Some(id),
+            _ => None,
+        }
+    }
+
     /// The text_changed a NATIVE undo produced, plus the field's own
     /// answer to "can you still undo?".
     ///
@@ -2292,7 +2363,6 @@ impl Scene {
     ///   A1's clear is supposed to make that unreachable — so this arm
     ///   falls back to the coarse restore and its test's job is to prove
     ///   the arm cannot be entered.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn note_native_undo(
         &mut self,
         window: WindowId,
@@ -2331,7 +2401,6 @@ impl Scene {
     /// Enablement is this same call: `Nothing` is what a disabled
     /// Edit>Undo means, computed live at activation the way paste's
     /// offer-meets-accepts already is.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn route_undo(
         &self,
         window: WindowId,
@@ -2352,7 +2421,6 @@ impl Scene {
     /// Redo's twin. The frontier episode redoes NATIVELY while it is
     /// partly undone — the platform still holds those steps, and taking
     /// them back coarsely would throw away granularity the user can see.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn route_redo(
         &self,
         window: WindowId,
@@ -2386,7 +2454,6 @@ impl Scene {
     /// programmatic write, so the echo doctrine silences everything it
     /// touches — which is why the occurrence carries the whole restored
     /// state rather than a notification.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn undo(&mut self, window: WindowId) -> Option<(Vec<ApplyOp>, Occurrence)> {
         let mut out = Vec::new();
         let occurrence = self.restore_episode_backwards(window, &mut out)?;
@@ -2446,7 +2513,6 @@ impl Scene {
     /// Redo the newest undone entry. Symmetric in every respect: the
     /// forward delta was computed at apply, beside the inverse, so a
     /// redo re-runs no handler and re-derives nothing.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn redo(&mut self, window: WindowId) -> Option<(Vec<ApplyOp>, Occurrence)> {
         let entry = self.ledgers.get_mut(&window)?.redo.pop()?;
         let (label, delta, back) = match entry {
@@ -7102,6 +7168,78 @@ mod tests {
         }
     }
 
+    /// THE SCENARIO THAT MOTIVATED THE MILESTONE (docs/undo-plan.md §2),
+    /// in the shape guests/rust/undo.rs and tools/scenes/undo.steps
+    /// drive it: the user types "milk", clicks add, and the handler
+    /// appends a todo AND clears the field. One Cmd+Z must take back the
+    /// ADD. Under two bare stacks it takes back the CLEAR — "milk"
+    /// returns, the todo stays, and the user is looking at a state that
+    /// never existed.
+    ///
+    /// THE CLEAR ACTS LIKE THE USER, which is what makes this delicate:
+    /// unlike a property write it echoes, so the field really does emit
+    /// its own `text_changed("")` (gtk.rs's Clear arm says so, and the
+    /// entry scene's second-add round depends on it). That echo arrives
+    /// at the ledger AFTER `absorb_text_writes` has already recorded the
+    /// field as empty — so it describes a run from "" to "", and an
+    /// entry that describes nothing must not become a step that does
+    /// nothing.
+    #[test]
+    fn the_add_scenario_undoes_the_add_and_not_the_clear() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        for text in ["m", "mi", "mil", "milk"] {
+            scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), text, true);
+        }
+        // The add handler's undoable half: what the step MEANS is the
+        // insert and the status it wrote. Focus rides along as a pure
+        // effect (A2) and is not restored.
+        scene.apply(vec![
+            group("add milk"),
+            insert(1, vec![], "t1", "milk"),
+            TxOp::WriteSignal { id: SignalId(1), value: v("added milk, 1 total") },
+            TxOp::WidgetCommand { widget: WidgetId(2), command: CommandKind::Focus },
+        ]);
+        // ...and the clear in its own transaction, because Clear is
+        // refused inside a group (D4) — which is the design saying the
+        // same thing the fix says: emptying the field is not part of
+        // the step, it is what the form does afterwards.
+        scene.apply(vec![TxOp::WidgetCommand {
+            widget: WidgetId(2),
+            command: CommandKind::Clear,
+        }]);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "", true);
+        assert_eq!(
+            depth(&scene, DEFAULT_WINDOW),
+            2,
+            "the ledger is the typing and the group — the clear's echo \
+             describes a run from \"\" to \"\" and is not a step"
+        );
+
+        let (ops, occ) = scene.undo(DEFAULT_WINDOW).expect("one Cmd+Z, one step");
+        let Occurrence::Undone { label, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert_eq!(label, "add milk", "the FIRST undo is the add");
+        assert!(keys(&scene).is_empty(), "the todo went back");
+        assert_eq!(scene.signals[&SignalId(1)], v("one"));
+        assert!(
+            !set_texts(&ops).iter().any(|(id, _)| *id == 2),
+            "the field is not touched: the clear was never a step, so undoing \
+             the add cannot put \"milk\" back beside a todo that is gone — {:?}",
+            set_texts(&ops)
+        );
+
+        // And the typing is still under it, at the granularity banking
+        // left: one more undo empties the field's history the coarse way.
+        let (ops, occ) = scene.undo(DEFAULT_WINDOW).expect("the typing under it");
+        let Occurrence::Undone { label, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert_eq!(label, "", "a typing episode carries no authored name");
+        assert_eq!(set_texts(&ops), vec![(2, String::new())]);
+    }
+
     #[test]
     fn the_interleave_walks_back_b_then_x_then_a() {
         // §2's hole, closed. Under two bare stacks this undoes as b, a,
@@ -7223,6 +7361,42 @@ mod tests {
         assert_eq!(
             episode(&scene, DEFAULT_WINDOW),
             Some(("", "milk eggs", "milk eggs", true))
+        );
+    }
+
+    #[test]
+    fn a_restated_walk_position_is_not_a_new_high_water() {
+        // EXACTLY ONE FUNCTION REPORTS A ROUTED NATIVE UNDO. The backend
+        // marks the ordinary text_changed its own undo provokes
+        // ledger-quiet, so the walk is told to the core once, by
+        // note_native_undo. This is what happens when a backend forgets
+        // the mark and the same undo is reported twice.
+        //
+        // The no-change return at the top of note_text_changed catches it
+        // whenever the core's record of the field is current — which it
+        // is, right after a walk — so the record is made STALE here by
+        // hand. That is the only way to reach the high-water rule at all,
+        // and a guard nobody can reach is a guard nobody can watch fail.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk bread", true);
+        assert!(
+            scene
+                .note_native_undo(DEFAULT_WINDOW, WidgetId(2), "milk ", true)
+                .is_none()
+        );
+        scene.field_text.insert(WidgetId(2), "milk bread".to_owned());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk ", true);
+        assert_eq!(
+            episode(&scene, DEFAULT_WINDOW),
+            Some(("", "milk bread", "milk ", true)),
+            "the walk's own position must not become the high-water — a redo \
+             would have nowhere to go"
+        );
+        assert_eq!(
+            scene.route_redo(DEFAULT_WINDOW, Some(WidgetId(2)), true),
+            UndoRoute::Native,
+            "and the forward steps the platform still holds stay reachable"
         );
     }
 

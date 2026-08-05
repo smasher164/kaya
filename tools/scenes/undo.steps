@@ -1,0 +1,115 @@
+# The undo scene: ONE history, walked newest-first, over two tiers the
+# user never has to know about (DESIGN.md, Menus; docs/undo-plan.md
+# D1-D6 and §3).
+#
+# WHAT THIS SCENE IS FOR is the ORDER. Every framework that keeps a
+# native text widget ends up with two undo stacks and no total order
+# between them, and the literature has a name for what that produces —
+# SELECTIVE UNDO, "a new node that has never existed before" (Yoon &
+# Myers, ICSE 2015). VS Code documents kaya's exact two stacks and
+# carries an open issue; Drupal filed the redo version. Type "a", do an
+# app action X, type "b", and two bare stacks walk back b, a, X: the
+# typing goes first because it lives on the other stack, and the user
+# passes through a state that never was. This script asserts b, X, a.
+#
+# THE FRONTIER'S GRANULARITY IS PLATFORM-FLAVORED AND THE ORDER IS NOT,
+# which is why every assertion here is about the STATE each step
+# restores. Whether the newest typing is taken back by the field's own
+# stack (a native step) or by the ledger (one coarse step) is the
+# platform's business and legitimately differs per lane; that the todo
+# comes back before the earlier typing does is kaya's promise
+# everywhere. So the history label is read after the steps whose route
+# is decided, never at the frontier.
+#
+# TYPING IS REAL KEYSTROKES (`type`), never set_text: a programmatic
+# write CLEARS a field's native history on every platform (D7), which is
+# the very history the first tier is made of. A scene built out of
+# set_text would destroy what it came to observe and pass anyway.
+expect label#0 "no todos"
+expect label#1 "history empty"
+
+# NOTHING HAS HAPPENED, SO BOTH COMMANDS ARE INERT — and they say so.
+# Enablement is not a build-time fact and no app computes it: it is
+# "does anything answer this right now", asked live at activation, the
+# same shape paste's offer-meets-accepts already has.
+expect_menu "Edit>Undo" disabled
+expect_menu "Edit>Redo" disabled
+
+# ---- the scenario that motivated the milestone --------------------
+#
+# The entry scene's add: it appends a todo AND empties the field. One
+# Undo must take back the ADD. Under two unordered stacks it takes back
+# the CLEAR — "milk" returns, the todo stays.
+click button#2
+expect_focused entry#0
+type "milk"
+expect entry#0 "milk"
+expect_menu "Edit>Undo" enabled
+click button#0
+expect label#0 "added milk, 1 total"
+expect entry#0 ""
+
+menu_activate "Edit>Undo"
+expect label#0 "no todos"
+# The app hears ONE occurrence carrying the label and the whole
+# restored state; the count is read from the app's own collection
+# mirror, which the binding reconciled from that payload.
+expect label#1 "undid add milk, 0 total"
+# AND THE FIELD IS UNTOUCHED. The clear was never a step, so undoing the
+# add cannot put the draft back beside a todo that is gone.
+expect entry#0 ""
+
+menu_activate "Edit>Redo"
+expect label#0 "added milk, 1 total"
+expect label#1 "redid add milk, 1 total"
+expect entry#0 ""
+
+# ---- the interleave: type, act, type, walk back -------------------
+click button#2
+type "tea"
+expect entry#0 "tea"
+click button#1
+expect label#0 "starred"
+click button#2
+# AND TYPING APPENDS (harness.rs Stage::type_text, contract point 3).
+# This is the step that says so: macOS SELECTS A FIELD'S WHOLE CONTENTS
+# when it becomes first responder, so a verb that typed "wherever the
+# caret happens to be" would append here and replace on another lane,
+# and one script is compared byte-for-byte on all five. A backend that
+# skips the caret move fails right here, reading "s" for "teas".
+type "s"
+expect entry#0 "teas"
+
+# b — the newest thing that happened is the newest thing undone.
+menu_activate "Edit>Undo"
+expect entry#0 "tea"
+# X — the app's step, in the order it happened rather than after every
+# text edit on the other stack.
+menu_activate "Edit>Undo"
+expect label#0 "added milk, 1 total"
+expect label#1 "undid star, 1 total"
+# a — and the earlier typing last, at the granularity banking left it:
+# one coarse step back to where that run began.
+menu_activate "Edit>Undo"
+expect entry#0 ""
+expect label#1 "undid typing, 1 total"
+
+# ---- forward again, and the delta is the only notification --------
+#
+# Restoring text is a programmatic write, so it emits no text_changed:
+# an app that folds edits into its own model (which is every app — the
+# field is uncontrolled) learns this one from the occurrence's payload
+# or not at all. The proof is the NEXT add: it can only name "tea" if
+# the app's draft came back with the field.
+menu_activate "Edit>Redo"
+expect entry#0 "tea"
+expect label#1 "redid typing, 1 total"
+click button#0
+expect label#0 "added tea, 2 total"
+expect entry#0 ""
+
+# And the new step is undoable like any other — a history is walked as
+# often as the user likes, so the handlers outlive every step.
+menu_activate "Edit>Undo"
+expect label#0 "added milk, 1 total"
+expect label#1 "undid add tea, 1 total"

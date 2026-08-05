@@ -3709,6 +3709,21 @@ pub enum MenuRole {
     Cut,
     Copy,
     Paste,
+    /// The two history commands, and the same gesture layer one tier
+    /// deeper (docs/undo-plan.md D6). They ask the FOCUSED widget
+    /// first — a text field whose own edit history has something to
+    /// give answers before the app's ledger does, which is what an
+    /// editor user expects: mid-typing, Undo means the typing; after a
+    /// structural action, Undo means the action. Enablement is that
+    /// same question, and kaya computes it.
+    ///
+    /// AN APP OPTS IN TO THE OTHER TIER BY NAMING ITS STEPS
+    /// ([`Tx::undoable`]) and hears the result as
+    /// [`Messages::on_undone`]. An app that names none still gets
+    /// working text undo from these items, because the first tier is
+    /// the platform's.
+    Undo,
+    Redo,
 }
 
 impl MenuRole {
@@ -3720,6 +3735,8 @@ impl MenuRole {
             MenuRole::Cut => "cut",
             MenuRole::Copy => "copy",
             MenuRole::Paste => "paste",
+            MenuRole::Undo => "undo",
+            MenuRole::Redo => "redo",
         }
     }
 }

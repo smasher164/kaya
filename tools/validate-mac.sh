@@ -52,7 +52,7 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
-DEPTH_SCENES=""
+DEPTH_SCENES="undo"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -101,6 +101,12 @@ tools/keyed.sh check-mirror -- tools/check-mirror.sh || exit 1
 tools/check-case.sh || exit 1
 tools/keyed.sh check-sugar-surface -- tools/check-sugar-surface.sh || exit 1
 tools/keyed.sh check-universal-props -- tools/check-universal-props.sh || exit 1
+# The role vocabulary's lowering-side sibling: MENU_ROLES is one line
+# that no generator reads, so a role can ship with the root accepting it
+# and every backend ignoring it (docs/undo-plan.md D6). RED BY DESIGN
+# across a fan-out — the role joins the vocabulary first and the four
+# arms follow.
+tools/keyed.sh check-roles -- tools/check-roles.sh || exit 1
 tools/check-wheel.sh || exit 1
 tools/check-abort.sh || exit 1
 tools/check-tx-liveness.sh || exit 1
@@ -840,6 +846,25 @@ run clipboard-haskell-swiftui env KAYA_SELFTEST=clipboard "$(hs_bin clipboard)"
 drain
 run clipboard-java-swiftui env KAYA_SELFTEST=clipboard KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+drain
+
+# The undo scene: one history over two tiers, walked newest-first
+# (docs/undo-plan.md §3). A DEPTH slice — the protocol, the core
+# ledger, the Rust surface and the SwiftUI arm — so it runs rust-only
+# here until the seven other bindings spell `undoable` and moves into
+# SCENES then.
+#
+# ALONE BETWEEN DRAINS, and the reason is the `type` verb rather than
+# the scene: it delivers REAL KEYSTROKES, and a backend that ever
+# synthesizes those at the system level puts them on the input queue of
+# whatever is FRONTMOST rather than of the leg that asked — the same
+# class that makes the Windows menus legs serial (docs/traps.md). The
+# mac arm delivers them in-process, so this bracket currently buys
+# insurance rather than correctness; it costs one leg's worth of pool.
+KAYA_SELFTEST_SCRIPT="$(scene_script undo)"
+export KAYA_SELFTEST_SCRIPT
+drain
+run undo-rust-swiftui env KAYA_SELFTEST=undo target/debug/examples/undo
 drain
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"

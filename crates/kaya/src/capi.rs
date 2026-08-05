@@ -1930,12 +1930,39 @@ pub unsafe extern "C" fn kaya_emit_value_changed(tag: *const u8, tag_len: usize,
 /// change handler would — `tag` is the tag bytes delivered with the
 /// entry's CREATE record, `text`/`text_len` the field's current UTF-8
 /// content. Do not combine with kaya_run.
+///
+/// THE LAST THREE ARGUMENTS ARE THE UNDO LEDGER'S (docs/undo-plan.md
+/// §3), and they ride HERE rather than on a second entry point because
+/// the alternative was a `note_text_changed` call beside every emit —
+/// two ABI crossings per keystroke to carry facts the backend is already
+/// standing on:
+///
+/// - `window`: which surface's ledger this run of typing belongs to. The
+///   core cannot derive it (a scene keeps no widget-to-window map — see
+///   `Scene::ledgers`), and the backend, which is rendering the widget
+///   inside a window, can.
+/// - `focused`: whether the field this event names holds focus. An event
+///   on an UNFOCUSED field closes the episode as it stands — the user is
+///   no longer there. A backend that cannot tell passes 0 and the ledger
+///   treats it as unfocused.
+/// - `quiet`: LEDGER-QUIET, apply_quiet's spirit for the banking stream.
+///   A backend that ROUTES a native undo reports it once, through
+///   `kaya_note_native_undo` with the sample it took at the widget; the
+///   ordinary text_changed the same undo provokes is bracketed with this
+///   flag so the same change is not banked twice, in either order (the
+///   platforms differ on whether the emit lands before or after the
+///   sample). The occurrence still goes to the app: the field is
+///   uncontrolled and the app's model must follow it. Only the BANKING
+///   is suppressed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kaya_emit_text_changed(
     tag: *const u8,
     tag_len: usize,
     text: *const u8,
     text_len: usize,
+    window: u64,
+    focused: u8,
+    quiet: u8,
 ) {
     assert!(!tag.is_null() && tag_len != 0, "kaya: empty entry tag");
     let tag = unsafe { std::slice::from_raw_parts(tag, tag_len) };
@@ -1946,6 +1973,9 @@ pub unsafe extern "C" fn kaya_emit_text_changed(
         std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) })
             .expect("kaya: entry text must be UTF-8")
     };
+    if quiet == 0 {
+        bank_text_changed(window, tag, text, focused != 0);
+    }
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_text_tag(tag, text);
         return;
@@ -1953,6 +1983,28 @@ pub unsafe extern "C" fn kaya_emit_text_changed(
     state()
         .ring
         .push_record(ring::REC_TEXT_CHANGED, &wire::text_changed_body(tag, text));
+}
+
+/// Show the edit to the window's undo ledger on its way past, BEFORE the
+/// app hears it: the run of edits on one field between clears is one
+/// entry, and the core banks it from the occurrence stream it already
+/// receives rather than by reading any widget.
+///
+/// A stamped copy edits under its template node's tag plus a key path;
+/// the ledger keys on the identity that CARRIES the text, which for the
+/// copy is its own internal widget id — the same id every programmatic
+/// write to it names, so `absorb_text_writes` and this agree.
+fn bank_text_changed(window: u64, tag: &[u8], text: &str, focused: bool) {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+    // Before the first transaction there is no scene and no widget to
+    // bank against: the presentation layer is still building.
+    let Some(scene) = scene_slot.as_mut() else {
+        return;
+    };
+    let Some(field) = scene.text_field_of_tag(tag) else {
+        return;
+    };
+    scene.note_text_changed(crate::protocol::WindowId(window), field, text, focused);
 }
 
 /// The noun path bytes an emit_menu_* call carries: the wire path
@@ -2028,6 +2080,187 @@ pub unsafe extern "C" fn kaya_emit_menu_value_changed(
         .push_record(ring::REC_MENU_VALUE_CHANGED, &wire::value_changed_body(&tag, index));
 }
 
+// --- The undo tier's presentation entries (docs/undo-plan.md §3) -------
+//
+// The ledger lives in the presentation scene, so every entry here takes
+// the same lock the pump takes and none of them blocks on anything else.
+// Exported on every platform (one header, one export surface — the
+// kaya_emit_alert_result pattern) and answerable where a guest-language
+// presentation layer exists.
+
+/// Apply-ops the core produced OUTSIDE a transaction: an undo's inverse
+/// or an episode's coarse restore. Nothing else in the protocol makes
+/// ops without a transaction, and the pump is the only way out, so they
+/// wait here for the next batch and lead it — the scene mutation that
+/// made them happened before whatever that batch applies, under the same
+/// lock, so leading is the order the scene actually saw.
+static PRESENTATION_PENDING: Mutex<Vec<crate::protocol::ApplyOp>> = Mutex::new(Vec::new());
+
+/// Queue an undo's ops for the pump and wake it.
+///
+/// THE WAKE IS NOT OPTIONAL. The pump blocks on the transaction channel,
+/// and an app that registers no `on_undone` handler sends no transaction
+/// in response — so without a nudge the inverse would sit here until the
+/// user did something else, which is the silent class this milestone
+/// exists to close. An empty transaction is the nudge; `kaya_next_commands`
+/// treats an empty resolved batch as "nothing to say yet", not shutdown.
+///
+/// Called with the scene lock HELD, so the queue's order is the order the
+/// scene was mutated in.
+fn queue_undo_ops(pending: &mut Vec<crate::protocol::ApplyOp>, ops: Vec<crate::protocol::ApplyOp>) {
+    if ops.is_empty() {
+        return;
+    }
+    pending.extend(ops);
+    let _ = state().tx_tx.send(Vec::new());
+}
+
+/// Send an `undone` / `redone` occurrence the way every other
+/// presentation-side emission goes out: the runtime-selected sink when
+/// one is installed, the byte ring otherwise.
+fn send_undo_occurrence(occurrence: crate::protocol::Occurrence) {
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(occurrence);
+        return;
+    }
+    match occurrence {
+        crate::protocol::Occurrence::Undone { window, label, delta } => state()
+            .ring
+            .push_record(ring::REC_UNDONE, &wire::undo_body(window, &label, &delta)),
+        crate::protocol::Occurrence::Redone { window, label, delta } => state()
+            .ring
+            .push_record(ring::REC_REDONE, &wire::undo_body(window, &label, &delta)),
+        _ => unreachable!("kaya: the undo tier emits undone/redone and nothing else"),
+    }
+}
+
+/// The shared body of `kaya_undo` / `kaya_redo` / a walk that exhausted
+/// itself: mutate the ledger, put the ops in front of the pump, then
+/// tell the app what came back.
+///
+/// THE SCENE LOCK SPANS THE FIRST TWO. The pump takes the same lock to
+/// resolve a transaction, so a transaction the guest sent WHILE this ran
+/// would otherwise be resolved against the restored scene and reach the
+/// backend AHEAD of the restore it came after — the app's newer write
+/// overwritten by an older value. Locking across both puts the ops in
+/// the queue before any batch can form.
+///
+/// The occurrence goes out afterwards, lock released: it is what makes
+/// the app apply its own transaction, and that transaction must not
+/// overtake the restore it is reacting to (the ops are already queued,
+/// and a queued op leads the next batch).
+fn with_undo_scene(
+    f: impl FnOnce(&mut Scene) -> Option<(Vec<crate::protocol::ApplyOp>, crate::protocol::Occurrence)>,
+) {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+    // No scene means no transaction has been applied: nothing is undoable.
+    let Some(scene) = scene_slot.as_mut() else {
+        return;
+    };
+    let Some((ops, occurrence)) = f(scene) else {
+        return;
+    };
+    queue_undo_ops(&mut PRESENTATION_PENDING.lock().unwrap(), ops);
+    drop(scene_slot);
+    send_undo_occurrence(occurrence);
+}
+
+/// Where an undo would go RIGHT NOW: 0 nowhere (the command is inert and
+/// reads disabled), 1 the focused field's own stack, 2 the core's ledger.
+///
+/// `focused` is the widget the backend has focus on, 0 for none;
+/// `can_undo` is A4's one named query, answered in the platform's own
+/// vocabulary (CanUndo / canUndo / undoManager.canUndo). Enablement and
+/// activation are the SAME call, so the two cannot drift.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_undo_route(window: u64, focused: u64, can_undo: u8) -> u32 {
+    undo_route_code(window, focused, can_undo, false)
+}
+
+/// Redo's twin, with the field's `canRedo` in place of `canUndo`.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_redo_route(window: u64, focused: u64, can_redo: u8) -> u32 {
+    undo_route_code(window, focused, can_redo, true)
+}
+
+fn undo_route_code(window: u64, focused: u64, can: u8, redo: bool) -> u32 {
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+    // No scene means no transaction has been applied: nothing can have
+    // been done, so nothing can be undone.
+    let Some(scene) = scene_slot.as_mut() else {
+        return 0;
+    };
+    let window = crate::protocol::WindowId(window);
+    let focused = (focused != 0).then_some(crate::protocol::WidgetId(focused));
+    let route = if redo {
+        scene.route_redo(window, focused, can != 0)
+    } else {
+        scene.route_undo(window, focused, can != 0)
+    };
+    match route {
+        crate::scene::UndoRoute::Nothing => 0,
+        crate::scene::UndoRoute::Native => 1,
+        crate::scene::UndoRoute::Core => 2,
+    }
+}
+
+/// The core tier answers: apply the newest ledger entry's inverse and
+/// emit `undone` carrying the label and the whole restored state. The
+/// ops reach the backend through the pump like any other apply.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_undo(window: u64) {
+    with_undo_scene(|scene| scene.undo(crate::protocol::WindowId(window)));
+}
+
+/// Redo's twin: the forward delta, computed at apply beside the inverse,
+/// so nothing is re-run and nothing is re-derived.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_redo(window: u64) {
+    with_undo_scene(|scene| scene.redo(crate::protocol::WindowId(window)));
+}
+
+/// THE ONE REPORT OF A ROUTED NATIVE UNDO (docs/undo-plan.md §3): the
+/// field the backend sent the platform's own undo to, the text the walk
+/// landed on, and whether that field can still undo. The core walks its
+/// frontier episode from those three facts.
+///
+/// The ordinary text_changed the same undo provokes carries the
+/// ledger-quiet flag on `kaya_emit_text_changed`, so this change is
+/// banked once no matter which of the two the platform delivers first.
+///
+/// Usually there is nothing to apply — the walk already happened in the
+/// widget. The exception is a platform that exhausted its stack short of
+/// the episode's before-image, which falls back to the coarse restore
+/// and comes back with ops and an occurrence like any core-tier undo.
+///
+/// # Safety
+/// `text`/`text_len` must describe a valid UTF-8 byte range, or be
+/// NULL/0 for the empty string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_note_native_undo(
+    window: u64,
+    field: u64,
+    text: *const u8,
+    text_len: usize,
+    can_undo: u8,
+) {
+    let text = if text_len == 0 {
+        ""
+    } else {
+        assert!(!text.is_null(), "kaya: null text with nonzero length");
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) })
+            .expect("kaya: field text must be UTF-8")
+    };
+    with_undo_scene(|scene| {
+        scene.note_native_undo(
+            crate::protocol::WindowId(window),
+            crate::protocol::WidgetId(field),
+            text,
+            can_undo != 0,
+        )
+    });
+}
+
 /// Presentation side: block until the next transaction, resolve it
 /// through the scene, and write the apply-op records into `buf`.
 /// Returns the byte length written, or 0 when the core has shut down.
@@ -2046,11 +2279,24 @@ pub unsafe extern "C" fn kaya_next_commands(buf: *mut u8, cap: usize) -> usize {
         *rx_slot = Some(tx_rx);
         *PRESENTATION_SCENE.lock().unwrap() = Some(Scene::new());
     }
-    let Ok(tx) = rx_slot.as_ref().unwrap().recv() else {
-        return 0;
+    // 0 MEANS SHUTDOWN TO EVERY PUMP, so a batch that resolved to
+    // nothing must not be returned: keep waiting instead. The undo
+    // tier's wake is an empty transaction whose ops are already queued
+    // (queue_undo_ops), and a transaction whose ops all cancelled out is
+    // the same shape — neither is the core going away.
+    let ops = loop {
+        let Ok(tx) = rx_slot.as_ref().unwrap().recv() else {
+            return 0;
+        };
+        let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
+        // The queue leads: those ops were made under this same lock,
+        // before this transaction could be resolved.
+        let mut ops = std::mem::take(&mut *PRESENTATION_PENDING.lock().unwrap());
+        ops.extend(scene_slot.as_mut().unwrap().apply(tx));
+        if !ops.is_empty() {
+            break ops;
+        }
     };
-    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
-    let ops = scene_slot.as_mut().unwrap().apply(tx);
     let mut writer = wire::Writer::new();
     for op in &ops {
         writer.apply_op(op);

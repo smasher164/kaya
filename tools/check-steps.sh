@@ -290,6 +290,96 @@ for f in tools/scenes/*.steps; do
     }
 done
 
+# THE TYPING VERB'S TWO RULES, both of them about the fact that `type`
+# is REAL KEYSTROKES at the FOCUSED widget (harness.rs Step::Type,
+# docs/undo-plan.md A8) rather than a write at a named target.
+#
+# 1. THE PAYLOAD IS PRINTABLE ASCII. A keystroke needs one keycode per
+#    character and that mapping is only platform-independent inside
+#    0x20..0x7e; a line break is worse than unmappable, because Return
+#    is a COMMAND whose meaning depends on the widget it lands in (a
+#    newline in a textarea, activation in an entry). harness.rs refuses
+#    it at parse — that is the wall — and this is the two-second answer
+#    with a file and a line, rather than a leg that boots a window to
+#    tell you the script was bad.
+# 2. A SCRIPT THAT TYPES MUST HAVE ASSERTED FOCUS FIRST. The verb takes
+#    no target: whoever holds focus receives the keys, which is the
+#    routing question the undo tier turns on. A script that types
+#    without an `expect_focused` above it has no idea where its
+#    keystrokes went — and because expects are bounded retries and
+#    actions are not, that assertion is also the WAIT for focus to land.
+#    Without it the keys race the focus command and the failure surfaces
+#    three steps later as a field that never got the text.
+typing_lint() {
+    python3 -c '
+import re
+import sys
+
+path = sys.argv[1]
+text = sys.stdin.read() if path == "-" else open(path).read()
+bad = []
+focused = False
+for lineno, line in enumerate(text.splitlines(), 1):
+    if line.lstrip().startswith("#"):
+        continue
+    for step in line.split(";"):
+        s = step.strip()
+        if s.startswith("expect_focused"):
+            focused = True
+            continue
+        m = re.match(r"type\s+\"(.*)\"\s*$", s)
+        if not m:
+            continue
+        payload = m.group(1)
+        if re.search(r"\\[nrt]", payload) or not payload:
+            bad.append(f"{path}:{lineno}: {s} — type carries real keystrokes, and "
+                       "a line break is a COMMAND whose meaning depends on the "
+                       "widget it lands in (newline in a textarea, activation in "
+                       "an entry). Type text, or drive the command with its own verb")
+        elif any(not (" " <= c <= "~") for c in payload):
+            bad.append(f"{path}:{lineno}: {s} — type carries real keystrokes, and "
+                       "one keycode per character is only platform-independent "
+                       "inside printable ASCII; composed characters are an input "
+                       "method question, not a verb argument")
+        if not focused:
+            bad.append(f"{path}:{lineno}: {s} — nothing has asserted focus yet. "
+                       "type has no target: whoever holds focus takes the keys, so "
+                       "a script must expect_focused first (which is also the WAIT "
+                       "for focus to land, since actions are not retried)")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# The guard guards itself, every direction: a line break must fail, a
+# composed character must fail, typing before focus is asserted must
+# fail, and the well-formed shape must PASS — or the three above are
+# failing for a reason that has nothing to do with what they claim.
+if printf 'expect_focused entry#0\ntype "a\\nb"\n' | typing_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a line break in a type payload passed)" >&2
+    exit 1
+fi
+if printf 'expect_focused entry#0\ntype "h\xc3\xa9llo"\n' | typing_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a composed character in a type payload passed)" >&2
+    exit 1
+fi
+if printf 'expect label#0 "x"\ntype "milk"\n' | typing_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (typing before focus was asserted passed)" >&2
+    exit 1
+fi
+if ! printf 'expect_focused entry#0\ntype "milk 2"\n' | typing_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a well-formed type step was refused)" >&2
+    exit 1
+fi
+
+for f in tools/scenes/*.steps; do
+    out="$(typing_lint "$f")" || {
+        echo "check-steps: $f types in a way no keyboard can:" >&2
+        echo "$out" >&2
+        status=1
+    }
+done
+
 # Every scene script must be reachable by name from harness::script.
 # That match ends in a catch-all returning the milestone2 script, so an
 # unregistered scene does not fail — it silently runs a DIFFERENT
