@@ -4,6 +4,14 @@
 // sugar lowers eagerly to the same records as the explicit floor —
 // the C guests keep that style on purpose.
 //
+// AND THE APP NAMES NO TODO. A todo here is a title and a done flag,
+// and neither of them identifies it, so the key comes from InsertFresh:
+// the binding mints one per collection instance and hands it back
+// (docs/fresh-key-plan.md). The row's checkbox carries that key back
+// out through the stamped path and straight into Patch, which is the
+// whole of what this scene asks of a key — the app never reads it,
+// formats it or compares it, and so has no reason to author it.
+//
 //     KAYA_SELFTEST=todos KAYA_LIB=target/debug/libkaya.dylib \
 //         dotnet run --project guests/csharp
 
@@ -25,7 +33,6 @@ static class TodosScene
         // The fold: widget-owned state arrives as occurrences; the
         // app's copy is this variable, not a widget read.
         string draft = "";
-        int nextKey = 0;
 
         app.Build(tx =>
         {
@@ -49,8 +56,12 @@ static class TodosScene
                 {
                     if (draft.Length == 0)
                         return;
-                    nextKey++;
-                    todos.Insert(t, $"t{nextKey}", new Todo(draft, false));
+                    // NO KEY, AND NO COUNTER TO GET WRONG: the binding
+                    // mints the name and hands it back. This app has no
+                    // use for the returned key — a todo is looked up by
+                    // nothing, and the checkbox's own path names its row
+                    // — so the call is made for effect.
+                    todos.InsertFresh(t, new Todo(draft, false));
                     // Finish the form: the field empties on screen and
                     // reports text_changed("") through its normal edit
                     // path (the fold empties the draft), and the

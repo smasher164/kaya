@@ -38,10 +38,20 @@
    text the core never held (D4). Undo restores state, and state is
    signals plus collections.
 
+   AND THE APP NAMES NO TODO. A todo is a title and nothing else — it has
+   no identity of its own — so the key comes from 'insertFresh', which
+   mints one per collection instance and hands it back
+   (docs/fresh-key-plan.md). What that buys here is the whole point of
+   the minter: this file used to carry a 'keyRef' counter beside the
+   collection whose safety rested on never rewinding, and an undo that
+   rewound it would have handed the same name to two todos.
+
    Canonical semantics in guests/rust/undo.rs; the byte-frozen contract
    in tools/scenes/undo.steps. -}
 
-import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.Int (Int64)
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.List (intercalate)
 import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 
@@ -60,28 +70,50 @@ instance KayaRecord Todo
 what :: String -> String
 what label = if null label then "typing" else label
 
+-- | The app's collection mirror, rendered: every key it holds, in the
+-- order it holds them.
+--
+-- THIS IS THE ONLY PART OF AN UNDO A COUNT CANNOT SEE. A restored entry
+-- that came back under a fresh name, or at the end instead of where it
+-- was, leaves every total in this file correct — the entries and orders
+-- runs of the delta are what say otherwise, and this is where the scene
+-- reads them (D5).
+keyList :: RecordCollection Todo -> Build String
+keyList todos = do
+  entries <- recordItems todos
+  -- The minter's keys are I64, and the binding's own field conversion
+  -- is what turns one back into a number.
+  let ks = map (show . (fromFieldValue :: Value -> Int64) . fst) entries
+  return (if null ks then "no keys" else "keys " ++ intercalate "," ks)
+
 main :: IO ()
 main = kayaMain $ \app -> do
   -- The fold: widget-owned state arrives as occurrences; the app's copy
   -- is this IORef, not a widget read.
   draftRef <- newIORef ""
-  keyRef <- newIORef (0 :: Int)
 
   buildTx app $ do
     status <- signal (VStr "no todos")
     history <- signal (VStr "history empty")
+    -- THE APP'S MIRROR, RENDERED. Declared third and read as label#2 in
+    -- every language, which is contract and not convention: with no
+    -- third static label the index resolves to the first STAMPED row
+    -- and the assertion reads a todo title instead of failing loud.
+    keys <- signal (VStr "no keys")
     todos <- collectionOf (Proxy :: Proxy Todo)
 
     -- Per window, and PERSISTENT: a history is walked as often as the
     -- user likes. The binding has already reconciled its collection
     -- model from this payload before the handler runs, which is why
-    -- `count` below answers about the restored state.
+    -- `count` and `recordItems` below answer about the restored state.
     --
     -- THE DELTA IS THE ONLY NOTIFICATION for the text it put back:
     -- restoring an episode is a programmatic write, and a programmatic
     -- write never echoes, so an app that folds text_changed into its own
     -- state — which is every app, the field being uncontrolled — would go
     -- stale on exactly this step if the payload did not carry it (D5).
+    -- The scene reads that stale copy out loud one step later, at the
+    -- add that refuses an empty draft.
     let walked verb label delta = do
           case reverse (undoTexts delta) of
             ((_, text) : _) -> writeIORef draftRef text
@@ -89,6 +121,12 @@ main = kayaMain $ \app -> do
           submitTx app $ do
             total <- count (recordHandle todos)
             writeSignal history (VStr (verb ++ " " ++ what label ++ ", " ++ show total ++ " total"))
+            -- ONE TRANSACTION WITH THE LABEL ABOVE, deliberately: the
+            -- script reads that label first, so by the time it reads
+            -- this one the app's own answer is what is on screen — not
+            -- the value the core restored on its way past.
+            list <- keyList todos
+            writeSignal keys (VStr list)
 
     -- THE GESTURE LAYER, one tier deeper: an app declares the two items
     -- and writes nothing else. They act on the focused widget, lower to
@@ -126,17 +164,29 @@ main = kayaMain $ \app -> do
           draft <- readIORef draftRef
           if null draft
             then submitTx app $ do
+              -- NOT A STEP, so it names no group and the forward
+              -- history survives it. It is also the one place this app
+              -- READS ITS OWN DRAFT out loud, which is how the script
+              -- proves the restored text of an undone typing episode
+              -- reached it at all.
               total <- count (recordHandle todos)
               writeSignal status (VStr ("nothing to add, " ++ show total ++ " total"))
             else do
-              key <- atomicModifyIORef' keyRef (\n -> (n + 1, n + 1))
               -- ONE CALL, AND IT IS THE WHOLE UNDO SURFACE. The name is
               -- what the step is called; everything in this
               -- transaction is what it did.
               undoableTx app ("add " ++ draft) $ do
-                insertRecord todos (VStr ("t" ++ show key)) (Todo draft)
+                -- NO KEY, AND NO COUNTER TO GET WRONG: the binding
+                -- mints the name and hands it back. This app has no use
+                -- for it — a todo is looked up by nothing — and an app
+                -- that does (selecting the new row, say) takes it from
+                -- here rather than inventing a second name for the same
+                -- datum.
+                _ <- insertFresh todos (Todo draft)
                 total <- count (recordHandle todos)
                 writeSignal status (VStr ("added " ++ draft ++ ", " ++ show total ++ " total"))
+                list <- keyList todos
+                writeSignal keys (VStr list)
                 -- A PURE EFFECT rides along and is simply not restored:
                 -- undo restores state, not where you were looking (A2).
                 focusWidget entryField
@@ -148,6 +198,37 @@ main = kayaMain $ \app -> do
               -- its normal edit path, so the fold above empties the
               -- draft.
               submitTx app (clearWidget entryField)
+        -- THE STEP WHOSE INVERSE IS AN IDENTITY, not a content. The core
+        -- captured the entry and the instance's order before the
+        -- removal, so undoing this puts the entry back under the key it
+        -- already had, where it already was — neither of which this app
+        -- has to remember.
+        --
+        -- IN TWO TRANSACTIONS BECAUSE THE NAME IS THE SCOPE'S. This
+        -- binding's group is named where it opens, so a label that
+        -- quotes the model ("remove milk") is read in the transaction
+        -- BEFORE the one it names — the ambient tier's shape, where the
+        -- handle bindings read and name on the transaction they already
+        -- hold. The read is the model's own answer, never a widget's,
+        -- so the entry that comes back has to come back before the one
+        -- that stayed.
+        onRemove = do
+          first <- buildTx app $ do
+            entries <- recordItems todos
+            case entries of
+              [] -> do
+                total <- count (recordHandle todos)
+                writeSignal status (VStr ("nothing to remove, " ++ show total ++ " total"))
+                return Nothing
+              ((key, todo) : _) -> return (Just (key, title todo))
+          case first of
+            Nothing -> return ()
+            Just (key, name) -> undoableTx app ("remove " ++ name) $ do
+              remove (recordHandle todos) key
+              total <- count (recordHandle todos)
+              writeSignal status (VStr ("removed " ++ name ++ ", " ++ show total ++ " total"))
+              list <- keyList todos
+              writeSignal keys (VStr list)
         -- A group at its smallest: one signal write, which is the
         -- undoable set's whole vocabulary on the reactive side.
         onStar = undoableTx app "star" (writeSignal status (VStr "starred"))
@@ -162,10 +243,12 @@ main = kayaMain $ \app -> do
       column
         [ labelBound status [A11yId "status"], -- label#0
           labelBound history [A11yId "history"], -- label#1
+          labelBound keys [A11yId "keys"], -- label#2
           pure entryField, -- entry#0
           buttonOn "add" onAdd, -- button#0
           buttonOn "star" onStar, -- button#1
           buttonOn "focus" onFocus, -- button#2
+          buttonOn "remove" onRemove, -- button#3
           each (recordHandle todos) (row [label (field @"title" @Todo)])
         ]
     -- THE SCENE TYPES WITH REAL KEYSTROKES, so something has to be

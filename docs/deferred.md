@@ -917,6 +917,45 @@ count, so the saving is measured rather than assumed.
     apply record. Worth a second look when another arm needs the
     same move.
 
+  From the fresh-key breadth arms (2026-08-05), a doctrine question
+  for the maintainer:
+  - **What tier does the entry scene sit at, per language — and why is
+    the tree split?** DESIGN.md sanctions entry and milestone2 as "the
+    documented floor" for the raw occurrence loop, and four entry
+    guests (rust, swift, ocaml, haskell) are spelled at the explicit
+    widget floor with hand-counted keys — but python's is
+    sugar-constructed, and go/csharp/java sit in between. The
+    fresh-key slice ruled conservatively: entry keeps hand-spelled
+    keys in ALL EIGHT languages (uniform spelling for a documentation
+    scene; four arms' adoptions were reverted unrun). The open call:
+    either the entry guests all migrate to the construction floor
+    (making the demonstration uniform), or the "documented floor"
+    carve-out is narrowed to the occurrence loop alone and the
+    construction/collection spelling graduates to sugar everywhere.
+    Whichever way, the carve-out should be stated per DESIGN.md's
+    Binding-conventions rule, and a gate clause should pin the chosen
+    tier so the split cannot silently re-open.
+
+  From the fresh-key depth arm (2026-08-05):
+  - **DEFECT — a derived signal is not recomputed after an undo.**
+    `recompute_derived` is called from the six `Tx` mutation paths and
+    from nowhere else; `AppCtx::absorb_undo` folds the mirror with
+    zero references to it (measured). So a `Collection::derive` signal
+    goes stale the moment an undo restores or removes an entry, and
+    stays stale until the next ordinary mutation. No scene catches it
+    today only because `todos` (the one `derive` user) has no undo and
+    `undo` writes its labels by hand — but derive-plus-undo is the
+    natural combination. Fix: absorb_undo recomputes; guard: a scene
+    (or the undo scene itself) that binds a derived count over an
+    undone insert/remove.
+  - **Residual, taken deliberately: the toolkit's child order after an
+    undo restore is asserted at the app's mirror (the keys label), not
+    at the toolkit.** `expect_order` would need the For's container to
+    be the only column (the reorder root-as-row trick) across all 8
+    guests. Core-side, an undo's re-insert and re-order travel the
+    same `apply_delta` path the reorder scene already exercises at the
+    toolkit.
+
   Two more carried out of the fan-out (2026-08-04), both gate gaps
   rather than behavior:
   - **check-steps is blind to the C floor.** The per-language sweep

@@ -28,6 +28,15 @@
    core never held (D4). Undo restores state, and state is signals plus
    collections.
 
+   AND THE APP NAMES NO TODO. A todo is a title and nothing else — it
+   has no identity of its own — so the key comes from
+   [insert_record_fresh], which mints one per collection instance and
+   hands it back (docs/fresh-key-plan.md). What that buys here is the
+   whole point of the minter: this file used to carry [next_key], an
+   [int ref] beside the collection whose safety rested on never
+   rewinding, and an undo that rewound it would have handed the same
+   name to two todos.
+
    Canonical semantics in guests/rust/undo.rs; the byte-frozen contract
    in tools/scenes/undo.steps. *)
 
@@ -46,14 +55,36 @@ let () =
   let app = Kaya_app.create () in
 
   (* The fold: widget-owned state arrives as occurrences; the app's copy
-     is these refs, not a widget read. *)
+     is this ref, not a widget read. *)
   let draft = ref "" in
-  let next_key = ref 0 in
 
   build app (fun () ->
       let status = signal (Str "no todos") in
       let history = signal (Str "history empty") in
+      let keys = signal (Str "no keys") in
       let todos = collection_of todo_record in
+
+      (* The app's collection mirror, rendered: every key it holds, in
+         the order it holds them.
+
+         THIS IS THE ONLY PART OF AN UNDO A COUNT CANNOT SEE. A restored
+         entry that came back under a fresh name, or at the end instead
+         of where it was, leaves every total in this file correct — the
+         entries and orders runs of the delta are what say otherwise,
+         and this is where the scene reads them (D5). *)
+      let key_list () =
+        let spell (key, _) =
+          match key with
+          (* The minter's keys are I64, so this scene never meets
+             another shape; a match that answered for one would be
+             inventing a name the collection does not hold. *)
+          | I64 n -> Int64.to_string n
+          | _ -> invalid_arg "kaya: undo scene expects minted (I64) keys"
+        in
+        match List.map spell (record_items todos) with
+        | [] -> "no keys"
+        | ks -> "keys " ^ String.concat "," ks
+      in
 
       (* The field realizes here because the handlers below need its
          handle; [w field] slots the existing widget into the child
@@ -65,18 +96,29 @@ let () =
       let on_add () =
         let d = !draft in
         if d = "" then begin
+          (* NOT A STEP, so it names no group and the forward history
+             survives it. It is also the one place this app READS ITS
+             OWN DRAFT out loud, which is how the script proves the
+             restored text of an undone typing episode reached it at
+             all. *)
           let total = count (record_handle todos) in
           write status (Str (Printf.sprintf "nothing to add, %d total" total))
         end
         else begin
-          incr next_key;
           (* ONE CALL, AND IT IS THE WHOLE UNDO SURFACE. The name is what
              the step is called; everything in this transaction is what
              it did. *)
           undoable (Printf.sprintf "add %s" d);
-          insert_record todos (Str (Printf.sprintf "t%d" !next_key)) { title = d };
+          (* NO KEY, AND NO COUNTER TO GET WRONG: the binding mints the
+             name and hands it back. This app has no use for it — a todo
+             is looked up by nothing — so the call is made for effect and
+             [ignore] says so; an app that does want it (selecting the
+             new row, say) takes it from here rather than inventing a
+             second name for the same datum. *)
+          ignore (insert_record_fresh todos { title = d });
           let total = count (record_handle todos) in
           write status (Str (Printf.sprintf "added %s, %d total" d total));
+          write keys (Str (key_list ()));
           (* A PURE EFFECT rides along and is simply not restored: undo
              restores state, not where you were looking (A2). *)
           focus field;
@@ -94,6 +136,28 @@ let () =
              draft. *)
           post app (fun () -> clear field)
         end
+      in
+
+      (* THE STEP WHOSE INVERSE IS AN IDENTITY, not a content. The core
+         captured the entry and the instance's order before the removal,
+         so undoing this puts the entry back under the key it already
+         had, where it already was — neither of which this app has to
+         remember. The target is the collection's FIRST entry, the
+         model's own answer and never a widget's, so the entry that
+         comes back has to come back BEFORE the one that stayed. *)
+      let on_remove () =
+        match record_items todos with
+        | [] ->
+            let total = count (record_handle todos) in
+            write status
+              (Str (Printf.sprintf "nothing to remove, %d total" total))
+        | (key, todo) :: _ ->
+            undoable (Printf.sprintf "remove %s" todo.title);
+            remove (record_handle todos) key;
+            let total = count (record_handle todos) in
+            write status
+              (Str (Printf.sprintf "removed %s, %d total" todo.title total));
+            write keys (Str (key_list ()))
       in
 
       (* A group at its smallest: one signal write, which is the
@@ -123,7 +187,12 @@ let () =
            handler ran. *)
         let total = count (record_handle todos) in
         write history
-          (Str (Printf.sprintf "%s %s, %d total" verb (what step) total))
+          (Str (Printf.sprintf "%s %s, %d total" verb (what step) total));
+        (* ONE TRANSACTION WITH THE LABEL ABOVE, deliberately: the
+           script reads that label first, so by the time it reads this
+           one the app's own answer is what is on screen — not the value
+           the core restored on its way past. *)
+        write keys (Str (key_list ()))
       in
 
       (* THE GESTURE LAYER, one tier deeper: an app declares the two
@@ -151,6 +220,7 @@ let () =
           [
             label ~a11y_id:"status" ~bind:status (* label#0 *);
             label ~a11y_id:"history" ~bind:history (* label#1 *);
+            label ~a11y_id:"keys" ~bind:keys (* label#2 *);
             w field (* entry#0 *);
             button ~text:"add" ~on_click:on_add (* button#0 *);
             button ~text:"star" ~on_click:on_star (* button#1 *);
@@ -161,6 +231,7 @@ let () =
                ("what is focused?") stays visible in the script rather
                than hidden in a handler. *)
             button ~text:"focus" ~on_click:on_focus (* button#2 *);
+            button ~text:"remove" ~on_click:on_remove (* button#3 *);
             each (record_handle todos) (fun () ->
                 Tpl.(row [ label ~bind_field:todo_title ] ()));
           ]

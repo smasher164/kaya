@@ -113,6 +113,7 @@ module KayaApp
     collectionOf,
     field,
     insertRecord,
+    insertFresh,
     updateRecord,
     updateField,
     FieldSet,
@@ -370,6 +371,17 @@ data Instance = Instance
 -- entry's copy is torn down.
 type Model = Map.Map Word64 [Instance]
 
+-- The minter's counters, one per collection INSTANCE, keyed the way
+-- the model is: collection id to a list of (path, counter). A path is
+-- a [W.Value] and W.Value carries a Double, so it is compared rather
+-- than hashed or ordered — 'lookupEntries' does the same.
+--
+-- DELIBERATELY BESIDE THE MODEL AND NOT INSIDE IT. 'absorbUndo'
+-- rebuilds Instances from the core's payload, so a counter living in
+-- an Instance would be rewritten by every history walk — which is the
+-- one thing 'insertFresh' promises can never happen.
+type Fresh = Map.Map Word64 [([W.Value], Int64)]
+
 data BuildState = BuildState
   { bCounters :: !Counters,
     -- The transaction under construction: IO Builder, not Builder.
@@ -383,6 +395,10 @@ data BuildState = BuildState
     -- records enter as `pure builder`.
     bRecords :: IO Builder,
     bModel :: !Model,
+    -- The fresh-key counters, threaded through the same fold as the
+    -- model and stored back beside it: a monotonic per-instance
+    -- sequence has to outlive the transaction that advanced it.
+    bFresh :: !Fresh,
     bChildren :: !(Map.Map Word64 [Word64]),
     bOpenFors :: ![Word64],
     -- Handlers declared at their constructors (buttonOn, entryOn,
@@ -475,6 +491,34 @@ lookupEntries cid path model =
   case filter ((== path) . iPath) (Map.findWithDefault [] cid model) of
     (i : _) -> iEntries i
     [] -> []
+
+-- One instance's counter, made if this is the first anyone has asked.
+-- Split out because both the mint and the absorb want the same lookup.
+withCounter :: Word64 -> [W.Value] -> (Int64 -> (a, Int64)) -> Fresh -> (a, Fresh)
+withCounter cid path body fresh =
+  let instances = Map.findWithDefault [] cid fresh
+      (a, instances') = go instances
+   in (a, Map.insert cid instances' fresh)
+  where
+    go [] = let (a, n) = body 0 in (a, [(path, n)])
+    go ((p, n) : rest)
+      | p == path = let (a, n') = body n in (a, (path, n') : rest)
+      | otherwise = let (a, rest') = go rest in (a, (p, n) : rest')
+
+-- The next fresh key for one instance: counter+1, and the counter
+-- keeps it. Monotonic by construction — nothing else writes it
+-- downwards (see 'insertFresh').
+mintKey :: Word64 -> [W.Value] -> Fresh -> (Int64, Fresh)
+mintKey cid path = withCounter cid path (\n -> (n + 1, n + 1))
+
+-- An explicit key, shown to the minter on its way into the table. A
+-- numeric key at or above the counter carries it up so the next mint
+-- clears it; anything else moves nothing, having no way to collide
+-- with an I64.
+absorbKey :: Word64 -> [W.Value] -> W.Value -> Fresh -> Fresh
+absorbKey cid path key fresh = case key of
+  W.VI64 n -> snd (withCounter cid path (\c -> ((), max c n)) fresh)
+  _ -> fresh
 
 -- A collection declared inside a For's template is torn down with its
 -- copies: record the edge so the model purges along it.
@@ -666,11 +710,21 @@ recomputeDerived cid path s
               (Map.findWithDefault [] cid (bDerived s))
        in s {bRecords = bRecords s <> pure writes}
 
+-- THE ONE INSERT PATH EVERY KEY TRAVELS, scalar or record: the model
+-- fold, the wire record, the derived recompute — and ABSORPTION,
+-- which is why it is one function and not two. A numeric key at or
+-- above the minter's counter carries it up, so hand-chosen and minted
+-- keys share one space safely and in either order ('insertFresh').
+insertEntry :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> IO Builder -> BuildState -> BuildState
+insertEntry n path key vals record s0 =
+  let s = s0 {bFresh = absorbKey n path key (bFresh s0)}
+   in recomputeDerived n path
+        s {bRecords = bRecords s <> record,
+           bModel = modelSet n path key 0 vals (bModel s)}
+
 insert :: Collection -> W.Value -> W.Value -> Build ()
 insert (Collection n path) key value = Build $ \s ->
-  ((), recomputeDerived n path
-    s {bRecords = bRecords s <> pure (W.txCollectionInsert n path key 0 [value]),
-       bModel = modelSet n path key 0 [value] (bModel s)})
+  ((), insertEntry n path key [value] (pure (W.txCollectionInsert n path key 0 [value])) s)
 
 update :: Collection -> W.Value -> W.Value -> Build ()
 update (Collection n path) key value = Build $ \s ->
@@ -2148,9 +2202,53 @@ collectionOf p = Build $ \s ->
 insertRecord :: forall a. KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
 insertRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
   let vals = toValues value
-   in ((), recomputeDerived n path
-        s {bRecords = bRecords s <> (W.txCollectionInsert n path key 0 <$> encodeFields (kayaSchema (Proxy :: Proxy a)) vals),
-           bModel = modelSet n path key 0 vals (bModel s)})
+   in ( (),
+        insertEntry n path key vals
+          (W.txCollectionInsert n path key 0 <$> encodeFields (kayaSchema (Proxy :: Proxy a)) vals)
+          s
+      )
+
+-- | Insert a record under a key the binding authors, and hand the key
+-- back.
+--
+-- FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain identity
+-- and guest-chosen (DESIGN.md, the update algebra), so anything that
+-- already HAS a name passes it to 'insertRecord' — today and always.
+-- This is the other case, and it is the common one in a form: the app
+-- has a title and nothing else, and the alternative is a hand-spelled
+-- counter beside the collection, which in this language is an IORef
+-- the Build cannot even see and whose safety rests on a never-rewind
+-- rule nobody wrote down.
+--
+-- ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted key
+-- is 'W.VI64' and is counter+1. An instance is a table — the live-zone
+-- collection, or one stamped copy selected by 'at' — and keys are
+-- unique within one, so that is what the counter is per.
+--
+-- MIXING IS SAFE BY ABSORPTION: an explicit 'insertRecord' (or
+-- 'insert') whose key is an I64 at or above the counter carries it up,
+-- so a later mint clears every hand-chosen numeric key already in the
+-- table. A non-numeric key cannot collide with an I64 at all and moves
+-- nothing.
+--
+-- NO DECREMENT IS EXPRESSIBLE, and that is the whole safety argument.
+-- Undo and redo replay captured keys inside the core and never re-enter
+-- this path ('absorbUndo' folds the model and touches no counter), so a
+-- history walk never moves the minter and a fresh key is fresh forever.
+-- A Build that THROWS abandons its counters with everything else it
+-- held — records, model, handlers — because in this binding an
+-- abandoned transaction is a transaction that never happened at all;
+-- the key it minted reached no core and no guest, so re-minting it
+-- names nothing twice.
+--
+-- THE KEY IS THE RESULT even where a scene discards it: an app that
+-- selects the row it just added takes the name from here rather than
+-- inventing a second one for the same datum.
+insertFresh :: forall a. KayaRecord a => RecordCollection a -> a -> Build Int64
+insertFresh c@(RecordCollection (Collection n path)) value = Build $ \s ->
+  let (key, fresh) = mintKey n path (bFresh s)
+      (_, s') = unBuild (insertRecord c (W.VI64 key) value) s {bFresh = fresh}
+   in (key, s')
 
 updateRecord :: forall a. KayaRecord a => RecordCollection a -> W.Value -> a -> Build ()
 updateRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
@@ -2241,6 +2339,10 @@ data App = App
     appPosted :: MVar [IO ()],
     appCounters :: IORef Counters,
     appModel :: IORef (Model, Map.Map Word64 [Word64]),
+    -- The minter's counters, outliving any one transaction exactly as
+    -- the id counters above do. Never written by 'absorbUndo': a
+    -- history walk replays keys the core captured and mints nothing.
+    appFresh :: IORef Fresh,
     appDerived :: IORef (Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)]),
     appWidgetHandlers :: IORef (Map.Map Word64 (IO ())),
     appNodeHandlers :: IORef (Map.Map Word64 ([W.Value] -> IO ())),
@@ -2333,8 +2435,9 @@ buildTx app (Build f) = do
   requireAppThread
   counters <- readIORef (appCounters app)
   (model, children) <- readIORef (appModel app)
+  fresh <- readIORef (appFresh app)
   derived <- readIORef (appDerived app)
-  let (a, s) = f (BuildState counters mempty model children [] [] derived)
+  let (a, s) = f (BuildState counters mempty model fresh children [] [] derived)
   -- Force the Build's final state before the first store-back: a
   -- Build that throws must throw HERE, where the boundary abandons
   -- everything — never later, from a poisoned thunk inside an IORef
@@ -2351,6 +2454,7 @@ buildTx app (Build f) = do
   records <- bRecords s
   writeIORef (appCounters app) (bCounters s)
   writeIORef (appModel app) (bModel s, bChildren s)
+  writeIORef (appFresh app) (bFresh s)
   writeIORef (appDerived app) (bDerived s)
   -- Handlers declared at their constructors register alongside the
   -- submit; a Build that threw never reaches here, abandoning them
@@ -2558,6 +2662,7 @@ newApp =
     <$> newMVar []
     <*> newIORef (Counters 0 0 0 0 0 0 0 0)
     <*> newIORef (Map.empty, Map.empty)
+    <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty

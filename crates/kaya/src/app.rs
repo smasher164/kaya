@@ -475,6 +475,13 @@ pub struct AppCtx {
     children: RefCell<HashMap<CollectionId, Vec<CollectionId>>>,
     open_fors: RefCell<Vec<CollectionId>>,
     derived: RefCell<HashMap<CollectionId, Vec<Derived>>>,
+    // The minter's counters: the highest I64 key each collection
+    // INSTANCE has minted or absorbed. Keyed by path the way the model
+    // is (a Vec<Value> is not hashable — Value carries an f64), and
+    // NOT part of the transaction journal: a minted key is spent even
+    // if the transaction that spent it is abandoned, so an id can
+    // never be handed out twice.
+    fresh: RefCell<HashMap<CollectionId, Vec<(Vec<Value>, i64)>>>,
 }
 
 impl AppCtx {
@@ -498,6 +505,7 @@ impl AppCtx {
             children: RefCell::new(HashMap::new()),
             open_fors: RefCell::new(Vec::new()),
             derived: RefCell::new(HashMap::new()),
+            fresh: RefCell::new(HashMap::new()),
         }
     }
 
@@ -710,6 +718,46 @@ impl AppCtx {
         let id = self.next_menu_item.get();
         self.next_menu_item.set(id + 1);
         MenuItemId(id)
+    }
+
+    /// One instance's counter, made if this is the first anyone has
+    /// asked. Split out because both the mint and the absorb want the
+    /// same lookup and neither may hold the borrow across the other.
+    fn with_counter<R>(
+        &self,
+        collection: CollectionId,
+        path: &[Value],
+        body: impl FnOnce(&mut i64) -> R,
+    ) -> R {
+        let mut fresh = self.fresh.borrow_mut();
+        let instances = fresh.entry(collection).or_default();
+        let at = match instances.iter().position(|(p, _)| p == path) {
+            Some(at) => at,
+            None => {
+                instances.push((path.to_vec(), 0));
+                instances.len() - 1
+            }
+        };
+        body(&mut instances[at].1)
+    }
+
+    /// The next fresh key for one instance: counter+1, and the counter
+    /// keeps it. Monotonic by construction — nothing else writes it
+    /// downwards (see `Tx::insert_fresh`).
+    fn mint_key(&self, collection: CollectionId, path: &[Value]) -> i64 {
+        self.with_counter(collection, path, |counter| {
+            *counter += 1;
+            *counter
+        })
+    }
+
+    /// An explicit key, shown to the minter on its way into the table.
+    /// A numeric key at or above the counter carries it up so the next
+    /// mint clears it; anything else moves nothing, having no way to
+    /// collide with an I64.
+    fn absorb_key(&self, collection: CollectionId, path: &[Value], key: &Value) {
+        let Value::I64(n) = *key else { return };
+        self.with_counter(collection, path, |counter| *counter = (*counter).max(n));
     }
 
     /// A collection declared inside a For's template is torn down with
@@ -1706,6 +1754,11 @@ impl<'a> Tx<'a> {
     ) {
         let value = value.into();
         let (key, variant, record) = (key.into(), value.variant(), value.to_values());
+        // ABSORPTION, on the one path every explicit key travels: a
+        // numeric key at or above the minter's counter carries it up, so
+        // hand-chosen and minted keys share one space safely and in
+        // either order (insert_fresh's contract).
+        self.ctx.absorb_key(instance.id, &instance.path, &key);
         self.model_set(instance.id, &instance.path, &key, variant, &record);
         self.ops.push(TxOp::CollectionInsert {
             id: instance.id,
@@ -1717,6 +1770,47 @@ impl<'a> Tx<'a> {
         if instance.path.is_empty() {
             self.recompute_derived(instance.id);
         }
+    }
+
+    /// Insert a record under a key the binding authors, and hand the key
+    /// back.
+    ///
+    /// FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
+    /// identity and guest-chosen (DESIGN.md, the update algebra), so
+    /// anything that already HAS a name passes it to [`insert`](Tx::insert)
+    /// — today and always. This is the other case, and it is the common
+    /// one in a form: the app has a title and nothing else, and the
+    /// alternative is a hand-spelled counter beside the collection,
+    /// which is mutable global state in most languages and whose safety
+    /// rests on a never-rewind rule nobody wrote down.
+    ///
+    /// ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted
+    /// key is `I64` and is counter+1. An instance is a table — the
+    /// live-zone collection, or one stamped copy selected by `at(...)`
+    /// — and keys are unique within one, so that is what the counter is
+    /// per.
+    ///
+    /// MIXING IS SAFE BY ABSORPTION: an explicit `insert` whose key is
+    /// an I64 at or above the counter carries it up, so a later mint
+    /// clears every hand-chosen numeric key already in the table. A
+    /// non-numeric key cannot collide with an I64 at all and moves
+    /// nothing.
+    ///
+    /// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
+    /// argument. Undo and redo replay captured keys inside the core and
+    /// never re-enter this path, so a history walk never moves the
+    /// counter; an abandoned transaction does not move it back either
+    /// (a minted key is spent, the sequence rule — the rollback journal
+    /// restores the model, not the counter, so a key can never be
+    /// handed out twice). A fresh key is fresh forever.
+    pub fn insert_fresh<T: KayaSum>(
+        &mut self,
+        instance: &Collection<T>,
+        value: impl Into<T>,
+    ) -> i64 {
+        let key = self.ctx.mint_key(instance.id, &instance.path);
+        self.insert(instance, key, value);
+        key
     }
 
     pub fn update<T: KayaSum>(
@@ -4866,6 +4960,165 @@ mod tests {
             assert_eq!(tx.len(&groups), 1);
         }
         assert_eq!(ctx.begin().len(&groups), 0);
+    }
+
+    /// The minter, on its own terms: one counter per INSTANCE starting
+    /// at 0, mint = counter+1 — and an abandoned transaction does NOT
+    /// hand the key back. A key that two commits could both be given is
+    /// not an identity, so the counter is deliberately outside the
+    /// rollback journal (which puts the model back, and only that).
+    #[test]
+    fn fresh_keys_are_minted_per_instance_and_never_rewind() {
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let mut tx = ctx.begin();
+        let groups = tx.collection::<String>();
+        let (_list, items) = tx.for_each(&groups, |t| t.collection::<String>());
+        let (g1, g2) = (items.at("g1"), items.at("g2"));
+
+        assert_eq!(tx.insert_fresh(&groups, "Work"), 1);
+        assert_eq!(tx.insert_fresh(&groups, "Home"), 2);
+        // A SEPARATE TABLE IS A SEPARATE SEQUENCE: keys are unique
+        // within an instance, so that is what a counter is per.
+        assert_eq!(tx.insert_fresh(&g1, "send report"), 1);
+        assert_eq!(tx.insert_fresh(&g1, "buy milk"), 2);
+        assert_eq!(tx.insert_fresh(&g2, "water the plants"), 1);
+        assert_eq!(
+            tx.items(&g1),
+            vec![
+                (Value::I64(1), "send report".to_string()),
+                (Value::I64(2), "buy milk".to_string()),
+            ],
+            "the minted key is what the entry is filed under"
+        );
+        tx.commit();
+
+        // An abandoned transaction takes its records with it — and
+        // leaves the counter where it is.
+        {
+            let mut tx = ctx.begin();
+            assert_eq!(tx.insert_fresh(&groups, "Errands"), 3);
+        }
+        let mut tx = ctx.begin();
+        assert_eq!(tx.len(&groups), 2, "the abandoned insert is gone");
+        assert_eq!(
+            tx.insert_fresh(&groups, "Errands"),
+            4,
+            "a spent key is spent: the minter never hands 3 out again"
+        );
+    }
+
+    /// Absorption: an explicit I64 key at or above the counter carries
+    /// it up, so hand-chosen and minted keys share one space in either
+    /// order and a mint can never collide. A key of any other type
+    /// cannot collide with an I64 at all and moves nothing.
+    #[test]
+    fn an_explicit_i64_key_carries_the_minter_past_it() {
+        let (_occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<String>();
+        tx.insert(&todos, 7i64, "imported");
+        assert_eq!(tx.insert_fresh(&todos, "typed"), 8, "past the explicit key");
+        // At the counter, not above it: 8 is taken, so the next mint is
+        // still the one after it.
+        tx.insert(&todos, 8i64, "reimported");
+        assert_eq!(tx.insert_fresh(&todos, "typed again"), 9);
+        // Below the counter: nothing to clear.
+        tx.insert(&todos, 2i64, "older");
+        assert_eq!(tx.insert_fresh(&todos, "and again"), 10);
+        // A Str key shares no space with an I64.
+        tx.insert(&todos, "t99", "named");
+        assert_eq!(tx.insert_fresh(&todos, "last"), 11);
+    }
+
+    /// THE RULE THE HAND-SPELLED COUNTERS RESTED ON, now the binding's.
+    /// A history walk replays captured keys inside the core and never
+    /// re-enters this insert path, so an undo cannot rewind the counter
+    /// and the next mint is still fresh — the duplicate-key panic nine
+    /// guests were one undo/redo/add interleave away from.
+    #[test]
+    fn a_mint_after_an_undo_and_a_redo_is_still_fresh() {
+        use crate::protocol::{DEFAULT_WINDOW, Occurrence, UndoDelta, UndoEntry, UndoOrder};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+
+        let mut tx = ctx.begin();
+        let todos = tx.collection::<Todo>();
+        let milk = tx.insert_fresh(&todos, Todo { title: "milk".into(), done: false });
+        assert_eq!(milk, 1);
+        tx.commit();
+
+        // The core's inverse for that add, then its forward again: the
+        // same key both ways, authored where the entry was captured.
+        let step = |state: Option<(u32, Vec<Value>)>, order: Vec<Value>| UndoDelta {
+            entries: vec![UndoEntry {
+                collection: todos.id,
+                path: vec![],
+                key: Value::I64(milk),
+                state,
+            }],
+            orders: if order.is_empty() {
+                vec![]
+            } else {
+                vec![UndoOrder { collection: todos.id, path: vec![], keys: order }]
+            },
+            ..UndoDelta::default()
+        };
+        occ_tx
+            .send(Inbox::Occ(Occurrence::Undone {
+                window: DEFAULT_WINDOW,
+                label: "add milk".into(),
+                delta: step(None, vec![]),
+            }))
+            .unwrap();
+        assert!(matches!(ctx.next(), Occurrence::Undone { .. }));
+
+        // THE INTERLEAVE, which is the whole danger: the table is empty
+        // again, so a counter that reads the model (its length, or its
+        // highest key — both hand-spellings this replaces) mints 1 a
+        // second time and the redo below lands on top of it.
+        let mut tx = ctx.begin();
+        assert_eq!(tx.len(&todos), 0, "the undo took the entry out");
+        assert_eq!(
+            tx.insert_fresh(&todos, Todo { title: "tea".into(), done: false }),
+            2,
+            "the undo moved no counter"
+        );
+        tx.commit();
+
+        occ_tx
+            .send(Inbox::Occ(Occurrence::Redone {
+                window: DEFAULT_WINDOW,
+                label: "add milk".into(),
+                delta: step(
+                    Some((0, vec![Value::from("milk"), Value::Bool(false)])),
+                    vec![Value::I64(1), Value::I64(2)],
+                ),
+            }))
+            .unwrap();
+        assert!(matches!(ctx.next(), Occurrence::Redone { .. }));
+
+        let mut tx = ctx.begin();
+        assert_eq!(
+            tx.items(&todos),
+            vec![
+                (Value::I64(1), Todo { title: "milk".into(), done: false }),
+                (Value::I64(2), Todo { title: "tea".into(), done: false }),
+            ],
+            "two adds, two entries, two names — the redo overwrote nothing"
+        );
+        assert_eq!(
+            tx.insert_fresh(&todos, Todo { title: "buns".into(), done: false }),
+            3,
+            "and the walk left the sequence where it was"
+        );
     }
 
     /// The root-handle guard: a For binds the collection, never an

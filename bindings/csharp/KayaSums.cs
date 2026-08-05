@@ -36,6 +36,19 @@ sealed class SumCollection<T>
     public void Insert(Tx tx, object key, T value) =>
         InsertOrUpdate(tx, key, value, insert: true);
 
+    /// Insert under a key the BINDING authors, and hand the key back —
+    /// the minter, on the sum surface too, because a sum's entries have
+    /// no more identity of their own than a record's (a feed item is
+    /// its content). The witness is unaffected: the value's own
+    /// constructor still rides the wire. The contract, in full, is on
+    /// Tx.InsertFresh.
+    public long InsertFresh(Tx tx, T value)
+    {
+        long key = tx.MintKey(Collection);
+        Insert(tx, key, value);
+        return key;
+    }
+
     /// Update replaces a record wholesale; a different constructor
     /// than the entry's current one restamps its copy in place.
     public void Update(Tx tx, object key, T value) =>

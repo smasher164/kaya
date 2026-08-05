@@ -783,6 +783,13 @@ final class KayaApp {
     }
 
     private var model: [UInt64: [KayaInstance]] = [:]
+    // The minter's counters: the highest I64 key each collection
+    // INSTANCE has minted or absorbed. Keyed by path the way the model
+    // is (a [KayaValue] is not Hashable — KayaValue carries an f64), and
+    // NOT part of the transaction journal: a minted key is spent even if
+    // the transaction that spent it is abandoned, so an id can never be
+    // handed out twice.
+    private var fresh: [UInt64: [(path: [KayaValue], counter: Int64)]] = [:]
     private var childCollections: [UInt64: [UInt64]] = [:]
     fileprivate var openFors: [UInt64] = []
     // Signals recomputed from a collection after each of its
@@ -846,6 +853,41 @@ final class KayaApp {
 
     fileprivate func keysOf(_ coll: UInt64, _ path: [KayaValue]) -> [KayaValue] {
         model[coll]?.first { $0.path == path }?.entries.map { $0.key } ?? []
+    }
+
+    /// One instance's counter, made if this is the first anyone has
+    /// asked. Split out because both the mint and the absorb want the
+    /// same lookup.
+    private func withCounter<R>(
+        _ coll: UInt64, _ path: [KayaValue], _ body: (inout Int64) -> R
+    ) -> R {
+        var instances = fresh[coll, default: []]
+        let at = instances.firstIndex { $0.path == path } ?? {
+            instances.append((path: path, counter: 0))
+            return instances.count - 1
+        }()
+        let out = body(&instances[at].counter)
+        fresh[coll] = instances
+        return out
+    }
+
+    /// The next fresh key for one instance: counter+1, and the counter
+    /// keeps it. Monotonic by construction — nothing else writes it
+    /// downwards (see `KayaAppTx.insertFresh`).
+    fileprivate func mintKey(_ coll: UInt64, _ path: [KayaValue]) -> Int64 {
+        withCounter(coll, path) { counter in
+            counter += 1
+            return counter
+        }
+    }
+
+    /// An explicit key, shown to the minter on its way into the table.
+    /// A numeric key at or above the counter carries it up so the next
+    /// mint clears it; anything else moves nothing, having no way to
+    /// collide with an I64.
+    fileprivate func absorbKey(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue) {
+        guard case .i64(let n) = key else { return }
+        withCounter(coll, path) { counter in counter = max(counter, n) }
     }
 
     fileprivate func modelMove(
@@ -2076,10 +2118,52 @@ final class KayaAppTx {
         }
     }
 
+    /// A scalar collection's element IS its one wire value, so this is
+    /// the record path with a one-field record — spelled as a delegation
+    /// rather than a copy so that EVERY insert this binding can make,
+    /// scalar or typed, passes the one chokepoint the minter absorbs at.
     func insert(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
-        app.modelSet(c.id, c.path, key, value)
-        tx.collectionInsert(c.id, c.path, key, 0, [value])
-        recomputeDerived(c)
+        insertRecordRaw(c, key, value, 0, [value])
+    }
+
+    /// Insert a scalar under a key the binding authors, and hand the key
+    /// back.
+    ///
+    /// FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
+    /// identity and guest-chosen (DESIGN.md, the update algebra), so
+    /// anything that already HAS a name passes it to `insert` — today
+    /// and always. This is the other case, and it is the common one in a
+    /// form: the app has a title and nothing else, and the alternative
+    /// is a hand-spelled counter beside the collection, which is mutable
+    /// global state in most languages and whose safety rests on a
+    /// never-rewind rule nobody wrote down.
+    ///
+    /// ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted
+    /// key is `.i64` and is counter+1. An instance is a table — the
+    /// live-zone collection, or one stamped copy selected by `at(...)`
+    /// — and keys are unique within one, so that is what the counter is
+    /// per.
+    ///
+    /// MIXING IS SAFE BY ABSORPTION: an explicit `insert` whose key is
+    /// an I64 at or above the counter carries it up, so a later mint
+    /// clears every hand-chosen numeric key already in the table. A
+    /// non-numeric key cannot collide with an I64 at all and moves
+    /// nothing.
+    ///
+    /// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
+    /// argument. Undo and redo replay captured keys inside the core and
+    /// never re-enter this path, so a history walk never moves the
+    /// counter; an abandoned transaction does not move it back either
+    /// (the rollback journal restores the model, not the counter, so a
+    /// key can never be handed out twice). A fresh key is fresh forever.
+    ///
+    /// The key IS the return value — an app that selects the row it just
+    /// made takes it from here rather than inventing a second name for
+    /// the same datum — and `@discardableResult` is Swift's spelling of
+    /// "and an app that has no use for it simply does not read it".
+    @discardableResult
+    func insertFresh(_ c: KayaCollection, _ value: KayaValue) -> Int64 {
+        insertRecordFresh(c, value, 0, [value])
     }
 
     func update(_ c: KayaCollection, _ key: KayaValue, _ value: KayaValue) {
@@ -2191,9 +2275,27 @@ final class KayaAppTx {
         _ c: KayaCollection, _ key: KayaValue, _ model: Any, _ variant: UInt32,
         _ fields: [KayaValue]
     ) {
+        // ABSORPTION, on the one path every explicit key travels — the
+        // scalar `insert` and both typed surfaces come through here: a
+        // numeric key at or above the minter's counter carries it up, so
+        // hand-chosen and minted keys share one space safely and in
+        // either order (insertFresh's contract).
+        app.absorbKey(c.id, c.path, key)
         app.modelSet(c.id, c.path, key, model)
         tx.collectionInsert(c.id, c.path, key, variant, fields)
         recomputeDerived(c)
+    }
+
+    /// The minting insert every typed surface's `insertFresh` lowers to:
+    /// take the instance's next key, insert under it, hand it back. The
+    /// contract lives on `insertFresh` above.
+    @discardableResult
+    func insertRecordFresh(
+        _ c: KayaCollection, _ model: Any, _ variant: UInt32, _ fields: [KayaValue]
+    ) -> Int64 {
+        let key = app.mintKey(c.id, c.path)
+        insertRecordRaw(c, .i64(key), model, variant, fields)
+        return key
     }
 
     func updateRecordRaw(

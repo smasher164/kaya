@@ -100,6 +100,19 @@ type instance struct {
 	entries []Entry
 }
 
+// minter is one collection INSTANCE's fresh-key counter (Tx.InsertFresh,
+// docs/fresh-key-plan.md): the highest I64 key that table has minted or
+// been handed, so the next mint is one past it. Its own state rather
+// than a field on instance, for two reasons that are the whole safety
+// argument: a counter outlives the entries — every key it handed out
+// stays spent whether or not the entry is still there — and instance is
+// what the rollback journal restores, so an abandoned transaction would
+// carry the counter backwards with it.
+type minter struct {
+	path    []any
+	counter int64
+}
+
 // App owns the id counters (which outlive any one transaction), the
 // dispatch tables, and the collection model. The collection is the
 // model — the only copy: every mutation op edits it and queues the wire
@@ -145,6 +158,10 @@ type App struct {
 	// is not (the occurrence loop).
 	shapes         map[uint64]undoShape
 	model          map[uint64][]*instance
+	// The fresh-key counters, in the model's own (collection, path)
+	// shape: one per collection INSTANCE, because an instance is a table
+	// and keys are unique within one.
+	fresh          map[uint64][]*minter
 	// Collections declared inside a For's template: removing a parent
 	// entry tears down the copy and every instance inside it, so the
 	// model needs the same edge to purge along.
@@ -208,6 +225,7 @@ func NewApp() *App {
 		redone:         make(map[uint64]func(*Tx, string, UndoDelta)),
 		shapes:         make(map[uint64]undoShape),
 		model:          make(map[uint64][]*instance),
+		fresh:          make(map[uint64][]*minter),
 		children:       make(map[uint64][]uint64),
 		derived:        make(map[uint64][]func(*Tx)),
 	}
@@ -232,6 +250,48 @@ func (a *App) instanceOf(coll uint64, path []any) *instance {
 		}
 	}
 	return nil
+}
+
+// counterOf is one instance's fresh-key counter, created at 0 the first
+// time that table is minted into or inserted into.
+func (a *App) counterOf(coll uint64, path []any) *minter {
+	for _, m := range a.fresh[coll] {
+		if pathEq(m.path, path) {
+			return m
+		}
+	}
+	m := &minter{path: append([]any(nil), path...)}
+	a.fresh[coll] = append(a.fresh[coll], m)
+	return m
+}
+
+// mintKey is the next fresh key for one instance: counter+1, and the
+// counter keeps it. Monotonic by construction — nothing in the binding
+// writes it downwards (see Tx.InsertFresh).
+func (a *App) mintKey(coll uint64, path []any) int64 {
+	m := a.counterOf(coll, path)
+	m.counter++
+	return m.counter
+}
+
+// absorbKey shows the minter an explicit key on its way into the table.
+// A numeric key at or above the counter carries it up so the next mint
+// clears it; anything else moves nothing, having no way to collide with
+// an I64. int and int64 are exactly what encodeValue writes as ValueI64,
+// so what absorbs here is what the core will see as a number.
+func (a *App) absorbKey(coll uint64, path []any, key any) {
+	var n int64
+	switch k := key.(type) {
+	case int64:
+		n = k
+	case int:
+		n = int64(k)
+	default:
+		return
+	}
+	if m := a.counterOf(coll, path); n > m.counter {
+		m.counter = n
+	}
 }
 
 // touch journals a deep snapshot of one collection's instances the
@@ -1100,9 +1160,59 @@ func (tx *Tx) When(s Signal[bool], fn func(*Tpl)) Widget {
 }
 
 func (tx *Tx) Insert(c Collection, key, value any) {
+	tx.insertEntry(c, key, 0, value, []any{value})
+}
+
+// insertEntry is THE insert: the model write, the wire record, the
+// derived recompute — and the fresh-key minter shown every explicit key
+// on its way past. Go has three public inserts (this Collection's, a
+// RecordCollection's, a SumCollection's) that differ only in how a value
+// becomes wire fields, so they all land here: ABSORPTION SITS ON THE
+// PATH, not beside it, and there is one path to sit on. A numeric key at
+// or above the counter carries it up, so hand-chosen and minted keys
+// share one space safely and in either order (Tx.InsertFresh).
+func (tx *Tx) insertEntry(c Collection, key any, variant uint32, value any, fields []any) {
+	tx.app.absorbKey(c.id, c.path, key)
 	tx.app.modelSet(c.id, c.path, key, value)
-	tx.emit(TxCollectionInsert(c.id, c.path, key, 0, []any{value}))
+	tx.emit(TxCollectionInsert(c.id, c.path, key, variant, fields))
 	tx.recomputeDerived(c.id, c.path)
+}
+
+// InsertFresh inserts a value under a key the binding authors, and hands
+// the key back.
+//
+// FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain identity and
+// guest-chosen (DESIGN.md, the update algebra), so anything that already
+// HAS a name passes it to Insert — today and always. This is the other
+// case, and it is the common one in a form: the app has a title and
+// nothing else, and the alternative is a hand-spelled counter beside the
+// collection whose safety rests on a never-rewind rule nobody wrote
+// down.
+//
+// ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted key is
+// an I64 and is counter+1. An instance is a table — the live-zone
+// collection, or one stamped copy selected by At(...) — and keys are
+// unique within one, so that is what the counter is per.
+//
+// MIXING IS SAFE BY ABSORPTION: an explicit Insert whose key is a number
+// at or above the counter carries it up, so a later mint clears every
+// hand-chosen numeric key already in the table. A minted key travels the
+// ordinary insert path, so it absorbs like any other.
+//
+// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety argument.
+// Undo and redo replay captured keys inside the core and never re-enter
+// this path, so a history walk never moves the counter; an abandoned
+// transaction does not move it back either (the rollback journal
+// restores the model, not the counter, so a key can never be handed out
+// twice). A fresh key is fresh forever.
+//
+// The returned key is the app's if it wants one — the row it just added,
+// to select or scroll to. A guest with no use for a name discards it,
+// which in Go is simply a call statement.
+func (tx *Tx) InsertFresh(c Collection, value any) int64 {
+	key := tx.app.mintKey(c.id, c.path)
+	tx.Insert(c, key, value)
+	return key
 }
 
 func (tx *Tx) Update(c Collection, key, value any) {

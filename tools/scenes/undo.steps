@@ -25,8 +25,26 @@
 # write CLEARS a field's native history on every platform (D7), which is
 # the very history the first tier is made of. A scene built out of
 # set_text would destroy what it came to observe and pass anyway.
+#
+# LABEL#2 IS THE APP'S OWN MIRROR, RENDERED — the keys its collection
+# holds, in the order it holds them, written by whichever handler just
+# ran. It is how this script observes the two things a count cannot: an
+# undone REMOVE comes back under its ORIGINAL key at its ORIGINAL
+# position (the delta's entries and orders runs, both), and a key minted
+# after a history walk is still FRESH (docs/fresh-key-plan.md — no guest
+# spells a counter any more; `insert_fresh` mints, and undo/redo replay
+# captured keys inside the core without ever re-entering that path).
+#
+# EVERY label#2 ASSERTION IS PRECEDED BY THE label#0 OR label#1
+# ASSERTION WRITTEN IN THE SAME TRANSACTION, and that ordering is
+# load-bearing. After an undo the core restores what the group wrote
+# and THEN the app hears the occurrence; a bare `expect label#2` could
+# match the core's restored value before the app's own write landed and
+# pass on a mirror it never read. Reading the app-written label first
+# means the transaction carrying both has already been applied.
 expect label#0 "no todos"
 expect label#1 "history empty"
+expect label#2 "no keys"
 
 # NOTHING HAS HAPPENED, SO BOTH COMMANDS ARE INERT — and they say so.
 # Enablement is not a build-time fact and no app computes it: it is
@@ -47,6 +65,10 @@ expect entry#0 "milk"
 expect_menu "Edit>Undo" enabled
 click button#0
 expect label#0 "added milk, 1 total"
+# THE MINTER'S FIRST ANSWER. The app passed no key: the binding
+# authored one, and it is the I64 sequence starting at 1 that every
+# language mints (docs/fresh-key-plan.md).
+expect label#2 "keys 1"
 expect entry#0 ""
 
 menu_activate "Edit>Undo"
@@ -55,6 +77,7 @@ expect label#0 "no todos"
 # restored state; the count is read from the app's own collection
 # mirror, which the binding reconciled from that payload.
 expect label#1 "undid add milk, 0 total"
+expect label#2 "no keys"
 # AND THE FIELD IS UNTOUCHED. The clear was never a step, so undoing the
 # add cannot put the draft back beside a todo that is gone.
 expect entry#0 ""
@@ -62,6 +85,7 @@ expect entry#0 ""
 menu_activate "Edit>Redo"
 expect label#0 "added milk, 1 total"
 expect label#1 "redid add milk, 1 total"
+expect label#2 "keys 1"
 expect entry#0 ""
 
 # ---- the interleave: type, act, type, walk back -------------------
@@ -94,22 +118,88 @@ menu_activate "Edit>Undo"
 expect entry#0 ""
 expect label#1 "undid typing, 1 total"
 
-# ---- forward again, and the delta is the only notification --------
+# ---- the delta is the only notification, AND IT IS FALSIFIABLE ----
 #
 # Restoring text is a programmatic write, so it emits no text_changed:
 # an app that folds edits into its own model (which is every app — the
 # field is uncontrolled) learns this one from the occurrence's payload
-# or not at all. The proof is the NEXT add: it can only name "tea" if
-# the app's draft came back with the field.
+# or not at all.
+#
+# THE NEXT LINE IS THE PROOF, and it is a proof because it reads the
+# APP'S copy of the draft at a moment when the widget's and the app's
+# would disagree. The coarse undo above put the field back to "" while
+# the last ordinary text_changed this app heard said "tea"; an app that
+# ignores `delta.texts` still holds "tea" and its add ADDS. Only an app
+# that folded the payload refuses.
+#
+# The earlier script asserted the same D5 promise one step later, at the
+# add after the redo — and that assertion could not fail: the redo lands
+# the episode's after-image, which is exactly where the last ordinary
+# emission had left the app, so the two ignores cancelled. Measured
+# vacuous independently on the Java and Haskell lanes. A refusal is not
+# a step, so the forward history survives it.
+click button#0
+expect label#0 "nothing to add, 1 total"
+
+# And now the other half of the same fold, which the step above has
+# just made checkable: the redo writes "tea" programmatically and emits
+# nothing, so the app can only NAME it if the payload reached its draft
+# — and the refusal proved the draft was "" a moment ago, so there is
+# nowhere else for the name to come from.
 menu_activate "Edit>Redo"
 expect entry#0 "tea"
 expect label#1 "redid typing, 1 total"
 click button#0
 expect label#0 "added tea, 2 total"
+# A FRESH KEY IS FRESH FOREVER. The first add's undo and redo walked
+# this very entry out of the collection and back in; a counter that
+# rewound would mint 1 again here and collide with the milk that is
+# still there. 2 is the whole never-rewind rule, observed.
+expect label#2 "keys 1,2"
 expect entry#0 ""
 
 # And the new step is undoable like any other — a history is walked as
 # often as the user likes, so the handlers outlive every step.
+#
+# THE STATUS COMES BACK TO WHAT THE REFUSAL WROTE, not to what the
+# previous add wrote, and that is the inverse being exactly what it
+# claims: a group restores the signal it overwrote to the value it found
+# there, whoever put it there and whether or not that writer was a step.
 menu_activate "Edit>Undo"
-expect label#0 "added milk, 1 total"
+expect label#0 "nothing to add, 1 total"
 expect label#1 "undid add tea, 1 total"
+expect label#2 "keys 1"
+
+# ---- the remove: the case where identity IS what undo asserts -----
+#
+# Every other step here restores CONTENT. This one restores an ENTRY,
+# and an entry is a key: an undone remove that came back under a new
+# name, or at the end instead of where it was, would satisfy every
+# count in this file and still be wrong. So both are read off label#2.
+menu_activate "Edit>Redo"
+expect label#0 "added tea, 2 total"
+expect label#1 "redid add tea, 2 total"
+expect label#2 "keys 1,2"
+
+# The remove takes the collection's first entry — the model's own
+# answer, never a widget's — so the entry that comes back has to come
+# back BEFORE the one that stayed.
+click button#3
+expect label#0 "removed milk, 1 total"
+expect label#2 "keys 2"
+
+menu_activate "Edit>Undo"
+# The group's inverse restores the status the remove wrote, and the
+# occurrence carries the entry and the order that group disturbed.
+expect label#0 "added tea, 2 total"
+expect label#1 "undid remove milk, 2 total"
+# ITS ORIGINAL KEY, AT ITS ORIGINAL POSITION. A mirror that folds the
+# entries run and drops the orders run reads "keys 2,1" here — the
+# restored entry appended rather than replaced — and a mirror that
+# folds neither reads "keys 2".
+expect label#2 "keys 1,2"
+
+menu_activate "Edit>Redo"
+expect label#0 "removed milk, 1 total"
+expect label#1 "redid remove milk, 1 total"
+expect label#2 "keys 2"

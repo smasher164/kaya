@@ -28,6 +28,14 @@
 // core never held (D4). Undo restores state, and state is signals plus
 // collections.
 //
+// AND THE APP NAMES NO TODO. A todo is a title and nothing else — it has
+// no identity of its own — so the key comes from InsertFresh, which
+// mints one per collection instance and hands it back
+// (docs/fresh-key-plan.md). What that buys here is the whole point of
+// the minter: this file used to carry nextKey, a counter beside the
+// collection whose safety rested on never rewinding, and an undo that
+// rewound it would have handed the same name to two todos.
+//
 // Canonical semantics in guests/rust/undo.rs; the byte-frozen contract
 // in tools/scenes/undo.steps.
 package main
@@ -36,6 +44,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
+	"strings"
 
 	kaya "dev.kaya/bindings/go"
 )
@@ -56,18 +66,40 @@ func what(label string) string {
 	return label
 }
 
+// keyList is the app's collection mirror, rendered: every key it holds,
+// in the order it holds them.
+//
+// THIS IS THE ONLY PART OF AN UNDO A COUNT CANNOT SEE. A restored entry
+// that came back under a fresh name, or at the end instead of where it
+// was, leaves every total in this file correct — the entries and orders
+// runs of the delta are what say otherwise, and this is where the scene
+// reads them (D5).
+func keyList(tx *kaya.Tx, todos kaya.Collection) string {
+	items := tx.Items(todos)
+	if len(items) == 0 {
+		return "no keys"
+	}
+	keys := make([]string, len(items))
+	for i, e := range items {
+		// The minter's keys are I64, and this app never spells one
+		// itself, so the assertion is the honest read: a key of any
+		// other type here would be a binding bug, not a case to handle.
+		keys[i] = strconv.FormatInt(e.Key.(int64), 10)
+	}
+	return "keys " + strings.Join(keys, ",")
+}
+
 func main() {
 	app := kaya.NewApp()
 
 	// The fold: widget-owned state arrives as occurrences; the app's
 	// copy is this variable, not a widget read.
 	draft := ""
-	nextKey := 0
 
 	var (
-		status, history kaya.Signal[string]
-		field           kaya.Widget
-		todos           kaya.Collection
+		status, history, keys kaya.Signal[string]
+		field                 kaya.Widget
+		todos                 kaya.Collection
 	)
 
 	app.Build(func(tx *kaya.Tx) {
@@ -91,6 +123,11 @@ func main() {
 				}
 				total := tx.Len(todos)
 				tx.Write(history, fmt.Sprintf("undid %s, %d total", what(label), total))
+				// ONE TRANSACTION WITH THE LABEL ABOVE, deliberately: the
+				// script reads that label first, so by the time it reads
+				// this one the app's own answer is what is on screen —
+				// not the value the core restored on its way past.
+				tx.Write(keys, keyList(tx, todos))
 			}).
 			OnRedone(func(tx *kaya.Tx, label string, delta kaya.UndoDelta) {
 				if n := len(delta.Texts); n > 0 {
@@ -98,6 +135,7 @@ func main() {
 				}
 				total := tx.Len(todos)
 				tx.Write(history, fmt.Sprintf("redid %s, %d total", what(label), total))
+				tx.Write(keys, keyList(tx, todos))
 			})
 
 		// THE GESTURE LAYER, one tier deeper: an app declares the two
@@ -111,11 +149,13 @@ func main() {
 
 		status = tx.Signal("no todos")
 		history = tx.Signal("history empty")
+		keys = tx.Signal("no keys")
 		todos = tx.Collection()
 
 		root := tx.Column(func() {
 			tx.Label(status).A11yID("status")   // label#0
 			tx.Label(history).A11yID("history") // label#1
+			tx.Label(keys).A11yID("keys")       // label#2
 			field = tx.Entry(func(tx *kaya.Tx, text string) {
 				draft = text
 			}).A11yID("draft") // entry#0
@@ -126,14 +166,20 @@ func main() {
 					tx.Write(status, fmt.Sprintf("nothing to add, %d total", total))
 					return
 				}
-				nextKey++
 				// ONE CALL, AND IT IS THE WHOLE UNDO SURFACE. The name
 				// is what the step is called; everything in this batch
 				// is what it did.
 				tx.Undoable(fmt.Sprintf("add %s", draft))
-				tx.Insert(todos, fmt.Sprintf("t%d", nextKey), draft)
+				// NO KEY, AND NO COUNTER TO GET WRONG: the binding mints
+				// the name and hands it back. This app has no use for it
+				// — a todo is looked up by nothing — and an app that does
+				// (selecting the new row, say) takes it from here rather
+				// than inventing a second name for the same datum. Go's
+				// way of discarding a result is a call statement.
+				tx.InsertFresh(todos, draft)
 				total := tx.Len(todos)
 				tx.Write(status, fmt.Sprintf("added %s, %d total", draft, total))
+				tx.Write(keys, keyList(tx, todos))
 				// A PURE EFFECT rides along and is simply not restored:
 				// undo restores state, not where you were looking (A2).
 				tx.Focus(field)
@@ -162,6 +208,27 @@ func main() {
 			// than hidden in a handler.
 			tx.Button("focus", func(tx *kaya.Tx) { // button#2
 				tx.Focus(field)
+			})
+			// THE STEP WHOSE INVERSE IS AN IDENTITY, not a content. The
+			// core captured the entry and the instance's order before the
+			// removal, so undoing this puts the entry back under the key
+			// it already had, where it already was — neither of which
+			// this app has to remember. The target is the collection's
+			// FIRST entry, taken from the model, never from a widget.
+			tx.Button("remove", func(tx *kaya.Tx) { // button#3
+				items := tx.Items(todos)
+				if len(items) == 0 {
+					total := tx.Len(todos)
+					tx.Write(status, fmt.Sprintf("nothing to remove, %d total", total))
+					return
+				}
+				first := items[0]
+				title := first.Value.(string)
+				tx.Undoable(fmt.Sprintf("remove %s", title))
+				tx.Remove(todos, first.Key)
+				total := tx.Len(todos)
+				tx.Write(status, fmt.Sprintf("removed %s, %d total", title, total))
+				tx.Write(keys, keyList(tx, todos))
 			})
 			for row := range todos.Rows(tx) {
 				row.Row(func() {

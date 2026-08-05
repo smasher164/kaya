@@ -11,7 +11,7 @@
 
    Build like milestone2.hs, then run with KAYA_SELFTEST=todos. -}
 
-import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 
@@ -28,7 +28,6 @@ main = kayaMain $ \app -> do
   -- The fold: widget-owned state arrives as occurrences; the app's
   -- copy is this IORef, not a widget read.
   draftRef <- newIORef ""
-  keyRef <- newIORef (0 :: Int)
 
   buildTx app $ do
     todos <- collectionOf (Proxy :: Proxy Todo)
@@ -48,16 +47,19 @@ main = kayaMain $ \app -> do
           -- insert, nothing to command.
           if null draft
             then return ()
-            else do
-              key <- atomicModifyIORef' keyRef (\n -> (n + 1, n + 1))
-              submitTx app $ do
-                insertRecord todos (VStr ("t" ++ show key)) (Todo draft False)
-                -- Finish the form: the field empties on screen and
-                -- reports text_changed("") through its normal edit path
-                -- (the fold empties the draft), and the cursor lands
-                -- back in it.
-                clearWidget entryField
-                focusWidget entryField
+            else submitTx app $ do
+              -- A todo is a title and a checkbox — it has no identity
+              -- of its own — so the binding authors the key and hands
+              -- it back (docs/fresh-key-plan.md). This file used to
+              -- keep an IORef counter beside the collection for the
+              -- job; that is what the minter replaces.
+              _ <- insertFresh todos (Todo draft False)
+              -- Finish the form: the field empties on screen and
+              -- reports text_changed("") through its normal edit path
+              -- (the fold empties the draft), and the cursor lands
+              -- back in it.
+              clearWidget entryField
+              focusWidget entryField
         onToggle keys checked =
           submitTx app $
             -- One field's delta: the title never travels; the derived

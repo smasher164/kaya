@@ -23,7 +23,9 @@ scoped templates, occurrence dispatch), this layer adds:
   never written by hand);
 - handles with methods: `signal.set`, `collection.insert/update/remove`
   and `collection.at(*path)` for instances of template-declared
-  collections;
+  collections. Data with no identity of its own gets its key from the
+  binding: `collection.insert_fresh(value)` mints one and returns it,
+  so no app spells a `next_key` global;
 - the collection is the model — the only copy. Every mutation is a
   patch: it edits the model and becomes the wire delta in one recorded
   operation, in order, inside the transaction, and an abandoned
@@ -615,14 +617,79 @@ class _BoundCollection:
             for derived in self._owner._derived:
                 derived._recompute()
 
+    def _absorb_key(self, key):
+        """An explicit key, shown to the minter on its way into the
+        table: a numeric key at or above the counter carries it up so
+        the next mint clears it.
+
+        BOOLS ARE NOT NUMBERS HERE, because they are not numbers on the
+        wire either — `wire._enc.value` dispatches `bool` before `int`
+        and a True key rides as VALUE_BOOL. Python's `bool` subclasses
+        `int`, so the isinstance order below is the encoder's order,
+        written out; anything else has no way to collide with an I64 and
+        moves nothing.
+        """
+        if isinstance(key, bool) or not isinstance(key, int):
+            return
+        path = tuple(self._path)
+        if key > self._owner._fresh.get(path, 0):
+            self._owner._fresh[path] = key
+
     def insert(self, key, value):
         variant, fields = self._encode(value)
+        # ABSORPTION, on the one path every explicit key travels (the
+        # draft scope's `d[k] = v` lands here too): a numeric key at or
+        # above the minter's counter carries it up, so hand-chosen and
+        # minted keys share one space safely and in either order
+        # (insert_fresh's contract).
+        self._absorb_key(key)
         _records().append(
             wire.tx_collection_insert(self._owner._id, self._path, key,
                                       variant, fields)
         )
         self._mirror()[key] = value
         self._recompute_derived()
+
+    def insert_fresh(self, value):
+        """Insert a record under a key the binding authors, and hand the
+        key back — `key = todos.insert_fresh(Todo(title=draft))`.
+
+        FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
+        identity and guest-chosen (DESIGN.md, the update algebra), so
+        anything that already HAS a name passes it to `insert` — today
+        and always. This is the other case, and it is the common one in
+        a form: the app has a title and nothing else, and the
+        alternative is a hand-spelled counter beside the collection,
+        which in Python is a module global reached through `global` in
+        every handler that adds, and whose safety rests on a
+        never-rewind rule nobody wrote down.
+
+        ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted
+        key is an I64 and is counter+1. An instance is a table — the
+        live-zone collection, or one stamped copy selected by `at(...)`
+        — and keys are unique within one, so that is what the counter is
+        per.
+
+        MIXING IS SAFE BY ABSORPTION: an explicit `insert` whose key is
+        an int at or above the counter carries it up, so a later mint
+        clears every hand-chosen numeric key already in the table. A
+        string key cannot collide with an I64 at all and moves nothing.
+
+        NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
+        argument. Undo and redo replay captured keys inside the core and
+        never re-enter this path (`App._absorb_undo` writes the mirror
+        directly), so a history walk never moves the counter; an
+        abandoned transaction does not move it back either (the counter
+        is deliberately outside `_journal_once` — the rollback journal
+        restores the mirror, never the counter, so a key spent by an
+        abandoned transaction stays spent and cannot be handed out
+        twice). A fresh key is fresh forever.
+        """
+        path = tuple(self._path)
+        key = self._owner._fresh.get(path, 0) + 1
+        self._owner._fresh[path] = key
+        self.insert(key, value)
+        return key
 
     def update(self, key, value):
         variant, fields = self._encode(value)
@@ -840,6 +907,10 @@ class Collection(_BoundCollection):
         self._instances = {}
         self._children = []  # collections declared inside our template
         self._derived = []  # signals recomputed from this collection
+        # The minter's counters: the highest I64 key each INSTANCE has
+        # minted or absorbed, keyed by path the way `_instances` is. Not
+        # in the rollback journal, on purpose — see insert_fresh.
+        self._fresh = {}
         self._record_type = record_type
         # The type is the schema: a dataclass is the one-variant case,
         # and a union of dataclasses (Note | Todo) is the sum — one

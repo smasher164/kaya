@@ -45,6 +45,17 @@ public final class KayaSums {
                     infos[variant].wireFields(value));
         }
 
+        /** The witnessed insert under a minted key; see
+         * {@link KayaSums#insertFresh}, which is where the key type
+         * gets checked. */
+        long insertMinted(KayaApp.Tx tx, T value) {
+            int variant = variantOf(value.getClass());
+            long key = tx.mintKeyFor(handle);
+            tx.insertRecordRaw(handle, key, value, variant,
+                    infos[variant].wireFields(value));
+            return key;
+        }
+
         /** Update replaces a record wholesale; a different constructor
          * than the entry's current one restamps its copy in place. */
         public void update(KayaApp.Tx tx, K key, T value) {
@@ -166,6 +177,22 @@ public final class KayaSums {
             }
             return n;
         }
+    }
+
+    /**
+     * Insert under a key the binding authors, and hand it back — the
+     * sum twin of {@link KayaRecords#insertFresh}, witnessing the
+     * constructor exactly as {@link SumCollection#insert} does. The
+     * contract is on {@link KayaApp.Tx#insertFresh}; a sum's entries
+     * have no more identity of their own than a record's, so the minter
+     * is not a record-only surface.
+     *
+     * <p>A STATIC FOR THE SAME REASON its record twin is: the minted
+     * key is I64, and {@code SumCollection<Long, T>} in the parameter
+     * is what refuses a collection keyed by names.
+     */
+    public static <T> long insertFresh(KayaApp.Tx tx, SumCollection<Long, T> c, T value) {
+        return c.insertMinted(tx, value);
     }
 
     /**

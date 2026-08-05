@@ -11,21 +11,21 @@ import dev.kaya.KayaRecords;
  * records one update_field — a patch is recorded writes, never a
  * diff). */
 final class TodoKaya {
-    static KayaRecords.Collection<String, Todos.Todo> collection(KayaApp.Tx tx) {
+    static KayaRecords.Collection<Long, Todos.Todo> collection(KayaApp.Tx tx) {
         return KayaRecords.collectionOf(tx, Todos.Todo.class);
     }
 
     static final KayaRecords.Field<String> TITLE = KayaRecords.fieldAt(0);
     static final KayaRecords.Field<Boolean> DONE = KayaRecords.fieldAt(1);
 
-    static Patch patch(KayaApp.Tx tx, KayaRecords.Collection<String, Todos.Todo> c, String key) {
+    static Patch patch(KayaApp.Tx tx, KayaRecords.Collection<Long, Todos.Todo> c, Long key) {
         return new Patch(c.patch(tx, key));
     }
 
     static final class Patch {
-        private final KayaRecords.Patch<String, Todos.Todo> p;
+        private final KayaRecords.Patch<Long, Todos.Todo> p;
 
-        Patch(KayaRecords.Patch<String, Todos.Todo> p) {
+        Patch(KayaRecords.Patch<Long, Todos.Todo> p) {
             this.p = p;
         }
 
@@ -44,7 +44,7 @@ final class TodoKaya {
      * authoring the blueprint with the typed row surface
      * (exact-index tokens, no probes); stamping is the core's
      * replay. */
-    static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<String, Todos.Todo> c,
+    static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<Long, Todos.Todo> c,
             java.util.function.Consumer<Row> body) {
         // A block body: an expression lambda is ambiguous between
         // the Consumer and Function forEach overloads.
@@ -56,7 +56,7 @@ final class TodoKaya {
     /** The for-each form: `for (var row : TodoKaya.rows(c))` traces
      * the record template — the body runs once, and a break is
      * caught at submit. */
-    static Iterable<Row> rows(KayaRecords.Collection<String, Todos.Todo> c) {
+    static Iterable<Row> rows(KayaRecords.Collection<Long, Todos.Todo> c) {
         return KayaRecords.rowTrace(c, t -> new Row(t, c));
     }
 
@@ -64,11 +64,11 @@ final class TodoKaya {
      * wire field, and the constructors that consume them. */
     static final class Row {
         private final KayaApp.Tpl t;
-        private final KayaRecords.Collection<String, Todos.Todo> c;
+        private final KayaRecords.Collection<Long, Todos.Todo> c;
         final KayaRecords.Field<String> title = TITLE;
         final KayaRecords.Field<Boolean> done = DONE;
 
-        Row(KayaApp.Tpl t, KayaRecords.Collection<String, Todos.Todo> c) {
+        Row(KayaApp.Tpl t, KayaRecords.Collection<Long, Todos.Todo> c) {
             this.t = t;
             this.c = c;
         }
@@ -82,7 +82,7 @@ final class TodoKaya {
         }
 
         KayaApp.Node checkbox(KayaRecords.Field<Boolean> f,
-                KayaRecords.Collection.ToggleHandler<String> onToggle) {
+                KayaRecords.Collection.ToggleHandler<Long> onToggle) {
             return c.checkbox(t, f, onToggle);
         }
 

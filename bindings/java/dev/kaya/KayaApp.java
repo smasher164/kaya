@@ -262,6 +262,57 @@ public final class KayaApp {
     private final Map<Long, List<Long>> childCollections = new HashMap<>();
     private final List<Long> openFors = new ArrayList<>();
 
+    // The minter's counters: the highest I64 key each collection
+    // INSTANCE has minted or absorbed, keyed by path the way the model
+    // itself is. On the app and not on the Tx, deliberately — the
+    // rollback journal restores the model, never these, so a key spent
+    // by an abandoned transaction stays spent (see Tx.insertFresh).
+    private final Map<Long, Map<List<Object>, Long>> fresh = new HashMap<>();
+
+    /**
+     * The next fresh key for one instance: counter+1, and the counter
+     * keeps it. Monotonic by construction — nothing else writes it
+     * downwards (see {@link Tx#insertFresh}).
+     */
+    private long mintKey(long coll, List<Object> path) {
+        Map<List<Object>, Long> counters = fresh.computeIfAbsent(coll, k -> new HashMap<>());
+        // The path is the instance's identity here exactly as it is in
+        // the model; copied because it is the map's key from now on.
+        List<Object> at = List.copyOf(path);
+        long next = counters.getOrDefault(at, 0L) + 1;
+        counters.put(at, next);
+        return next;
+    }
+
+    /**
+     * An explicit key, shown to the minter on its way into the table.
+     * A numeric key at or above the counter carries it up so the next
+     * mint clears it; anything else moves nothing, having no way to
+     * collide with an I64.
+     *
+     * <p>INTEGER COUNTS AS I64 BECAUSE THE WIRE SAYS SO:
+     * {@code KayaWire.encodeValue} sends both Integer and Long as
+     * VALUE_I64, so a guest that writes {@code insert(tx, 7, ...)} —
+     * autoboxed to Integer — has put a numeric key in the same space
+     * the minter draws from, and the minter has to see it. Double is
+     * VALUE_F64 and Boolean VALUE_BOOL; neither can collide.
+     */
+    private void absorbKey(long coll, List<Object> path, Object key) {
+        long n;
+        if (key instanceof Long) {
+            n = (Long) key;
+        } else if (key instanceof Integer) {
+            n = (Integer) key;
+        } else {
+            return;
+        }
+        Map<List<Object>, Long> counters = fresh.computeIfAbsent(coll, k -> new HashMap<>());
+        List<Object> at = List.copyOf(path);
+        if (n > counters.getOrDefault(at, 0L)) {
+            counters.put(at, n);
+        }
+    }
+
     /** One key/value pair of a collection instance, in insertion order. */
     public static final class Entry {
         public final Object key;
@@ -2358,10 +2409,66 @@ public final class KayaApp {
             return new Stamped<>(w, out);
         }
 
+        /**
+         * The untyped insert: one value, one wire field. Delegates to
+         * the record path so the binding has exactly ONE insert — which
+         * is what lets absorption sit on a single line and cover every
+         * explicit key, typed or not (see {@link #insertFresh}).
+         */
         public void insert(Collection c, Object key, Object value) {
-            modelSet(c.id, c.path, key, value);
-            emit(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, 0, new Object[] { value }));
-            recomputeDerived(c);
+            insertRecordRaw(c, key, value, 0, new Object[] { value });
+        }
+
+        /**
+         * Insert a value under a key the binding authors, and hand the
+         * key back — {@code long key = tx.insertFresh(todos, draft)}.
+         * The typed twins are
+         * {@code KayaRecords.Collection.insertFresh} and
+         * {@code KayaSums.SumCollection.insertFresh}.
+         *
+         * <p>FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
+         * identity and guest-chosen (DESIGN.md, the update algebra), so
+         * anything that already HAS a name passes it to
+         * {@link #insert} — today and always. This is the other case,
+         * and it is the common one in a form: the app has a title and
+         * nothing else, and the alternative is a hand-spelled counter
+         * beside the collection, which in Java is a mutable static
+         * reached from every handler that adds, and whose safety rests
+         * on a never-rewind rule nobody wrote down.
+         *
+         * <p>ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the
+         * minted key is I64 and is counter+1. An instance is a table —
+         * the live-zone collection, or one stamped copy selected by
+         * {@code at(...)} — and keys are unique within one, so that is
+         * what the counter is per.
+         *
+         * <p>MIXING IS SAFE BY ABSORPTION: an explicit insert whose key
+         * is an I64 at or above the counter carries it up, so a later
+         * mint clears every hand-chosen numeric key already in the
+         * table. A String key cannot collide with an I64 at all and
+         * moves nothing.
+         *
+         * <p>NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
+         * argument. Undo and redo replay captured keys inside the core
+         * and never re-enter this path ({@link KayaApp#absorbUndo}
+         * writes the model directly), so a history walk never moves the
+         * counter; an abandoned transaction does not move it back
+         * either — {@link #rollback} restores the model, not the
+         * counters, so a key can never be handed out twice. A fresh key
+         * is fresh forever.
+         */
+        public long insertFresh(Collection c, Object value) {
+            long key = mintKeyFor(c);
+            insert(c, key, value);
+            return key;
+        }
+
+        /** The minted key for one instance, for the typed surfaces'
+         * own insertFresh: they encode their record themselves and go
+         * on to insertRecordRaw, so they need the mint alone. */
+        long mintKeyFor(Collection c) {
+            alive();
+            return mintKey(c.id, c.path);
         }
 
         public void update(Collection c, Object key, Object value) {
@@ -2388,6 +2495,12 @@ public final class KayaApp {
         }
 
         void insertRecordRaw(Collection c, Object key, Object model, int variant, Object[] fields) {
+            // ABSORPTION, on the one path every explicit key travels
+            // (the untyped insert delegates here): a numeric key at or
+            // above the minter's counter carries it up, so hand-chosen
+            // and minted keys share one space safely and in either
+            // order (insertFresh's contract).
+            absorbKey(c.id, c.path, key);
             modelSet(c.id, c.path, key, model);
             emit(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, variant, fields));
             recomputeDerived(c);

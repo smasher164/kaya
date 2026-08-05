@@ -327,6 +327,15 @@ sealed class KayaApp
     // declared-inside-a-For edges the model purges along when a parent
     // entry's copy is torn down.
     internal readonly Dictionary<ulong, List<KayaInstance>> Model = new();
+    // The fresh-key minter's counters, one per collection INSTANCE —
+    // keyed by (collection, PATH), because an instance is a table and
+    // keys are unique within one. Path-compared exactly as Model is (a
+    // path is an object[] and two equal paths are not the same array,
+    // so there is no hashing it), and OUTSIDE the rollback journal on
+    // purpose: a minted key is spent, so an abandoned transaction puts
+    // the model back and leaves the counter where it is, and no key is
+    // ever handed out twice (docs/fresh-key-plan.md).
+    readonly Dictionary<ulong, List<(List<object> Path, long Counter)>> fresh = new();
     // How to turn one collection's WIRE fields back into the object the
     // model keeps, per collection id: (variant, fields, the entry the
     // mirror still holds or null) -> the value. Registered where the
@@ -405,6 +414,55 @@ sealed class KayaApp
             if (instance.Path.Count == path.Count && PathEq(instance.Path, path, path.Count))
                 return instance;
         return null;
+    }
+
+    /// One instance's fresh-key counter, made if this is the first
+    /// anyone has asked. Split out because both the mint and the absorb
+    /// want the same lookup; a List entry is a value tuple, so the new
+    /// count is written back rather than mutated through the indexer.
+    long WithCounter(ulong coll, IReadOnlyList<object> path, Func<long, long> body)
+    {
+        if (!fresh.TryGetValue(coll, out var instances))
+            fresh[coll] = instances = new List<(List<object>, long)>();
+        int at = instances.FindIndex(i =>
+            i.Path.Count == path.Count && PathEq(i.Path, path, path.Count));
+        if (at < 0)
+        {
+            instances.Add((new List<object>(path), 0));
+            at = instances.Count - 1;
+        }
+        long next = body(instances[at].Counter);
+        instances[at] = (instances[at].Path, next);
+        return next;
+    }
+
+    /// The next fresh key for one instance: counter+1, and the counter
+    /// keeps it. Monotonic by construction — nothing else writes it
+    /// downwards (see Tx.InsertFresh).
+    internal long MintKey(ulong coll, IReadOnlyList<object> path) =>
+        WithCounter(coll, path, counter => counter + 1);
+
+    /// An explicit key, shown to the minter on its way into the table.
+    /// A numeric key at or above the counter carries it up so the next
+    /// mint clears it; anything else moves nothing, having no way to
+    /// collide with an I64.
+    ///
+    /// BOTH C# INTEGER SPELLINGS COUNT. KayaWire.Encode widens an int
+    /// to the wire's I64, so `Insert(c, 5, ...)` and `Insert(c, 5L, ...)`
+    /// name the same entry to the core — while the mirror compares keys
+    /// with Equals, where 5 and 5L are different. A minted long that
+    /// collided with a hand-written int key would be one entry to the
+    /// core and two to the mirror, so the int is absorbed too.
+    internal void AbsorbKey(ulong coll, IReadOnlyList<object> path, object key)
+    {
+        long n;
+        if (key is long l)
+            n = l;
+        else if (key is int i)
+            n = i;
+        else
+            return;
+        WithCounter(coll, path, counter => counter > n ? counter : n);
     }
 
     /// Fold an undo's payload into the mirrors.
@@ -1471,12 +1529,56 @@ sealed class Tx
         return w;
     }
 
-    public void Insert(Collection c, object key, object value)
+    /// Insert under a key the app already has: a scalar collection's
+    /// entry is one value, which is the single-field record.
+    ///
+    /// ROUTED THROUGH InsertRecordRaw and not spelled out again, so
+    /// there is ONE insert path in this binding rather than three. The
+    /// minter's absorption sits on it, and an explicit key that reached
+    /// the core without passing the counter is what would let a later
+    /// mint collide with it (docs/fresh-key-plan.md).
+    public void Insert(Collection c, object key, object value) =>
+        InsertRecordRaw(c, key, value, 0, new[] { value });
+
+    /// Insert under a key the BINDING authors, and hand the key back.
+    ///
+    /// FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
+    /// identity and guest-chosen (DESIGN.md, the update algebra), so
+    /// anything that already HAS a name passes it to Insert — today and
+    /// always. This is the other case, and it is the common one in a
+    /// form: the app has a title and nothing else, and the alternative
+    /// is a hand-spelled counter beside the collection, whose safety
+    /// rests on a never-rewind rule nobody wrote down.
+    ///
+    /// ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted
+    /// key is I64 (a C# long) and is counter+1. An instance is a table
+    /// — the live-zone collection, or one stamped copy selected by
+    /// At(...) — and keys are unique within one, so that is what the
+    /// counter is per.
+    ///
+    /// MIXING IS SAFE BY ABSORPTION: an explicit Insert whose key is an
+    /// integer at or above the counter carries it up, so a later mint
+    /// clears every hand-chosen numeric key already in the table. A
+    /// non-numeric key cannot collide with an I64 at all and moves
+    /// nothing.
+    ///
+    /// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
+    /// argument. Undo and redo replay captured keys inside the core and
+    /// never re-enter this path, so a history walk never moves the
+    /// counter; an abandoned transaction does not move it back either
+    /// (Rollback restores the model, not the counter, so a key can
+    /// never be handed out twice). A fresh key is fresh forever.
+    public long InsertFresh(Collection c, object value)
     {
-        ModelSet(c.Id, c.Path, key, value);
-        Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, 0, new[] { value }));
-        RecomputeDerived(c);
+        long key = MintKey(c);
+        Insert(c, key, value);
+        return key;
     }
+
+    /// The mint behind the three InsertFresh spellings — this one, and
+    /// the typed collections' in KayaRecords/KayaSums, which insert
+    /// through their own raw paths.
+    internal long MintKey(Collection c) => App.MintKey(c.Id, c.Path);
 
     public void Update(Collection c, object key, object value)
     {
@@ -1592,6 +1694,12 @@ sealed class Tx
 
     internal void InsertRecordRaw(Collection c, object key, object model, uint variant, object[] fields)
     {
+        // ABSORPTION, on the one path every explicit key travels — the
+        // scalar Insert, the record one and the sum one all arrive here:
+        // a numeric key at or above the minter's counter carries it up,
+        // so hand-chosen and minted keys share one space safely and in
+        // either order (InsertFresh's contract).
+        App.AbsorbKey(c.Id, c.Path, key);
         ModelSet(c.Id, c.Path, key, model);
         Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, variant, fields));
         RecomputeDerived(c);

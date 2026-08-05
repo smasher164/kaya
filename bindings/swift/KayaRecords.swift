@@ -131,8 +131,24 @@ struct KayaRecordCollection<T: KayaRecord> {
         tx.insertRecordRaw(collection, key, value, 0, value.kayaValues)
     }
 
+    /// Insert under a key the binding authors, and hand the key back —
+    /// the form for data that has no identity of its own. The contract
+    /// (one monotonic counter per collection INSTANCE, absorption of
+    /// explicit I64 keys, no decrement) lives on `KayaAppTx.insertFresh`;
+    /// this is the typed spelling of it.
+    @discardableResult
+    func insertFresh(_ tx: KayaAppTx, _ value: T) -> Int64 {
+        tx.insertRecordFresh(collection, value, 0, value.kayaValues)
+    }
+
     func update(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
         tx.updateRecordRaw(collection, key, value, 0, value.kayaValues)
+    }
+
+    /// Drop an entry, taking its stamped copy and every collection
+    /// instance inside it with it.
+    func remove(_ tx: KayaAppTx, _ key: KayaValue) {
+        tx.remove(collection, key)
     }
 
     /// One field's delta by key path: the rest of the record never

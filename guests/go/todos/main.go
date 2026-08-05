@@ -29,7 +29,13 @@ func init() {
 // reads this declaration and emits todo_kaya.go: the collection
 // factory and the named-setter patch.
 //
-//go:generate go run dev.kaya/cmd/kaya-gen -type Todo -key string
+// THE KEY TYPE IS I64 BECAUSE THE BINDING MINTS IT. A todo is a title
+// and a checkbox — it has no identity of its own — so the name comes
+// from kaya.InsertFresh, and the minted key rides the generated surface
+// from the collection handle through to the toggle handler's parameter
+// (docs/fresh-key-plan.md).
+//
+//go:generate go run dev.kaya/cmd/kaya-gen -type Todo -key int64
 type Todo struct {
 	Title string
 	Done  bool
@@ -41,14 +47,13 @@ func main() {
 	// The fold: widget-owned state arrives as occurrences; the app's
 	// copy is this variable, not a widget read.
 	draft := ""
-	nextKey := 0
 
 	// The construction sugar: containers take their children,
 	// constructors carry their handlers, and the build body reads as
 	// the tree (the C guests keep the explicit floor).
 	app.Build(func(tx *kaya.Tx) {
 		todos := TodoCollection(tx)
-		itemsLeft := todos.Derive(tx, func(items []kaya.RecordEntry[string, Todo]) string {
+		itemsLeft := todos.Derive(tx, func(items []kaya.RecordEntry[int64, Todo]) string {
 			n := 0
 			for _, e := range items {
 				if !e.Value.Done {
@@ -69,8 +74,12 @@ func main() {
 				if draft == "" {
 					return
 				}
-				nextKey++
-				todos.Insert(tx, fmt.Sprintf("t%d", nextKey), Todo{Title: draft})
+				// NO KEY, AND NO COUNTER TO GET WRONG: a todo has no
+				// identity of its own, so the binding mints one and hands
+				// it back. Discarded here — this app looks a todo up by
+				// nothing — and the toggle handler receives the same key
+				// from the stamped row it came from.
+				kaya.InsertFresh(tx, todos, Todo{Title: draft})
 				// Finish the form: the field empties on screen and
 				// reports text_changed("") through its normal edit
 				// path (the fold empties the draft), and the cursor
@@ -86,7 +95,7 @@ func main() {
 			for row := range TodoRows(tx, todos) {
 				row.Row(func() {
 					row.Checkbox(row.Done(),
-						func(tx *kaya.Tx, key string, checked bool) {
+						func(tx *kaya.Tx, key int64, checked bool) {
 							// One field's delta through the generated
 							// named setter: the title never travels;
 							// the derived signal updates itself.

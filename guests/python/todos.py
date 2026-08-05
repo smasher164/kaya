@@ -30,7 +30,6 @@ class Todo:
 app = kaya.App()
 
 draft = ""
-next_key = 0
 
 
 def items_left_text(items):
@@ -44,11 +43,14 @@ def on_change(text):
 
 
 def on_add():
-    global next_key
     if not draft:
         return
-    next_key += 1
-    todos.insert(f"t{next_key}", Todo(title=draft, done=False))
+    # A todo is a title and a flag — no identity of its own — so the key
+    # comes from the binding: insert_fresh mints one per collection
+    # instance and hands it back (docs/fresh-key-plan.md). The key the
+    # toggle handler receives below is that minted one, round-tripped
+    # through the stamped row.
+    todos.insert_fresh(Todo(title=draft, done=False))
     # Finish the form: the field empties on screen and reports
     # text_changed("") through its normal edit path (the fold above
     # empties the draft), and the cursor lands back in it.

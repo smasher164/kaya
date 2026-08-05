@@ -5,6 +5,15 @@
    sugar lowers eagerly to the same records as the explicit floor —
    the C guests keep that style on purpose.
 
+   AND THE APP NAMES NO TODO. A todo here is a title and a done flag,
+   and neither of them identifies it, so the key comes from
+   [insert_record_fresh]: the binding mints one per collection instance
+   and hands it back (docs/fresh-key-plan.md). The row's checkbox
+   carries that key back out through the stamped path and straight into
+   [todo_patch], which is the whole of what this scene asks of a key —
+   the app never reads it, formats it or compares it, and so has no
+   reason to author it.
+
    Build like milestone2.ml, then run with KAYA_SELFTEST=todos. *)
 
 open Kaya_wire
@@ -18,7 +27,6 @@ let () =
   (* The fold: widget-owned state arrives as occurrences; the app's
      copy is this ref, not a widget read. *)
   let draft = ref "" in
-  let next_key = ref 0 in
 
   build app (fun () ->
      let todos = collection_of todo_record in
@@ -39,14 +47,19 @@ let () =
        (* The empty-draft guard every real form has: nothing to insert,
           nothing to command. *)
        if d = "" then ()
-       else
-         let key = (incr next_key; Printf.sprintf "t%d" !next_key) in
-         insert_record todos (Str key) { title = d; done_ = false };
+       else begin
+         (* NO KEY, AND NO COUNTER TO GET WRONG: the binding mints the
+            name and hands it back. This app has no use for the returned
+            key — a todo is looked up by nothing, and the checkbox's own
+            path names its row — so the call is made for effect and
+            [ignore] says so. *)
+         ignore (insert_record_fresh todos { title = d; done_ = false });
          (* Finish the form: the field empties on screen and reports
             text_changed "" through its normal edit path (the fold
             empties the draft), and the cursor lands back in it. *)
          clear field;
          focus field
+       end
      in
      let on_toggle keys checked =
        (* One field's delta: the title never travels; the derived

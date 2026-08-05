@@ -168,6 +168,19 @@ sealed class RecordCollection<T>
     public void Insert(Tx tx, object key, T value) =>
         tx.InsertRecordRaw(Collection, key, value, 0, Info.WireFields(value));
 
+    /// Insert under a key the BINDING authors, and hand the key back —
+    /// for a record with no identity of its own (a todo is a title, and
+    /// a title is not a name). One monotonic counter per collection
+    /// instance, minting I64 keys from 1; mixing with explicit keys is
+    /// safe by absorption, and no history walk ever rewinds it. The
+    /// contract, in full, is on Tx.InsertFresh.
+    public long InsertFresh(Tx tx, T value)
+    {
+        long key = tx.MintKey(Collection);
+        Insert(tx, key, value);
+        return key;
+    }
+
     public void Update(Tx tx, object key, T value) =>
         tx.UpdateRecordRaw(Collection, key, value, 0, Info.WireFields(value));
 

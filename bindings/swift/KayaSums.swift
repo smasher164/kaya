@@ -92,10 +92,26 @@ struct KayaSumCollection<T: KayaSumElement> {
         tx.insertRecordRaw(collection, key, value, value.kayaVariant, value.kayaSumValues)
     }
 
+    /// Insert under a key the binding authors, and hand the key back —
+    /// the form for data that has no identity of its own. The contract
+    /// (one monotonic counter per collection INSTANCE, absorption of
+    /// explicit I64 keys, no decrement) lives on `KayaAppTx.insertFresh`;
+    /// this is the sum-typed spelling of it.
+    @discardableResult
+    func insertFresh(_ tx: KayaAppTx, _ value: T) -> Int64 {
+        tx.insertRecordFresh(collection, value, value.kayaVariant, value.kayaSumValues)
+    }
+
     /// Update replaces a record wholesale; a different constructor
     /// than the entry's current one restamps its copy in place.
     func update(_ tx: KayaAppTx, _ key: KayaValue, _ value: T) {
         tx.updateRecordRaw(collection, key, value, value.kayaVariant, value.kayaSumValues)
+    }
+
+    /// Drop an entry, taking its stamped copy and every collection
+    /// instance inside it with it.
+    func remove(_ tx: KayaAppTx, _ key: KayaValue) {
+        tx.remove(collection, key)
     }
 
     /// The typed model, in insertion order; `if case` / `switch`

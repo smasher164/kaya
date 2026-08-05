@@ -197,6 +197,14 @@ type app = {
      declared-inside-a-For edges the model purges along when a parent
      entry's copy is torn down. *)
   model : (int64, instance list) Hashtbl.t;
+  (* The minter's counters: the highest I64 key each collection
+     INSTANCE has minted or absorbed, keyed by path the way [model] is
+     (a path is a [value list], and a [value] carries a float, so it is
+     compared structurally here exactly as instances are). Kept on the
+     app and NOT in the transaction's rollback journal, on purpose —
+     see [insert_fresh]: the journal restores the model, never the
+     counter, so a key spent by an abandoned transaction stays spent. *)
+  fresh : (int64, (Kaya_wire.value list * int64 ref) list) Hashtbl.t;
   children : (int64, int64 list) Hashtbl.t;
   mutable open_fors : int64 list;
   (* The record-time mirror-read guard's arming counter: >0 while any
@@ -310,6 +318,7 @@ let create () =
     redone_handlers = Hashtbl.create 4;
     node_toggles = Hashtbl.create 8;
     model = Hashtbl.create 8;
+    fresh = Hashtbl.create 8;
     children = Hashtbl.create 8;
     open_fors = [];
     tpl_depth = 0;
@@ -319,6 +328,38 @@ let create () =
 let emit tx record = tx.records <- record :: tx.records
 
 let instances_of app cid = Option.value ~default:[] (Hashtbl.find_opt app.model cid)
+
+(* One instance's fresh-key counter, made if this is the first anyone
+   has asked. Split out because both the mint and the absorb want the
+   same lookup, and a [ref] in the slot means neither has to write the
+   table back. *)
+let counter_of app cid path =
+  let instances = Option.value ~default:[] (Hashtbl.find_opt app.fresh cid) in
+  match List.assoc_opt path instances with
+  | Some counter -> counter
+  | None ->
+      let counter = ref 0L in
+      Hashtbl.replace app.fresh cid (instances @ [ (path, counter) ]);
+      counter
+
+(* The next fresh key for one instance: counter+1, and the counter keeps
+   it. Monotonic by construction — nothing else writes it downwards (see
+   [insert_fresh]). *)
+let mint_key app cid path =
+  let counter = counter_of app cid path in
+  counter := Int64.add !counter 1L;
+  !counter
+
+(* An explicit key, shown to the minter on its way into the table. A
+   numeric key at or above the counter carries it up so the next mint
+   clears it; anything else moves nothing, having no way to collide with
+   an I64. *)
+let absorb_key app cid path key =
+  match key with
+  | Kaya_wire.I64 n ->
+      let counter = counter_of app cid path in
+      if Int64.compare n !counter > 0 then counter := n
+  | _ -> ()
 
 (* The record-time mirror-read guard: a template body records once and
    the core replays it — a model read inside one bakes this moment's
@@ -914,9 +955,52 @@ let assert_root c =
 
 let insert c key value =
   let tx = the_tx () in
+  (* ABSORPTION, on the one path every explicit key of a scalar
+     collection travels: a numeric key at or above the minter's counter
+     carries it up, so hand-chosen and minted keys share one space
+     safely and in either order ([insert_fresh]'s contract). *)
+  absorb_key tx.app c.cid c.cpath key;
   model_set tx c.cid c.cpath key 0 [ value ];
   emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key 0 [ value ]);
   recompute_derived tx c.cid c.cpath
+
+(* Insert a value under a key the binding authors, and hand the key
+   back — [let key = insert_fresh todos (Str draft)].
+
+   FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain identity
+   and guest-chosen (DESIGN.md, the update algebra), so anything that
+   already HAS a name passes it to [insert] — today and always. This is
+   the other case, and it is the common one in a form: the app has a
+   title and nothing else, and the alternative is a hand-spelled counter
+   beside the collection, which in OCaml is an [int ref] that outlives
+   every handler that adds, and whose safety rests on a never-rewind
+   rule nobody wrote down.
+
+   ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted key is
+   [I64] and is counter+1. An instance is a table — the live-zone
+   collection, or one stamped copy selected by [at] — and keys are
+   unique within one, so that is what the counter is per.
+
+   MIXING IS SAFE BY ABSORPTION: an explicit [insert] whose key is an
+   [I64] at or above the counter carries it up, so a later mint clears
+   every hand-chosen numeric key already in the table. A [Str] key
+   cannot collide with an [I64] at all and moves nothing.
+
+   NO DECREMENT IS EXPRESSIBLE, and that is the whole safety argument.
+   Undo and redo replay captured keys inside the core and never re-enter
+   this path ([absorb_undo] writes the mirror directly), so a history
+   walk never moves the counter; an abandoned transaction does not move
+   it back either — the rollback journal restores the model, not the
+   counter, so a key can never be handed out twice. A fresh key is fresh
+   forever.
+
+   The result is meaningful even where a scene discards it: [ignore] is
+   OCaml's spelling for "inserted for effect". *)
+let insert_fresh c value =
+  let tx = the_tx () in
+  let key = mint_key tx.app c.cid c.cpath in
+  insert c (Kaya_wire.I64 key) value;
+  key
 
 let update c key value =
   let tx = the_tx () in
@@ -1080,11 +1164,23 @@ let collection_of rt =
 let insert_record rc key value =
   let tx = the_tx () in
   let fields = rc.rc_type.rt_to_values value in
+  (* ABSORPTION, on the one path every explicit key of a record
+     collection travels — see [insert_fresh]. *)
+  absorb_key tx.app rc.rc_handle.cid rc.rc_handle.cpath key;
   model_set tx rc.rc_handle.cid rc.rc_handle.cpath key 0 fields;
   emit tx
     (Kaya_wire.tx_collection_insert rc.rc_handle.cid rc.rc_handle.cpath key 0
        (encode_fields rc.rc_type.rt_schema fields));
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
+
+(* [insert_fresh] for a record collection: the binding authors the key
+   and hands it back. Same contract, same counter — see [insert_fresh]
+   for the whole of it. *)
+let insert_record_fresh rc value =
+  let tx = the_tx () in
+  let key = mint_key tx.app rc.rc_handle.cid rc.rc_handle.cpath in
+  insert_record rc (Kaya_wire.I64 key) value;
+  key
 
 let update_record rc key value =
   let tx = the_tx () in
@@ -1789,12 +1885,24 @@ let sum_insert sc key value =
   let tx = the_tx () in
   let variant = sc.sc_type.st_variant value in
   let fields = sc.sc_type.st_to_values value in
+  (* ABSORPTION, on the one path every explicit key of a sum collection
+     travels — see [insert_fresh]. *)
+  absorb_key tx.app sc.sc_handle.cid sc.sc_handle.cpath key;
   model_set tx sc.sc_handle.cid sc.sc_handle.cpath key variant fields;
   emit tx
     (Kaya_wire.tx_collection_insert sc.sc_handle.cid sc.sc_handle.cpath key
        variant
        (encode_fields (List.nth sc.sc_type.st_schemas variant) fields));
   recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
+
+(* [insert_fresh] for a sum collection: the value's own constructor is
+   still what is witnessed onto the wire; only the key comes from the
+   binding. Same contract, same counter — see [insert_fresh]. *)
+let sum_insert_fresh sc value =
+  let tx = the_tx () in
+  let key = mint_key tx.app sc.sc_handle.cid sc.sc_handle.cpath in
+  sum_insert sc (Kaya_wire.I64 key) value;
+  key
 
 (* Update replaces a record wholesale; a different constructor than
    the entry's current one restamps its copy in place. *)

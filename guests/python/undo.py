@@ -34,6 +34,15 @@ group is REFUSED at apply, because it destroys widget-owned text the
 core never held (D4). Undo restores state, and state is signals plus
 collections.
 
+AND THE APP NAMES NO TODO. A todo is a title and nothing else — it has
+no identity of its own — so the key comes from `insert_fresh`, which
+mints one per collection instance and hands it back
+(docs/fresh-key-plan.md). What that buys here is the whole point of the
+minter: this file used to carry `next_key`, a module global reached
+through `global` in the handler that adds, whose safety rested on never
+rewinding, and an undo that rewound it would have handed the same name
+to two todos.
+
 Canonical semantics in guests/rust/undo.rs; the byte-frozen contract in
 tools/scenes/undo.steps.
 """
@@ -54,7 +63,6 @@ app = kaya.App()
 # The fold: widget-owned state arrives as occurrences; the app's copy is
 # this variable, not a widget read.
 draft = ""
-next_key = 0
 
 
 def what(label):
@@ -65,22 +73,48 @@ def what(label):
     return label or "typing"
 
 
+def key_list():
+    """The app's collection mirror, rendered: every key it holds, in the
+    order it holds them.
+
+    THIS IS THE ONLY PART OF AN UNDO A COUNT CANNOT SEE. A restored entry
+    that came back under a fresh name, or at the end instead of where it
+    was, leaves every total in this file correct — the entries and orders
+    runs of the delta are what say otherwise, and this is where the scene
+    reads them (D5).
+    """
+    # The minter's keys are ints, so the model's own keys stringify
+    # straight; nothing here parses or invents a name.
+    ks = todos.keys()
+    if not ks:
+        return "no keys"
+    return "keys " + ",".join(str(k) for k in ks)
+
+
 def on_change(text):
     global draft
     draft = text
 
 
 def on_add():
-    global next_key
     if not draft:
+        # NOT A STEP, so it names no group and the forward history
+        # survives it. It is also the one place this app READS ITS OWN
+        # DRAFT out loud, which is how the script proves the restored
+        # text of an undone typing episode reached it at all.
         status.set(f"nothing to add, {len(todos)} total")
         return
-    next_key += 1
     # ONE CALL, AND IT IS THE WHOLE UNDO SURFACE. The name is what the
     # step is called; everything else in this transaction is what it did.
     kaya.undoable(f"add {draft}")
-    todos.insert(f"t{next_key}", Todo(title=draft))
+    # NO KEY, AND NO COUNTER TO GET WRONG: the binding mints the name and
+    # hands it back. This app has no use for it — a todo is looked up by
+    # nothing — and an app that does (selecting the new row, say) takes
+    # it from here rather than inventing a second name for the same
+    # datum.
+    todos.insert_fresh(Todo(title=draft))
     status.set(f"added {draft}, {len(todos)} total")
+    keys.set(key_list())
     # A PURE EFFECT rides along and is simply not restored: undo restores
     # state, not where you were looking (A2).
     field.focus()
@@ -92,6 +126,25 @@ def on_add():
     # reports text_changed("") through its normal edit path, so the fold
     # above empties the draft.
     app.post(field.clear)
+
+
+def on_remove():
+    """THE STEP WHOSE INVERSE IS AN IDENTITY, not a content. The core
+    captured the entry and the instance's order before the removal, so
+    undoing this puts the entry back under the key it already had, where
+    it already was — neither of which this app has to remember."""
+    entries = todos.items()
+    if not entries:
+        status.set(f"nothing to remove, {len(todos)} total")
+        return
+    # The collection's FIRST entry, from the model — never a widget — so
+    # the entry that comes back has to come back BEFORE the one that
+    # stayed.
+    key, todo = entries[0]
+    kaya.undoable(f"remove {todo.title}")
+    todos.remove(key)
+    status.set(f"removed {todo.title}, {len(todos)} total")
+    keys.set(key_list())
 
 
 def on_star():
@@ -123,6 +176,12 @@ def undone(label, delta):
     if delta.texts:
         draft = delta.texts[-1][1]
     history.set(f"undid {what(label)}, {len(todos)} total")
+    # ONE TRANSACTION WITH THE LABEL ABOVE — a handler IS one here, so
+    # this needs no ceremony, and it is deliberate: the script reads that
+    # label first, so by the time it reads this one the app's own answer
+    # is what is on screen, not the value the core restored on its way
+    # past.
+    keys.set(key_list())
 
 
 def redone(label, delta):
@@ -130,6 +189,7 @@ def redone(label, delta):
     if delta.texts:
         draft = delta.texts[-1][1]
     history.set(f"redid {what(label)}, {len(todos)} total")
+    keys.set(key_list())
 
 
 # Per window, and PERSISTENT: a history is walked as often as the user
@@ -146,11 +206,13 @@ with app.window(title="undo", on_undone=undone, on_redone=redone):
 
     status = kaya.signal("no todos")
     history = kaya.signal("history empty")
+    keys = kaya.signal("no keys")
     todos = kaya.collection(Todo)
 
     with kaya.column():
         kaya.label(bind=status).a11y_id("status")           # label#0
         kaya.label(bind=history).a11y_id("history")         # label#1
+        kaya.label(bind=keys).a11y_id("keys")               # label#2
         field = kaya.entry(on_change=on_change).a11y_id("draft")  # entry#0
         kaya.button("add", on_click=on_add)                 # button#0
         kaya.button("star", on_click=on_star)               # button#1
@@ -160,6 +222,7 @@ with app.window(title="undo", on_undone=undone, on_redone=redone):
         # says so itself, and the routing question ("what is focused?")
         # stays visible in the script rather than hidden in a handler.
         kaya.button("focus", on_click=on_focus)             # button#2
+        kaya.button("remove", on_click=on_remove)           # button#3
         for todo in todos:
             with kaya.row():
                 kaya.label(bind=todo.title)

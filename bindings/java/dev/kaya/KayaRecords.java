@@ -249,6 +249,15 @@ public final class KayaRecords {
             tx.insertRecordRaw(handle, key, value, 0, info.wireFields(value));
         }
 
+        /** The typed insert under a minted key; see
+         * {@link KayaRecords#insertFresh}, which is where the key type
+         * gets checked. */
+        long insertMinted(KayaApp.Tx tx, T value) {
+            long key = tx.mintKeyFor(handle);
+            tx.insertRecordRaw(handle, key, value, 0, info.wireFields(value));
+            return key;
+        }
+
         public void update(KayaApp.Tx tx, K key, T value) {
             tx.updateRecordRaw(handle, key, value, 0, info.wireFields(value));
         }
@@ -473,6 +482,30 @@ public final class KayaRecords {
                 return makeRow.apply(trace.tpl);
             }
         };
+    }
+
+    /**
+     * Insert a record under a key the binding authors, and hand the key
+     * back — {@code long key = KayaRecords.insertFresh(tx, todos, new
+     * Todo(draft))}. The contract, the counter and the never-rewind
+     * argument are on {@link KayaApp.Tx#insertFresh}, in full; this is
+     * the typed spelling, encoding the record the way
+     * {@link Collection#insert} does.
+     *
+     * <p>A STATIC BECAUSE THE KEY TYPE IS THE POINT. The minted key is
+     * I64, so the collection has to be one whose keys ARE that:
+     * {@code Collection<Long, T>}. Java cannot constrain an instance
+     * method to one instantiation of its own class's type parameters,
+     * so as a method this would accept a {@code Collection<String, T>}
+     * and quietly put a number in a table of names — the second kind of
+     * name for one datum that the minter exists to prevent. Written as
+     * a function, the parameter type is the wall, and a String-keyed
+     * collection fails to compile AT THE CALL naming both types. (The
+     * Go binding, the other key-typed one, is a free function for the
+     * same reason.)
+     */
+    public static <T> long insertFresh(KayaApp.Tx tx, Collection<Long, T> c, T value) {
+        return c.insertMinted(tx, value);
     }
 
     /**

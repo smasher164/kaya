@@ -73,14 +73,18 @@ func (c SumCollection[K, T]) variantOf(t reflect.Type) (uint32, *recordInfo) {
 	panic(fmt.Sprintf("kaya: %v is not a constructor of this sum", t))
 }
 
-// Insert witnesses the value's own constructor onto the wire.
+// Insert witnesses the value's own constructor onto the wire. Through
+// Tx.insertEntry, the one insert path — so an explicit numeric key is
+// shown to the fresh-key minter here exactly as it is on the untyped and
+// record surfaces.
 func (c SumCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	variant, info := c.variantOf(reflect.TypeOf(value))
-	tx.app.modelSet(c.id, c.path, key, value)
-	tx.emit(
-		TxCollectionInsert(c.id, c.path, key, variant, info.values(value)))
-	tx.recomputeDerived(c.id, c.path)
+	tx.insertEntry(c.Collection, key, variant, value, info.values(value))
 }
+
+// handle is the plain (collection, path) handle behind this typed
+// collection: what the minter counts per (see FreshCollection).
+func (c SumCollection[K, T]) handle() Collection { return c.Collection }
 
 // Update replaces a record wholesale; a different constructor than the
 // entry's current one restamps its copy in place.

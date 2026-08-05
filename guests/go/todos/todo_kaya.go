@@ -7,20 +7,18 @@ import kaya "dev.kaya/bindings/go"
 
 // TodoCollection declares the record collection; the struct is the
 // schema.
-func TodoCollection(tx *kaya.Tx) kaya.RecordCollection[string, Todo] {
-	return kaya.CollectionOf[string, Todo](tx)
+func TodoCollection(tx *kaya.Tx) kaya.RecordCollection[int64, Todo] {
+	return kaya.CollectionOf[int64, Todo](tx)
 }
 
 // TodoPatch opens a named-setter patch on one entry; each setter
 // records one update_field — a patch is recorded writes, never a
 // diff.
-func TodoPatch(c kaya.RecordCollection[string, Todo], tx *kaya.Tx, key string) todoPatchBuilder {
+func TodoPatch(c kaya.RecordCollection[int64, Todo], tx *kaya.Tx, key int64) todoPatchBuilder {
 	return todoPatchBuilder{c.Patch(tx, key)}
 }
 
-type todoPatchBuilder struct {
-	p kaya.RecordPatch[string, Todo]
-}
+type todoPatchBuilder struct{ p kaya.RecordPatch[int64, Todo] }
 
 func (p todoPatchBuilder) Title(v string) todoPatchBuilder {
 	p.p.Set(func(t *Todo) *string { return &t.Title }, v)
@@ -35,7 +33,7 @@ func (p todoPatchBuilder) Done(v bool) todoPatchBuilder {
 // TodoEach is the record template: the body runs once, authoring the
 // blueprint with the typed row surface (exact-index tokens, no
 // probes); stamping is the core's replay.
-func TodoEach(tx *kaya.Tx, c kaya.RecordCollection[string, Todo], body func(todoRow)) kaya.Widget {
+func TodoEach(tx *kaya.Tx, c kaya.RecordCollection[int64, Todo], body func(todoRow)) kaya.Widget {
 	return tx.ForEach(c.Collection, func(t *kaya.Tpl) {
 		body(todoRow{t: t, c: c})
 	})
@@ -45,7 +43,7 @@ func TodoEach(tx *kaya.Tx, c kaya.RecordCollection[string, Todo], body func(todo
 // constructors that consume them.
 type todoRow struct {
 	t *kaya.Tpl
-	c kaya.RecordCollection[string, Todo]
+	c kaya.RecordCollection[int64, Todo]
 }
 
 func (r todoRow) Title() kaya.Field[string] { return kaya.FieldAt[string](0) }
@@ -60,7 +58,7 @@ func (r todoRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f
 
 func (r todoRow) Image(f kaya.Field[[]byte]) kaya.Node { return r.c.Image(r.t, f) }
 
-func (r todoRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, bool)) kaya.Node {
+func (r todoRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, int64, bool)) kaya.Node {
 	return r.c.Checkbox(r.t, f, onToggle)
 }
 
@@ -68,7 +66,7 @@ func (r todoRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, string, bo
 // body runs once, authoring the blueprint, and the close is
 // structural — range-over-func regains control even on break. The
 // For parents into the enclosing container scope.
-func TodoRows(tx *kaya.Tx, c kaya.RecordCollection[string, Todo]) func(func(todoRow) bool) {
+func TodoRows(tx *kaya.Tx, c kaya.RecordCollection[int64, Todo]) func(func(todoRow) bool) {
 	return func(yield func(todoRow) bool) {
 		t, done := kaya.BeginRowTrace(tx, c.Collection)
 		yield(todoRow{t: t, c: c})

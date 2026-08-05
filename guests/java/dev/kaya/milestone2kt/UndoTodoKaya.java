@@ -11,20 +11,20 @@ import dev.kaya.KayaRecords;
  * records one update_field — a patch is recorded writes, never a
  * diff). */
 final class UndoTodoKaya {
-    static KayaRecords.Collection<String, Undo.UndoTodo> collection(KayaApp.Tx tx) {
+    static KayaRecords.Collection<Long, Undo.UndoTodo> collection(KayaApp.Tx tx) {
         return KayaRecords.collectionOf(tx, Undo.UndoTodo.class);
     }
 
     static final KayaRecords.Field<String> TITLE = KayaRecords.fieldAt(0);
 
-    static Patch patch(KayaApp.Tx tx, KayaRecords.Collection<String, Undo.UndoTodo> c, String key) {
+    static Patch patch(KayaApp.Tx tx, KayaRecords.Collection<Long, Undo.UndoTodo> c, Long key) {
         return new Patch(c.patch(tx, key));
     }
 
     static final class Patch {
-        private final KayaRecords.Patch<String, Undo.UndoTodo> p;
+        private final KayaRecords.Patch<Long, Undo.UndoTodo> p;
 
-        Patch(KayaRecords.Patch<String, Undo.UndoTodo> p) {
+        Patch(KayaRecords.Patch<Long, Undo.UndoTodo> p) {
             this.p = p;
         }
 
@@ -38,7 +38,7 @@ final class UndoTodoKaya {
      * authoring the blueprint with the typed row surface
      * (exact-index tokens, no probes); stamping is the core's
      * replay. */
-    static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<String, Undo.UndoTodo> c,
+    static KayaApp.Widget each(KayaApp.Tx tx, KayaRecords.Collection<Long, Undo.UndoTodo> c,
             java.util.function.Consumer<Row> body) {
         // A block body: an expression lambda is ambiguous between
         // the Consumer and Function forEach overloads.
@@ -50,7 +50,7 @@ final class UndoTodoKaya {
     /** The for-each form: `for (var row : UndoTodoKaya.rows(c))` traces
      * the record template — the body runs once, and a break is
      * caught at submit. */
-    static Iterable<Row> rows(KayaRecords.Collection<String, Undo.UndoTodo> c) {
+    static Iterable<Row> rows(KayaRecords.Collection<Long, Undo.UndoTodo> c) {
         return KayaRecords.rowTrace(c, t -> new Row(t, c));
     }
 
@@ -58,10 +58,10 @@ final class UndoTodoKaya {
      * wire field, and the constructors that consume them. */
     static final class Row {
         private final KayaApp.Tpl t;
-        private final KayaRecords.Collection<String, Undo.UndoTodo> c;
+        private final KayaRecords.Collection<Long, Undo.UndoTodo> c;
         final KayaRecords.Field<String> title = TITLE;
 
-        Row(KayaApp.Tpl t, KayaRecords.Collection<String, Undo.UndoTodo> c) {
+        Row(KayaApp.Tpl t, KayaRecords.Collection<Long, Undo.UndoTodo> c) {
             this.t = t;
             this.c = c;
         }
@@ -75,7 +75,7 @@ final class UndoTodoKaya {
         }
 
         KayaApp.Node checkbox(KayaRecords.Field<Boolean> f,
-                KayaRecords.Collection.ToggleHandler<String> onToggle) {
+                KayaRecords.Collection.ToggleHandler<Long> onToggle) {
             return c.checkbox(t, f, onToggle);
         }
 

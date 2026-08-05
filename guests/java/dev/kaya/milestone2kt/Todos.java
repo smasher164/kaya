@@ -13,20 +13,28 @@ import dev.kaya.KayaRecords;
  * on purpose.
  */
 final class Todos {
-    /** The record is the schema; the annotation processor reads it
-     * and generates TodoKaya: the collection factory, exact-index
-     * field tokens, and the named-setter patch. */
-    @KayaGen(key = "String")
+    /**
+     * The record is the schema; the annotation processor reads it and
+     * generates TodoKaya: the collection factory, exact-index field
+     * tokens, and the named-setter patch.
+     *
+     * <p>KEYED BY Long, because a todo here is a title and a done flag
+     * and neither of them identifies it — the key comes from
+     * {@code insertFresh} and the minter's keys are I64. The annotation
+     * is what makes the generated surface a
+     * {@code Collection<Long, Todo>}, down to the row checkbox's
+     * {@code ToggleHandler<Long>}.
+     */
+    @KayaGen(key = "Long")
     record Todo(String title, boolean done) {}
 
     // The fold: widget-owned state arrives as occurrences; the app's
     // copy is this field, not a widget read.
     private static String draft = "";
-    private static int nextKey;
 
-    private static String itemsLeftText(java.util.List<KayaRecords.Entry<String, Todo>> items) {
+    private static String itemsLeftText(java.util.List<KayaRecords.Entry<Long, Todo>> items) {
         int n = 0;
-        for (KayaRecords.Entry<String, Todo> entry : items) {
+        for (KayaRecords.Entry<Long, Todo> entry : items) {
             if (!entry.value.done()) {
                 n++;
             }
@@ -50,8 +58,13 @@ final class Todos {
                     if (draft.isEmpty()) {
                         return;
                     }
-                    nextKey++;
-                    todos.insert(t, "t" + nextKey, new Todo(draft, false));
+                    // NO KEY, AND NO COUNTER TO GET WRONG: the
+                    // binding mints the name and hands it back
+                    // (docs/fresh-key-plan.md). This app has no use
+                    // for the returned key — the checkbox's own
+                    // stamped path names its row — so the call is
+                    // made for effect.
+                    KayaRecords.insertFresh(t, todos, new Todo(draft, false));
                     // Finish the form: the field empties on screen and
                     // reports text_changed("") through its normal edit
                     // path (the fold empties the draft), and the

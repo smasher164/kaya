@@ -244,11 +244,53 @@ func (info *recordInfo) encode(field uint32, v any) any {
 }
 
 // Insert a record; the model keeps the T itself, the wire carries its
-// fields positionally.
+// fields positionally. Through Tx.insertEntry, the one insert path — so
+// an explicit numeric key is shown to the fresh-key minter here exactly
+// as it is on the untyped and sum surfaces.
 func (c RecordCollection[K, T]) Insert(tx *Tx, key K, value T) {
-	tx.app.modelSet(c.id, c.path, key, value)
-	tx.emit(TxCollectionInsert(c.id, c.path, key, 0, c.info.values(value)))
-	tx.recomputeDerived(c.id, c.path)
+	tx.insertEntry(c.Collection, key, 0, value, c.info.values(value))
+}
+
+// handle is the plain (collection, path) handle behind a typed
+// collection: what the minter counts per. Unexported, so FreshCollection
+// below is closed to kaya's own collections.
+func (c RecordCollection[K, T]) handle() Collection { return c.Collection }
+
+// FreshCollection is a typed collection InsertFresh can mint into: one
+// whose keys ARE the minted I64. THE KEY TYPE IS THE WALL — a
+// RecordCollection[string, T] does not satisfy this, so a collection
+// declared with string identities fails to compile at the call rather
+// than growing a second kind of name for the same datum. The untyped
+// scalar surface has its own spelling, Tx.InsertFresh.
+type FreshCollection[T any] interface {
+	Insert(tx *Tx, key int64, value T)
+	handle() Collection
+}
+
+// InsertFresh inserts a value under a key the binding authors, and hands
+// the key back: the typed twin of Tx.InsertFresh, over records and sums
+// alike, and the same contract in every particular (one counter per
+// collection instance, counter+1, absorption on every explicit insert,
+// no decrement — see Tx.InsertFresh for the whole of it).
+//
+// A FREE FUNCTION BECAUSE THE KEY TYPE IS THE POINT. Go cannot constrain
+// a method to one instantiation of its receiver's type parameters, and a
+// method returning K would have to convert the minted number into
+// whatever K is — which for a string key is a silent one-rune key, the
+// exact class of quiet wrongness the minter exists to remove. Written as
+// a function, the constraint is checked where the guest writes it.
+//
+// A RECORD COLLECTION INFERS BOTH PARAMETERS from the arguments. A SUM
+// COLLECTION NAMES ITS SUM — kaya.InsertFresh[Feed](tx, items, Note{…})
+// — because the value is one constructor and T is the sealed interface
+// they share: inference reads T off the value and would fix it to the
+// constructor. Insert has the same shape and takes it from the receiver;
+// here the sum is spelled once, at the call.
+func InsertFresh[T any, C FreshCollection[T]](tx *Tx, c C, value T) int64 {
+	h := c.handle()
+	key := tx.app.mintKey(h.id, h.path)
+	c.Insert(tx, key, value)
+	return key
 }
 
 // Update replaces a record wholesale; UpdateField is the one-field way.

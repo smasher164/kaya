@@ -279,16 +279,35 @@ for name in args[1:]:
         print(f"build-id: {name}: NO build id — nothing here was built "
               f"from {component}", file=sys.stderr)
     else:
+        # Before crying STALE, check whether the file simply belongs to a
+        # DIFFERENT component and is current there. A bare --verify
+        # defaults to core, and running it on the swiftui dylib can never
+        # pass — it compares the swiftui id against the core's. Two
+        # separate agents hit exactly that, and each spent time
+        # "fixing" an artifact that was already current (the haskell
+        # fan-out arm's deviation 1, then the fresh-key depth arm's F2).
+        # The verifier knows every component's current id, so it can say
+        # which question the caller should have asked.
+        others = [c for c in COMPONENTS if c != component
+                  and build_id(c).encode() in found]
         carried = ", ".join(sorted(f.decode("ascii", "replace") for f in found))
         print(
             f"build-id: {name}: STALE — carries {carried}, but {component} "
             f"in this tree is {want.decode()}",
             file=sys.stderr,
         )
-        print(
-            "  the build step that should have refreshed it did not run, or "
-            "failed with its exit status masked",
-            file=sys.stderr,
-        )
+        if others:
+            print(
+                f"  BUT that is {others[0]}'s CURRENT id — this file looks "
+                f"like the {others[0]} component; did you mean "
+                f"--component {others[0]}?",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "  the build step that should have refreshed it did not run, "
+                "or failed with its exit status masked",
+                file=sys.stderr,
+            )
 sys.exit(status)
 PY

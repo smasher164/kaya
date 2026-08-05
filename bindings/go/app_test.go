@@ -616,3 +616,133 @@ func TestAnUndoneDeltaRestoresRecordsNotWireFields(t *testing.T) {
 		}
 	})
 }
+
+// THE FRESH-KEY MINTER: one counter per collection INSTANCE, mint is
+// counter+1, and nothing writes it downwards (docs/fresh-key-plan.md).
+// The undo scene observes the sequence through its keys label, but not
+// the RETURN VALUE — its app has no use for a name — so the value the
+// contract says an app can select a row with is pinned here.
+func TestFreshKeysAreMintedPerInstanceAndNeverRewind(t *testing.T) {
+	app := NewApp()
+	var groups, todos Collection
+	app.Build(func(tx *Tx) {
+		groups = tx.Collection()
+		todos = tx.Collection()
+		if k := tx.InsertFresh(groups, "Work"); k != int64(1) {
+			t.Fatalf("the first mint is %v, want 1", k)
+		}
+		if k := tx.InsertFresh(groups, "Home"); k != int64(2) {
+			t.Fatalf("the second mint is %v, want 2", k)
+		}
+		// A COUNTER PER INSTANCE, not per collection: an instance is a
+		// table and keys are unique within one, so the todos of two
+		// different groups both start at 1.
+		g1, g2 := todos.At(int64(1)), todos.At(int64(2))
+		if k := tx.InsertFresh(g1, "send report"); k != int64(1) {
+			t.Fatalf("the first mint of instance g1 is %v, want 1", k)
+		}
+		if k := tx.InsertFresh(g1, "buy milk"); k != int64(2) {
+			t.Fatalf("the second mint of instance g1 is %v, want 2", k)
+		}
+		if k := tx.InsertFresh(g2, "water the plants"); k != int64(1) {
+			t.Fatalf("the first mint of instance g2 is %v, want 1", k)
+		}
+	})
+	// AND AN ABANDONED TRANSACTION DOES NOT HAND THE KEY BACK. The
+	// rollback journal restores the model, not the counter: a minted key
+	// is spent, or two todos could be handed one name.
+	func() {
+		defer func() { _ = recover() }()
+		app.Build(func(tx *Tx) {
+			if k := tx.InsertFresh(groups, "Errands"); k != int64(3) {
+				t.Fatalf("the mint inside the doomed tx is %v, want 3", k)
+			}
+			panic("handler bug")
+		})
+	}()
+	app.Build(func(tx *Tx) {
+		if got := entryKeys(tx, groups); !keysEqual(got, []any{int64(1), int64(2)}) {
+			t.Fatalf("the abort left %v in the mirror, want [1 2]", got)
+		}
+		if k := tx.InsertFresh(groups, "Errands"); k != int64(4) {
+			t.Fatalf("a spent key came back: the mint is %v, want 4", k)
+		}
+	})
+}
+
+// ABSORPTION, on the one path every explicit key travels: a numeric key
+// at or above the counter carries it up, so a later mint cannot collide
+// with a hand-chosen number. All three insert surfaces absorb, because
+// there is one insert underneath them (Tx.insertEntry).
+func TestAnExplicitI64KeyCarriesTheMinterPastIt(t *testing.T) {
+	app := NewApp()
+	var todos Collection
+	var records RecordCollection[int64, checkTodo]
+	app.Build(func(tx *Tx) {
+		todos = tx.Collection()
+		tx.Insert(todos, int64(7), "hand-chosen")
+		if k := tx.InsertFresh(todos, "typed"); k != int64(8) {
+			t.Fatalf("the mint after an explicit 7 is %v, want 8 (past the explicit key)", k)
+		}
+		// BELOW the counter moves nothing.
+		tx.Insert(todos, int64(3), "older")
+		if k := tx.InsertFresh(todos, "typed again"); k != int64(9) {
+			t.Fatalf("a key below the counter moved it: the mint is %v, want 9", k)
+		}
+		// AT the counter still carries it past: 9 is spent.
+		tx.Insert(todos, int64(9), "collides with the last mint")
+		if k := tx.InsertFresh(todos, "and again"); k != int64(10) {
+			t.Fatalf("a key at the counter did not carry it: the mint is %v, want 10", k)
+		}
+		// A NON-NUMERIC KEY MOVES NOTHING, having no way to collide.
+		tx.Insert(todos, "t99", "named")
+		if k := tx.InsertFresh(todos, "last"); k != int64(11) {
+			t.Fatalf("a string key moved the counter: the mint is %v, want 11", k)
+		}
+		// The typed surface absorbs through the same path.
+		records = CollectionOf[int64, checkTodo](tx)
+		records.Insert(tx, int64(4), checkTodo{Title: "hand-chosen"})
+		if k := InsertFresh(tx, records, checkTodo{Title: "minted"}); k != int64(5) {
+			t.Fatalf("the record surface did not absorb: the mint is %v, want 5", k)
+		}
+	})
+}
+
+// A FRESH KEY IS FRESH FOREVER. Undo and redo replay captured keys
+// inside the core and never re-enter the guest insert path, so a history
+// walk moves no counter — the claim the undo scene reads as "keys 1,2"
+// where a rewinding counter would mint 1 again and collide with the
+// entry that is still there.
+func TestAMintAfterAnUndoAndARedoIsStillFresh(t *testing.T) {
+	app := NewApp()
+	var todos Collection
+	app.Build(func(tx *Tx) {
+		todos = tx.Collection()
+		if k := tx.InsertFresh(todos, "milk"); k != int64(1) {
+			t.Fatalf("the first mint is %v, want 1", k)
+		}
+	})
+	// The undo empties the table (the core's own replay, not an insert).
+	app.absorbUndo(UndoDelta{Entries: []UndoEntry{{Collection: todos.id, Key: int64(1)}}})
+	app.Build(func(tx *Tx) {
+		if n := tx.Len(todos); n != 0 {
+			t.Fatalf("the undo left %d entries, want 0", n)
+		}
+		if k := tx.InsertFresh(todos, "tea"); k != int64(2) {
+			t.Fatalf("the undo moved the counter: the mint is %v, want 2", k)
+		}
+	})
+	// The redo puts key 1 back on top of a table that now holds 2.
+	app.absorbUndo(UndoDelta{
+		Entries: []UndoEntry{{Collection: todos.id, Key: int64(1), Present: true, Record: []any{"milk"}}},
+		Orders:  []UndoOrder{{Collection: todos.id, Keys: []any{int64(1), int64(2)}}},
+	})
+	app.Build(func(tx *Tx) {
+		if got := entryKeys(tx, todos); !keysEqual(got, []any{int64(1), int64(2)}) {
+			t.Fatalf("the redo left %v, want [1 2]", got)
+		}
+		if k := tx.InsertFresh(todos, "buns"); k != int64(3) {
+			t.Fatalf("the redo moved the counter: the mint is %v, want 3", k)
+		}
+	})
+}

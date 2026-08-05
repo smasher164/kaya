@@ -7,6 +7,15 @@
 //! items-left label is a derived signal the binding recomputes from
 //! the collection after every mutation, so no handler mentions it.
 //!
+//! AND THE APP NAMES NO TODO. A todo here is a title and a done flag,
+//! and neither of them identifies it, so the key comes from
+//! `insert_fresh`: the binding mints one per collection instance and
+//! hands it back (docs/fresh-key-plan.md). The row's checkbox carries
+//! that key back out through the stamped path and straight into
+//! `patch`, which is the whole of what this scene asks of a key — the
+//! app never reads it, formats it or compares it, and so has no reason
+//! to author it.
+//!
 //! The backend selftest (KAYA_SELFTEST=todos) types "buy milk", clicks
 //! Add, toggles the stamped row's checkbox, and expects the status
 //! label to read exactly "0 items left".
@@ -69,7 +78,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // The fold: widget-owned state arrives as occurrences; the app's
     // copy is this variable, not a widget read.
     let mut draft = String::new();
-    let mut next_key = 0u32;
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Draft(text) => draft = text,
@@ -77,13 +85,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 if draft.is_empty() {
                     continue;
                 }
-                next_key += 1;
                 ctx.apply(|tx| {
-                    tx.insert(
-                        &todos,
-                        format!("t{next_key}"),
-                        Todo { title: draft.clone(), done: false },
-                    );
+                    // NO KEY, AND NO COUNTER TO GET WRONG: the binding
+                    // mints the name and hands it back. This app has no
+                    // use for the returned key — a todo is looked up by
+                    // nothing, and the checkbox's own path names its row
+                    // — so the call is made for effect.
+                    tx.insert_fresh(&todos, Todo { title: draft.clone(), done: false });
                     // Finish the form: the field empties on screen and
                     // reports text_changed("") through its normal edit
                     // path (the fold empties the draft), and the

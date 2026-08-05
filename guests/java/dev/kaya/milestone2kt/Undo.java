@@ -36,6 +36,15 @@ import dev.kaya.KayaRecords;
  * text the core never held (D4). Undo restores state, and state is
  * signals plus collections.
  *
+ * <p>AND THE APP NAMES NO TODO. A todo is a title and nothing else — it
+ * has no identity of its own — so the key comes from
+ * {@code insertFresh}, which mints one per collection instance and
+ * hands it back (docs/fresh-key-plan.md). What that buys here is the
+ * whole point of the minter: this file used to carry {@code nextKey}, a
+ * static counter beside the collection whose safety rested on never
+ * rewinding, and an undo that rewound it would have handed the same
+ * name to two todos.
+ *
  * <p>Canonical semantics in guests/rust/undo.rs; the byte-frozen
  * contract in tools/scenes/undo.steps.
  */
@@ -49,14 +58,19 @@ final class Undo {
      * this guest, so two records of the same simple name would generate
      * the same file. {@code Todos.Todo} got there first. Nothing about
      * the name reaches the wire or a scene string.
+     *
+     * <p>KEYED BY Long, because the minter's keys are I64 and the
+     * generated surface carries the key type: the annotation is what
+     * makes {@code UndoTodoKaya.collection} a
+     * {@code Collection<Long, UndoTodo>}, and a guest that adopted
+     * {@code insertFresh} without moving this would not compile.
      */
-    @KayaGen(key = "String")
+    @KayaGen(key = "Long")
     record UndoTodo(String title) {}
 
     // The fold: widget-owned state arrives as occurrences; the app's
     // copy is this field, not a widget read.
     private static String draft = "";
-    private static int nextKey;
 
     /**
      * What the history label says a step was. A typing episode has no
@@ -66,6 +80,30 @@ final class Undo {
      */
     private static String what(String label) {
         return label.isEmpty() ? "typing" : label;
+    }
+
+    /**
+     * The app's collection mirror, rendered: every key it holds, in the
+     * order it holds them.
+     *
+     * <p>THIS IS THE ONLY PART OF AN UNDO A COUNT CANNOT SEE. A
+     * restored entry that came back under a fresh name, or at the end
+     * instead of where it was, leaves every total in this file correct
+     * — the entries and orders runs of the delta are what say
+     * otherwise, and this is where the scene reads them (D5).
+     */
+    private static String keyList(KayaApp.Tx tx,
+            KayaRecords.Collection<Long, UndoTodo> todos) {
+        StringBuilder keys = new StringBuilder();
+        for (KayaRecords.Entry<Long, UndoTodo> entry : todos.items(tx)) {
+            if (keys.length() > 0) {
+                keys.append(',');
+            }
+            // The minter's keys are I64, and Long's own decimal
+            // spelling is what turns one back into a scene string.
+            keys.append(entry.key.longValue());
+        }
+        return keys.length() == 0 ? "no keys" : "keys " + keys;
     }
 
     static void app() {
@@ -84,6 +122,7 @@ final class Undo {
 
             KayaApp.Signal<String> status = tx.signal("no todos");
             KayaApp.Signal<String> history = tx.signal("history empty");
+            KayaApp.Signal<String> keys = tx.signal("no keys");
             var todos = UndoTodoKaya.collection(tx);
 
             // THE HANDLERS RIDE THE WINDOW CONSTRUCT, because handlers
@@ -97,18 +136,26 @@ final class Undo {
                 absorb(delta);
                 t.write(history,
                         "undid " + what(label) + ", " + t.count(todos.handle) + " total");
+                // ONE TRANSACTION WITH THE LABEL ABOVE, deliberately:
+                // the script reads that label first, so by the time it
+                // reads this one the app's own answer is what is on
+                // screen — not the value the core restored on its way
+                // past.
+                t.write(keys, keyList(t, todos));
             }).onRedone((t, label, delta) -> {
                 absorb(delta);
                 t.write(history,
                         "redid " + what(label) + ", " + t.count(todos.handle) + " total");
+                t.write(keys, keyList(t, todos));
             });
 
             KayaApp.Widget[] field = new KayaApp.Widget[1];
             KayaApp.Widget root = tx.column(() -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.label(history).a11yId("history"); // label#1
+                tx.label(keys).a11yId("keys"); // label#2
                 field[0] = tx.entry((t, text) -> draft = text).a11yId("draft"); // entry#0
-                tx.button("add", t -> add(t, app, status, todos, field[0])); // button#0
+                tx.button("add", t -> add(t, app, status, keys, todos, field[0])); // button#0
                 // A group at its smallest: one signal write, which is
                 // the undoable set's whole vocabulary on the reactive
                 // side.
@@ -123,6 +170,7 @@ final class Undo {
                 // question ("what is focused?") stays visible in the
                 // script rather than hidden in a handler.
                 tx.button("focus", t -> t.focus(field[0])); // button#2
+                tx.button("remove", t -> remove(t, status, keys, todos)); // button#3
                 for (var row : UndoTodoKaya.rows(todos)) {
                     row.row(() -> row.label(row.title));
                 }
@@ -153,17 +201,28 @@ final class Undo {
     }
 
     private static void add(KayaApp.Tx tx, KayaApp app, KayaApp.Signal<String> status,
-            KayaRecords.Collection<String, UndoTodo> todos, KayaApp.Widget field) {
+            KayaApp.Signal<String> keys, KayaRecords.Collection<Long, UndoTodo> todos,
+            KayaApp.Widget field) {
         if (draft.isEmpty()) {
+            // NOT A STEP, so it names no group and the forward history
+            // survives it. It is also the one place this app READS ITS
+            // OWN DRAFT out loud, which is how the script proves the
+            // restored text of an undone typing episode reached it at
+            // all.
             tx.write(status, "nothing to add, " + tx.count(todos.handle) + " total");
             return;
         }
-        nextKey++;
         // ONE CALL, AND IT IS THE WHOLE UNDO SURFACE. The name is what
         // the step is called; everything in this batch is what it did.
         tx.undoable("add " + draft);
-        todos.insert(tx, "t" + nextKey, new UndoTodo(draft));
+        // NO KEY, AND NO COUNTER TO GET WRONG: the binding mints the
+        // name and hands it back. This app has no use for it — a todo
+        // is looked up by nothing — and an app that does (selecting the
+        // new row, say) takes it from here rather than inventing a
+        // second name for the same datum.
+        KayaRecords.insertFresh(tx, todos, new UndoTodo(draft));
         tx.write(status, "added " + draft + ", " + tx.count(todos.handle) + " total");
+        tx.write(keys, keyList(tx, todos));
         // A PURE EFFECT rides along and is simply not restored: undo
         // restores state, not where you were looking (A2).
         tx.focus(field);
@@ -176,6 +235,31 @@ final class Undo {
         // through the normal edit path, so the fold above empties the
         // draft.
         app.post(t -> t.clear(field));
+    }
+
+    /**
+     * THE STEP WHOSE INVERSE IS AN IDENTITY, not a content. The core
+     * captured the entry and the instance's order before the removal,
+     * so undoing this puts the entry back under the key it already had,
+     * where it already was — neither of which this app has to remember.
+     *
+     * <p>The target is the collection's FIRST entry, taken from the
+     * app's own model and never from a widget, so the entry that comes
+     * back has to come back BEFORE the one that stayed.
+     */
+    private static void remove(KayaApp.Tx tx, KayaApp.Signal<String> status,
+            KayaApp.Signal<String> keys, KayaRecords.Collection<Long, UndoTodo> todos) {
+        var items = todos.items(tx);
+        if (items.isEmpty()) {
+            tx.write(status, "nothing to remove, " + tx.count(todos.handle) + " total");
+            return;
+        }
+        KayaRecords.Entry<Long, UndoTodo> first = items.get(0);
+        tx.undoable("remove " + first.value.title());
+        tx.remove(todos.handle, first.key);
+        tx.write(status,
+                "removed " + first.value.title() + ", " + tx.count(todos.handle) + " total");
+        tx.write(keys, keyList(tx, todos));
     }
 
     private Undo() {}
