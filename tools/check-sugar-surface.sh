@@ -26,6 +26,13 @@ fi
 # language's flavor counts (Haskell's checkboxOn matches "checkbox",
 # Go's Checkbox matches "checkbox"). C is exempt: it is the function
 # floor on purpose.
+#
+# AND THE GUARD RUNS IN BOTH DIRECTIONS. Everything until the last
+# clause is about what a BINDING OFFERS. The SCENE-TIER clause at the
+# end is about what the EXAMPLES USE (invariant 5), because a binding
+# can spell every constructor in all eight languages while the example
+# scenes go on teaching the floor — which is precisely how the entry
+# scene stayed at the floor for five milestones.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -798,6 +805,416 @@ done
 # any kind, so a `kaya_app_on_undone` arriving one day fails here
 # instead of quietly making C the ninth binding with a loose spelling.
 deny c bindings/c/kaya_wire.h "any window handler" "kaya_[a-z_]*_on_[a-z_]+\("
+
+# ─────────────────────────────────────────────────────────────────────
+# THE SCENE TIER: THE SAME RULE, READ FROM THE OTHER SIDE.
+#
+# Everything above asks whether a BINDING OFFERS the sugar. Nothing
+# asked whether the EXAMPLES USE IT, which is invariant 5 (CLAUDE.md:
+# all example scenes use each language's sugar tier; only the C guests
+# keep the explicit floor, deliberately, as the floor's documentation).
+# That invariant was a matter of memory, and the entry scene is what
+# the memory cost: entry sat at the whole-file explicit floor in eight
+# languages for five milestones — widget-kind constructors, add_child
+# chains, bind_element by index — because its EVENT mechanism is
+# deliberately the raw tier and nobody separated the two halves. Every
+# reader who noticed reasoned "entry is the explicit scene" and moved
+# on. The maintainer ratified the split on 2026-08-05 (DESIGN.md,
+# "SCOPE, ratified 2026-08-05"): entry's carve-out covers its
+# EVENT-RECEIVING mechanism ONLY, and its construction follows the same
+# sugar rule as every other example.
+#
+# So this clause reads both halves of that ratification:
+#   (a) no entry guest spells CONSTRUCTION at the floor, in any of the
+#       eight bindings; and
+#   (b) rust's entry guest still spells its EVENTS as the raw
+#       `ctx.next()` loop. THE CARVE-OUT IS CHECKED, NOT ASSUMED — a
+#       later session "finishing the job" by folding entry onto
+#       kaya::Messages would delete the only guest that documents the
+#       tier Messages is built on, and this says so out loud instead of
+#       leaving it to a reviewer's eye.
+#
+# THE PATTERNS ARE DERIVED FROM WHAT EACH FILE ACTUALLY SAID, not from
+# what a floor might look like: every regex below matched
+# guests/<lang>/entry.* at the pre-graduation revision and matches
+# nothing in the graduated one.
+#
+# MILESTONE2 IS THE OTHER SCENE STILL AT THE FLOOR, AND IS NOT PINNED
+# HERE. It graduates in the following slice, and its eight guests join
+# the paths below at that point — the same rules, the same table. They
+# are absent today on purpose: a gate that went red for work nobody has
+# started would be holding open a slice it does not own, and the
+# hold-open pattern belongs to the slice doing the work.
+SC_RS=guests/rust/entry.rs
+SC_PY=guests/python/entry.py
+SC_GO=guests/go/entry/main.go
+SC_CS=guests/csharp/EntryScene.cs
+SC_JA=guests/java/dev/kaya/milestone2kt/Entry.java
+SC_SW=guests/swift/entry.swift
+SC_HS=guests/haskell/entry.hs
+SC_ML=guests/ocaml/entry.ml
+
+scene_file() { # <language> -> the guest this clause reads for it
+    case "$1" in
+        rust) printf '%s\n' "$SC_RS" ;;
+        python) printf '%s\n' "$SC_PY" ;;
+        go) printf '%s\n' "$SC_GO" ;;
+        csharp) printf '%s\n' "$SC_CS" ;;
+        java) printf '%s\n' "$SC_JA" ;;
+        swift) printf '%s\n' "$SC_SW" ;;
+        haskell) printf '%s\n' "$SC_HS" ;;
+        ocaml) printf '%s\n' "$SC_ML" ;;
+        *)
+            echo "check-sugar-surface: scene clause names an unknown language '$1'" >&2
+            exit 1
+            ;;
+    esac
+}
+
+# HASKELL'S GENERIC CONSTRUCTOR IS DENIED PER KIND, and the kind list
+# is the GENERATED one this file already reads at the top, so a kind
+# added to the spec is denied here without anyone editing a list.
+# HISTORY: this clause shipped with `kindEntry` and `kindButton`
+# exempted, because the sugar then had no handler-free leaf
+# constructors and entry.hs (which registers centrally) had no other
+# way to build those two widgets. The binding grew `entry` and
+# `button` the same day (2026-08-05, the one hole of its kind among
+# the eight bindings) and the exemption was dropped as the original
+# comment here instructed — the guest now builds every leaf in the
+# sugar and the denial is total.
+hs_kinds=$(python3 -c "
+import sys
+
+kinds = sys.argv[1].split()
+if not kinds:
+    sys.exit('no widget kinds reached the haskell clause — it would be vacuous')
+pascal = [k[0].upper() + k[1:] for k in kinds]
+print('|'.join(pascal), pascal[0])
+" "$kinds")
+hs_rc=$?
+if [ "$hs_rc" -ne 0 ]; then
+    echo "check-sugar-surface: FAIL (no haskell kind list for the scene clause)"
+    exit 1
+fi
+hs_alt="${hs_kinds%% *}"
+hs_first="${hs_kinds##* }"
+
+# THE FLOOR VOCABULARY, FOUR FIELDS PER ROW: the language, what the
+# spelling IS, the regex that finds it, and A LINE OF THAT LANGUAGE'S
+# FLOOR THAT MUST TRIP IT. The fourth field is not decoration. The
+# self-test below plants every one of a language's snippets in a copy
+# of its real guest and requires the clause to name every row — so each
+# regex here is watched finding something, and a pattern cannot be
+# added without a line proving it fires. A guard nobody has seen fail
+# is worse than none: it stops you looking (docs/traps.md).
+scene_rules=(
+    rust "widget-kind construction" '\.widget\(WidgetKind::' \
+        '        let column = tx.widget(WidgetKind::Column);'
+    rust "the add_child chain" '\.add_child\(' \
+        '        tx.add_child(column, field);'
+    rust "generic prop writes" 'Prop::' \
+        '        tx.set(add, Prop::Text, "add");'
+    rust "the for_each combinator" '\.for_each\(' \
+        '        let (todo_list, ()) = tx.for_each(&todos, |t| {});'
+    rust "bind_element by index" '\.bind_element\(' \
+        '        t.bind_element(label, Prop::Text, 0);'
+
+    # PYTHON HAS NO WIDGET-KIND FLOOR TO LEAVE: its public surface has
+    # only ever been the sugar (the kind constructors call a private
+    # _widget), which is why its entry guest's graduation was the key
+    # counter alone. The clause is written anyway, and written the way
+    # the C exemption above is — as a rule about what must NOT ARRIVE.
+    # `kaya.for_each` is real today (feed.py needs the target for a
+    # variant collection) and is the tier below the `for` statement
+    # this scene traces with; the other two name spellings the binding
+    # does not export, so a floor arriving one day fails here instead
+    # of landing in an example first.
+    python "the for_each combinator" 'kaya\.for_each\(' \
+        '    with kaya.for_each(todos) as todo:'
+    python "the add_child chain" '\.add_child\(' \
+        '    column.add_child(field)'
+    python "bind_element by index" '\.bind_element\(' \
+        '    label.bind_element(0)'
+
+    go "widget-kind construction" '\.Widget\(' \
+        '        column := tx.Widget(kaya.KindColumn)'
+    go "the SetText prop write" '\.SetText\(' \
+        '        tx.SetText(add, "add")'
+    go "the generic BindText" '\.BindText\(' \
+        '        tx.BindText(statusLabel, status)'
+    go "the ForEach combinator" '\.ForEach\(' \
+        '        todoList := tx.ForEach(todos, nil)'
+    go "BindTextElement by index" '\.BindTextElement\(' \
+        '        t.BindTextElement(label, 0)'
+    go "the AddChild chain" '\.AddChild\(' \
+        '        tx.AddChild(column, field)'
+
+    csharp "widget-kind construction" '\.Widget\(' \
+        '            var column = tx.Widget(KayaWire.KindColumn);'
+    csharp "the SetText prop write" '\.SetText\(' \
+        '            tx.SetText(add, "add");'
+    csharp "the generic BindText" '\.BindText\(' \
+        '            tx.BindText(statusLabel, status);'
+    csharp "the ForEach combinator" '\.ForEach\(' \
+        '            var todoList = tx.ForEach(todos, null);'
+    csharp "BindTextElement by index" '\.BindTextElement\(' \
+        '            t.BindTextElement(label);'
+    csharp "the AddChild chain" '\.AddChild\(' \
+        '            tx.AddChild(column, field);'
+
+    java "widget-kind construction" '\.widget\(' \
+        '            KayaApp.Widget column = tx.widget(KayaWire.KIND_COLUMN);'
+    java "the setText prop write" '\.setText\(' \
+        '            tx.setText(add, "add");'
+    java "the generic bindText" '\.bindText\(' \
+        '            tx.bindText(statusLabel, status);'
+    java "the forEach combinator" '\.forEach\(' \
+        '            KayaApp.Widget todoList = tx.forEach(todos, null);'
+    java "bindTextElement by index" '\.bindTextElement\(' \
+        '            t.bindTextElement(label, 0);'
+    java "the addChild chain" '\.addChild\(' \
+        '            tx.addChild(column, field);'
+
+    swift "widget-kind construction" '\.widget\(' \
+        '    let column = tx.widget(UInt32(KAYA_KIND_COLUMN))'
+    swift "the setText prop write" '\.setText\(' \
+        '    tx.setText(add, "add")'
+    swift "the generic bindText" '\.bindText\(' \
+        '    tx.bindText(statusLabel, status)'
+    swift "the forEach combinator" '\.forEach\(' \
+        '    let (todoList, _) = tx.forEach(todos) { t in }'
+    swift "bindTextElement by index" '\.bindTextElement\(' \
+        '        t.bindTextElement(label)'
+    swift "the addChild chain" '\.addChild\(' \
+        '    tx.addChild(column, field)'
+
+    haskell "the addChild chain" '(^|[^A-Za-z])addChild[[:space:]]' \
+        '    addChild column field'
+    haskell "the forEach combinator" '(^|[^A-Za-z])forEach[[:space:]]' \
+        '    forEach todos body'
+    haskell "bindTextElement by index" '(^|[^A-Za-z])bindTextElement[[:space:]]' \
+        '      bindTextElement label 0'
+    haskell "the generic bindText" '(^|[^A-Za-z])bindText[[:space:]]' \
+        '    bindText statusLabel status'
+
+    ocaml "widget-kind construction" '(^|[^A-Za-z_])widget kind_' \
+        '       let column = widget kind_column in'
+    ocaml "the set_text prop write" '(^|[^A-Za-z_])set_text[[:space:]]' \
+        '       set_text add "add";'
+    ocaml "the generic bind_text" '(^|[^A-Za-z_])bind_text[[:space:]]' \
+        '       bind_text status_label status;'
+    ocaml "the for_each combinator" '(^|[^A-Za-z_])for_each[[:space:]]' \
+        '       for_each todos body;'
+    ocaml "the add_child chain" '(^|[^A-Za-z_])add_child[[:space:]]' \
+        '       add_child column field;'
+)
+scene_rules+=(haskell "widget-kind construction" \
+    "widget kind($hs_alt)([^A-Za-z]|\$)" "    column <- widget kind$hs_first")
+
+# floor <language> <file> <what> <regex> [<file to name in the message>]
+# — deny's scene-side sibling.
+floor() {
+    if grep -qE "$4" "$2"; then
+        echo "check-sugar-surface: $1's entry guest still spells $3 at the" \
+            "explicit floor (found /$4/ in ${5:-$2}) — an example scene uses its" \
+            "language's construction sugar (CLAUDE.md invariant 5), and entry's" \
+            "carve-out is its EVENT mechanism and nothing else (DESIGN.md, scope" \
+            "ratified 2026-08-05)"
+        status=1
+    fi
+}
+
+# check_scene_sugar <rust> <python> <go> <csharp> <java> <swift> <haskell> <ocaml>
+#
+# The paths are ARGUMENTS for the same reason deny_loose's are: the
+# self-test runs this against DOCTORED COPIES OF THE REAL GUESTS, and a
+# rule about eight fixed paths could never be watched failing.
+check_scene_sugar() {
+    local rsf="$1" pyf="$2" gof="$3" csf="$4" jaf="$5" swf="$6" hsf="$7" mlf="$8"
+    local f code i lang what regex
+
+    # THE ANTI-VACUITY FLOOR. `grep -q` on a file that is not there
+    # finds nothing, which is indistinguishable from a clean scene, so
+    # a renamed or deleted guest would satisfy every denial below at
+    # once. Each file therefore proves it IS the entry scene first, by
+    # carrying the scene script's own expected string — frozen by
+    # invariant 6, and byte-identical in all eight languages by
+    # invariant 6's whole point.
+    for f in "$rsf" "$pyf" "$gof" "$csf" "$jaf" "$swf" "$hsf" "$mlf"; do
+        if ! grep -qF 'nothing to add, ' "$f" 2>/dev/null; then
+            echo "check-sugar-surface: $f is not the entry scene — it does not" \
+                "carry \"nothing to add, \", the scene script's own expected" \
+                "string (tools/scenes/entry.steps) — so this clause reads it and" \
+                "passes vacuously about it"
+            status=1
+        fi
+    done
+
+    # RUST IS READ WITH ITS COMMENT LINES DROPPED, and only rust: its
+    # header NAMES `ctx.next()` in prose, so the positive pin below
+    # would be satisfied by the sentence describing the loop rather
+    # than by the loop (measured while writing this — entry.rs carries
+    # two occurrences, one of them prose). The other seven are read
+    # whole: a comment that spells a floor call in a graduated scene
+    # teaches the floor, and is worth the reader's second.
+    code="$T/rust-entry-code.txt"
+    python3 -c '
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+lines = [ln for ln in open(src, encoding="utf-8").read().split("\n")
+         if not ln.lstrip().startswith("//")]
+open(dst, "w", encoding="utf-8").write("\n".join(lines))
+' "$rsf" "$code" 2>/dev/null
+    local strip_rc=$?
+    if [ "$strip_rc" -ne 0 ]; then
+        echo "check-sugar-surface: $rsf could not be read (this clause reads the" \
+            "rust guest with its comment lines dropped)"
+        status=1
+        return
+    fi
+
+    for ((i = 0; i < ${#scene_rules[@]}; i += 4)); do
+        lang="${scene_rules[i]}"
+        what="${scene_rules[i + 1]}"
+        regex="${scene_rules[i + 2]}"
+        case "$lang" in
+            rust) floor rust "$code" "$what" "$regex" "$rsf (comments dropped)" ;;
+            python) floor python "$pyf" "$what" "$regex" ;;
+            go) floor go "$gof" "$what" "$regex" ;;
+            csharp) floor csharp "$csf" "$what" "$regex" ;;
+            java) floor java "$jaf" "$what" "$regex" ;;
+            swift) floor swift "$swf" "$what" "$regex" ;;
+            haskell) floor haskell "$hsf" "$what" "$regex" ;;
+            ocaml) floor ocaml "$mlf" "$what" "$regex" ;;
+            *)
+                echo "check-sugar-surface: scene rule for unknown language '$lang'"
+                status=1
+                ;;
+        esac
+    done
+
+    # (b) AND RUST'S RAW LOOP STAYS.
+    if ! grep -qE 'ctx\.next\(\)' "$code"; then
+        echo "check-sugar-surface: rust's entry guest no longer reads occurrences" \
+            "through the raw \`ctx.next()\` loop ($rsf) — that loop IS this" \
+            "scene's carve-out and the only guest documenting the tier" \
+            "kaya::Messages is built on (DESIGN.md, scope ratified 2026-08-05)." \
+            "Graduating it is the maintainer's decision, not a cleanup"
+        status=1
+    fi
+}
+
+# scene_run <language> <path> — the clause with that language's guest
+# swapped for a doctored copy and the other seven left real.
+scene_run() {
+    case "$1" in
+        rust) check_scene_sugar "$2" "$SC_PY" "$SC_GO" "$SC_CS" "$SC_JA" "$SC_SW" "$SC_HS" "$SC_ML" ;;
+        python) check_scene_sugar "$SC_RS" "$2" "$SC_GO" "$SC_CS" "$SC_JA" "$SC_SW" "$SC_HS" "$SC_ML" ;;
+        go) check_scene_sugar "$SC_RS" "$SC_PY" "$2" "$SC_CS" "$SC_JA" "$SC_SW" "$SC_HS" "$SC_ML" ;;
+        csharp) check_scene_sugar "$SC_RS" "$SC_PY" "$SC_GO" "$2" "$SC_JA" "$SC_SW" "$SC_HS" "$SC_ML" ;;
+        java) check_scene_sugar "$SC_RS" "$SC_PY" "$SC_GO" "$SC_CS" "$2" "$SC_SW" "$SC_HS" "$SC_ML" ;;
+        swift) check_scene_sugar "$SC_RS" "$SC_PY" "$SC_GO" "$SC_CS" "$SC_JA" "$2" "$SC_HS" "$SC_ML" ;;
+        haskell) check_scene_sugar "$SC_RS" "$SC_PY" "$SC_GO" "$SC_CS" "$SC_JA" "$SC_SW" "$2" "$SC_ML" ;;
+        ocaml) check_scene_sugar "$SC_RS" "$SC_PY" "$SC_GO" "$SC_CS" "$SC_JA" "$SC_SW" "$SC_HS" "$2" ;;
+        *)
+            echo "check-sugar-surface: scene self-test names an unknown language '$1'" >&2
+            exit 1
+            ;;
+    esac
+}
+
+scene_applied=""
+applied_scene() { # count label
+    if [ "$1" -ge 1 ]; then
+        scene_applied="$scene_applied $2=$1"
+        return 0
+    fi
+    echo "check-sugar-surface: SELF-TEST FAIL (scene perturbation $2 applied $1" \
+        "times, want at least 1 — an unchanged copy cannot prove the rule fires)" >&2
+    exit 1
+}
+
+# scene_block <language> — that language's floor snippets, ready to be
+# spliced in as a python replacement (a literal \n before each).
+scene_block() {
+    local i out=""
+    for ((i = 0; i < ${#scene_rules[@]}; i += 4)); do
+        if [ "${scene_rules[i]}" = "$1" ]; then
+            out="$out"'\n'"${scene_rules[i + 3]}"
+        fi
+    done
+    printf '%s' "$out"
+}
+
+# THE PERTURBATIONS, ON DOCTORED COPIES OF THE REAL GUESTS. One per
+# language: every snippet that language declares is planted after the
+# line holding the scene's own "no todos" signal — a line each of the
+# eight carries exactly once — and the clause must then name EVERY rule
+# that language has. A snippet the pattern misses is a pattern that
+# would never have fired.
+scene_selftest() { # <language>
+    local lang="$1" src doctored hits out i what missing=""
+    src=$(scene_file "$lang")
+    doctored="$T/scene-floor-$lang.txt"
+    hits=$(perturb "$src" '^(.*no todos.*)$' "\\g<1>$(scene_block "$lang")" "$doctored")
+    applied_scene "$hits" "$lang"
+    out=$(scene_run "$lang" "$doctored" 2>&1)
+    for ((i = 0; i < ${#scene_rules[@]}; i += 4)); do
+        [ "${scene_rules[i]}" = "$lang" ] || continue
+        what="${scene_rules[i + 1]}"
+        case "$out" in
+            *"$lang's entry guest still spells $what "*) ;;
+            *) missing="$missing [$what]" ;;
+        esac
+    done
+    if [ -n "$missing" ]; then
+        echo "check-sugar-surface: SELF-TEST FAIL ($lang floor patterns that did" \
+            "NOT fire on a doctored copy of the real guest:$missing)" >&2
+        exit 1
+    fi
+}
+
+for scene_lang in rust python go csharp java swift haskell ocaml; do
+    scene_selftest "$scene_lang"
+done
+
+# AND THE POSITIVE PIN IS WATCHED FAILING TOO: (b) is the half that
+# says something must STAY, so the only way to see it work is to take
+# it away. The prose in the header still names `ctx.next()` after this
+# substitution, which is exactly why the clause reads rust with its
+# comments dropped.
+hits=$(perturb "$SC_RS" 'match ctx\.next\(\)' 'match ctx.peek()' "$T/scene-noloop.rs")
+applied_scene "$hits" rust-raw-loop
+scene_loop_out=$(scene_run rust "$T/scene-noloop.rs" 2>&1)
+case "$scene_loop_out" in
+    *"no longer reads occurrences through the raw"*) ;;
+    *)
+        echo "check-sugar-surface: SELF-TEST FAIL (rust's entry guest was not" \
+            "refused for losing its raw occurrence loop:" \
+            "${scene_loop_out:-no output at all})" >&2
+        exit 1
+        ;;
+esac
+
+# AND SO IS THE ANTI-VACUITY FLOOR. A file this clause cannot recognise
+# as the entry scene has to fail LOUDLY rather than satisfy every
+# denial by having nothing in it — the wayland seat guard passed
+# vacuously twice for want of exactly this (docs/traps.md).
+hits=$(perturb "$SC_ML" 'nothing to add, ' 'nothing to ADD, ' "$T/scene-notentry.ml")
+applied_scene "$hits" ocaml-not-entry
+scene_vac_out=$(scene_run ocaml "$T/scene-notentry.ml" 2>&1)
+case "$scene_vac_out" in
+    *"is not the entry scene"*) ;;
+    *)
+        echo "check-sugar-surface: SELF-TEST FAIL (a file that is not the entry" \
+            "scene was not refused: ${scene_vac_out:-no output at all})" >&2
+        exit 1
+        ;;
+esac
+echo "check-sugar-surface: scene-tier perturbations applied:$scene_applied" >&2
+
+check_scene_sugar "$SC_RS" "$SC_PY" "$SC_GO" "$SC_CS" "$SC_JA" "$SC_SW" "$SC_HS" "$SC_ML"
 
 if [ "$status" -ne 0 ]; then
     echo "check-sugar-surface: FAIL"

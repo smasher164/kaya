@@ -918,7 +918,12 @@ count, so the saving is measured rather than assumed.
     same move.
 
   From the fresh-key breadth arms (2026-08-05), a doctrine question
-  for the maintainer:
+  for the maintainer — RULED same day, option B: the entry/milestone2
+  carve-out covers the event-receiving mechanism only (DESIGN.md,
+  Binding conventions, has the ratified scope); construction and
+  collection idioms graduate to sugar. Entry graduates first,
+  milestone2 rides the next slice, and the gate clause extends to it
+  then.
   - **What tier does the entry scene sit at, per language — and why is
     the tree split?** DESIGN.md sanctions entry and milestone2 as "the
     documented floor" for the raw occurrence loop, and four entry

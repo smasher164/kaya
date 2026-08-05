@@ -536,7 +536,15 @@ rules so far:
   the Xilem-style co-located-closure tier is expressible on top of
   Messages by instantiating M as a boxed command — the reverse
   construction does not exist, which is why Messages is the
-  primitive. Derived signals are maintained
+  primitive. SCOPE, ratified 2026-08-05 (option B): what entry and
+  milestone2 document is the EVENT-RECEIVING mechanism only — Rust's
+  `loop { match ctx.next() }`, and in the other languages whatever
+  event tier each guest already spells. Widget construction and
+  collection idioms in those scenes follow the same sugar rule as
+  every other example (the C guests remain the one whole-file
+  explicit tier). The half-and-half state this replaced — python
+  sugar-built, four siblings floor-built, nobody having decided —
+  is pinned against by check-sugar-surface's scene-tier clause. Derived signals are maintained
   by the binding, recomputed at write time and batched into the same
   transaction; the core never knows about them. A derived signal's source
   can also be a collection — `todos.derive(|items| ...)` — recomputed

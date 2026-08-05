@@ -94,7 +94,12 @@ GATES = {
     "check-shell": [],
     "check-mirror": ["CLAUDE.md", "AGENTS.md"],
     "check-targets": ["crates", "Cargo.toml", "Cargo.lock", ".cargo"],
-    "check-sugar-surface": ["crates", "bindings"],
+    # guests/ joined this set when the gate grew its SCENE-TIER clause
+    # (the example scenes must USE the sugar, not only the bindings
+    # OFFER it): the clause reads guests/*/entry.*, so a key blind to
+    # guests/ would hand back a stale PASS for exactly the edit the
+    # clause exists to catch.
+    "check-sugar-surface": ["crates", "bindings", "guests"],
     "check-universal-props": ["crates", "bindings", "swift", "android"],
     # The role vocabulary (crates/kaya/src/scene.rs) against the four
     # backends that must know it. Same set as check-verbs minus the

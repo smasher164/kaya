@@ -6,6 +6,14 @@
 //! into the todos collection and answers with the count read from the
 //! collection model (the patch-producing fold, same as milestone 2).
 //!
+//! WHAT THIS SCENE DOCUMENTS IS THE RAW EVENT SURFACE. Every other
+//! Rust guest folds through `kaya::Messages` — a meaning enum the
+//! compiler holds total — and this one matches `ctx.next()` directly,
+//! guarding on widget identity, which is the tier that surface is
+//! built on. Construction is the ordinary sugar either way (DESIGN.md,
+//! entry's scope ratified 2026-08-05): the carve-out is the event
+//! mechanism, not the tree.
+//!
 //! The backend selftest (KAYA_SELFTEST=entry) types "milk", clicks add,
 //! and expects the status label to read "added milk, 1 total", the
 //! field cleared and refocused (the one-shot commands riding the same
@@ -13,37 +21,48 @@
 //! add, 1 total" — proving the clear's text_changed("") re-entered
 //! through the normal fold and emptied the draft.
 
-use kaya::{Occurrence, Prop, WidgetKind};
+use kaya::Occurrence;
+
+/// A todo is a title and nothing else, which is exactly why the app
+/// authors no key for one (see the insert below). The derive turns the
+/// struct's own shape into the schema and mints the field token the
+/// row binds through.
+#[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
+struct Todo {
+    title: String,
+}
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
+    // The construction sugar: constructors carry their props, the
+    // container takes its children through the body, and the build
+    // reads as the tree. The two widgets whose events this app wants
+    // ride out of the body as its result — the raw loop below matches
+    // on their ids.
     let (status, field, add, todos) = ctx.apply(|tx| {
         let status = tx.signal("no todos");
+        let todos = tx.collection::<Todo>();
 
-        let column = tx.widget(WidgetKind::Column);
-        let field = tx.widget(WidgetKind::Entry);
-        let add = tx.widget(WidgetKind::Button);
-        tx.set(add, Prop::Text, "add");
-        let status_label = tx.widget(WidgetKind::Label);
-        tx.bind(status_label, Prop::Text, status);
-
-        let todos = tx.collection::<String>();
-        let (todo_list, ()) = tx.for_each(&todos, |t| {
-            let label = t.widget(WidgetKind::Label);
-            t.bind_element(label, Prop::Text, 0);
-        });
-
-        tx.add_child(column, field);
-        tx.add_child(column, add);
-        tx.add_child(column, status_label);
-        tx.add_child(column, todo_list);
-        tx.mount(column);
+        let (root, (field, add)) = tx
+            .column(|tx| {
+                let field = tx.entry().id(); // entry#0
+                let add = tx.button("add").id(); // button#0
+                tx.label(status); // label#0
+                // The tracing tier: the for statement IS the For — the
+                // body runs once, authoring the blueprint, and the
+                // row's Drop closes the template.
+                for mut row in todos.rows(tx) {
+                    row.label(Todo::title());
+                }
+                (field, add)
+            })
+            .into_parts();
+        tx.mount(root);
         (status, field, add, todos)
     });
 
     // The fold: widget-owned state arrives as occurrences; the app's
     // copy is this variable, not a widget read.
     let mut draft = String::new();
-    let mut next_key = 0u32;
     loop {
         match ctx.next() {
             Occurrence::TextChanged { id, text } if id == field => draft = text,
@@ -58,9 +77,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     });
                     continue;
                 }
-                next_key += 1;
                 ctx.apply(|tx| {
-                    tx.insert(&todos, format!("t{next_key}"), draft.clone());
+                    // NO KEY, AND NO COUNTER TO GET WRONG: a line of
+                    // text has no identity of its own, so the binding
+                    // mints the name and hands it back
+                    // (docs/fresh-key-plan.md). Rust discards a return
+                    // by calling in statement position; an app that
+                    // needed the name — to select the new row, say —
+                    // takes it from here rather than inventing a second
+                    // name for the same datum.
+                    tx.insert_fresh(&todos, Todo { title: draft.clone() });
                     let total = tx.len(&todos);
                     tx.write(status, format!("added {draft}, {total} total"));
                     // Finish the form: drop the field's content and put

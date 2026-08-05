@@ -124,7 +124,9 @@ module KayaApp
     bindTextField,
     bindCheckedField,
     bindSourceField,
+    button,
     buttonOn,
+    entry,
     entryOn,
     textareaOn,
     labelText,
@@ -1682,6 +1684,21 @@ buttonOn text handler = leafish $ do
   setText w text
   pendB (PClick n handler)
   return w
+
+-- The handler-free siblings: the same leaves with the event slot
+-- empty, for an app that registers its handlers centrally (the entry
+-- scene's documented mechanism) rather than at the constructor. Added
+-- 2026-08-05 when the entry graduation found the sugar could not
+-- spell "leaf, no handler" — the one hole of its kind among the eight
+-- bindings (python's handler kwarg is optional, go takes nil).
+button :: (LeafArgs r) => String -> r
+button text = leafish $ do
+  w <- widget W.kindButton
+  setText w text
+  return w
+
+entry :: (LeafArgs r) => r
+entry = leafish (widget W.kindEntry)
 
 entryOn :: (LeafArgs r) => (String -> IO ()) -> r
 entryOn handler = leafish $ do

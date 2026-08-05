@@ -1,11 +1,31 @@
-(* The entry scene from OCaml, on the let surface: the uncontrolled
-   contract end to end. The field owns its text and reports each edit
-   through on_change; the app folds those into a plain ref (draft) —
-   its own model, per doctrine. The add button inserts the draft and
-   answers with the count read from the collection model, then clears
-   and refocuses the field — one-shot commands riding the insert's
-   transaction; the clear's own text_changed "" re-enters through the
-   fold and empties the draft, so a second add finds nothing to add.
+(* The entry scene from OCaml, on the let surface with the construction
+   sugar: the uncontrolled contract end to end. The field owns its text
+   and reports each edit through on_change; the app folds those into a
+   plain ref (draft) — its own model, per doctrine. The add button
+   inserts the draft and answers with the count read from the collection
+   model, then clears and refocuses the field — one-shot commands riding
+   the insert's transaction; the clear's own text_changed "" re-enters
+   through the fold and empties the draft, so a second add finds nothing
+   to add.
+
+   WHAT THIS SCENE DOCUMENTS IS HOW OCCURRENCES REACH AN APP, and that
+   is the whole of its carve-out (DESIGN.md, scope ratified 2026-08-05).
+   The handlers are registered CENTRALLY, after the build, against the
+   handles the build returned: [on_change app field] and
+   [on_click app add], the tier underneath the [~on_change] and
+   [~on_click] arguments todos.ml and undo.ml pass to their
+   constructors. Both spellings register the same handler in the same
+   table; this file is where the explicit one is written down. It is
+   also why these two widgets realize inside the build and slot into the
+   child list with [w] — a central registration needs a handle to name.
+
+   AND THE APP NAMES NO TODO. A draft is a line of text and nothing else
+   — it has no identity of its own — so the key comes from
+   [insert_fresh]: the binding mints one per collection instance and
+   hands it back (docs/fresh-key-plan.md). This file used to carry
+   [next_key], an [int ref] outliving every handler that adds; nothing
+   here has a use for the name, so the call is made for effect and
+   [ignore] says so.
 
    Build like milestone2.ml, then run with KAYA_SELFTEST=entry. *)
 
@@ -18,34 +38,35 @@ let () =
   let status, field, add, todos =
     build app (fun () ->
        let status = signal (Str "no todos") in
-
-       let column = widget kind_column in
-       let field = widget kind_entry in
-       let add = widget kind_button in
-       set_text add "add";
-       let status_label = widget kind_label in
-       bind_text status_label status;
-
        let todos = collection () in
-       let todo_list, () =
-         for_each todos (fun () ->
-             Tpl.(
-               let label = widget kind_label in
-               bind_text_element label)) ()
-       in
 
-       add_child column field;
-       add_child column add;
-       add_child column status_label;
-       add_child column todo_list;
-       mount column;
+       (* The field and the add button realize here because the central
+          registrations below need their handles; [w] slots an
+          already-realized widget into the child list, where the column
+          merely attaches it. *)
+       let field = entry () in
+       let add = button ~text:"add" () in
+
+       let root =
+         column
+           [
+             w field (* entry#0 *);
+             w add (* button#0 *);
+             label ~bind:status (* label#0 *);
+             (* One stamped label per entry, bound to the ELEMENT
+                itself: an entry of a scalar collection is the string,
+                so there is no field to name. *)
+             each todos (fun () -> Tpl.(bind_text_element (label ())));
+           ]
+           ()
+       in
+       mount root;
        (status, field, add, todos))
   in
 
   (* The fold: widget-owned state arrives as occurrences; the app's
      copy is this ref, not a widget read. *)
   let draft = ref "" in
-  let next_key = ref 0 in
   on_change app field (fun text -> draft := text);
   on_click app add (fun () ->
      let d = !draft in
@@ -56,9 +77,11 @@ let () =
        let total = count todos in
        write status (Str (Printf.sprintf "nothing to add, %d total" total))
      else begin
-       incr next_key;
-       let key = Printf.sprintf "t%d" !next_key in
-       insert todos (Str key) (Str d);
+       (* NO KEY, AND NO COUNTER TO GET WRONG: the binding authors the
+          name and hands it back, and an app that wants it (selecting
+          the new row, say) takes it from here rather than inventing a
+          second name for the same datum. *)
+       ignore (insert_fresh todos (Str d));
        let total = count todos in
        write status (Str (Printf.sprintf "added %s, %d total" d total));
        (* Finish the form: drop the field's content and put the cursor

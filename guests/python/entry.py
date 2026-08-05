@@ -25,7 +25,6 @@ app = kaya.App()
 
 
 draft = ""
-next_key = 0
 
 
 def on_change(text):
@@ -36,15 +35,19 @@ def on_change(text):
 
 
 def on_add():
-    global next_key
     # The empty-draft guard every real form has — and the scene's
     # proof that clear emptied the draft through the occurrence fold,
     # not a side assignment.
     if not draft:
         status.set(f"nothing to add, {len(todos)} total")
         return
-    next_key += 1
-    todos.insert(f"t{next_key}", draft)
+    # The draft is a line of text and nothing else — no identity of its
+    # own — so the key comes from the binding: insert_fresh mints one
+    # per collection instance and hands it back
+    # (docs/fresh-key-plan.md). This app has no use for the key, and an
+    # app that does takes it from here rather than inventing a second
+    # name for the same datum.
+    todos.insert_fresh(draft)
     status.set(f"added {draft}, {len(todos)} total")
     # Finish the form: drop the field's content and put the cursor
     # back, atomically with the insert. The field answers with
