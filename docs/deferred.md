@@ -917,6 +917,30 @@ count, so the saving is measured rather than assumed.
     apply record. Worth a second look when another arm needs the
     same move.
 
+  Two more carried out of the fan-out (2026-08-04), both gate gaps
+  rather than behavior:
+  - **check-steps is blind to the C floor.** The per-language sweep
+    (tools/check-steps.sh LANGS, ~:494) does not list C, so the C
+    undo guest — the floor's first mac-lane leg ever — is demanded
+    by no gate: if it silently fell out of validate-mac, nothing
+    would go red. Add C to the sweep (or a targeted clause for the
+    legs the floor actually has), and watch the clause fail with the
+    leg removed before trusting it.
+  - **The shared scene's stated D5 text-run proof cannot fail.**
+    undo.steps claims the next add "can only name tea if the draft
+    came back with the field" — but under the §3a mirror rule the
+    native undo reaches the app as an ordinary emission, and the
+    coarse undo + redo then land the draft exactly where it already
+    was, so the add names tea whether or not the guest ever reads
+    delta.texts. Measured independently on the Java and Haskell
+    lanes: deleting the guest's entire texts fold leaves the leg
+    green. The texts run is the one member of the undone payload no
+    lane checks. Fix is a scene reshape (type, act, type again — so
+    the episode's before-image differs from where the last emission
+    left the app), which moves byte-frozen expected strings on all
+    12 surfaces at once; ride it with the next milestone that
+    touches the scene.
+
 
 
 - ~~**DEFECT — filedialog_java is a coin flip on windows**~~ — FIXED
