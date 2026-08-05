@@ -326,11 +326,17 @@ impl<T: KayaSum> Collection<T> {
     /// The for-statement form: `for mut row in todos.rows(&mut tx)`
     /// traces the record template — the body runs once, and the row's
     /// Drop closes the template (break- and panic-safe).
-    pub fn rows<'t, 'b>(&self, tx: &'t mut Tx<'b>) -> Rows<'t, 'b> {
+    ///
+    /// The argument is the zone the For is declared in ([`ForScope`]),
+    /// so a nested For is the same statement one level in:
+    /// `groups.rows(tx)` in the live tree, `items.rows(t)` inside
+    /// another template's body.
+    pub fn rows<'t, 'b, S: ForScope<'b>>(&self, scope: &'t mut S) -> Rows<'t, 'b> {
         assert_root(self);
         Rows {
-            tx: Some(tx),
+            tx: Some(scope.zone_tx()),
             collection: self.id,
+            nested: S::NESTED,
         }
     }
 
@@ -2335,6 +2341,9 @@ impl<'a> Tx<'a> {
 pub struct Rows<'t, 'b> {
     tx: Option<&'t mut Tx<'b>>,
     collection: CollectionId,
+    /// Which id space this For's own node comes from — see
+    /// [`ForScope`].
+    nested: bool,
 }
 
 impl<'t, 'b> Iterator for Rows<'t, 'b> {
@@ -2342,19 +2351,86 @@ impl<'t, 'b> Iterator for Rows<'t, 'b> {
 
     fn next(&mut self) -> Option<Row<'t, 'b>> {
         let tx = self.tx.take()?;
-        let id = tx.ctx.alloc_widget();
+        let id = if self.nested {
+            tx.ctx.alloc_node().0
+        } else {
+            tx.ctx.alloc_widget().0
+        };
         let parent = tx.current_parent();
         tx.ops.push(TxOp::CreateFor {
-            id: id.0,
+            id,
             collection: self.collection,
         });
         tx.ctx.open_fors.borrow_mut().push(self.collection);
         tx.parents.push(0);
         Some(Row {
             tx: Some(tx),
-            for_id: id.0,
+            for_id: id,
             parent,
         })
+    }
+}
+
+/// SEALED, AND SEALED FOR A REASON, not for taste: the whole mechanism
+/// is `zone_tx`, which hands out the transaction from inside a template
+/// body — precisely what the template-zone discipline forbids a guest
+/// to have (the compile_fail doctest on [`Tx::items`] is that wall). A
+/// `#[doc(hidden)]` method would still be callable; a trait living in a
+/// private module cannot even be brought into scope outside this crate,
+/// so the mechanism is unreachable rather than merely undocumented.
+mod for_scope {
+    use super::Tx;
+
+    pub trait Zone<'b> {
+        /// True inside a template body. Decides the id space of the
+        /// For's own node, and nothing else — the records, the
+        /// auto-parenting and the close are identical at both depths.
+        const NESTED: bool;
+        fn zone_tx(&mut self) -> &mut Tx<'b>;
+    }
+}
+
+/// The zone a For is being traced in: the live tree (a [`Tx`]) or
+/// another template's body (a [`Tpl`], or a [`Row`] directly).
+/// [`Collection::rows`] takes either, so a nested For is the same for
+/// statement one level in — `groups.rows(tx)` outside, `items.rows(t)`
+/// inside — which is how every other binding spells the nesting too.
+///
+/// The zones differ in exactly one thing: a For declared inside a
+/// template is itself a template node, and template nodes are a
+/// separate id space from live widgets.
+///
+/// Taking a scope does NOT hand the transaction back to the guest —
+/// the one method that could is sealed away, so the template-zone wall
+/// still stands. Pinned here rather than trusted:
+///
+/// ```compile_fail
+/// fn zone_rule(t: &mut kaya::Tpl<'_, '_>, todos: &kaya::Collection<String>) {
+///     t.zone_tx().len(todos); // no such method: the trait is unnameable
+/// }
+/// ```
+pub trait ForScope<'b>: for_scope::Zone<'b> {}
+
+impl<'b, T: for_scope::Zone<'b>> ForScope<'b> for T {}
+
+impl<'b> for_scope::Zone<'b> for Tx<'b> {
+    const NESTED: bool = false;
+    fn zone_tx(&mut self) -> &mut Tx<'b> {
+        self
+    }
+}
+
+impl<'b> for_scope::Zone<'b> for Tpl<'_, 'b> {
+    const NESTED: bool = true;
+    fn zone_tx(&mut self) -> &mut Tx<'b> {
+        self.tx
+    }
+}
+
+impl<'b> for_scope::Zone<'b> for Row<'_, 'b> {
+    const NESTED: bool = true;
+    fn zone_tx(&mut self) -> &mut Tx<'b> {
+        self.tx.as_mut().expect("kaya: row used after close")
     }
 }
 
@@ -2383,6 +2459,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn checkbox(&mut self, src: impl Into<TplSource<BoolKind>>) -> TemplateNodeId {
         self.tpl().checkbox(src)
+    }
+
+    pub fn button(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        self.tpl().button(src)
     }
 
     pub fn row<R>(&mut self, body: impl FnOnce(&mut Tpl<'_, 'b>) -> R) -> (TemplateNodeId, R) {
@@ -4321,6 +4401,16 @@ impl Tpl<'_, '_> {
         n
     }
 
+    /// A button whose caption comes from any addressable source — a
+    /// constant per stamped copy, a signal, or the element's own field.
+    /// Clicks on a stamped copy arrive as `InstanceButtonClicked`,
+    /// naming this node plus the copy's key path.
+    pub fn button(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Button);
+        self.apply_source(n, Prop::Text, src.into().inner);
+        n
+    }
+
     fn apply_source(&mut self, node: TemplateNodeId, prop: Prop, src: SourceInner) {
         let value = match src {
             SourceInner::Const(v) => PropValue::Const(v),
@@ -4835,6 +4925,79 @@ mod tests {
             )),
             "the For parented into the enclosing container"
         );
+    }
+
+    /// THE NESTED TRACE AND THE TEMPLATE-ZONE BUTTON ARE SPELLING.
+    /// milestone2's shape — a For over groups, a For over items inside
+    /// it, a label bound to the element and a constant-captioned button
+    /// per stamped item — built at the explicit floor and built in the
+    /// sugar, emits the same records in the same order. IDS INCLUDED,
+    /// which is the clause that can actually break: the two zones
+    /// allocate from separate counters, so a nested For that took a
+    /// widget id instead of a template-node id would renumber
+    /// everything after it while still rendering something plausible.
+    #[test]
+    fn nested_row_trace_matches_the_floor_records() {
+        use crate::protocol::{Prop, WidgetKind};
+
+        fn floor() -> String {
+            let (_occ_tx, occ_rx) = mpsc::channel();
+            let (tx_tx, tx_rx) = mpsc::channel();
+            let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+            let mut tx = ctx.begin();
+            let groups = tx.collection::<Todo>();
+            let root = tx
+                .column(|tx| {
+                    tx.for_each(&groups, |t| {
+                        t.column(|t| {
+                            let name = t.widget(WidgetKind::Label);
+                            t.bind_element(name, Prop::Text, 0);
+                            let items = t.collection::<Todo>();
+                            t.for_each(&items, |t| {
+                                t.column(|t| {
+                                    let text = t.widget(WidgetKind::Label);
+                                    t.bind_element(text, Prop::Text, 0);
+                                    let remove = t.widget(WidgetKind::Button);
+                                    t.set(remove, Prop::Text, "remove");
+                                });
+                            });
+                        });
+                    });
+                })
+                .id();
+            tx.mount(root);
+            tx.commit();
+            format!("{:#?}", tx_rx.try_recv().expect("committed ops"))
+        }
+
+        fn sugar() -> String {
+            let (_occ_tx, occ_rx) = mpsc::channel();
+            let (tx_tx, tx_rx) = mpsc::channel();
+            let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+            let mut tx = ctx.begin();
+            let groups = tx.collection::<Todo>();
+            let root = tx
+                .column(|tx| {
+                    for mut group in groups.rows(tx) {
+                        group.column(|t| {
+                            t.label(Todo::title());
+                            let items = t.collection::<Todo>();
+                            for mut item in items.rows(t) {
+                                item.column(|t| {
+                                    t.label(Todo::title());
+                                    t.button("remove");
+                                });
+                            }
+                        });
+                    }
+                })
+                .id();
+            tx.mount(root);
+            tx.commit();
+            format!("{:#?}", tx_rx.try_recv().expect("committed ops"))
+        }
+
+        assert_eq!(sugar(), floor());
     }
 
     /// The round trip minus any backend: the app builds the milestone-1

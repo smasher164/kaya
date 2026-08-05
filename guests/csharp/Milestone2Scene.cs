@@ -1,13 +1,38 @@
 // The milestone-2 scene from C#, on the construction sugar: typed
-// handles, constructors carrying their handlers, containers taking
-// their children, and Action<Tpl> closures instead of template_end
-// bookkeeping. The wire vocabulary underneath (KayaWire.cs) is
-// generated from kaya::spec by kaya-bindgen.
+// handles, constructors carrying their props, containers taking their
+// children through a body lambda, and the template zone's own
+// constructors instead of template_end bookkeeping. The wire
+// vocabulary underneath (KayaWire.cs) is generated from kaya::spec by
+// kaya-bindgen.
+//
+// WHAT THIS SCENE DOCUMENTS IS HOW OCCURRENCES REACH AN APP, and only
+// that (DESIGN.md, the scope ratified 2026-08-05). The remove button is
+// a STAMPED copy, so its handler is registered CENTRALLY, after the
+// build, against the template node the build body handed back — and it
+// arrives carrying that copy's key path, which is the only way to know
+// WHICH remove was clicked. The live step button spells the other half
+// of the same registry: its handler rides its constructor, because a
+// live widget is its own noun. Both spellings put the same closure in
+// the same table. Construction is the ordinary sugar every example that
+// is not a C guest uses.
+//
+// A C# LAMBDA CAPTURES ITS ENCLOSING LOCALS BY REFERENCE, so the two
+// handles the central registration needs — the per-group items
+// collection and the stamped remove button — are assigned to the
+// scene's own locals from inside the template bodies that build them.
+// Java threads the same two handles out through one-slot arrays only
+// because its lambdas cannot do this.
+//
+// AND THE APP NAMES EVERY KEY HERE, on purpose. "g1" and "a" are the
+// app's own identity for a group and an item: the driver reaches back
+// for g1 to rename it ("Work" -> "Office") and the expected verdict
+// says "removed g2/a", so those names are data the app chose and still
+// knows. InsertFresh answers the other case — a row with no identity of
+// its own (EntryScene.cs, TodosScene.cs, docs/fresh-key-plan.md) — and
+// minting here would only force the app to remember a name it had.
 //
 // Build the library first (cargo build / cargo xwin build --release),
 // keep kaya.dll on PATH or set KAYA_LIB, then: dotnet run
-
-using System.Collections.Generic;
 
 static class Milestone2Scene
 {
@@ -30,26 +55,6 @@ static class Milestone2Scene
             var stepCount = tx.Signal(0);
 
             var groups = tx.Collection();
-            System.Action<Tpl> buildGroupList = t =>
-            {
-                t.Column(() =>
-                {
-                    Node name = t.Widget(KayaWire.KindLabel);
-                    t.BindTextElement(name);
-
-                    items = t.Collection();
-                    t.ForEach(items, item =>
-                    {
-                        item.Column(() =>
-                        {
-                            Node text = item.Widget(KayaWire.KindLabel);
-                            item.BindTextElement(text);
-                            removeButton = item.Widget(KayaWire.KindButton);
-                            item.SetText(removeButton, "remove");
-                        });
-                    });
-                });
-            };
 
             // Auto-parenting puts the templates where they stand: the
             // When and the For are declared inside the column, between
@@ -76,12 +81,27 @@ static class Milestone2Scene
                     t.Write(status, $"step {steps}");
                 });
                 tx.Label(bind: status);
-                tx.When(stepCount == 1, t =>
+                tx.When(stepCount == 1, t => t.Label("extras on"));
+                tx.Each(groups, group =>
                 {
-                    Node bannerLabel = t.Widget(KayaWire.KindLabel);
-                    t.SetText(bannerLabel, "extras on");
+                    group.Column(() =>
+                    {
+                        // A scalar collection's element IS its one wire
+                        // field, so the row's label addresses field 0 —
+                        // the token is the address, and the constructor
+                        // is the same Label the live zone uses.
+                        group.Label(KayaRecords.FieldAt<string>(0));
+                        items = group.Collection();
+                        group.Each(items, item =>
+                        {
+                            item.Column(() =>
+                            {
+                                item.Label(KayaRecords.FieldAt<string>(0));
+                                removeButton = item.Button("remove");
+                            });
+                        });
+                    });
                 });
-                tx.ForEach(groups, buildGroupList);
             }));
         });
 

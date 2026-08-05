@@ -1,21 +1,30 @@
 package dev.kaya.milestone2kt;
 
 import dev.kaya.KayaApp;
-import dev.kaya.KayaWire;
 
 /**
  * The milestone-2 scene from the JVM, on the construction sugar: typed
  * handles, constructors carrying their handlers, containers taking
- * their children, and Consumer&lt;Tpl&gt; closures instead of
- * template_end bookkeeping. The ring recipe (Unsafe fenced access)
- * lives in KayaApp; the wire vocabulary (KayaWire) is generated from
- * kaya::spec by kaya-bindgen.
+ * their children, and the tracing tier for both Fors — a nested {@code
+ * for} statement over {@code rows()} IS the nested For, so nothing
+ * spells template_end and nothing binds an element by index. The ring
+ * recipe (Unsafe fenced access) lives in KayaApp; the wire vocabulary
+ * (KayaWire) is generated from kaya::spec by kaya-bindgen.
+ *
+ * <p>WHAT THIS SCENE DOCUMENTS IS THE EVENT SIDE (DESIGN.md, the scope
+ * ratified 2026-08-05): the step button carries its handler where it
+ * stands, while the stamped remove button is registered CENTRALLY
+ * after the build, against the template node the build body handed
+ * back — a click on a copy arrives carrying that copy's key path,
+ * which is the thing this scene exists to show. Construction is
+ * ordinary sugar here, as in every example that is not a C guest. The
+ * keys are the app's own ("g1", "a"): identity it chose, so no minter
+ * is involved.
  */
 final class Milestone2 {
     /**
-     * The template handles the handlers need — templates and build
-     * hand their declarations back out (KayaApp.Stamped), so nothing
-     * escapes through static fields.
+     * The template handles the handlers need — build hands its
+     * declarations back out, so nothing escapes through static fields.
      */
     private static final class Scene {
         final KayaApp.Signal<String> status;
@@ -41,54 +50,60 @@ final class Milestone2 {
 
             KayaApp.Collection groups = tx.collection();
 
+            // Java lambdas cannot assign captured locals, so the two
+            // handles declared inside the blueprint — the nested
+            // collection and the stamped button — come back out
+            // through one-slot arrays (Entry.java's idiom, and
+            // Undo.java's).
+            KayaApp.Collection[] items = new KayaApp.Collection[1];
+            KayaApp.Node[] remove = new KayaApp.Node[1];
+
             // Auto-parenting puts the templates where they stand: the
             // When and the For are declared inside the column, between
-            // their siblings, and parent themselves there. Handles
-            // still escape through the For body's return value (one
-            // slot per handle, the lambda-capture idiom).
-            Scene[] built = new Scene[1];
+            // their siblings, and parent themselves there.
             tx.mount(tx.column(() -> {
-                tx.button("step", t -> {
+                tx.button("step", t -> { // button#0
                     steps++;
                     if (steps == 1) {
                         t.insert(groups, "g1", "Work");
-                        KayaApp.Collection todos = built[0].items.at("g1");
+                        KayaApp.Collection todos = items[0].at("g1");
                         t.insert(todos, "a", "send report");
                         t.insert(todos, "b", "buy milk");
                     } else if (steps == 2) {
                         t.insert(groups, "g2", "Home");
-                        t.insert(built[0].items.at("g2"), "a", "water plants");
+                        t.insert(items[0].at("g2"), "a", "water plants");
                         t.update(groups, "g1", "Office");
                     }
                     t.write(extras, steps == 1);
                     t.write(status, "step " + steps);
                 });
-                tx.label(status);
+                tx.label(status); // label#0
+                // A block body: an expression lambda is ambiguous
+                // between the Consumer and Function when overloads.
                 tx.when(extras, t -> {
-                    KayaApp.Node bannerLabel = t.widget(KayaWire.KIND_LABEL);
-                    t.setText(bannerLabel, "extras on");
+                    t.label("extras on");
                 });
-                built[0] = tx.forEach(groups, t -> {
-                    KayaApp.Collection[] items = new KayaApp.Collection[1];
-                    KayaApp.Node[] remove = new KayaApp.Node[1];
-                    t.column(() -> {
-                        KayaApp.Node name = t.widget(KayaWire.KIND_LABEL);
-                        t.bindTextElement(name, 0);
+                // The tracing tier: each for-each IS the For — the
+                // body runs once, and value() is the element's own
+                // token (a scalar collection has exactly one field,
+                // the element itself, which is what an index used to
+                // spell). The traces nest because each rides the zone
+                // it opens in.
+                for (var group : groups.rows()) {
+                    group.column(() -> {
+                        group.label(group.value());
 
-                        items[0] = t.collection();
-                        t.forEach(items[0], item -> {
+                        items[0] = group.collection();
+                        for (var item : items[0].rows()) {
                             item.column(() -> {
-                                KayaApp.Node text = item.widget(KayaWire.KIND_LABEL);
-                                item.bindTextElement(text, 0);
-                                remove[0] = item.widget(KayaWire.KIND_BUTTON);
-                                item.setText(remove[0], "remove");
+                                item.label(item.value());
+                                remove[0] = item.button("remove");
                             });
-                        });
+                        }
                     });
-                    return new Scene(status, items[0], remove[0]);
-                }).out;
+                }
             }));
-            return built[0];
+            return new Scene(status, items[0], remove[0]);
         });
 
         app.onClick(scene.removeButton, (tx, keys) -> {

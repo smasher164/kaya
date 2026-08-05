@@ -65,7 +65,7 @@ extern crate self as kaya;
 
 pub use app::{
     Accepts, ActionRef, Align, AnyAnchor, AppCtx, BarAnchor, Collection, ContextAnchor, ContextCatalog,
-    Field, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
+    Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
     CatalogHome, MenuRole, ToggleRef, Tpl, TplSource, Tx, ValueKind, props,
 };

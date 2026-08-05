@@ -1578,6 +1578,13 @@ public final class KayaApp {
             return t.label(f);
         }
 
+        /** A button in this row, captioned: every stamped copy shows
+         * it, and a click on one names that copy's key path (register
+         * with {@code app.onClick(node, (tx, keys) -> …)}). */
+        public Node button(String text) {
+            return t.button(text);
+        }
+
         public Node row(Runnable body) {
             return t.row(body);
         }
@@ -2955,6 +2962,24 @@ public final class KayaApp {
         public Node label(KayaRecords.Field<String> f) {
             Node n = widget(KayaWire.KIND_LABEL);
             bindTextField(n, 0, f);
+            return n;
+        }
+
+        /**
+         * A button with its caption, in the blueprint: the template
+         * twin of {@link Tx#button(String)}.
+         *
+         * <p>Its handler is registered against the template node
+         * ({@code app.onClick(node, (tx, keys) -> …)}) because a
+         * stamped copy's click names the copy — the keys ARE the noun.
+         * There is no caption-plus-handler overload here for that
+         * reason: the live-zone {@code button(text, onClick)} takes a
+         * {@code Consumer<Tx>}, and a template's handler cannot have
+         * that shape.
+         */
+        public Node button(String text) {
+            Node n = widget(KayaWire.KIND_BUTTON);
+            setText(n, text);
             return n;
         }
 

@@ -2384,6 +2384,23 @@ sealed class Tpl
         return n;
     }
 
+    /// A button with its caption, in the blueprint: the template twin
+    /// of Tx.Button, and the same constructor java's Tpl.button,
+    /// swift's KayaTpl.button and ocaml's template zone already carry.
+    ///
+    /// IT TAKES NO HANDLER, and the omission is the design. A stamped
+    /// copy's click names the copy, so the handler is registered
+    /// against the TEMPLATE NODE — app.OnClick(node, (tx, keys) => …)
+    /// — and receives that copy's key path. The live zone's
+    /// Action&lt;Tx&gt; has nowhere to put the keys, so an onClick
+    /// overload here could only be the wrong one.
+    public Node Button(string text)
+    {
+        var n = Widget(KayaWire.KindButton);
+        SetText(n, text);
+        return n;
+    }
+
     /// An image over constant encoded bytes: one registration copy
     /// into core memory at record time — the handle is consumed by
     /// the next submit, and every stamped copy shows the same asset.
@@ -2449,6 +2466,16 @@ sealed class Tpl
     }
 
     public Collection Collection() => tx.Collection();
+
+    /// A nested For as a child: ForEach whose body keeps no handles —
+    /// the template twin of Tx.Each, and swift's KayaTpl.each.
+    ///
+    /// A C# lambda captures its enclosing locals BY REFERENCE, so a
+    /// handle the body owes the outside is assigned to the scene's own
+    /// local (guests/csharp/Milestone2Scene.cs) rather than threaded
+    /// back through a result. That is why this returns the For alone
+    /// and why nothing here needs ForEach's shape.
+    public Node Each(Collection c, Action<Tpl> body) => ForEach(c, body);
 
     public Node ForEach(Collection c, Action<Tpl> body)
     {

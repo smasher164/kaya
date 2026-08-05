@@ -99,6 +99,7 @@ module KayaApp
     WClass (..),
     RowCol,
     LeafArgs,
+    ButtonArgs,
     row,
     column,
     scroll,
@@ -112,6 +113,7 @@ module KayaApp
     recordHandle,
     collectionOf,
     field,
+    element,
     insertRecord,
     insertFresh,
     updateRecord,
@@ -1691,11 +1693,43 @@ buttonOn text handler = leafish $ do
 -- 2026-08-05 when the entry graduation found the sugar could not
 -- spell "leaf, no handler" — the one hole of its kind among the eight
 -- bindings (python's handler kwarg is optional, go takes nil).
-button :: (LeafArgs r) => String -> r
-button text = leafish $ do
+--
+-- 'button' IS THE ONE LEAF THAT STANDS IN BOTH ZONES, so it dispatches
+-- on its result type through a class of its own rather than through
+-- 'LeafArgs' — the idiom 'row' and 'column' already use for the same
+-- reason. A template's button is a blueprint entry stamped once per
+-- element, and a click on a copy names that copy by key path, so it
+-- CANNOT take the live zone's @IO ()@ handler at the constructor: the
+-- app registers one handler centrally with 'onClickNode' and reads the
+-- keys off the occurrence (guests/haskell/milestone2.hs). That is why
+-- there is no template 'buttonOn' beside it — the live zone's @IO ()@
+-- has nowhere to put the keys, so the overload could only be the wrong
+-- one. The other bindings carry the same handler-free constructor in
+-- their template zones (swift's @KayaTpl.button@, java's
+-- @Tpl.button@); this zone reached it 2026-08-05, with the milestone2
+-- graduation.
+class ButtonArgs r where
+  buttonish :: String -> r
+
+instance (b ~ Widget) => ButtonArgs (Build b) where
+  buttonish = captionedButton
+
+instance (b ~ Node) => ButtonArgs (Tpl b) where
+  buttonish = captionedButton
+
+instance (a ~ Attr 'LeafW, r ~ Build Widget) => ButtonArgs ([a] -> r) where
+  buttonish text attrs = withAttrs attrs (captionedButton text)
+
+-- One declaration, whichever zone hosts it: the same two records at
+-- both depths, from that zone's own id space.
+captionedButton :: (Declare m) => String -> m (El m)
+captionedButton text = do
   w <- widget W.kindButton
   setText w text
   return w
+
+button :: (ButtonArgs r) => String -> r
+button = buttonish
 
 entry :: (LeafArgs r) => r
 entry = leafish (widget W.kindEntry)
@@ -2198,6 +2232,19 @@ field = case elemIndex (symbolVal (Proxy :: Proxy name)) (kayaFieldNames (Proxy 
   -- Unreachable: HasField holds and every KayaRecord field is
   -- wire-typed, so the name is always in the derived list.
   Nothing -> error ("kaya: field " ++ symbolVal (Proxy :: Proxy name) ++ " has no wire slot")
+
+-- | The ELEMENT ITSELF as an addressable source: a scalar collection
+-- (the plain 'collection') carries exactly one field and the element
+-- is it, so there is no name to give. @label element@ is the scalar
+-- twin of @label (field \@"title" \@Todo)@, and lowers to the same
+-- bind_element the index spelling did.
+--
+-- go and java reach this token through a row proxy (@row.Value()@); a
+-- template body here takes no argument, so it stands alone and says
+-- what it addresses. String because that is a scalar collection's
+-- whole schema — @[[valueStr]]@, one field, one type.
+element :: KField String
+element = KField 0
 
 -- | A Collection whose entries are a-records.
 newtype RecordCollection a = RecordCollection Collection

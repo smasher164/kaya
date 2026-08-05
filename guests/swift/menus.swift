@@ -96,13 +96,17 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
         tx.forEach(groups) { g -> Void in
             let items = g.collection()
             itemsOut = items
-            let (itemList, _) = g.forEach(items) { r -> Void in
-                let row = r.widget(UInt32(KAYA_KIND_LABEL))  // label#2 once g2/a stamps
-                r.bindTextElement(row)
-                r.contextMenu(row, catalog)
-            }
+            // The For is declared INSIDE the column it belongs to and
+            // parents itself there at creation. The old spelling built
+            // it outside and mentioned the handle in the builder, which
+            // DISCARDS its expressions — the rows were never attached
+            // (the milestone2 graduation's orphan class, 2026-08-05).
             _ = g.column {
-                itemList
+                g.forEach(items) { r -> Void in
+                    let row = r.widget(UInt32(KAYA_KIND_LABEL))  // label#2 once g2/a stamps
+                    r.bindTextElement(row)
+                    r.contextMenu(row, catalog)
+                }.0
             }
         }.0
     }

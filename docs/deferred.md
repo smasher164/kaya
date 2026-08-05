@@ -941,6 +941,30 @@ count, so the saving is measured rather than assumed.
     Binding-conventions rule, and a gate clause should pin the chosen
     tier so the split cannot silently re-open.
 
+  From the milestone2 graduation (2026-08-05):
+  - **GUARD GAP — the harness resolves widgets by registry, so a leg
+    cannot see a widget that never got parented.** Proven by the
+    defect it hid: Swift's milestone2 window rendered TWO widgets (the
+    step button and status label) instead of its full UI for
+    milestones, with every leg green, because `kind#index` targets
+    resolve against per-kind registries populated at create/stamp time
+    (KayaSwiftUI.swift:410-431) — never by walking the mounted tree.
+    An unparented widget answers reads, produces expected strings, and
+    displays nothing. The wall this needs: a harness-level assertion
+    that every widget a script names is REACHABLE FROM THE MOUNTED
+    ROOT (both interpreters), so an orphan turns the leg red instead
+    of invisible. Sibling suspicion flagged by the same arm:
+    guests/swift/menus.swift has the identical discarded-builder shape
+    and is likely rendering an empty group column today — verify by
+    tree-walk when the wall exists, or by eye before.
+  - The Swift binding's template zone never pushed a parenting frame
+    for forEach/when bodies (fixed 2026-08-05 in the graduation: an
+    inTemplateBody frame at all four combinators, matching Java's
+    always-present barrier). Kept here as the failure-class record:
+    the defect survived because NO Swift guest had ever declared a For
+    inside a template container — first-use-of-a-combination holes are
+    what the scene matrix's breadth is for.
+
   From the fresh-key depth arm (2026-08-05):
   - **DEFECT — a derived signal is not recomputed after an undo.**
     `recompute_derived` is called from the six `Tx` mutation paths and

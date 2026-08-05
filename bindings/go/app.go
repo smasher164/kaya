@@ -2492,6 +2492,37 @@ func (t *Tpl) BindTextElement(n Node, level uint32) {
 	t.tx.emit(TxBindTextElement(n.id, level, 0))
 }
 
+// LabelText creates a label with constant text in the blueprint: the
+// template twin of Tx.LabelText, and the same two records at either
+// depth. The bound flavors are the element ones — Row.Label over the
+// element's own token, RecordCollection.Label over a field's — since a
+// blueprint's variable text comes from the element it is stamped for.
+func (t *Tpl) LabelText(text string) Node {
+	n := t.Widget(KindLabel)
+	t.SetText(n, text)
+	return n
+}
+
+// Button creates a button with its caption in the blueprint: the
+// template twin of Tx.Button.
+//
+// IT TAKES NO HANDLER, and the omission is the design. A template's
+// button is stamped once per element, so a click names WHICH copy by
+// key path, and the app registers one handler centrally against the
+// template node (App.OnClickNode, which hands the handler that copy's
+// keys). The live zone's func(*Tx) has nowhere to put them, so a
+// second parameter here could only be the wrong shape — the same
+// reason java's Tpl.button, swift's KayaTpl.button and haskell's
+// template `button` take a caption and nothing else. Go's template
+// zone reached this constructor 2026-08-05, with the milestone2
+// graduation; until then a stamped button had to be spelled at the
+// floor (Widget(KindButton) + SetText), which is what that scene did.
+func (t *Tpl) Button(text string) Node {
+	n := t.Widget(KindButton)
+	t.SetText(n, text)
+	return n
+}
+
 // The template flavor of the containers.
 func (t *Tpl) Row(body func()) Node {
 	return t.containerOf(KindRow, body)

@@ -771,6 +771,27 @@ final class KayaApp {
             childFrames[top].ids.append(id)
         }
     }
+
+    /// Run a For's or a When's body behind a PARENT BARRIER: a node
+    /// created directly in that body is a ROOT of the template it
+    /// declares — the core derives the roots itself — and never a child
+    /// of whatever container encloses the combinator. The frame is
+    /// pushed only to be dropped; its ids are the roots, and roots take
+    /// no add_child.
+    ///
+    /// Java's binding has always spelled this (`parents.add(0L)` around
+    /// the body); Swift's omission survived because no Swift guest had
+    /// ever declared a For inside a TEMPLATE container. milestone2's
+    /// graduation is the first, and without the barrier its item column
+    /// parented into the enclosing group column across the inner For's
+    /// scope — which the core refuses outright ("add_child across
+    /// template cases"). That refusal is the wall; this is the fix it
+    /// named.
+    fileprivate func inTemplateBody<R>(_ body: () -> R) -> R {
+        childFrames.append(KayaFrame(template: true))
+        defer { childFrames.removeLast() }
+        return body()
+    }
     var openTraces = 0
     // The record-time mirror-read guard's arming counter: >0 while any
     // template body (a For body, a When body, or a row-trace body) is
@@ -2090,7 +2111,7 @@ final class KayaAppTx {
         app.openFors.append(c.id)
         app.tplDepth += 1
         defer { app.tplDepth -= 1 }
-        let out = body(KayaTpl(tx: self))
+        let out = app.inTemplateBody { body(KayaTpl(tx: self)) }
         app.openFors.removeLast()
         tx.templateEnd()
         return (w, out)
@@ -2103,7 +2124,7 @@ final class KayaAppTx {
         app.parentAtCreation(live: w.id)
         app.tplDepth += 1
         defer { app.tplDepth -= 1 }
-        let out = body(KayaTpl(tx: self))
+        let out = app.inTemplateBody { body(KayaTpl(tx: self)) }
         tx.templateEnd()
         return (w, out)
     }
@@ -2973,6 +2994,23 @@ final class KayaTpl {
         return n
     }
 
+    /// A button with its caption, in the blueprint: the template twin
+    /// of `KayaAppTx.button(_:onClick:grow:)`, and the same constructor
+    /// Java's and OCaml's template zones already carry.
+    ///
+    /// It takes NO handler argument, and the omission is the design:
+    /// a stamped copy's click names the copy, so the handler is
+    /// registered against the template node
+    /// (`app.onClick(node) { tx, keys in … }`) and receives that copy's
+    /// keys. The live zone's `(KayaAppTx) -> Void` shape has nowhere to
+    /// put them, so an `onClick:` overload here could only be the wrong
+    /// one.
+    func button(_ text: String) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_BUTTON))
+        setText(n, text)
+        return n
+    }
+
     func checkbox(
         _ f: KayaField<Bool>,
         onToggle: ((KayaAppTx, [KayaValue], Bool) throws -> Void)? = nil
@@ -3044,6 +3082,14 @@ final class KayaTpl {
         tx.collection()
     }
 
+    /// A nested For as a child: forEach whose body keeps no handles —
+    /// the template twin of `KayaAppTx.each(_:_:)`, and the common case
+    /// once the handles a template owes the outside are assigned to the
+    /// scene's own bindings rather than threaded back through R.
+    func each(_ c: KayaCollection, _ body: (KayaTpl) -> Void) -> KayaNodeHandle {
+        forEach(c) { body($0) }.0
+    }
+
     func forEach<R>(_ c: KayaCollection, _ body: (KayaTpl) -> R) -> (KayaNodeHandle, R) {
         c.assertRoot()
         let n = tx.app.nextNode()
@@ -3052,7 +3098,7 @@ final class KayaTpl {
         tx.app.openFors.append(c.id)
         tx.app.tplDepth += 1
         defer { tx.app.tplDepth -= 1 }
-        let out = body(KayaTpl(tx: tx))
+        let out = tx.app.inTemplateBody { body(KayaTpl(tx: tx)) }
         tx.app.openFors.removeLast()
         tx.tx.templateEnd()
         return (n, out)
@@ -3064,7 +3110,7 @@ final class KayaTpl {
         tx.app.parentAtCreation(node: n.id)
         tx.app.tplDepth += 1
         defer { tx.app.tplDepth -= 1 }
-        let out = body(KayaTpl(tx: tx))
+        let out = tx.app.inTemplateBody { body(KayaTpl(tx: tx)) }
         tx.tx.templateEnd()
         return (n, out)
     }
