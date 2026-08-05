@@ -90,6 +90,13 @@ GATES = {
     # so REMOVING a declaration is what makes the missing legs a failure,
     # and a key that did not read the backends would hand back the stale
     # PASS exactly then.
+    #
+    # The verb-feature cross-check (2026-08-05) reads three more things
+    # and NONE of them widens this set, which is worth writing down so
+    # the next reader does not re-derive it: tools/scenes and the five
+    # runners are under tools/, which rides every gate key; and
+    # ROLE_FEATURE is pinned against MENU_ROLES in
+    # crates/kaya/src/scene.rs, which is already inside crates/.
     "check-steps": ["guests", "crates", "swift", "android"],
     "check-shell": [],
     "check-mirror": ["CLAUDE.md", "AGENTS.md"],
@@ -110,7 +117,16 @@ GATES = {
     # The JNI registration cross-check reads the two rust registration
     # modules, the Kotlin classes and the desktop Java class.
     "check-jni": ["crates", "android/kaya/src", "bindings/java-desktop"],
-    "check-stubs": ["crates", "swift", "android"],
+    # docs/ joined this set when the gate grew the STUB-IMPLIES-LEDGER
+    # clause (2026-08-05): a depth stub is sanctioned only while
+    # docs/deferred.md holds an OPEN entry for it, so STRIKING an entry
+    # through is now a change that must fail the gate. A key blind to the
+    # ledger would hand back a stale PASS for exactly that edit — the
+    # same shape as the guests/ widening on check-sugar-surface. The
+    # whole directory rather than the one file, following this table's
+    # own rule: over-approximating costs a re-run nobody notices, and it
+    # survives the ledger ever splitting in two.
+    "check-stubs": ["crates", "swift", "android", "docs"],
     # gradle's :kaya sourceSet reaches ../../bindings/java and nothing
     # else outside android/.
     "check-compose": ["android", "bindings/java"],

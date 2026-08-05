@@ -212,4 +212,66 @@ object KayaPresent {
      * fetch within the batch. Null for a dead handle.
      */
     @JvmStatic external fun blobData(handle: Long): ByteArray?
+
+    // ---- The undo tier (docs/undo-plan.md D6/§3) -------------------
+    //
+    // The five entries KayaHostApi carries as vtable rows on the Apple
+    // side. THE WINDOW IS ALWAYS 0 HERE and that is a platform fact
+    // rather than a shortcut: Android is one Activity and one surface,
+    // the same reason [emitTextChanged] does not carry a window across
+    // this boundary. It stays in the signature so the JNI thunks are a
+    // straight forward to the C entries and the ledger keeps its
+    // per-window shape.
+
+    /**
+     * Where an undo would go RIGHT NOW: 0 nowhere (the command is inert
+     * and reads disabled), 1 the focused field's own stack, 2 the core's
+     * ledger.
+     *
+     * [focused] is the widget the backend has focus on, 0 for none;
+     * [canUndo] is A4's one named query, answered in this platform's own
+     * vocabulary (`TextUndoManager.canUndo`). ENABLEMENT AND ACTIVATION
+     * ARE THE SAME CALL, so the two cannot drift.
+     * kaya_undo_route's JNI spelling.
+     */
+    @JvmStatic external fun undoRoute(window: Long, focused: Long, canUndo: Boolean): Int
+
+    /** Redo's twin, with the field's `canRedo` in place of `canUndo`.
+     *  kaya_redo_route's JNI spelling. */
+    @JvmStatic external fun redoRoute(window: Long, focused: Long, canRedo: Boolean): Int
+
+    /** The core tier answers: apply the newest ledger entry's inverse
+     *  and emit `undone` carrying the label and the restored state. The
+     *  ops reach this backend through [nextCommands] like any other
+     *  apply, so nothing comes back here. kaya_undo's JNI spelling. */
+    @JvmStatic external fun undo(window: Long)
+
+    /** Redo's twin: the forward delta was computed at apply beside the
+     *  inverse, so nothing is re-run. kaya_redo's JNI spelling. */
+    @JvmStatic external fun redo(window: Long)
+
+    /**
+     * THE ONE REPORT OF A ROUTED NATIVE UNDO (docs/undo-plan.md §3):
+     * the [field] the backend sent the platform's own undo to, the
+     * [text] the walk landed on, and whether that field can still undo.
+     * The core walks its frontier episode from those three facts.
+     *
+     * [canUndo] IN BOTH DIRECTIONS, deliberately — a redo reports it
+     * too. It is not "did this walk have more to give"; it is the
+     * core's test for the one case A1's clear is meant to make
+     * unreachable, a platform that coalesced across the episode's start.
+     *
+     * The ordinary [emitTextChanged] the same undo provokes carries
+     * `quiet = true`, so the change is banked once no matter which of
+     * the two the platform delivers first — and on this backend BOTH
+     * arrive (measured: a routed `undoState.undo()` moves the snapshot
+     * the field's collector observes, scratchpad/undo-fan-compose.md
+     * §1 Q-a and §3 point 6). kaya_note_native_undo's JNI spelling.
+     */
+    @JvmStatic external fun noteNativeUndo(
+        window: Long,
+        field: Long,
+        text: String,
+        canUndo: Boolean,
+    )
 }

@@ -275,27 +275,20 @@ var kayaDensity = 1.0
 var kayaRootSize = androidx.compose.ui.unit.IntSize.Zero
 var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
-/**
- * The one spelling of "this backend has not reached that scene yet",
- * the Kotlin twin of Rust's `depth_stub` and Swift's `kayaDepthStub`.
- *
- * A CALL AND NOT A SENTENCE, which is the whole point: check-stubs and
- * check-steps both READ this call — one refuses a runner that wires a
- * scene's legs while the backend is still here, the other stops
- * demanding those legs — and a backend that refuses in its own words is
- * invisible to both.
- *
- * IT CAME BACK FOR THE UNDO SLICE, exactly as its own deletion note
- * asked: the helper lived here through the clipboard depth slice and
- * was removed the day the arms landed, because dead code kept "for
- * later" is what a reader has to reason about for nothing. The last
- * call site's removal is what obliges the next one.
- */
-internal fun depthStub(scene: String): Nothing =
-    error(
-        "kaya: the $scene scene is not yet materialized on this backend — " +
-            "it is a depth slice; see CLAUDE.md's sequencing"
-    )
+// THE DEPTH-STUB HELPER IS GONE AGAIN, and its own doc asked for this:
+// it lived here through the clipboard depth slice, was removed the day
+// those arms landed, came back for the undo slice, and is removed now
+// that the undo arm's last call site is gone. Dead code kept "for later"
+// is what a reader has to reason about for nothing.
+//
+// The next Compose depth slice re-adds it, in exactly this shape — a
+// CALL and not a sentence, because tools/check-stubs.sh and
+// tools/check-steps.sh both read the call and neither can see a backend
+// that refuses in its own words:
+//
+//     internal fun depthStub(scene: String): Nothing =
+//         error("kaya: the $scene scene is not yet materialized on this " +
+//               "backend — it is a depth slice; see CLAUDE.md's sequencing")
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
@@ -2320,11 +2313,14 @@ object KayaCompose {
      * Cut and Copy, acting on the FOCUSED FIELD'S SELECTION through the
      * one selection-level hook this interpreter's fields have.
      *
-     * kaya holds no caret and no selection: the lowering hands Compose
-     * the `String` / `onValueChange` overload, so there is no
-     * TextFieldValue to read a range out of — which is exactly why
-     * these had to be platform COMMANDS rather than something an app
-     * assembles out of the data layer. What Compose does publish is
+     * kaya holds no caret and no selection: the model carries a bare
+     * `String`, so nothing on this side names a range to cut — which is
+     * exactly why these had to be platform COMMANDS rather than
+     * something an app assembles out of the data layer. (The field's
+     * `TextFieldState` DOES carry a selection since the undo migration,
+     * and reaching for it would be the wrong fix: `edit {}` commits, and
+     * a commit CLEARS the field's undo history — D7's clear firing for a
+     * read.) What Compose does publish is
      * SemanticsActions.CutText / CopyText on the field's own node,
      * present only while a selection exists, and invoking one runs
      * BasicTextField's own cut/copy — the same action the platform's
@@ -4108,47 +4104,19 @@ internal fun kayaNativeUndo(redo: Boolean) {
 
 // ---- The seam to the core's ledger --------------------------------
 //
-// BLOCKED, AND LOUDLY (docs/undo-plan.md §4's fan-out; the mac arm hit
-// the identical wall one phase earlier and recorded it the same way).
+// The five entries below are this host's spelling of KayaHostApi's undo
+// rows: `undoRoute`, `redoRoute`, `undo`, `redo`, `noteNativeUndo`,
+// declared in KayaPresent.kt and registered by
+// `register_present_natives` in crates/kaya/src/android.rs. Kotlin
+// cannot call a C symbol without one — there is no generic bridge here,
+// and every core query on this host (specHash, stalledMs, nextCommands,
+// blobData) is a registered native. tools/check-jni.sh pins both
+// directions of that pairing.
 //
-// The core's undo entry points EXIST and are exported as C symbols —
-// `kaya_undo_route`, `kaya_redo_route`, `kaya_undo`, `kaya_redo`,
-// `kaya_note_native_undo` (crates/kaya/src/capi.rs) — and the SwiftUI
-// interpreter reaches them through the KayaHostApi vtable. THIS
-// interpreter reaches the core only through the JNI natives registered in
-// `crates/kaya/src/android.rs` and declared in
-// `android/…/dev/kaya/KayaPresent.kt`, and neither file carries an undo
-// entry yet. Kotlin cannot call a C symbol without one: there is no
-// generic bridge, and every core query on this host (specHash, stalledMs,
-// nextCommands, blobData) is a registered native.
-//
-// So these five functions are the arm's side of a two-file change, and
-// they REFUSE rather than answer quietly: an undo route that guessed, or
-// a core undo that no-oped, would be indistinguishable from an empty
-// ledger — the exact silent class this milestone exists to close.
-// `depthStub` is the refusal, because it is the one spelling
-// tools/check-stubs.sh and tools/check-steps.sh both READ: between them
-// they hold the undo legs off tools/android/run-emulator.sh for exactly
-// as long as this seam is open, and hand them back the moment it closes.
-//
-// WHAT THE JNI NEEDS, from this side (the mirror of KayaHostApi's rows):
-//
-//     KayaPresent.undoRoute(window: Long, focused: Long, canUndo: Boolean): Int
-//     KayaPresent.redoRoute(window: Long, focused: Long, canRedo: Boolean): Int
-//     KayaPresent.undo(window: Long)
-//     KayaPresent.redo(window: Long)
-//     KayaPresent.noteNativeUndo(window: Long, field: Long, text: String,
-//                                canUndo: Boolean)
-//
-// The two route entries answer 0 NOTHING / 1 NATIVE / 2 CORE
-// (`Scene::route_undo`'s three answers; capi.rs's undo_route_code); an
-// unknown code is a protocol drift and must fail loudly rather than read
-// as "nothing to do". Then each body below becomes one line, and nothing
-// else in this file moves.
-//
-// Android is one Activity and one surface, so the window argument is 0
-// everywhere here — stated rather than crossed, the way android.rs states
-// it for the emit.
+// THE WINDOW IS 0 EVERYWHERE HERE, stated rather than crossed: Android is
+// one Activity and one surface, which android.rs already says for the
+// emit. macOS asks `kayaPresentedMenuWindow` because it has a key window
+// and a global menu bar; this platform has neither.
 
 /**
  * Where an undo would go RIGHT NOW.
@@ -4164,12 +4132,9 @@ internal fun kayaNativeUndo(redo: Boolean) {
  * fifth hard-coded predicate of exactly the kind D6 records as the
  * silent-failure shape.
  */
-internal fun kayaUndoRoute(): KayaUndoRoute {
-    kayaUndoSeamNote("undo_route", "canUndo=${kayaFocusedCanUndo()}")
-    // return kayaRouteCode(
-    //     KayaPresent.undoRoute(0, KayaSceneModel.focusedId ?: 0, kayaFocusedCanUndo()))
-    depthStub("undo")
-}
+internal fun kayaUndoRoute(): KayaUndoRoute =
+    kayaRouteCode(
+        KayaPresent.undoRoute(0, KayaSceneModel.focusedId ?: 0, kayaFocusedCanUndo()))
 
 /**
  * Redo's twin. On the frontier episode redo stays NATIVE while the
@@ -4177,10 +4142,27 @@ internal fun kayaUndoRoute(): KayaUndoRoute {
  * taking them back coarsely would throw away granularity the user sees.
  * That judgement is the ledger's too; this asks with `canRedo`.
  */
-internal fun kayaRedoRoute(): KayaUndoRoute {
-    kayaUndoSeamNote("redo_route", "canRedo=${kayaFocusedCanRedo()}")
-    depthStub("undo")
-}
+internal fun kayaRedoRoute(): KayaUndoRoute =
+    kayaRouteCode(
+        KayaPresent.redoRoute(0, KayaSceneModel.focusedId ?: 0, kayaFocusedCanRedo()))
+
+/**
+ * The core's three-way answer, in this file's vocabulary. An unknown code
+ * is a PROTOCOL DRIFT, not a "nothing to do": the core and this
+ * interpreter would disagree about routing, silently, on every
+ * activation — and "nothing to do" is the one wrong answer that looks
+ * exactly like the right one. `undo_route_code` in
+ * crates/kaya/src/capi.rs is the authority for the mapping.
+ */
+internal fun kayaRouteCode(code: Int): KayaUndoRoute =
+    when (code) {
+        0 -> KayaUndoRoute.NOTHING
+        1 -> KayaUndoRoute.NATIVE
+        2 -> KayaUndoRoute.CORE
+        else -> error(
+            "kaya: unknown undo route $code from the core — the JNI surface and " +
+                "this interpreter disagree")
+    }
 
 /**
  * THE ONE REPORT OF A ROUTED NATIVE UNDO (§3). The core walks its
@@ -4188,11 +4170,20 @@ internal fun kayaRedoRoute(): KayaUndoRoute {
  * consumed at the before-image, still open with more to give, or
  * exhausted short of it (the case A1's clear is supposed to make
  * unreachable). All three are the core's to decide.
+ *
+ * ONE REPORT AND NOT TWO, on a backend where BOTH channels fire. §3a
+ * demands each arm measure whether a native undo reaches kaya's model,
+ * and this one answered YES where the mac arm answered no
+ * (scratchpad/undo-fan-compose.md §1 Q-a, re-measured on the shipped
+ * source at §3 point 6): `undoState.undo()` writes the same snapshot
+ * state the field's collector observes, so the ordinary `text_changed`
+ * arrives a frame later on its own. That emission is bracketed
+ * LEDGER-QUIET ([kayaNativeUndoEcho]) and this call is the report, which
+ * is Q2's one-reporter rule with the two platforms differing only in
+ * which of the two reports they suppress.
  */
 internal fun kayaNoteNativeUndo(node: KayaNode, text: String, canUndo: Boolean) {
-    kayaUndoSeamNote("note_native_undo", "field=${node.id} text=$text canUndo=$canUndo")
-    // KayaPresent.noteNativeUndo(0, node.id, text, canUndo)
-    depthStub("undo")
+    KayaPresent.noteNativeUndo(0, node.id, text, canUndo)
 }
 
 /**
@@ -4208,38 +4199,13 @@ internal fun kayaNoteNativeUndo(node: KayaNode, text: String, canUndo: Boolean) 
  * layer keeps no copy of the ledger to disagree with.
  */
 internal fun kayaCoreUndo() {
-    kayaUndoSeamNote("undo", "window=0")
-    // KayaPresent.undo(0)
-    depthStub("undo")
+    KayaPresent.undo(0)
 }
 
 /** Redo's twin, symmetric in every respect (the forward delta was
  *  computed at apply beside the inverse, so nothing is re-run). */
 internal fun kayaCoreRedo() {
-    kayaUndoSeamNote("redo", "window=0")
-    // KayaPresent.redo(0)
-    depthStub("undo")
-}
-
-/**
- * Say WHICH core entry was wanted and with what, on the way to the
- * refusal.
- *
- * A depth stub's own message names the scene and the doctrine, which is
- * right for a reader who has never seen this file and useless for the one
- * wiring the JNI. This line carries what the backend had computed at the
- * moment it needed the core — the sample, the focus, the field's own
- * answer — which is the half that is easy to get wrong and impossible to
- * reconstruct afterwards.
- */
-private fun kayaUndoSeamNote(entry: String, facts: String) {
-    Log.e(
-        "kaya",
-        "KAYA_UNDO_TRACE: the core's `$entry` has no JNI entry on this host " +
-            "($facts). Add it to KayaPresent.kt and register it in " +
-            "crates/kaya/src/android.rs beside emitTextChanged; the C symbol " +
-            "`kaya_$entry` already exists in crates/kaya/src/capi.rs."
-    )
+    KayaPresent.redo(0)
 }
 
 /**

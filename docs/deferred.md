@@ -966,17 +966,27 @@ count, so the saving is measured rather than assumed.
     what the scene matrix's breadth is for.
 
   From the fresh-key depth arm (2026-08-05):
-  - **DEFECT — a derived signal is not recomputed after an undo.**
-    `recompute_derived` is called from the six `Tx` mutation paths and
-    from nowhere else; `AppCtx::absorb_undo` folds the mirror with
-    zero references to it (measured). So a `Collection::derive` signal
-    goes stale the moment an undo restores or removes an entry, and
-    stays stale until the next ordinary mutation. No scene catches it
-    today only because `todos` (the one `derive` user) has no undo and
-    `undo` writes its labels by hand — but derive-plus-undo is the
-    natural combination. Fix: absorb_undo recomputes; guard: a scene
-    (or the undo scene itself) that binds a derived count over an
-    undone insert/remove.
+  - ~~**DEFECT — a derived signal is not recomputed after an undo.**~~
+    **RETRACTED 2026-08-06, ratified by the maintainer — a false alarm
+    from call-graph reading, and the record stays because the next
+    reader will make the same inference.** The claim was: absorb_undo
+    never calls recompute_derived, therefore a derived label goes
+    stale when undo restores or removes entries. The claim's premise
+    is true and its conclusion is false: a derived write is an
+    ordinary WriteSignal batched into the SAME transaction as its
+    mutation (recompute_derived pushes unconditionally — no cache, no
+    skip), and Scene::bank_group banks EVERY dirty signal into both
+    directions of the step, so undo restores the derived value
+    together with the collection it derives from. They cannot
+    disagree. The C# and Swift absorb comments said this all along;
+    the resolution slice propagates that comment to the six bindings
+    that skip silently, and the todos scene gains an undoable step so
+    the correct behavior is pinned by the matrix, not trusted.
+    ONE RESIDUAL, real but unconstructible today: a derive declared
+    AFTER a step was banked is absent from that step's signal set, so
+    undoing past its declaration leaves it inconsistent until the
+    next mutation. Every guest declares derives in the opening build;
+    if a scene ever declares one late, this line is the warning.
   - **Residual, taken deliberately: the toolkit's child order after an
     undo restore is asserted at the app's mirror (the keys label), not
     at the toolkit.** `expect_order` would need the For's container to

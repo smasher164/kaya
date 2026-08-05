@@ -2772,6 +2772,38 @@ class App:
         core says what the value is, and a derived signal the group
         wrote is an ordinary signal in that same run. Text is neither
         mirrored nor cached, and passes straight through.
+
+        NO DERIVED RECOMPUTE, DELIBERATELY — the absence is the design,
+        not an omission. A derived signal's write rode the SAME
+        transaction as the mutation that caused it
+        (`Collection._recompute_derived` appends an ordinary
+        `tx_write_signal` after every mutation, unconditionally), so
+        when that transaction was a named step the group banked the
+        derived value in both of its directions, and the core has
+        already restored it — it arrives in the `signals` run above like
+        any other signal. Python says the same thing structurally, since
+        it has no type to say it with: recomputing appends to
+        `_records()`, and there is no ambient transaction here. This
+        runs straight off the occurrence loop (`_dispatch_loop`), before
+        and without any handler, so a recompute would have nowhere to
+        put the write.
+
+        WHAT A RECOMPUTE HERE WOULD COST is worth spelling out, because
+        the call graph invites one (docs/deferred.md carries the
+        retracted "a derived signal goes stale after an undo" defect,
+        inferred from exactly this method calling nothing). Agreeing
+        with the banked value it writes nothing at all — `_recompute`'s
+        `!=` guard sees the cache this method just moved — so it is dead
+        code hiding the mechanism. Disagreeing, it raises "no ambient
+        transaction" in the middle of an occurrence; and were it handed
+        a transaction to write into, it would put a value the ledger
+        never banked on screen, so the screen and the ledger's record of
+        the step would drift apart and the next walk through the history
+        would jump back. Disagreement is reachable exactly two ways: a
+        compute that reads anything beyond the entries, or a derive
+        declared after that step was banked (deferred.md's one
+        residual). Neither is fixed by recomputing behind the core's
+        back.
         """
         for signal_id, value in delta.signals:
             sig = self._signals.get(signal_id)

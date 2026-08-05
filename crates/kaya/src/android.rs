@@ -226,6 +226,33 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "()J".into(),
                 fn_ptr: crate::jvm::ring_spec_hash as *mut _,
             },
+            // The undo tier (docs/undo-plan.md D6/§3), the JNI mirror of
+            // KayaHostApi's five vtable rows on the Apple side.
+            NativeMethod {
+                name: "undoRoute".into(),
+                sig: "(JJZ)I".into(),
+                fn_ptr: present_undo_route as *mut _,
+            },
+            NativeMethod {
+                name: "redoRoute".into(),
+                sig: "(JJZ)I".into(),
+                fn_ptr: present_redo_route as *mut _,
+            },
+            NativeMethod {
+                name: "undo".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_undo as *mut _,
+            },
+            NativeMethod {
+                name: "redo".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_redo as *mut _,
+            },
+            NativeMethod {
+                name: "noteNativeUndo".into(),
+                sig: "(JJLjava/lang/String;Z)V".into(),
+                fn_ptr: present_note_native_undo as *mut _,
+            },
         ],
     )
 }
@@ -372,6 +399,77 @@ extern "system" fn present_emit_text(
             crate::protocol::DEFAULT_WINDOW.0,
             u8::from(focused != 0),
             u8::from(quiet != 0),
+        )
+    };
+}
+
+/// KayaPresent.undoRoute / redoRoute: kaya_undo_route's and
+/// kaya_redo_route's JNI spelling — 0 nowhere, 1 the focused field's own
+/// stack, 2 the core's ledger.
+///
+/// The pair the backend contributes (what is focused, whether that
+/// field's own stack has anything) goes down; the ledger decides. Asked
+/// once and used twice on the Kotlin side — enablement and activation
+/// are the same question (A4) — so this crossing happens on every menu
+/// render that carries an Edit>Undo row, which is why it is a plain
+/// forward with no allocation.
+extern "system" fn present_undo_route(
+    _env: JNIEnv,
+    _class: JClass,
+    window: jlong,
+    focused: jlong,
+    can_undo: jni::sys::jboolean,
+) -> jint {
+    crate::capi::kaya_undo_route(window as u64, focused as u64, u8::from(can_undo != 0)) as jint
+}
+
+extern "system" fn present_redo_route(
+    _env: JNIEnv,
+    _class: JClass,
+    window: jlong,
+    focused: jlong,
+    can_redo: jni::sys::jboolean,
+) -> jint {
+    crate::capi::kaya_redo_route(window as u64, focused as u64, u8::from(can_redo != 0)) as jint
+}
+
+/// KayaPresent.undo / redo: the core tier's two entries. Nothing comes
+/// back — the inverse's ops reach this backend through the pump like any
+/// other apply, and the app hears one `undone` / `redone`.
+extern "system" fn present_undo(_env: JNIEnv, _class: JClass, window: jlong) {
+    crate::capi::kaya_undo(window as u64);
+}
+
+extern "system" fn present_redo(_env: JNIEnv, _class: JClass, window: jlong) {
+    crate::capi::kaya_redo(window as u64);
+}
+
+/// KayaPresent.noteNativeUndo: the one report of a native undo THIS
+/// backend routed (docs/undo-plan.md §3) — the field, the text the walk
+/// landed on, and whether the field can still undo.
+///
+/// The string crosses as UTF-8 bytes, the same shape `emitTextChanged`
+/// hands `kaya_emit_text_changed`: the C entry takes a byte range and
+/// the local `String` outlives the call.
+extern "system" fn present_note_native_undo(
+    mut env: JNIEnv,
+    _class: JClass,
+    window: jlong,
+    field: jlong,
+    text: JString,
+    can_undo: jni::sys::jboolean,
+) {
+    let text: String = env
+        .get_string(&text)
+        .expect("kaya: reading the undone field text failed")
+        .into();
+    unsafe {
+        crate::capi::kaya_note_native_undo(
+            window as u64,
+            field as u64,
+            text.as_ptr(),
+            text.len(),
+            u8::from(can_undo != 0),
         )
     };
 }

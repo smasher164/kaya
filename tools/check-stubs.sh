@@ -112,6 +112,24 @@ if ! python3 tools/lib/hand-rolled-stubs.py; then
     status=1
 fi
 
+# STUB IMPLIES LEDGER. The two rules above make a depth stub SILENT: it
+# holds a scene's legs off a runner and both gates read green. That is
+# the right behavior and it is also a place to leave work forever —
+# forgetting a stub costs nothing, because nothing anywhere says it is
+# there. The Compose undo stub sat across five entry points for a whole
+# milestone with no entry in docs/deferred.md, and it took an agent
+# reading the backend source to find it (2026-08-05).
+#
+# So the silence has a price: every declaration must have an OPEN entry
+# in docs/deferred.md naming the scene and the backend. Struck-through
+# entries do not count — a closed entry says the hole was filled, and a
+# backend still refusing is then a contradiction rather than a carve-out.
+# `git log -S 'depth_stub(' -- docs/deferred.md` was EMPTY before this
+# rule: not one stub in the project's history was ever tracked.
+if ! python3 tools/lib/stub-ledger.py; then
+    status=1
+fi
+
 if [ "$status" -ne 0 ]; then
     exit 1
 fi

@@ -770,6 +770,61 @@ impl KayaOuter {
     }
 }
 
+/// Whether the framework's control resources were merged at launch, and
+/// if not, why. Recorded ONCE by outer_on_launched; read by
+/// require_control_resources.
+///
+/// A process-global rather than CoreState, because the merge happens in
+/// OnLaunched — before any transaction, and therefore before CORE holds
+/// anything a menu apply could consult.
+static CONTROL_RESOURCES: OnceLock<Result<(), String>> = OnceLock::new();
+
+/// Refuse to build chrome whose default style lives in the resources
+/// this process could not load, and SAY SO.
+///
+/// THE FAILURE THIS REPLACES, measured 2026-08-05 (todos_go /
+/// todos_csharp, matrix, twice): the tiering below is right — most
+/// templates resolve locally and a host without the pri must keep
+/// working — but "log and continue" left the process to walk into a
+/// bare `RaiseFailFastException` LATER, on a layout tick, with no
+/// message. The dump's stack is
+/// `DefaultStyles::GetDefaultStyleByTypeName` (0x800f1000) under
+/// `CControl::EnterImpl` under `CLayoutManager::UpdateLayout`: XAML
+/// realizing a MenuBarItem into the tree, asking for its built-in
+/// style, and finding none. The guest had already served six harness
+/// steps by then, so the crash pointed at the step that happened to be
+/// running rather than at the menu — it cost this arm a dump and a
+/// controlled substitution to say what the first line of the log
+/// already knew.
+///
+/// The menu surface is where the wall goes because it is where the
+/// dependency enters: a window MenuBar (ensure_menu_shell) and a
+/// context MenuFlyout (ensure_context_flyout) are the only two places
+/// kaya mints chrome from this dictionary, and both are reached the
+/// first time an app declares a menu — the most basic thing an app can
+/// do that provokes the failure.
+fn require_control_resources(surface: &str) {
+    let Some(Err(why)) = CONTROL_RESOURCES.get() else {
+        return;
+    };
+    panic!(
+        "kaya: winui: {surface}, but the Windows App SDK control \
+         resources are not loaded, so XAML has no default style for the \
+         menu chrome. Realizing it fail-fasts the process with \
+         0xc000027b on a later layout tick — after the window is on \
+         screen, with no message — so kaya refuses here instead. \
+         XamlControlsResources could not be merged at launch: {why}. It \
+         loads through ms-appx, and ms-appx in an unpackaged process \
+         resolves against the directory of the EXECUTABLE — not the \
+         dll, not the working directory. Put kaya's resources.pri beside \
+         the exe that runs this app; a host that launches from a \
+         temporary or build-output directory (`go run`, a dotnet apphost \
+         under bin/) must build or copy its exe next to the pri instead. \
+         See docs/traps.md, \"WinUI resource resolution is anchored to \
+         the PROCESS exe's directory\"."
+    );
+}
+
 unsafe extern "system" fn outer_on_launched(
     this: *mut core::ffi::c_void,
     _args: *mut core::ffi::c_void,
@@ -783,7 +838,11 @@ unsafe extern "system" fn outer_on_launched(
     // through ms-appx, which needs the exe-adjacent resources.pri —
     // present for the scene executables, structurally absent for
     // dll-hosted guests without the pri-adjacency runners. Where the
-    // real merge fails, kaya logs and continues.
+    // real merge fails, kaya logs, RECORDS THE REASON, and continues —
+    // continuing is correct (every control whose template resolves
+    // locally still works, which is most of them), but the recorded
+    // reason is what turns the eventual death into a sentence rather
+    // than a hex code (require_control_resources).
     let launched: windows_core::Result<()> = APP.with_borrow(|app| {
         let Some(app) = app.as_ref() else {
             return Ok(());
@@ -794,12 +853,17 @@ unsafe extern "system" fn outer_on_launched(
             app.Resources()?.MergedDictionaries()?.Append(&resources)?;
             Ok(())
         })();
-        if let Err(e) = merged {
-            eprintln!(
-                "kaya: winui XamlControlsResources unavailable ({})",
-                e.message()
-            );
-        }
+        let outcome = match &merged {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                eprintln!(
+                    "kaya: winui XamlControlsResources unavailable ({})",
+                    e.message()
+                );
+                Err(e.message())
+            }
+        };
+        let _ = CONTROL_RESOURCES.set(outcome);
         Ok(())
     });
     launched.into()
@@ -1670,6 +1734,11 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     if core.menubars.contains_key(&window) {
         return Ok(());
     }
+    // The MenuBar's items are realized by a LAYOUT PASS, not by the
+    // append below, which is why the failure this guards used to land
+    // milliseconds later on a dispatcher tick and read as a defect in
+    // whatever step was running.
+    require_control_resources("this window declares a menu");
     let target = winui_window(core, window)?;
     let shell = Grid::new()?;
     let defs = shell.RowDefinitions()?;
@@ -2477,6 +2546,11 @@ fn ensure_context_flyout(core: &mut CoreState, widget: u64) -> windows_core::Res
     if core.context_flyouts.contains_key(&widget) {
         return Ok(());
     }
+    // At ATTACH, not at first show: a flyout whose styles are missing
+    // dies on the user's first right-click, and "it crashes when a user
+    // does the thing" is the failure mode this whole guard exists to
+    // stop being the first report.
+    require_control_resources("this widget declares a context menu");
     let flyout = MenuFlyout::new()?;
     let element = core
         .widgets

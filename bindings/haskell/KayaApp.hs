@@ -2607,6 +2607,27 @@ undoableTxIn app windowId label body =
 -- nothing here re-derives anything. Signals and text are not mirrored
 -- by this binding (there is no read-back for either, by doctrine), so
 -- those two runs pass straight to the app's handler.
+--
+-- NO DERIVED RECOMPUTE HERE, DELIBERATELY: the absence is the design
+-- and not an omission. A derived signal's write rode the SAME
+-- transaction as the mutation that caused it — 'recomputeDerived'
+-- appends an ordinary 'txWriteSignal' to 'bRecords' on every mutation
+-- path there is — so when that transaction was a named group the core
+-- banked the derived value in both of the step's directions and has
+-- already restored it by the time this runs. The types point the same
+-- way: 'recomputeDerived' is a 'BuildState' step that appends to the
+-- batch it is already inside, and there is no batch here. Reaching
+-- 'appDerived' from IO would mean opening a transaction of the
+-- binding's own, which is exactly the thing that would be wrong.
+--
+-- Because that transaction is one the app never asked for, carrying a
+-- value the ledger never banked, arriving between the core's restore
+-- and the app's 'WOnUndone'. Where it agreed with the banked value it
+-- would be dead code hiding the mechanism; where it disagreed — a
+-- compute reading anything beyond the entries, or a derive declared
+-- after the step was banked (the residual docs/deferred.md keeps) — the
+-- screen and the ledger's record of the step would drift apart, and the
+-- next walk through the history would jump back to the banked value.
 absorbUndo :: App -> UndoDelta -> IO ()
 absorbUndo app delta = modifyIORef' (appModel app) fold
   where

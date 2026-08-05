@@ -565,6 +565,26 @@ impl AppCtx {
     /// Signals and text are not mirrored by this binding (there is no
     /// read-back for either, by doctrine), so the two runs that carry
     /// them pass straight to the app's own handler.
+    ///
+    /// NO DERIVED RECOMPUTE HERE, DELIBERATELY — and the absence is the
+    /// design, not an omission. A derived signal's write rode the SAME
+    /// transaction as the mutation that caused it (`Tx::recompute_derived`
+    /// pushes an ordinary `WriteSignal` after each of the six mutation
+    /// paths), so when that transaction was a named step the group
+    /// banked the derived value in both of its directions and the core
+    /// has already restored it by the time this runs. The type system
+    /// says the same thing: recomputing is a `Tx` method and there is no
+    /// `Tx` here.
+    ///
+    /// A recompute added here would write a value the ledger never
+    /// banked, in a transaction the app never asked for, arriving
+    /// between the core's restore and the app's own `on_undone`. When it
+    /// agreed with the banked value it would be dead code hiding the
+    /// mechanism; when it disagreed — a compute that reads anything
+    /// beyond the entries, or a derive declared after that step was
+    /// banked (docs/deferred.md's one residual) — the screen and the
+    /// ledger's record of the step would drift apart, and the next walk
+    /// through the history would jump back to the banked value.
     fn absorb_undo(&self, delta: &crate::protocol::UndoDelta) {
         let mut model = self.model.borrow_mut();
         for entry in &delta.entries {

@@ -2737,6 +2737,27 @@ type undoReport struct {
 // Signals and text are not mirrored by this binding (there is no
 // read-back for either, by doctrine), so the two runs that carry them
 // pass straight to the app's own handler.
+//
+// NO DERIVED RECOMPUTE HERE, DELIBERATELY, and the absence is the
+// design rather than an oversight. A derived signal's write rode the
+// SAME transaction as the mutation that caused it — every collection
+// mutation calls (*Tx).recomputeDerived, which writes each compute's
+// result into the transaction in hand — so when that transaction was a
+// named step, the group banked the derived value in both of its
+// directions and the core has already restored it before this runs. The
+// signatures say the same thing: recomputing takes a *Tx and this
+// method has none. The transaction the loop makes next is the app's
+// handler's, and it comes after.
+//
+// A recompute added here would write a value the ledger never banked,
+// in a transaction the app never asked for, landing between the core's
+// restore and the app's own OnUndone. Where it agreed with the banked
+// value it would be dead code hiding the mechanism; where it disagreed
+// — a compute reading anything beyond the entries, or a derive declared
+// after that step was banked (docs/deferred.md's one residual) — the
+// screen and the ledger's record of the step would part company, and
+// the next walk through the history would jump back to the banked
+// value.
 func (a *App) absorbUndo(delta UndoDelta) {
 	for _, e := range delta.Entries {
 		shape, known := a.shapes[e.Collection]

@@ -778,6 +778,23 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity clipboard \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script clipboard)'"
+    # The undo scene: ONE history over two tiers (docs/undo-plan.md
+    # D1-D6, §3). Both tiers are real on this backend — the field's own
+    # TextUndoManager answers the frontier, the core's ledger answers
+    # everything behind it, and the routing between them is kaya's
+    # (§1's table: "GTK and Compose route in kaya"), because a focused
+    # Compose text field CONSUMES Ctrl+Z whether or not it has anything
+    # to undo and the Activity's shortcut route never sees the chord.
+    #
+    # THIS LEG IS WHERE THE TYPING VERB EARNS ITS KEEP. `type` dispatches
+    # real KeyEvents through the Activity, so the field's own undo stack
+    # fills the way a user's typing fills it; a set_text stand-in would
+    # CLEAR that stack (D7) and the native tier would have nothing to
+    # answer with — the scene would pass having observed one tier.
+    run_apk undo-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity undo \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script undo)'"
     drain
     timing legs-compose
 fi
@@ -910,6 +927,15 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity clipboard \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script clipboard)'"
+    # The undo scene through the JVM binding (see the compose leg). Same
+    # interpreter, same two tiers; what this arm adds is the Java
+    # binding's `undoable` spelling and its absorb of the undone/redone
+    # payload, on the tier that shares guests/java's sources with the
+    # desktop lanes.
+    run_apk undo-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity undo \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script undo)'"
     drain
     timing legs-jvm
 fi

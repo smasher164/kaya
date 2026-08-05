@@ -16,9 +16,20 @@
 //! app never reads it, formats it or compares it, and so has no reason
 //! to author it.
 //!
+//! AND THE DERIVED LABEL SURVIVES AN UNDO WITHOUT ANYONE RESTORING IT.
+//! The add is a named step (`tx.undoable`), and the derive's write is
+//! in that same batch — the binding recomputes after the insert and
+//! pushes an ordinary signal write into the transaction that caused it
+//! — so the core banks the label in both directions of the step and
+//! hands it back with the collection. That is why this file registers
+//! no `on_undone`: there is nothing for a handler to fix up, and a
+//! binding that recomputed the derive while absorbing the payload would
+//! be writing a value the ledger never banked (see AppCtx::absorb_undo).
+//!
 //! The backend selftest (KAYA_SELFTEST=todos) types "buy milk", clicks
-//! Add, toggles the stamped row's checkbox, and expects the status
-//! label to read exactly "0 items left".
+//! Add, reads "1 item left", walks the add back and forward through the
+//! Edit menu reading the label at each end, then toggles the stamped
+//! row's checkbox and expects the label to read exactly "0 items left".
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Todo {
@@ -43,6 +54,18 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // loop, the Rust idiom.
     let msgs = kaya::Messages::new();
     let (todos, field) = ctx.apply(|tx| {
+        // THE GESTURE LAYER, and the two items are the whole of it: an
+        // app declares them and writes nothing else. They act on what
+        // is focused, lower to the platform's own command where it has
+        // one, and work out their own enablement from what the ledger
+        // holds (docs/undo-plan.md D1-D6).
+        tx.window(kaya::DEFAULT_WINDOW)
+            .title("todos")
+            .menu("Edit", |m| {
+                m.item("Undo").role(kaya::MenuRole::Undo).id();
+                m.item("Redo").role(kaya::MenuRole::Redo).id();
+            })
+            .id();
         let todos = tx.collection::<Todo>();
         let items_left = todos.derive(tx, |items| {
             let n = items.iter().filter(|(_, t)| !t.done).count();
@@ -85,17 +108,34 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 if draft.is_empty() {
                     continue;
                 }
+                let step = format!("add {draft}");
                 ctx.apply(|tx| {
+                    // ONE CALL, AND IT IS THE WHOLE UNDO SURFACE. What
+                    // makes the ITEMS-LEFT LABEL come back with the todo
+                    // is that the derive's write is in this batch:
+                    // `insert_fresh` recomputes and pushes an ordinary
+                    // signal write, and a named transaction banks every
+                    // signal it dirtied in both directions. So the
+                    // step's inverse carries "0 items left" and its
+                    // forward carries "1 item left", and the label is
+                    // restored by the same mechanism as the collection.
+                    tx.undoable(step);
                     // NO KEY, AND NO COUNTER TO GET WRONG: the binding
                     // mints the name and hands it back. This app has no
                     // use for the returned key — a todo is looked up by
                     // nothing, and the checkbox's own path names its row
                     // — so the call is made for effect.
                     tx.insert_fresh(&todos, Todo { title: draft.clone(), done: false });
-                    // Finish the form: the field empties on screen and
-                    // reports text_changed("") through its normal edit
-                    // path (the fold empties the draft), and the
-                    // cursor lands back in it.
+                });
+                // FINISHING THE FORM IS NOT PART OF THE STEP. Its own
+                // transaction, so undoing the add does not put the draft
+                // back beside a todo that is gone — and `clear` inside a
+                // group would be refused at apply anyway (D4), because
+                // it destroys widget-owned text the core never held. The
+                // field empties on screen and reports text_changed("")
+                // through its normal edit path (the fold empties the
+                // draft), and the cursor lands back in it.
+                ctx.apply(|tx| {
                     tx.clear(field);
                     tx.focus(field);
                 });

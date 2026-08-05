@@ -2358,7 +2358,30 @@ let decode_undo body =
    is what would otherwise be left behind. The payload is
    core-authoritative, so nothing here re-derives anything. Signals and
    text are not mirrored by this binding (no read-back exists for
-   either, by doctrine), so those two runs go straight to the app. *)
+   either, by doctrine), so those two runs go straight to the app.
+
+   NO DERIVED RECOMPUTE HERE, AND THE ABSENCE IS THE DESIGN RATHER THAN
+   AN OMISSION. A derived signal's write rode the SAME transaction as
+   the mutation that caused it — [recompute_derived] runs the
+   collection's computes inside whichever transaction the insert,
+   update, remove or move was called in — so when that transaction
+   carried an [undoable] name, the group banked the derived value in
+   both of its directions and the core had already restored it before
+   this function ran. The types say it too: recomputing wants a [tx],
+   and this takes an [app].
+
+   That is not an accident of the signature. This runs from the dispatch
+   loop OUTSIDE any transaction, deliberately (the mirror is reconciled
+   before the handler and outside its rollback), so a recompute here
+   could not borrow the app's transaction — [the_tx ()] raises — and
+   would have to open one of its own. It would then write a value the
+   ledger never banked, in a transaction the app never asked for,
+   landing between the core's restore and the app's [~on_undone].
+   Agreeing with the banked value it is dead code hiding the mechanism;
+   disagreeing — a compute reading anything beyond the entries, or a
+   derive declared after that step was banked (docs/deferred.md's one
+   residual) — it drifts the screen away from the ledger's record of the
+   step, and the next walk through the history jumps back. *)
 let absorb_undo app delta =
   List.iter
     (fun e ->

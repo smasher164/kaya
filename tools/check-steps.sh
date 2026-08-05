@@ -418,34 +418,40 @@ done
 # costs a DECLARATION in the backend source, so the layout class this
 # gate was written for — green on mac, absent from every suite, nobody
 # having declared anything — is untouched.
+#
+# THE EXEMPTION IS KEYED ON THE SCENE'S FEATURES, NOT ITS NAME, and it
+# has to be, or the two gates contradict each other. tools/scenes are
+# shared verbatim, so a scene can demand a feature it is not named after:
+# `todos.steps` activates Edit>Undo. If a stub on `undo` held only the
+# `undo` legs off a runner, the cross-check below would fail that same
+# runner for its `todos` legs while this half demanded them — no tree
+# could satisfy both, and the next agent would delete a clause to get
+# green. Keyed on features, the interim state stays expressible: a
+# Compose stub on `undo` holds `todos` AND `undo` off the android runner,
+# and the JNI landing hands both back the same day.
+# tools/lib/scene-features.py derives the pairs; it is the SAME predicate
+# the cross-check uses, computed once so the two cannot drift.
 wired() {
-    local runner scene sig backend platform=macos status=0
+    local runner scene sig status=0 exempt
+    exempt="$(python3 tools/lib/scene-features.py --mode exempt)"
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "check-steps: scene-features.py could not derive the depth-stub exemptions" >&2
+        return 1
+    fi
+    # Padded and delimited, so a scene name that is a prefix of another
+    # cannot borrow its exemption. (The runner -> backend roster and the
+    # three declaration spellings moved into the helper with the
+    # predicate; they used to be inlined here, in the third of four
+    # copies.)
+    exempt="$(printf '\n%s\n' "$exempt")"
     for scene in tools/scenes/*.steps; do
         scene="$(basename "${scene%.steps}")"
         for runner in tools/validate-mac.sh tools/linux/run-suites.sh \
             tools/deploy-win.sh tools/ios/run-sim.sh tools/android/run-emulator.sh; do
-            case "$runner" in
-                tools/linux/run-suites.sh) backend=crates/kaya/src/gtk.rs ;;
-                tools/deploy-win.sh) backend=crates/kaya/src/winui/mod.rs ;;
-                tools/android/run-emulator.sh)
-                    backend=android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt ;;
-                # One file, two platforms — hence the platform argument
-                # on the Swift declaration and nowhere else.
-                tools/ios/run-sim.sh) backend=swift/KayaSwiftUI.swift; platform=ios ;;
-                *) backend=swift/KayaSwiftUI.swift; platform=macos ;;
+            case "$exempt" in
+                *$'\n'"$runner"$'\t'"$scene"$'\n'*) continue ;;
             esac
-            # Suffix match: each language keeps its own casing and
-            # prefix (depth_stub / depthStub / kayaDepthStub).
-            # The three spellings: Rust's snake_case, Swift's
-            # platform-qualified one (this file serves mac AND iOS), and
-            # Kotlin's bare one. The bare pattern cannot match the
-            # qualified call — a comma follows the scene there, not a
-            # paren — so mac never reads iOS's declaration as its own.
-            if grep -qF -e "epth_stub(\"$scene\")" \
-                -e "epthStub(\"$scene\", on: \"$platform\")" \
-                -e "epthStub(\"$scene\")" "$backend"; then
-                continue
-            fi
             case "$runner" in
                 tools/validate-mac.sh) sig="run $scene-" ;;
                 tools/linux/run-suites.sh) sig="run \"\$proto\" $scene-" ;;
@@ -464,6 +470,112 @@ wired() {
     return "$status"
 }
 wired || status=1
+
+# THE VERB-FEATURE CROSS-CHECK — the other half of the same predicate,
+# and the wall the derive-pin slice walked through
+# (scratchpad/derive-pin-depth.md §8, 2026-08-05).
+#
+# wired() above says when a stub HOLDS legs off a runner. This says when
+# a runner runs legs it must not: a scene whose verbs demand a feature
+# its backend still refuses. Keyed on the scene NAME — which is how both
+# gates read for four milestones — that question could not be asked at
+# all, because a scene's name is not what a backend has to implement. The
+# reshaped `todos.steps` grew `menu_activate "Edit>Undo"` while Compose
+# still declared `depthStub("undo")`; the android runner wired no `undo`
+# legs so check-stubs was green, and `todos` is not a stubbed name so
+# check-steps was green. Both gates passed on a tree whose android lane
+# was one Edit>Undo away from `error("...not yet materialized...")`.
+#
+# tools/lib/scene-features.py holds the derivation (verbs and menu ROLES
+# to features, with the role table pinned against MENU_ROLES so a seventh
+# role cannot ship without an answer) and every rule about it.
+if ! python3 tools/lib/scene-features.py --mode check; then
+    status=1
+fi
+
+# The guard guards itself, and against a REAL scene corpus rather than a
+# toy one: the synthetic root borrows tools/scenes, crates/kaya/src/scene.rs
+# and tools/lib/hand-rolled-stubs.py from this tree, and synthesizes only
+# the runner and backend files — the two things the rule is about. So the
+# derivation under test is the derivation that ships, and a table that
+# stopped matching the real scripts fails here too.
+feature_selftest() { # legs stub [extra-scene-body]
+    local dir out rc legs stub extra
+    legs="$1"; stub="$2"; extra="${3:-}"
+    dir="$(mktemp -d)"
+    mkdir -p "$dir/tools/lib" "$dir/tools/linux" "$dir/tools/ios" \
+        "$dir/tools/android" "$dir/crates/kaya/src" "$dir/swift" \
+        "$dir/crates/kaya/src/winui" \
+        "$dir/android/kaya/src/main/kotlin/dev/kaya"
+    cp -R tools/scenes "$dir/tools/scenes"
+    cp crates/kaya/src/scene.rs "$dir/crates/kaya/src/scene.rs"
+    cp tools/lib/hand-rolled-stubs.py "$dir/tools/lib/hand-rolled-stubs.py"
+    : >"$dir/tools/validate-mac.sh"
+    : >"$dir/tools/linux/run-suites.sh"
+    : >"$dir/tools/deploy-win.sh"
+    : >"$dir/tools/ios/run-sim.sh"
+    : >"$dir/crates/kaya/src/gtk.rs"
+    : >"$dir/crates/kaya/src/winui/mod.rs"
+    : >"$dir/swift/KayaSwiftUI.swift"
+    [ -n "$extra" ] && printf 'expect label#0 "x"\n%s\n' "$extra" \
+        >"$dir/tools/scenes/zzprobe.steps"
+    printf '%s\n' "$legs" >"$dir/tools/android/run-emulator.sh"
+    printf '%s\n' "$stub" \
+        >"$dir/android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+    out="$(python3 tools/lib/scene-features.py --root "$dir" --mode check 2>&1)"
+    rc=$?
+    rm -rf "$dir"
+    printf '%s' "$out"
+    return "$rc"
+}
+
+# 1. THE EXACT SHAPE §8 RECORDS: the android runner running todos while
+#    Compose stubs undo. It must fail, and it must NAME todos — a message
+#    naming only `undo` would send the reader to the scene that is not
+#    the problem, and the whole defect was that nobody was looking at
+#    todos.
+selftest_out="$(feature_selftest 'run_apk todos-compose apk act todos' \
+    'internal fun x(): Nothing = depthStub("undo")')"
+case "$selftest_out" in
+    *'runs "todos" legs'*'stubs "undo"'*'todos.steps:'*) ;;
+    *)
+        echo "check-steps: SELF-TEST FAIL (a todos leg on a backend stubbing undo was not named):" >&2
+        echo "$selftest_out" >&2
+        exit 1 ;;
+esac
+# 2. ...and the SAME stub with the legs pulled must PASS, or the interim
+#    state of a depth slice is inexpressible and this clause is a wall
+#    across the only road out of it.
+if ! feature_selftest 'run_apk menus-compose apk act menus' \
+    'internal fun x(): Nothing = depthStub("undo")' >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a stub with no legs wired was refused)" >&2
+    exit 1
+fi
+# 3. ...and with no stub at all, the same legs must PASS — otherwise 1
+#    is failing for some reason that has nothing to do with the stub.
+if ! feature_selftest 'run_apk todos-compose apk act todos' '' >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (todos legs on an unstubbed backend were refused)" >&2
+    exit 1
+fi
+# 4/5. THE CLIPBOARD ROWS FIRING CROSS-SCENE, which nothing in the tree
+#    can show: `clipboard.steps` is NAMED after the feature it needs, so
+#    a dead verb row and a live one look identical from outside — the
+#    same blindness that let the CALL spelling go unwritten for four
+#    milestones. A probe scene carries the verb under a name that implies
+#    nothing, and each of the two derivations gets its own run: the VERB
+#    row (expect_clipboard) and the ROLE row (a menu item labelled Paste).
+for probe in 'expect_clipboard text "x"' 'menu_activate "Edit>Paste"'; do
+    selftest_out="$(feature_selftest 'run_apk zzprobe-compose apk act zzprobe' \
+        'internal fun x(): Nothing = depthStub("clipboard")' "$probe")"
+    case "$selftest_out" in
+        *'runs "zzprobe" legs'*'stubs "clipboard"'*) ;;
+        *)
+            echo "check-steps: SELF-TEST FAIL (a clipboard rule did not fire for: $probe)" >&2
+            echo "$selftest_out" >&2
+            exit 1 ;;
+    esac
+done
+unset selftest_out probe
 
 # The Android per-leg setup has an ORDER, and every step's place is
 # load-bearing — enabling the accessibility service before the

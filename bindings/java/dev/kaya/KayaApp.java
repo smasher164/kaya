@@ -3175,6 +3175,27 @@ public final class KayaApp {
      * <p>Signals and text are not mirrored by this binding (there is no
      * read-back for either, by doctrine), so those two runs pass
      * straight to the app's own handler.
+     *
+     * <p>NO DERIVED RECOMPUTE HERE, DELIBERATELY — the absence is the
+     * design and not an oversight. A derived signal's write rode the
+     * SAME transaction as the mutation that caused it: every mutation
+     * path calls {@link Tx#recomputeDerived}, which runs the registered
+     * computes into that very transaction. So when the transaction was
+     * a named step, the group banked the derived value in both of its
+     * directions and the core has already restored it before this
+     * method is reached. The compiler states it too — recomputing is a
+     * {@code Tx} method and this method holds no {@code Tx}, only a
+     * payload.
+     *
+     * <p>A recompute added here would write a value the ledger never
+     * banked, in a transaction the app never asked for, landing between
+     * the core's restore and the app's own {@code onUndone}. Where it
+     * agreed with the banked value it would be dead code hiding the
+     * mechanism; where it disagreed — a compute that reads anything
+     * besides the entries, or a derive declared after that step was
+     * banked (docs/deferred.md's one residual) — the screen and the
+     * ledger's record of the step would drift apart, and the next walk
+     * through the history would jump back to the banked value.
      */
     private void absorbUndo(UndoDelta delta) {
         for (UndoEntry entry : delta.entries()) {
