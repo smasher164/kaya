@@ -335,16 +335,35 @@ func kayaRepresentation(_ clip: KayaClipValues?) -> KayaRepresentation? {
 struct KayaUndoDelta {
     /// Signal id -> its restored value.
     let signals: [(signal: UInt64, value: KayaValue)]
-    /// Widget id -> its restored text. A coarse episode restore is a
-    /// programmatic write, so NOTHING ELSE would ever tell an app that
-    /// folds text_changed into its own model (which is every app — the
-    /// field is uncontrolled).
-    let texts: [(widget: UInt64, text: String)]
+    /// One restored field's text, per field the step disturbed. A coarse
+    /// episode restore is a programmatic write, so NOTHING ELSE would
+    /// ever tell an app that folds text_changed into its own model
+    /// (which is every app — the field is uncontrolled).
+    let texts: [KayaUndoText]
     /// Collection entries, present or gone.
     let entries: [KayaUndoEntry]
     /// Instance orders, for the instances whose order the step changed
     /// — position is the one thing per-entry statements cannot carry.
     let orders: [KayaUndoOrder]
+}
+
+/// One text field's restored text, and the identity that says WHICH
+/// field.
+///
+/// THE SAME TWO NAMES A CHANGE OCCURRENCE ALREADY ARRIVES UNDER, which
+/// is the whole reason this run became an arity-first group like its
+/// entries and orders siblings: an empty `path` means `id` is a live
+/// widget's id, and a non-empty `path` means `id` is a TEMPLATE NODE and
+/// the path is the stamped copy's key path, outermost first — the pair
+/// `onChange(_ n: KayaNodeHandle, …)` hands a row's edit under. A fixed
+/// (widget id, text) pair had nowhere to put the path, so a row's typing
+/// could not be named to the app at all.
+struct KayaUndoText {
+    let id: UInt64
+    /// The instance path: one key per enclosing For, EMPTY for a live
+    /// widget.
+    let path: [KayaValue]
+    let text: String
 }
 
 /// One collection entry's restored state.
@@ -435,14 +454,26 @@ func kayaParseUndo(_ rec: [UInt8]) -> (window: UInt64, label: String, delta: Kay
             guard let pair = take(2), let id = int(pair[0]) else { return nil }
             signals.append((signal: UInt64(id), value: pair[1]))
         }
-        var texts: [(widget: UInt64, text: String)] = []
-        for _ in 0..<nTexts {
-            guard let pair = take(2), let id = int(pair[0]),
-                case .str(let text) = pair[1]
-            else { return nil }
-            texts.append((widget: UInt64(id), text: text))
-        }
         // ARITY FIRST, so a reader needs no schema: size counts itself.
+        // THREE RUNS SHARE THAT SHAPE, and this one joined the other two
+        // when a row's field needed a path — the group is
+        // `size, id, path_len, path values…, text`, pinned value by
+        // value in crates/kaya/src/wire.rs `undo_bodies_round_trip`.
+        // A reader that kept the old fixed pair takes the SIZE for the
+        // id and the id for the text, which is why the pin table is
+        // where this is agreed rather than in a round trip.
+        var texts: [KayaUndoText] = []
+        for _ in 0..<nTexts {
+            guard let head = take(1), let size = int(head[0]), size >= 4,
+                let rest = take(size - 1),
+                let id = int(rest[0]), let pathLen = int(rest[1]),
+                pathLen >= 0, pathLen + 2 < rest.count,
+                case .str(let text) = rest[2 + pathLen]
+            else { return nil }
+            texts.append(
+                KayaUndoText(
+                    id: UInt64(id), path: Array(rest[2..<(2 + pathLen)]), text: text))
+        }
         var entries: [KayaUndoEntry] = []
         for _ in 0..<nEntries {
             guard let head = take(1), let size = int(head[0]), size >= 6,

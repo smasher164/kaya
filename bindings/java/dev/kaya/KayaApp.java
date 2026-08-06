@@ -206,14 +206,20 @@ public final class KayaApp {
     /** One signal the undo put back. */
     public record UndoSignal(long signal, Object value) {}
 
-    /** One field's restored text.
+    /** One field's restored text, NAMED THE WAY THE EDIT THAT FILLED IT
+     * was named: an EMPTY {@code path} means {@code id} is a live
+     * widget's, and a non-empty one means it is the template node of a
+     * stamped copy, at that key path — the same identity tag a click or
+     * a paste on a copy already carries.
      *
      * <p>THE DELTA IS THE ONLY NOTIFICATION for this run: restoring a
      * typing episode is a programmatic write, and a programmatic write
      * never echoes, so an app folding {@code onChange} into its own
      * model would go stale on exactly this step if the payload did not
-     * carry it (docs/undo-plan.md D5). */
-    public record UndoText(long widget, String text) {}
+     * carry it (docs/undo-plan.md D5). An app with two rows needs the
+     * path for the same reason: a text with no name could only be put
+     * back in the field the app guessed. */
+    public record UndoText(long id, List<Object> path, String text) {}
 
     /** One collection entry's restored state. {@code present} false is
      * "the restored state does not have this entry at all", and then
@@ -3259,21 +3265,21 @@ public final class KayaApp {
     }
 
     /**
-     * The decoder's taste-free shape, typed: flattened (id, value) pairs
-     * become records, and the entry/order groups keep theirs. The
-     * generated parser owns the LAYOUT (counts in the head, one flat
-     * Values tail cut into four runs); this owns the SUM the app sees —
-     * the same split representation() already makes for a clip.
+     * The decoder's taste-free shape, typed: the signals' flattened
+     * (id, value) pairs become records, and the three arity-first groups
+     * keep theirs. The generated parser owns the LAYOUT (counts in the
+     * head, one flat Values tail cut into four runs); this owns the SUM
+     * the app sees — the same split representation() already makes for
+     * a clip.
      */
     static UndoDelta undoDelta(KayaWire.UndoValues values) {
         List<UndoSignal> signals = new ArrayList<>(values.signals.size() / 2);
         for (int i = 0; i + 1 < values.signals.size(); i += 2) {
             signals.add(new UndoSignal((Long) values.signals.get(i), values.signals.get(i + 1)));
         }
-        List<UndoText> texts = new ArrayList<>(values.texts.size() / 2);
-        for (int i = 0; i + 1 < values.texts.size(); i += 2) {
-            texts.add(new UndoText(
-                    (Long) values.texts.get(i), (String) values.texts.get(i + 1)));
+        List<UndoText> texts = new ArrayList<>(values.texts.size());
+        for (KayaWire.UndoTextValues text : values.texts) {
+            texts.add(new UndoText(text.id, text.path, text.text));
         }
         List<UndoEntry> entries = new ArrayList<>(values.entries.size());
         for (KayaWire.UndoEntryValues entry : values.entries) {

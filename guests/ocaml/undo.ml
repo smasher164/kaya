@@ -51,17 +51,75 @@ type todo = { title : string } [@@deriving kaya_gen]
    label is the app's to spell. *)
 let what label = if label = "" then "typing" else label
 
+(* The app's own map of what is typed in the ROWS, keyed by the todo's
+   minted name. A [Map] rather than a list because the rendering below
+   is ASCENDING BY KEY on every lane and [bindings] is what says so —
+   one script is compared byte-for-byte across five of them. *)
+module Notes = Map.Make (Int64)
+
+(* The row a stamped copy's occurrence names: the copy's key path, which
+   for a top-level For is one key — the todo's own, minted by
+   [insert_record_fresh] and read exactly as [key_list] reads the
+   collection's keys. *)
+let row_key path =
+  match path with
+  | I64 n :: _ -> n
+  | _ -> invalid_arg "kaya: undo scene expects minted (I64) keys"
+
+(* One note, written into the app's map. AN EMPTY NOTE IS NO NOTE, and
+   that is what makes the undo assertion falsifiable: restoring a row's
+   field to "" has to REMOVE the key, so an app that ignored the
+   payload reads its stale note back out and the script says so.
+
+   ONE SPELLING, TWO ARRIVAL PATHS — a live edit and a restore fold
+   through this same function, so the script's assertion cannot pass
+   through a second definition of "what a note is". *)
+let put_note notes key text =
+  if text = "" then Notes.remove key notes else Notes.add key text notes
+
+(* The rows' notes, rendered. THE ROWS' FIELDS ARE UNCONTROLLED LIKE THE
+   DRAFT, so this map is the app's own and nothing reads it back off a
+   widget. It is also where this scene proves the payload's new shape:
+   an undone note arrives naming (template node, key path), and an app
+   with two rows can only put it back in the right one because the path
+   says which. *)
+let note_list notes =
+  match Notes.bindings notes with
+  | [] -> "no notes"
+  | ns ->
+      "notes "
+      ^ String.concat ","
+          (List.map (fun (key, text) -> Printf.sprintf "%Ld=%s" key text) ns)
+
+(* One texts run, folded into the app's two mirrors of widget-owned
+   text. The EMPTY PATH is the draft — a live widget, whose id the app
+   holds — and a path names a ROW, whose field has no id an app could
+   hold at all.
+
+   ALL OF IT, not just the last entry: one step can restore several
+   fields, and each one names the field it restores. *)
+let fold_texts draft notes texts =
+  List.iter
+    (fun (t : undo_text) ->
+      if t.ut_path = [] then draft := t.ut_text
+      else notes := put_note !notes (row_key t.ut_path) t.ut_text)
+    texts
+
 let () =
   let app = Kaya_app.create () in
 
   (* The fold: widget-owned state arrives as occurrences; the app's copy
-     is this ref, not a widget read. *)
+     is these refs, not a widget read. Two of them, because there are
+     two kinds of text field on screen — the draft, and one per row —
+     and the payload's path is what tells them apart. *)
   let draft = ref "" in
+  let row_notes = ref Notes.empty in
 
   build app (fun () ->
       let status = signal (Str "no todos") in
       let history = signal (Str "history empty") in
       let keys = signal (Str "no keys") in
+      let notes = signal (Str "no notes") in
       let todos = collection_of todo_record in
 
       (* The app's collection mirror, rendered: every key it holds, in
@@ -169,6 +227,19 @@ let () =
 
       let on_focus () = focus field in
 
+      (* A note typed into a ROW's field: the copy's key path and the
+         text. The same occurrence [~on_change] carries for the draft,
+         one identity deeper — the field is uncontrolled either way —
+         and the path is how the app knows which row it was.
+
+         NOT A STEP OF ITS OWN: this handler names no group, so the
+         signal write below rides an ordinary transaction and the
+         ledger banks only the typing episode the core opened. *)
+      let on_note path text =
+        row_notes := put_note !row_notes (row_key path) text;
+        write notes (Str (note_list !row_notes))
+      in
+
       (* Undo and redo differ by one word here, and that is the point:
          the two occurrences are byte-identical in layout because ONE
          encoder writes both, so the two directions cannot drift. *)
@@ -179,9 +250,7 @@ let () =
            text_changed into its own model — which is every app, the
            field being uncontrolled — would go stale on exactly this
            step if the payload did not carry it (D5). *)
-        (match List.rev delta.ud_texts with
-        | (_, text) :: _ -> draft := text
-        | [] -> ());
+        fold_texts draft row_notes delta.ud_texts;
         (* The count is read from this app's own collection mirror,
            which the binding reconciled from that payload before this
            handler ran. *)
@@ -191,8 +260,10 @@ let () =
         (* ONE TRANSACTION WITH THE LABEL ABOVE, deliberately: the
            script reads that label first, so by the time it reads this
            one the app's own answer is what is on screen — not the value
-           the core restored on its way past. *)
-        write keys (Str (key_list ()))
+           the core restored on its way past. The notes ride the same
+           transaction for the same reason. *)
+        write keys (Str (key_list ()));
+        write notes (Str (note_list !row_notes))
       in
 
       (* THE GESTURE LAYER, one tier deeper: an app declares the two
@@ -221,6 +292,7 @@ let () =
             label ~a11y_id:"status" ~bind:status (* label#0 *);
             label ~a11y_id:"history" ~bind:history (* label#1 *);
             label ~a11y_id:"keys" ~bind:keys (* label#2 *);
+            label ~a11y_id:"notes" ~bind:notes (* label#3 *);
             w field (* entry#0 *);
             button ~text:"add" ~on_click:on_add (* button#0 *);
             button ~text:"star" ~on_click:on_star (* button#1 *);
@@ -233,7 +305,24 @@ let () =
             button ~text:"focus" ~on_click:on_focus (* button#2 *);
             button ~text:"remove" ~on_click:on_remove (* button#3 *);
             each (record_handle todos) (fun () ->
-                Tpl.(row [ label ~bind_field:todo_title ] ()));
+                Tpl.(
+                  row
+                    [
+                      label ~bind_field:todo_title;
+                      (* THE ROW'S OWN FIELD, and the reason this scene
+                         grew: a copy's text edits are the same
+                         occurrence a live field's are, one identity
+                         deeper, and the ledger banks them the same way
+                         now that the payload can name them. The
+                         template tier has no [entry] sugar — there is
+                         no source to bind — so the widget-kind floor is
+                         the spelling here, in every language. *)
+                      (fun () ->
+                        let note = widget kind_entry in
+                        on_change_node app note on_note;
+                        note);
+                    ]
+                    ()));
           ]
           ()
       in

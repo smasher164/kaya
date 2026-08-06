@@ -20,6 +20,7 @@ module KayaRuntime
     registerBlob,
     openPicked,
     UndoDelta (..),
+    UndoText (..),
     UndoEntry (..),
     UndoOrder (..),
     emptyUndoDelta,
@@ -211,15 +212,30 @@ waitOccurrences = do
 data UndoDelta = UndoDelta
   { -- | Signal id -> its restored value.
     undoSignals :: ![(Word64, Value)],
-    -- | Widget id -> its restored text. A coarse episode restore is a
-    -- programmatic write, so nothing else would ever tell an app that
-    -- folds text_changed into its own model.
-    undoTexts :: ![(Word64, String)],
+    -- | The text fields this step put back, each NAMING itself. A
+    -- coarse episode restore is a programmatic write, so nothing else
+    -- would ever tell an app that folds text_changed into its own
+    -- model.
+    undoTexts :: ![UndoText],
     -- | Collection entries, present or gone.
     undoEntries :: ![UndoEntry],
     -- | Instance orders, for the instances whose order the step moved
     -- — position is the one thing per-entry statements cannot carry.
     undoOrders :: ![UndoOrder]
+  }
+
+-- | One text field's restored text, and the identity that names it.
+--
+-- TWO IDENTITIES, ONE RECORD, decided by the path — the vocabulary a
+-- click or a paste on a stamped copy already arrives under. An EMPTY
+-- 'utPath' means 'utId' is a live widget's id, the one the app holds;
+-- a non-empty one means 'utId' is the TEMPLATE NODE and the path is
+-- the copy's keys, outermost first, which is the only way a row's
+-- field can be named at all (docs\/undo-plan.md §3b).
+data UndoText = UndoText
+  { utId :: !Word64,
+    utPath :: ![Value],
+    utText :: !String
   }
 
 -- | One collection entry's restored state; 'ueState' is Nothing when
@@ -281,9 +297,21 @@ parseUndo rec = do
         (one, rest') -> takeRun (n - 1 :: Word32) rest' (one : acc) step
       pair (i : v : rest) = ((fromIntegral (int i) :: Word64, v), rest)
       pair _ = error "kaya: undo delta is truncated"
-      text (i : VStr s : rest) = ((fromIntegral (int i) :: Word64, s), rest)
-      text _ = error "kaya: undo text is truncated or not a string"
-      -- ARITY-FIRST: size counts itself, so a reader needs no schema.
+      -- ARITY-FIRST: size counts ITSELF, so a reader takes the head it
+      -- knows and then `size` decides the rest — no schema, and a run
+      -- that grows a field cannot silently eat the next one. This run
+      -- joined the shape its two siblings below already had, because
+      -- the fixed (id, text) pair it used to be had nowhere to put the
+      -- path that names a stamped copy's field.
+      text (size : ident : pathLen : rest) =
+        let body = fromIntegral (int size) - 3
+            (mine, rest') = splitAt body rest
+            plen = fromIntegral (int pathLen)
+            (path, textOnly) = splitAt plen mine
+         in case textOnly of
+              [VStr s] -> (UndoText (fromIntegral (int ident)) path s, rest')
+              _ -> error "kaya: undo text is truncated or not a string"
+      text _ = error "kaya: undo text is truncated"
       entry (size : collection : present : variant : pathLen : rest) =
         let body = fromIntegral (int size) - 5
             (mine, rest') = splitAt body rest

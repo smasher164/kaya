@@ -42,8 +42,10 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -89,17 +91,72 @@ func keyList(tx *kaya.Tx, todos kaya.Collection) string {
 	return "keys " + strings.Join(keys, ",")
 }
 
+// rowKey is the row a stamped copy's occurrence names: the copy's key
+// path, which for a top-level For is one key — the todo's own, minted by
+// InsertFresh and asserted here exactly as keyList asserts the
+// collection's own keys.
+func rowKey(path []any) int64 {
+	return path[0].(int64)
+}
+
+// noteList is the app's copy of what is typed in the ROWS, rendered:
+// every note it holds, by key, ascending.
+//
+// THE ROWS' FIELDS ARE UNCONTROLLED LIKE THE DRAFT, so this map is the
+// app's own and nothing reads it back off a widget. It is also where
+// this scene proves the payload's new shape: an undone note arrives
+// naming (template node, key path), and an app with two rows can only
+// put it back in the right one because the path says which.
+func noteList(notes map[int64]string) string {
+	if len(notes) == 0 {
+		return "no notes"
+	}
+	// A Go map has no order at all, so the ascending walk is spelled
+	// rather than assumed — the script compares this string
+	// byte-for-byte against seven other languages, three of which get
+	// the order free from a sorted map.
+	rendered := make([]string, 0, len(notes))
+	for _, key := range slices.Sorted(maps.Keys(notes)) {
+		rendered = append(rendered, strconv.FormatInt(key, 10)+"="+notes[key])
+	}
+	return "notes " + strings.Join(rendered, ",")
+}
+
+// foldTexts folds one texts run into the app's two mirrors of
+// widget-owned text. The empty path is the draft; a path names a row.
+//
+// AN EMPTY NOTE IS NO NOTE, which is what makes the undo falsifiable:
+// the restore of a row's field to "" has to REMOVE the key, so an app
+// that ignored this run reads its stale note back out and the script
+// says so.
+func foldTexts(draft *string, notes map[int64]string, texts []kaya.UndoText) {
+	for _, text := range texts {
+		switch {
+		case len(text.Path) == 0:
+			*draft = text.Text
+		case text.Text == "":
+			delete(notes, rowKey(text.Path))
+		default:
+			notes[rowKey(text.Path)] = text.Text
+		}
+	}
+}
+
 func main() {
 	app := kaya.NewApp()
 
 	// The fold: widget-owned state arrives as occurrences; the app's
-	// copy is this variable, not a widget read.
+	// copy is these variables, not a widget read. Two of them, because
+	// there are two kinds of text field on screen — the draft, and one
+	// per row — and the payload's path is what tells them apart.
 	draft := ""
+	rowNotes := map[int64]string{}
 
 	var (
-		status, history, keys kaya.Signal[string]
-		field                 kaya.Widget
-		todos                 kaya.Collection
+		status, history, keys, notes kaya.Signal[string]
+		field                        kaya.Widget
+		note                         kaya.Node
+		todos                        kaya.Collection
 	)
 
 	app.Build(func(tx *kaya.Tx) {
@@ -116,26 +173,29 @@ func main() {
 		// text_changed into its own model — which is every app, the field
 		// being uncontrolled — would go stale on exactly this step if the
 		// payload did not carry it (D5).
+		//
+		// THE RUN IS FOLDED WHOLE, not reduced to its last string,
+		// because an entry NAMES the field it restores: the empty path
+		// is the draft, and a path names the row whose note came back.
 		win := tx.Window(0).Title("undo").
 			OnUndone(func(tx *kaya.Tx, label string, delta kaya.UndoDelta) {
-				if n := len(delta.Texts); n > 0 {
-					draft = delta.Texts[n-1].Text
-				}
+				foldTexts(&draft, rowNotes, delta.Texts)
 				total := tx.Len(todos)
 				tx.Write(history, fmt.Sprintf("undid %s, %d total", what(label), total))
 				// ONE TRANSACTION WITH THE LABEL ABOVE, deliberately: the
 				// script reads that label first, so by the time it reads
 				// this one the app's own answer is what is on screen —
-				// not the value the core restored on its way past.
+				// not the value the core restored on its way past. The
+				// notes ride the same transaction for the same reason.
 				tx.Write(keys, keyList(tx, todos))
+				tx.Write(notes, noteList(rowNotes))
 			}).
 			OnRedone(func(tx *kaya.Tx, label string, delta kaya.UndoDelta) {
-				if n := len(delta.Texts); n > 0 {
-					draft = delta.Texts[n-1].Text
-				}
+				foldTexts(&draft, rowNotes, delta.Texts)
 				total := tx.Len(todos)
 				tx.Write(history, fmt.Sprintf("redid %s, %d total", what(label), total))
 				tx.Write(keys, keyList(tx, todos))
+				tx.Write(notes, noteList(rowNotes))
 			})
 
 		// THE GESTURE LAYER, one tier deeper: an app declares the two
@@ -150,12 +210,14 @@ func main() {
 		status = tx.Signal("no todos")
 		history = tx.Signal("history empty")
 		keys = tx.Signal("no keys")
+		notes = tx.Signal("no notes")
 		todos = tx.Collection()
 
 		root := tx.Column(func() {
 			tx.Label(status).A11yID("status")   // label#0
 			tx.Label(history).A11yID("history") // label#1
 			tx.Label(keys).A11yID("keys")       // label#2
+			tx.Label(notes).A11yID("notes")     // label#3
 			field = tx.Entry(func(tx *kaya.Tx, text string) {
 				draft = text
 			}).A11yID("draft") // entry#0
@@ -233,6 +295,15 @@ func main() {
 			for row := range todos.Rows(tx) {
 				row.Row(func() {
 					row.Label(row.Value())
+					// THE ROW'S OWN FIELD, and the reason this scene
+					// grew: a copy's text edits are the same occurrence
+					// a live field's are, one identity deeper, and the
+					// ledger banks them the same way now that the
+					// payload can name them. The template tier has no
+					// Entry sugar — there is no source to bind — so the
+					// widget-kind floor is the spelling here, in every
+					// language.
+					note = row.Widget(kaya.KindEntry)
 				})
 			}
 		})
@@ -241,6 +312,23 @@ func main() {
 		// question's other half.
 		tx.Focus(field)
 		tx.Mount(root)
+	})
+
+	// The row field's edits, folded exactly as the payload's restore of
+	// the same field will be — one rule, two arrival paths, so the
+	// script's assertion cannot pass through a second spelling of "what
+	// a note is". A stamped copy's handler is registered once against
+	// the TEMPLATE NODE and hands the copy's keys, which is the same
+	// (node, key path) identity the undo payload carries; the live
+	// zone's func(*Tx, string) has nowhere to put them.
+	app.OnChangeNode(note, func(tx *kaya.Tx, path []any, text string) {
+		key := rowKey(path)
+		if text == "" {
+			delete(rowNotes, key)
+		} else {
+			rowNotes[key] = text
+		}
+		tx.Write(notes, noteList(rowNotes))
 	})
 
 	os.Exit(app.Run())

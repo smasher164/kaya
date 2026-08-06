@@ -518,6 +518,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     // decoder cuts the flat tail into its four runs, and the sum-typed
     // surface over it is the hand-written tier's.
     if !crate::undo_occurrence_names(spec).is_empty() {
+        c.line("    /** One text field's restored text, named the way the edit");
+        c.line("     * that filled it was named: an EMPTY path means {@code id}");
+        c.line("     * is a live widget id, and a non-empty one means it is the");
+        c.line("     * template node of a stamped copy at that key path. */");
+        c.line("    public static final class UndoTextValues {");
+        c.line("        public final long id;");
+        c.line("        public final List<Object> path;");
+        c.line("        public final String text;");
+        c.line("");
+        c.line("        UndoTextValues(long id, List<Object> path, String text) {");
+        c.line("            this.id = id;");
+        c.line("            this.path = path;");
+        c.line("            this.text = text;");
+        c.line("        }");
+        c.line("    }");
+        c.line("");
         c.line("    /** One collection entry's restored state, as the decoder");
         c.line("     * hands it over. {@code present} false is \"the restored");
         c.line("     * state does not have this entry at all\", and then");
@@ -558,16 +574,17 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    /** One undone/redone step as the decoder hands it over: the");
         c.line("     * group's label (EMPTY for a typing episode) and the four");
         c.line("     * counted runs cut out of the flat Values tail. A STATEMENT");
-        c.line("     * OF THE RESTORED STATE, never a replay of ops — signals and");
-        c.line("     * texts arrive as flattened (id, value) pairs. */");
+        c.line("     * OF THE RESTORED STATE, never a replay of ops — signals");
+        c.line("     * arrive as flattened (id, value) pairs, and the other three");
+        c.line("     * runs as arity-first groups. */");
         c.line("    public static final class UndoValues {");
         c.line("        public final String label;");
         c.line("        public final List<Object> signals;");
-        c.line("        public final List<Object> texts;");
+        c.line("        public final List<UndoTextValues> texts;");
         c.line("        public final List<UndoEntryValues> entries;");
         c.line("        public final List<UndoOrderValues> orders;");
         c.line("");
-        c.line("        UndoValues(String label, List<Object> signals, List<Object> texts,");
+        c.line("        UndoValues(String label, List<Object> signals, List<UndoTextValues> texts,");
         c.line("                List<UndoEntryValues> entries, List<UndoOrderValues> orders) {");
         c.line("            this.label = label;");
         c.line("            this.signals = signals;");
@@ -693,9 +710,20 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("            for (int i = 0; i < signalCount * 2; i++) {");
         c.line("                signals.add(flat.get(taken++));");
         c.line("            }");
-        c.line("            List<Object> texts = new ArrayList<>(textCount * 2);");
-        c.line("            for (int i = 0; i < textCount * 2; i++) {");
-        c.line("                texts.add(flat.get(taken++));");
+        // Arity-first like the two runs below, and for their reason: a
+        // stamped copy's field is (template node, key path), which a
+        // fixed pair had nowhere to put.
+        c.line("            List<UndoTextValues> texts = new ArrayList<>(textCount);");
+        c.line("            for (int i = 0; i < textCount; i++) {");
+        c.line("                int size = (int) (long) (Long) flat.get(taken);");
+        c.line("                long ident = (Long) flat.get(taken + 1);");
+        c.line("                int pathLen = (int) (long) (Long) flat.get(taken + 2);");
+        c.line("                List<Object> body = new ArrayList<>(");
+        c.line("                        flat.subList(taken + 3, taken + size));");
+        c.line("                taken += size;");
+        c.line("                texts.add(new UndoTextValues(ident,");
+        c.line("                        List.copyOf(body.subList(0, pathLen)),");
+        c.line("                        (String) body.get(pathLen)));");
         c.line("            }");
         // Arity-first groups: `size` counts itself, so a reader takes it
         // and needs nothing else.

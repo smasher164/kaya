@@ -42,6 +42,17 @@
  * which is exactly the work the other eight bindings do before their
  * guest's handler runs.
  *
+ * AND LABEL#3 IS THE SAME IDEA ONE LEVEL DOWN: what the user has typed
+ * into the ROWS, by key. Every other step in this scene is about the
+ * draft — a live widget whose id this app allocated — but a collection
+ * row's field has no id an app could hold; its identity is (template
+ * node, key path), the pair its clicks and its edits already arrive
+ * under. That is why the payload's texts run is now an ARITY-FIRST
+ * group like its entries and orders siblings, and the decode below
+ * narrates the shape value by value. A fixed pair of (widget id, text)
+ * had nowhere to put the path, so a row's typing could not be named to
+ * the app and was therefore not banked at all (docs/undo-plan.md §3b).
+ *
  * There is no generated kaya_parse_undone. The generator emits a parse
  * helper per click-shaped and per single-payload occurrence
  * (tools/kaya-bindgen/src/c.rs) and this record is neither, so the floor
@@ -60,30 +71,44 @@
  * label#0 is the first label created, not the first on screen.
  *
  * SO THE ORDER BELOW IS CONTRACT, not layout taste. The keys label is
- * created THIRD, immediately after history, because the script says
- * label#2; a scene that created it anywhere else would not fail with
- * "no such target" — index 2 would resolve to the first STAMPED row
- * label and the assertion would read a todo's title. */
+ * created THIRD and the notes label FOURTH, before the draft entry,
+ * because the script says label#2 and label#3; a scene that created
+ * either anywhere else would not fail with "no such target" — the index
+ * would resolve to the first STAMPED row label and the assertion would
+ * read a todo's title.
+ *
+ * AND label#3 IS INDEX-STABLE FOR THE WHOLE RUN even though this scene
+ * destroys row copies: nothing created before it is ever destroyed, so
+ * it does not matter whether a backend prunes its harness registries on
+ * Destroy (the SwiftUI interpreter does not). The row ENTRY the script
+ * reads is addressed `entry#last` for the other half of that fact. */
 #define SIG_STATUS 1
 #define SIG_HISTORY 2
 #define SIG_KEYS 3
+#define SIG_NOTES 4
 
 #define W_COLUMN 1
 #define W_STATUS 2  /* label#0 */
 #define W_HISTORY 3 /* label#1 */
 #define W_KEYS 4    /* label#2 */
-#define W_FIELD 5   /* entry#0 */
-#define W_ADD 6     /* button#0 */
-#define W_STAR 7    /* button#1 */
-#define W_FOCUS 8   /* button#2 */
-#define W_REMOVE 9  /* button#3 */
-#define W_FOR_TODOS 10
+#define W_NOTES 5   /* label#3 */
+#define W_FIELD 6   /* entry#0 */
+#define W_ADD 7     /* button#0 */
+#define W_STAR 8    /* button#1 */
+#define W_FOCUS 9   /* button#2 */
+#define W_REMOVE 10 /* button#3 */
+#define W_FOR_TODOS 11
 
 #define C_TODOS 1
 
-/* Template nodes: their own id space, never widget ids. */
+/* Template nodes: their own id space, never widget ids. A node id and a
+ * widget id may collide as NUMBERS (N_NOTE is 3, so is W_HISTORY) and
+ * nothing is wrong: an occurrence's identity is the PAIR (id, key path),
+ * and a live widget's path is empty while a stamped copy's never is. The
+ * handlers below match on both halves for exactly that reason. */
 #define N_ROW 1
 #define N_TITLE 2
+#define N_NOTE 3
 
 /* The record's field index: the C floor's "field token". */
 #define F_TITLE 0
@@ -123,6 +148,7 @@ static void build_scene(void) {
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("no todos"));
     kaya_tx_create_signal(&tx, SIG_HISTORY, kaya_str("history empty"));
     kaya_tx_create_signal(&tx, SIG_KEYS, kaya_str("no keys"));
+    kaya_tx_create_signal(&tx, SIG_NOTES, kaya_str("no notes"));
 
     kaya_tx_create_widget(&tx, W_COLUMN, KAYA_KIND_COLUMN);
     kaya_tx_create_widget(&tx, W_STATUS, KAYA_KIND_LABEL);
@@ -134,6 +160,9 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_KEYS, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_KEYS, SIG_KEYS);
     kaya_tx_set_a11y_id(&tx, W_KEYS, "keys");
+    kaya_tx_create_widget(&tx, W_NOTES, KAYA_KIND_LABEL);
+    kaya_tx_bind_text(&tx, W_NOTES, SIG_NOTES);
+    kaya_tx_set_a11y_id(&tx, W_NOTES, "notes");
     kaya_tx_create_widget(&tx, W_FIELD, KAYA_KIND_ENTRY);
     kaya_tx_set_a11y_id(&tx, W_FIELD, "draft");
     kaya_tx_create_widget(&tx, W_ADD, KAYA_KIND_BUTTON);
@@ -161,11 +190,26 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, N_TITLE, KAYA_KIND_LABEL);
     kaya_tx_bind_text_element(&tx, N_TITLE, 0, F_TITLE);
     kaya_tx_add_child(&tx, N_ROW, N_TITLE);
+    /* THE ROW'S OWN FIELD, and the reason this scene grew. A copy's text
+     * edits are the same occurrence the draft's are, one identity deeper
+     * — (node, key path) instead of a widget id — and the ledger banks
+     * them the same way now that the payload can NAME them. It is
+     * created after the title, so the row reads title-then-field.
+     *
+     * NOTHING BINDS IT, which is why the sugar languages spell it with
+     * the widget-kind floor here too (`t.widget(WidgetKind::Entry)`,
+     * `Tpl.Widget(KindEntry)`): the template tier's sugar takes a SOURCE
+     * for the text, and an unbound field has none. Down here that
+     * distinction does not exist — every widget in this file is a
+     * create_widget — which is the floor's usual relationship to sugar. */
+    kaya_tx_create_widget(&tx, N_NOTE, KAYA_KIND_ENTRY);
+    kaya_tx_add_child(&tx, N_ROW, N_NOTE);
     kaya_tx_template_end(&tx);
 
     kaya_tx_add_child(&tx, W_COLUMN, W_STATUS);
     kaya_tx_add_child(&tx, W_COLUMN, W_HISTORY);
     kaya_tx_add_child(&tx, W_COLUMN, W_KEYS);
+    kaya_tx_add_child(&tx, W_COLUMN, W_NOTES);
     kaya_tx_add_child(&tx, W_COLUMN, W_FIELD);
     kaya_tx_add_child(&tx, W_COLUMN, W_ADD);
     kaya_tx_add_child(&tx, W_COLUMN, W_STAR);
@@ -197,6 +241,24 @@ static int64_t todo_keys[MAX_TODOS];
 static char todo_titles[MAX_TODOS][MAX_TITLE];
 static unsigned n_todos = 0;
 
+/* The SECOND mirror of widget-owned text, and the one this slice is
+ * about: what has been typed into the ROWS, by key.
+ *
+ * THE DRAFT AND A ROW'S FIELD ARE THE SAME KIND OF THING — an
+ * uncontrolled entry whose text the app learns from occurrences — and
+ * they need two mirrors only because a row's field has no id an app
+ * could hold. Its identity is (template node, key path), so the key is
+ * what indexes this map, exactly as it indexes `todo_keys` above.
+ *
+ * Kept sorted ASCENDING by key, because label#3 renders it in that
+ * order (the contract in tools/scenes/undo.steps) and the floor sorts
+ * where the invariant lives — at the insert — rather than at every
+ * render. */
+#define MAX_NOTES MAX_TODOS
+static int64_t note_keys[MAX_NOTES];
+static char note_texts[MAX_NOTES][MAX_TITLE];
+static unsigned n_notes = 0;
+
 static int key_index(int64_t key) {
     for (unsigned i = 0; i < n_todos; i++)
         if (todo_keys[i] == key)
@@ -223,6 +285,59 @@ static void key_list(char *out, size_t cap) {
     for (unsigned i = 0; i < n_todos && at < cap; i++)
         at += (size_t)snprintf(out + at, cap - at, i == 0 ? "%lld" : ",%lld",
                                (long long)todo_keys[i]);
+}
+
+/* ONE RULE FOR A NOTE, WRITTEN ONCE, and both of its arrival paths call
+ * it: the row's own edit occurrence, and the texts run of an
+ * undone/redone payload restoring that same field. Two spellings of
+ * "what a note is" would let the script's assertion pass through the
+ * wrong one.
+ *
+ * AN EMPTY NOTE IS NO NOTE — an empty text REMOVES the key rather than
+ * holding it with an empty string — and that is what makes the undo in
+ * the script falsifiable: the restore of a row's field to "" has to
+ * leave `no notes` behind, so an app that walked past the run reads its
+ * stale note back out and fails there. */
+static void note_set(int64_t key, const KayaVal *text) {
+    unsigned i = 0;
+    while (i < n_notes && note_keys[i] < key)
+        i++;
+    int found = i < n_notes && note_keys[i] == key;
+    if (text->s_len == 0) {
+        if (!found)
+            return;
+        for (unsigned k = i + 1; k < n_notes; k++) {
+            note_keys[k - 1] = note_keys[k];
+            memcpy(note_texts[k - 1], note_texts[k], MAX_TITLE);
+        }
+        n_notes -= 1;
+        return;
+    }
+    if (!found) {
+        if (n_notes >= MAX_NOTES)
+            return;
+        for (unsigned k = n_notes; k > i; k--) {
+            note_keys[k] = note_keys[k - 1];
+            memcpy(note_texts[k], note_texts[k - 1], MAX_TITLE);
+        }
+        note_keys[i] = key;
+        n_notes += 1;
+    }
+    str_copy(note_texts[i], MAX_TITLE, text);
+}
+
+/* label#3: the notes mirror, rendered — "no notes", or "notes " and
+ * `key=text` per note, keys ascending, comma-separated. */
+static void note_list(char *out, size_t cap) {
+    if (n_notes == 0) {
+        snprintf(out, cap, "no notes");
+        return;
+    }
+    size_t at = (size_t)snprintf(out, cap, "notes ");
+    for (unsigned i = 0; i < n_notes && at < cap; i++)
+        at += (size_t)snprintf(out + at, cap - at,
+                               i == 0 ? "%lld=%s" : ",%lld=%s",
+                               (long long)note_keys[i], note_texts[i]);
 }
 
 /* An undone/redone body's fixed head, plus where its delta starts. The
@@ -267,7 +382,7 @@ static int parse_undo(const uint8_t *rec, uint16_t kind, KayaUndo *u) {
 static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
                        size_t draft_cap) {
     size_t at = u->at;
-    KayaVal v, w;
+    KayaVal v;
 
     /* 1. signals: PAIRS of (I64 signal id, restored value). NOTHING TO
      *    FOLD, and that is doctrine rather than laziness: a signal's
@@ -280,19 +395,73 @@ static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
         at = kaya_parse_value(rec, at, &v);
     }
 
-    /* 2. texts: PAIRS of (I64 widget id, restored Str). THE DELTA IS
-     *    THE ONLY NOTIFICATION for this: restoring an episode is a
-     *    programmatic write, and a programmatic write never echoes, so
-     *    an app that folds text_changed into its own draft — which is
-     *    every app, the field being uncontrolled — would go stale on
-     *    exactly this step if it ignored the run. */
+    /* 2. texts: ARITY-FIRST groups, like the entries and orders runs
+     *    below and for the same reason — a group has to carry a PATH,
+     *    and a path has no fixed length.
+     *
+     *        I64 size    counting itself: 3 + path_len + 1
+     *        I64 id      a widget id when path_len is 0, a TEMPLATE
+     *                    NODE id when it is not
+     *        I64 path_len
+     *        path_len    values: the copy's key path, outermost first
+     *        Str text    the restored text
+     *
+     *    (crates/kaya/src/wire.rs `undo_bodies_round_trip` pins these
+     *    values one by one; this decode is written against that table.)
+     *
+     *    THE TWO IDENTITIES ARE THE WHOLE POINT OF THE SHAPE. A live
+     *    widget is named by an id the app itself allocated — W_FIELD
+     *    below, the draft. A stamped copy's field was never allocated by
+     *    anyone: it is named the way its clicks and its edits are
+     *    already named, by (template node, key path), and for a
+     *    top-level For that path is one key — the todo's own. A fixed
+     *    pair of (id, text) had nowhere to put the path, so a row's
+     *    typing could not be named to the app and was therefore not
+     *    banked at all.
+     *
+     *    AND THE TAIL IS READ BY ARITY, not by counting on there being
+     *    exactly one value after the path: `size` says where the group
+     *    ends, so a reader that models the text and nothing else walks
+     *    past anything the group grows later without a schema. That is
+     *    the same discipline the entries run states below.
+     *
+     *    THE DELTA IS THE ONLY NOTIFICATION for every one of these:
+     *    restoring an episode is a programmatic write, and a
+     *    programmatic write never echoes, so an app that folds
+     *    text_changed into its own mirrors — which is every app, these
+     *    fields being uncontrolled — would go stale on exactly this step
+     *    if it ignored the run. Which is why ALL of it is walked and not
+     *    just its last group: one step can restore the draft and a row's
+     *    note, and each entry says which. */
     for (uint32_t i = 0; i < u->n_texts; i++) {
-        at = kaya_parse_value(rec, at, &v);
-        at = kaya_parse_value(rec, at, &w);
-        if (v.i == (int64_t)W_FIELD) {
-            size_t len = w.s_len < draft_cap - 1 ? w.s_len : draft_cap - 1;
-            memcpy(draft, w.s, len);
-            draft[len] = 0;
+        KayaVal size, id, path_len, key;
+        KayaVal text = kaya_str("");
+        int64_t row = 0;
+        at = kaya_parse_value(rec, at, &size);
+        at = kaya_parse_value(rec, at, &id);
+        at = kaya_parse_value(rec, at, &path_len);
+        for (int64_t k = 0; k < path_len.i; k++) {
+            at = kaya_parse_value(rec, at, &key);
+            if (k == 0)
+                row = key.i;
+        }
+        for (int64_t k = 3 + path_len.i; k < size.i; k++) {
+            at = kaya_parse_value(rec, at, &v);
+            if (k == 3 + path_len.i)
+                text = v;
+        }
+        if (path_len.i == 0) {
+            /* The draft. The floor names the widget it models rather
+             * than taking any live field's text on trust — this app has
+             * one, and an app with two would need the id to tell them
+             * apart exactly as the path tells the rows apart. */
+            if (id.i == (int64_t)W_FIELD) {
+                size_t len = text.s_len < draft_cap - 1 ? text.s_len : draft_cap - 1;
+                memcpy(draft, text.s, len);
+                draft[len] = 0;
+            }
+        } else {
+            note_set(row, &text);
         }
     }
 
@@ -457,18 +626,39 @@ static void *app(void *arg) {
         uint64_t id;
         KayaVal keys[2], text;
         uint32_t n_keys;
-        uint8_t buf[2048];
+        /* Wide enough for every label this app writes in one transaction,
+         * the notes list included, because the floor sizes its buffers
+         * rather than growing them. */
+        uint8_t buf[8192];
         char status[192];
-        /* Wide enough for MAX_TODOS I64 keys spelled out, because the
-         * floor sizes its buffers rather than growing them. */
+        /* Wide enough for MAX_TODOS I64 keys spelled out, and for as
+         * many `key=text` notes. */
         char keys_text[768];
+        char notes_text[MAX_NOTES * (MAX_TITLE + 24)];
         KayaUndo undo;
         if (kaya_parse_text_changed(rec, &id, keys, 2, &n_keys, &text)) {
+            /* THE TWO FIELDS, TOLD APART BY THE PATH — the identity rule
+             * the delta's texts run states, arriving here first. An
+             * empty path is a live widget and its id is this app's own;
+             * a path names a stamped copy and its id is a template
+             * node. */
             if (id == W_FIELD && n_keys == 0) {
                 unsigned len = text.s_len < sizeof draft - 1
                     ? text.s_len : (unsigned)sizeof draft - 1;
                 memcpy(draft, text.s, len);
                 draft[len] = 0;
+            } else if (id == N_NOTE && n_keys > 0) {
+                /* The row's edit, folded by the SAME rule the restore of
+                 * this field will use — one `note_set`, two arrival
+                 * paths. Its own transaction, and NOT an undoable one:
+                 * the typing is the step, the app's rendering of it is
+                 * not, and a group here would bank a second step for
+                 * every keystroke. */
+                note_set(keys[0].i, &text);
+                KayaTx tx = {buf, 0};
+                note_list(notes_text, sizeof notes_text);
+                kaya_tx_write_signal(&tx, SIG_NOTES, kaya_str(notes_text));
+                kaya_submit(tx.buf, tx.len);
             }
         } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys)) {
             if (n_keys != 0)
@@ -589,9 +779,15 @@ static void *app(void *arg) {
              * script reads the history label first, so by the time it
              * reads this one the app's own answer is on screen — not the
              * value the core restored on its way past, which a bare
-             * `expect label#2` could otherwise match. */
+             * `expect label#2` could otherwise match. The notes ride the
+             * same transaction for the same reason, and label#3 is where
+             * a walked-past texts run is READ: the core restored the
+             * row's field either way, so only the app's own map can say
+             * whether the app heard about it. */
             key_list(keys_text, sizeof keys_text);
             kaya_tx_write_signal(&tx, SIG_KEYS, kaya_str(keys_text));
+            note_list(notes_text, sizeof notes_text);
+            kaya_tx_write_signal(&tx, SIG_NOTES, kaya_str(notes_text));
             kaya_submit(tx.buf, tx.len);
         } else if (parse_undo(rec, KAYA_OCCURRENCE_REDONE, &undo)) {
             char name[128];
@@ -602,6 +798,8 @@ static void *app(void *arg) {
             kaya_tx_write_signal(&tx, SIG_HISTORY, kaya_str(status));
             key_list(keys_text, sizeof keys_text);
             kaya_tx_write_signal(&tx, SIG_KEYS, kaya_str(keys_text));
+            note_list(notes_text, sizeof notes_text);
+            kaya_tx_write_signal(&tx, SIG_NOTES, kaya_str(notes_text));
             kaya_submit(tx.buf, tx.len);
         }
     }

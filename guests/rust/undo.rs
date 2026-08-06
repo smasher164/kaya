@@ -44,20 +44,29 @@ struct Todo {
 #[derive(Clone)]
 enum Msg {
     Draft(String),
+    /// A note typed into a ROW's field: the copy's key path and the
+    /// text. Same occurrence as `Draft` one level down — the field is
+    /// uncontrolled either way — and the path is how the app knows
+    /// which row it was.
+    Note(kaya::Path, String),
     Add,
     Remove,
     Star,
     Focus,
-    /// The label of the step that came back, and the text the core put
-    /// back into a field, if any.
+    /// The label of the step that came back, and the whole texts run of
+    /// the delta.
     ///
     /// THE DELTA IS THE ONLY NOTIFICATION for that text: restoring an
     /// episode is a programmatic write, and a programmatic write never
     /// echoes, so an app that folds `text_changed` into its own model —
     /// which is every app, the field being uncontrolled — would go
     /// stale on exactly this step if the payload did not carry it (D5).
-    Undone(String, Option<String>),
-    Redone(String, Option<String>),
+    ///
+    /// THE RUN IS CARRIED WHOLE, not reduced to one string, because an
+    /// entry NAMES the field it restores: the empty path is the draft,
+    /// and a path names the row whose note came back.
+    Undone(String, Vec<kaya::UndoText>),
+    Redone(String, Vec<kaya::UndoText>),
 }
 
 /// What the history label says a step was. A typing episode has no
@@ -95,9 +104,56 @@ fn key_list(tx: &kaya::Tx<'_>, todos: &kaya::Collection<Todo>) -> String {
     }
 }
 
+/// The row a stamped copy's occurrence names: the copy's key path,
+/// which for a top-level For is one key — the todo's own, minted by
+/// `insert_fresh` and read back through the binding's field conversion,
+/// exactly as `key_list` reads the collection's keys.
+fn row_key(path: &[kaya::Value]) -> i64 {
+    <i64 as kaya::KayaField>::from_value(&path[0])
+}
+
+/// The app's copy of what is typed in the ROWS, rendered: every note it
+/// holds, by key.
+///
+/// THE ROWS' FIELDS ARE UNCONTROLLED LIKE THE DRAFT, so this map is the
+/// app's own and nothing reads it back off a widget. It is also where
+/// this scene proves the payload's new shape: an undone note arrives
+/// naming (template node, key path), and an app with two rows can only
+/// put it back in the right one because the path says which.
+fn note_list(notes: &std::collections::BTreeMap<i64, String>) -> String {
+    if notes.is_empty() {
+        return "no notes".to_string();
+    }
+    let rendered: Vec<String> = notes.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    format!("notes {}", rendered.join(","))
+}
+
+/// One texts run, folded into the app's two mirrors of widget-owned
+/// text. The empty path is the draft; a path names a row.
+///
+/// AN EMPTY NOTE IS NO NOTE, which is what makes the undo above
+/// falsifiable: the restore of a row's field to "" has to REMOVE the
+/// key, so an app that ignored this run reads its stale note back out
+/// and the script says so.
+fn fold_texts(
+    draft: &mut String,
+    notes: &mut std::collections::BTreeMap<i64, String>,
+    texts: &[kaya::UndoText],
+) {
+    for text in texts {
+        if text.path.is_empty() {
+            *draft = text.text.clone();
+        } else if text.text.is_empty() {
+            notes.remove(&row_key(&text.path));
+        } else {
+            notes.insert(row_key(&text.path), text.text.clone());
+        }
+    }
+}
+
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
-    let (status, history, keys, field, todos) = ctx.apply(|tx| {
+    let (status, history, keys, notes, field, todos) = ctx.apply(|tx| {
         // THE GESTURE LAYER, one tier deeper: an app declares the two
         // items and writes nothing else. They act on the focused
         // widget, lower to the platform's own command where it has one,
@@ -113,12 +169,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let status = tx.signal("no todos");
         let history = tx.signal("history empty");
         let keys = tx.signal("no keys");
+        let notes = tx.signal("no notes");
         let todos = tx.collection::<Todo>();
         let (root, field) = tx
             .column(|tx| {
                 tx.label(status).a11y_id("status"); // label#0
                 tx.label(history).a11y_id("history"); // label#1
                 tx.label(keys).a11y_id("keys"); // label#2
+                tx.label(notes).a11y_id("notes"); // label#3
                 let field = tx.entry().a11y_id("draft").id(); // entry#0
                 msgs.on_change(field, Msg::Draft);
                 let add = tx.button("add").id(); // button#0
@@ -138,6 +196,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 for mut row in todos.rows(tx) {
                     row.row(|t| {
                         t.label(Todo::title());
+                        // THE ROW'S OWN FIELD, and the reason this scene
+                        // grew: a copy's text edits are the same
+                        // occurrence a live field's are, one identity
+                        // deeper, and the ledger banks them the same way
+                        // now that the payload can name them (the
+                        // template tier has no `entry` sugar — there is
+                        // no source to bind — so the widget-kind floor
+                        // is the spelling in every language).
+                        let note = t.widget(kaya::WidgetKind::Entry);
+                        msgs.on_change_node(note, Msg::Note);
                     });
                 }
                 field
@@ -148,7 +216,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         // question's other half.
         tx.focus(field);
         tx.mount(root);
-        (status, history, keys, field, todos)
+        (status, history, keys, notes, field, todos)
     });
 
     // Per window, and PERSISTENT: a history is walked as often as the
@@ -156,18 +224,35 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // mirror from this payload before the handler runs, which is why
     // `tx.len` below answers about the restored state.
     msgs.on_undone(kaya::DEFAULT_WINDOW, |label, delta| {
-        Msg::Undone(label, delta.texts.last().map(|(_, text)| text.clone()))
+        Msg::Undone(label, delta.texts.clone())
     });
     msgs.on_redone(kaya::DEFAULT_WINDOW, |label, delta| {
-        Msg::Redone(label, delta.texts.last().map(|(_, text)| text.clone()))
+        Msg::Redone(label, delta.texts.clone())
     });
 
     // The fold: widget-owned state arrives as occurrences; the app's
-    // copy is this variable, not a widget read.
+    // copy is these variables, not a widget read. Two of them, because
+    // there are two kinds of text field on screen — the draft, and one
+    // per row — and the payload's path is what tells them apart.
     let mut draft = String::new();
+    let mut row_notes: std::collections::BTreeMap<i64, String> = std::collections::BTreeMap::new();
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Draft(text) => draft = text,
+            // The row's edit, folded exactly as the payload's restore of
+            // the same field will be — one rule, two arrival paths, so
+            // the script's assertion cannot pass through a second
+            // spelling of "what a note is".
+            Msg::Note(path, text) => {
+                let key = row_key(&path);
+                if text.is_empty() {
+                    row_notes.remove(&key);
+                } else {
+                    row_notes.insert(key, text);
+                }
+                let list = note_list(&row_notes);
+                ctx.apply(|tx| tx.write(notes, list));
+            }
             Msg::Add => {
                 if draft.is_empty() {
                     // NOT A STEP, so it names no group and the forward
@@ -241,10 +326,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.write(status, "starred");
             }),
             Msg::Focus => ctx.apply(|tx| tx.focus(field)),
-            Msg::Undone(label, text) => {
-                if let Some(text) = text {
-                    draft = text;
-                }
+            Msg::Undone(label, texts) => {
+                fold_texts(&mut draft, &mut row_notes, &texts);
+                let list = note_list(&row_notes);
                 ctx.apply(|tx| {
                     let total = tx.len(&todos);
                     tx.write(history, format!("undid {}, {total} total", what(&label)));
@@ -252,20 +336,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     // the script reads that label first, so by the time
                     // it reads this one the app's own answer is what is
                     // on screen — not the value the core restored on its
-                    // way past.
-                    let list = key_list(tx, &todos);
-                    tx.write(keys, list);
+                    // way past. The notes ride the same transaction for
+                    // the same reason.
+                    let keylist = key_list(tx, &todos);
+                    tx.write(keys, keylist);
+                    tx.write(notes, list);
                 });
             }
-            Msg::Redone(label, text) => {
-                if let Some(text) = text {
-                    draft = text;
-                }
+            Msg::Redone(label, texts) => {
+                fold_texts(&mut draft, &mut row_notes, &texts);
+                let list = note_list(&row_notes);
                 ctx.apply(|tx| {
                     let total = tx.len(&todos);
                     tx.write(history, format!("redid {}, {total} total", what(&label)));
-                    let list = key_list(tx, &todos);
-                    tx.write(keys, list);
+                    let keylist = key_list(tx, &todos);
+                    tx.write(keys, keylist);
+                    tx.write(notes, list);
                 });
             }
         }

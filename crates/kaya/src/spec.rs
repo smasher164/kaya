@@ -288,6 +288,27 @@ pub const SET_PROPERTY_NOTE: &str =
      | u32 level, u32 field (SOURCE_ELEMENT — which field of the element's \
      record; 0 for a scalar collection)";
 
+/// The layout of `undone`/`redone`'s one flat `delta` list, read as
+/// four runs in this order. It lives here, as a fingerprinted string,
+/// for the reason the record's own fields do: a reader with the wrong
+/// SHAPE decodes garbage SILENTLY — the counts still parse, the values
+/// are still values, and only the meanings slide. Every other part of
+/// the vocabulary is hashed, so a binding built against an older
+/// revision refuses to load; a run layout described only in a doc
+/// comment was the one part of the wire that could change under a
+/// binding without the fingerprint moving.
+///
+/// Keep it in step with the `undone` record's doc, which is the prose
+/// version of the same sentence. Changing a run's shape here is what
+/// moves the spec hash (2026-08-06, when `texts` became arity-first so
+/// a stamped copy's field could be named at all).
+pub const UNDO_DELTA_RUNS: &str = "\
+    signals: pairs(i64 signal_id, value); \
+    texts: groups(i64 size, i64 id, i64 path_len, path_len key values, str text); \
+    entries: groups(i64 size, i64 collection, i64 flags, i64 variant, \
+    i64 path_len, path_len key values, key, record fields); \
+    orders: groups(i64 size, i64 collection, i64 path_len, path_len key values, keys)";
+
 /// A deterministic fingerprint of the whole vocabulary: every record
 /// kind, field name and type, enum variant, and prop. The core exports
 /// it (capi::kaya_spec_hash), the generator bakes it into every wire
@@ -349,6 +370,13 @@ pub fn hash() -> u64 {
         eat(&id.to_le_bytes());
         eat(format!("{kind:?}").as_bytes());
     }
+    // The one part of the vocabulary that is a LAYOUT rather than a
+    // field: the undo payload's runs. Hashed for the same reason the
+    // fields are — a binding that reads the old shape out of new bytes
+    // gets values of the right types in the wrong places, which no
+    // assertion downstream can catch.
+    eat(b"undo_delta_runs");
+    eat(UNDO_DELTA_RUNS.as_bytes());
     h
 }
 
@@ -1526,10 +1554,22 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   them:\n\n\
                   1. `signals` PAIRS: I64 signal id, then its restored \
                   value.\n\
-                  2. `texts` PAIRS: I64 widget id, then its restored Str. \
-                  A coarse episode restore is a programmatic write, so \
-                  nothing else would ever tell an app that folds \
-                  text_changed into its model.\n\
+                  2. `texts` GROUPS, arity-first like the two below: I64 \
+                  size, I64 id, I64 path_len, path_len instance-path key \
+                  values, then the restored Str. IDENTITY READS AS IN \
+                  button_clicked and text_changed: path_len 0 means `id` is \
+                  a live widget id, and a non-empty path means `id` is the \
+                  TEMPLATE NODE of a stamped copy addressed by that key \
+                  path — the same identity the edit arrived under, so an \
+                  app folds the restore into the model its own occurrence \
+                  handler fills. A coarse episode restore is a \
+                  programmatic write, so nothing else would ever tell an \
+                  app that folds text_changed into its model. THE GROUP \
+                  SHAPE IS NECESSARY RATHER THAN TIDY: this run was fixed \
+                  arity pairs, which had nowhere to put a path, so a \
+                  collection row's typing could not be named here and was \
+                  not banked at all (docs/undo-plan.md §3b; RULED \
+                  2026-08-06).\n\
                   3. `entries` GROUPS, each ARITY-FIRST so a reader needs \
                   no schema: I64 size (values in this group, including the \
                   size itself), I64 collection, I64 flags (bit 0 = the \

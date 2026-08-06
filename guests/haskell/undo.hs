@@ -50,13 +50,14 @@
    in tools/scenes/undo.steps. -}
 
 import Data.Int (Int64)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (intercalate)
+import qualified Data.Map.Strict as Map
 import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 
 import KayaApp
-import KayaWire (Value (..))
+import KayaWire (Value (..), kindEntry)
 
 -- The record is the schema.
 data Todo = Todo {title :: String} deriving (Generic)
@@ -86,13 +87,61 @@ keyList todos = do
   let ks = map (show . (fromFieldValue :: Value -> Int64) . fst) entries
   return (if null ks then "no keys" else "keys " ++ intercalate "," ks)
 
+-- | The app's copy of what is typed in the ROWS: a note per todo key.
+type Notes = Map.Map Int64 String
+
+-- | The row a stamped copy's occurrence names: the copy's key path,
+-- which for a top-level For is one key — the todo's own, minted by
+-- 'insertFresh' and read back through the binding's field conversion,
+-- exactly as 'keyList' reads the collection's keys.
+rowKey :: [Value] -> Int64
+rowKey (k : _) = fromFieldValue k
+rowKey [] = error "kaya: a stamped copy's path is never empty"
+
+-- | The notes, rendered: every note the app holds, by key.
+--
+-- THE ROWS' FIELDS ARE UNCONTROLLED LIKE THE DRAFT, so this map is the
+-- app's own and nothing reads it back off a widget. It is also where
+-- this scene proves the payload's new shape: an undone note arrives
+-- naming (template node, key path), and an app with two rows can only
+-- put it back in the right one because the path says which.
+noteList :: Notes -> String
+noteList notes
+  | Map.null notes = "no notes"
+  | otherwise = "notes " ++ intercalate "," [show k ++ "=" ++ v | (k, v) <- Map.toAscList notes]
+
+-- | One note, folded in. AN EMPTY NOTE IS NO NOTE, which is what makes
+-- the undo in the scene falsifiable: the restore of a row's field to ""
+-- has to REMOVE the key, so an app that ignored the payload reads its
+-- stale note back out and the script says so.
+noteAt :: Int64 -> String -> Notes -> Notes
+noteAt key text
+  | null text = Map.delete key
+  | otherwise = Map.insert key text
+
+-- | One texts run, folded into the app's two mirrors of widget-owned
+-- text. The empty path is the draft; a path names a row.
+--
+-- THE RUN IS WALKED WHOLE, not reduced to its last member, because an
+-- entry NAMES the field it restores and one step can restore both
+-- kinds at once.
+foldTexts :: IORef String -> IORef Notes -> [UndoText] -> IO ()
+foldTexts draftRef notesRef = mapM_ one
+  where
+    one t
+      | null (utPath t) = writeIORef draftRef (utText t)
+      | otherwise = modifyIORef' notesRef (noteAt (rowKey (utPath t)) (utText t))
+
 main :: IO ()
 main = kayaMain $ \app -> do
   -- The fold: widget-owned state arrives as occurrences; the app's copy
-  -- is this IORef, not a widget read.
+  -- is these two IORefs, not a widget read. Two of them, because there
+  -- are two kinds of text field on screen — the draft, and one per row
+  -- — and the payload's path is what tells them apart.
   draftRef <- newIORef ""
+  notesRef <- newIORef (Map.empty :: Notes)
 
-  buildTx app $ do
+  (notes, noteNode) <- buildTx app $ do
     status <- signal (VStr "no todos")
     history <- signal (VStr "history empty")
     -- THE APP'S MIRROR, RENDERED. Declared third and read as label#2 in
@@ -100,6 +149,9 @@ main = kayaMain $ \app -> do
     -- third static label the index resolves to the first STAMPED row
     -- and the assertion reads a todo title instead of failing loud.
     keys <- signal (VStr "no keys")
+    -- label#3: the same mirror one level down, for the text the ROWS
+    -- own. Declared fourth and read as label#3 in every language.
+    notes <- signal (VStr "no notes")
     todos <- collectionOf (Proxy :: Proxy Todo)
 
     -- Per window, and PERSISTENT: a history is walked as often as the
@@ -115,18 +167,19 @@ main = kayaMain $ \app -> do
     -- The scene reads that stale copy out loud one step later, at the
     -- add that refuses an empty draft.
     let walked verb label delta = do
-          case reverse (undoTexts delta) of
-            ((_, text) : _) -> writeIORef draftRef text
-            [] -> return ()
+          foldTexts draftRef notesRef (undoTexts delta)
+          noted <- noteList <$> readIORef notesRef
           submitTx app $ do
             total <- count (recordHandle todos)
             writeSignal history (VStr (verb ++ " " ++ what label ++ ", " ++ show total ++ " total"))
             -- ONE TRANSACTION WITH THE LABEL ABOVE, deliberately: the
             -- script reads that label first, so by the time it reads
             -- this one the app's own answer is what is on screen — not
-            -- the value the core restored on its way past.
+            -- the value the core restored on its way past. The notes
+            -- ride the same transaction for the same reason.
             list <- keyList todos
             writeSignal keys (VStr list)
+            writeSignal notes (VStr noted)
 
     -- THE GESTURE LAYER, one tier deeper: an app declares the two items
     -- and writes nothing else. They act on the focused widget, lower to
@@ -239,20 +292,49 @@ main = kayaMain $ \app -> do
         -- stays visible in the script rather than hidden in a handler.
         onFocus = submitTx app (focusWidget entryField)
 
+    -- THE ROW'S OWN FIELD, and the reason this scene grew: a copy's
+    -- text edits are the same occurrence a live field's are, one
+    -- identity deeper, and the ledger banks them the same way now that
+    -- the payload can name them. The template tier has no `entry` sugar
+    -- — there is no source to bind — so the widget-kind floor is the
+    -- spelling in every language.
+    --
+    -- 'forEach' rather than 'each' because the change handler is
+    -- registered centrally against the NODE, exactly as a stamped
+    -- button's click is: Build is a pure state monad with no App to
+    -- hand a handler to, so the node escapes the template and 'pure'
+    -- slots it into the row where it stands.
+    (todoRows, noteNode) <- forEach (recordHandle todos) $ do
+      note <- widget kindEntry
+      _ <- row [label (field @"title" @Todo), pure note]
+      return note
+
     root <-
       column
         [ labelBound status [A11yId "status"], -- label#0
           labelBound history [A11yId "history"], -- label#1
           labelBound keys [A11yId "keys"], -- label#2
+          labelBound notes [A11yId "notes"], -- label#3
           pure entryField, -- entry#0
           buttonOn "add" onAdd, -- button#0
           buttonOn "star" onStar, -- button#1
           buttonOn "focus" onFocus, -- button#2
           buttonOn "remove" onRemove, -- button#3
-          each (recordHandle todos) (row [label (field @"title" @Todo)])
+          pure todoRows
         ]
     -- THE SCENE TYPES WITH REAL KEYSTROKES, so something has to be
     -- holding focus when it does — and focus is the routing question's
     -- other half.
     focusWidget entryField
     mount root
+    return (notes, noteNode)
+
+  -- The row's edit, folded exactly as the payload's restore of the same
+  -- field will be — one rule, two arrival paths, so the script's
+  -- assertion cannot pass through a second spelling of "what a note is".
+  -- Its own transaction, and not an undoable one: an ordinary edit is
+  -- the platform's step, not the ledger's.
+  onChangeNode app noteNode $ \path text -> do
+    modifyIORef' notesRef (noteAt (rowKey path) text)
+    noted <- noteList <$> readIORef notesRef
+    submitTx app (writeSignal notes (VStr noted))

@@ -615,6 +615,91 @@ and the typing verb must wait for a text-editing responder, because
 kaya's focus is a model fact instantly while AppKit installs the
 field editor a render later and a leg is never the active app.
 
+## §3b — STAMPED COPIES JOIN THE LEDGER (2026-08-06, option A as
+## ruled): the `texts` run becomes arity-first
+
+§5.4 left one question open and the maintainer answered it: a
+collection row's text field is app-facing state like any other, so it
+banks episodes like any other, and the payload had to grow a way to
+NAME it.
+
+### What the shape was, and why it could not carry a row
+
+The `undone`/`redone` payload reads as four runs. `entries` and
+`orders` were arity-first groups — each opens with its own size — and
+`texts` was fixed-arity PAIRS of (widget id, text). An instance field's
+identity on the text channel is (template node, key path): that is what
+`decode_text_changed_tag` produces and the only name an app can
+resolve. A pair had nowhere to put the path, so `text_field_of_tag`
+answered None for a copy, no episode was ever opened, and a row's
+typing was outside the history entirely.
+
+`texts` is now the same shape as its two neighbours:
+
+    I64 size, I64 id, I64 path_len, path_len key values, Str text
+
+with path_len 0 meaning `id` is a live widget id — the identity-tag
+vocabulary the spec already restates for `pasted` and `button_clicked`.
+
+### The core half: the map that was already being built
+
+`Scene::run_body` builds a template-node-to-widget map while stamping
+and used to discard it; `Stamp` now keeps it. That map is the
+translation between a copy's two names, and both directions read it:
+`text_field_of_tag` turns an arriving (node, path) into the internal
+widget id the ledger keys on, and the payload builder turns that id
+back into (node, path) on the way out. `apply_delta` resolves the
+identity again when it writes, so the write follows the row rather than
+an id that a re-stamp would invalidate.
+
+Nothing else moved, and the three things that did not are worth
+recording because they were measured rather than assumed: programmatic
+writes to a copy were ALREADY admitted by `absorb_text_writes` (an
+internal id is editable), focus is ALREADY reported as the copy's
+internal id, and NO BACKEND changed — no backend decodes `undone`, and
+the restore is an ordinary SetProp every backend already applies.
+
+### THE HASH WOULD NOT HAVE MOVED, and that was the real defect
+
+`spec::hash()` fingerprints record kinds, names, fields, types, enums
+and props. The four runs' layout lived only in a doc comment, so this
+change rewrote the wire and left the fingerprint identical — a binding
+built against the old shape would have loaded happily and mis-read
+every payload, which is precisely the stale-artifact class the hash
+exists to refuse. The layout is now `spec::UNDO_DELTA_RUNS`, a declared
+string that `hash()` eats, so a run that changes shape moves the hash
+by construction. (`SET_PROPERTY_NOTE` describes a variable tail the
+same way and is still unhashed — the same trap, one record over.)
+
+### A destroyed row takes its typing history with it
+
+Keying an episode on the copy's internal id means a torn-down copy
+would leave a ledger entry naming a widget that no longer exists, so
+`teardown` drops those entries from both sides of the window's ledger.
+A step that restores text into a destroyed widget is a step that
+visibly does nothing — the user presses Cmd+Z and the screen does not
+move — which is the shape §2 exists to remove, one level down. The
+row's own removal remains a step and still walks back; what it brings
+back is a FRESH copy, because an uncontrolled field's text is
+widget-owned state and undo restores app state (D4). An app that wants
+a row's text to survive its removal binds it to a record field, and the
+`entries` run already carries that — which is option B's answer,
+surviving as the answer to the narrower question it actually fits.
+
+### What the scene pins (tools/scenes/undo.steps, final block)
+
+A row is added, its field is edited, Edit>Undo takes the edit back and
+Edit>Redo brings it forward, and the app's own by-key map of row notes
+is read at each step — the app can only put a restored note in the
+right row because the payload's path says which. The undo's assertion
+is the falsifiable one: an app that ignores the run reads its stale
+note back out. The block addresses the row as `entry#last` and edits it
+with `set_text`, both for stated reasons — a fixed index would name a
+destroyed copy on a backend that does not prune its harness registry,
+and nothing can FOCUS a stamped copy, so the native tier is not what
+this block asserts. Focus stays on the draft, so the route is the
+core's on every lane.
+
 ## §4 — the depth slice (spec → core → Rust → mac → scene)
 
 Per the sequencing doctrine, with banking in from the start:

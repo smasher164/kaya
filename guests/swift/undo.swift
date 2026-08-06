@@ -48,12 +48,16 @@ struct Todo: KayaGen {
 let app = KayaApp()
 
 // The fold: widget-owned state arrives as occurrences; the app's copy is
-// this variable, not a widget read.
+// these variables, not a widget read. Two of them, because there are two
+// kinds of text field on screen — the draft, and one per row — and the
+// payload's path is what tells them apart.
 var draft = ""
+var rowNotes: [Int64: String] = [:]
 
 var status: KayaSignal!
 var history: KayaSignal!
 var keys: KayaSignal!
+var notes: KayaSignal!
 var field: KayaWidget!
 var todos: KayaRecordCollection<Todo>!
 
@@ -85,6 +89,53 @@ func keyList(_ tx: KayaAppTx) -> String {
     return ks.isEmpty ? "no keys" : "keys \(ks.joined(separator: ","))"
 }
 
+/// The row a stamped copy's occurrence names: the copy's key path, which
+/// for a top-level For is one key — the todo's own, minted by
+/// insertFresh and read back exactly as keyList reads the collection's
+/// keys.
+func rowKey(_ path: [KayaValue]) -> Int64 {
+    guard case .i64(let n) = path[0] else {
+        preconditionFailure("kaya: a minted key is I64")
+    }
+    return n
+}
+
+/// The app's copy of what is typed in the ROWS, rendered: every note it
+/// holds, by key.
+///
+/// THE ROWS' FIELDS ARE UNCONTROLLED LIKE THE DRAFT, so this map is the
+/// app's own and nothing reads it back off a widget. It is also where
+/// this scene proves the payload's new shape: an undone note arrives
+/// naming (template node, key path), and an app with two rows can only
+/// put it back in the right one because the path says which. Sorted,
+/// because a Dictionary has no order and the script compares bytes.
+func noteList() -> String {
+    if rowNotes.isEmpty {
+        return "no notes"
+    }
+    let rendered = rowNotes.keys.sorted().map { key in "\(key)=\(rowNotes[key]!)" }
+    return "notes \(rendered.joined(separator: ","))"
+}
+
+/// One texts run, folded into the app's two mirrors of widget-owned
+/// text. The empty path is the draft; a path names a row.
+///
+/// AN EMPTY NOTE IS NO NOTE, which is what makes the undo falsifiable:
+/// the restore of a row's field to "" has to REMOVE the key, so an app
+/// that ignored this run reads its stale note back out and the script
+/// says so.
+func foldTexts(_ texts: [KayaUndoText]) {
+    for restored in texts {
+        if restored.path.isEmpty {
+            draft = restored.text
+        } else if restored.text.isEmpty {
+            rowNotes.removeValue(forKey: rowKey(restored.path))
+        } else {
+            rowNotes[rowKey(restored.path)] = restored.text
+        }
+    }
+}
+
 app.build { tx in
     // THE GESTURE LAYER, one tier deeper: an app declares the two items
     // and writes nothing else. They act on the focused widget, lower to
@@ -109,32 +160,42 @@ app.build { tx in
             // its own model — which is every app, the field being
             // uncontrolled — would go stale on exactly this step if the
             // payload did not carry it (D5).
-            if let restored = delta.texts.last { draft = restored.text }
+            //
+            // THE RUN IS WALKED WHOLE, not reduced to its last string,
+            // because an entry NAMES the field it restores: the empty
+            // path is the draft, and a path names the row whose note
+            // came back.
+            foldTexts(delta.texts)
             let total = todos.items(tx).count
             tx.write(history, .str("undid \(what(label)), \(total) total"))
             // ONE TRANSACTION WITH THE LABEL ABOVE, deliberately: the
             // script reads that label first, so by the time it reads
             // this one the app's own answer is what is on screen — not
-            // the value the core restored on its way past.
+            // the value the core restored on its way past. The notes
+            // ride the same transaction for the same reason.
             tx.write(keys, .str(keyList(tx)))
+            tx.write(notes, .str(noteList()))
         },
         onRedone: { tx, label, delta in
-            if let restored = delta.texts.last { draft = restored.text }
+            foldTexts(delta.texts)
             let total = todos.items(tx).count
             tx.write(history, .str("redid \(what(label)), \(total) total"))
             tx.write(keys, .str(keyList(tx)))
+            tx.write(notes, .str(noteList()))
         },
         menus: [edit])
 
     status = tx.signal(.str("no todos"))
     history = tx.signal(.str("history empty"))
     keys = tx.signal(.str("no keys"))
+    notes = tx.signal(.str("no notes"))
     todos = todoCollection(tx)
 
     let root = tx.column {
         tx.setA11yId(tx.label(bind: status), "status")  // label#0
         tx.setA11yId(tx.label(bind: history), "history")  // label#1
         tx.setA11yId(tx.label(bind: keys), "keys")  // label#2
+        tx.setA11yId(tx.label(bind: notes), "notes")  // label#3
         field = tx.entry { _, text in draft = text }  // entry#0
         tx.setA11yId(field, "draft")
         tx.button("add") { tx in  // button#0
@@ -216,6 +277,30 @@ app.build { tx in
         for row in todos.rows {
             row.row {
                 row.label(row.title)
+                // THE ROW'S OWN FIELD, and the reason this scene grew: a
+                // copy's text edits are the same occurrence a live
+                // field's are, one identity deeper, and the ledger banks
+                // them the same way now that the payload can name them.
+                // The template tier has no `entry` sugar — there is no
+                // source to bind — so the widget-kind floor is the
+                // spelling here, in every language.
+                let note = row.t.widget(UInt32(KAYA_KIND_ENTRY))
+                // Registered against the TEMPLATE NODE, so each edit
+                // arrives with the stamped copy's keys: the same
+                // (node, path) pair the undo payload names it by, which
+                // is what lets one rule fold both arrival paths.
+                app.onChange(note) { tx, path, text in
+                    let key = rowKey(path)
+                    if text.isEmpty {
+                        rowNotes.removeValue(forKey: key)
+                    } else {
+                        rowNotes[key] = text
+                    }
+                    // The handler's own transaction, and it names no
+                    // undoable group: the app's mirror of a field's text
+                    // is not a step, exactly as the draft's fold is not.
+                    tx.write(notes, .str(noteList()))
+                }
             }
         }
     }

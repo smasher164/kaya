@@ -1396,12 +1396,27 @@ class UndoDelta:
     Four runs, each a list:
 
     - `signals` — (signal id, restored value) pairs.
-    - `texts` — (widget id, restored text) pairs. THE ONLY NOTIFICATION
-      THERE IS for that text: restoring a typing episode is a
-      programmatic write, and a programmatic write never echoes, so an
-      app that folds `text_changed` into its own model — which is every
-      app, the field being uncontrolled — would go stale on exactly this
-      step if the payload did not carry it.
+    - `texts` — (widget or node id, instance path, restored text)
+      triples. THE ONLY NOTIFICATION THERE IS for that text: restoring
+      a typing episode is a programmatic write, and a programmatic
+      write never echoes, so an app that folds `text_changed` into its
+      own model — which is every app, the field being uncontrolled —
+      would go stale on exactly this step if the payload did not carry
+      it.
+
+      THE PATH IS WHICH FIELD, and it is the same identity tag every
+      other occurrence already carries. EMPTY means a live widget:
+      the id is the one the app holds, and there is nothing else to
+      say. NON-EMPTY means a stamped copy of a template, whose identity
+      is (template node, key path) because a copy has no id an app
+      could hold — the very pair its own edits arrive under, since a
+      template `entry`'s `on_change` is handed those keys before the
+      text. A top-level `for` over a collection makes that one key, so
+      `path[0]` is the row, already an int for the minter's I64 keys.
+
+      THE RUN IS A LIST AND EVERY MEMBER COUNTS: one step can restore
+      the draft and a row's note at once, so an app that reads only the
+      last entry drops the other field on the floor.
     - `entries` — (collection id, instance path, key, state), with state
       None where the restored state does not have that entry at all and
       (variant, wire fields) where it does.

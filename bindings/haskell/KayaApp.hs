@@ -42,6 +42,7 @@ module KayaApp
     undoableTx,
     undoableTxIn,
     UndoDelta (..),
+    UndoText (..),
     UndoEntry (..),
     UndoOrder (..),
     dispatch,
@@ -232,6 +233,7 @@ import System.IO.Unsafe (unsafePerformIO)
 
 import KayaRuntime
   ( UndoDelta (..),
+    UndoText (..),
     UndoEntry (..),
     UndoOrder (..),
     emptyUndoDelta,

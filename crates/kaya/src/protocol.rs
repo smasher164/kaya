@@ -640,15 +640,37 @@ pub type Record = Vec<Value>;
 pub struct UndoDelta {
     /// Signal id -> its restored value.
     pub signals: Vec<(SignalId, Value)>,
-    /// Widget id -> its restored text. A coarse episode restore is a
-    /// programmatic write, so nothing else would ever tell an app that
-    /// folds TextChanged into its model.
-    pub texts: Vec<(WidgetId, String)>,
+    /// Each text field this step put back. A coarse episode restore is
+    /// a programmatic write, so nothing else would ever tell an app
+    /// that folds TextChanged into its model.
+    pub texts: Vec<UndoText>,
     /// Collection entries, present or gone.
     pub entries: Vec<UndoEntry>,
     /// Instance orders, for the instances whose order the step changed
     /// — position is the one thing per-entry statements cannot carry.
     pub orders: Vec<UndoOrder>,
+}
+
+/// One text field's restored text, named the way the edit that filled
+/// it was named.
+///
+/// THE IDENTITY IS THE OCCURRENCE'S, not the core's bookkeeping. An
+/// empty `path` means `id` is a live [`WidgetId`]; a non-empty one
+/// means `id` is the [`TemplateNodeId`] of a stamped copy addressed by
+/// that key path — the split `decode_text_changed_tag` already makes
+/// between `TextChanged` and `InstanceTextChanged`. An app therefore
+/// folds this into the same model its own change handler fills, and the
+/// core's internal widget id for a copy never leaves the core (it could
+/// not be resolved by an app, and it changes when the row is stamped
+/// again).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UndoText {
+    /// A widget id when `path` is empty, a template node id otherwise.
+    pub id: u64,
+    /// The stamped copy's key path, outermost first; empty for a live
+    /// widget.
+    pub path: Path,
+    pub text: String,
 }
 
 /// One collection entry's restored state.

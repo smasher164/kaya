@@ -173,6 +173,18 @@ struct WhenSite {
 struct Stamp {
     /// Internal widget ids in creation order; destroyed in reverse.
     widgets: Vec<WidgetId>,
+    /// Which TEMPLATE NODE each of this copy's widgets came from — the
+    /// map `run_body` builds while stamping, kept instead of thrown
+    /// away.
+    ///
+    /// It is the translation between the copy's two names. A stamped
+    /// widget has an internal id, which is what a programmatic write
+    /// names and what the ledger keys on; the app knows the same widget
+    /// as (template node, key path), which is what its occurrences
+    /// carry and the only name it could resolve. Everything that has to
+    /// cross between those two — banking a row's typing, and naming the
+    /// restored text in an `undone` payload — reads this map.
+    nodes: HashMap<u64, WidgetId>,
     /// The copy's root widgets (children of the For's container), in
     /// body order — what a move repositions.
     roots: Vec<WidgetId>,
@@ -2330,19 +2342,97 @@ impl Scene {
     /// id (the backend never learns what the tag means; it hands back
     /// what it was given).
     ///
-    /// A STAMPED COPY IS NOT BANKED YET, and says so by answering None
-    /// rather than guessing: a copy's identity on this channel is
-    /// (template node, key path), and the ledger keys on the widget id
-    /// that a programmatic write to the same field would name — the map
-    /// between them is the one thing the scene does not keep (`stamps`
-    /// records a copy's widgets in creation order, not which template
-    /// node each came from). An editable collection row therefore has no
-    /// typing episode and its undo falls to the core tier, which is
-    /// coarser rather than wrong.
+    /// A STAMPED COPY ANSWERS WITH ITS OWN INTERNAL ID, which is the
+    /// identity that CARRIES the text: it is what a programmatic write
+    /// to the same field names (so `absorb_text_writes` and this agree),
+    /// and what the backend reports as focused. The copy's app-facing
+    /// name — (template node, key path) — is restored on the way out,
+    /// where the payload is built.
     pub(crate) fn text_field_of_tag(&self, tag: &[u8]) -> Option<WidgetId> {
         match crate::wire::decode_text_changed_tag(tag, "") {
             Occurrence::TextChanged { id, .. } => Some(id),
+            Occurrence::InstanceTextChanged { node, path, .. } => {
+                self.instance_widget(node.0, &path)
+            }
             _ => None,
+        }
+    }
+
+    /// The internal widget a stamped copy's template node became, for
+    /// the copy addressed by `path`.
+    ///
+    /// The stamps table is keyed by (collection, site path, key) and the
+    /// copy's own path is the site path plus the key — the same
+    /// `copy_path` the tag was built from (`button_tag`) — so the
+    /// candidates are the stamps at that path, and the node map picks
+    /// the widget among them. The collection is not in the tag and does
+    /// not need to be: a template node belongs to exactly one blueprint.
+    ///
+    /// Linear in live copies, and deliberately so: the map that makes it
+    /// O(1) would be a second index over the same facts, and a second
+    /// index is a thing that drifts. If a scene ever makes this hot, the
+    /// answer is a node-to-collection table built at declaration, not a
+    /// copy of this one.
+    fn instance_widget(&self, node: u64, path: &[Value]) -> Option<WidgetId> {
+        let (key, site) = path.split_last()?;
+        let key = Key::from_value(key);
+        let site: PathKey = site.iter().map(Key::from_value).collect();
+        self.stamps.iter().find_map(|((_, p, k), stamp)| {
+            (*p == site && *k == key)
+                .then(|| stamp.nodes.get(&node).copied())
+                .flatten()
+        })
+    }
+
+    /// What an `undone`/`redone` payload calls this field.
+    ///
+    /// A live widget is its own name. A stamped copy's internal id is
+    /// NOT a name — no app has ever seen it, it cannot be resolved
+    /// through any binding, and it changes when the row is stamped again
+    /// — so the copy is named the way its own occurrences name it:
+    /// template node plus key path (D5, and the option-A ruling of
+    /// 2026-08-06). None means the field cannot be named at all, which
+    /// after `teardown`'s drop is a field no ledger holds.
+    fn field_identity(&self, field: WidgetId) -> Option<(u64, crate::protocol::Path)> {
+        if field.0 & INTERNAL_BIT == 0 {
+            return Some((field.0, Vec::new()));
+        }
+        self.stamps.iter().find_map(|((_, path, key), stamp)| {
+            let node = *stamp.nodes.iter().find(|(_, w)| **w == field)?.0;
+            let mut values = path_values(path);
+            values.push(key.to_value());
+            Some((node, values))
+        })
+    }
+
+    /// An episode's restored text as the payload's one-entry texts run,
+    /// or an EMPTY run for a field that can no longer be named — which
+    /// is not a state a ledger reaches (`teardown` drops the episodes of
+    /// a copy it destroys), and is an empty statement rather than a
+    /// wrong one if it ever is.
+    fn text_delta(&self, field: WidgetId, text: &str) -> Vec<crate::protocol::UndoText> {
+        self.field_identity(field)
+            .map(|(id, path)| crate::protocol::UndoText {
+                id,
+                path,
+                text: text.to_owned(),
+            })
+            .into_iter()
+            .collect()
+    }
+
+    /// The live widget an `undone` text entry describes: itself when it
+    /// names one, or the copy that carries that template node now.
+    ///
+    /// RESOLVED AT APPLY, not stored: between banking and restoring, a
+    /// row can be stamped again (an undone removal re-inserts it) and
+    /// the copy's internal ids are new. The path names the row, so the
+    /// write follows it.
+    fn text_target(&self, text: &crate::protocol::UndoText) -> Option<WidgetId> {
+        if text.path.is_empty() {
+            Some(WidgetId(text.id))
+        } else {
+            self.instance_widget(text.id, &text.path)
         }
     }
 
@@ -2510,7 +2600,7 @@ impl Scene {
                 // — one correctly-ordered step, at the granularity a
                 // banked episode has left.
                 let delta = UndoDelta {
-                    texts: vec![(ep.field, ep.before.clone())],
+                    texts: self.text_delta(ep.field, &ep.before),
                     ..UndoDelta::default()
                 };
                 ep.current = ep.before.clone();
@@ -2554,7 +2644,7 @@ impl Scene {
             }
             LedgerEntry::Episode(mut ep) => {
                 let delta = UndoDelta {
-                    texts: vec![(ep.field, ep.after.clone())],
+                    texts: self.text_delta(ep.field, &ep.after),
                     ..UndoDelta::default()
                 };
                 ep.current = ep.after.clone();
@@ -2632,12 +2722,22 @@ impl Scene {
             let keys: Vec<Key> = order.keys.iter().map(Key::from_value).collect();
             self.restore_order(order.collection, &path, &keys, out);
         }
-        for (field, text) in &delta.texts {
-            self.field_text.insert(*field, text.clone());
+        for text in &delta.texts {
+            // THE PAYLOAD NAMES THE FIELD THE APP'S WAY, so the write
+            // has to translate back: a live widget is its own id, and a
+            // stamped copy's field is whichever widget carries that
+            // template node at that key path RIGHT NOW. A copy whose row
+            // is gone resolves to nothing and writes nothing — the same
+            // statement, applied to a world that no longer has the
+            // widget, rather than a write into a destroyed id.
+            let Some(field) = self.text_target(text) else {
+                continue;
+            };
+            self.field_text.insert(field, text.text.clone());
             out.push(ApplyOp::SetProp {
-                id: *field,
+                id: field,
                 prop: Prop::Text,
-                value: Value::Str(text.clone()),
+                value: Value::Str(text.text.clone()),
             });
         }
         // An inverse is a programmatic write like any other, so D7 holds
@@ -3791,6 +3891,7 @@ impl Scene {
             });
             stamp.roots.push(node_map[root]);
         }
+        stamp.nodes = node_map;
         self.stamps.insert((id, path.clone(), key.clone()), stamp);
     }
 
@@ -3955,6 +4056,7 @@ impl Scene {
                     child: node_map[root],
                 });
             }
+            stamp.nodes = node_map;
             self.when_sites.get_mut(&site).unwrap().stamp = Some(stamp);
         } else if !on {
             if let Some(stamp) = s.stamp.take() {
@@ -3997,6 +4099,24 @@ impl Scene {
             if let Some(bound) = self.element_bindings.get_mut(entry) {
                 bound.retain(|(w, _, _)| w != widget);
             }
+        }
+        // THE COPY TAKES ITS TYPING HISTORY WITH IT. An episode on a
+        // field that no longer exists is a step that would visibly do
+        // nothing — the user presses Cmd+Z and the screen does not move
+        // — which is the exact shape this milestone exists to remove
+        // (`note_text_changed`'s no-change rule, one level up). The row's
+        // own removal is a step in its own right and still walks back;
+        // what it brings back is a fresh copy, because an uncontrolled
+        // field's text is widget-owned state and undo restores app state
+        // (D4). An app that wants a row's text to survive its removal
+        // binds it to a record field, and the entries run carries it.
+        for ledger in self.ledgers.values_mut() {
+            let spent = |entry: &LedgerEntry| match entry {
+                LedgerEntry::Episode(ep) => stamp.widgets.contains(&ep.field),
+                LedgerEntry::Group { .. } => false,
+            };
+            ledger.done.retain(|entry| !spent(entry));
+            ledger.redo.retain(|entry| !spent(entry));
         }
         for id in stamp.widgets.iter().rev() {
             out.push(ApplyOp::Destroy { id: *id });
@@ -6775,6 +6895,17 @@ mod tests {
             .count()
     }
 
+    /// The texts run a LIVE field's restore carries: its own id and the
+    /// empty path, which is how the payload spells "a widget id" (the
+    /// identity-tag vocabulary, spec.rs).
+    fn live_text(id: u64, text: &str) -> crate::protocol::UndoText {
+        crate::protocol::UndoText {
+            id,
+            path: Vec::new(),
+            text: text.to_owned(),
+        }
+    }
+
     fn set_texts(ops: &[ApplyOp]) -> Vec<(u64, String)> {
         ops.iter()
             .filter_map(|op| match op {
@@ -7282,7 +7413,7 @@ mod tests {
             panic!("wanted Undone");
         };
         assert_eq!(label, "", "a typing episode carries no authored name");
-        assert_eq!(delta.texts, vec![(WidgetId(2), "a".to_string())]);
+        assert_eq!(delta.texts, vec![live_text(2, "a")]);
 
         let (_, occ) = scene.undo(DEFAULT_WINDOW).expect("X");
         let Occurrence::Undone { label, .. } = &occ else {
@@ -7400,7 +7531,7 @@ mod tests {
         assert_eq!(label, "", "a typing episode carries no authored name");
         assert_eq!(
             delta.texts,
-            vec![(WidgetId(2), "teas".to_string())],
+            vec![live_text(2, "teas")],
             "the after-image, restored by the core: the redo is the coarse one, \
              which is the granularity the walk already spent"
         );
@@ -7536,7 +7667,7 @@ mod tests {
         let Occurrence::Undone { delta, .. } = &occ else {
             panic!("wanted Undone");
         };
-        assert_eq!(delta.texts, vec![(WidgetId(2), String::new())]);
+        assert_eq!(delta.texts, vec![live_text(2, "")]);
         assert_eq!(depth(&scene, DEFAULT_WINDOW), 0);
     }
 
@@ -7571,6 +7702,218 @@ mod tests {
             Some(LedgerEntry::Group { label, .. }) => assert_eq!(label, "add todo"),
             _ => panic!("the group must be the next step back"),
         }
+    }
+
+    /// The undo scene one level down: the For's template holds the
+    /// element-bound label AND AN ENTRY OF ITS OWN — a collection row's
+    /// text field, which is the case the fixed-arity texts run could not
+    /// name and therefore did not bank (RULED 2026-08-06, option A).
+    ///
+    /// ids: signal 1; widgets 1 column, 2 the live entry, 3 label,
+    /// 4 the For; collection 1; template nodes 10 label, 11 row entry.
+    fn stamped_field_scene() -> Transaction {
+        vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: v("one") },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Entry },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(3),
+                prop: Prop::Text,
+                value: PropValue::Signal(SignalId(1)),
+            },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(10),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Entry },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]
+    }
+
+    fn insert_row(key: &str) -> TxOp {
+        TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: vec![],
+            key: v(key),
+            variant: 0,
+            record: vec![v(key)],
+        }
+    }
+
+    /// The map the stamping pass used to throw away is kept, and it is
+    /// kept per copy: every template node the body created answers with
+    /// the widget THIS copy got, and two copies of one template answer
+    /// differently. Without it the two names for a row's field — the
+    /// internal id the text arrives under and the (node, key path) the
+    /// app knows it by — cannot be translated in either direction.
+    #[test]
+    fn a_stamp_remembers_which_node_each_widget_came_from() {
+        let mut scene = Scene::new();
+        scene.apply(stamped_field_scene());
+        scene.apply(vec![insert_row("r1"), insert_row("r2")]);
+        let one = &scene.stamps[&(CollectionId(1), vec![], Key::Str("r1".into()))];
+        let two = &scene.stamps[&(CollectionId(1), vec![], Key::Str("r2".into()))];
+        for stamp in [one, two] {
+            let mut nodes: Vec<u64> = stamp.nodes.keys().copied().collect();
+            nodes.sort_unstable();
+            assert_eq!(nodes, vec![10, 11], "both template nodes, and only those");
+            for widget in stamp.nodes.values() {
+                assert!(stamp.widgets.contains(widget), "a widget this copy created");
+            }
+        }
+        assert_ne!(
+            one.nodes[&11], two.nodes[&11],
+            "one template node, two copies, two widgets — which is the whole \
+             reason the app cannot be handed the internal id"
+        );
+    }
+
+    /// THE ITEM THIS SLICE EXISTS FOR. A row's field banks a typing
+    /// episode like any other field, walks back through the ledger, and
+    /// is named in the payload the way the app knows it: template node
+    /// plus key path, never the copy's internal id (D5 — this record is
+    /// the only thing the app hears, so every name in it must be one the
+    /// app can resolve).
+    #[test]
+    fn a_stamped_rows_field_banks_an_episode_and_names_itself_to_the_app() {
+        let mut scene = Scene::new();
+        scene.apply(stamped_field_scene());
+        scene.apply(vec![insert_row("r1")]);
+
+        // The identity a backend reports the edit under: the tag it was
+        // handed at Create, which for a copy is (node, key path).
+        let tag = crate::wire::click_tag(11, &[v("r1")]);
+        let field = scene
+            .text_field_of_tag(&tag)
+            .expect("a stamped copy's field resolves to the widget carrying the text");
+        assert!(
+            field.0 & INTERNAL_BIT != 0,
+            "the ledger keys on the copy's own internal id — the one a \
+             programmatic write to the same field names"
+        );
+
+        scene.note_text_changed(DEFAULT_WINDOW, field, "ha", false);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 1, "the row's run is banked");
+        assert_eq!(
+            scene.route_undo(DEFAULT_WINDOW, Some(WidgetId(2)), false),
+            UndoRoute::Core,
+            "the frontier is the row's episode and the focus is elsewhere"
+        );
+
+        let (ops, occ) = scene.undo(DEFAULT_WINDOW).expect("the row's typing walks back");
+        assert_eq!(
+            set_texts(&ops),
+            vec![(field.0, String::new())],
+            "the widget write still goes to the copy that carries the text"
+        );
+        let Occurrence::Undone { label, delta, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert_eq!(label, "", "a typing episode carries no authored name");
+        assert_eq!(
+            delta.texts,
+            vec![crate::protocol::UndoText {
+                id: 11,
+                path: vec![v("r1")],
+                text: String::new(),
+            }],
+            "named the app's way: the template node and the row's key"
+        );
+
+        let (ops, occ) = scene.redo(DEFAULT_WINDOW).expect("and forward again");
+        assert_eq!(set_texts(&ops), vec![(field.0, "ha".to_string())]);
+        let Occurrence::Redone { delta, .. } = &occ else {
+            panic!("wanted Redone");
+        };
+        assert_eq!(
+            delta.texts,
+            vec![crate::protocol::UndoText {
+                id: 11,
+                path: vec![v("r1")],
+                text: "ha".to_string(),
+            }]
+        );
+    }
+
+    /// Two copies of one template are two fields, and the payload says
+    /// which. A reader that took the template node alone would fold the
+    /// wrong row's text into its model and never know.
+    #[test]
+    fn two_rows_of_one_template_bank_separately() {
+        let mut scene = Scene::new();
+        scene.apply(stamped_field_scene());
+        scene.apply(vec![insert_row("r1"), insert_row("r2")]);
+        let first = scene
+            .text_field_of_tag(&crate::wire::click_tag(11, &[v("r1")]))
+            .expect("row one");
+        let second = scene
+            .text_field_of_tag(&crate::wire::click_tag(11, &[v("r2")]))
+            .expect("row two");
+        assert_ne!(first, second);
+        scene.note_text_changed(DEFAULT_WINDOW, first, "one", false);
+        scene.note_text_changed(DEFAULT_WINDOW, second, "two", false);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 2, "two runs, two entries");
+
+        let (_, occ) = scene.undo(DEFAULT_WINDOW).expect("newest first");
+        let Occurrence::Undone { delta, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert_eq!(delta.texts[0].path, vec![v("r2")]);
+        let (_, occ) = scene.undo(DEFAULT_WINDOW).expect("then the older one");
+        let Occurrence::Undone { delta, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert_eq!(delta.texts[0].path, vec![v("r1")]);
+    }
+
+    /// A removed row takes its typing history with it. The alternative
+    /// is a step that visibly does nothing — the user presses Cmd+Z, the
+    /// core writes text into a widget that no longer exists, and the
+    /// screen does not move — which is the shape this milestone exists
+    /// to remove, one level down.
+    #[test]
+    fn a_removed_row_takes_its_episode_with_it() {
+        let mut scene = Scene::new();
+        scene.apply(stamped_field_scene());
+        scene.apply(vec![insert_row("r1")]);
+        let field = scene
+            .text_field_of_tag(&crate::wire::click_tag(11, &[v("r1")]))
+            .expect("the row's field");
+        scene.note_text_changed(DEFAULT_WINDOW, field, "ha", false);
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 1);
+
+        scene.apply(vec![
+            group("remove r1"),
+            TxOp::CollectionRemove {
+                id: CollectionId(1),
+                path: vec![],
+                key: v("r1"),
+            },
+        ]);
+        assert_eq!(
+            depth(&scene, DEFAULT_WINDOW),
+            1,
+            "the removal is the only step left: the row's run went with the row"
+        );
+        let (_, occ) = scene.undo(DEFAULT_WINDOW).expect("the removal walks back");
+        let Occurrence::Undone { label, delta, .. } = &occ else {
+            panic!("wanted Undone");
+        };
+        assert_eq!(label, "remove r1");
+        assert!(
+            delta.texts.is_empty(),
+            "undo restores app state; an uncontrolled field's text is the \
+             widget's, and the row comes back the way a fresh copy is stamped"
+        );
     }
 
     #[test]

@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x44b8c0a4228f2b33L
+let spec_hash = 0x69c07d5216db7eb8L
 
 let value_bool = 1
 let value_i64 = 2

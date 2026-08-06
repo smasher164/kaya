@@ -239,3 +239,65 @@ menu_activate "Edit>Redo"
 expect label#0 "removed milk, 1 total"
 expect label#1 "redid remove milk, 1 total"
 expect label#2 "keys 2"
+
+# ---- and one level down: a ROW's field is a field too --------------
+#
+# Every step above is about the DRAFT — a live widget, whose id the app
+# holds. A collection row's field has no id an app could hold: its
+# identity is (template node, key path), the same pair its clicks and
+# its edits already arrive under. That is the whole reason this block
+# exists, and the reason the payload's texts run had to become an
+# arity-first group like its entries and orders siblings: a fixed pair
+# of (widget id, text) had nowhere to put the path, so a row's typing
+# could not be NAMED to the app and was therefore not banked at all
+# (docs/undo-plan.md §3b).
+#
+# THE ROW IS ADDED HERE AND ADDRESSED AS `#last` ON PURPOSE. By this
+# point the scene has stamped six row copies and destroyed four of them
+# (two adds and a remove, each walked back and forward), and a backend
+# is not required to prune its harness registry when a copy is
+# destroyed — the SwiftUI interpreter does not. A fixed `entry#N` would
+# name a dead node on some lanes and a live one on others; the newest
+# stamped copy is the newest live one everywhere.
+#
+# AND THE EDIT IS `set_text`, which is the one place this scene departs
+# from its own real-keystrokes rule, for a reason that is not
+# convenience: nothing can FOCUS a stamped copy. `tx.focus` takes a
+# widget id and no app has one for a row, and `click` targets buttons.
+# What is asserted here is therefore the LEDGER's half — a row's run is
+# banked, ordered with everything else, and restored by the core — and
+# not the native tier, which an unfocused field could not offer anyway.
+# Focus stays on the draft, so this undo routes to the core on every
+# lane and no frontier granularity is being asserted.
+click button#2
+type "jam"
+click button#0
+expect label#0 "added jam, 2 total"
+# A THIRD FRESH KEY. The minter has been walked back and forward over
+# both earlier todos and still never rewinds.
+expect label#2 "keys 2,3"
+set_text entry#last "ha"
+# label#3 IS THE APP'S OWN MAP OF WHAT IS TYPED IN THE ROWS, by key —
+# the row fields are uncontrolled exactly as the draft is, so this is
+# the app's copy and never a widget read.
+expect label#3 "notes 3=ha"
+
+menu_activate "Edit>Undo"
+expect label#1 "undid typing, 2 total"
+# THE FALSIFIABLE HALF, and the only one of the two. The restore of a
+# row's field is a programmatic write, so it emits nothing: an app that
+# ignores the payload's texts run still holds "3=ha" and reads it back
+# out here. The redo below cannot catch that on its own — an app that
+# ignored BOTH directions ends up back at "notes 3=ha" and the two
+# ignores cancel, which is the same vacuity this file's earlier D5 pin
+# was rewritten to escape.
+expect label#3 "no notes"
+# ...and the widget followed, which is the other half of one step: the
+# core wrote the text back into whichever copy carries that template
+# node at that key right now.
+expect entry#last ""
+
+menu_activate "Edit>Redo"
+expect label#1 "redid typing, 2 total"
+expect label#3 "notes 3=ha"
+expect entry#last "ha"

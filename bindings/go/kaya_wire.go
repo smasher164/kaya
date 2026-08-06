@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x44b8c0a4228f2b33
+	SpecHash uint64 = 0x69c07d5216db7eb8
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -1594,10 +1594,16 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 				UndoSignal{Signal: uint64(num(pair[0])), Value: pair[1]})
 		}
 		for i := 0; i < texts; i++ {
-			pair := next(2)
-			text, _ := pair[1].(string)
-			delta.Texts = append(delta.Texts,
-				UndoText{Widget: uint64(num(pair[0])), Text: text})
+			head := next(3)
+			size := int(num(head[0]))
+			pathLen := int(num(head[2]))
+			body := next(size - 3)
+			text, _ := body[pathLen].(string)
+			delta.Texts = append(delta.Texts, UndoText{
+				ID:   uint64(num(head[1])),
+				Path: append([]any(nil), body[:pathLen]...),
+				Text: text,
+			})
 		}
 		for i := 0; i < entries; i++ {
 			// size, collection, flags (bit 0 = the entry EXISTS),

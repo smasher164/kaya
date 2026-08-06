@@ -3611,11 +3611,12 @@ fn clear_native_undo(field: &TextBox) {
 /// FOCUSED (an event on an unfocused field closes the episode as it
 /// stands).
 ///
-/// FROM THE HANDLER, WHICH IS THE ONE PLACE A USER EDIT PASSES. The
-/// programmatic paths do not come through here: they bump the swallow
-/// counter and the core absorbs their writes from the apply ops
-/// (`Scene::absorb_text_writes`), which is the site that cannot be
-/// bypassed by a sixth write path.
+/// FROM A USER EDIT, WHICHEVER WAY IT ARRIVED — the control's own
+/// TextChanged (a real keystroke, a real paste) and the harness's
+/// `set_text`, which stands in for one. The APP's programmatic writes do
+/// not come through here: they bump the swallow counter and the core
+/// absorbs them from the apply ops (`Scene::absorb_text_writes`), which
+/// is the site that cannot be bypassed by a sixth write path.
 ///
 /// `with_borrow_mut` and not a deferred hop, deliberately: a bank that
 /// landed a tick later could arrive AFTER the routing question that
@@ -3627,26 +3628,40 @@ fn clear_native_undo(field: &TextBox) {
 fn bank_text_changed(id: u64, text: &str) {
     CORE.with_borrow_mut(|core| {
         let Some(core) = core.as_mut() else { return };
-        // THE LEDGER HAS BEEN SHOWN THIS TEXT, whichever way the next
-        // few lines go: a quiet echo was reported through
-        // `note_native_undo` and an ordinary edit is banked below, and
-        // the `type` verb's settle is asking "has kaya seen it", not
-        // "which path did it take".
-        core.banked_text.insert(id, text.to_owned());
-        // Q2's ledger-quiet bracket: this edit is the echo of a native
-        // undo THIS BACKEND ROUTED, and `note_native_undo` already
-        // reported it with the backend's own sample. Banking it again
-        // would restate the walk's position as a new high-water and
-        // erase the walk the redo side needs.
-        if core.ledger_quiet.get(&id).map(String::as_str) == Some(text) {
-            core.ledger_quiet.remove(&id);
-            return;
-        }
-        let focused = focused_editable_id(core) == Some(id);
-        let window = ledger_window(core);
-        core.scene
-            .note_text_changed(window, WidgetId(id), text, focused);
+        bank_text_changed_on(core, id, text);
     });
+}
+
+/// The same banking with the core ALREADY BORROWED — the harness's
+/// `set_text` runs inside `on_ui_mut`, and taking `CORE` again there
+/// would panic on the live borrow rather than bank.
+///
+/// ONE BODY, TWO DOORS: the rule about what the ledger is told must not
+/// be spelled twice, or the two spellings drift and only one of them is
+/// the one a scene exercises — which is exactly the state this function
+/// was extracted to end (the harness path told the ledger nothing at
+/// all, and a stamped row's typing was outside the history on this
+/// backend alone).
+fn bank_text_changed_on(core: &mut CoreState, id: u64, text: &str) {
+    // THE LEDGER HAS BEEN SHOWN THIS TEXT, whichever way the next
+    // few lines go: a quiet echo was reported through
+    // `note_native_undo` and an ordinary edit is banked below, and
+    // the `type` verb's settle is asking "has kaya seen it", not
+    // "which path did it take".
+    core.banked_text.insert(id, text.to_owned());
+    // Q2's ledger-quiet bracket: this edit is the echo of a native
+    // undo THIS BACKEND ROUTED, and `note_native_undo` already
+    // reported it with the backend's own sample. Banking it again
+    // would restate the walk's position as a new high-water and
+    // erase the walk the redo side needs.
+    if core.ledger_quiet.get(&id).map(String::as_str) == Some(text) {
+        core.ledger_quiet.remove(&id);
+        return;
+    }
+    let focused = focused_editable_id(core) == Some(id);
+    let window = ledger_window(core);
+    core.scene
+        .note_text_changed(window, WidgetId(id), text, focused);
 }
 
 /// A4's ONE named query — "can the focused widget undo?" — answered in
@@ -7054,23 +7069,60 @@ impl crate::harness::Stage for WinUiStage {
         // (the harness's \r escape stands in for a paste) must reach
         // guests as LF like every other path.
         let text = lf(text.to_owned());
-        Self::on_ui(move |core| {
+        // on_ui_MUT, because this verb reaches the undo ledger: it
+        // stands in for a user edit and the ledger is core state.
+        Self::on_ui_mut(move |core| {
             // The user path, ordered: TextChanged is raised async, so
             // the occurrence is emitted here synchronously and the
             // late raise swallowed — a following click can never
             // overtake the edit (see entry_swallow).
+            //
+            // The handles are CLONED out of the core (WinRT objects are
+            // refcounted, so this is a refcount bump): the banking below
+            // borrows the core mutably, and a reference into `entries`
+            // held across it would not compile.
             let (field, id) = if t.kind == crate::harness::TargetKind::Textarea {
                 let i = crate::harness::resolve(t.index, core.textareas.len());
-                (&core.textareas[i], core.textarea_ids[i])
+                (core.textareas[i].clone(), core.textarea_ids[i])
             } else {
                 let i = crate::harness::resolve(t.index, core.entries.len());
-                (&core.entries[i], core.entry_ids[i])
+                (core.entries[i].clone(), core.entry_ids[i])
             };
             if lf(field.Text()?.to_string()) != text {
                 if let Some(swallow) = core.entry_swallow.get(&id) {
                     swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 field.SetText(&HSTRING::from(&text))?;
+                // AND THE LEDGER SEES IT FIRST, exactly as it does for a
+                // keystroke (§3's banking, and the same order the
+                // TextChanged handler uses: bank, then tell the app).
+                //
+                // THIS VERB IS A USER EDIT, not an app write. It writes
+                // the node's own text and emits the ordinary occurrence
+                // with the widget's identity tag, so the ledger must see
+                // what typing produces — undo.steps' stamped-row block
+                // stands on exactly that, a stamped copy having no way
+                // to be focused and therefore no way to be typed into.
+                // The swallow above is what makes the call NECESSARY
+                // here rather than duplicated: it silences the async
+                // raise that would otherwise carry this edit into
+                // `bank_text_changed` a tick later.
+                //
+                // MEASURED ON THE VM (2026-08-05) before it was
+                // written: with the bank absent, the occurrence still
+                // reached the guest carrying the copy's (node, path)
+                // identity — the scene's notes label read `notes 3=ha`
+                // — while the ledger's frontier stayed the enclosing
+                // group, so Edit>Undo took back the ADD and a row's
+                // typing was outside the history entirely. The tag, the
+                // core's resolution of it and the focus flag were all
+                // identical to mac's; only the banking call was
+                // missing. This backend was the only one with the
+                // split, because it is the only one whose set_text
+                // silences the control's own change event: mac banks
+                // inside `kaya_emit_text_changed` and GTK from the
+                // widget's `changed`.
+                bank_text_changed_on(core, id, &text);
                 if let Some(tag) = core.entry_tags.get(&id) {
                     core.occurrences.send_text_tag(tag, &text);
                 }

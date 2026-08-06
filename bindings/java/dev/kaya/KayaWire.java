@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x44b8c0a4228f2b33L;
+    public static final long SPEC_HASH = 0x69c07d5216db7eb8L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -1300,6 +1300,22 @@ public final class KayaWire {
         }
     }
 
+    /** One text field's restored text, named the way the edit
+     * that filled it was named: an EMPTY path means {@code id}
+     * is a live widget id, and a non-empty one means it is the
+     * template node of a stamped copy at that key path. */
+    public static final class UndoTextValues {
+        public final long id;
+        public final List<Object> path;
+        public final String text;
+
+        UndoTextValues(long id, List<Object> path, String text) {
+            this.id = id;
+            this.path = path;
+            this.text = text;
+        }
+    }
+
     /** One collection entry's restored state, as the decoder
      * hands it over. {@code present} false is "the restored
      * state does not have this entry at all", and then
@@ -1340,16 +1356,17 @@ public final class KayaWire {
     /** One undone/redone step as the decoder hands it over: the
      * group's label (EMPTY for a typing episode) and the four
      * counted runs cut out of the flat Values tail. A STATEMENT
-     * OF THE RESTORED STATE, never a replay of ops — signals and
-     * texts arrive as flattened (id, value) pairs. */
+     * OF THE RESTORED STATE, never a replay of ops — signals
+     * arrive as flattened (id, value) pairs, and the other three
+     * runs as arity-first groups. */
     public static final class UndoValues {
         public final String label;
         public final List<Object> signals;
-        public final List<Object> texts;
+        public final List<UndoTextValues> texts;
         public final List<UndoEntryValues> entries;
         public final List<UndoOrderValues> orders;
 
-        UndoValues(String label, List<Object> signals, List<Object> texts,
+        UndoValues(String label, List<Object> signals, List<UndoTextValues> texts,
                 List<UndoEntryValues> entries, List<UndoOrderValues> orders) {
             this.label = label;
             this.signals = signals;
@@ -1431,9 +1448,17 @@ public final class KayaWire {
             for (int i = 0; i < signalCount * 2; i++) {
                 signals.add(flat.get(taken++));
             }
-            List<Object> texts = new ArrayList<>(textCount * 2);
-            for (int i = 0; i < textCount * 2; i++) {
-                texts.add(flat.get(taken++));
+            List<UndoTextValues> texts = new ArrayList<>(textCount);
+            for (int i = 0; i < textCount; i++) {
+                int size = (int) (long) (Long) flat.get(taken);
+                long ident = (Long) flat.get(taken + 1);
+                int pathLen = (int) (long) (Long) flat.get(taken + 2);
+                List<Object> body = new ArrayList<>(
+                        flat.subList(taken + 3, taken + size));
+                taken += size;
+                texts.add(new UndoTextValues(ident,
+                        List.copyOf(body.subList(0, pathLen)),
+                        (String) body.get(pathLen)));
             }
             List<UndoEntryValues> entries = new ArrayList<>(entryCount);
             for (int i = 0; i < entryCount; i++) {

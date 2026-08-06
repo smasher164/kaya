@@ -635,11 +635,21 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("\t\t\tdelta.Signals = append(delta.Signals,");
         c.line("\t\t\t\tUndoSignal{Signal: uint64(num(pair[0])), Value: pair[1]})");
         c.line("\t\t}");
+        // Arity-first like the two runs below, and for their reason: a
+        // stamped copy's field is named by (template node, key path),
+        // which a fixed pair had nowhere to put. path_len 0 means the id
+        // is a live widget id.
         c.line("\t\tfor i := 0; i < texts; i++ {");
-        c.line("\t\t\tpair := next(2)");
-        c.line("\t\t\ttext, _ := pair[1].(string)");
-        c.line("\t\t\tdelta.Texts = append(delta.Texts,");
-        c.line("\t\t\t\tUndoText{Widget: uint64(num(pair[0])), Text: text})");
+        c.line("\t\t\thead := next(3)");
+        c.line("\t\t\tsize := int(num(head[0]))");
+        c.line("\t\t\tpathLen := int(num(head[2]))");
+        c.line("\t\t\tbody := next(size - 3)");
+        c.line("\t\t\ttext, _ := body[pathLen].(string)");
+        c.line("\t\t\tdelta.Texts = append(delta.Texts, UndoText{");
+        c.line("\t\t\t\tID:   uint64(num(head[1])),");
+        c.line("\t\t\t\tPath: append([]any(nil), body[:pathLen]...),");
+        c.line("\t\t\t\tText: text,");
+        c.line("\t\t\t})");
         c.line("\t\t}");
         // Arity-first groups: `size` counts itself, so a reader takes it
         // first and needs no schema.

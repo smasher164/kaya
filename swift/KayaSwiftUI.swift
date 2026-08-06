@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x44b8c0a4228f2b33
+let kayaSpecHash: UInt64 = 0x69c07d5216db7eb8
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2

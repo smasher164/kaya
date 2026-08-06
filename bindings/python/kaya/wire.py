@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x44b8c0a4228f2b33
+SPEC_HASH = 0x69c07d5216db7eb8
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -908,8 +908,10 @@ def parse_occurrence(buf):
             i += 2
         texts = []
         for _ in range(n_texts):
-            texts.append((flat[i], flat[i + 1]))
-            i += 2
+            size, ident, path_len = flat[i:i + 3]
+            body = flat[i + 3:i + size]
+            i += size
+            texts.append((ident, tuple(body[:path_len]), body[path_len]))
         entries = []
         # Arity-first groups: `size` counts itself, so a
         # reader takes it and needs nothing else.

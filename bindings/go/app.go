@@ -2668,10 +2668,22 @@ type UndoSignal struct {
 	Value  any
 }
 
-// UndoText is one field's restored text.
+// UndoText is one text field's restored text, named the way the edit
+// that filled it was named.
+//
+// THE IDENTITY IS THE OCCURRENCE'S, not the core's bookkeeping. An
+// empty Path means ID is a live widget's id — the one an app holds
+// from Tx.Entry, and folds through OnChange. A non-empty Path means ID
+// is a TEMPLATE NODE and Path is a stamped copy's keys, outermost
+// first: the same pair OnChangeNode hands that copy's own edits, and
+// the same pair OnClickNode hands its clicks. So an app folds this run
+// into the very model its own handlers fill, and the core's internal
+// widget id for a copy never leaves the core — an app could not
+// resolve one, and it changes every time the row is stamped again.
 type UndoText struct {
-	Widget uint64
-	Text   string
+	ID   uint64
+	Path []any
+	Text string
 }
 
 // UndoEntry is one collection entry's restored state. Present is false

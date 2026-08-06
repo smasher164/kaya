@@ -112,6 +112,21 @@ type undo_order = {
   uo_keys : Kaya_wire.value list;
 }
 
+(* One text field's restored contents, and the FIELD'S OWN NAME beside
+   it — the identity-tag vocabulary [Node]-flavored occurrences already
+   speak, one more time.
+
+   [ut_path] EMPTY means [ut_id] is a live widget's id, the one the app
+   holds. A non-empty path means it is a TEMPLATE NODE's id and the path
+   is the stamped copy's keys, outermost first: a row's field has no id
+   an app could hold, so (node, keys) is the only name it has. Same pair
+   a click or an edit on that copy already arrives under. *)
+type undo_text = {
+  ut_id : int64;
+  ut_path : Kaya_wire.value list;
+  ut_text : string;
+}
+
 (* WHAT THE CORE PUT BACK, and a STATEMENT of it rather than a replay
    of ops: every run says what a thing now IS, so applying it twice is
    the same as applying it once.
@@ -124,10 +139,16 @@ type undo_order = {
    binding has already reconciled its collection mirror from
    [ud_entries] and [ud_orders] before a handler runs; signals and text
    are not mirrored by this binding (no read-back exists for either, by
-   doctrine), so those two runs are the app's own business. *)
+   doctrine), so those two runs are the app's own business.
+
+   THE TEXTS RUN IS CARRIED WHOLE and each of its entries NAMES its
+   field ([undo_text]), because one step can restore several: a group
+   that touched the draft and a row's note hands back both, and an app
+   with two rows can only put a note in the right one because the path
+   says which. *)
 type undo_delta = {
   ud_signals : (int64 * Kaya_wire.value) list;
-  ud_texts : (int64 * string) list;
+  ud_texts : undo_text list;
   ud_entries : undo_entry list;
   ud_orders : undo_order list;
 }
@@ -2303,10 +2324,23 @@ let decode_undo body =
   in
   let rec texts n acc =
     if n = 0 then List.rev acc
-    else
+    else begin
+      let start = !pos in
+      (* size, id, path_len — then the path, then the text. [size]
+         counts itself, exactly as the two group runs below do, and it
+         is what the cursor is advanced by: the path is what NAMES a
+         stamped copy's field, and the old fixed pair had nowhere to
+         put it. *)
+      let size = int () in
       let id = i64 () in
-      let text = match take () with Kaya_wire.Str s -> s | _ -> "" in
-      texts (n - 1) ((id, text) :: acc)
+      let path = take_n (int ()) in
+      let text =
+        match take_n (start + size - !pos) with
+        | [ Kaya_wire.Str s ] -> s
+        | _ -> ""
+      in
+      texts (n - 1) ({ ut_id = id; ut_path = path; ut_text = text } :: acc)
+    end
   in
   let rec entries n acc =
     if n = 0 then List.rev acc

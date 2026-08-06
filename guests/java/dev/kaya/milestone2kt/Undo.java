@@ -3,6 +3,7 @@ package dev.kaya.milestone2kt;
 import dev.kaya.KayaApp;
 import dev.kaya.KayaGen;
 import dev.kaya.KayaRecords;
+import dev.kaya.KayaWire;
 
 /**
  * The undo scene from the JVM: two tiers, one Edit menu, and one ledger
@@ -69,8 +70,18 @@ final class Undo {
     record UndoTodo(String title) {}
 
     // The fold: widget-owned state arrives as occurrences; the app's
-    // copy is this field, not a widget read.
+    // copy is these two, not a widget read. Two of them, because there
+    // are two kinds of text field on screen — the draft, and one per
+    // row — and the payload's path is what tells them apart.
     private static String draft = "";
+
+    /**
+     * What is typed in the ROWS, by key. Sorted, because the rendering
+     * below walks it in ascending key order and the string it makes is
+     * compared byte-for-byte across every guest and every lane
+     * (invariant 6).
+     */
+    private static final java.util.TreeMap<Long, String> rowNotes = new java.util.TreeMap<>();
 
     /**
      * What the history label says a step was. A typing episode has no
@@ -106,6 +117,60 @@ final class Undo {
         return keys.length() == 0 ? "no keys" : "keys " + keys;
     }
 
+    /**
+     * The row a stamped copy's occurrence names: the copy's key path,
+     * which for a top-level For is one key — the todo's own, minted by
+     * {@code insertFresh}. The minter's keys are I64, and a wire I64 is
+     * a Long here, exactly as {@code keyList} reads the collection's
+     * keys.
+     */
+    private static Long rowKey(java.util.List<Object> path) {
+        return (Long) path.get(0);
+    }
+
+    /**
+     * The app's copy of what is typed in the ROWS, rendered: every note
+     * it holds, by key.
+     *
+     * <p>THE ROWS' FIELDS ARE UNCONTROLLED LIKE THE DRAFT, so this map
+     * is the app's own and nothing reads it back off a widget. It is
+     * also where this scene proves the payload's shape: an undone note
+     * arrives naming (template node, key path), and an app with two rows
+     * can only put it back in the right one because the path says which.
+     */
+    private static String noteList() {
+        if (rowNotes.isEmpty()) {
+            return "no notes";
+        }
+        StringBuilder rendered = new StringBuilder();
+        for (java.util.Map.Entry<Long, String> note : rowNotes.entrySet()) {
+            if (rendered.length() > 0) {
+                rendered.append(',');
+            }
+            rendered.append(note.getKey().longValue()).append('=').append(note.getValue());
+        }
+        return "notes " + rendered;
+    }
+
+    /**
+     * One row's note, folded — the rule both arrival paths share, so
+     * the script's assertion cannot pass through a second spelling of
+     * "what a note is": the row's own edit writes it, and the delta that
+     * restores that field writes it again.
+     *
+     * <p>AN EMPTY NOTE IS NO NOTE, which is what makes the scene's undo
+     * falsifiable: restoring a row's field to "" has to REMOVE the key,
+     * so an app that ignored the payload's instance texts reads its
+     * stale note back out and the script says so.
+     */
+    private static void foldNote(Long key, String text) {
+        if (text.isEmpty()) {
+            rowNotes.remove(key);
+        } else {
+            rowNotes.put(key, text);
+        }
+    }
+
     static void app() {
         KayaApp app = new KayaApp();
 
@@ -123,6 +188,7 @@ final class Undo {
             KayaApp.Signal<String> status = tx.signal("no todos");
             KayaApp.Signal<String> history = tx.signal("history empty");
             KayaApp.Signal<String> keys = tx.signal("no keys");
+            KayaApp.Signal<String> notes = tx.signal("no notes");
             var todos = UndoTodoKaya.collection(tx);
 
             // THE HANDLERS RIDE THE WINDOW CONSTRUCT, because handlers
@@ -140,13 +206,16 @@ final class Undo {
                 // the script reads that label first, so by the time it
                 // reads this one the app's own answer is what is on
                 // screen — not the value the core restored on its way
-                // past.
+                // past. The notes ride the same transaction for the same
+                // reason.
                 t.write(keys, keyList(t, todos));
+                t.write(notes, noteList());
             }).onRedone((t, label, delta) -> {
                 absorb(delta);
                 t.write(history,
                         "redid " + what(label) + ", " + t.count(todos.handle) + " total");
                 t.write(keys, keyList(t, todos));
+                t.write(notes, noteList());
             });
 
             KayaApp.Widget[] field = new KayaApp.Widget[1];
@@ -154,6 +223,7 @@ final class Undo {
                 tx.label(status).a11yId("status"); // label#0
                 tx.label(history).a11yId("history"); // label#1
                 tx.label(keys).a11yId("keys"); // label#2
+                tx.label(notes).a11yId("notes"); // label#3
                 field[0] = tx.entry((t, text) -> draft = text).a11yId("draft"); // entry#0
                 tx.button("add", t -> add(t, app, status, keys, todos, field[0])); // button#0
                 // A group at its smallest: one signal write, which is
@@ -171,9 +241,33 @@ final class Undo {
                 // script rather than hidden in a handler.
                 tx.button("focus", t -> t.focus(field[0])); // button#2
                 tx.button("remove", t -> remove(t, status, keys, todos)); // button#3
-                for (var row : UndoTodoKaya.rows(todos)) {
-                    row.row(() -> row.label(row.title));
-                }
+                // THE TEMPLATE HANDLE ITSELF, not the generated typed
+                // row: the row now holds a field, and the template tier
+                // has label/checkbox/button sugar and no `entry` in ANY
+                // binding — there is no source to bind an uncontrolled
+                // field to — so the widget-kind floor is the spelling
+                // everywhere, and in Java it lives on the Tpl. The
+                // title stays on the typed field token, which is the
+                // same call the generated row would have made.
+                tx.forEach(todos.handle, tpl -> {
+                    tpl.row(() -> {
+                        tpl.label(UndoTodoKaya.TITLE);
+                        // THE ROW'S OWN FIELD, and the reason this scene
+                        // grew: a copy's text edits are the same
+                        // occurrence a live field's are, one identity
+                        // deeper, and the ledger banks them the same way
+                        // now that the payload can name them.
+                        KayaApp.Node note = tpl.widget(KayaWire.KIND_ENTRY);
+                        // ITS OWN TRANSACTION, and not an undoable one:
+                        // the handler was handed the transaction, and
+                        // nothing in it names a group — the field's own
+                        // typing undo is the platform's (D6).
+                        app.onChange(note, (t, path, text) -> {
+                            foldNote(rowKey(path), text);
+                            t.write(notes, noteList());
+                        });
+                    });
+                });
             });
             // THE SCENE TYPES WITH REAL KEYSTROKES, so something has to
             // be holding focus when it does — and focus is the routing
@@ -186,17 +280,25 @@ final class Undo {
     }
 
     /**
-     * The text the core put back, into the app's own copy of the draft.
+     * The texts the core put back, into the app's own copies of them.
      *
      * <p>THE DELTA IS THE ONLY NOTIFICATION for that text: restoring an
      * episode is a programmatic write, and a programmatic write never
      * echoes, so an app that folds text changes into its own model —
      * which is every app, the field being uncontrolled — would go stale
      * on exactly this step if the payload did not carry it (D5).
+     *
+     * <p>THE RUN IS WALKED WHOLE, not reduced to its last entry, because
+     * an entry NAMES the field it restores: the empty path is the draft,
+     * and a path names the row whose note came back.
      */
     private static void absorb(KayaApp.UndoDelta delta) {
-        if (!delta.texts().isEmpty()) {
-            draft = delta.texts().get(delta.texts().size() - 1).text();
+        for (KayaApp.UndoText text : delta.texts()) {
+            if (text.path().isEmpty()) {
+                draft = text.text();
+            } else {
+                foldNote(rowKey(text.path()), text.text());
+            }
         }
     }
 

@@ -73,17 +73,66 @@ static class UndoScene
         return keys.Count == 0 ? "no keys" : $"keys {string.Join(",", keys)}";
     }
 
+    /// The row a stamped copy's occurrence names: the copy's key path,
+    /// which for a top-level For is one key — the todo's own, minted by
+    /// InsertFresh and unboxed exactly as KeyList unboxes the
+    /// collection's keys, so a key of any other type names itself here
+    /// instead of being printed.
+    static long RowKey(List<object> path) => (long)path[0];
+
+    /// The app's copy of what is typed in the ROWS, rendered: every note
+    /// it holds, by key, ascending.
+    ///
+    /// THE ROWS' FIELDS ARE UNCONTROLLED LIKE THE DRAFT, so this map is
+    /// the app's own and nothing reads it back off a widget. It is also
+    /// where this scene proves the payload's new shape: an undone note
+    /// arrives naming (template node, key path), and an app with two rows
+    /// can only put it back in the right one because the path says which.
+    static string NoteList(SortedDictionary<long, string> notes)
+    {
+        if (notes.Count == 0)
+            return "no notes";
+        var rendered = new List<string>();
+        foreach (var note in notes)
+            rendered.Add($"{note.Key}={note.Value}");
+        return $"notes {string.Join(",", rendered)}";
+    }
+
     public static void Run()
     {
         var app = new KayaApp();
 
-        Signal status = default, history = default, keys = default;
+        Signal status = default, history = default, keys = default, notes = default;
         Widget field = default;
         RecordCollection<Todo> todos = null;
 
         // The fold: widget-owned state arrives as occurrences; the app's
-        // copy is this variable, not a widget read.
+        // copy is these variables, not a widget read. Two of them,
+        // because there are two kinds of text field on screen — the
+        // draft, and one per row — and the payload's path is what tells
+        // them apart.
         string draft = "";
+        var rowNotes = new SortedDictionary<long, string>();
+
+        // One texts run, folded into those two mirrors. The empty path is
+        // the draft; a path names a row.
+        //
+        // AN EMPTY NOTE IS NO NOTE, which is what makes the undo
+        // falsifiable: the restore of a row's field to "" has to REMOVE
+        // the key, so an app that ignored this run reads its stale note
+        // back out and the script says so.
+        void FoldTexts(List<UndoText> texts)
+        {
+            foreach (var text in texts)
+            {
+                if (text.Path.Count == 0)
+                    draft = text.Text;
+                else if (text.Text.Length == 0)
+                    rowNotes.Remove(RowKey(text.Path));
+                else
+                    rowNotes[RowKey(text.Path)] = text.Text;
+            }
+        }
 
         app.Build(tx =>
         {
@@ -100,6 +149,7 @@ static class UndoScene
             status = tx.Signal("no todos");
             history = tx.Signal("history empty");
             keys = tx.Signal("no keys");
+            notes = tx.Signal("no notes");
             todos = TodoKaya.Collection(tx);
 
             // Per window, and PERSISTENT: a history is walked as often as
@@ -114,27 +164,33 @@ static class UndoScene
             // changes into its own model — which is every app, the field
             // being uncontrolled — would go stale on exactly this step if
             // the payload did not carry it (D5).
+            //
+            // THE RUN IS WALKED WHOLE, not reduced to its last string,
+            // because an entry NAMES the field it restores: the empty
+            // path is the draft, and a path names the row whose note came
+            // back.
             tx.Window(title: "undo", menus: new[] { edit },
                 onUndone: (t, label, delta) =>
                 {
-                    if (delta.Texts.Count > 0)
-                        draft = delta.Texts[^1].Text;
+                    FoldTexts(delta.Texts);
                     t.Write(history,
                         $"undid {What(label)}, {t.Count(todos.Collection)} total");
                     // ONE TRANSACTION WITH THE LABEL ABOVE, deliberately:
                     // the script reads that label first, so by the time it
                     // reads this one the app's own answer is what is on
                     // screen — not the value the core restored on its way
-                    // past.
+                    // past. The notes ride the same transaction for the
+                    // same reason.
                     t.Write(keys, KeyList(t, todos));
+                    t.Write(notes, NoteList(rowNotes));
                 },
                 onRedone: (t, label, delta) =>
                 {
-                    if (delta.Texts.Count > 0)
-                        draft = delta.Texts[^1].Text;
+                    FoldTexts(delta.Texts);
                     t.Write(history,
                         $"redid {What(label)}, {t.Count(todos.Collection)} total");
                     t.Write(keys, KeyList(t, todos));
+                    t.Write(notes, NoteList(rowNotes));
                 });
 
             var root = tx.Column(() =>
@@ -142,6 +198,7 @@ static class UndoScene
                 tx.SetA11yId(tx.Label(bind: status), "status");    // label#0
                 tx.SetA11yId(tx.Label(bind: history), "history");  // label#1
                 tx.SetA11yId(tx.Label(bind: keys), "keys");        // label#2
+                tx.SetA11yId(tx.Label(bind: notes), "notes");      // label#3
                 field = tx.Entry((t, text) => draft = text);       // entry#0
                 tx.SetA11yId(field, "draft");
                 tx.Button("add", onClick: t =>                     // button#0
@@ -222,8 +279,41 @@ static class UndoScene
                         $"removed {first.Value.Title}, {t.Count(todos.Collection)} total");
                     t.Write(keys, KeyList(t, todos));
                 });
-                foreach (var row in todos.Rows())
-                    row.Row(() => row.Label(row.Title));
+                // THE ROW'S OWN FIELD, and the reason this scene grew: a
+                // copy's text edits are the same occurrence a live
+                // field's are, one identity deeper, and the ledger banks
+                // them the same way now that the payload can name them.
+                //
+                // NOT todos.Rows(), and the reason is a gap rather than a
+                // preference: the generated row surface (TodoKaya.cs,
+                // DO NOT EDIT) exposes Label/Image/Checkbox/Row/Column
+                // and keeps its Tpl private, so the template tier's
+                // widget-kind floor is out of reach through it. The floor
+                // is the sanctioned spelling for a row's entry in every
+                // language — the template tier has no `entry` sugar,
+                // there being no source to bind — so this scene opens the
+                // For itself and keeps the generated field token, which
+                // is what the row surface was buying.
+                tx.Each(todos.Collection, t => t.Row(() =>
+                {
+                    t.Label(TodoKaya.Title);
+                    var note = t.Widget(KayaWire.KindEntry);
+                    // The row's edit, folded exactly as the payload's
+                    // restore of the same field will be — one rule, two
+                    // arrival paths, so the script's assertion cannot
+                    // pass through a second spelling of "what a note is".
+                    // The handler already holds a transaction and names
+                    // no group, so this write is not a step of its own.
+                    app.OnChange(note, (t2, path, text) =>
+                    {
+                        long key = RowKey(path);
+                        if (text.Length == 0)
+                            rowNotes.Remove(key);
+                        else
+                            rowNotes[key] = text;
+                        t2.Write(notes, NoteList(rowNotes));
+                    });
+                }));
             });
             // THE SCENE TYPES WITH REAL KEYSTROKES, so something has to
             // be holding focus when it does — and focus is the routing

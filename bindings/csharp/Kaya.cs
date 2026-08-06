@@ -102,7 +102,22 @@ readonly record struct UndoSignal(ulong Signal, object Value);
 /// One field's restored text. A coarse episode restore is a
 /// programmatic write, so nothing else would ever tell an app that
 /// folds OnChange into its own model (docs/undo-plan.md D5).
-readonly record struct UndoText(ulong Widget, string Text);
+///
+/// TWO IDENTITIES IN ONE ENTRY, and they are the pair this binding
+/// already hands to every template-node handler: an EMPTY Path means Id
+/// is a live widget's id, and a non-empty one means Id is a TEMPLATE
+/// NODE and Path is the stamped copy's key path, outermost first. A
+/// collection row's field has no id an app could hold — its identity is
+/// (node, keys), the same pair its clicks and its edits arrive under —
+/// so the pair is the only way a payload can name one at all.
+sealed class UndoText
+{
+    public ulong Id;
+    /// The instance path: one key per enclosing For, empty for a live
+    /// widget.
+    public List<object> Path = new();
+    public string Text = "";
+}
 
 /// One collection entry's restored state. State is null when the
 /// restored state does not have this entry at all — the entry is gone,
@@ -385,14 +400,26 @@ static class Kaya
             var pair = Next(2);
             delta.Signals.Add(new UndoSignal((ulong)AsInt(pair[0]), pair[1]));
         }
+        // The last three runs are ARITY-FIRST groups — size counts
+        // itself — so a reader needs no schema and a record it cannot
+        // interpret still advances by exactly the right distance. Texts
+        // joined them when a row's field had to be nameable: a fixed
+        // (widget, text) pair had nowhere to put the path.
         for (int i = 0; i < texts; i++)
         {
-            var pair = Next(2);
-            delta.Texts.Add(new UndoText((ulong)AsInt(pair[0]), pair[1] as string ?? ""));
+            var head = Next(3);
+            int size = (int)AsInt(head[0]);
+            int pathLen = (int)AsInt(head[2]);
+            // size counts the three head values too, so what is left is
+            // the path and then exactly one string.
+            var rest = Next(size - 3);
+            delta.Texts.Add(new UndoText
+            {
+                Id = (ulong)AsInt(head[1]),
+                Path = rest.GetRange(0, pathLen),
+                Text = rest[pathLen] as string ?? "",
+            });
         }
-        // Both group runs are ARITY-FIRST — size counts itself — so a
-        // reader needs no schema and a record it cannot interpret still
-        // advances by exactly the right distance.
         for (int i = 0; i < entries; i++)
         {
             var head = Next(5);

@@ -941,10 +941,12 @@ pub(crate) fn check_undo_label(label: &str, what: &str) {
 
 /// An undo or redo's answer on the wire: the window, the four run
 /// counts, the label, then one flat Values list holding the runs in
-/// order — signal pairs, text pairs, arity-first entry groups,
-/// arity-first order groups. See the `undone` spec record for the exact
-/// group layouts; this is the ONE encoder, and `redone` is byte-identical
-/// so the two directions cannot drift.
+/// order — signal pairs, then three ARITY-FIRST group runs (texts,
+/// entries, orders), each opening with the size of the group including
+/// the size itself. See the `undone` spec record for the exact layouts
+/// and `spec::UNDO_DELTA_RUNS` for the fingerprinted one-line form; this
+/// is the ONE encoder, and `redone` is byte-identical so the two
+/// directions cannot drift.
 pub(crate) fn undo_body(
     window: WindowId,
     label: &str,
@@ -955,9 +957,17 @@ pub(crate) fn undo_body(
         values.push(Value::I64(signal.0 as i64));
         values.push(value.clone());
     }
-    for (widget, text) in &delta.texts {
-        values.push(Value::I64(widget.0 as i64));
-        values.push(Value::Str(text.clone()));
+    for text in &delta.texts {
+        // size counts ITSELF: 3 fixed ints + the path + the text. Same
+        // arity-first shape as the two runs below, for the same reason
+        // — the path is what names a stamped copy's field, and a fixed
+        // arity had nowhere to put it.
+        let size = 4 + text.path.len();
+        values.push(Value::I64(size as i64));
+        values.push(Value::I64(text.id as i64));
+        values.push(Value::I64(text.path.len() as i64));
+        values.extend(text.path.iter().cloned());
+        values.push(Value::Str(text.text.clone()));
     }
     for entry in &delta.entries {
         let (present, variant, record) = match &entry.state {
@@ -1007,7 +1017,7 @@ pub(crate) fn undo_body(
 pub(crate) fn decode_undo_body(
     body: &[u8],
 ) -> (WindowId, String, crate::protocol::UndoDelta) {
-    use crate::protocol::{UndoDelta, UndoEntry, UndoOrder};
+    use crate::protocol::{UndoDelta, UndoEntry, UndoOrder, UndoText};
     let mut r = Reader { buf: body, at: 0, blobs: &|_| None };
     let window = WindowId(r.u64());
     let signals = r.u32() as usize;
@@ -1040,12 +1050,19 @@ pub(crate) fn decode_undo_body(
             .push((SignalId(int(&pair[0]) as u64), pair[1].clone()));
     }
     for _ in 0..texts {
-        let pair = next(2);
-        let text = match &pair[1] {
+        let head = next(3);
+        let size = int(&head[0]) as usize;
+        let path_len = int(&head[2]) as usize;
+        let rest = next(size - 3);
+        let text = match &rest[path_len] {
             Value::Str(s) => s.clone(),
             other => panic!("kaya: undo text is {other:?}, wanted a string"),
         };
-        delta.texts.push((WidgetId(int(&pair[0]) as u64), text));
+        delta.texts.push(UndoText {
+            id: int(&head[1]) as u64,
+            path: rest[..path_len].to_vec(),
+            text,
+        });
     }
     for _ in 0..entries {
         let head = next(5);
@@ -2605,15 +2622,32 @@ mod tests {
     /// entry count. Eight generated parsers will each write this walk
     /// once; the encoder is pinned here so they have something to agree
     /// with.
+    ///
+    /// THE TEXTS RUN CARRIES BOTH IDENTITIES, and in that order: a live
+    /// widget (empty path) followed by a stamped copy's field named by
+    /// template node plus key path. A reader that kept the old
+    /// fixed-arity pair reading takes the group's SIZE for the widget id
+    /// and the id for the text, so it fails here rather than in a scene.
     #[test]
     fn undo_bodies_round_trip() {
-        use crate::protocol::{UndoDelta, UndoEntry, UndoOrder};
+        use crate::protocol::{UndoDelta, UndoEntry, UndoOrder, UndoText};
         let delta = UndoDelta {
             signals: vec![
                 (SignalId(3), Value::from("one")),
                 (SignalId(9), Value::Bool(true)),
             ],
-            texts: vec![(WidgetId(2), "milk bread".into())],
+            texts: vec![
+                UndoText {
+                    id: 2,
+                    path: vec![],
+                    text: "milk bread".into(),
+                },
+                UndoText {
+                    id: 31,
+                    path: vec![Value::from("g1"), Value::I64(4)],
+                    text: "row note".into(),
+                },
+            ],
             entries: vec![
                 UndoEntry {
                     collection: CollectionId(1),
@@ -2646,6 +2680,38 @@ mod tests {
         assert_eq!(
             decode_undo_body(&bare),
             (WindowId(0), String::new(), UndoDelta::default())
+        );
+
+        // THE GROUP'S VALUES, PINNED ONE BY ONE. A round trip passes for
+        // any self-consistent encoder, including one that wrote the path
+        // before the length or forgot to count the size itself; the
+        // eight bindings are written against THIS table, so it is the
+        // table that has to be right.
+        let pinned = undo_body(
+            WindowId(1),
+            "",
+            &UndoDelta {
+                texts: vec![UndoText {
+                    id: 7,
+                    path: vec![Value::I64(3)],
+                    text: "ha".into(),
+                }],
+                ..UndoDelta::default()
+            },
+        );
+        let mut r = Reader { buf: &pinned, at: 0, blobs: &|_| None };
+        assert_eq!(r.u64(), 1);
+        assert_eq!((r.u32(), r.u32(), r.u32(), r.u32()), (0, 1, 0, 0));
+        assert_eq!(r.value(), Value::Str(String::new()));
+        assert_eq!(
+            r.record(),
+            vec![
+                Value::I64(5), // size, counting itself: 3 ints + 1 path key + the text
+                Value::I64(7), // id — a template node, because the path below is not empty
+                Value::I64(1), // path_len
+                Value::I64(3), // the copy's key
+                Value::from("ha"),
+            ]
         );
     }
 

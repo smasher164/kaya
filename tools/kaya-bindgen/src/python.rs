@@ -484,10 +484,16 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("        for _ in range(n_signals):");
         c.line("            signals.append((flat[i], flat[i + 1]))");
         c.line("            i += 2");
+        // ARITY-FIRST LIKE ITS TWO NEIGHBOURS, and for their reason:
+        // a stamped copy's field is named by (template node, key path),
+        // and a fixed pair had nowhere to put the path. path_len 0 means
+        // the id is a live widget id.
         c.line("        texts = []");
         c.line("        for _ in range(n_texts):");
-        c.line("            texts.append((flat[i], flat[i + 1]))");
-        c.line("            i += 2");
+        c.line("            size, ident, path_len = flat[i:i + 3]");
+        c.line("            body = flat[i + 3:i + size]");
+        c.line("            i += size");
+        c.line("            texts.append((ident, tuple(body[:path_len]), body[path_len]))");
         // Arity-first, so each group carries its own size and a reader
         // needs nothing else: 5 fixed values, then the instance path,
         // the key, and the record — `size` counts itself.
