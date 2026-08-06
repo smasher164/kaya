@@ -113,6 +113,11 @@ GATES = {
     # bindings: an authored role reaches the backends through the wire,
     # so no binding sits between them.
     "check-roles": ["crates", "swift", "android"],
+    # The native-undo pairing, over the same four backend files as
+    # check-roles and for the same reason: the property is entirely
+    # backend-side, and no binding sits between the core seam and the
+    # arm that calls it.
+    "check-native-undo": ["crates", "swift", "android"],
     "check-verbs": ["crates", "bindings", "swift", "android"],
     # The JNI registration cross-check reads the two rust registration
     # modules, the Kotlin classes and the desktop Java class.

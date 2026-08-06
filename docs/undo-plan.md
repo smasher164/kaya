@@ -541,6 +541,13 @@ Redo only at the frontier).
   text between images; further typing extends the same episode
   (native redo history dies on the next keystroke — the platform's
   own rule, inherited, not fought).
+- A native undo that REACHES the before-image spends the episode as a
+  step back and BANKS IT FORWARD (added by the completion pass, §5).
+  The frontier then moves to the entry underneath — a group, wherever
+  A1's clear did its job — so the native tier can offer that run in
+  neither direction, and a dropped episode would be a hole in a history
+  this design promises has none. It redoes coarsely, which is the
+  granularity the walk already spent.
 - A native undo that exhausts CanUndo WITHOUT reaching the
   before-image (possible only if the platform coalesced across the
   episode start — the clear makes this unreachable, which is the
@@ -647,3 +654,88 @@ so the next window-scoped occurrence cannot ship the loose form.
 
 The depth slice: spec + core log + Rust surface + the SwiftUI mac arm
 + the scene, then the fan-out, per the sequencing doctrine.
+
+## §5 — THE COMPLETION PASS (2026-08-05): the ledger's open items,
+## closed in one slice
+
+The five follow-ups the depth slice and the fan-out carried
+(docs/deferred.md, "Undo follow-ups") were taken together rather than
+one per milestone. Four are closed; one is a ratification the maintainer
+owns and is stated below as a question, not an answer.
+
+### 5.1 REDO BANKING (built)
+
+`Scene::note_native_undo`'s walk-reached-the-start arm now closes the
+episode and pushes it onto the window's redo side. §3's reconciliation
+rules carry the entry; what is worth stating here is the SHAPE OF THE
+FIX, because it is the shape the design predicted: no wire moved, no
+backend changed, and the redo travels the machinery a coarsely-undone
+episode already used. Every arm asks the core for the route before
+acting, so a `route_redo` that answers `Core` where it answered
+`Nothing` changes behaviour on all five at once. That is what "the
+routing question is the core's, and the backend contributes only what it
+alone can see" (A4/D6) buys, measured rather than argued.
+
+The scene pins it at the ENABLEMENT rather than at the text
+(tools/scenes/undo.steps): unbanked, Edit>Redo is inert there and no
+assertion about a string says why.
+
+### 5.2 THE TWO GUARDS NO SCENE CAN FAIL, AND THE GATE THAT CAN
+
+The Compose arm broke the ledger-quiet bracket and A1's backend clear in
+turn and watched its whole lane stay GREEN (scratchpad/compose-undo-arm.md
+§3.3/§3.4). The reason is core-side and therefore true of every arm:
+observing either guard needs TWO CONSECUTIVE NATIVE WALKS, and the first
+walk spends the frontier episode, so the second Edit>Undo routes CORE by
+construction. The scene cannot be reshaped to reach it either — that
+would assert frontier granularity, which invariant 6 forbids across five
+lanes with five keystroke cadences.
+
+So the wall is static: `tools/check-native-undo.sh` (fast-gate set,
+keyed) reads the two-line pairing out of each backend file — a backend
+that takes the core's sample marks the emission its walk provokes, that
+mark is consumed WHERE THE EDIT IS REPORTED, and a ClearUndo arm calls
+the platform's clear. It watches its own four clauses fail on doctored
+copies of the real files on every run, and says so out loud.
+
+WHAT IT DOES NOT PIN, so nobody mistakes its scope: a call that is
+present but disabled satisfies it. What it pins is that the arm and the
+clear are ONE UNIT, which is what a new arm actually breaks.
+
+### 5.3 THE SAMPLE'S THIRD FACT IS NOT A DIRECTION (resolved)
+
+`note_native_undo` takes `can_undo` in both directions on every arm, and
+the follow-up asked whether the first platform to distinguish canUndo
+from canRedo would demand a redo twin. All five distinguish them — and
+all five already consume that distinction in `route_redo`, which is
+where it belongs. The sample's flag has exactly ONE consumer: the
+exhausted-backward-walk fallback. A `canRedo` reported there answers
+false at the end of a forward walk and sends the core backwards, which
+is why three arms independently wrote the same comment at their own call
+sites. The forward analogue — a redo exhausted short of the after-image
+— is unreachable for A1's reason, and if a platform is ever measured
+violating it, THAT is the arm that needs a twin.
+
+### 5.4 OPEN, FOR THE MAINTAINER: stamped copies and the `texts` run
+
+The one item left as a question. A collection row's text field is not
+banked, because `text_field_of_tag` cannot name it: an instance field's
+identity on that channel is `(template node, key path)`, and the
+`undone`/`redone` payload's `texts` run is fixed-arity PAIRS of
+`(I64 widget id, Str)` — while `entries` and `orders` are arity-first
+GROUPS precisely so they can carry a path. So instance fields are not
+addressable on the wire as it stands.
+
+The core half is cheap (the stamping pass already builds the
+template-node-to-copy map and discards it), which is exactly what makes
+the question sharp: building only that restores the widget while handing
+the app a pair naming an identifier it has never seen, which breaks D5's
+"this record is the ONLY thing the app hears" silently. The options and
+their bills — A: make `texts` arity-first (hash moves, no backend cost);
+B: ratify native-tier-only for stamped fields, with the reactive
+doctrine's own answer (bind the row's text to a record field and the
+`entries` run already carries it); C: carry the internal id, named only
+so it is not rediscovered — are written out in
+scratchpad/undo-completion.md §ITEM 2. Whichever way it goes, invariant
+1 wants the carve-out stated uniformly in DESIGN.md's Binding
+conventions.

@@ -690,6 +690,100 @@ PY
 }
 sweep_guests || status=1
 
+# AND THE C FLOOR IS SWEPT LIKE EVERY OTHER LANGUAGE — it was not, for
+# as long as it has existed. The sweep above is keyed on `guests/<lang>/`
+# path patterns and the C guests are not in it, so the floor's legs were
+# demanded by NO gate: `undo-c-swiftui` is the floor's first mac-lane leg
+# ever, and if it silently fell out of validate-mac nothing would have
+# gone red. Recorded as a gate gap out of the undo fan-out
+# (docs/deferred.md), closed here.
+#
+# IT CANNOT BE A ROW IN THE SWEEP ABOVE, and the reason is the floor's
+# shape rather than an exception made for it: that sweep demands a leg on
+# the MAC runner for every scene in mac's SCENES whose guest file exists,
+# and the C floor deliberately does not carry every scene on every lane —
+# it is the documented explicit-tier demonstration, not a breadth guest.
+# Adding `("c", "guests/c/{s}.c")` there would demand ten mac legs nobody
+# ever intended and turn a gap into a red gate. So the C floor is swept
+# on its own terms, from the two declarations it actually has.
+#
+# THE BINARY PATH IS THE LEG SIGNATURE, because the three runners spell a
+# C leg three ways — `run undo-c-swiftui ... target/c-guests/undo` on mac,
+# `run "$proto" todos-c ... /tmp/c-guests/todos` on linux, and the a11y
+# legs through a helper script with no leg name at all
+# (`tools/linux/a11y-leg.sh /tmp/c-guests/a11y`). What all three share is
+# the binary they execute, and that is the thing that cannot be present
+# while the leg is dead.
+sweep_c_floor() {
+    python3 - <<'PY'
+import pathlib, re, sys
+
+RUNNERS = ("tools/validate-mac.sh", "tools/linux/run-suites.sh",
+           "tools/deploy-win.sh", "tools/ios/run-sim.sh",
+           "tools/android/run-emulator.sh")
+
+makefile = pathlib.Path("guests/c/Makefile").read_text()
+m = re.search(r"^SCENES\s*:?=\s*(.+)$", makefile, re.M)
+if not m:
+    print("check-steps: guests/c/Makefile has no SCENES variable", file=sys.stderr)
+    sys.exit(1)
+built = m.group(1).split()
+
+bad = []
+runs = {}   # scene -> the runners that execute its C binary
+for runner in RUNNERS:
+    text = pathlib.Path(runner).read_text()
+    for name in re.findall(r"c-guests/([A-Za-z0-9_]+)", text):
+        # A leg pointing at a binary the Makefile never builds runs
+        # nothing at all: `make` succeeds, the file is absent, and the
+        # leg dies at exec time on whichever lane owns it.
+        if name not in built:
+            bad.append(f'{runner}: runs c-guests/{name}, which guests/c/Makefile '
+                       f'never builds (SCENES has no "{name}")')
+            continue
+        runs.setdefault(name, []).append(runner)
+
+# 1. EVERY C GUEST THE FLOOR SHIPS IS RUN SOMEWHERE. This is the clause
+#    the gap was about: a leg that falls out of a runner leaves a guest
+#    that compiles, ships, and is executed by nobody — the exact shape
+#    that hid working OCaml and Haskell clipboard guests for a milestone.
+for scene in built:
+    if scene not in runs:
+        bad.append(f'guests/c/{scene}.c is built by guests/c/Makefile but no lane '
+                   f'runs it (wanted a leg naming c-guests/{scene} in one of: '
+                   + ", ".join(RUNNERS) + ")")
+
+# 2. A RUNNER THAT NAMES THE C SCENES IT BUILDS RUNS THEM. mac compiles
+#    exactly one C guest — `make -C guests/c SCENES=undo` — so that line
+#    is the mac lane's own declaration of what its C floor is, and a
+#    build with no leg is a binary compiled for nothing. Runners that
+#    build the whole floor (linux) declare nothing here and are covered
+#    by clause 1.
+for runner in RUNNERS:
+    text = pathlib.Path(runner).read_text()
+    for at in (mm.end() for mm in re.finditer(r"make\s+-C\s+guests/c\b", text)):
+        # The logical line, continuations joined: the SCENES= assignment
+        # and the make it belongs to are routinely split across two.
+        line = ""
+        for raw in text[at:].splitlines():
+            line += raw
+            if not raw.rstrip().endswith("\\"):
+                break
+        named = re.search(r'SCENES=(?:"([^"]*)"|(\S+))', line)
+        if not named:
+            continue
+        for scene in (named.group(1) or named.group(2)).split():
+            if f"c-guests/{scene}" not in text:
+                bad.append(f'{runner}: builds the C "{scene}" guest (SCENES={scene}) '
+                           f"but runs no leg for it — wire the leg, or stop building it")
+
+for b in bad:
+    print(f"check-steps: {b}", file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+}
+sweep_c_floor || status=1
+
 # EVERY WINDOWS LEG NEEDS ITS LAUNCHER. deploy-win runs a leg by
 # scheduling C:\kaya\run_<scene>_<lang>.cmd on the VM, and those .cmd
 # files are CHECKED IN under tools/guest. A leg whose launcher does not

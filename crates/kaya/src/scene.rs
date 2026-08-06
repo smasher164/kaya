@@ -2352,8 +2352,9 @@ impl Scene {
     /// Walks the frontier episode backwards rather than extending it. It
     /// ends three ways, and the third is the interesting one:
     ///
-    /// - the text reached the before-image: the episode is CONSUMED, and
-    ///   the next undo takes whatever is under it;
+    /// - the text reached the before-image: the episode is spent as a
+    ///   step back and is BANKED FORWARD, so the next undo takes whatever
+    ///   is under it and a redo brings the typing back (below);
     /// - the field can still undo: the episode stays OPEN at its current
     ///   position, and further typing extends it (the platform's own
     ///   rule that a keystroke kills the redo history is inherited, not
@@ -2363,6 +2364,19 @@ impl Scene {
     ///   A1's clear is supposed to make that unreachable — so this arm
     ///   falls back to the coarse restore and its test's job is to prove
     ///   the arm cannot be entered.
+    ///
+    /// THE FORWARD BANK IS WHAT KEEPS THE LEDGER SYMMETRIC. A walk that
+    /// reaches the run's start has spent the platform's stack, so the
+    /// episode leaves the done side — and the frontier moves to the entry
+    /// underneath, which is a GROUP whenever A1's clear did its job. So
+    /// `route_redo` can no longer offer the native tier, and if the
+    /// episode were merely dropped the typing would be unreachable in
+    /// both directions: the one hole D5's "walk back as often as you
+    /// like" promise cannot have. Banked, it redoes through exactly the
+    /// machinery a coarsely-undone episode already uses — its after-image
+    /// written by the core, named by the same `redone` occurrence — and
+    /// the only thing the user loses is the platform's finer granularity,
+    /// which is the granularity degradation §3 already charges for.
     pub(crate) fn note_native_undo(
         &mut self,
         window: WindowId,
@@ -2378,7 +2392,13 @@ impl Scene {
         };
         ep.current = text.to_owned();
         if ep.current == ep.before {
-            ledger.done.pop();
+            // Spent as a step back, and closed on the way over: the
+            // native stack that was carrying it is empty now, so nothing
+            // further belongs to this run — the same state the coarse
+            // restore leaves an episode in, reached by the other tier.
+            ep.open = false;
+            let spent = ledger.done.pop().expect("just matched the frontier");
+            ledger.redo.push(spent);
             return None;
         }
         if can_undo {
@@ -7333,7 +7353,106 @@ mod tests {
         // The platform coalesced the run into one step of its own.
         let fallback = scene.note_native_undo(DEFAULT_WINDOW, WidgetId(2), "", false);
         assert!(fallback.is_none(), "the before-image was reached; no coarse restore");
+        // Consumed AS A STEP BACK — gone from the done side, and the
+        // test below is the other half: it is on the redo side, not
+        // thrown away.
         assert_eq!(depth(&scene, DEFAULT_WINDOW), 0);
+    }
+
+    #[test]
+    fn a_native_walk_to_the_start_banks_the_episode_forward() {
+        // THE OTHER HALF OF CONSUMING AN EPISODE: it is spent as a step
+        // BACK, not thrown away. The walk emptied the platform's stack
+        // and the frontier moved to the group underneath, so the native
+        // tier can offer this typing in NEITHER direction any more —
+        // and a redo that found nothing here would be the one hole the
+        // ledger promises not to have.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "tea", true);
+        scene.apply(vec![
+            group("star"),
+            TxOp::WriteSignal { id: SignalId(1), value: v("starred") },
+        ]);
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "teas", true);
+        assert!(
+            scene
+                .note_native_undo(DEFAULT_WINDOW, WidgetId(2), "tea", false)
+                .is_none(),
+            "the walk reached the run's start, so no coarse restore"
+        );
+        assert_eq!(depth(&scene, DEFAULT_WINDOW), 2, "the group and the typing under it");
+        for still_holds_forward_steps in [false, true] {
+            assert_eq!(
+                scene.route_redo(DEFAULT_WINDOW, Some(WidgetId(2)), still_holds_forward_steps),
+                UndoRoute::Core,
+                "the frontier is the group again, so the ledger answers whatever \
+                 the field's own stack has left — and this call IS the live \
+                 enablement of Edit>Redo"
+            );
+        }
+
+        let (ops, occ) = scene.redo(DEFAULT_WINDOW).expect("the typing comes back");
+        assert_eq!(set_texts(&ops), vec![(2, "teas".to_string())]);
+        let Occurrence::Redone { label, delta, .. } = &occ else {
+            panic!("wanted Redone");
+        };
+        assert_eq!(label, "", "a typing episode carries no authored name");
+        assert_eq!(
+            delta.texts,
+            vec![(WidgetId(2), "teas".to_string())],
+            "the after-image, restored by the core: the redo is the coarse one, \
+             which is the granularity the walk already spent"
+        );
+
+        // And it is a step back again, as often as the user likes.
+        let (ops, _) = scene.undo(DEFAULT_WINDOW).expect("and back");
+        assert_eq!(set_texts(&ops), vec![(2, "tea".to_string())]);
+    }
+
+    #[test]
+    fn a_new_step_after_a_banked_walk_spends_the_forward_history() {
+        // A banked episode is forward history like any other, so the
+        // rule every undo system has applies to it unchanged: a new step
+        // invalidates it. THIS IS ALSO WHY tools/scenes/undo.steps asks
+        // for the redo before the next app action — a click that commits
+        // a group would take the banked typing with it, whatever it did
+        // to focus.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
+        assert!(
+            scene
+                .note_native_undo(DEFAULT_WINDOW, WidgetId(2), "", false)
+                .is_none()
+        );
+        assert_eq!(scene.route_redo(DEFAULT_WINDOW, Some(WidgetId(2)), false), UndoRoute::Core);
+        scene.apply(vec![
+            group("X"),
+            TxOp::WriteSignal { id: SignalId(1), value: v("two") },
+        ]);
+        assert_eq!(
+            scene.route_redo(DEFAULT_WINDOW, Some(WidgetId(2)), false),
+            UndoRoute::Nothing,
+            "the group is the newest step, so nothing is forward of it"
+        );
+        assert!(scene.redo(DEFAULT_WINDOW).is_none());
+
+        // And typing is a step by the same rule.
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
+        assert!(
+            scene
+                .note_native_undo(DEFAULT_WINDOW, WidgetId(2), "", false)
+                .is_none()
+        );
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "b", true);
+        assert_eq!(
+            scene.route_redo(DEFAULT_WINDOW, Some(WidgetId(2)), false),
+            UndoRoute::Nothing,
+            "the new run is the newest step"
+        );
     }
 
     #[test]

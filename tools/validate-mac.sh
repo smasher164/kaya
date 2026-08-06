@@ -107,6 +107,12 @@ tools/keyed.sh check-universal-props -- tools/check-universal-props.sh || exit 1
 # across a fan-out — the role joins the vocabulary first and the four
 # arms follow.
 tools/keyed.sh check-roles -- tools/check-roles.sh || exit 1
+# The native undo tier's two guards, which NO shared scene can fail: the
+# ledger-quiet bracket and A1's clear both live inside a SECOND
+# consecutive native walk, and the routing makes that unreachable
+# (scratchpad/compose-undo-arm.md §3.3/§3.4, watched green with each
+# guard broken). Static pairing is the only wall available.
+tools/keyed.sh check-native-undo -- tools/check-native-undo.sh || exit 1
 tools/check-wheel.sh || exit 1
 tools/check-abort.sh || exit 1
 tools/check-tx-liveness.sh || exit 1

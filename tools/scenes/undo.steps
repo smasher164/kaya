@@ -107,6 +107,42 @@ expect entry#0 "teas"
 # b — the newest thing that happened is the newest thing undone.
 menu_activate "Edit>Undo"
 expect entry#0 "tea"
+
+# ---- and a step back is a step forward, WHICHEVER TIER TOOK IT ----
+#
+# The walk above took the run to its start, so the field's own stack is
+# spent and the ledger's frontier has moved to the app's step underneath.
+# That is what makes this the interesting redo: the platform can no
+# longer offer this typing in either direction, so if the ledger did not
+# BANK the spent episode forward, the run would be gone for good — a hole
+# in a history the whole design promises has none. The enablement is read
+# first because it is the falsifiable half: unbanked, Edit>Redo is inert
+# here (the ledger's forward side is empty and the routing says so), and
+# no assertion about text could tell you why.
+#
+# THE ROUTE IS THE CORE'S ON EVERY LANE, which is what makes this
+# platform-uniform: the frontier is a group, so `route_redo` cannot offer
+# the native tier, and the whole after-image comes back in one coarse
+# step whether the undo above was taken natively or coarsely. Frontier
+# granularity is not being asserted here — the granularity was already
+# spent by the walk.
+#
+# AND IT IS ASKED BEFORE THE NEXT APP ACTION, deliberately: a banked
+# episode is forward history like any other, so the next step commits
+# over it (scene.rs's
+# `a_new_step_after_a_banked_walk_spends_the_forward_history`). Clicking
+# something to move focus first would take the typing with it.
+expect_menu "Edit>Redo" enabled
+menu_activate "Edit>Redo"
+expect entry#0 "teas"
+expect label#1 "redid typing, 1 total"
+# ...and back where the interleave was, so the walk below is the one this
+# scene came for. A closed episode is not frontier-live, so this one is
+# the coarse restore on every lane too.
+menu_activate "Edit>Undo"
+expect entry#0 "tea"
+expect label#1 "undid typing, 1 total"
+
 # X — the app's step, in the order it happened rather than after every
 # text edit on the other stack.
 menu_activate "Edit>Undo"

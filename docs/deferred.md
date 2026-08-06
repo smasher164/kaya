@@ -893,29 +893,78 @@ count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
 
-- **Undo follow-ups carried out of the depth slice (2026-08-04).** All
-  reachable by a user, none by the scene, none blocking the fan-out;
-  each is a design call rather than a bug:
-  - **A fully-undone episode is not redoable.** A native undo that
-    walks an episode to its start pops it and pushes nothing to the
-    redo side, so Cmd+Shift+Z cannot bring the typing back. The
-    ledger would have to bank the consumed episode on the redo
-    stack — decide whether redo of native typing is kaya's business
-    at all (the native tier's own redo already handles it while the
-    field keeps focus).
-  - **A stamped copy's typing is not banked**: text_field_of_tag
-    answers None for a collection-instance copy because the scene
-    keeps no template-node-to-copy map. Coarser, not wrong — the
-    episode simply never opens, so those edits are outside the
-    ledger.
-  - **note_native_undo has no redo twin**; the mac arm passes
-    canUndo in both directions deliberately. Revisit with the first
-    arm whose platform distinguishes them.
-  - **The interpreter now writes a node's text on a routed native
-    undo** — correct under the post-user mirror rule (§3a), but the
-    first time the SwiftUI arm writes a widget's text outside an
-    apply record. Worth a second look when another arm needs the
-    same move.
+- **Undo follow-ups carried out of the depth slice (2026-08-04).**
+  CLOSED 2026-08-05 by the completion pass, which took all of them in
+  one slice rather than accumulating stages. One is a ratification the
+  maintainer owns and is stated as a proposal, not a change; the rest
+  are done or answered from evidence. Commit forthcoming; the working
+  record is scratchpad/undo-completion.md.
+  - ~~**A fully-undone episode is not redoable.**~~ **FIXED.** A walk
+    that reaches the run's start now CLOSES the episode and pushes it
+    onto the redo side (`Scene::note_native_undo`), so it redoes through
+    the same machinery a coarsely-undone episode already used — its
+    after-image written by the core, named by the same `redone`
+    occurrence. No wire moved and no backend was touched: every arm asks
+    the core for the route first, so `route_redo` answering `Core` where
+    it answered `Nothing` changes behaviour on all five.
+    The parenthetical in the old entry was wrong and is worth keeping
+    for the correction: the native tier's own redo does NOT cover for
+    it while the field keeps focus — kaya's Edit>Redo consumes the
+    command and, unbanked, routes it to `Nothing`.
+    Pinned by two unit tests beside the ledger tests and by
+    tools/scenes/undo.steps, which reads the ENABLEMENT before
+    activating (unbanked, the first failure is `menu "Edit>Redo" reads
+    "disabled", wanted "enabled"` — watched, with the banking reverted
+    and the tree rebuilt).
+  - **A stamped copy's typing is not banked** — MEASURED, and it is a
+    RATIFICATION the maintainer owns, so the tree is unchanged on it.
+    The deciding fact: the `undone`/`redone` payload's `texts` run is
+    fixed-arity PAIRS (`I64 widget id, Str` — spec.rs, wire.rs's one
+    encoder), while `entries`/`orders` are arity-first GROUPS that can
+    carry an instance path. A stamped copy's identity on that channel is
+    `(template node, key path)`, so an instance field is NOT addressable
+    on the existing wire.
+    The core half alone is cheap — `run_body` already builds the
+    template-node-to-copy map while stamping and discards it — but
+    building only that would restore the widget while handing the app a
+    pair naming an id it cannot resolve, which breaks D5's "this record
+    is the ONLY thing the app hears" silently. The options (A: make
+    `texts` arity-first, hash moves, no backend cost; B: ratify
+    native-tier-only for stamped fields, with the reactive doctrine's
+    own answer — bind the row's text to a record field and the `entries`
+    run already carries it; C: carry the internal id, named only so it
+    is not rediscovered) are written out with their bills in
+    scratchpad/undo-completion.md §ITEM 2.
+    **RULED 2026-08-06, option A (the maintainer): `texts` becomes an
+    arity-first group like its two siblings, instance paths join the
+    channel, the spec hash moves, the eight bindings' delta decode and
+    the folding guests move with it, and no backend moves (measured,
+    not assumed). Stamped-row typing then joins the ledger with the
+    same guarantees as everything else — the reactive doctrine's own
+    answer, since text is app state everywhere else in the design.
+    Ships as the final undo slice, immediately after this one.**
+  - ~~**note_native_undo has no redo twin.**~~ **RESOLVED BY EVIDENCE.**
+    The item said "revisit with the first arm whose platform
+    distinguishes them"; all five do, and every one already feeds the
+    distinct query into `route_redo`, which is where the distinction is
+    consumed. The sample's third argument is not "can this walk go on" —
+    it is the EXHAUSTED-BACKWARD-WALK test, and a `canRedo` there would
+    read false at the end of a forward walk and send the core backwards.
+    Three arms say so independently at their own call sites
+    (KayaSwiftUI.swift, KayaCompose.kt, gtk.rs — which further refuses
+    to report a redo that moved nothing). The forward analogue is
+    unreachable for A1's reason: the platform's redo stack is created by
+    the backward walk and reaches exactly as far as it came back.
+  - ~~**The interpreter now writes a node's text on a routed native
+    undo.**~~ **ANSWERED BY THE FAN-OUT.** The "second look when another
+    arm needs the same move" happened: no other arm needs it, and each
+    measured why. iOS deliberately does NOT write the node (UIKit's undo
+    is an ordinary text replacement, so the binding setter already ran);
+    Compose does not either (the undo moves the shared TextFieldState);
+    GTK and WinUI own raw controls. The mac write is §3a's rule where
+    §3a's premise fails — a declarative layer between the widget and the
+    model — and it is now paired with a gate
+    (tools/check-native-undo.sh) rather than with a note.
 
   From the fresh-key breadth arms (2026-08-05), a doctrine question
   for the maintainer — RULED same day, option B: the entry/milestone2
@@ -996,28 +1045,29 @@ count, so the saving is measured rather than assumed.
     toolkit.
 
   Two more carried out of the fan-out (2026-08-04), both gate gaps
-  rather than behavior:
-  - **check-steps is blind to the C floor.** The per-language sweep
-    (tools/check-steps.sh LANGS, ~:494) does not list C, so the C
-    undo guest — the floor's first mac-lane leg ever — is demanded
-    by no gate: if it silently fell out of validate-mac, nothing
-    would go red. Add C to the sweep (or a targeted clause for the
-    legs the floor actually has), and watch the clause fail with the
-    leg removed before trusting it.
-  - **The shared scene's stated D5 text-run proof cannot fail.**
-    undo.steps claims the next add "can only name tea if the draft
-    came back with the field" — but under the §3a mirror rule the
-    native undo reaches the app as an ordinary emission, and the
-    coarse undo + redo then land the draft exactly where it already
-    was, so the add names tea whether or not the guest ever reads
-    delta.texts. Measured independently on the Java and Haskell
-    lanes: deleting the guest's entire texts fold leaves the leg
-    green. The texts run is the one member of the undone payload no
-    lane checks. Fix is a scene reshape (type, act, type again — so
-    the episode's before-image differs from where the last emission
-    left the app), which moves byte-frozen expected strings on all
-    12 surfaces at once; ride it with the next milestone that
-    touches the scene.
+  rather than behavior, both CLOSED:
+  - ~~**check-steps is blind to the C floor.**~~ **FIXED 2026-08-05**
+    (`sweep_c_floor` in tools/check-steps.sh). Not a row in the existing
+    per-language sweep, and the gate says why: that sweep demands a MAC
+    leg for every scene in mac's SCENES whose guest file exists, and the
+    C floor deliberately carries a different scene set per lane — a `c`
+    row there would demand ten mac legs nobody intended. It is swept
+    instead from the two declarations the floor actually has: every
+    scene guests/c/Makefile builds must be RUN by some lane (keyed on
+    the binary path `c-guests/<scene>`, the one signature all three leg
+    spellings share), a runner that NAMES the C scenes it builds must
+    run each of them, and a leg pointing at a binary the Makefile never
+    builds is refused. Watched failing three ways — the mac undo leg
+    deleted (both clauses fire), the linux todos leg deleted, a leg
+    re-pointed at a typo — each restored by sha256.
+  - ~~**The shared scene's stated D5 text-run proof cannot fail.**~~
+    **FIXED 2026-08-05 by the fresh-key depth arm**, which reshaped
+    tools/scenes/undo.steps exactly as this entry asked: the add's
+    empty-draft refusal now reads the app's own draft at the one moment
+    the app's copy and the widget's disagree. Watched failing three ways
+    on the mac leg (the whole `delta.texts` fold deleted, the undone
+    half alone, the redone half alone), so both directions of the run
+    are independently load-bearing.
 
 
 
