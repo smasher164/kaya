@@ -306,6 +306,14 @@ pub enum Step {
     /// section_selected like a user's switch.
     SelectSection(usize),
     ExpectWindowSize(Option<u64>, f64, f64),
+    /// Expect the surface to be showing the platform's UNSAVED-WORK
+    /// affordance, or not (None = the implicit primary; Some(n)
+    /// prefixes the observation with `window#n `). The READ is
+    /// per-backend — see [`Stage::window_dirty`], which is where the
+    /// per-platform table lives; the SCRIPT is identical everywhere,
+    /// which is the whole reason this is a verb rather than five
+    /// platform-flavored expect_title lines.
+    ExpectDirty(Option<u64>, bool),
     /// Drive the window's REAL chrome close (performClose, WM_CLOSE,
     /// gtk close) — the veto grammar's trigger.
     CloseWindow(u64),
@@ -490,6 +498,7 @@ impl Step {
             Step::ExpectSection { .. } => true,
             Step::SelectSection { .. } => false,
             Step::ExpectWindowSize { .. } => true,
+            Step::ExpectDirty { .. } => true,
             Step::CloseWindow { .. } => false,
             Step::ExpectWindows { .. } => true,
             Step::ExpectAlert { .. } => true,
@@ -660,6 +669,34 @@ pub trait Stage: Send + 'static {
     /// what expect_window_size compares against the advisory
     /// request. No default, like window_title.
     fn window_content_size(&self, window: u64) -> (f64, f64);
+    /// Whether the surface is REALLY showing the platform's
+    /// unsaved-work affordance — the observation `expect_dirty`
+    /// verifies (docs/dirty-plan.md D5).
+    ///
+    /// THE READ IS PER-BACKEND AND THE SCRIPT IS NOT. `dirty` is one
+    /// declaration with five different chromes (D2), so there is no
+    /// single string to compare and an expect_title per platform could
+    /// not be written at all — the .steps files are shared verbatim and
+    /// compared byte-for-byte (CLAUDE.md invariant 6). This verb is
+    /// where that divergence is absorbed: every backend answers the
+    /// same question from its own surface.
+    ///
+    /// | backend | what to read |
+    /// |---|---|
+    /// | SwiftUI (macOS) | the window's CLOSE BUTTON element, attribute `AXEdited` (measured: it is not on the window element — the window's 29 attributes have no edited state) |
+    /// | WinUI | the REAL OS caption through the existing title read: leading `*` present or absent |
+    /// | GTK | the header-bar marker through the existing AT-SPI read |
+    /// | SwiftUI (iOS), Compose | the applied window prop, read back through the interpreter — state, not chrome, because these platforms have none (D4). NOT vacuous: it fails if the prop never applied |
+    ///
+    /// FROM THE PLATFORM WHEREVER THE PLATFORM HAS ONE. Reading kaya's
+    /// own model on a backend that draws chrome would make the verb
+    /// agree with itself and prove nothing: the failure under test is a
+    /// lowering that never reached the window. The model read is the
+    /// honest answer only where there is no chrome to read.
+    ///
+    /// No default: a backend that forgets it must fail to compile
+    /// rather than pass a dirty leg vacuously.
+    fn window_dirty(&self, window: u64) -> bool;
     /// Drive the surface's REAL chrome close (performClose, WM_CLOSE,
     /// gtk close) — a veto_close window emits close_requested and
     /// stays; a non-veto auxiliary closes and reports window_closed.
@@ -986,6 +1023,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_window_size wants numeric WxH: {line:?}")
                 })?;
                 Step::ExpectWindowSize(window, w, h)
+            }
+            "expect_dirty" => {
+                let (window, rest) = parse_window_target(rest);
+                // `parse::<bool>` rather than a match on the two
+                // spellings, and not for brevity: check-verbs reads
+                // THIS function's `"…" =>` arms as the verb grammar, so
+                // a literal argument here would enter the vocabulary
+                // and be demanded of both interpreters as if it were a
+                // verb (`on`/`off` are already carved out for exactly
+                // that reason).
+                let on = rest.trim().parse::<bool>().map_err(|_| {
+                    format!("expect_dirty wants true or false: {line:?}")
+                })?;
+                Step::ExpectDirty(window, on)
             }
             "close_window" => {
                 let (window, rest) = parse_window_target(rest);
@@ -2114,6 +2165,28 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }
                 }))
             }
+            Step::ExpectDirty(window, want) => {
+                // The platform's REAL unsaved-work affordance, read
+                // where that platform publishes it (Stage::window_dirty
+                // carries the table) — never the scene model's copy
+                // where chrome exists, or a backend that dropped the
+                // write would pass. The pass observation is
+                // byte-identical on every backend; an explicit window
+                // target prefixes it.
+                let id = window.unwrap_or(0);
+                let prefix = match window {
+                    Some(n) => format!("window#{n} "),
+                    None => String::new(),
+                };
+                Some(poll(|| {
+                    let got = stage.window_dirty(id);
+                    if got == *want {
+                        Ok(format!("{prefix}dirty {want}"))
+                    } else {
+                        Err(format!("{prefix}dirty {got}, wanted {want}"))
+                    }
+                }))
+            }
             Step::ExpectWindows(n) => Some(poll(|| {
                 let got = stage.window_count();
                 if got == *n {
@@ -2721,6 +2794,49 @@ mod tests {
         assert!(verdict.contains("no expects"), "{verdict}");
     }
 
+    /// `expect_dirty` takes a BOOLEAN and an optional window target,
+    /// and the parse refuses anything else: the argument is the state
+    /// itself, never a marker string, because the marker is the
+    /// backend's business and differs on every platform
+    /// (docs/dirty-plan.md D1/D2).
+    #[test]
+    fn expect_dirty_parses_a_bool_and_an_optional_window() {
+        assert_eq!(parse("expect_dirty true").unwrap()[0], Step::ExpectDirty(None, true));
+        assert_eq!(parse("expect_dirty false").unwrap()[0], Step::ExpectDirty(None, false));
+        assert_eq!(
+            parse("expect_dirty window#1 true").unwrap()[0],
+            Step::ExpectDirty(Some(1), true)
+        );
+        // Not a marker, not a title, not a maybe.
+        assert!(parse("expect_dirty").is_err());
+        assert!(parse("expect_dirty yes").is_err());
+        assert!(parse("expect_dirty \"*notes\"").is_err());
+    }
+
+    /// The verb reads THE STAGE, and both answers are reachable: the
+    /// mock's surface 0 is clean and its surface 1 is edited, so a
+    /// scene asserting `true` of the clean one fails and says what it
+    /// saw. A verb whose mismatch text does not carry the observation
+    /// is a verb nobody can debug.
+    #[test]
+    fn expect_dirty_reads_the_stage_and_reports_what_it_saw() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_dirty false\nexpect_dirty window#1 true").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("dirty false"), "{verdict}");
+        assert!(verdict.contains("window#1 dirty true"), "{verdict}");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(parse("expect_dirty true").unwrap(), MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("dirty false, wanted true"), "{verdict}");
+    }
+
     /// A seed whose file is NOT THERE fails by name, rather than
     /// leaving the backend's wait to run out and blame the pasteboard.
     /// macOS's own tool is the reason this cannot be left to the
@@ -2792,6 +2908,12 @@ mod tests {
         }
         fn window_content_size(&self, _: u64) -> (f64, f64) {
             (540.0, 330.0)
+        }
+        /// Surface 1 is the mock's EDITED one and 0 is clean, so one
+        /// stage can walk both answers of the verb — a fixed `true`
+        /// would make every expect_dirty test pass for the same reason.
+        fn window_dirty(&self, window: u64) -> bool {
+            window == 1
         }
         fn close_window(&self, _: u64) {}
         fn entry_count(&self, _: u64) -> usize {
@@ -3004,6 +3126,9 @@ mod tests {
         fn window_content_size(&self, _: u64) -> (f64, f64) {
             (540.0, 330.0)
         }
+        fn window_dirty(&self, _: u64) -> bool {
+            false
+        }
         fn close_window(&self, _: u64) {}
         fn entry_count(&self, _: u64) -> usize {
             0
@@ -3158,6 +3283,9 @@ mod tests {
         }
         fn window_content_size(&self, _: u64) -> (f64, f64) {
             (540.0, 330.0)
+        }
+        fn window_dirty(&self, _: u64) -> bool {
+            false
         }
         fn close_window(&self, _: u64) {}
         fn entry_count(&self, _: u64) -> usize {

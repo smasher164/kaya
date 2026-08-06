@@ -533,6 +533,11 @@ pub const KAYA_WPROP_VETO_CLOSE: u32 = 4;
 /// this window's entry stack (DESIGN.md, Adaptive list-detail).
 pub const KAYA_WPROP_LIST_DETAIL: u32 = 6;
 
+/// The window prop saying this surface holds UNSAVED WORK
+/// (docs/dirty-plan.md D1). State, not chrome: each backend spells its
+/// own platform's affordance and the app's title string is untouched.
+pub const KAYA_WPROP_DIRTY: u32 = 7;
+
 /// Navigation-entry properties (spec::ENTRY_PROPS): their own typed
 /// table (DESIGN.md, Navigation). `intercept_back` is the close-veto
 /// class transplanted to POP.
@@ -674,6 +679,7 @@ const _: () = assert!(
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
         && KAYA_WPROP_VETO_CLOSE == wire::WPROP_VETO_CLOSE
         && KAYA_WPROP_LIST_DETAIL == wire::WPROP_LIST_DETAIL
+        && KAYA_WPROP_DIRTY == wire::WPROP_DIRTY
         && KAYA_EPROP_TITLE == wire::EPROP_TITLE
         && KAYA_EPROP_INTERCEPT_BACK == wire::EPROP_INTERCEPT_BACK
 );
@@ -701,7 +707,7 @@ const _: () = assert!(
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
-    crate::spec::WINDOW_PROPS.len() == 6,
+    crate::spec::WINDOW_PROPS.len() == 7,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
      this count"
 );

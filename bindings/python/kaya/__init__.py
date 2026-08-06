@@ -2313,12 +2313,70 @@ def when(sig):
     return _Template(wire.tx_create_when, sig.id, is_for=False)
 
 
+def _window_props(window, title, width, height, veto_close, dirty,
+                  list_detail, sections_presentation):
+    """The window construct's props, emitted into the ambient
+    transaction — ONE place, so the scene scope and the live call
+    cannot drift apart. The scope calls it from `__enter__` (right
+    after any create_window); `App.window` calls it directly when a
+    transaction is already open."""
+    records = _records()
+    if title is not None:
+        records.append(wire.tx_set_window_title(window, str(title)))
+    if veto_close is not None:
+        records.append(wire.tx_set_window_veto_close(window, bool(veto_close)))
+    # `dirty` sits beside `veto_close` and is ORTHOGONAL to it: either
+    # rides this construct without the other. See App.window for what it
+    # means and what it deliberately does not do.
+    if dirty is not None:
+        records.append(wire.tx_set_window_dirty(window, bool(dirty)))
+    if list_detail is not None:
+        records.append(wire.tx_set_window_list_detail(window, bool(list_detail)))
+    if sections_presentation is not None:
+        records.append(wire.tx_set_window_sections_presentation(
+            window, int(sections_presentation)))
+    if width is not None or height is not None:
+        if width is None or height is None:
+            raise ValueError("kaya: window width and height travel together")
+        records.append(wire.tx_set_window_width(window, float(width)))
+        records.append(wire.tx_set_window_height(window, float(height)))
+
+
+class _LiveWindow:
+    """What the window construct returns when it was called LIVE — its
+    props are already in the ambient transaction, so there is nothing
+    left to enter.
+
+    It exists to make the other spelling's mistake loud. `with
+    app.window(dirty=True):` inside a handler would otherwise reach
+    `_TxScope.__enter__` and report "transactions do not nest", which is
+    true and unhelpful: the answer is not to find somewhere else to put
+    the transaction, it is that the live form takes no `with` at all.
+    """
+
+    def __enter__(self):
+        raise RuntimeError(
+            "kaya: the window construct's props are already in this "
+            "transaction — inside a handler (or `with app.build():`) the "
+            "construct is a PLAIN CALL, `app.window(dirty=True)`. The "
+            "`with` form is the scene scope: it opens a transaction of "
+            "its own and mounts a root, which a handler must not do."
+        )
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 class _TxScope:
     def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
-                 window=0, create=False, veto_close=None, list_detail=None,
+                 window=0, create=False, veto_close=None, dirty=None,
+                 list_detail=None,
                  sections_presentation=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
                  section=False, on_selected=None):
+        # FIRST, so __del__ below can read them even if this __init__
+        # raises on one of its own conversions.
+        self._entered = False
         self._app = app
         self._mount = mount_on_exit
         self._title = title
@@ -2327,6 +2385,7 @@ class _TxScope:
         self._window = int(window)
         self._create = create
         self._veto_close = veto_close
+        self._dirty = dirty
         self._list_detail = list_detail
         self._sections_presentation = sections_presentation
         self._push = push
@@ -2336,8 +2395,34 @@ class _TxScope:
         self._section = section
         self._on_selected = on_selected
 
+    def __del__(self):
+        # A construct that was BUILT AND NEVER ENTERED emitted nothing —
+        # its props went nowhere and no error said so. That silence is
+        # reachable only from the live spelling's shape: inside a
+        # transaction `app.window(dirty=True)` is a real call, and
+        # outside every transaction the same line is this object, which
+        # nobody enters. In CPython the temporary dies on the statement
+        # itself, so the complaint lands at the mistake rather than at
+        # exit. Guarded because __del__ can run while the interpreter is
+        # tearing stderr down, and a stream error here would print a
+        # second, less useful message on top of this one.
+        if self._entered:
+            return
+        try:
+            print(
+                "kaya: a window construct was built and never used — its "
+                "attributes went nowhere. `app.window(...)` as a plain "
+                "call is the LIVE spelling and needs a transaction "
+                "already open (inside a handler, or `with app.build():`); "
+                "outside one it is the SCENE scope and needs its `with`.",
+                file=sys.stderr,
+            )
+        except Exception:
+            pass
+
     def __enter__(self):
         global _tx, _pending_root, _recording, _journal
+        self._entered = True
         _require_app_thread()
         if self._section:
             # A section's scene scope (the push_entry nesting rules:
@@ -2401,25 +2486,10 @@ class _TxScope:
         _recording = self._mount
         if self._create:
             _records().append(wire.tx_create_window(self._window))
-        if self._title is not None:
-            _records().append(
-                wire.tx_set_window_title(self._window, str(self._title)))
-        if self._veto_close is not None:
-            _records().append(
-                wire.tx_set_window_veto_close(self._window, bool(self._veto_close)))
-        if self._list_detail is not None:
-            _records().append(
-                wire.tx_set_window_list_detail(self._window, bool(self._list_detail)))
-        if self._sections_presentation is not None:
-            _records().append(wire.tx_set_window_sections_presentation(
-                self._window, int(self._sections_presentation)))
-        if self._width is not None or self._height is not None:
-            if self._width is None or self._height is None:
-                raise ValueError("kaya: window width and height travel together")
-            _records().append(
-                wire.tx_set_window_width(self._window, float(self._width)))
-            _records().append(
-                wire.tx_set_window_height(self._window, float(self._height)))
+        _window_props(
+            self._window, self._title, self._width, self._height,
+            self._veto_close, self._dirty, self._list_detail,
+            self._sections_presentation)
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -2562,7 +2632,7 @@ class App:
             self._redone[int(window_id)] = on_redone
 
     def create_window(self, window_id, title=None, width=None, height=None,
-                      veto_close=None, list_detail=None,
+                      veto_close=None, dirty=None, list_detail=None,
                       sections_presentation=None,
                       on_close_requested=None, on_closed=None,
                       on_undone=None, on_redone=None):
@@ -2578,7 +2648,12 @@ class App:
         on_closed() fires when the non-veto auxiliary is chrome-closed
         (informational; destroy_window reconciles) and retires with
         it. on_undone(label, delta) / on_redone(label, delta) fire each
-        time kaya routes an undo at THIS surface — see App.window."""
+        time kaya routes an undo at THIS surface — see App.window.
+
+        The prop set is App.window's, `dirty` included: an auxiliary
+        surface holds unsaved work as readily as the primary one. To
+        raise or lower the mark LATER, call the construct again with
+        this surface's id — `app.window(dirty=True, window_id=7)`."""
         if on_close_requested is not None:
             self._close_requested[int(window_id)] = on_close_requested
         if on_closed is not None:
@@ -2587,13 +2662,13 @@ class App:
         return _TxScope(
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close,
-            list_detail=list_detail,
+            dirty=dirty, list_detail=list_detail,
             sections_presentation=sections_presentation)
 
     def window(self, title=None, width=None, height=None, veto_close=None,
-               list_detail=None, sections_presentation=None,
+               dirty=None, list_detail=None, sections_presentation=None,
                on_close_requested=None, on_closed=None,
-               on_undone=None, on_redone=None):
+               on_undone=None, on_redone=None, window_id=0):
         """The scene scope: an ambient transaction whose single
         top-level container mounts into the default window on exit.
         The attribute set is EXACTLY create_window's — a window's
@@ -2605,7 +2680,41 @@ class App:
         stack as list-detail, and WHICH way it presents is the
         platform's answer (DESIGN.md, Adaptive list-detail);
         `sections_presentation` is the ADVISORY sections hint
-        (kaya.SECTIONS_AUTO/BAR/SIDEBAR).
+        (kaya.SECTIONS_AUTO/BAR/SIDEBAR); `window_id` names the surface
+        the attributes are about — 0, the primary, unless you say
+        otherwise (the trailing-id spelling C# and OCaml already carry).
+
+        `dirty` says this surface holds UNSAVED WORK, and each backend
+        spells its own platform's affordance: the dot in the close
+        button on macOS, a leading `*` in the RENDERED caption on
+        Windows, a bullet beside the header-bar title on GTK, nothing on
+        the phones, which have none (docs/dirty-plan.md D2/D4). STATE,
+        NOT CHROME — the title you declared is left untouched, with no
+        marker composed into it and no placeholder to leave room for
+        (Qt's `[*]` template is the named rejection, D1). And it ARMS
+        NOTHING (D3): "unsaved changes, close anyway?" is `veto_close`
+        plus `kaya.show_alert`, composed by the app, because apps
+        legitimately differ on what that flow should do. The two props
+        are orthogonal — either rides this construct without the other.
+
+        NOTHING INFERS IT. Writing the document's signal does not raise
+        the mark and saving does not lower it: say both, in the one
+        transaction the handler already is.
+
+        THE LIVE SPELLING IS THIS SAME CONSTRUCT, CALLED AGAIN, because
+        no window attribute lives as a loose function outside it
+        (DESIGN.md, Binding conventions — `window_title` retired
+        2026-07-22). A handler does not open its own transaction; the
+        binding does (`App._dispatch`), so inside one the construct
+        drops the `with` and becomes a plain call whose props join the
+        transaction already running:
+
+            with app.window(title="dirty", veto_close=True):   # the scene
+                ...
+
+            def edit():                                        # a handler
+                doc.set("notes and a line")
+                app.window(dirty=True)
 
         on_undone(label, delta) fires each time kaya routes an undo at
         this surface, with the group's label — EMPTY for a typing
@@ -2615,14 +2724,28 @@ class App:
         likes, so it never retires. on_redone is its twin. Neither
         fires for a native-tier undo the platform's own affordance
         drove (docs/undo-plan.md A6)."""
+        window_id = int(window_id)
         if on_close_requested is not None:
-            self._close_requested[0] = on_close_requested
+            self._close_requested[window_id] = on_close_requested
         if on_closed is not None:
-            self._window_closed[0] = on_closed
-        self._register_history(0, on_undone, on_redone)
+            self._window_closed[window_id] = on_closed
+        self._register_history(window_id, on_undone, on_redone)
+        if _tx is not None:
+            # THE LIVE FORM. A transaction is already open — this call
+            # is inside a handler, or inside `with app.build():` — so
+            # the props join it right here and there is nothing to
+            # enter. The thread check is the one the scope form does in
+            # `__enter__`: `_tx` is a module global, so a background
+            # thread would otherwise stamp records into the app
+            # thread's open transaction (see _require_app_thread).
+            _require_app_thread()
+            _window_props(window_id, title, width, height, veto_close,
+                          dirty, list_detail, sections_presentation)
+            return _LiveWindow()
         return _TxScope(
-            self, mount_on_exit=True, title=title, width=width, height=height,
-            veto_close=veto_close, list_detail=list_detail,
+            self, mount_on_exit=True, window=window_id,
+            title=title, width=width, height=height,
+            veto_close=veto_close, dirty=dirty, list_detail=list_detail,
             sections_presentation=sections_presentation)
 
     def build(self):

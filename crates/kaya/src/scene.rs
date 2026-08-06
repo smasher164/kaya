@@ -597,6 +597,7 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
         (WindowProp::Title, Value::Str(_)) => {}
         (WindowProp::VetoClose, Value::Bool(_)) => {}
         (WindowProp::ListDetail, Value::Bool(_)) => {}
+        (WindowProp::Dirty, Value::Bool(_)) => {}
         (WindowProp::Width | WindowProp::Height, Value::F64(v)) => {
             assert!(
                 v.is_finite() && *v > 0.0,
@@ -4593,6 +4594,35 @@ mod tests {
             window: DEFAULT_WINDOW,
             prop: WindowProp::ListDetail,
             value: PropValue::Const(Value::from("regular")),
+        }]);
+    }
+
+    #[test]
+    fn dirty_takes_a_bool() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetWindowProp {
+            window: DEFAULT_WINDOW,
+            prop: WindowProp::Dirty,
+            value: PropValue::Const(Value::Bool(true)),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "rejects value")]
+    fn dirty_rejects_a_non_bool() {
+        // The prop is a BOOLEAN, and a string here is exactly the
+        // design it replaces: Qt spells unsaved work as a `[*]`
+        // placeholder inside the app's own title, which puts the
+        // mechanism in app-facing text and the constraint on a string
+        // no type system sees (docs/dirty-plan.md D1). kaya's window
+        // titles are compared byte-for-byte across platforms, so the
+        // declared string stays identical everywhere and only the
+        // chrome diverges.
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetWindowProp {
+            window: DEFAULT_WINDOW,
+            prop: WindowProp::Dirty,
+            value: PropValue::Const(Value::from("notes[*]")),
         }]);
     }
 

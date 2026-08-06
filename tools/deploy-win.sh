@@ -99,6 +99,9 @@ for arg in "$@"; do
         # A DEPTH SCENE, so rust alone (docs/undo-plan.md §4's fan-out):
         # the other eight guests land with the `undoable` sweep.
         undo_rust) SUITE="$arg" ;;
+        # Likewise, until the `dirty` window prop has a sugar spelling in
+        # the other seven bindings (docs/dirty-plan.md §2's fan-out).
+        dirty_rust) SUITE="$arg" ;;
         # These two were wired as legs without arms here, so a single
         # leg could not be re-run in isolation — the one-leg-repeatedly
         # loop is the only practical way to characterise a rare flake.
@@ -216,7 +219,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -243,6 +246,101 @@ for s in $DEPTH_SCENES; do
 done
 # (No mid-sweep list any more: filedialog joined SCENES when its eighth
 # guest landed, so its per-language surfaces glob with everyone else's.)
+
+# ONE CAPTION WRITER, enforced before anything is built.
+#
+# Windows publishes no document-modified affordance at any layer
+# (scratchpad/dirty-probe-windows.md §2: all 28 App SDK .winmd scanned,
+# UIA's WindowPattern checked, nothing), so on this platform the `dirty`
+# prop lowers to TEXT — a leading `*` composed into the rendered caption.
+# The probe costed that up front: the caption is already a composition
+# of the window's own title and a covering nav entry's, and a text
+# marker becomes a third input that EVERY caption write has to apply or
+# the mark blinks out on a push, a pop, or a split-mode change. There
+# were five such writes.
+#
+# So the backend has one: `refresh_caption`, which derives the whole
+# caption from state. This refuses a sixth. It is a text check because
+# the type system cannot help — `Window::SetTitle` is a WinRT projection
+# method and is always callable — and it lives HERE, in the deploy every
+# Windows change goes through, rather than in a gate list somebody has
+# to remember: a caption write that bypasses the composition is a
+# Windows-lane defect and this is the Windows lane's door. The kaya.h
+# export check below is the same idea one layer down.
+if ! python3 - "$ROOT/crates/kaya/src/winui/mod.rs" <<'PY'
+import pathlib, re, sys
+
+# A caption write is `<recv>.SetTitle(` in the WinUI backend. Two
+# receivers are NOT window captions and never were: a menu bar item's
+# label and a ContentDialog's title.
+NOT_A_CAPTION = {"bar_item", "dialog"}
+CALL = re.compile(r"(\w+)\.SetTitle\(")
+# ANY indent, so a method inside an impl block resets the tracker too —
+# a column-0-only match would let a `SetTitle` in the Stage impl inherit
+# the sanction of whatever free function was declared above it.
+HEADER = re.compile(r"\s*(?:pub(?:\(\w+\))?\s+)?(?:unsafe\s+)?fn\s")
+# The two sanctioned window-caption writes, each identified by the
+# function it sits in rather than by its line number.
+WRITER = "fn refresh_caption("
+PLACEHOLDER = "fn setup("
+
+
+def audit(text):
+    """Offending caption writes as (line-number, receiver) pairs."""
+    fn, bad = "", []
+    for n, line in enumerate(text.splitlines(), 1):
+        if HEADER.match(line):
+            fn = line.strip()
+        for m in CALL.finditer(line):
+            recv = m.group(1)
+            if recv in NOT_A_CAPTION:
+                continue
+            if WRITER in fn or PLACEHOLDER in fn:
+                continue
+            bad.append((n, recv))
+    return bad
+
+
+# THE SELF-TEST RUNS FIRST, because a checker that cannot see a bypass
+# reports OK on every tree including a broken one. Both directions: a
+# bypass is caught, and the sanctioned shapes are not.
+bypass = 'fn refresh_nav() {\n    target.SetTitle(&HSTRING::from(t));\n}\n'
+# ...and the one the column-0 matcher used to miss: an indented method
+# BELOW the sanctioned writer, which inherited its sanction.
+indented = ('fn refresh_caption() {\n    target.SetTitle(&x);\n}\n'
+            'impl Stage {\n    fn other(&self) {\n'
+            '        target.SetTitle(&x);\n    }\n}\n')
+clean = ('fn refresh_caption() {\n    target.SetTitle(&x);\n}\n'
+         'fn setup() {\n    window.SetTitle(&y);\n}\n'
+         'fn build_menu() {\n    bar_item.SetTitle(&z);\n}\n')
+if audit(bypass) != [(2, "target")]:
+    sys.exit("deploy-win: SELF-TEST FAIL (a bypassing SetTitle was not seen)")
+if audit(indented) != [(6, "target")]:
+    sys.exit("deploy-win: SELF-TEST FAIL (an indented method inherited the "
+             "caption writer's sanction)")
+if audit(clean):
+    sys.exit("deploy-win: SELF-TEST FAIL (a sanctioned SetTitle was refused: "
+             f"{audit(clean)})")
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+if WRITER not in text:
+    sys.exit(f"deploy-win: {path} has no `{WRITER}` — the WinUI dirty "
+             f"lowering composes its marker there, and without it every "
+             f"caption write is a bypass")
+found = audit(text)
+if found:
+    where = ", ".join(f"line {n} (`{r}.SetTitle`)" for n, r in found)
+    sys.exit(f"deploy-win: {path} writes a window caption outside "
+             f"refresh_caption: {where}. Call `refresh_caption(core, "
+             f"window)` instead — it composes the dirty marker (a leading "
+             f"`*`, the measured Notepad convention) into whichever title "
+             f"the window should be showing. A raw SetTitle drops the mark "
+             f"the next time that path runs (docs/dirty-plan.md D2).")
+PY
+then
+    exit 1
+fi
 
 echo "== building (aarch64-pc-windows-msvc, release) =="
 (cd "$ROOT" && cargo xwin build --locked --features harness --release --target aarch64-pc-windows-msvc --lib \
@@ -1262,6 +1360,21 @@ case "$SUITE" in
         # launcher to be checked in. So every depth scene had both, and
         # the loop ran each of them a SECOND time — split_rust ran twice
         # per full matrix from the day it was wired until now.
+        #
+        # The dirty scene: unsaved work as window chrome
+        # (docs/dirty-plan.md). Rust-only until the sugar sweep gives the
+        # other eight guests a `dirty` spelling. On this platform the
+        # chrome is TEXT — Windows has no modified affordance at any
+        # layer — so `expect_dirty` reads the real OS caption for a
+        # leading `*`, which is also why the scene asserts its title only
+        # while clean (the two reads share a channel here and nowhere
+        # else). Drained around, not for the foreground reason: the leg
+        # drives a real WM_CLOSE on its own window, and the veto keeps it
+        # — but a window disappearing out from under a pooled leg is the
+        # one failure that reads as somebody else's bug.
+        drain_suites
+        run_suite dirty_rust
+        drain_suites
         # The background scene: work off the app thread, posted back.
         # Its worker parks until a click releases it, so a binding that
         # ran background work ON the app thread cannot deliver its own

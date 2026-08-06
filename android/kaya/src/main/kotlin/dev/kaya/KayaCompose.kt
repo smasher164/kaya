@@ -277,9 +277,10 @@ var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
 // THE DEPTH-STUB HELPER IS GONE AGAIN, and its own doc asked for this:
 // it lived here through the clipboard depth slice, was removed the day
-// those arms landed, came back for the undo slice, and is removed now
-// that the undo arm's last call site is gone. Dead code kept "for later"
-// is what a reader has to reason about for nothing.
+// those arms landed, came back for the undo slice, went again, came
+// back for `dirty`, and is removed now that the dirty arm's last call
+// site is gone. Dead code kept "for later" is what a reader has to
+// reason about for nothing.
 //
 // The next Compose depth slice re-adds it, in exactly this shape — a
 // CALL and not a sentence, because tools/check-stubs.sh and
@@ -362,6 +363,24 @@ object KayaSceneModel {
     /// the width, so expect_split cannot agree with the lowering by
     /// construction (docs/traps.md).
     var splitPresentation = "stacked" // split | stacked
+    /// Does this surface hold UNSAVED WORK (wprop 7;
+    /// docs/dirty-plan.md). Declared by the app, never inferred from a
+    /// signal — kaya does not watch your document for you.
+    ///
+    /// PLAIN STATE, AND THAT IS THE WHOLE LOWERING HERE (D4). Android
+    /// has no window chrome to put an unsaved-work mark in: there is no
+    /// title bar, no close button, and the platform's unsaved-state
+    /// affordances are FLOW ones (the predictive-back confirmation),
+    /// which kaya already spells through veto_close and navigation. So
+    /// nothing reads this field to draw with — deliberately — and it is
+    /// not a `mutableStateOf`, because no composition depends on it.
+    ///
+    /// It is still what `expect_dirty` reads, and that read is not
+    /// vacuous: the value arrives over the wire through the apply arm,
+    /// so a backend that dropped the prop fails the assertion. The
+    /// title is NEVER rewritten (D1 — Qt's `[*]` template is the named
+    /// rejection), on this platform or any other.
+    var windowDirty = false
     // Context catalogs by anchored WIDGET id. Each attach APPENDS one
     // root — a widget's roots ACCUMULATE in attach order (the bindings
     // emit one attach per root), never replace. A template attachment
@@ -524,7 +543,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x69c07d5216db7eb8uL
+    private const val SPEC_HASH: ULong = 0x5b3d760b52e59d91uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -583,6 +602,7 @@ object KayaCompose {
     private const val WPROP_VETO_CLOSE = 4
     private const val WPROP_SECTIONS_PRESENTATION = 5
     private const val WPROP_LIST_DETAIL = 6
+    private const val WPROP_DIRTY = 7
     private const val SPROP_TITLE = 1
     private const val SPROP_ICON = 2
     // Navigation-entry properties: their own typed table;
@@ -988,6 +1008,24 @@ object KayaCompose {
                         WPROP_SECTIONS_PRESENTATION ->
                             KayaSceneModel.sectionsPresentation = readI64(b)
                         WPROP_LIST_DETAIL -> KayaSceneModel.listDetail = readBool(b)
+                        // The unsaved-work mark (docs/dirty-plan.md D4).
+                        // It APPLIES and it lowers to NO CHROME, which
+                        // is not the same as being ignored: the value
+                        // lands in the model, expect_dirty reads it
+                        // back, and a prop dropped on the wire fails
+                        // that assertion. What Android has no room for
+                        // is the CHROME — no title bar, no close
+                        // button, and the platform's own unsaved-state
+                        // affordance is the predictive-back
+                        // confirmation, which is veto_close and
+                        // navigation's business, not this prop's.
+                        // Synthesizing a marker here would express what
+                        // no native app expresses.
+                        //
+                        // NOT INTO THE TITLE, on any platform. The task
+                        // label stays exactly the string the app
+                        // declared (D1).
+                        WPROP_DIRTY -> KayaSceneModel.windowDirty = readBool(b)
                         else -> error("kaya: unknown window prop $prop")
                     }
                 }
@@ -3094,6 +3132,52 @@ object KayaCompose {
                         // owns surfaces, and back is not close
                         // (DESIGN.md, Presentation contexts).
                         failures.add("close_window: this host has no chrome close")
+                    }
+                    "expect_dirty" -> {
+                        // THE UNSAVED-WORK MARK (docs/dirty-plan.md
+                        // D5, and Stage::window_dirty's table in
+                        // crates/kaya/src/harness.rs carries the row).
+                        // Every backend answers the same question off
+                        // its own surface; on the desktops that means
+                        // the chrome — the close button's AXEdited on
+                        // macOS, the caption's leading `*` on Windows,
+                        // the header-bar marker on GTK — because
+                        // reading kaya's own model where chrome exists
+                        // would make the verb agree with itself and
+                        // never catch a lowering that stopped short of
+                        // the window.
+                        //
+                        // HERE THE MODEL IS THE HONEST ANSWER, and
+                        // that is the stated carve-out rather than a
+                        // shortcut (D4): this platform has no chrome to
+                        // publish the mark in, so the applied prop is
+                        // the only observable there is. It is not
+                        // vacuous — the value came over the wire
+                        // through the apply arm, so a dropped prop
+                        // fails here, and the negative test watched it
+                        // do exactly that.
+                        val target = parts.getOrNull(1) ?: ""
+                        val explicit = target.startsWith("window#")
+                        val wid =
+                            if (explicit) target.removePrefix("window#").toLongOrNull() ?: -1
+                            else 0L
+                        val prefix = if (explicit) "window#$wid " else ""
+                        val want = parts.getOrNull(if (explicit) 2 else 1) == "true"
+                        // window 0 is the one surface this host has
+                        // (the core rejects create_window). A named
+                        // window that cannot exist is UNREADABLE, never
+                        // `false`: a clean-window assertion must not
+                        // pass because the read had nothing to read.
+                        if (wid != 0L) {
+                            failures.add("${prefix}dirty unreadable, wanted $want")
+                        } else {
+                            val got = onUi(activity) { KayaSceneModel.windowDirty }
+                            if (got == want) {
+                                observed.add("${prefix}dirty $want")
+                            } else {
+                                failures.add("${prefix}dirty $got, wanted $want")
+                            }
+                        }
                     }
                     "expect_windows" -> {
                         val want = parts[1].toIntOrNull() ?: -1

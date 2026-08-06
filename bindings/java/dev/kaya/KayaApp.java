@@ -869,6 +869,26 @@ public final class KayaApp {
         }
 
         /**
+         * Say this surface holds UNSAVED WORK: the backend shows its
+         * platform's own affordance — the dot in the close button on
+         * macOS, a leading {@code *} in the rendered caption on
+         * Windows, a bullet beside the header-bar title on GTK,
+         * nothing on the phones, which have none
+         * (docs/dirty-plan.md D2/D4).
+         *
+         * <p>STATE, NOT CHROME, and the title you declared is left
+         * alone: there is no marker to compose into it and no
+         * placeholder to leave room for (the rejected Qt design). It
+         * ARMS NOTHING either — "unsaved changes, close anyway?" is
+         * {@link #vetoClose} plus a dialog, which is yours to compose,
+         * because apps legitimately differ on what it should do.
+         */
+        public WindowRef dirty(boolean on) {
+            tx.emit(KayaWire.txSetWindowDirty(id, on));
+            return this;
+        }
+
+        /**
          * Ask this window to present its ENTRY STACK as list-detail: on a REGULAR window the base root takes the leading pane and the top of the stack the trailing one; on a COMPACT one nothing changes.
          * There is no argument for WHICH way it presents - that is the size class's answer, not the app's.
          */

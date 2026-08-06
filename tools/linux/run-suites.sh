@@ -38,7 +38,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -436,7 +436,13 @@ CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 build_go() {
     mkdir -p /tmp/go-guests
     local guest
-    for guest in $SCENES; do
+    # DEPTH_SCENES TOO, the validate-mac convention: a depth slice's
+    # guests arrive one language at a time, and Go's has to be BUILT
+    # before its leg can run — every other language's build here is a
+    # whole-directory sweep (dune, cabal, javac's wildcard, dotnet's
+    # glob) and picks a new guest up for free, so Go was the one tier
+    # where a landed guest could still have nothing to run.
+    for guest in $SCENES $DEPTH_SCENES; do
         go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || return 1
     done
 }
@@ -574,6 +580,47 @@ for proto in x11 wayland; do
     run "$proto" panels-haskell env KAYA_SELFTEST=panels "$(hs_bin panels)"
     run "$proto" panels-java env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The dirty scene: unsaved work as window chrome
+    # (docs/dirty-plan.md). GTK4 has no window-level edited affordance at
+    # any layer, so kaya draws the living GNOME convention — a bullet
+    # LABEL beside the header-bar title (GNOME Text Editor's own shape),
+    # with the window's title string untouched.
+    #
+    # THROUGH a11y-leg.sh, and that is the lowering's own consequence
+    # rather than a preference: the marker is a widget kaya drew, so the
+    # only honest read of it is the one an assistive client makes, and
+    # GTK publishes no accessibility tree at all without GTK_A11Y=atspi
+    # and a bus to sit on. This wrapper stands up both, per leg — never
+    # lane-wide, which once timed out eleven legs that never asked for
+    # accessibility.
+    #
+    # EVERY GUEST THIS LANE CARRIES, which is already the full roster:
+    # the sugar sweep landed all seven non-Swift bindings plus the C
+    # floor, and each was run here before its leg was wired. The scene
+    # stays in DEPTH_SCENES all the same — that is a TREE-WIDE tier, and
+    # the mac runner is still filling in its own languages; graduating it
+    # is one move made across every runner at once, not per lane. Nothing
+    # here depends on which list holds it: both feed the example build
+    # and the Go guest build alike.
+    run "$proto" dirty-rust env KAYA_SELFTEST=dirty \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/dirty"
+    run "$proto" dirty-python env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/dirty.py
+    run "$proto" dirty-go env KAYA_SELFTEST=dirty \
+        tools/linux/a11y-leg.sh /tmp/go-guests/dirty
+    run "$proto" dirty-csharp env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" dirty-ocaml env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/dirty.exe
+    run "$proto" dirty-haskell env KAYA_SELFTEST=dirty \
+        tools/linux/a11y-leg.sh "$(hs_bin dirty)"
+    run "$proto" dirty-java env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The C floor's dirty guest, which does not wait on the sugar sweep:
+    # the floor takes no sugar at all, so it was writable the day the
+    # wire constant existed (the undo-c precedent).
+    run "$proto" dirty-c env KAYA_SELFTEST=dirty \
+        tools/linux/a11y-leg.sh /tmp/c-guests/dirty
     # The confirm scene: the modal-alert grammar (gtk::AlertDialog),
     # all three answer paths through the REAL dialog button.
     # The stall diagnostic (crates/kaya/src/stall.rs): the one scene

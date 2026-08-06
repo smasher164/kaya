@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -553,12 +553,13 @@ build_c() {
     # dlopens the SwiftUI interpreter for a C guest exactly as it does
     # for a Go or Swift one.
     #
-    # ONE SCENE, not the Makefile's eleven: this lane runs one C leg, and a
-    # guest built here and run nowhere is the false-coverage shape
-    # check-steps was written against. SCENES is a command-line
-    # override, so the Makefile keeps one list and the linux suite keeps
-    # building all of them.
-    make -C guests/c SCENES=undo TARGET_DIR="$ROOT/target/debug" \
+    # THE SCENES THIS LANE ACTUALLY RUNS, not the Makefile's whole list:
+    # a guest built here and run nowhere is the false-coverage shape
+    # check-steps was written against, and its sweep_c_floor reads this
+    # very assignment to say so — every name here must have a leg below.
+    # SCENES is a command-line override, so the Makefile keeps one list
+    # and the linux suite keeps building all of them.
+    make -C guests/c SCENES="undo dirty" TARGET_DIR="$ROOT/target/debug" \
         OUT="$ROOT/target/c-guests"
 }
 
@@ -1156,6 +1157,49 @@ run confirm-haskell-swiftui env KAYA_SELFTEST=confirm "$(hs_bin confirm)"
 run confirm-swift-swiftui env KAYA_SELFTEST=confirm target/swift-guests/confirm
 run confirm-java-swiftui env KAYA_SELFTEST=confirm KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+
+# The dirty scene: unsaved work as window chrome (docs/dirty-plan.md).
+# The app declares one boolean and macOS shows the dot in the close
+# button; expect_dirty reads that dot back through the accessibility
+# tree (AXEdited on the close button — measured to be exactly where it
+# lives), never the model, so a lowering that never reached the
+# NSWindow fails here. The scene ends on the D3 composition: the close
+# attempt fires the veto class, the app's own dialog opens, cancel
+# keeps the window and the mark stays up.
+#
+# DEPTH until the sugar lands in the other seven bindings and their
+# guests follow (it is in DEPTH_SCENES for exactly that reason, so
+# check-steps demands no BINDING leg yet). The C floor is not one of
+# those bindings and does not wait on them: it takes no sugar at all,
+# so its guest is writable the day the wire constant exists — the
+# undo-c precedent, where the floor rode this lane first.
+KAYA_SELFTEST_SCRIPT="$(scene_script dirty)"
+export KAYA_SELFTEST_SCRIPT
+run dirty-rust-swiftui env KAYA_SELFTEST=dirty target/debug/examples/dirty
+# Python's guest: the prop is a keyword argument on the window
+# construct, and setting it later is THAT CONSTRUCT CALLED AGAIN —
+# `app.window(dirty=True)` without the `with`, since a handler already
+# runs inside the transaction the binding opened. No loose function:
+# a window attribute lives nowhere but the construct (DESIGN.md).
+run dirty-python-swiftui env KAYA_SELFTEST=dirty python3 guests/python/dirty.py
+# OCaml's guest: the prop is a labelled argument on the window construct
+# ([~dirty]), and setting it later is that construct called again inside
+# the handler — an ambient binding's handler already IS the transaction,
+# so the edit's three statements ride one.
+run dirty-ocaml-swiftui env KAYA_SELFTEST=dirty KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/dirty.exe
+# The C floor's dirty guest: the same script, the same expected strings,
+# and the prop spelled as the SET_WINDOW_PROP record it is — the same
+# record the title rides, one constant apart from veto_close. It is also
+# the floor's first reader of close_requested and alert_result, neither
+# of which the generator emits a parser for, so the veto/confirm
+# composition is decoded by hand here (invariant 5's documentation tier).
+run dirty-c-swiftui env KAYA_SELFTEST=dirty target/c-guests/dirty
+run dirty-go-swiftui env KAYA_SELFTEST=dirty target/go-guests/dirty
+run dirty-haskell-swiftui env KAYA_SELFTEST=dirty "$(hs_bin dirty)"
+run dirty-swift-swiftui env KAYA_SELFTEST=dirty target/swift-guests/dirty
+run dirty-csharp-swiftui env KAYA_SELFTEST=dirty KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
 
 KAYA_SELFTEST_SCRIPT="$(scene_script align)"
 export KAYA_SELFTEST_SCRIPT

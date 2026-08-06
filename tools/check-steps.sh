@@ -444,7 +444,17 @@ wired() {
     # three declaration spellings moved into the helper with the
     # predicate; they used to be inlined here, in the third of four
     # copies.)
-    exempt="$(printf '\n%s\n' "$exempt")"
+    #
+    # NOT THROUGH A COMMAND SUBSTITUTION, and that is the whole bug this
+    # line used to have: `$(printf '\n%s\n' ...)` STRIPS the trailing
+    # newline it just added, so the pattern below — which requires one
+    # after the pair — could never match the LAST derived exemption.
+    # Measured 2026-08-06 on the dirty slice, the first tree in this
+    # project's history with any depth stub at all: four pairs derived,
+    # three honored, and the android one silently demanded legs its
+    # backend had just declared it could not run. An empty exemption
+    # list is why nobody saw it sooner.
+    exempt=$'\n'"$exempt"$'\n'
     for scene in tools/scenes/*.steps; do
         scene="$(basename "${scene%.steps}")"
         for runner in tools/validate-mac.sh tools/linux/run-suites.sh \

@@ -176,6 +176,10 @@ name = "undo"
 path = "../../guests/rust/undo.rs"
 
 [[example]]
+name = "dirty"
+path = "../../guests/rust/dirty.rs"
+
+[[example]]
 name = "confirm"
 path = "../../guests/rust/confirm.rs"
 

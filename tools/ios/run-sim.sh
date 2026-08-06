@@ -987,12 +987,87 @@ run_swiftui_on() {
     # true on its own device (the iPad's form factor), the way
     # panels.steps carries desktop-only capability rejection.
     local extra="${8:-}"
+    # Optional 9th/10th arguments: THE PHONE-EXPRESSIBLE PREFIX — the cut
+    # VERB this host cannot express, and the verb whose assertions the
+    # cut may not take with it.
+    #
+    # This runner already declines WHOLE scenes for this reason and says
+    # so at the top of the file: `split` drives resize_window and a phone
+    # does not command its own window size, `panels` drives create_window
+    # and this host rejects it by capability. `dirty` is the first scene
+    # that is mostly runnable here and desktop-only in its TAIL: its last
+    # six steps hang off a chrome close (close_window → the veto class →
+    # the app's own dialog), and on iOS the whole close grammar is inside
+    # `#if os(macOS)` because there is no chrome close to grammar. The
+    # alternatives were an all-or-nothing carve-out — which would leave
+    # D4's iOS arm applied but asserted by nobody, and the depth arm's
+    # rule is that a read nothing runs is a claim nobody checked — or a
+    # phone-safe sibling scene, which every runner would then owe legs
+    # for (check-steps' wired()), i.e. a cross-lane obligation minted
+    # mid-fan-out. This keeps the shared file byte-frozen and shared
+    # verbatim: the prefix is its own bytes, and the steps this lane did
+    # not run are PRINTED, so a green leg still says what it declined.
+    #
+    # THE TWO WAYS THIS COULD GO QUIET, BOTH REFUSED BELOW: the cut verb
+    # leaving the scene (then the cut is stale and the leg would silently
+    # run everything, or nothing), and the cut swallowing the very
+    # assertion the leg exists for (then it is a gate satisfiable without
+    # exercising the real thing). The second is not hypothetical — cut
+    # this scene one step earlier, at `click button#0`, and the prefix
+    # asserts `dirty false` and never `dirty true`.
+    local cut="${9:-}" keep="${10:-}"
     xcrun simctl install "$udid" "$app"
     local container
     container=$(xcrun simctl get_app_container "$udid" "$bundle_id" app)
     rec_start "$name" "$slot"
     local script
-    script=$(grep -v '^#' "$ROOT/tools/scenes/$scene.steps")
+    if [ -n "$cut" ]; then
+        script=$(python3 - "$ROOT/tools/scenes/$scene.steps" "$cut" "$keep" <<'PY'
+import pathlib
+import sys
+
+path, cut, keep = sys.argv[1], sys.argv[2], sys.argv[3]
+# A CUT WITHOUT A `keep` IS AN UNGUARDED CUT, and an optional guard is
+# the kind that is quietly not passed. Naming what the cut may not take
+# is the price of cutting at all.
+if not keep:
+    sys.exit(f"run-sim: cutting {path} at `{cut}` with no `keep` verb — say "
+             f"which assertions this cut may not take with it, or the leg "
+             f"can be trimmed until it asserts nothing")
+lines = [line for line in pathlib.Path(path).read_text().splitlines()
+         if not line.lstrip().startswith("#")]
+verbs = [(line.split() or [""])[0] for line in lines]
+if cut not in verbs:
+    sys.exit(f"run-sim: {path} has no `{cut}` step, so this lane's cut is "
+             f"stale — the scene was reshaped and nobody re-read what the "
+             f"phone can express. Fix the leg, do not widen the cut.")
+at = verbs.index(cut)
+prefix, dropped = lines[:at], lines[at:]
+
+
+def asserted(seq):
+    """The distinct `keep` steps in seq, whitespace-normalized."""
+    return {" ".join(line.split()) for line in seq
+            if (line.split() or [""])[0] == keep}
+
+
+whole, kept = asserted(lines), asserted(prefix)
+if not kept:
+    sys.exit(f"run-sim: cutting {path} at `{cut}` leaves no `{keep}` step "
+             f"at all — the leg would pass without asserting the thing it "
+             f"exists for")
+if kept != whole:
+    sys.exit(f"run-sim: cutting {path} at `{cut}` drops "
+             f"{sorted(whole - kept)} — the cut may not take an assertion "
+             f"of `{keep}` with it")
+print("\n".join(f"run-sim: NOT RUN on this host (after `{cut}`): {line}"
+                for line in dropped if line.strip()), file=sys.stderr)
+print("\n".join(prefix))
+PY
+        ) || return 1
+    else
+        script=$(grep -v '^#' "$ROOT/tools/scenes/$scene.steps")
+    fi
     [ -n "$extra" ] && script="$script
 $extra"
     # THE HARNESS'S EYES AND HANDS OUTSIDE THIS APP, for the two scenes
@@ -1500,6 +1575,31 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle undors-swiftui dev.kaya.undoswiftui "$TARGET_DIR/examples/undo")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on undo-swiftui "$APP" dev.kaya.undoswiftui undo-swiftui undo undo
+
+    # The dirty scene, the DEPTH slice's mobile arm (rust only until the
+    # sweep). THE PROP APPLIES HERE AND LOWERS TO NOTHING, which is the
+    # one stated exception in this design (docs/dirty-plan.md D4): a
+    # phone has no window chrome to carry an unsaved-work mark, and the
+    # affordances it does have for unsaved work are FLOW ones — the
+    # pull-down-dismiss confirmation, the predictive-back dialog — which
+    # kaya already spells with veto_close and navigation. Synthesizing a
+    # marker no native app shows would express what the platform does
+    # not, so the lowering is deliberately empty and this leg is what
+    # keeps "empty" from meaning "absent": expect_dirty reads the
+    # APPLIED PROP back through the interpreter (D5's iOS row), which
+    # fails the moment the prop stops arriving.
+    #
+    # The cut is the chrome close (see run_swiftui_on's 9th/10th
+    # arguments): everything below `close_window` in the shared scene is
+    # D3's veto demonstration, which needs a close this platform has
+    # not got. `expect_dirty` is named as the assertion the cut may not
+    # take with it — the prefix still watches the mark go up, come down
+    # on save, and go up again.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example dirty
+    APP=$(make_bundle dirtyrs-swiftui dev.kaya.dirtyswiftui "$TARGET_DIR/examples/dirty")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on dirty-swiftui "$APP" dev.kaya.dirtyswiftui dirty-swiftui \
+        dirty dirty '' close_window expect_dirty
     drain
     timing swiftui-build+legs
 fi

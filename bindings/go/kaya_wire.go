@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x69c07d5216db7eb8
+	SpecHash uint64 = 0x5b3d760b52e59d91
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -61,6 +61,7 @@ const (
 	WpropVetoClose = 4
 	WpropSectionsPresentation = 5
 	WpropListDetail = 6
+	WpropDirty = 7
 	EpropTitle = 1
 	EpropInterceptBack = 2
 	SpropTitle = 1
@@ -1182,6 +1183,26 @@ func TxBindWindowListDetail(window uint64, signalID uint64) []byte {
 	b := beginRecord(txSetWindowProp)
 	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropListDetail)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetWindowDirty: set_window_prop with a constant dirty value (window 0, the primary surface).
+func TxSetWindowDirty(window uint64, dirty bool) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropDirty)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, dirty)
+	return endRecord(b)
+}
+
+// TxBindWindowDirty: set_window_prop with a signal-bound dirty value (window 0, the primary surface).
+func TxBindWindowDirty(window uint64, signalID uint64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropDirty)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
 	return endRecord(b)

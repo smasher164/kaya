@@ -74,6 +74,9 @@ mod clipboard;
 #[path = "undo.rs"]
 mod undo;
 
+#[path = "dirty.rs"]
+mod dirty;
+
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
 /// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
@@ -123,6 +126,13 @@ fn app(ctx: kaya::AppCtx) {
         // holds the leg itself off tools/android/run-emulator.sh until
         // the Compose backend's core-tier seam closes.
         Ok("undo") => undo::app(ctx),
+        // The dirty scene. The same app the desktops run — the guest is
+        // shared, the CHROME is what differs, and here there is none
+        // (docs/dirty-plan.md D4): the prop applies, expect_dirty reads
+        // it back, and the leg's script stops above the chrome close
+        // this host does not have (tools/android/run-emulator.sh says
+        // where and why).
+        Ok("dirty") => dirty::app(ctx),
         // The milestone-2 scene is the DEFAULT and says so: its leg
         // passes "1" (the selftest flag's original spelling, from
         // before the value doubled as a scene selector), and a build

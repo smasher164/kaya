@@ -802,5 +802,69 @@ check(
     len(undo_todos) == 2,
 )
 
+# ---- the window construct: one attribute set, two spellings ---------
+#
+# A window attribute rides the window construct and lives nowhere else
+# (DESIGN.md, Binding conventions — `window_title` retired 2026-07-22),
+# so Python's construct has to serve the LIVE case too. Every other
+# binding hangs it off the transaction and gets that for free; Python's
+# hangs off the App because it doubles as the scene scope, so the same
+# call means two things and `_tx` is what decides.
+#
+# THIS IS A SILENT FAILURE CLASS AND THAT IS WHY IT IS CHECKED HERE.
+# Watched 2026-08-06 with the live branch deleted: `app.window(dirty=
+# True)` inside a handler emitted nothing, raised nothing, printed
+# nothing, and the mac leg failed three `expect_dirty true` steps while
+# every label assertion passed. The dirty scene catches it today; these
+# checks catch it without a scene.
+app_win = kaya.App()
+_win_shipped = []
+_real_submit5 = kaya.runtime.submit
+kaya.runtime.submit = lambda *records: _win_shipped.append(list(records))
+try:
+    with app_win.window(title="w", dirty=True):
+        with kaya.column():
+            kaya.label("x")
+    check(
+        "the window construct carries dirty at build",
+        bool(_win_shipped)
+        and kaya.wire.tx_set_window_dirty(0, True) in _win_shipped[0],
+    )
+    # THE LIVE SPELLING SHIPS THE SAME RECORD, byte for byte, which is
+    # what keeps the two spellings from drifting apart: one prop
+    # emitter, reached two ways.
+    with app_win.build():
+        app_win.window(dirty=False)
+    check(
+        "the live window construct ships the same record",
+        _win_shipped[1:2] == [[kaya.wire.tx_set_window_dirty(0, False)]],
+    )
+    # An auxiliary surface is NAMED, not assumed. Without this the live
+    # form could only ever mean window 0, and a mark raised on a panel
+    # would land on the primary instead — the trailing-id spelling C#
+    # and OCaml already carry.
+    with app_win.build():
+        app_win.window(dirty=True, window_id=7)
+    check(
+        "the live window construct names its surface",
+        _win_shipped[2:3] == [[kaya.wire.tx_set_window_dirty(7, True)]],
+    )
+    # And the `with` form inside an open transaction is refused IN ITS
+    # OWN WORDS. "transactions do not nest" is true here and unhelpful:
+    # the answer is not to move the transaction, it is that the live
+    # form takes no `with` at all.
+    with app_win.build():
+        try:
+            with app_win.window(dirty=True):
+                pass
+            check("the live window construct refuses a `with`", False)
+        except RuntimeError as exc:
+            check(
+                "the live window construct refuses a `with`",
+                "PLAIN CALL" in str(exc),
+            )
+finally:
+    kaya.runtime.submit = _real_submit5
+
 sys.exit(1 if failures else 0)
 

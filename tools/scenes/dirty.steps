@@ -1,0 +1,48 @@
+# The dirty-state scene: unsaved work as window chrome
+# (docs/dirty-plan.md). The app declares STATE — one boolean beside
+# title and veto_close — and each backend spells its own platform's
+# affordance: the dot in the close button on macOS, a leading `*` in
+# the rendered caption on Windows, a bullet in the GTK header bar,
+# nothing on the phones, which have none. expect_dirty asks the same
+# question everywhere and each backend answers it from its own surface
+# (D5); one script, five chromes.
+#
+# THE TITLE IS ASSERTED ONLY WHILE CLEAN, and that is deliberate rather
+# than tidiness: the declared string is untouched by this prop on every
+# platform (D1 — a marker composed into the app's own title is the
+# rejected Qt design), but the WinUI arm composes its asterisk into the
+# RENDERED caption, which is exactly what expect_title reads there. An
+# expect_title inside the dirty stretch would therefore be a byte
+# comparison that cannot hold on all five lanes at once. Assert it here,
+# clean, where every backend agrees.
+expect label#0 "notes"
+expect label#1 "saved"
+expect_title "dirty"
+expect_dirty false
+# An edit changes the model AND declares the window dirty — the
+# composition this scene exists to show. Neither implies the other:
+# kaya does not watch your signals for you, and dirty is not a
+# side effect of writing one.
+click button#0
+expect label#0 "notes and a line"
+expect label#1 "unsaved"
+expect_dirty true
+# Saving clears both, so the mark comes DOWN as well as up — half a
+# lowering that only ever sets the flag passes every assertion above.
+click button#1
+expect label#1 "saved"
+expect_dirty false
+# Dirty again, and now the D3 demonstration: the prop arms NOTHING.
+# The close attempt fires the veto class (close_requested), the app
+# opens its own dialog through the machinery that already exists, and
+# cancelling keeps the window — with the mark still up, because
+# answering a dialog is not saving.
+click button#0
+expect label#1 "unsaved"
+expect_dirty true
+close_window window#0
+expect_alert "unsaved changes"
+alert_choose cancel
+expect label#1 "kept editing"
+expect_windows 1
+expect_dirty true

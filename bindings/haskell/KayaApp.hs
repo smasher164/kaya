@@ -823,6 +823,26 @@ data WindowAttr
     -- size class allows; the platform decides which way.
     WListDetail Bool
   | WSectionsPresentation Int64
+  | -- | Whether this surface holds unsaved work (docs/dirty-plan.md
+    -- D1). STATE, not chrome: the backend spells its own platform's
+    -- affordance — the dot in the close button on macOS, a leading
+    -- @*@ in the rendered caption on Windows, a bullet beside the
+    -- GTK header-bar title, nothing at all on the phones, which have
+    -- no chrome to show it in (D4). 'WTitle' is never touched by it,
+    -- here or anywhere: a marker composed into the app's own title
+    -- string is the rejected Qt @[*]@ design, and kaya's titles are
+    -- byte-compared across platforms.
+    --
+    -- DECLARED, NEVER INFERRED. Writing a signal does not raise it —
+    -- "the document has unsaved changes" is a statement only the app
+    -- can make, so the app makes it, beside the write, in the same
+    -- transaction.
+    --
+    -- AND IT ARMS NOTHING (D3). The unsaved-changes confirmation is
+    -- composed from 'WVetoClose' and 'showAlert', which predate this
+    -- prop; the two are orthogonal and either rides the window
+    -- construct without the other.
+    WDirty Bool
   | WOnCloseRequested (IO ())
   | WOnClosed (IO ())
   | -- | Hear an undo kaya routed in this window: the step's label —
@@ -870,6 +890,7 @@ window n = mapM_ apply
     apply (WVetoClose v) = emitB (W.txSetWindowVetoClose n v)
     apply (WListDetail v) = emitB (W.txSetWindowListDetail n v)
     apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
+    apply (WDirty v) = emitB (W.txSetWindowDirty n v)
     apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
     apply (WOnClosed handler) = pendB (PWindowClosed n handler)
     apply (WOnUndone handler) = pendB (PUndone n handler)

@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x69c07d5216db7eb8
+let kayaSpecHash: UInt64 = 0x5b3d760b52e59d91
 
 struct KayaTx {
     var bytes = Data()
@@ -1007,6 +1007,26 @@ struct KayaTx {
         let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_LIST_DETAIL))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(start)
+    }
+
+    /// set_window_prop with a constant dirty value (window 0, the primary surface).
+    mutating func setWindowDirty(_ window: UInt64, _ dirty: Bool) {
+        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_DIRTY))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(dirty))
+        self.end(start)
+    }
+
+    /// set_window_prop with a signal-bound dirty value (window 0, the primary surface).
+    mutating func bindWindowDirty(_ window: UInt64, _ signalId: UInt64) {
+        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_DIRTY))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
         self.end(start)

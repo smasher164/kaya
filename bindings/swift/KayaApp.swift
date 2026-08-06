@@ -2547,7 +2547,7 @@ final class KayaAppTx {
     /// destroyWindow reconciles) and retires with it.
     func createWindow(
         _ id: UInt64, title: String? = nil, width: Double? = nil,
-        height: Double? = nil, vetoClose: Bool? = nil,
+        height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
         listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
@@ -2558,7 +2558,7 @@ final class KayaAppTx {
         tx.createWindow(id)
         window(
             id, title: title, width: width, height: height,
-            vetoClose: vetoClose, listDetail: listDetail,
+            vetoClose: vetoClose, dirty: dirty, listDetail: listDetail,
             sectionsPresentation: sectionsPresentation,
             onCloseRequested: onCloseRequested, onClosed: onClosed,
             onUndone: onUndone, onRedone: onRedone,
@@ -2571,9 +2571,22 @@ final class KayaAppTx {
     /// creation moment — the process owns it):
     /// tx.window(title: "sections", sectionsPresentation:
     /// Int64(KAYA_SECTIONS_PRESENTATION_BAR)).
+    ///
+    /// `dirty:` says this surface holds UNSAVED WORK, and the backend
+    /// shows its platform's own affordance — the dot in the close
+    /// button on macOS, a leading `*` in the rendered caption on
+    /// Windows, a bullet beside the header-bar title on GTK, nothing on
+    /// the phones, which have none (docs/dirty-plan.md D2/D4).
+    ///
+    /// STATE, NOT CHROME, and the `title:` you declared is left alone:
+    /// there is no marker to compose into it and no placeholder to
+    /// leave room for (the rejected Qt design). It ARMS NOTHING either
+    /// — "unsaved changes, close anyway?" is `vetoClose:` plus a
+    /// dialog, which is yours to compose, because apps legitimately
+    /// differ on what it should do.
     func window(
         _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
-        height: Double? = nil, vetoClose: Bool? = nil,
+        height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
         listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
@@ -2585,6 +2598,7 @@ final class KayaAppTx {
         if let width { tx.setWindowWidth(id, width) }
         if let height { tx.setWindowHeight(id, height) }
         if let vetoClose { tx.setWindowVetoClose(id, vetoClose) }
+        if let dirty { tx.setWindowDirty(id, dirty) }
         if let listDetail { tx.setWindowListDetail(id, listDetail) }
         if let sectionsPresentation {
             tx.setWindowSectionsPresentation(id, sectionsPresentation)

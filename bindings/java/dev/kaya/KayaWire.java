@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x69c07d5216db7eb8L;
+    public static final long SPEC_HASH = 0x5b3d760b52e59d91L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -60,6 +60,7 @@ public final class KayaWire {
     public static final int WPROP_VETO_CLOSE = 4;
     public static final int WPROP_SECTIONS_PRESENTATION = 5;
     public static final int WPROP_LIST_DETAIL = 6;
+    public static final int WPROP_DIRTY = 7;
     public static final int EPROP_TITLE = 1;
     public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int SPROP_TITLE = 1;
@@ -992,6 +993,21 @@ public final class KayaWire {
     public static byte[] txBindWindowListDetail(long window, long signalId) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_LIST_DETAIL).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_window_prop with a constant dirty value (window 0, the primary surface). */
+    public static byte[] txSetWindowDirty(long window, boolean dirty) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_DIRTY).putInt(SOURCE_CONST);
+        encodeValue(b, dirty);
+        return finish(b);
+    }
+
+    /** set_window_prop with a signal-bound dirty value (window 0, the primary surface). */
+    public static byte[] txBindWindowDirty(long window, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_DIRTY).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 

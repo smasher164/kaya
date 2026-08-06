@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x69c07d5216db7eb8
+let kayaSpecHash: UInt64 = 0x5b3d760b52e59d91
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -71,6 +71,7 @@ private let wpropHeight: UInt32 = 3
 private let wpropVetoClose: UInt32 = 4
 private let wpropSectionsPresentation: UInt32 = 5
 private let wpropListDetail: UInt32 = 6
+private let wpropDirty: UInt32 = 7
 private let spropTitle: UInt32 = 1
 private let spropIcon: UInt32 = 2
 private let sectionsPresentationAuto: Int64 = 0
@@ -239,6 +240,13 @@ final class KayaWindowModel: Identifiable {
     /// construction: this asks for the presentation, the SIZE CLASS
     /// decides which one materializes.
     var listDetail = false
+    /// Whether this surface holds UNSAVED WORK (wprop 7;
+    /// docs/dirty-plan.md). STATE, not chrome: macOS lowers it to
+    /// NSWindow.isDocumentEdited (the dot in the close button, and
+    /// nothing else — the title string is untouched), iOS lowers it to
+    /// NOTHING, because the platform has no chrome to put it in (D4).
+    /// The declared title is never rewritten on either.
+    var dirty = false
     /// The presentation the view layer ACTUALLY rendered — "split" or
     /// "stacked" — stamped by the arm that ran, never derived from
     /// `listDetail` or `formFactor`. Deriving it would make the
@@ -1977,6 +1985,12 @@ var kayaTearingDown: Set<UInt64> = []
                 // (props apply while a surface is still hidden);
                 // honor the pending request now that it exists.
                 kayaApplyWindowSize(windowId)
+                // Same for the dirty flag, and for the same reason: it
+                // lives on the AppKit object, so a surface that was
+                // marked before it materialized — or one dismissed and
+                // re-opened, which comes back with a FRESH NSWindow —
+                // would silently lose it.
+                kayaApplyWindowDirty(windowId)
             }
         }
     }
@@ -2255,6 +2269,38 @@ private func kayaApplyWindowSize(_ windowId: UInt64) {
     #endif
 }
 
+/// The dirty flag's macOS materialization: NSWindow.isDocumentEdited,
+/// which draws the dot inside the close button — measured as the WHOLE
+/// of the chrome change (88 backing pixels; the title string, the
+/// toolbar, the proxy icon and the Dock tile are all untouched). It
+/// goes through the NSWindow bridge because SwiftUI publishes nothing
+/// for it: zero hits for "Edited" in the SDK 26.5 module interface, and
+/// DocumentGroup only gets the behavior because NSDocument writes this
+/// very property. The system attaches NO behavior to the flag — a real
+/// Cmd+W on an edited window calls windowShouldClose once and closes,
+/// with no save sheet — so the confirm flow stays the app's, spelled
+/// with veto_close and a dialog (docs/dirty-plan.md D3).
+///
+/// iOS applies NOTHING, and that is the stated carve-out (D4): the
+/// platform has no window chrome to carry the mark, and its
+/// unsaved-work affordances are FLOW (the pull-down-dismiss
+/// confirmation), which kaya already spells through veto_close and
+/// navigation. Synthesizing a marker no native app shows would express
+/// what the platform does not.
+private func kayaApplyWindowDirty(_ windowId: UInt64) {
+    #if os(macOS)
+        // The same re-application hazard the size request has: a prop
+        // may be set while the surface is still hidden, and the flag
+        // lives on the AppKit object — an NSWindow that does not exist
+        // yet cannot hold it, and a dismissed-and-reopened surface comes
+        // back clean. register() calls this for exactly that reason.
+        let window = kayaNSWindows[windowId]
+            ?? (windowId == 0 ? NSApp.windows.first : nil)
+        guard let window else { return }
+        window.isDocumentEdited = kayaScene.windows[windowId]?.dirty ?? false
+    #endif
+}
+
 private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
     // Coalesced menu re-assert: any record that touches the command
     // catalog re-syncs the native chrome ONCE at the batch boundary
@@ -2327,6 +2373,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     model?.vetoClose = raw[body + 24] != 0
                 case (wpropListDetail, valueBool):
                     model?.listDetail = raw[body + 24] != 0
+                case (wpropDirty, valueBool):
+                    model?.dirty = raw[body + 24] != 0
+                    kayaApplyWindowDirty(wid)
                 case (wpropSectionsPresentation, valueI64):
                     // ADVISORY (the width/height precedent): honored
                     // where this platform has the idiom.
@@ -3141,6 +3190,72 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         }
     }
 
+    /// Whether the window's CHROME is really showing the unsaved-work
+    /// mark: `AXEdited` on the window's CLOSE BUTTON, which is a
+    /// measured fact and not a guess — the AXWindow's own 29 attributes
+    /// contain no edited state at all (`AXEdited` there is
+    /// kAXErrorAttributeUnsupported), while the button element's 14
+    /// include it and it tracks NSWindow.isDocumentEdited exactly.
+    ///
+    /// nil = the answer could not be read (no window, no close button,
+    /// no attribute), which the verb reports as a failure and retries.
+    /// It must NOT collapse to `false`: a scene's first assertion is
+    /// that the window is CLEAN, and a broken read that answered false
+    /// would pass it — the vacuous-pass shape this project keeps
+    /// paying for.
+    ///
+    /// FOUR MEASURED PROPERTIES make this usable in the lane: it needs
+    /// no assistive-client announcement (this is AppKit chrome, not the
+    /// lazily built SwiftUI subtree, so the read costs no accessibility
+    /// rebuild and no layout pass — which the a11y milestone measured
+    /// at a whole leg's wall time); it works under `.accessory` on a
+    /// window that is neither key nor active, which is exactly what the
+    /// mac lane runs as; it is synchronous, with no settle between the
+    /// property write and a correct read; and it is READ-ONLY from the
+    /// client side, so a test cannot fake the state through AX — the
+    /// assertion can only pass because the backend really set it.
+    ///
+    /// THE THREAD DISCIPLINE IS NOT OPTIONAL and not stylistic. A
+    /// same-process AX read does not go out through the messaging
+    /// layer: AXUIElementCopyAttributeValue short-circuits into AppKit
+    /// and runs main-thread-only code INLINE on the calling thread, so
+    /// servicing it on the harness thread while the main thread is in
+    /// layout inverts AppKit's own locks and hangs the leg forever —
+    /// no messaging timeout can bound a call that never sends a
+    /// message. That cost a day in the a11y milestone (docs/traps.md).
+    /// Hence: park on the window's materialization FIRST (event-driven,
+    /// never a clock), then read inside DispatchQueue.main.sync, which
+    /// is kayaAxRead's shape exactly.
+    private func kayaWindowEdited(_ windowId: UInt64) -> Bool? {
+        guard kayaAwaitWindow(windowId) != nil else { return nil }
+        return DispatchQueue.main.sync { () -> Bool? in
+            guard let window = kayaTitleWindow(windowId) else { return nil }
+            let app = AXUIElementCreateApplication(getpid())
+            // Bounded like every AX call here: reading your own process
+            // is still serviced by the main runloop.
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            let windows = kayaAxCopy(app, kAXWindowsAttribute) as? [AXUIElement] ?? []
+            // AX publishes no window id, and SwiftUI's AXIdentifier is
+            // derived from the root view TYPE (every aux surface shares
+            // one), so the title is the key — the same rung
+            // expect_title already stands on. A lone window needs no
+            // matching at all.
+            let element =
+                windows.first {
+                    (kayaAxCopy($0, kAXTitleAttribute) as? String) == window.title
+                } ?? (windows.count == 1 ? windows[0] : nil)
+            guard let element else { return nil }
+            guard let close = kayaAxCopy(element, kAXCloseButtonAttribute),
+                CFGetTypeID(close) == AXUIElementGetTypeID()
+            else { return nil }
+            // swiftlint:disable:next force_cast
+            let button = close as! AXUIElement
+            guard let edited = kayaAxCopy(button, "AXEdited" as String) as? NSNumber
+            else { return nil }
+            return edited.boolValue
+        }
+    }
+
     /// What [kayaAxRole] weighed, for a MISMATCH: `unknown/…` means the
     /// platform published a role the closed set has no name for, and
     /// the next question is always which one.
@@ -3392,6 +3507,34 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
             }
         }
         return ""
+    }
+
+    /// The unsaved-work mark as THIS platform can honestly report it:
+    /// the APPLIED PROP, read back off the model the apply arm wrote
+    /// (docs/dirty-plan.md D5's iOS row). The macOS sibling three
+    /// hundred lines up reads AXEdited off the close button because
+    /// macOS HAS a mark; iOS lowers `dirty` to nothing (D4), so there
+    /// is no surface to interrogate and a read that invented one would
+    /// be asserting what no native app on this platform shows.
+    ///
+    /// IT IS NOT THE SCRIPT AGREEING WITH ITSELF, which is the thing to
+    /// be careful about when a read drops to state. Exactly one line
+    /// writes this field — the apply arm's `case (wpropDirty,
+    /// valueBool)` — and that line is the far end of the whole chain
+    /// this milestone added: guest sugar, wire record, batch decode.
+    /// WATCHED: delete it and the leg reports `dirty false, wanted
+    /// true` while every label assertion still passes. What the read
+    /// cannot catch is a missing LOWERING, and on this platform that is
+    /// precisely the claim — there is none to miss.
+    ///
+    /// nil means UNREADABLE, never `false`: a surface id this scene
+    /// does not have is not a clean window, and the caller says so
+    /// rather than letting a clean-window assertion pass because the
+    /// read broke (the macOS arm's rule, for the macOS arm's reason).
+    private func kayaWindowDirtyState(_ windowId: UInt64) -> Bool? {
+        DispatchQueue.main.sync { () -> Bool? in
+            kayaScene.windows[windowId]?.dirty
+        }
     }
 #endif
 
@@ -4025,6 +4168,64 @@ private func kayaRunScript(_ script: String) {
                         "\(prefix)window \(Int(got.width))x\(Int(got.height)), wanted "
                             + "\(Int(wantW))x\(Int(wantH))")
                 }
+            case "expect_dirty":
+                // The platform's REAL unsaved-work affordance
+                // (docs/dirty-plan.md D5). On macOS that is the dot in
+                // the close button and NOTHING ELSE — the title string
+                // does not change, so a title read is not an
+                // observability channel here — and the accessibility
+                // tree publishes it as AXEdited ON THE CLOSE BUTTON.
+                // The model is NOT the source: reading it would make
+                // the verb agree with itself, and the failure under
+                // test is a lowering that never reached the NSWindow.
+                //
+                // iOS's read is the applied prop instead, and that is a
+                // stated carve-out rather than a shortcut (D4): the
+                // platform has no chrome to publish, so state is the
+                // honest observable there. See kayaWindowDirtyState for
+                // why that is still an observation and not the script
+                // agreeing with itself. The phone lane runs this
+                // scene's PHONE-EXPRESSIBLE PREFIX — everything above
+                // its chrome close, which is every dirty assertion but
+                // the one that follows a cancelled close — and
+                // tools/ios/run-sim.sh's `cut` argument states that
+                // with its reasons.
+                #if os(macOS)
+                    let (wid, explicit, rest) = kayaWindowTarget(Array(parts[1...]))
+                    let prefix = explicit ? "window#\(wid) " : ""
+                    let want = rest[0] == "true"
+                    let got = kayaWindowEdited(wid)
+                    if got == want {
+                        observed.append("\(prefix)dirty \(want)")
+                    } else if let got {
+                        failures.append("\(prefix)dirty \(got), wanted \(want)")
+                    } else {
+                        // UNREADABLE is not FALSE. Saying so keeps the
+                        // clean-window assertion from passing because
+                        // the read broke.
+                        failures.append("\(prefix)dirty unreadable, wanted \(want)")
+                    }
+                #else
+                    // The same three-way answer as the macOS arm, off
+                    // this platform's own observable. Spelled out
+                    // rather than sharing a preamble with it, because
+                    // the two halves must each stand alone: a `let`
+                    // bound in one arm and read below the `#endif`
+                    // compiles on one platform and not the other, and
+                    // this file's iOS half has been broken exactly that
+                    // way before (scratchpad/dirty-depth.md §2d).
+                    let (wid, explicit, rest) = kayaWindowTarget(Array(parts[1...]))
+                    let prefix = explicit ? "window#\(wid) " : ""
+                    let want = rest[0] == "true"
+                    let got = kayaWindowDirtyState(wid)
+                    if got == want {
+                        observed.append("\(prefix)dirty \(want)")
+                    } else if let got {
+                        failures.append("\(prefix)dirty \(got), wanted \(want)")
+                    } else {
+                        failures.append("\(prefix)dirty unreadable, wanted \(want)")
+                    }
+                #endif
             case "close_window":
                 // The REAL chrome path: performClose runs the delegate
                 // (windowShouldClose), so the veto grammar fires

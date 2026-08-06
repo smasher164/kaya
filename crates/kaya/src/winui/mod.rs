@@ -228,6 +228,17 @@ struct CoreState {
     split_views: HashMap<u64, TwoPaneView>,
     window_roots: HashMap<u64, UIElement>,
     window_titles: HashMap<u64, String>,
+    /// Unsaved work per window (wprop 7). Windows publishes no
+    /// modified affordance at any layer — the whole App SDK metadata
+    /// has no IsModified/IsDirty/HasUnsavedChanges, and UIA's
+    /// WindowPattern has none either (scratchpad/dirty-probe-windows.md)
+    /// — so the caption IS the chrome here, and this flag is the third
+    /// input to the caption composition beside the window's own title
+    /// and a covering entry's. Kept as STATE rather than read back out
+    /// of the caption string, because the caption is the rendering and
+    /// the rendering is not the declaration: the app's title is never
+    /// touched (docs/dirty-plan.md D1/D2).
+    window_dirty: HashMap<u64, bool>,
     /// Sections (DESIGN.md, Sections): per-window ordered sets, pane
     /// containers by section id, the NavigationView that materializes
     /// the switcher (the platform's own idiom — viable now that the
@@ -1220,6 +1231,76 @@ fn user_back(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     Ok(())
 }
 
+/// The dirty marker: a LEADING ASTERISK, NO SPACE, prefixed to the
+/// caption. Measured on Notepad 11.2606.15.0, which captions a modified
+/// document `*<doc> - Notepad` and a clean one `<doc> - Notepad`
+/// (scratchpad/dirty-probe-windows.md §4). Not trailing, not a bullet:
+/// four other candidates round-tripped and rendered legibly, and this
+/// is the one Windows apps actually use.
+///
+/// Notepad's *visible* mark is a dot in its own tab strip, because it
+/// draws its own title bar; the asterisk still lives in the HWND
+/// caption for the taskbar, Alt+Tab and automation. kaya draws a plain
+/// system caption, so for kaya the caption string is both.
+const DIRTY_MARK: &str = "*";
+
+/// The caption a window SHOULD be showing, composed: the covering nav
+/// entry's title if the stack has one, else the window's own, with the
+/// dirty marker in front when the app has declared unsaved work.
+///
+/// THE DECLARED TITLE IS NEVER TOUCHED (docs/dirty-plan.md D1). The
+/// marker is composed HERE, on the way to the OS, so `core.window_titles`
+/// keeps exactly the bytes the app wrote and a title update while dirty
+/// re-composes rather than dropping the mark. Qt's `[*]` placeholder —
+/// a marker spelled inside the app's own title string — is the named
+/// rejection; kaya's scene titles are byte-compared across five
+/// platforms, so the declared string has to stay identical everywhere
+/// while the chrome diverges.
+///
+/// THE MARKER RIDES THE CAPTION, not the window's own title string, so
+/// a covering nav entry keeps it. That is the question the probe left
+/// open (§1) and this is the answer with a reason: `dirty` is a
+/// property of the WINDOW, and macOS — the one platform with a real
+/// API — draws its dot on the window's close button regardless of what
+/// the title bar currently reads. A marker that vanished on a nav push
+/// would be a different observable semantics on this backend alone.
+fn window_caption(core: &CoreState, window: u64) -> String {
+    let title = core
+        .nav_stacks
+        .get(&window)
+        .and_then(|s| s.last())
+        .and_then(|id| core.nav_entries.get(id))
+        .map(|e| e.title.clone())
+        .unwrap_or_else(|| core.window_titles.get(&window).cloned().unwrap_or_default());
+    if core.window_dirty.get(&window).copied().unwrap_or(false) {
+        format!("{DIRTY_MARK}{title}")
+    } else {
+        title
+    }
+}
+
+/// THE ONE CAPTION WRITER. Every `Window::SetTitle` in this backend
+/// past the pre-app placeholder in `setup()` goes through here, and it
+/// is the structural half of the dirty lowering: the composition has
+/// one place to happen instead of four places to be forgotten.
+///
+/// It used to be four. `SetWindowProp`/Title tested `covered` and
+/// wrote the window's own; `refresh_nav`'s split arm and both serial
+/// arms each recomputed the same thing and wrote it again. The probe
+/// costed a title-composed marker at exactly that: five sites, each of
+/// which has to apply it or the mark blinks out on a nav push, a pop,
+/// or a split-mode change (scratchpad/dirty-probe-windows.md §1). The
+/// answer is not four disciplined call sites, it is one.
+///
+/// Idempotent by construction — it derives the whole caption from
+/// state, so calling it after ANY of the three inputs moves (the
+/// window's title, the nav stack, the dirty flag) is always correct
+/// and never needs to know which one moved.
+fn refresh_caption(core: &CoreState, window: u64) -> windows_core::Result<()> {
+    let target = winui_window(core, window)?;
+    target.SetTitle(&HSTRING::from(window_caption(core, window)))
+}
+
 /// Reconcile the window's visible state with its stack: the top
 /// entry's wrapper and title (the entry title IS the window title
 /// while covered), or the window's own root and title when the stack
@@ -1230,7 +1311,6 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     if core.section_panes.contains_key(&window) {
         return refresh_section_pane(core, window);
     }
-    let target = winui_window(core, window)?;
     let top = core.nav_stacks.get(&window).and_then(|s| s.last()).copied();
 
     // ADAPTIVE LIST-DETAIL (DESIGN.md). Both halves: the app asked
@@ -1320,14 +1400,9 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
             // has always used window_titles for exactly this case, and
             // the split arm simply did not. Caught on macOS, where the
             // title bar is read for real and AppKit substitutes the
-            // PROCESS NAME for an empty one (2026-07-27).
-            let title = top
-                .and_then(|id| core.nav_entries.get(&id))
-                .map(|e| e.title.clone())
-                .unwrap_or_else(|| {
-                    core.window_titles.get(&window).cloned().unwrap_or_default()
-                });
-            target.SetTitle(&HSTRING::from(&*title))?;
+            // PROCESS NAME for an empty one (2026-07-27). Both arms now
+            // ask window_caption, which is that fallback written once.
+            refresh_caption(core, window)?;
             // The back bar follows the CONTROL's mode, now and every
             // time Windows changes it. Mode is decided during layout, so
             // reading it here alone would read the value from before
@@ -1361,18 +1436,18 @@ fn refresh_nav(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
                 let wrapper: UIElement = windows_core::Interface::cast(wrapper)?;
                 set_window_content(core, window, &wrapper)?;
             }
-            target.SetTitle(&HSTRING::from(&*entry.title))?;
         }
         None => {
             if let Some(root) = core.window_roots.get(&window) {
                 let root = root.clone();
                 set_window_content(core, window, &root)?;
             }
-            let own = core.window_titles.get(&window).cloned().unwrap_or_default();
-            target.SetTitle(&HSTRING::from(&*own))?;
         }
     }
-    Ok(())
+    // Both arms end the same way — the covering entry's title or the
+    // window's own, marker composed in — so the caption is written
+    // once, after the content, rather than once per arm.
+    refresh_caption(core, window)
 }
 
 /// Fill a navigation entry at mount: the wrapper Grid is the
@@ -4485,17 +4560,37 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let target = winui_window(core, window.0)?;
             match (prop, &value) {
                 (WindowProp::Title, Value::Str(title)) => {
-                    // The window's OWN title; while a navigation entry
-                    // covers it the entry's title shows, and this one
-                    // comes back at pop.
+                    // The window's OWN title, stored EXACTLY as the app
+                    // wrote it; while a navigation entry covers it the
+                    // entry's title shows, and this one comes back at
+                    // pop. The dirty marker is not stored with it — the
+                    // composition happens on the way to the OS
+                    // (window_caption), so the declared string stays the
+                    // app's own bytes (docs/dirty-plan.md D1).
                     core.window_titles.insert(window.0, title.clone());
-                    let covered = core
-                        .nav_stacks
-                        .get(&window.0)
-                        .is_some_and(|s| !s.is_empty());
-                    if !covered {
-                        target.SetTitle(&HSTRING::from(&**title))?;
-                    }
+                    // No `covered` test any more: the caption writer
+                    // derives which title shows from the stack itself,
+                    // so a covered window re-writes the entry's title
+                    // (the same bytes already there) instead of skipping.
+                    refresh_caption(core, window.0)?;
+                }
+                (WindowProp::Dirty, Value::Bool(on)) => {
+                    // WINDOWS PUBLISHES NO MODIFIED AFFORDANCE — not in
+                    // WinUI, not in the Windows App SDK metadata (all 28
+                    // .winmd scanned: the only hits are InteractionTracker
+                    // inertia modifiers), not in UIA's WindowPattern. The
+                    // caption is the entire surface, and the taskbar shows
+                    // nothing either on Windows 11's icons-only default.
+                    // So the lowering is the caption, and it is composed
+                    // rather than stored (D2).
+                    //
+                    // ShutdownBlockReasonCreate is the one Win32 API that
+                    // NAMES unsaved work, and it is deliberately not used:
+                    // it draws no chrome at all, it only changes what the
+                    // shell says at shutdown. That is a different feature
+                    // wearing this one's word.
+                    core.window_dirty.insert(window.0, *on);
+                    refresh_caption(core, window.0)?;
                 }
                 (WindowProp::Width, Value::F64(v)) => {
                     resize_request(&target, Some(*v), None)?
@@ -4558,6 +4653,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.sections_presentation.remove(&window.0);
             core.window_roots.remove(&window.0);
             core.window_titles.remove(&window.0);
+            core.window_dirty.remove(&window.0);
             // ... and its menu shell/catalog registration (the item
             // MODELS stay — items are never destroyed).
             core.menu_windows.remove(&window.0);
@@ -5965,6 +6061,12 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
         Some(n) => format!("kaya milestone 2 [{n}]"),
         None => "kaya milestone 2".to_owned(),
     };
+    // THE ONE CAPTION WRITE THAT DOES NOT GO THROUGH refresh_caption,
+    // and it cannot: CORE does not exist yet — this is the placeholder
+    // the window wears between materializing and the app's first
+    // transaction. Nothing is declared at this point, so there is no
+    // dirty flag to compose and no title to preserve; the app's own
+    // title replaces this through the writer a moment later.
     window.SetTitle(&HSTRING::from(&*title))?;
     if let Some(n) = slot {
         let native: IWindowNative = windows_core::Interface::cast(&window)?;
@@ -6071,6 +6173,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             split_views: HashMap::new(),
             window_roots: HashMap::new(),
             window_titles: HashMap::new(),
+            window_dirty: HashMap::new(),
             window_veto: HashMap::new(),
             tearing_down: std::collections::HashSet::new(),
             live_alert: None,
@@ -7448,6 +7551,36 @@ impl crate::harness::Stage for WinUiStage {
             let area = root.XamlRoot()?.Size()?;
             Ok((f64::from(area.Width), f64::from(area.Height)))
         }).unwrap_or((f64::NAN, f64::NAN))
+    }
+
+    fn window_dirty(&self, window: u64) -> bool {
+        // THE REAL OS CAPTION, not core.window_dirty (D5). The failure
+        // under test is a lowering that never reached the window, and a
+        // read of the flag this backend just stored would agree with
+        // itself and prove nothing.
+        //
+        // Window::Title() is the honest channel here, MEASURED rather
+        // than assumed: the probe held a window open, rewrote its HWND
+        // caption with SetWindowTextW from a SECOND PROCESS, and the
+        // in-guest harness read the rewritten string back — so this
+        // getter follows the OS caption and is not a XAML-side cache of
+        // what kaya last set (scratchpad/dirty-probe-windows.md §5).
+        //
+        // UNREADABLE IS NOT CLEAN. window_title answers an error with
+        // "<unreadable: ...>", which does not start with the marker and
+        // would therefore pass every `expect_dirty false` in the scene
+        // — a clean-window assertion satisfied because the read broke.
+        // This returns bool and has no third answer, so it refuses out
+        // loud instead, the way the macOS arm refuses on an unreadable
+        // AXEdited.
+        let caption = <Self as crate::harness::Stage>::window_title(self, window);
+        assert!(
+            !caption.starts_with("<unreadable"),
+            "kaya: the dirty read could not see window {window}'s caption \
+             ({caption}) — on Windows the caption IS the affordance, and \
+             an unreadable one is a broken read, not a clean window"
+        );
+        caption.starts_with(DIRTY_MARK)
     }
 
     fn close_window(&self, window: u64) {

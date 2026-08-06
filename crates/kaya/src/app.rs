@@ -3360,6 +3360,23 @@ impl WindowRef<'_, '_> {
         self
     }
 
+    /// Say this surface holds UNSAVED WORK: the backend shows its
+    /// platform's own affordance — the dot in the close button on
+    /// macOS, a leading `*` in the rendered caption on Windows, a
+    /// bullet beside the header-bar title on GTK, nothing on the
+    /// phones, which have none (docs/dirty-plan.md D2/D4).
+    ///
+    /// STATE, NOT CHROME, and the title you declared is left alone:
+    /// there is no marker to compose into it and no placeholder to
+    /// leave room for (the rejected Qt design). It ARMS NOTHING either
+    /// — "unsaved changes, close anyway?" is `veto_close` plus a
+    /// dialog, which is yours to compose, because apps legitimately
+    /// differ on what it should do.
+    pub fn dirty(self, on: bool) -> Self {
+        self.tx.set_window_prop(self.window, WindowProp::Dirty, on);
+        self
+    }
+
     /// How this window presents its sections — ADVISORY, the
     /// width/height precedent: honored where the platform has the
     /// idiom, nearest thing otherwise, ignored on the phones.

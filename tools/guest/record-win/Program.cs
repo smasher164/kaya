@@ -48,6 +48,9 @@ internal static class Program
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern int GetWindowText(IntPtr h, System.Text.StringBuilder sb, int max);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr h, System.Text.StringBuilder sb, int max);
+
     [DllImport("d3d11.dll", EntryPoint = "CreateDirect3D11DeviceFromDXGIDevice",
         SetLastError = true, ExactSpelling = true, CallingConvention = CallingConvention.StdCall)]
     private static extern uint CreateDirect3D11DeviceFromDXGIDevice(
@@ -80,6 +83,22 @@ internal static class Program
         IntPtr GetInterface([In] ref Guid iid);
     }
 
+    // A GUEST WINDOW IS A WinUI WINDOW, not a window whose title happens
+    // to start with "kaya". The title test alone was written when every
+    // scene ran under the milestone-2 app's "kaya milestone 2" title;
+    // scenes have set their own since (`tx.window(...).title("undo")`),
+    // so the recorder filmed NOTHING for them — the run reported "the
+    // capturer produced no frames" and the leg still passed, which is
+    // the shape of a recording gap that reads as an empty lane.
+    //
+    // Microsoft.UI.Xaml.Window's HWND carries the class
+    // WinUIDesktopWin32WindowClass, and this VM runs no other WinUI app,
+    // so the class is the whole identification — for every language,
+    // every scene, whatever the guest titles its window. The title test
+    // stays as well: it costs nothing and keeps any window a future
+    // helper names "kaya*" in the film.
+    private const string WinUiClass = "WinUIDesktopWin32WindowClass";
+
     private static List<IntPtr> FindKayaWindows()
     {
         var found = new List<IntPtr>();
@@ -88,7 +107,10 @@ internal static class Program
             if (!IsWindowVisible(h)) return true;
             var sb = new System.Text.StringBuilder(256);
             GetWindowText(h, sb, 256);
-            if (sb.ToString().StartsWith("kaya", StringComparison.OrdinalIgnoreCase))
+            var cls = new System.Text.StringBuilder(256);
+            GetClassName(h, cls, 256);
+            if (sb.ToString().StartsWith("kaya", StringComparison.OrdinalIgnoreCase)
+                || cls.ToString() == WinUiClass)
                 found.Add(h);
             return true;
         }, IntPtr.Zero);
@@ -153,36 +175,59 @@ internal static class Program
         // One worker per live kaya window: parallel legs each get
         // their own capture loop; the worker retires when its window
         // closes.
-        var workers = new Dictionary<IntPtr, Thread>();
+        //
+        // KAYA_RECORD_LANES > 1 puts SEVERAL workers on the same window,
+        // staggered across the sample period. A cycle is mostly WAITING
+        // — the session's first frame comes back from the compositor in
+        // tens of milliseconds — so overlapping cycles is what raises
+        // the true frame rate; shortening the sleep alone cannot go
+        // below the cycle's own cost. It exists because a WinUI leg is
+        // FASTER THAN THE RECORDER: undo_rust's 90 steps run in 313ms,
+        // and at one lane the whole scripted part of the leg lands in
+        // two frames. Default 1 — a matrix run's four concurrent legs
+        // want the cheap loop, and nothing but a showcase asks for more.
+        var lanes = 1;
+        if (int.TryParse(Environment.GetEnvironmentVariable("KAYA_RECORD_LANES"),
+                out var l) && l >= 1 && l <= 8)
+            lanes = l;
+        var workers = new Dictionary<IntPtr, List<Thread>>();
         while (!File.Exists(stopFile))
         {
             foreach (var hwnd in FindKayaWindows())
             {
-                if (workers.TryGetValue(hwnd, out var t) && t.IsAlive) continue;
-                var thread = new Thread(() =>
+                if (workers.TryGetValue(hwnd, out var ts) && ts.Exists(t => t.IsAlive))
+                    continue;
+                var started = new List<Thread>();
+                for (var i = 0; i < lanes; i++)
                 {
-                    try
+                    var lane = i;
+                    var thread = new Thread(() =>
                     {
-                        CaptureWindow(d3d, device, hwnd, outdir, stopFile);
-                    }
-                    catch (Exception e)
-                    {
-                        Console.Error.WriteLine($"record-win: capture cycle: {e.Message}");
-                    }
-                });
-                thread.IsBackground = true;
-                thread.Start();
-                workers[hwnd] = thread;
+                        try
+                        {
+                            CaptureWindow(d3d, device, hwnd, outdir, stopFile, lane, lanes);
+                        }
+                        catch (Exception e)
+                        {
+                            Console.Error.WriteLine($"record-win: capture cycle: {e.Message}");
+                        }
+                    });
+                    thread.IsBackground = true;
+                    thread.Start();
+                    started.Add(thread);
+                }
+                workers[hwnd] = started;
             }
             Thread.Sleep(100);
         }
-        foreach (var t in workers.Values)
-            t.Join(2000);
+        foreach (var ts in workers.Values)
+            foreach (var t in ts)
+                t.Join(2000);
         return 0;
     }
 
     private static void CaptureWindow(ID3D11Device d3d, IDirect3DDevice device,
-        IntPtr hwnd, string outdir, string stopFile)
+        IntPtr hwnd, string outdir, string stopFile, int lane = 0, int lanes = 1)
     {
         // Screenshot-by-session: on this VM's WARP compositor a
         // capture session delivers exactly ONE frame (the compositor
@@ -192,11 +237,28 @@ internal static class Program
         // composited content, so the recorder polls sessions at ~3fps
         // of true pixels.
         var slot = WindowSlot(hwnd);
-        Console.WriteLine($"CAPTURING {hwnd:x} slot={slot}");
+        var title = new System.Text.StringBuilder(256);
+        GetWindowText(hwnd, title, 256);
+        var cls = new System.Text.StringBuilder(256);
+        GetClassName(hwnd, cls, 256);
+        if (lane == 0)
+            Console.WriteLine($"CAPTURING {hwnd:x} slot={slot} title=\"{title}\" class={cls} lanes={lanes}");
+        // The sample period: 150ms (~3fps of true pixels) is what a
+        // matrix run wants — enough for the extractor's covering frame,
+        // cheap on a VM running four legs at once. A SHOWCASE film of a
+        // single serial leg wants more, and a WinUI leg is over in
+        // seconds: KAYA_RECORD_PERIOD_MS asks for a denser film without
+        // changing what any other run does.
+        var period = 150;
+        if (int.TryParse(Environment.GetEnvironmentVariable("KAYA_RECORD_PERIOD_MS"),
+                out var p) && p >= 10 && p <= 5000)
+            period = p;
         var t0 = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         long saved = 0;
+        var staggered = lane == 0;
         while (IsWindow(hwnd) && !File.Exists(stopFile))
         {
+            var c0 = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             try
             {
                 if (CaptureOneFrame(d3d, device, hwnd, outdir, slot))
@@ -206,9 +268,21 @@ internal static class Program
             {
                 Console.Error.WriteLine($"record-win: shot: {e.Message} (0x{e.HResult:x})");
             }
-            Thread.Sleep(150);
+            // SPREAD THE LANES OVER A MEASURED CYCLE, not over the sleep.
+            // A cycle is the sleep PLUS the session round trip (~90ms
+            // here), so staggering by the sleep alone leaves four lanes
+            // firing within a few ms of each other: 40 frames arrived as
+            // 10 instants, four copies each. The first cycle measures
+            // itself and the lane then shifts by its share of it.
+            if (!staggered)
+            {
+                var cycle = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - c0 + period;
+                Thread.Sleep((int)(cycle * lane / lanes));
+                staggered = true;
+            }
+            Thread.Sleep(period);
         }
-        Console.WriteLine($"WINDOW_GONE {hwnd:x} frames_saved={saved} lifetime_ms={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - t0}");
+        Console.WriteLine($"WINDOW_GONE {hwnd:x} lane={lane} frames_saved={saved} lifetime_ms={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - t0}");
     }
 
     private static bool CaptureOneFrame(ID3D11Device d3d, IDirect3DDevice device,
@@ -251,15 +325,43 @@ internal static class Program
         if (!got.Wait(1500))
             return false;
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var path = ReserveName(outdir, slot, now);
         try
         {
-            SaveFrame(d3d, frame, Path.Combine(outdir, $"{slot}-{now}.png"));
+            SaveFrame(d3d, frame, path);
+        }
+        catch
+        {
+            // A reserved name that never got written would reach the
+            // film assembly as a zero-byte png.
+            try { File.Delete(path); } catch { }
+            throw;
         }
         finally
         {
             frame.Dispose();
         }
         return true;
+    }
+
+    private static readonly object NameLock = new();
+
+    // <slot>-<epoch_ms>.png is the contract the host-side extraction
+    // parses, so a second lane landing in the same millisecond takes the
+    // next one rather than a suffix. Reserved (not just checked) because
+    // the encoder's write comes later, and two lanes would otherwise
+    // both pass the existence test and one would be encoding into the
+    // other's file.
+    private static string ReserveName(string outdir, string slot, long now)
+    {
+        lock (NameLock)
+        {
+            var path = Path.Combine(outdir, $"{slot}-{now}.png");
+            while (File.Exists(path))
+                path = Path.Combine(outdir, $"{slot}-{++now}.png");
+            File.Create(path).Dispose();
+            return path;
+        }
     }
 
     // ID3D11Device is thread-safe; its ImmediateContext is NOT — the
@@ -294,33 +396,41 @@ internal static class Program
             CPUAccessFlags = CpuAccessFlags.Read,
             MiscFlags = ResourceOptionFlags.None,
         });
+        // ONLY THE CONTEXT WORK IS SERIALIZED. The PNG encode used to sit
+        // inside this lock too, and with several capture lanes that
+        // produced a convoy: every lane queued on the encode, left the
+        // lock in single file, and came back to the compositor in step,
+        // so four lanes sampled ONE instant four times over (measured:
+        // 40 frames arriving as 10 instants). Copy and map under the
+        // lock, encode outside it.
+        var stride = width * 4;
+        var pixels = new byte[stride * height];
         lock (CtxLock)
         {
-        var ctx = d3d.ImmediateContext;
-        ctx.CopyResource(staging, tex);
-        var mapped = ctx.Map(staging, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
-        try
-        {
-            using var bmp = new System.Drawing.Bitmap(width, height,
-                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            var data = bmp.LockBits(
-                new System.Drawing.Rectangle(0, 0, width, height),
-                System.Drawing.Imaging.ImageLockMode.WriteOnly,
-                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            // Row by row: RowPitch generally exceeds width*4.
-            for (var y = 0; y < height; y++)
+            var ctx = d3d.ImmediateContext;
+            ctx.CopyResource(staging, tex);
+            var mapped = ctx.Map(staging, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
+            try
             {
-                var row = new byte[width * 4];
-                Marshal.Copy(mapped.DataPointer + y * (int)mapped.RowPitch, row, 0, row.Length);
-                Marshal.Copy(row, 0, data.Scan0 + y * data.Stride, row.Length);
+                // Row by row: RowPitch generally exceeds width*4.
+                for (var y = 0; y < height; y++)
+                    Marshal.Copy(mapped.DataPointer + y * (int)mapped.RowPitch,
+                        pixels, y * stride, stride);
             }
-            bmp.UnlockBits(data);
-            bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            finally
+            {
+                ctx.Unmap(staging, 0);
+            }
         }
-        finally
-        {
-            ctx.Unmap(staging, 0);
-        }
-        }
+        using var bmp = new System.Drawing.Bitmap(width, height,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        var data = bmp.LockBits(
+            new System.Drawing.Rectangle(0, 0, width, height),
+            System.Drawing.Imaging.ImageLockMode.WriteOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        for (var y = 0; y < height; y++)
+            Marshal.Copy(pixels, y * stride, data.Scan0 + y * data.Stride, stride);
+        bmp.UnlockBits(data);
+        bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
     }
 }

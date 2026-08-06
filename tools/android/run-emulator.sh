@@ -563,6 +563,87 @@ run_apk_on() {
 # into `;` — the grammar's newline stand-in.
 scene_script() { grep -v '^#' "$ROOT/tools/scenes/$1.steps" | tr '\n' ';'; }
 
+# THE PHONE-EXPRESSIBLE PREFIX of a shared scene: everything above the
+# CUT VERB, for the one shape a phone cannot run end to end — a scene
+# that is mostly runnable here and desktop-only in its TAIL.
+#
+# This runner already declines WHOLE scenes for that reason and says so
+# at the top of the file (`split` drives resize_window, `panels` drives
+# create_window, and this host does neither). `dirty` is the first scene
+# that only goes out of reach at the end: its last six steps hang off a
+# chrome close, which the interpreter refuses in as many words. The
+# alternatives were an all-or-nothing carve-out — leaving D4's Compose
+# arm applied but asserted by nobody — or a phone-safe sibling scene,
+# which every runner would then owe legs for (check-steps' wired()),
+# i.e. a cross-lane obligation minted mid-fan-out.
+#
+# THE SHARED FILE STAYS BYTE-FROZEN: the prefix is its own bytes, and
+# the steps this lane did NOT run are printed, so a green leg still says
+# what it declined. The lane composes in the other direction already —
+# the tablet leg is `scene_script listdetail` plus two claims only a
+# regular width can make.
+#
+# THE TWO WAYS A CUT GOES QUIET, BOTH REFUSED HERE: the cut verb leaving
+# the scene (the cut is then stale and the leg runs everything or
+# nothing), and the cut swallowing the very assertion the leg exists for
+# (a gate satisfiable without exercising the real thing). The second is
+# not hypothetical — cut `dirty` one step earlier, at `click button#0`,
+# and the prefix asserts `dirty false` and never `dirty true`. So the
+# KEEP VERB is mandatory and the comparison is against the WHOLE file:
+# every distinct assertion that verb makes anywhere must survive, or a
+# step added below the cut later would go silently unrun.
+#
+# THIS IS THE iOS LANE'S SHAPE, deliberately (tools/ios/run-sim.sh, the
+# cut/keep arguments on its leg function): the two mobile lanes meet the
+# same tail on the same scene, and two answers to one question is how
+# lanes drift.
+scene_script_cut() { # scene cut-verb keep-verb
+    python3 - "$ROOT/tools/scenes/$1.steps" "$2" "$3" <<'PY'
+import pathlib
+import sys
+
+path, cut, keep = sys.argv[1], sys.argv[2], sys.argv[3]
+# A CUT WITHOUT A `keep` IS AN UNGUARDED CUT, and an optional guard is
+# the kind that is quietly not passed. Naming what the cut may not take
+# is the price of cutting at all.
+if not keep:
+    sys.exit(f"run-emulator: cutting {path} at `{cut}` with no `keep` verb — "
+             f"say which assertions this cut may not take with it, or the leg "
+             f"can be trimmed until it asserts nothing")
+lines = [line.strip() for line in pathlib.Path(path).read_text().splitlines()
+         if line.strip() and not line.lstrip().startswith("#")]
+verbs = [(line.split() or [""])[0] for line in lines]
+if cut not in verbs:
+    sys.exit(f"run-emulator: {path} has no `{cut}` step, so this lane's cut is "
+             f"stale — the scene was reshaped and nobody re-read what the phone "
+             f"can express. Fix the leg, do not widen the cut.")
+at = verbs.index(cut)
+prefix, dropped = lines[:at], lines[at:]
+
+
+def asserted(seq):
+    """The distinct `keep` steps in seq, whitespace-normalized."""
+    return {" ".join(line.split()) for line in seq
+            if (line.split() or [""])[0] == keep}
+
+
+whole, kept = asserted(lines), asserted(prefix)
+if not kept:
+    sys.exit(f"run-emulator: cutting {path} at `{cut}` leaves no `{keep}` step "
+             f"at all — the leg would pass without asserting the thing it "
+             f"exists for")
+if kept != whole:
+    sys.exit(f"run-emulator: cutting {path} at `{cut}` drops "
+             f"{sorted(whole - kept)} — the cut may not take an assertion of "
+             f"`{keep}` with it")
+print("\n".join(f"run-emulator: NOT RUN on this host (after `{cut}`): {line}"
+                for line in dropped), file=sys.stderr)
+# Intent extras cannot carry newlines, so this lane's scripts fold into
+# `;` — the grammar's newline stand-in, exactly as scene_script does.
+print(";".join(prefix) + ";")
+PY
+}
+
 # The Compose interpreter carries the id of the sources it was compiled
 # from, the same contract libkaya and the SwiftUI dylib have. Written
 # before gradle so it is compiled in; the apk is asked afterwards
@@ -795,6 +876,48 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity undo \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script undo)'"
+    # The dirty scene: unsaved work as window chrome (docs/dirty-plan.md).
+    # THIS HOST HAS NO CHROME AND THAT IS THE POINT (D4) — no title bar,
+    # no close button, and the platform's own unsaved-state affordance is
+    # the predictive-back confirmation, which is veto_close and
+    # navigation's business rather than this prop's. So the prop applies,
+    # lowers to nothing visible, and `expect_dirty` reads the applied
+    # value back (Stage::window_dirty's table names this lane's row).
+    # Synthesizing a marker no native app shows was the rejected
+    # alternative, and it is rejected in the plan, not here.
+    #
+    # THE SCRIPT STOPS ABOVE THE CHROME CLOSE (scene_script_cut, which
+    # carries the reasoning and the guards). dirty.steps ends with D3's
+    # demonstration — close_window, the veto dialog, cancel — and this
+    # host has neither half: the interpreter refuses close_window in as
+    # many words (the system owns surfaces; DESIGN.md, Presentation
+    # contexts) and veto_close is inert here by the same physics. The
+    # steps above that line are exactly what D4 asks this lane to prove,
+    # and they are not a thin slice of it: the mark goes UP, comes DOWN
+    # on save, and goes up again, so a lowering that only ever sets the
+    # flag fails here as surely as on the desktops — watched, both ways.
+    # `expect_dirty` is the keep verb, so no cut may take one of those
+    # assertions with it.
+    #
+    # AND ONE APPENDED CLAIM, which is the tablet leg's pattern for the
+    # opposite reason: not a claim the shared file may not carry because
+    # only one device can make it, but one it may not carry because only
+    # SOME platforms can. The trimmed script leaves the mark UP, and
+    # `expect_title "dirty"` here says the task label is still exactly
+    # the string the app declared — no asterisk, no bullet, nothing
+    # composed in. That is the observable form of "lowers to no chrome"
+    # (D4) and of "the title is never touched" (D1), and it is the wall
+    # in front of the rejected design: a Compose arm that synthesized a
+    # marker no Android app shows would fail right here. The shared file
+    # cannot hold this line inside the dirty stretch — WinUI composes
+    # its asterisk into the rendered caption, which is what expect_title
+    # reads there, so one byte-compared assertion cannot serve both
+    # lanes (dirty.steps says so in its own comment).
+    dirty_script="$(scene_script_cut dirty close_window expect_dirty)" || exit 1
+    run_apk dirty-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity dirty \
+        --es KAYA_SELFTEST_SCRIPT "'${dirty_script}expect_title \"dirty\"'"
     drain
     timing legs-compose
 fi

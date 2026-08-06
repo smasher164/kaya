@@ -1268,13 +1268,33 @@ let derive rc compute =
    the process owns it): [window ~title:"sections"
    ~sections_presentation:(Int64.of_int
    Kaya_wire.sections_presentation_bar) ()]. *)
-let window ?title ?width ?height ?veto_close ?list_detail ?sections_presentation
+let window ?title ?width ?height ?veto_close ?dirty ?list_detail
+    ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ?(id = 0L) () =
   let tx = the_tx () in
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
   Option.iter (fun h -> emit tx (Kaya_wire.tx_set_window_height id h)) height;
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_veto_close id v)) veto_close;
+  (* [~dirty] declares that this surface holds unsaved work; the backend
+     spells its own platform's affordance (the dot in the close button on
+     macOS, a leading [*] in the rendered caption on Windows, a bullet in
+     the GTK header bar, nothing on the phones, which have none —
+     docs/dirty-plan.md D2/D4). THE TITLE STRING IS NEVER TOUCHED: a
+     marker composed into the app's own title is Qt's [*] template, the
+     named rejection (D1).
+
+     It arms NOTHING (D3). The "unsaved changes, close anyway?" flow is
+     [~veto_close] plus [show_alert], composed by the app, and the two
+     props are orthogonal — either rides this construct without the
+     other.
+
+     Nothing infers it: writing the document's signal does not raise the
+     mark, and saving does not lower it. Say both, in the one
+     transaction the handler already is — [window ~dirty:true ()] is the
+     OCaml spelling of setting it later, since a window attribute never
+     lives as a loose function outside this construct. *)
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_dirty id v)) dirty;
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_list_detail id v)) list_detail;
   Option.iter
     (fun p -> emit tx (Kaya_wire.tx_set_window_sections_presentation id p))
@@ -1315,11 +1335,15 @@ let window ?title ?width ?height ?veto_close ?list_detail ?sections_presentation
    at the root); materializes hidden, [mount_in] presents. Labeled
    optional arguments are the OCaml spelling — the same set [window]
    takes. *)
-let create_window ?title ?width ?height ?veto_close ?sections_presentation
+let create_window ?title ?width ?height ?veto_close ?dirty
+    ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_create_window id);
-  window ?title ?width ?height ?veto_close ?sections_presentation
+  (* [~dirty] rides the creation like every other window attribute: an
+     auxiliary editor can be born with unsaved work, and the mark has to
+     survive the surface not existing yet. *)
+  window ?title ?width ?height ?veto_close ?dirty ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ~id ()
 
 (* Close and forget an auxiliary window — also the veto grammar's

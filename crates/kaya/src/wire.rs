@@ -162,6 +162,7 @@ pub const WPROP_HEIGHT: u32 = 3;
 pub const WPROP_VETO_CLOSE: u32 = 4;
 pub const WPROP_SECTIONS_PRESENTATION: u32 = 5;
 pub const WPROP_LIST_DETAIL: u32 = 6;
+pub const WPROP_DIRTY: u32 = 7;
 
 /// Section property ids (spec::SECTION_PROPS) — the third typed
 /// surface table (see DESIGN.md, Sections).
@@ -412,6 +413,7 @@ fn window_prop(raw: u32) -> WindowProp {
         WPROP_VETO_CLOSE => WindowProp::VetoClose,
         WPROP_SECTIONS_PRESENTATION => WindowProp::SectionsPresentation,
         WPROP_LIST_DETAIL => WindowProp::ListDetail,
+        WPROP_DIRTY => WindowProp::Dirty,
         other => panic!("kaya: unknown window property {other}"),
     }
 }
@@ -424,6 +426,7 @@ fn window_prop_raw(p: WindowProp) -> u32 {
         WindowProp::VetoClose => WPROP_VETO_CLOSE,
         WindowProp::SectionsPresentation => WPROP_SECTIONS_PRESENTATION,
         WindowProp::ListDetail => WPROP_LIST_DETAIL,
+        WindowProp::Dirty => WPROP_DIRTY,
     }
 }
 

@@ -227,6 +227,35 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     // way it presents, since that is the size class's answer, not the
     // app's.
     ("list_detail", 6, PropKind::Bool),
+    // WHETHER THIS SURFACE HOLDS UNSAVED WORK (docs/dirty-plan.md D1).
+    // The app declares STATE; the backend spells the chrome, and the
+    // spellings genuinely differ — macOS puts the whole signal in the
+    // close button's dot (measured: 88 backing pixels change and the
+    // title string does not), Windows composes a leading `*` into the
+    // rendered caption, GTK draws a bullet beside the header-bar title,
+    // and the phones show nothing at all because they have no chrome to
+    // show it in (D4: the prop still applies and reads back there —
+    // their unsaved-work affordances are FLOW, which kaya spells
+    // through veto_close and navigation).
+    //
+    // A BOOLEAN AND NOT A TITLE TEMPLATE, which is Qt's design and the
+    // named rejection: `setWindowModified` requires the app's own title
+    // to carry a `[*]` placeholder, so the mechanism leaks into
+    // app-facing text, the constraint lives on a STRING no type system
+    // sees (Qt's own answer is a runtime warning that fires only when
+    // the window is dirty AND the platform has no native support), and
+    // kaya's scene titles are compared byte-for-byte across platforms —
+    // the declared string must stay identical everywhere while the
+    // chrome diverges.
+    //
+    // IT ARMS NOTHING (D3). "Unsaved changes, close anyway?" is already
+    // expressible from veto_close plus the dialog machinery, apps
+    // legitimately differ on what it should do, and macOS attaches no
+    // behavior of its own: measured, a real Cmd+W on an edited window
+    // calls windowShouldClose exactly once and closes, with no sheet and
+    // no alert. One attribute, one meaning: show the platform's
+    // unsaved-work affordance.
+    ("dirty", 7, PropKind::Bool),
 ];
 
 /// Navigation-entry properties: their own typed table, deliberately
@@ -1690,6 +1719,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("veto_close", 4),
                 ("sections_presentation", 5),
                 ("list_detail", 6),
+                ("dirty", 7),
             ],
         },
         EnumSpec {
@@ -2112,6 +2142,7 @@ mod tests {
                     ("wprop", "height") => wire::WPROP_HEIGHT,
                     ("wprop", "veto_close") => wire::WPROP_VETO_CLOSE,
                     ("wprop", "list_detail") => wire::WPROP_LIST_DETAIL,
+                    ("wprop", "dirty") => wire::WPROP_DIRTY,
                     ("wprop", "sections_presentation") => wire::WPROP_SECTIONS_PRESENTATION,
                     ("eprop", "title") => wire::EPROP_TITLE,
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,

@@ -1758,9 +1758,20 @@ sealed class Tx
     /// creation moment — the process owns it). Named arguments are
     /// the C# spelling: tx.Window(title: "sections",
     /// sectionsPresentation: KayaWire.SectionsPresentationBar).
+    ///
+    /// dirty: says this surface holds UNSAVED WORK, and the backend
+    /// shows its platform's own affordance — the dot in the close
+    /// button on macOS, a leading `*` in the rendered caption on
+    /// Windows, a bullet beside the header-bar title on GTK, nothing
+    /// on the phones, which have none (docs/dirty-plan.md D2/D4).
+    /// STATE, NOT CHROME: the title you declared is left alone, with
+    /// no marker to compose into it and no placeholder to leave room
+    /// for (the rejected Qt design). It ARMS NOTHING either — "unsaved
+    /// changes, close anyway?" is vetoClose plus a dialog, yours to
+    /// compose, because apps legitimately differ on what it should do.
     public void Window(
         string? title = null, double? width = null, double? height = null,
-        bool? vetoClose = null, bool? listDetail = null,
+        bool? vetoClose = null, bool? listDetail = null, bool? dirty = null,
         long? sectionsPresentation = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
@@ -1772,6 +1783,7 @@ sealed class Tx
         if (height is { } h) Records.Add(KayaWire.TxSetWindowHeight(id, h));
         if (vetoClose is { } v) Records.Add(KayaWire.TxSetWindowVetoClose(id, v));
         if (listDetail is { } ld) Records.Add(KayaWire.TxSetWindowListDetail(id, ld));
+        if (dirty is { } d) Records.Add(KayaWire.TxSetWindowDirty(id, d));
         if (sectionsPresentation is { } sp)
             Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, sp));
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
@@ -1809,7 +1821,7 @@ sealed class Tx
     /// DestroyWindow reconciles) and retires with it.
     public void CreateWindow(
         ulong id, string? title = null, double? width = null, double? height = null,
-        bool? vetoClose = null, bool? listDetail = null,
+        bool? vetoClose = null, bool? listDetail = null, bool? dirty = null,
         long? sectionsPresentation = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
@@ -1817,7 +1829,7 @@ sealed class Tx
         MenuItem[]? menus = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
-        Window(title, width, height, vetoClose, listDetail, sectionsPresentation,
+        Window(title, width, height, vetoClose, listDetail, dirty, sectionsPresentation,
             onCloseRequested, onClosed, onUndone, onRedone, menus, id);
     }
 

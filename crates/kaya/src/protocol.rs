@@ -1109,6 +1109,22 @@ pub enum WindowProp {
     /// compact case IS the default. There is deliberately no prop for
     /// WHICH way it presents — that is the size class's answer.
     ListDetail,
+    /// Whether this surface holds UNSAVED WORK (Bool-valued; default
+    /// false; docs/dirty-plan.md D1). State, never chrome: the app says
+    /// the document is edited and each backend spells its platform's
+    /// own affordance — the close button's dot on macOS, a leading `*`
+    /// in the rendered caption on Windows, a bullet beside the
+    /// header-bar title on GTK, nothing on the phones, which have no
+    /// chrome to show it in (D4). The app's title string is untouched
+    /// everywhere; a marker composed into it is Qt's design and this
+    /// prop's named rejection.
+    ///
+    /// It arms nothing (D3). The "unsaved changes, close anyway?" flow
+    /// is `veto_close` plus the dialog machinery, which apps compose
+    /// for themselves; macOS attaches no behavior to the flag either
+    /// (measured: Cmd+W on an edited window calls windowShouldClose
+    /// once and closes, with no save sheet).
+    Dirty,
 }
 
 /// The presentation hint's closed set (spec enum

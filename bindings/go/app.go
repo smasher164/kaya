@@ -1920,8 +1920,6 @@ func (w WindowRef) Size(width, height float64) WindowRef {
 	return w
 }
 
-// VetoClose arms the veto class: the close button emits
-// close_requested and nothing closes until DestroyWindow agrees.
 // SectionsPresentation sets the window's ADVISORY sections hint
 // (SectionsPresentationAuto/Bar/Sidebar — the width/height
 // precedent; the phones ignore it by physics).
@@ -1930,6 +1928,8 @@ func (w WindowRef) SectionsPresentation(hint int64) WindowRef {
 	return w
 }
 
+// VetoClose arms the veto class: the close button emits
+// close_requested and nothing closes until DestroyWindow agrees.
 func (w WindowRef) VetoClose(on bool) WindowRef {
 	w.tx.emit(TxSetWindowVetoClose(w.id, on))
 	return w
@@ -1942,6 +1942,22 @@ func (w WindowRef) VetoClose(on bool) WindowRef {
 // that is the size class's answer, not the app's.
 func (w WindowRef) ListDetail(on bool) WindowRef {
 	w.tx.emit(TxSetWindowListDetail(w.id, on))
+	return w
+}
+
+// Dirty says this surface holds UNSAVED WORK: the backend shows its
+// platform's own affordance — the dot in the close button on macOS, a
+// leading `*` in the rendered caption on Windows, a bullet beside the
+// header-bar title on GTK, nothing on the phones, which have none
+// (docs/dirty-plan.md D2/D4).
+//
+// STATE, NOT CHROME, and the title you declared is left alone: there
+// is no marker to compose into it and no placeholder to leave room for
+// (the rejected Qt design). It ARMS NOTHING either — "unsaved changes,
+// close anyway?" is VetoClose plus a dialog, which is yours to
+// compose, because apps legitimately differ on what it should do.
+func (w WindowRef) Dirty(on bool) WindowRef {
+	w.tx.emit(TxSetWindowDirty(w.id, on))
 	return w
 }
 

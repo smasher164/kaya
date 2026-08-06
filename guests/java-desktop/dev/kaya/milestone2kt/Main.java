@@ -117,6 +117,9 @@ public final class Main {
             case "undo":
                 app = Undo::app;
                 break;
+            case "dirty":
+                app = Dirty::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

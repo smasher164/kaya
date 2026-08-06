@@ -165,6 +165,11 @@ executable undo
   main-is: undo.hs
   build-depends: kaya-guests
 
+executable dirty
+  import: shared
+  main-is: dirty.hs
+  build-depends: kaya-guests
+
 executable encodebench
   import: shared
   main-is: encodebench.hs

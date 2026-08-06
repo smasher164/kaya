@@ -39,6 +39,71 @@ own the state (see the undo note in this file).
   entries. Editor prerequisites remaining after this: undo/redo,
   dirty-state window titles, find.
 
+- **Dirty state** — IN FLIGHT 2026-08-06. The design is ratified and
+  written down: docs/dirty-plan.md D1-D6, off five probe reports. One
+  `dirty` bool beside `title` and `veto_close`; the app declares state
+  and each backend spells its own chrome (the close-button dot on
+  macOS, a leading `*` in the rendered caption on Windows, a bullet in
+  the GTK header bar, nothing on the phones, which have none). The
+  title string is untouched everywhere — Qt's `[*]` template is the
+  named rejection. It arms nothing: the "unsaved changes, close
+  anyway?" flow stays composed from `veto_close` plus the dialog
+  machinery. DEPTH LANDED: spec + Rust surface + the SwiftUI mac arm +
+  the `dirty` scene. What is still open, each held by a gate that is
+  RED BY DESIGN until it lands:
+  - ~~**DEPTH STUB: dirty on gtk** — the GTK arm (a bullet label beside
+    the header-bar title, the living GNOME convention) and its AT-SPI
+    read. `Stage::window_dirty` refuses loudly meanwhile; the linux
+    runner wires no `dirty` legs.~~ LANDED 2026-08-06: every kaya window
+    now carries the marker in its header bar (GNOME Text Editor's
+    CenterBox shape, so the title does not move when the mark goes up),
+    with an accessible label that is what makes it readable at all;
+    `Stage::window_dirty` walks AT-SPI for that node inside the frame
+    the window publishes, and reports UNREADABLE as its own failure
+    rather than as `false`. The linux runner wires the scene for every
+    guest this lane carries — the seven non-Swift bindings plus the C
+    floor — on both protocols, each through `a11y-leg.sh`, which is what
+    makes GTK publish a tree at all.
+  - ~~**DEPTH STUB: dirty on winui** — the WinUI arm (a leading `*`
+    composed into the rendered caption, the measured Notepad
+    convention) and its caption read. Same shape; the windows runner
+    wires no `dirty` legs.~~ LANDED 2026-08-06: the marker composes in
+    `refresh_caption`, the one caption writer this backend now has
+    (five `SetTitle` sites collapsed into it, and `deploy-win.sh`
+    refuses a sixth); `Stage::window_dirty` reads the real OS caption;
+    `run_suite dirty_rust` is a live leg.
+  - ~~**DEPTH STUB: dirty on compose**~~ — LANDED 2026-08-06. All four
+    interpreter layers in KayaCompose.kt (constant, apply arm, model
+    field, verb arm); the lowering is deliberately EMPTY, which is D4,
+    and `expect_dirty` reads the applied prop back — watched failing
+    with the apply arm dropping the value, and again with a lowering
+    that sets but never clears. The chrome-close tail is answered the
+    way the iOS lane answered it, on purpose: `dirty-compose` runs the
+    shared scene's phone-expressible PREFIX (the mark up, down on save,
+    up again), cut at `close_window` and guarded on the `expect_dirty`
+    verb, with the declined steps printed. One android-only claim rides
+    on top — `expect_title "dirty"` while the mark is UP, which is the
+    observable form of "no chrome" and fails the moment anything
+    composes a marker into the task label.
+  - ~~**DEPTH STUB: dirty on swiftui/ios**~~ — LANDED 2026-08-06.
+    `expect_dirty` reads the applied prop back off the window model
+    (D5's iOS row); the lowering stays empty, which is D4. The question
+    this entry held open — the scene drives a chrome CLOSE, which no
+    phone has — was answered with NEITHER of the two options it named:
+    not an all-or-nothing carve-out (D4's arm would then be applied and
+    asserted by nobody) and not a sibling scene (every runner would owe
+    it legs, a cross-lane obligation minted mid-fan-out). The iOS leg
+    runs the shared scene's PHONE-EXPRESSIBLE PREFIX — everything above
+    `close_window`, which is the mark going up, coming down on save,
+    and going up again — with the cut declared by VERB and guarded
+    both ways in tools/ios/run-sim.sh. The Compose arm faces the same
+    tail and can lift the same shape; if it does, the two belong in one
+    helper rather than two spellings.
+  - The seven other bindings' sugar spelling of the window prop
+    (check-sugar-surface's window-prop sweep holds it open) and the
+    scene's guests, at which point `dirty` graduates out of
+    DEPTH_SCENES.
+
 - **DEFERRED — wayland lane session architecture (researched
   2026-08-03, no trigger yet).** The GTK clipboard work pinned two
   session-level constraints and researched their exits

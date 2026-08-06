@@ -554,6 +554,16 @@ struct CoreState {
     /// (the ViewSwitcher-era header pattern); visible only while the
     /// window's stack has entries.
     back_buttons: HashMap<u64, gtk4::Button>,
+    /// The unsaved-work marker per window — the bullet label beside the
+    /// header-bar title (install_nav_chrome), shown exactly while the
+    /// window's `dirty` prop is true.
+    ///
+    /// THE WIDGET IS THE STATE. There is deliberately no `dirty` map
+    /// beside this one: the prop's whole observable is the marker's
+    /// visibility, and a model copy would only be something for
+    /// `window_dirty` to agree with itself about (the read goes to the
+    /// accessibility tree for exactly that reason).
+    dirty_markers: HashMap<u64, gtk4::Label>,
     /// The live modal alert (one per process): the request's identity
     /// plus the REAL dialog object for the runner's reads. Shared with
     /// the choose callback, which clears it when the one result fires.
@@ -739,13 +749,43 @@ fn gtk_window(core: &CoreState, id: u64) -> gtk4::Window {
     }
 }
 
-/// Install the window's navigation chrome: a HeaderBar whose back
-/// button is GTK's back affordance (the ViewSwitcher-era header
-/// pattern). Hidden until the window's stack has entries; the click
-/// runs the SAME user-pop path a real press does, so the harness's
-/// `back` verb can drive the actual button.
-fn install_nav_chrome(window: &gtk4::Window, id: u64) -> gtk4::Button {
-    use gtk4::prelude::{ButtonExt, GtkWindowExt, WidgetExt};
+/// Install the window's chrome: a HeaderBar carrying GTK's back
+/// affordance (the ViewSwitcher-era header pattern; hidden until the
+/// window's stack has entries, and the click runs the SAME user-pop
+/// path a real press does, so the harness's `back` verb drives the
+/// actual button) and the unsaved-work marker beside the title.
+///
+/// THE MARKER IS THE `dirty` PROP'S WHOLE LOWERING ON THIS PLATFORM
+/// (docs/dirty-plan.md D2). GTK4 has no window-level edited/modified
+/// affordance at any layer — not GtkWindow's 25 properties, not
+/// libadwaita, not xdg-shell, and X11's urgency hint means "demands
+/// attention" and has no Wayland counterpart — so kaya draws it. The
+/// shape is GNOME Text Editor's own, read from its `editor-window.ui`:
+/// a GtkLabel holding U+2022, `visible=false`, sitting in the header
+/// bar's title widget BESIDE the title, with the window's title string
+/// left completely alone. (The GNOME-2-era "insert an asterisk at the
+/// beginning of the window title" rule is HIG 2.2.1 and did not survive
+/// the GNOME 40 rewrite; the current HIG says nothing at all about
+/// unsaved state. Composing a marker into the title is also D1's named
+/// rejection — the declared title is compared byte-for-byte across five
+/// platforms, and there are four `set_title` call sites here, three of
+/// them on the navigation path, so a composed marker would need a
+/// chokepoint the other three could not bypass.)
+///
+/// Setting a title widget means kaya renders the title itself, so the
+/// box carries a `.title` label BOUND to the window's own `title`
+/// property — one binding rather than a fifth write, so every existing
+/// `set_title` call site keeps working untouched.
+///
+/// AND THE MARKER CARRIES AN ACCESSIBLE LABEL, which is what makes it
+/// observable at all: measured on the bus, an unlabelled bullet
+/// publishes as `label name='• '` — a glyph is not a name, so neither a
+/// screen reader nor the harness can address it. With the label the node
+/// is `label name='Unsaved changes'` (the accessible name REPLACES the
+/// glyph, which is also what a screen reader should say), and
+/// `Stage::window_dirty` reads exactly that.
+fn install_nav_chrome(window: &gtk4::Window, id: u64) -> (gtk4::Button, gtk4::Label) {
+    use gtk4::prelude::{ButtonExt, GtkWindowExt, ObjectExt, WidgetExt};
     let header = gtk4::HeaderBar::new();
     let back = gtk4::Button::from_icon_name("go-previous-symbolic");
     back.set_visible(false);
@@ -756,9 +796,45 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> gtk4::Button {
         });
     });
     header.pack_start(&back);
+
+    let marker = gtk4::Label::new(Some(DIRTY_MARKER));
+    marker.set_visible(false);
+    marker.update_property(&[gtk4::accessible::Property::Label(DIRTY_MARKER_NAME)]);
+    let title = gtk4::Label::new(None);
+    // The style class GtkHeaderBar puts on its own title label, so the
+    // typography does not change by taking the slot over.
+    title.add_css_class("title");
+    window
+        .bind_property("title", &title, "label")
+        .sync_create()
+        .build();
+    // A CenterBox and not a plain Box, which is GNOME's own trick and
+    // worth the extra line: the marker EXPANDS into the space to the
+    // left of the title and hugs its trailing edge, so appearing and
+    // disappearing does not move the title. A Box makes the two a single
+    // centered group — measured on this scene, the title stepped 7px
+    // right the moment the mark went up, which is a title that twitches
+    // while you type.
+    let title_box = gtk4::CenterBox::new();
+    title_box.set_hexpand(true);
+    marker.set_hexpand(true);
+    marker.set_halign(gtk4::Align::End);
+    marker.set_margin_end(6);
+    title_box.set_start_widget(Some(&marker));
+    title_box.set_center_widget(Some(&title));
+    header.set_title_widget(Some(&title_box));
+
     window.set_titlebar(Some(&header));
-    back
+    (back, marker)
 }
+
+/// The glyph GNOME's own editor draws for unsaved work, and the name the
+/// accessibility tree publishes in its place. The NAME is what the
+/// harness matches on (see `install_nav_chrome`); neither string is ever
+/// compared across platforms — `dirty` is one declaration with five
+/// different chromes (D2), which is why the verb exists at all.
+const DIRTY_MARKER: &str = "\u{2022}";
+const DIRTY_MARKER_NAME: &str = "Unsaved changes";
 
 /// A user-driven back on the window's top entry: an
 /// intercept_back-armed top emits back_requested and nothing pops
@@ -3369,6 +3445,23 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.list_detail.insert(window.0, *on);
                     refresh_nav(core, window.0);
                 }
+                // The unsaved-work marker beside the header-bar title
+                // (docs/dirty-plan.md D2 — install_nav_chrome carries
+                // the reasoning). THE TITLE STRING IS NOT TOUCHED here
+                // or anywhere: `target` is not written at all.
+                //
+                // No materialization hazard to guard, unlike the mac
+                // arm's re-apply from `register()`: the marker is built
+                // with the window's chrome, so it exists before any
+                // transaction can name that window (the scene validates
+                // the id, and CreateWindow is what makes one valid).
+                (WindowProp::Dirty, Value::Bool(on)) => {
+                    use gtk4::prelude::WidgetExt;
+                    core.dirty_markers
+                        .get(&window.0)
+                        .expect("every kaya window installs its chrome")
+                        .set_visible(*on);
+                }
                 (WindowProp::SectionsPresentation, Value::I64(hint)) => {
                     // ADVISORY: bar/auto = the header StackSwitcher,
                     // sidebar = GtkStackSidebar; the chrome rebuilds
@@ -3390,8 +3483,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .default_width(540)
                 .default_height(330)
                 .build();
-            let back = install_nav_chrome(&aux, window.0);
+            let (back, marker) = install_nav_chrome(&aux, window.0);
             core.back_buttons.insert(window.0, back);
+            core.dirty_markers.insert(window.0, marker);
             wire_close(
                 &aux,
                 window.0,
@@ -3423,6 +3517,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.window_roots.remove(&window.0);
             core.window_titles.remove(&window.0);
             core.back_buttons.remove(&window.0);
+            core.dirty_markers.remove(&window.0);
             // ... and its sections, each with ITS stack (the one way
             // a section dies).
             for sid in core.sections.remove(&window.0).unwrap_or_default() {
@@ -4584,7 +4679,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
         }
-        let primary_back = {
+        let (primary_back, primary_marker) = {
             use gtk4::prelude::Cast;
             install_nav_chrome(window.upcast_ref::<gtk4::Window>(), 0)
         };
@@ -4642,6 +4737,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     let mut buttons = HashMap::new();
                     buttons.insert(0, primary_back);
                     buttons
+                },
+                dirty_markers: {
+                    let mut markers = HashMap::new();
+                    markers.insert(0, primary_marker);
+                    markers
                 },
                 live_alert: std::rc::Rc::new(RefCell::new(None)),
                 live_file_dialog: std::rc::Rc::new(RefCell::new(None)),
@@ -5967,6 +6067,60 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn window_dirty(&self, window: u64) -> bool {
+        // THE CHROME, OVER THE BUS — the read D5's table names for this
+        // backend. GTK publishes no getter for accessible properties and
+        // kaya's own model would only agree with itself, so the honest
+        // question is the one an assistive client asks: does this
+        // window's accessibility subtree contain the marker node?
+        //
+        // The window is identified by its frame's NAME, which is the
+        // window title GTK publishes (measured: the property,
+        // _NET_WM_NAME and sway's IPC name agreed exactly, every time) —
+        // and `dirty` never touches that string, on any platform, which
+        // is what makes it usable as identity here. Two windows wearing
+        // one title would make the question ambiguous, and ambiguity is
+        // reported rather than guessed at.
+        //
+        // UNREADABLE IS ITS OWN FAILURE, NEVER `false`. A clean-window
+        // assertion that passes because the bus was not there is the
+        // exact vacuous green the depth arm refused on macOS. The common
+        // cause is a leg wired WITHOUT tools/linux/a11y-leg.sh: GTK
+        // publishes an accessibility tree only under GTK_A11Y=atspi with
+        // a bus to sit on, and that wrapper is what stands both up.
+        //
+        // The bounded retry is for PUBLICATION LAG, not for the answer:
+        // the tree is served by our own main loop on demand, and a frame
+        // can be a beat late to appear. Every other GTK accessibility
+        // read has a sentinel string for this (`ax` returns "<not in the
+        // accessibility tree>" and lets the harness poll re-ask); a bool
+        // has no spelling that is not an answer, so the waiting happens
+        // here.
+        use std::time::{Duration, Instant};
+        let title = self.window_title(window);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match atspi_window_marker(&title, DIRTY_MARKER_NAME) {
+                Ok(marked) => return marked,
+                Err(why) => {
+                    if why.retryable && Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(100));
+                        continue;
+                    }
+                    panic!(
+                        "kaya: the dirty read cannot answer for window#{window} \
+                         (title {title:?}): {}. The marker is a header-bar label \
+                         the AT-SPI walk matches by its accessible name, so a leg \
+                         asserting expect_dirty must run under \
+                         tools/linux/a11y-leg.sh — GTK publishes no accessibility \
+                         tree without GTK_A11Y=atspi and a bus to sit on.",
+                        why.why
+                    );
+                }
+            }
+        }
+    }
+
     fn close_window(&self, window: u64) {
         Self::on_main(move |core| {
             use gtk4::prelude::GtkWindowExt;
@@ -7007,5 +7161,145 @@ fn atspi_collect(want: atspi::Role, index: usize, want_description: bool) -> Opt
         nth.map(|(_, name, description)| {
             if want_description { description.clone() } else { name.clone() }
         })
+    })
+}
+
+/// Why an accessibility read could not answer, and whether asking again
+/// could change that. A read with no sentinel value (`window_dirty`
+/// returns a bare bool) has to tell those apart itself: a tree that has
+/// not appeared yet is worth another 100ms, and two windows wearing one
+/// title never will be.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+struct AtspiMiss {
+    why: String,
+    retryable: bool,
+}
+
+/// Is the marker node — a descendant named `marker` — inside the frame
+/// this app publishes under the name `title`?
+///
+/// The `dirty` prop's read on GTK (docs/dirty-plan.md D5), and the
+/// reason the marker carries an accessible label at all: an unlabelled
+/// bullet publishes as `label name='• '`, which no client can address.
+/// Measured with the whole scene's toggle: the node appears in and
+/// disappears from the tree in lockstep with `gtk_widget_set_visible`,
+/// both directions, while the frame's own name stays clean throughout.
+///
+/// SCOPED TO ONE FRAME, unlike `atspi_collect`, which ranks nodes across
+/// the whole application. `window_dirty` is asked about a WINDOW, and a
+/// scene with two of them (the panels grammar) would otherwise read one
+/// window's marker as another's.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_window_marker(title: &str, marker: &str) -> Result<bool, AtspiMiss> {
+    use atspi::proxy::accessible::AccessibleProxy;
+    let (title, marker) = (title.to_owned(), marker.to_owned());
+    atspi::zbus::block_on(async move {
+        let conn = atspi::connection::AccessibilityConnection::new()
+            .await
+            .map_err(|e| AtspiMiss {
+                why: format!("no accessibility bus ({e})"),
+                // The bus is stood up before the guest starts; a
+                // connection failure is the wiring, not a race.
+                retryable: false,
+            })?;
+        let root = AccessibleProxy::builder(conn.connection())
+            .destination("org.a11y.atspi.Registry")
+            .and_then(|b| b.path("/org/a11y/atspi/accessible/root"))
+            .map_err(|e| AtspiMiss { why: format!("no registry proxy ({e})"), retryable: false })?
+            .build()
+            .await
+            .map_err(|e| AtspiMiss { why: format!("no registry root ({e})"), retryable: false })?;
+
+        /// Frames seen under the wanted name, whether one of them holds
+        /// the marker, and every frame name published — the last is for
+        /// the failure message, which otherwise cannot say what the tree
+        /// DID contain.
+        struct Found {
+            frames: usize,
+            marked: bool,
+            names: Vec<String>,
+        }
+
+        async fn walk(
+            node: AccessibleProxy<'_>,
+            want_frame: &str,
+            want_marker: &str,
+            out: &mut Found,
+            in_frame: bool,
+            depth: usize,
+        ) {
+            // The same horizon atspi_collect walks. NOT the depth-8 one
+            // in tools/linux/atspi_probe.py: under an Adw header the
+            // labels sit at depth ~15, and the shallow probe reports
+            // them missing (docs/traps.md, the linux dirty probe §4d).
+            if depth > 24 {
+                return;
+            }
+            let mut inside = in_frame;
+            if let (Ok(role), Ok(name)) = (node.get_role().await, node.name().await) {
+                if role == atspi::Role::Frame {
+                    out.names.push(name.clone());
+                    if name == want_frame {
+                        out.frames += 1;
+                        inside = true;
+                    }
+                }
+                // The accessible NAME, which for the marker is the
+                // authored label and not the bullet glyph.
+                if in_frame && name == want_marker {
+                    out.marked = true;
+                }
+            }
+            let Ok(children) = node.get_children().await else {
+                return;
+            };
+            for child in children {
+                let Some(dest) = child.name() else { continue };
+                let Ok(proxy) = AccessibleProxy::builder(node.inner().connection())
+                    .destination(dest.to_owned())
+                    .and_then(|b| b.path(child.path().to_owned()))
+                else {
+                    continue;
+                };
+                if let Ok(proxy) = proxy.build().await {
+                    Box::pin(walk(proxy, want_frame, want_marker, out, inside, depth + 1)).await;
+                }
+            }
+        }
+
+        let mut found = Found { frames: 0, marked: false, names: Vec::new() };
+        let apps = root.get_children().await.map_err(|e| AtspiMiss {
+            why: format!("the registry published no applications ({e})"),
+            retryable: true,
+        })?;
+        for app in apps {
+            let Some(dest) = app.name() else { continue };
+            let Ok(builder) = AccessibleProxy::builder(conn.connection())
+                .destination(dest.to_owned())
+                .and_then(|b| b.path(app.path().to_owned()))
+            else {
+                continue;
+            };
+            let Ok(proxy) = builder.build().await else { continue };
+            // Only our own process's application node.
+            if proxy.get_application().await.is_err() {
+                continue;
+            }
+            Box::pin(walk(proxy, &title, &marker, &mut found, false, 0)).await;
+        }
+        match found.frames {
+            1 => Ok(found.marked),
+            0 => Err(AtspiMiss {
+                why: format!("no frame is named {title:?}; the tree published {:?}", found.names),
+                retryable: true,
+            }),
+            n => Err(AtspiMiss {
+                why: format!(
+                    "{n} frames are named {title:?}, so which window's marker to read \
+                     is ambiguous — give the windows distinct titles"
+                ),
+                retryable: false,
+            }),
+        }
     })
 }

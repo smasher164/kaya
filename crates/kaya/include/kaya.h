@@ -310,6 +310,8 @@
 
 #define WPROP_LIST_DETAIL 6
 
+#define WPROP_DIRTY 7
+
 /**
  * Section property ids (spec::SECTION_PROPS) — the third typed
  * surface table (see DESIGN.md, Sections).
@@ -876,6 +878,13 @@
  * this window's entry stack (DESIGN.md, Adaptive list-detail).
  */
 #define KAYA_WPROP_LIST_DETAIL 6
+
+/**
+ * The window prop saying this surface holds UNSAVED WORK
+ * (docs/dirty-plan.md D1). State, not chrome: each backend spells its
+ * own platform's affordance and the app's title string is untouched.
+ */
+#define KAYA_WPROP_DIRTY 7
 
 /**
  * Navigation-entry properties (spec::ENTRY_PROPS): their own typed
