@@ -464,6 +464,61 @@ pub enum Step {
     /// wide enough is the platform's call and a compact window is never
     /// asked to show two.
     ExpectSplit(Option<String>),
+    /// The textarea's DECORATED RANGES, read from the platform's own
+    /// text layer, spelled `<start>:<end>=<covered text>` per range and
+    /// joined with `|` in ascending order. The empty string asserts that
+    /// nothing is decorated.
+    ///
+    /// BOTH HALVES, and the second one is the guard. Offsets alone would
+    /// be a test that agrees with itself: the core converts byte offsets
+    /// into the backend's unit to lower them, and a backend converts
+    /// back to read them, so two symmetric mistakes cancel and the leg
+    /// passes while the highlight visibly covers the wrong characters
+    /// (worked example: a pass-through "conversion" in both directions
+    /// paints two UTF-16 units too many over `ab😀cd` and reports the
+    /// declared offsets back unharmed). The COVERED TEXT has no
+    /// arithmetic in it at all — the platform slices its own string with
+    /// the range it is actually holding — so the two halves cannot be
+    /// wrong together.
+    ExpectHighlights(Target, String),
+    /// The textarea's SELECTION, in the same `<start>:<end>=<text>`
+    /// spelling as ExpectHighlights and for the same reason. A caret
+    /// reads as `12:12=`.
+    ExpectSelection(Target, String),
+    /// Whether a range is inside the textarea's VIEWPORT: `visible` or
+    /// `offscreen`.
+    ///
+    /// CONTAINMENT AND NOT THE VIEWPORT ITSELF, because the visible
+    /// range is a geometry fact that differs per lane (a 240x96 macOS
+    /// text view showed `{1378,224}`) while "is my range on screen" is
+    /// the same question everywhere — the expect_split precedent. The
+    /// `offscreen` spelling is what keeps the assertion from being
+    /// vacuous: a scene asserts it BEFORE the reveal, so a document
+    /// short enough to be entirely visible fails the leg instead of
+    /// passing it.
+    ExpectRevealed(Target, TextRange, String),
+    /// Start an input-method COMPOSITION in the target with this marked
+    /// text — the state a user is in mid-word with a Japanese or Chinese
+    /// IME, which no other verb can reach (`type` is printable ASCII by
+    /// contract, precisely because a composed character is an IME
+    /// question and not a verb argument).
+    ///
+    /// The text is MARKED, not committed: it is displayed, it is not in
+    /// the widget's value, and the app has been told nothing. It exists
+    /// so a scene can prove that select_range refuses to run over it
+    /// (docs/ranges-plan.md D4) — an assertion that is otherwise
+    /// unreachable from a script, and a defect that would only ever be
+    /// found by a user typing kana.
+    Compose(Target, String),
+}
+
+/// A range in a harness assertion, in the same UTF-8 byte offsets the
+/// protocol carries. Its own type so a verb cannot take two loose
+/// integers in the wrong order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextRange {
+    pub start: u64,
+    pub stop: u64,
 }
 
 impl Step {
@@ -526,6 +581,10 @@ impl Step {
             Step::Shortcut { .. } => false,
             Step::ResizeWindow { .. } => false,
             Step::ExpectSplit { .. } => true,
+            Step::ExpectHighlights { .. } => true,
+            Step::ExpectSelection { .. } => true,
+            Step::ExpectRevealed { .. } => true,
+            Step::Compose { .. } => false,
         }
     }
 }
@@ -895,6 +954,46 @@ pub trait Stage: Send + 'static {
     /// the item's direct activation would (one dispatch path). No
     /// default.
     fn shortcut(&self, spelling: &str);
+    /// THE TEXT-RANGE READS — three of them, one per primitive, and the
+    /// contract every backend implements against. Read the table before
+    /// writing an arm: what each one must come FROM is the whole point,
+    /// and the wrong source passes with the lowering deleted.
+    ///
+    /// | | source it MUST come from | mac (built) | windows | linux | ios/android |
+    /// |---|---|---|---|---|---|
+    /// | `highlights` | the platform's text attribute layer | `AXAttributedStringForRange` -> `AXBackgroundColor` runs (0.58ms for 60 runs over 1.9k chars, measured) | provider-side in-process `GetAttributeValue(BackgroundColor)` — never a UIA client attach, which is the file-dialog era's crash class | AT-SPI text attributes over the GtkTextTag | the interpreter's own view state |
+    /// | `selection` | the platform's selection | `AXSelectedTextRange` | `GetSelection` | AT-SPI `GetSelection` | `selectedRange` / the field's selection |
+    /// | `revealed` | the platform's VIEWPORT, never a model | `AXVisibleCharacterRange`, containment | `GetVisibleRanges` | the GtkScrolledWindow viewport geometry the foundation added | the scroll view's visible rect |
+    ///
+    /// SPELLING, both range verbs: `<start>:<end>=<covered text>` per
+    /// range, `|`-joined, ascending; `""` when there is nothing. The
+    /// offsets are UTF-8 BYTE offsets — the protocol's unit, not the
+    /// backend's — so one frozen scene compares byte-for-byte on five
+    /// lanes (invariant 6). This is the one place a backend converts an
+    /// offset in the READING direction, and it is deliberate: the
+    /// covered text beside it is what stops the read from being the
+    /// lowering's own inverse (see Step::ExpectHighlights).
+    ///
+    /// TOTAL, like `menu_state`: a target that is not a textarea, or a
+    /// widget that has vanished, answers with a short description rather
+    /// than panicking, so these double as the wait for a render to land.
+    /// No defaults on any of them — a backend that forgets one must fail
+    /// to compile rather than pass a range leg vacuously.
+    fn highlights(&self, target: Target) -> String;
+    fn selection(&self, target: Target) -> String;
+    /// `visible` when the byte range is inside the widget's viewport,
+    /// `offscreen` when it is not.
+    fn revealed(&self, target: Target, range: TextRange) -> String;
+    /// Start an input-method composition in the target, leaving `text`
+    /// MARKED — displayed, uncommitted, invisible to the app — exactly
+    /// as a half-typed kana sequence is. The platform's own composition
+    /// entry point (`setMarkedText:`, `IMM`/`TSF`, `gtk_im_context`,
+    /// `InputConnection.setComposingText`), never a text write: the
+    /// state under test is the input method's, and a backend that fakes
+    /// it with a plain insertion proves nothing about D4.
+    ///
+    /// Blocks until the composition is live, like `type_text`.
+    fn compose(&self, target: Target, text: &str);
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -1268,6 +1367,61 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
                 Step::Shortcut(spelling)
             }
+            "expect_highlights" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!(
+                        "expect_highlights wants a target and a \"s:e=text|...\" string \
+                         (the empty string asserts nothing is decorated): {line:?}"
+                    )
+                })?;
+                let want = parse_string(text)?;
+                check_range_list(&want).map_err(|e| format!("{e}: {line:?}"))?;
+                Step::ExpectHighlights(parse_target(target)?, want)
+            }
+            "expect_selection" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_selection wants a target and a \"s:e=text\" string: {line:?}")
+                })?;
+                let want = parse_string(text)?;
+                check_range_list(&want).map_err(|e| format!("{e}: {line:?}"))?;
+                if want.contains('|') {
+                    return Err(format!(
+                        "expect_selection takes ONE range; a set is expect_highlights: {line:?}"
+                    ));
+                }
+                Step::ExpectSelection(parse_target(target)?, want)
+            }
+            "expect_revealed" => {
+                let mut parts = rest.split_whitespace();
+                let (Some(target), Some(range), Some(state), None) =
+                    (parts.next(), parts.next(), parts.next(), parts.next())
+                else {
+                    return Err(format!(
+                        "expect_revealed wants a target, a start:end range and \
+                         visible|offscreen: {line:?}"
+                    ));
+                };
+                if state != "visible" && state != "offscreen" {
+                    return Err(format!(
+                        "expect_revealed state is {state:?}, wanted visible or offscreen: {line:?}"
+                    ));
+                }
+                Step::ExpectRevealed(
+                    parse_target(target)?,
+                    parse_range(range).map_err(|e| format!("{e}: {line:?}"))?,
+                    state.to_owned(),
+                )
+            }
+            "compose" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("compose wants a target and a quoted marked text: {line:?}")
+                })?;
+                let marked = parse_string(text)?;
+                if marked.is_empty() {
+                    return Err(format!("compose wants a non-empty marked text: {line:?}"));
+                }
+                Step::Compose(parse_target(target)?, marked)
+            }
             other => return Err(format!("unknown step {other:?}")),
         };
         steps.push(step);
@@ -1435,6 +1589,51 @@ fn check_menu_path(path: &str) -> Result<(), String> {
                 "menu path {path:?} pads a label with whitespace"
             ));
         }
+    }
+    Ok(())
+}
+
+/// One `start:end` range in a harness assertion — UTF-8 byte offsets,
+/// the protocol's own unit, so a scene and a guest spell the same
+/// numbers.
+fn parse_range(spec: &str) -> Result<TextRange, String> {
+    let Some((start, end)) = spec.split_once(':') else {
+        return Err(format!("range {spec:?} wants start:end"));
+    };
+    let start: u64 = start
+        .parse()
+        .map_err(|_| format!("range {spec:?} has a non-numeric start"))?;
+    let end: u64 = end
+        .parse()
+        .map_err(|_| format!("range {spec:?} has a non-numeric end"))?;
+    if start > end {
+        return Err(format!("range {spec:?} starts after it ends"));
+    }
+    Ok(TextRange { start, stop: end })
+}
+
+/// The spelling of a range assertion: `<start>:<end>=<covered text>`
+/// per range, joined with `|`, ascending. The empty string is the empty
+/// set and is meaningful — it is what a scene asserts after an edit
+/// drops a declared set (docs/ranges-plan.md D2).
+///
+/// The COVERED TEXT is checked here for the one thing that would make
+/// the spelling ambiguous rather than merely wrong: a `|` inside it. A
+/// scene whose document contains a pipe inside a decorated range would
+/// read back as two ranges and the failure would name the wrong
+/// offsets, which is the shape of bug that costs an afternoon. Scenes
+/// are frozen text; this makes the constraint on them explicit.
+fn check_range_list(spec: &str) -> Result<(), String> {
+    if spec.is_empty() {
+        return Ok(());
+    }
+    for item in spec.split('|') {
+        let Some((range, _covered)) = item.split_once('=') else {
+            return Err(format!(
+                "range assertion {item:?} wants <start>:<end>=<covered text>"
+            ));
+        };
+        parse_range(range)?;
     }
     Ok(())
 }
@@ -2348,6 +2547,39 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 stage.shortcut(spelling);
                 None
             }
+            Step::ExpectHighlights(target, want) => Some(poll(|| {
+                let got = stage.highlights(*target);
+                if got == *want {
+                    Ok(format!("highlights {want:?}"))
+                } else {
+                    Err(format!("highlights {got:?}, wanted {want:?}"))
+                }
+            })),
+            Step::ExpectSelection(target, want) => Some(poll(|| {
+                let got = stage.selection(*target);
+                if got == *want {
+                    Ok(format!("selection {want:?}"))
+                } else {
+                    Err(format!("selection {got:?}, wanted {want:?}"))
+                }
+            })),
+            Step::ExpectRevealed(target, range, want) => Some(poll(|| {
+                let got = stage.revealed(*target, *range);
+                if got == *want {
+                    Ok(format!("{}:{} {want}", range.start, range.stop))
+                } else {
+                    Err(format!(
+                        "{}:{} is {got}, wanted {want}",
+                        range.start, range.stop
+                    ))
+                }
+            })),
+            Step::Compose(target, text) => {
+                // An action, silent like type: what the composition does
+                // to the next step is the observable.
+                stage.compose(*target, text);
+                None
+            }
             Step::ExpectAx(target, want) => Some(poll(|| {
                 let got = stage.ax(*target);
                 if got == *want {
@@ -2994,6 +3226,19 @@ mod tests {
         fn ax_hint(&self, _: Target) -> String {
             "save the draft".to_owned()
         }
+        // The range reads answer NOTHING here on purpose: these mocks
+        // exist for the parse/flow tests, and a mock that invented a
+        // highlight would be a fixture pretending to be a platform.
+        fn highlights(&self, _: Target) -> String {
+            String::new()
+        }
+        fn selection(&self, _: Target) -> String {
+            String::new()
+        }
+        fn revealed(&self, _: Target, _: TextRange) -> String {
+            "offscreen".to_owned()
+        }
+        fn compose(&self, _: Target, _: &str) {}
         fn menu_state(&self, _: &str, aspect: MenuAspect) -> String {
             match aspect {
                 MenuAspect::Enablement => "disabled".to_owned(),
@@ -3200,6 +3445,19 @@ mod tests {
         fn ax_hint(&self, _: Target) -> String {
             String::new()
         }
+        // The range reads answer NOTHING here on purpose: these mocks
+        // exist for the parse/flow tests, and a mock that invented a
+        // highlight would be a fixture pretending to be a platform.
+        fn highlights(&self, _: Target) -> String {
+            String::new()
+        }
+        fn selection(&self, _: Target) -> String {
+            String::new()
+        }
+        fn revealed(&self, _: Target, _: TextRange) -> String {
+            "offscreen".to_owned()
+        }
+        fn compose(&self, _: Target, _: &str) {}
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }
@@ -3358,6 +3616,19 @@ mod tests {
         fn ax_hint(&self, _: Target) -> String {
             String::new()
         }
+        // The range reads answer NOTHING here on purpose: these mocks
+        // exist for the parse/flow tests, and a mock that invented a
+        // highlight would be a fixture pretending to be a platform.
+        fn highlights(&self, _: Target) -> String {
+            String::new()
+        }
+        fn selection(&self, _: Target) -> String {
+            String::new()
+        }
+        fn revealed(&self, _: Target, _: TextRange) -> String {
+            "offscreen".to_owned()
+        }
+        fn compose(&self, _: Target, _: &str) {}
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }

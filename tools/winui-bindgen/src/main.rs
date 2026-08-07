@@ -96,6 +96,43 @@ fn main() {
         // TextBox would land.
         "Microsoft.UI.Text.TextGetOptions".to_string(),
         "Microsoft.UI.Text.TextSetOptions".to_string(),
+        // THE TEXT-RANGE PRIMITIVES (docs/ranges-plan.md D1). Each of
+        // these three names an ITextRange member that does not exist
+        // without it — the transitivity trap again, and here it hides
+        // the whole milestone: `get_CharacterFormat`, `ScrollIntoView`
+        // and `GetRect` are all in the metadata (52 members on
+        // ITextRange) and all three were absent from the generated file
+        // because their parameter and return types were unfiltered.
+        //   ITextCharacterFormat — the highlight itself. A declared
+        //     range is `range.CharacterFormat.BackgroundColor = colour`,
+        //     which is the ONLY per-range decoration a WinUI text
+        //     control can express (TextBox cannot express it at all,
+        //     which is why the textarea is a RichEditBox).
+        //   PointOptions — `ScrollIntoView`'s placement argument (reveal)
+        //     and `GetRect`'s coordinate space (the viewport read: a
+        //     range's rectangle in CLIENT coordinates is where it sits
+        //     relative to what is on screen right now).
+        //   TextConstants — `AutoColor`, the background value an
+        //     UNPAINTED run carries. Clearing a highlight means writing
+        //     that value back, and naming the platform's own constant is
+        //     the difference between a clear and a guess at a magic
+        //     colour (measured: an unpainted run reads #00000001).
+        // Windows.Foundation.Rect is GetRect's out parameter; without it
+        // the method vanishes with the rest.
+        "Microsoft.UI.Text.ITextCharacterFormat".to_string(),
+        "Microsoft.UI.Text.PointOptions".to_string(),
+        "Microsoft.UI.Text.TextConstants".to_string(),
+        "Windows.Foundation.Rect".to_string(),
+        // D4's refusal needs to KNOW a composition is live, and this
+        // control is the only party that does: an input method's
+        // composition is on no kaya channel and never will be. The two
+        // event args types are named for the transitivity reason
+        // everything else here is — without them `add_TextCompositionStarted`
+        // and `add_TextCompositionEnded` are absent from the generated
+        // RichEditBox, which reads as "WinUI has no composition events"
+        // when it has six.
+        "Microsoft.UI.Xaml.Controls.TextCompositionStartedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.TextCompositionEndedEventArgs".to_string(),
         "Microsoft.UI.Xaml.Controls.RichEditClipboardFormat".to_string(),
         "Microsoft.UI.Xaml.Controls.DisabledFormattingAccelerators".to_string(),
         "Microsoft.UI.Xaml.Controls.TextControlPasteEventHandler".to_string(),

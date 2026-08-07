@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x5b3d760b52e59d91
+let kayaSpecHash: UInt64 = 0xd8165a4995d2554f
 
 struct KayaTx {
     var bytes = Data()
@@ -105,164 +105,164 @@ struct KayaTx {
 
     /// Create a signal holding `initial`.
     mutating func createSignal(_ signalId: UInt64, _ initial: KayaValue) {
-        let start = self.begin(UInt16(KAYA_TX_CREATE_SIGNAL))
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_SIGNAL))
         self.u64(signalId)
         self.value(initial)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Replace a signal's value; keep-latest per batch.
     mutating func writeSignal(_ signalId: UInt64, _ value: KayaValue) {
-        let start = self.begin(UInt16(KAYA_TX_WRITE_SIGNAL))
+        let kayaAt = self.begin(UInt16(KAYA_TX_WRITE_SIGNAL))
         self.u64(signalId)
         self.value(value)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Create a live widget, or declare a template node inside a scope.
     mutating func createWidget(_ widgetId: UInt64, _ kind: UInt32) {
-        let start = self.begin(UInt16(KAYA_TX_CREATE_WIDGET))
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_WIDGET))
         self.u64(widgetId)
         self.u32(kind)
         self.u32(0)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Append `child` to `parent` (same zone only).
     mutating func addChild(_ parent: UInt64, _ child: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_ADD_CHILD))
+        let kayaAt = self.begin(UInt16(KAYA_TX_ADD_CHILD))
         self.u64(parent)
         self.u64(child)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Mount a root into a window (0 = the default window).
     mutating func mount(_ window: UInt64, _ root: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_MOUNT))
+        let kayaAt = self.begin(UInt16(KAYA_TX_MOUNT))
         self.u64(window)
         self.u64(root)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template.
     mutating func createCollection(_ collectionId: UInt64, _ variants: [[UInt32]]) {
-        let start = self.begin(UInt16(KAYA_TX_CREATE_COLLECTION))
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_COLLECTION))
         self.u64(collectionId)
         self.variantSchemas(variants)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case.
     mutating func collectionInsert(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ variant: UInt32, _ fields: [KayaValue]) {
-        let start = self.begin(UInt16(KAYA_TX_COLLECTION_INSERT))
+        let kayaAt = self.begin(UInt16(KAYA_TX_COLLECTION_INSERT))
         self.u64(collectionId)
         self.values(path)
         self.value(key)
         self.u32(variant)
         self.u32(0)
         self.values(fields)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place.
     mutating func collectionUpdate(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ variant: UInt32, _ fields: [KayaValue]) {
-        let start = self.begin(UInt16(KAYA_TX_COLLECTION_UPDATE))
+        let kayaAt = self.begin(UInt16(KAYA_TX_COLLECTION_UPDATE))
         self.u64(collectionId)
         self.values(path)
         self.value(key)
         self.u32(variant)
         self.u32(0)
         self.values(fields)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Remove an entry; its stamped copy tears down.
     mutating func collectionRemove(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue) {
-        let start = self.begin(UInt16(KAYA_TX_COLLECTION_REMOVE))
+        let kayaAt = self.begin(UInt16(KAYA_TX_COLLECTION_REMOVE))
         self.u64(collectionId)
         self.values(path)
         self.value(key)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// A For over a collection; opens a template scope until template_end.
     mutating func createFor(_ id: UInt64, _ collectionId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_CREATE_FOR))
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_FOR))
         self.u64(id)
         self.u64(collectionId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// A When over a Bool signal; opens a template scope until template_end.
     mutating func createWhen(_ id: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_CREATE_WHEN))
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_WHEN))
         self.u64(id)
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Close the innermost template scope.
     mutating func templateEnd() {
-        let start = self.begin(UInt16(KAYA_TX_TEMPLATE_END))
-        self.end(start)
+        let kayaAt = self.begin(UInt16(KAYA_TX_TEMPLATE_END))
+        self.end(kayaAt)
     }
 
     /// Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them.
     mutating func collectionMove(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ before: [KayaValue]) {
-        let start = self.begin(UInt16(KAYA_TX_COLLECTION_MOVE))
+        let kayaAt = self.begin(UInt16(KAYA_TX_COLLECTION_MOVE))
         self.u64(collectionId)
         self.values(path)
         self.value(key)
         self.values(before)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does).
     mutating func collectionUpdateField(_ collectionId: UInt64, _ path: [KayaValue], _ key: KayaValue, _ field: UInt32, _ variant: UInt32, _ value: KayaValue) {
-        let start = self.begin(UInt16(KAYA_TX_COLLECTION_UPDATE_FIELD))
+        let kayaAt = self.begin(UInt16(KAYA_TX_COLLECTION_UPDATE_FIELD))
         self.u64(collectionId)
         self.values(path)
         self.value(key)
         self.u32(field)
         self.u32(variant)
         self.value(value)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly.
     mutating func variantCase(_ variant: UInt32) {
-        let start = self.begin(UInt16(KAYA_TX_VARIANT_CASE))
+        let kayaAt = self.begin(UInt16(KAYA_TX_VARIANT_CASE))
         self.u32(variant)
         self.u32(0)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy.
     mutating func widgetCommand(_ widgetId: UInt64, _ command: UInt32) {
-        let start = self.begin(UInt16(KAYA_TX_WIDGET_COMMAND))
+        let kayaAt = self.begin(UInt16(KAYA_TX_WIDGET_COMMAND))
         self.u64(widgetId)
         self.u32(command)
         self.u32(0)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists.
     mutating func createWindow(_ windowId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_CREATE_WINDOW))
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_WINDOW))
         self.u64(windowId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it.
     mutating func destroyWindow(_ windowId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_DESTROY_WINDOW))
+        let kayaAt = self.begin(UInt16(KAYA_TX_DESTROY_WINDOW))
         self.u64(windowId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires.
     mutating func showAlert(_ window: UInt64, _ alert: UInt64, _ actions: UInt32, _ title: KayaValue, _ message: KayaValue, _ action0: KayaValue, _ action1: KayaValue, _ cancel: KayaValue) {
-        let start = self.begin(UInt16(KAYA_TX_SHOW_ALERT))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SHOW_ALERT))
         self.u64(window)
         self.u64(alert)
         self.u32(actions)
@@ -272,965 +272,993 @@ struct KayaTx {
         self.value(action0)
         self.value(action1)
         self.value(cancel)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation).
     mutating func pushEntry(_ window: UInt64, _ entry: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_PUSH_ENTRY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_PUSH_ENTRY))
         self.u64(window)
         self.u64(entry)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch.
     mutating func popEntry(_ window: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_POP_ENTRY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_POP_ENTRY))
         self.u64(window)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements.
     mutating func setEntryProp(_ entry: UInt64, _ prop: UInt32, _ source: UInt32) {
-        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
         self.u64(entry)
         self.u32(prop)
         self.u32(source)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections).
     mutating func addSection(_ window: UInt64, _ section: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_ADD_SECTION))
+        let kayaAt = self.begin(UInt16(KAYA_TX_ADD_SECTION))
         self.u64(window)
         self.u64(section)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive.
     mutating func selectSection(_ window: UInt64, _ section: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SELECT_SECTION))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SELECT_SECTION))
         self.u64(window)
         self.u64(section)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements.
     mutating func setSectionProp(_ section: UInt64, _ prop: UInt32, _ source: UInt32) {
-        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
         self.u64(section)
         self.u32(prop)
         self.u32(source)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus).
     mutating func menuItemCreate(_ item: UInt64, _ kind: UInt32) {
-        let start = self.begin(UInt16(KAYA_TX_MENU_ITEM_CREATE))
+        let kayaAt = self.begin(UInt16(KAYA_TX_MENU_ITEM_CREATE))
         self.u64(item)
         self.u32(kind)
         self.u32(0)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root.
     mutating func menuItemAppend(_ parent: UInt64, _ child: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_MENU_ITEM_APPEND))
+        let kayaAt = self.begin(UInt16(KAYA_TX_MENU_ITEM_APPEND))
         self.u64(parent)
         self.u64(child)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error.
     mutating func menubarAppend(_ window: UInt64, _ item: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_MENUBAR_APPEND))
+        let kayaAt = self.begin(UInt16(KAYA_TX_MENUBAR_APPEND))
         self.u64(window)
         self.u64(item)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home).
     mutating func contextAttach(_ widget: UInt64, _ item: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_CONTEXT_ATTACH))
+        let kayaAt = self.begin(UInt16(KAYA_TX_CONTEXT_ATTACH))
         self.u64(widget)
         self.u64(item)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach.
     mutating func contextAttachNode(_ node: UInt64, _ item: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_CONTEXT_ATTACH_NODE))
+        let kayaAt = self.begin(UInt16(KAYA_TX_CONTEXT_ATTACH_NODE))
         self.u64(node)
         self.u64(item)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier.
     mutating func setMenuProp(_ item: UInt64, _ prop: UInt32, _ source: UInt32) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(prop)
         self.u32(source)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got.
     mutating func showFileDialog(_ window: UInt64, _ dialog: UInt64, _ multiple: UInt32, _ filters: [KayaValue]) {
-        let start = self.begin(UInt16(KAYA_TX_SHOW_FILE_DIALOG))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SHOW_FILE_DIALOG))
         self.u64(window)
         self.u64(dialog)
         self.u32(multiple)
         self.u32(0)
         self.values(filters)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya.
     mutating func copy(_ present: UInt32, _ fileCount: UInt32, _ customCount: UInt32, _ reps: [KayaValue]) {
-        let start = self.begin(UInt16(KAYA_TX_COPY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_COPY))
         self.u32(present)
         self.u32(fileCount)
         self.u32(customCount)
         self.u32(0)
         self.values(reps)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike.
     mutating func readClipboard(_ request: UInt64, _ accepting: KayaValue) {
-        let start = self.begin(UInt16(KAYA_TX_READ_CLIPBOARD))
+        let kayaAt = self.begin(UInt16(KAYA_TX_READ_CLIPBOARD))
         self.u64(request)
         self.value(accepting)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary.
     mutating func undoGroup(_ window: UInt64, _ label: KayaValue) {
-        let start = self.begin(UInt16(KAYA_TX_UNDO_GROUP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_UNDO_GROUP))
         self.u64(window)
         self.value(label)
-        self.end(start)
+        self.end(kayaAt)
+    }
+
+    /// DECLARE the set of decorated ranges on a textarea, replacing whatever was declared before (docs/ranges-plan.md D1/D2). `ranges` holds 2*`count` I64 values — start then end, in UTF-8 BYTE offsets into the widget's current guest-visible text; an empty set is the clear.  THE OFFSET UNIT AND ITS THREE RULES, once, here, because four of the five platforms answer a malformed offset differently and one of them ABORTS THE PROCESS (scratchpad/ranges-units.md §3: an out-of-range NSTextStorage attribute is an NSRangeException, exit 134). The core refuses before lowering: `start <= end`, `end <= text.len()`, and both endpoints on a CODE-POINT boundary. A GRAPHEME split is deliberately NOT refused and is the stated carve-out — the platforms disagree about what a grapheme is (java.text.BreakIterator counts the ZWJ family as 11 clusters where .NET and Swift count 5, measured), so a core that refused by its own table would refuse ranges three platforms honor. The range covers exactly the code points it names; a platform may widen what it PAINTS to the whole cluster.  APP-OWNED AND NEVER TRACKED. kaya adjusts nothing across edits: a declared set is bound to the text it was declared against, and a backend paints it only while the widget still holds that text — the first keystroke, programmatic write or native undo drops the set with nothing said. The app re-declares from the fold `text_changed` already drives, which is the same uncontrolled contract the text itself has. Range tracking is editor-component work and lives in the app.  TEXTAREA ONLY this milestone. The entry is deferred with measured per-platform reasons (docs/deferred.md): GTK's entry highlight rides absolute byte offsets that do not follow edits and is not readable over AT-SPI, macOS destroys an entry's highlight the moment it loses focus (the field editor is the window's, not the field's), and no consumer wants it — an editor's find bar decorates a document.
+    mutating func highlightRanges(_ widgetId: UInt64, _ count: UInt32, _ ranges: [KayaValue]) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_HIGHLIGHT_RANGES))
+        self.u64(widgetId)
+        self.u32(count)
+        self.u32(0)
+        self.values(ranges)
+        self.end(kayaAt)
+    }
+
+    /// Put the textarea's SELECTION at one range (UTF-8 byte offsets, validated exactly as highlight_ranges is). `start == end` is a caret and is legal — every platform's text object models a degenerate range.  ITS OWN RECORD RATHER THAN A `widget_command`, which it otherwise is exactly (momentary, fire-and-forget, the app's sanctioned crossing into widget-owned state): that record's layout has nowhere to put offsets, and growing it two U64s would hang two dead fields on `clear` and `focus` and make `focus(w, 0, 0)` representable.  REFUSED DURING AN INPUT-METHOD COMPOSITION, in every backend, under the reason `ime_composition` (docs/ranges-plan.md D4). Measured on macOS: honoring it COMMITS the marked text into the document and into the app's model mid-word, which is data loss shaped like a feature, and it shifts every later offset by the committed length. A refusal here is a NO-OP AND NOT A PANIC — unlike undo's D4, which refuses an app-programming error the app can fix. Composition state is on no kaya channel and never will be (there are no widget mirror reads), so the same app code is correct one millisecond and refused the next; the app that wants the selection waits for the composition to end, which `text_changed` announces anyway. HIGHLIGHT and REVEAL do not disturb a composition and are not refused (measured, same probe).
+    mutating func selectRange(_ widgetId: UInt64, _ start: UInt64, _ stop: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SELECT_RANGE))
+        self.u64(widgetId)
+        self.u64(start)
+        self.u64(stop)
+        self.end(kayaAt)
+    }
+
+    /// Scroll the textarea so a range is inside the viewport (UTF-8 byte offsets, validated exactly as highlight_ranges is). A PURE EFFECT: it moves no state, the selection is untouched, and per docs/undo-plan.md A2 undo does not restore it — undo restores state, not where you were looking, which is why it is permitted inside an undo group and simply not inverted.  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not kaya's: each backend calls its own scroll-to-range (scrollRangeToVisible, ScrollIntoView, gtk_text_view_scroll_to_iter, bringIntoView), so how much context lands around the range is native behaviour. The observable kaya fixes is containment, which is the only thing every platform agrees on.
+    mutating func revealRange(_ widgetId: UInt64, _ start: UInt64, _ stop: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_REVEAL_RANGE))
+        self.u64(widgetId)
+        self.u64(start)
+        self.u64(stop)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant text value.
     mutating func setText(_ widgetId: UInt64, _ text: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_TEXT))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(text))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound text value.
     mutating func bindText(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_TEXT))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindTextElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_TEXT))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant checked value.
     mutating func setChecked(_ widgetId: UInt64, _ checked: Bool) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_CHECKED))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.bool(checked))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound checked value.
     mutating func bindChecked(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_CHECKED))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindCheckedElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_CHECKED))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant value value.
     mutating func setValue(_ widgetId: UInt64, _ value: Double) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_VALUE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(value))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound value value.
     mutating func bindValue(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_VALUE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindValueElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_VALUE))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant min value.
     mutating func setMin(_ widgetId: UInt64, _ min: Double) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_MIN))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(min))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound min value.
     mutating func bindMin(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_MIN))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindMinElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_MIN))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant max value.
     mutating func setMax(_ widgetId: UInt64, _ max: Double) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_MAX))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(max))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound max value.
     mutating func bindMax(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_MAX))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindMaxElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_MAX))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant source value.
     mutating func setSource(_ widgetId: UInt64, _ handle: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_SOURCE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.blob(handle))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound source value.
     mutating func bindSource(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_SOURCE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindSourceElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_SOURCE))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant grow value.
     mutating func setGrow(_ widgetId: UInt64, _ grow: Double) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_GROW))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(grow))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound grow value.
     mutating func bindGrow(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_GROW))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindGrowElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_GROW))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant spacing value.
     mutating func setSpacing(_ widgetId: UInt64, _ spacing: Double) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_SPACING))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(spacing))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound spacing value.
     mutating func bindSpacing(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_SPACING))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindSpacingElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_SPACING))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant align value.
     mutating func setAlign(_ widgetId: UInt64, _ align: Int64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_ALIGN))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.i64(align))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound align value.
     mutating func bindAlign(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_ALIGN))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindAlignElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_ALIGN))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant indeterminate value.
     mutating func setIndeterminate(_ widgetId: UInt64, _ indeterminate: Bool) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_INDETERMINATE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.bool(indeterminate))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound indeterminate value.
     mutating func bindIndeterminate(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_INDETERMINATE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindIndeterminateElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_INDETERMINATE))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant columns value.
     mutating func setColumns(_ widgetId: UInt64, _ columns: Double) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_COLUMNS))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(columns))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound columns value.
     mutating func bindColumns(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_COLUMNS))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindColumnsElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_COLUMNS))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant a11y_id value.
     mutating func setA11yId(_ widgetId: UInt64, _ a11yId: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_A11Y_ID))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(a11yId))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound a11y_id value.
     mutating func bindA11yId(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_A11Y_ID))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindA11yIdElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_A11Y_ID))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant a11y_label value.
     mutating func setA11yLabel(_ widgetId: UInt64, _ a11yLabel: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_A11Y_LABEL))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(a11yLabel))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound a11y_label value.
     mutating func bindA11yLabel(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_A11Y_LABEL))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindA11yLabelElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_A11Y_LABEL))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant a11y_hint value.
     mutating func setA11yHint(_ widgetId: UInt64, _ a11yHint: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_A11Y_HINT))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(a11yHint))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound a11y_hint value.
     mutating func bindA11yHint(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_A11Y_HINT))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindA11yHintElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_A11Y_HINT))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a constant accepts value.
     mutating func setAccepts(_ widgetId: UInt64, _ accepts: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_ACCEPTS))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(accepts))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property with a signal-bound accepts value.
     mutating func bindAccepts(_ widgetId: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_ACCEPTS))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_property bound to one field of the element of the
     /// enclosing For, `level` Fors up (0 = nearest).
     mutating func bindAcceptsElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
-        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
         self.u64(widgetId)
         self.u32(UInt32(KAYA_PROP_ACCEPTS))
         self.u32(UInt32(KAYA_SOURCE_ELEMENT))
         self.u32(level)
         self.u32(field)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_TITLE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(title))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a signal-bound title value (window 0, the primary surface).
     mutating func bindWindowTitle(_ window: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_TITLE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a constant width value (window 0, the primary surface).
     mutating func setWindowWidth(_ window: UInt64, _ width: Double) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_WIDTH))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(width))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a signal-bound width value (window 0, the primary surface).
     mutating func bindWindowWidth(_ window: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_WIDTH))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a constant height value (window 0, the primary surface).
     mutating func setWindowHeight(_ window: UInt64, _ height: Double) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_HEIGHT))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(height))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a signal-bound height value (window 0, the primary surface).
     mutating func bindWindowHeight(_ window: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_HEIGHT))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a constant veto_close value (window 0, the primary surface).
     mutating func setWindowVetoClose(_ window: UInt64, _ vetoClose: Bool) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_VETO_CLOSE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.bool(vetoClose))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a signal-bound veto_close value (window 0, the primary surface).
     mutating func bindWindowVetoClose(_ window: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_VETO_CLOSE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a constant sections_presentation value (window 0, the primary surface).
     mutating func setWindowSectionsPresentation(_ window: UInt64, _ sectionsPresentation: Int64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_SECTIONS_PRESENTATION))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.i64(sectionsPresentation))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a signal-bound sections_presentation value (window 0, the primary surface).
     mutating func bindWindowSectionsPresentation(_ window: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_SECTIONS_PRESENTATION))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a constant list_detail value (window 0, the primary surface).
     mutating func setWindowListDetail(_ window: UInt64, _ listDetail: Bool) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_LIST_DETAIL))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.bool(listDetail))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a signal-bound list_detail value (window 0, the primary surface).
     mutating func bindWindowListDetail(_ window: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_LIST_DETAIL))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a constant dirty value (window 0, the primary surface).
     mutating func setWindowDirty(_ window: UInt64, _ dirty: Bool) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_DIRTY))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.bool(dirty))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_window_prop with a signal-bound dirty value (window 0, the primary surface).
     mutating func bindWindowDirty(_ window: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_DIRTY))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_entry_prop with a constant title value.
     mutating func setEntryTitle(_ entry: UInt64, _ title: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
         self.u64(entry)
         self.u32(UInt32(KAYA_EPROP_TITLE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(title))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_entry_prop with a signal-bound title value.
     mutating func bindEntryTitle(_ entry: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
         self.u64(entry)
         self.u32(UInt32(KAYA_EPROP_TITLE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_entry_prop with a constant intercept_back value.
     mutating func setEntryInterceptBack(_ entry: UInt64, _ interceptBack: Bool) {
-        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
         self.u64(entry)
         self.u32(UInt32(KAYA_EPROP_INTERCEPT_BACK))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.bool(interceptBack))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_entry_prop with a signal-bound intercept_back value.
     mutating func bindEntryInterceptBack(_ entry: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
         self.u64(entry)
         self.u32(UInt32(KAYA_EPROP_INTERCEPT_BACK))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_section_prop with a constant title value.
     mutating func setSectionTitle(_ section: UInt64, _ title: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
         self.u64(section)
         self.u32(UInt32(KAYA_SPROP_TITLE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(title))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_section_prop with a signal-bound title value.
     mutating func bindSectionTitle(_ section: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
         self.u64(section)
         self.u32(UInt32(KAYA_SPROP_TITLE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_section_prop with a constant icon value.
     mutating func setSectionIcon(_ section: UInt64, _ handle: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
         self.u64(section)
         self.u32(UInt32(KAYA_SPROP_ICON))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.blob(handle))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_section_prop with a signal-bound icon value.
     mutating func bindSectionIcon(_ section: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
         self.u64(section)
         self.u32(UInt32(KAYA_SPROP_ICON))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a constant label value.
     mutating func setMenuLabel(_ item: UInt64, _ label: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_LABEL))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(label))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a signal-bound label value.
     mutating func bindMenuLabel(_ item: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_LABEL))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a constant enabled value.
     mutating func setMenuEnabled(_ item: UInt64, _ enabled: Bool) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_ENABLED))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.bool(enabled))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a signal-bound enabled value.
     mutating func bindMenuEnabled(_ item: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_ENABLED))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a constant checked value.
     mutating func setMenuChecked(_ item: UInt64, _ checked: Bool) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_CHECKED))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.bool(checked))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a signal-bound checked value.
     mutating func bindMenuChecked(_ item: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_CHECKED))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a constant value value.
     mutating func setMenuValue(_ item: UInt64, _ value: Double) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_VALUE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.f64(value))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a signal-bound value value.
     mutating func bindMenuValue(_ item: UInt64, _ signalId: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_VALUE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a constant icon value.
     mutating func setMenuIcon(_ item: UInt64, _ handle: UInt64) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_ICON))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.blob(handle))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a constant primary value.
     mutating func setMenuPrimary(_ item: UInt64, _ primary: Bool) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_PRIMARY))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.bool(primary))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a constant shortcut value, canonicalized here
     /// (the one binding-tier shortcut parser — no call site bypasses it).
     mutating func setMenuShortcut(_ item: UInt64, _ shortcut: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_SHORTCUT))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(kayaCanonicalizeShortcut(shortcut)))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     /// set_menu_prop with a constant role value.
     mutating func setMenuRole(_ item: UInt64, _ role: String) {
-        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
         self.u64(item)
         self.u32(UInt32(KAYA_MPROP_ROLE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(role))
-        self.end(start)
+        self.end(kayaAt)
     }
 
     func submit() {

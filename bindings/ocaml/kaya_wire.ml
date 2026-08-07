@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x5b3d760b52e59d91L
+let spec_hash = 0xd8165a4995d2554fL
 
 let value_bool = 1
 let value_i64 = 2
@@ -142,6 +142,9 @@ let tx_kind_show_file_dialog = 34
 let tx_kind_copy = 35
 let tx_kind_read_clipboard = 36
 let tx_kind_undo_group = 37
+let tx_kind_highlight_ranges = 38
+let tx_kind_select_range = 39
+let tx_kind_reveal_range = 40
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -169,6 +172,9 @@ let apply_kind_present_file_dialog = 24
 let apply_kind_copy = 25
 let apply_kind_read_clipboard = 26
 let apply_kind_clear_undo = 27
+let apply_kind_highlight_ranges = 28
+let apply_kind_select_range = 29
+let apply_kind_reveal_range = 30
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -487,6 +493,28 @@ let tx_undo_group window label =
   finish tx_kind_undo_group (fun b ->
       Buffer.add_int64_le b window;
       encode_value b label)
+
+(* DECLARE the set of decorated ranges on a textarea, replacing whatever was declared before (docs/ranges-plan.md D1/D2). `ranges` holds 2*`count` I64 values — start then end, in UTF-8 BYTE offsets into the widget's current guest-visible text; an empty set is the clear.  THE OFFSET UNIT AND ITS THREE RULES, once, here, because four of the five platforms answer a malformed offset differently and one of them ABORTS THE PROCESS (scratchpad/ranges-units.md §3: an out-of-range NSTextStorage attribute is an NSRangeException, exit 134). The core refuses before lowering: `start <= end`, `end <= text.len()`, and both endpoints on a CODE-POINT boundary. A GRAPHEME split is deliberately NOT refused and is the stated carve-out — the platforms disagree about what a grapheme is (java.text.BreakIterator counts the ZWJ family as 11 clusters where .NET and Swift count 5, measured), so a core that refused by its own table would refuse ranges three platforms honor. The range covers exactly the code points it names; a platform may widen what it PAINTS to the whole cluster.  APP-OWNED AND NEVER TRACKED. kaya adjusts nothing across edits: a declared set is bound to the text it was declared against, and a backend paints it only while the widget still holds that text — the first keystroke, programmatic write or native undo drops the set with nothing said. The app re-declares from the fold `text_changed` already drives, which is the same uncontrolled contract the text itself has. Range tracking is editor-component work and lives in the app.  TEXTAREA ONLY this milestone. The entry is deferred with measured per-platform reasons (docs/deferred.md): GTK's entry highlight rides absolute byte offsets that do not follow edits and is not readable over AT-SPI, macOS destroys an entry's highlight the moment it loses focus (the field editor is the window's, not the field's), and no consumer wants it — an editor's find bar decorates a document. *)
+let tx_highlight_ranges widget_id count ranges =
+  finish tx_kind_highlight_ranges (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int count);
+      Buffer.add_int32_le b 0l;
+      encode_values b ranges)
+
+(* Put the textarea's SELECTION at one range (UTF-8 byte offsets, validated exactly as highlight_ranges is). `start == end` is a caret and is legal — every platform's text object models a degenerate range.  ITS OWN RECORD RATHER THAN A `widget_command`, which it otherwise is exactly (momentary, fire-and-forget, the app's sanctioned crossing into widget-owned state): that record's layout has nowhere to put offsets, and growing it two U64s would hang two dead fields on `clear` and `focus` and make `focus(w, 0, 0)` representable.  REFUSED DURING AN INPUT-METHOD COMPOSITION, in every backend, under the reason `ime_composition` (docs/ranges-plan.md D4). Measured on macOS: honoring it COMMITS the marked text into the document and into the app's model mid-word, which is data loss shaped like a feature, and it shifts every later offset by the committed length. A refusal here is a NO-OP AND NOT A PANIC — unlike undo's D4, which refuses an app-programming error the app can fix. Composition state is on no kaya channel and never will be (there are no widget mirror reads), so the same app code is correct one millisecond and refused the next; the app that wants the selection waits for the composition to end, which `text_changed` announces anyway. HIGHLIGHT and REVEAL do not disturb a composition and are not refused (measured, same probe). *)
+let tx_select_range widget_id start stop =
+  finish tx_kind_select_range (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int64_le b start;
+      Buffer.add_int64_le b stop)
+
+(* Scroll the textarea so a range is inside the viewport (UTF-8 byte offsets, validated exactly as highlight_ranges is). A PURE EFFECT: it moves no state, the selection is untouched, and per docs/undo-plan.md A2 undo does not restore it — undo restores state, not where you were looking, which is why it is permitted inside an undo group and simply not inverted.  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not kaya's: each backend calls its own scroll-to-range (scrollRangeToVisible, ScrollIntoView, gtk_text_view_scroll_to_iter, bringIntoView), so how much context lands around the range is native behaviour. The observable kaya fixes is containment, which is the only thing every platform agrees on. *)
+let tx_reveal_range widget_id start stop =
+  finish tx_kind_reveal_range (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int64_le b start;
+      Buffer.add_int64_le b stop)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =

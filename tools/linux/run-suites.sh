@@ -38,7 +38,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -442,7 +442,13 @@ build_go() {
     # whole-directory sweep (dune, cabal, javac's wildcard, dotnet's
     # glob) and picks a new guest up for free, so Go was the one tier
     # where a landed guest could still have nothing to run.
+    # ...and the directory test is what decides, the mac runner's exact
+    # shape: a depth scene whose Go guest has not landed yet is SKIPPED,
+    # not a build failure. Without it this loop was the one place where
+    # putting a scene in DEPTH_SCENES broke the whole lane before a
+    # single leg ran.
     for guest in $SCENES $DEPTH_SCENES; do
+        [ -d "guests/go/$guest" ] || continue
         go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || return 1
     done
 }
@@ -957,6 +963,48 @@ for proto in x11 wayland; do
     # pool there.
     run "$proto" undo-rust env KAYA_SELFTEST=undo \
         "$CARGO_TARGET_DIR/debug/examples/undo"
+    drain
+    # The text-ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one,
+    # plus the two rules that make them a contract — a keystroke DROPS
+    # a declared set (D2) and a select_range mid-composition is REFUSED
+    # (D4). Through a11y-leg.sh: all three reads go to the accessibility
+    # bus (GtkTextTag attribute runs, the selection, and the viewport
+    # geometry the textarea's GtkScrolledWindow made observable), so the
+    # leg needs GTK_A11Y=atspi and a bus to sit on.
+    #
+    # ALONE BETWEEN DRAINS, the undo rule and for the same measured
+    # reason: `type " z"` delivers REAL key events, and on wayland the
+    # injector is a virtual keyboard whose seat makes keyboard focus
+    # exclusive across the compositor the pooled legs share.
+    #
+    # EVERY GUEST THIS LANE CARRIES — the sugar sweep landed all seven
+    # non-Swift bindings plus the C floor while this backend arm was
+    # being written, and one frozen script is compared byte-for-byte
+    # across all of them. The scene stays in DEPTH_SCENES: graduating it
+    # is one move made across every runner at once.
+    run "$proto" ranges-rust env KAYA_SELFTEST=ranges \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/ranges"
+    drain
+    run "$proto" ranges-c env KAYA_SELFTEST=ranges \
+        tools/linux/a11y-leg.sh /tmp/c-guests/ranges
+    drain
+    run "$proto" ranges-python env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/ranges.py
+    drain
+    run "$proto" ranges-go env KAYA_SELFTEST=ranges \
+        tools/linux/a11y-leg.sh /tmp/go-guests/ranges
+    drain
+    run "$proto" ranges-csharp env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    drain
+    run "$proto" ranges-ocaml env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/ranges.exe
+    drain
+    run "$proto" ranges-haskell env KAYA_SELFTEST=ranges \
+        tools/linux/a11y-leg.sh "$(hs_bin ranges)"
+    drain
+    run "$proto" ranges-java env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     drain
 done
 drain

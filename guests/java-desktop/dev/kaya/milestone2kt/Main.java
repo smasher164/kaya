@@ -120,6 +120,9 @@ public final class Main {
             case "dirty":
                 app = Dirty::app;
                 break;
+            case "ranges":
+                app = Ranges::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

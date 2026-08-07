@@ -14,6 +14,17 @@ pub const RESERVED: &[&str] = &[
     "rethrows", "static", "struct", "subscript", "typealias", "var", "break", "case",
     "continue", "default", "defer", "do", "else", "fallthrough", "for", "guard", "if", "in",
     "repeat", "return", "switch", "where", "while",
+    // NOT A KEYWORD — a local this generator EMITS. A record helper
+    // opens with `let kayaAt = self.begin(...)`, so a spec field of the
+    // same name would be shadowed inside its own helper and the record
+    // would carry the buffer offset where the field's value belongs.
+    // That is not hypothetical: the field was called `start` for about
+    // an hour, and `self.u64(start)` cheerfully wrote the record offset
+    // (the C generator had the same local and at least failed to
+    // compile). The local is kaya-prefixed so nothing an author writes
+    // can reach it, and it is named here so the generator refuses if
+    // anyone tries.
+    "kayaAt",
 ];
 
 fn camel(name: &str) -> String {
@@ -169,34 +180,34 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /// set_property with a constant {prop} value."));
         c.line(&format!("    mutating func set{pc}(_ widgetId: UInt64, _ {p}: {ty}) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
         c.line("        self.u64(widgetId)");
         c.line(&format!("        self.u32(UInt32(KAYA_PROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
         c.line(&format!("        self.value(.{ctor}({p}))"));
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
         c.line("");
         c.line(&format!("    /// set_property with a signal-bound {prop} value."));
         c.line(&format!("    mutating func bind{pc}(_ widgetId: UInt64, _ signalId: UInt64) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
         c.line("        self.u64(widgetId)");
         c.line(&format!("        self.u32(UInt32(KAYA_PROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
         c.line("        self.u64(signalId)");
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
         c.line("");
         c.line("    /// set_property bound to one field of the element of the");
         c.line("    /// enclosing For, `level` Fors up (0 = nearest).");
         c.line(&format!("    mutating func bind{pc}Element(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))");
         c.line("        self.u64(widgetId)");
         c.line(&format!("        self.u32(UInt32(KAYA_PROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_ELEMENT))");
         c.line("        self.u32(level)");
         c.line("        self.u32(field)");
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
     }
 
@@ -216,22 +227,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /// set_window_prop with a constant {prop} value (window 0, the primary surface)."));
         c.line(&format!("    mutating func setWindow{pc}(_ window: UInt64, _ {p}: {ty}) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))");
         c.line("        self.u64(window)");
         c.line(&format!("        self.u32(UInt32(KAYA_WPROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
         c.line(&format!("        self.value(.{ctor}({p}))"));
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
         c.line("");
         c.line(&format!("    /// set_window_prop with a signal-bound {prop} value (window 0, the primary surface)."));
         c.line(&format!("    mutating func bindWindow{pc}(_ window: UInt64, _ signalId: UInt64) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))");
         c.line("        self.u64(window)");
         c.line(&format!("        self.u32(UInt32(KAYA_WPROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
         c.line("        self.u64(signalId)");
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
     }
 
@@ -248,22 +259,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /// set_entry_prop with a constant {prop} value."));
         c.line(&format!("    mutating func setEntry{pc}(_ entry: UInt64, _ {p}: {ty}) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))");
         c.line("        self.u64(entry)");
         c.line(&format!("        self.u32(UInt32(KAYA_EPROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
         c.line(&format!("        self.value(.{ctor}({p}))"));
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
         c.line("");
         c.line(&format!("    /// set_entry_prop with a signal-bound {prop} value."));
         c.line(&format!("    mutating func bindEntry{pc}(_ entry: UInt64, _ signalId: UInt64) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))");
         c.line("        self.u64(entry)");
         c.line(&format!("        self.u32(UInt32(KAYA_EPROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
         c.line("        self.u64(signalId)");
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
     }
 
@@ -280,22 +291,22 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("    /// set_section_prop with a constant {prop} value."));
         c.line(&format!("    mutating func setSection{pc}(_ section: UInt64, _ {p}: {ty}) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))");
         c.line("        self.u64(section)");
         c.line(&format!("        self.u32(UInt32(KAYA_SPROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
         c.line(&format!("        self.value(.{ctor}({p}))"));
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
         c.line("");
         c.line(&format!("    /// set_section_prop with a signal-bound {prop} value."));
         c.line(&format!("    mutating func bindSection{pc}(_ section: UInt64, _ signalId: UInt64) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))");
         c.line("        self.u64(section)");
         c.line(&format!("        self.u32(UInt32(KAYA_SPROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
         c.line("        self.u64(signalId)");
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
     }
 
@@ -327,23 +338,23 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line(&format!("    /// set_menu_prop with a constant {prop} value."));
         }
         c.line(&format!("    mutating func setMenu{pc}(_ item: UInt64, _ {p}: {ty}) {{"));
-        c.line("        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))");
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))");
         c.line("        self.u64(item)");
         c.line(&format!("        self.u32(UInt32(KAYA_MPROP_{up}))"));
         c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
         c.line(&format!("        self.value({expr})"));
-        c.line("        self.end(start)");
+        c.line("        self.end(kayaAt)");
         c.line("    }");
         if crate::menu_prop_bindable(prop) {
             c.line("");
             c.line(&format!("    /// set_menu_prop with a signal-bound {prop} value."));
             c.line(&format!("    mutating func bindMenu{pc}(_ item: UInt64, _ signalId: UInt64) {{"));
-            c.line("        let start = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))");
+            c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))");
             c.line("        self.u64(item)");
             c.line(&format!("        self.u32(UInt32(KAYA_MPROP_{up}))"));
             c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
             c.line("        self.u64(signalId)");
-            c.line("        self.end(start)");
+            c.line("        self.end(kayaAt)");
             c.line("    }");
         }
     }
@@ -668,7 +679,7 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
         sig.join(", ")
     ));
     c.line(&format!(
-        "        let start = self.begin(UInt16(KAYA_TX_{}))",
+        "        let kayaAt = self.begin(UInt16(KAYA_TX_{}))",
         r.name.to_uppercase()
     ));
     for f in r.fields {
@@ -681,6 +692,6 @@ fn emit_packer(c: &mut Ctx, r: &Record) {
             FieldTy::VariantSchemas => format!("        self.variantSchemas({})", camel(f.name)),
         });
     }
-    c.line("        self.end(start)");
+    c.line("        self.end(kayaAt)");
     c.line("    }");
 }

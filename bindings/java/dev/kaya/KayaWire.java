@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x5b3d760b52e59d91L;
+    public static final long SPEC_HASH = 0xd8165a4995d2554fL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -140,6 +140,9 @@ public final class KayaWire {
     public static final short TX_KIND_COPY = 35;
     public static final short TX_KIND_READ_CLIPBOARD = 36;
     public static final short TX_KIND_UNDO_GROUP = 37;
+    public static final short TX_KIND_HIGHLIGHT_RANGES = 38;
+    public static final short TX_KIND_SELECT_RANGE = 39;
+    public static final short TX_KIND_REVEAL_RANGE = 40;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -167,6 +170,9 @@ public final class KayaWire {
     public static final short APPLY_KIND_COPY = 25;
     public static final short APPLY_KIND_READ_CLIPBOARD = 26;
     public static final short APPLY_KIND_CLEAR_UNDO = 27;
+    public static final short APPLY_KIND_HIGHLIGHT_RANGES = 28;
+    public static final short APPLY_KIND_SELECT_RANGE = 29;
+    public static final short APPLY_KIND_REVEAL_RANGE = 30;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -558,6 +564,34 @@ public final class KayaWire {
         ByteBuffer b = begin(TX_KIND_UNDO_GROUP);
         b.putLong(window);
         encodeValue(b, label);
+        return finish(b);
+    }
+
+    /** DECLARE the set of decorated ranges on a textarea, replacing whatever was declared before (docs/ranges-plan.md D1/D2). `ranges` holds 2*`count` I64 values — start then end, in UTF-8 BYTE offsets into the widget's current guest-visible text; an empty set is the clear.  THE OFFSET UNIT AND ITS THREE RULES, once, here, because four of the five platforms answer a malformed offset differently and one of them ABORTS THE PROCESS (scratchpad/ranges-units.md §3: an out-of-range NSTextStorage attribute is an NSRangeException, exit 134). The core refuses before lowering: `start <= end`, `end <= text.len()`, and both endpoints on a CODE-POINT boundary. A GRAPHEME split is deliberately NOT refused and is the stated carve-out — the platforms disagree about what a grapheme is (java.text.BreakIterator counts the ZWJ family as 11 clusters where .NET and Swift count 5, measured), so a core that refused by its own table would refuse ranges three platforms honor. The range covers exactly the code points it names; a platform may widen what it PAINTS to the whole cluster.  APP-OWNED AND NEVER TRACKED. kaya adjusts nothing across edits: a declared set is bound to the text it was declared against, and a backend paints it only while the widget still holds that text — the first keystroke, programmatic write or native undo drops the set with nothing said. The app re-declares from the fold `text_changed` already drives, which is the same uncontrolled contract the text itself has. Range tracking is editor-component work and lives in the app.  TEXTAREA ONLY this milestone. The entry is deferred with measured per-platform reasons (docs/deferred.md): GTK's entry highlight rides absolute byte offsets that do not follow edits and is not readable over AT-SPI, macOS destroys an entry's highlight the moment it loses focus (the field editor is the window's, not the field's), and no consumer wants it — an editor's find bar decorates a document. */
+    public static byte[] txHighlightRanges(long widgetId, int count, Object[] ranges) {
+        ByteBuffer b = begin(TX_KIND_HIGHLIGHT_RANGES);
+        b.putLong(widgetId);
+        b.putInt(count);
+        b.putInt(0);
+        encodeValues(b, ranges);
+        return finish(b);
+    }
+
+    /** Put the textarea's SELECTION at one range (UTF-8 byte offsets, validated exactly as highlight_ranges is). `start == end` is a caret and is legal — every platform's text object models a degenerate range.  ITS OWN RECORD RATHER THAN A `widget_command`, which it otherwise is exactly (momentary, fire-and-forget, the app's sanctioned crossing into widget-owned state): that record's layout has nowhere to put offsets, and growing it two U64s would hang two dead fields on `clear` and `focus` and make `focus(w, 0, 0)` representable.  REFUSED DURING AN INPUT-METHOD COMPOSITION, in every backend, under the reason `ime_composition` (docs/ranges-plan.md D4). Measured on macOS: honoring it COMMITS the marked text into the document and into the app's model mid-word, which is data loss shaped like a feature, and it shifts every later offset by the committed length. A refusal here is a NO-OP AND NOT A PANIC — unlike undo's D4, which refuses an app-programming error the app can fix. Composition state is on no kaya channel and never will be (there are no widget mirror reads), so the same app code is correct one millisecond and refused the next; the app that wants the selection waits for the composition to end, which `text_changed` announces anyway. HIGHLIGHT and REVEAL do not disturb a composition and are not refused (measured, same probe). */
+    public static byte[] txSelectRange(long widgetId, long start, long stop) {
+        ByteBuffer b = begin(TX_KIND_SELECT_RANGE);
+        b.putLong(widgetId);
+        b.putLong(start);
+        b.putLong(stop);
+        return finish(b);
+    }
+
+    /** Scroll the textarea so a range is inside the viewport (UTF-8 byte offsets, validated exactly as highlight_ranges is). A PURE EFFECT: it moves no state, the selection is untouched, and per docs/undo-plan.md A2 undo does not restore it — undo restores state, not where you were looking, which is why it is permitted inside an undo group and simply not inverted.  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not kaya's: each backend calls its own scroll-to-range (scrollRangeToVisible, ScrollIntoView, gtk_text_view_scroll_to_iter, bringIntoView), so how much context lands around the range is native behaviour. The observable kaya fixes is containment, which is the only thing every platform agrees on. */
+    public static byte[] txRevealRange(long widgetId, long start, long stop) {
+        ByteBuffer b = begin(TX_KIND_REVEAL_RANGE);
+        b.putLong(widgetId);
+        b.putLong(start);
+        b.putLong(stop);
         return finish(b);
     }
 

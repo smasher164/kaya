@@ -77,6 +77,9 @@ mod undo;
 #[path = "dirty.rs"]
 mod dirty;
 
+#[path = "ranges.rs"]
+mod ranges;
+
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
 /// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
@@ -133,6 +136,14 @@ fn app(ctx: kaya::AppCtx) {
         // this host does not have (tools/android/run-emulator.sh says
         // where and why).
         Ok("dirty") => dirty::app(ctx),
+        // The text-ranges scene: HIGHLIGHT a set, SELECT one, REVEAL
+        // one, plus the two things that make those three a contract —
+        // a user's keystroke DROPS a declared set, and a select_range
+        // arriving mid-composition is REFUSED. The same guest the mac
+        // lane runs; the offsets are UTF-8 byte offsets there and here,
+        // and the document's CJK first line is what makes that a
+        // testable claim rather than a stated one.
+        Ok("ranges") => ranges::app(ctx),
         // The milestone-2 scene is the DEFAULT and says so: its leg
         // passes "1" (the selftest flag's original spelling, from
         // before the value doubled as a scene selector), and a build

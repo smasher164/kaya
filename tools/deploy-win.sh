@@ -102,6 +102,10 @@ for arg in "$@"; do
         # Likewise, until the `dirty` window prop has a sugar spelling in
         # the other seven bindings (docs/dirty-plan.md §2's fan-out).
         dirty_rust) SUITE="$arg" ;;
+        # Likewise, until the three range verbs and `set_text` have a
+        # sugar spelling in the other seven bindings
+        # (docs/ranges-plan.md §2's fan-out).
+        ranges_rust) SUITE="$arg" ;;
         # These two were wired as legs without arms here, so a single
         # leg could not be re-run in isolation — the one-leg-repeatedly
         # loop is the only practical way to characterise a rare flake.
@@ -219,7 +223,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -1374,6 +1378,23 @@ case "$SUITE" in
         # one failure that reads as somebody else's bug.
         drain_suites
         run_suite dirty_rust
+        drain_suites
+        # The ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one
+        # (docs/ranges-plan.md D1), plus the two rules that make those
+        # three a contract — a user's keystroke DROPS the declared set
+        # (D2) and a select_range arriving mid-composition is REFUSED
+        # (D4). Rust-only until the sugar sweep gives the other eight
+        # guests a spelling.
+        #
+        # DRAINED AROUND, and for the `type`/`compose` reason rather than
+        # the window one: both put real input where the platform sends
+        # it. `type` injects OS-GLOBAL keystrokes (the foreground
+        # confirmation is what keeps them out of a bystander's window),
+        # and `compose` starts a TSF composition in whatever document
+        # holds the KEYBOARD FOCUS — so a pooled leg stealing the
+        # foreground mid-scene would put a composition in someone else's
+        # control and this leg would fail for their reason.
+        run_suite ranges_rust
         drain_suites
         # The background scene: work off the app thread, posted back.
         # Its worker parks until a click releases it, so a binding that

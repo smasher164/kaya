@@ -1485,6 +1485,174 @@ public final class KayaApp {
     }
 
     /**
+     * A half-open range of a text widget's content, in KAYA'S UNIT:
+     * UTF-8 byte offsets into the widget's current text.
+     *
+     * <p>A TYPE RATHER THAN TWO INTS, because Java's own unit is not
+     * kaya's and the two are indistinguishable as bare numbers.
+     * {@code String.indexOf}, {@code length()} and {@code substring}
+     * all count UTF-16 code units; the wire counts UTF-8 bytes, which
+     * is what every binding sends and what the core validates and
+     * converts before a backend sees it (scratchpad/ranges-units.md).
+     * For ASCII the two agree, which is exactly why an unconverted
+     * index ships: one CJK word earlier in the document and every
+     * offset is three bytes per character short. The conformance
+     * scene's document opens with one for that reason — its matches sit
+     * at bytes 57, 203 and 753 where {@code indexOf} answers 51, 197
+     * and 747.
+     *
+     * <p>So the two factories NAME THE UNIT and there is no third way
+     * to make one: {@link #in} converts from Java's index, {@link
+     * #ofBytes} takes kaya's directly (an app whose model is already
+     * byte-addressed — a rope, a memory-mapped file, a language server
+     * — has them and should not pay to convert twice).
+     */
+    public static final class TextRange {
+        /** Start offset, in UTF-8 bytes, inclusive. */
+        public final long start;
+
+        /** End offset, in UTF-8 bytes, exclusive. */
+        public final long stop;
+
+        private TextRange(long start, long stop) {
+            this.start = start;
+            this.stop = stop;
+        }
+
+        /**
+         * A range from offsets that are ALREADY UTF-8 byte offsets
+         * into the widget's text.
+         *
+         * <p>The endpoints are checked against each other here and
+         * against the text itself in the core, which is the only place
+         * that holds it: an offset past the end, or one that splits a
+         * character, is refused there by name (a malformed offset
+         * reaching a backend is not a wrong colour — on macOS an
+         * out-of-range text attribute aborts the process).
+         */
+        public static TextRange ofBytes(long start, long stop) {
+            if (start < 0) {
+                throw new IllegalArgumentException(
+                        "kaya: text range start " + start + " is negative");
+            }
+            if (start > stop) {
+                throw new IllegalArgumentException(
+                        "kaya: text range start " + start + " is after stop " + stop);
+            }
+            return new TextRange(start, stop);
+        }
+
+        /**
+         * A range from JAVA'S OWN INDICES — UTF-16 code-unit offsets
+         * into {@code text}, the kind {@code indexOf} returns and
+         * {@code substring} takes — converted once against that text:
+         *
+         * <pre>{@code
+         * int at = doc.indexOf(needle);
+         * tx.selectRange(editor, TextRange.in(doc, at, at + needle.length()));
+         * }</pre>
+         *
+         * <p>{@code text} MUST BE THE WIDGET'S CURRENT TEXT, because a
+         * byte offset only means anything against the string it was
+         * measured on. That is the app's own document — the fold its
+         * change handler already keeps — and not a widget read: kaya
+         * has none.
+         */
+        public static TextRange in(String text, int startIndex, int stopIndex) {
+            if (startIndex > stopIndex) {
+                throw new IllegalArgumentException(
+                        "kaya: text range start index " + startIndex
+                        + " is after stop index " + stopIndex);
+            }
+            return new TextRange(byteOffset(text, startIndex), byteOffset(text, stopIndex));
+        }
+
+        /**
+         * Java's index into kaya's: the UTF-8 byte offset of the
+         * character at UTF-16 index {@code index} of {@code text}.
+         *
+         * <p>REFUSES AN INDEX THAT SPLITS A SURROGATE PAIR, which is
+         * the one way a Java app can hand out a byte offset that is
+         * silently wrong. For the string {@code ab} U+1F600 {@code cd},
+         * {@code substring(0, 3)} keeps a lone high surrogate, and
+         * encoding that to UTF-8 yields the single byte {@code 0x3F} —
+         * a literal {@code ?} —
+         * so the offset comes back 2 instead of 5 and every later
+         * offset in the document is short by three (measured against
+         * .NET, which substitutes U+FFFD instead and is wrong by a
+         * different amount: scratchpad/ranges-units.md §4). Neither
+         * runtime raises anything. An index inside a pair is not a
+         * position in the text, so it is refused here rather than
+         * converted into a plausible number.
+         *
+         * <p>Costs one encode of the prefix, and it is deliberately
+         * THE SAME ENCODE the wire performs on the text itself
+         * ({@code getBytes(UTF_8)}), so the two cannot disagree.
+         */
+        public static long byteOffset(String text, int index) {
+            if (index < 0 || index > text.length()) {
+                throw new IndexOutOfBoundsException(
+                        "kaya: index " + index + " is outside the text (" + text.length()
+                        + " UTF-16 code units)");
+            }
+            if (index > 0 && index < text.length()
+                    && Character.isHighSurrogate(text.charAt(index - 1))
+                    && Character.isLowSurrogate(text.charAt(index))) {
+                throw new IllegalArgumentException(
+                        "kaya: index " + index + " splits the surrogate pair for U+"
+                        + Integer.toHexString(text.codePointAt(index - 1)).toUpperCase()
+                        + " — it is inside a character, not between two");
+            }
+            return text.substring(0, index).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        }
+
+        /**
+         * Kaya's index into Java's: the UTF-16 index of the character
+         * at UTF-8 byte offset {@code offset} of {@code text}, so an
+         * app holding kaya's offsets can slice its own String with
+         * them — {@code text.substring(charIndex(text, r.start),
+         * charIndex(text, r.stop))}. The inverse of {@link
+         * #byteOffset}, and the direction an app needs when the
+         * offsets came from something byte-addressed (a grep, a
+         * language server) rather than from its own search.
+         *
+         * <p>An offset inside a character is refused, in the same
+         * words the core uses: it is not a position in the text.
+         */
+        public static int charIndex(String text, long offset) {
+            long at = 0;
+            int i = 0;
+            while (i < text.length()) {
+                if (at == offset) {
+                    return i;
+                }
+                int cp = text.codePointAt(i);
+                at += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+                if (at > offset) {
+                    throw new IllegalArgumentException(
+                            "kaya: byte offset " + offset + " is not a character boundary; it is"
+                            + " inside U+" + Integer.toHexString(cp).toUpperCase());
+                }
+                i += Character.charCount(cp);
+            }
+            if (at == offset) {
+                return i;
+            }
+            throw new IndexOutOfBoundsException(
+                    "kaya: byte offset " + offset + " is past the end of the text (" + at
+                    + " bytes)");
+        }
+
+        /** {@code start:stop} in kaya's unit — the spelling the scene
+         * scripts assert in, so a debug print and a failure message read
+         * alike. */
+        @Override
+        public String toString() {
+            return start + ":" + stop;
+        }
+    }
+
+    /**
      * A template node: a blueprint entry, stamped per collection entry.
      * Never on screen by itself; clicks on its copies arrive with the
      * copy's key path.
@@ -1986,6 +2154,23 @@ public final class KayaApp {
             }
         }
 
+        /**
+         * A widget's text: a label's caption, a button's title, and —
+         * on the uncontrolled text widgets — the "open a document into
+         * the editor" write.
+         *
+         * <p>ONE WRITE, NOT A BINDING. On an entry or a textarea the
+         * app is not pinning the field to a value it will keep pushing;
+         * it performs this write and hands the text back to the user,
+         * who owns it from that moment. The field answers with its
+         * ordinary change occurrence and the app's fold takes it from
+         * there — the same round trip a keystroke makes.
+         *
+         * <p>A write that CHANGES the text also drops whatever the app
+         * had declared over it (see {@link #highlightRanges}: ranges
+         * are bound to the text they were declared against), and it
+         * spends the field's native undo history.
+         */
         public void setText(Widget w, String text) {
             emit(KayaWire.txSetText(w.id, text));
         }
@@ -2331,6 +2516,84 @@ public final class KayaApp {
          * transaction like clear. */
         public void focus(Widget w) {
             emit(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_FOCUS));
+        }
+
+        /**
+         * DECLARE the decorated ranges of a textarea, replacing
+         * whatever was declared before; an empty list is the clear.
+         *
+         * <p>kaya ships no search. What to decorate is the app's
+         * question and every editor answers it differently — case
+         * folding, word boundaries, a regex dialect with its own rules
+         * — so a find engine, a find bar and a regex dialect belong to
+         * the app (docs/ranges-plan.md §3). What no app can write for
+         * itself is this half: colouring a run of a native text view.
+         * The search that feeds it is five lines of
+         * {@link String#indexOf}, and {@link TextRange#in} is where
+         * those five lines meet kaya's unit:
+         *
+         * <pre>{@code
+         * List<KayaApp.TextRange> hits = new ArrayList<>();
+         * for (int at = doc.indexOf(needle); at >= 0;
+         *         at = doc.indexOf(needle, at + needle.length())) {
+         *     hits.add(KayaApp.TextRange.in(doc, at, at + needle.length()));
+         * }
+         * tx.highlightRanges(editor, hits);
+         * }</pre>
+         *
+         * <p>APP-OWNED AND NEVER TRACKED. A declared set is bound to
+         * the text it was declared against: the first edit of any kind
+         * — a keystroke, a programmatic write, a native undo — drops
+         * the whole set with nothing said, and the app re-declares from
+         * the fold its change handler already keeps. Nothing in kaya
+         * adjusts a range across an edit, which is the same
+         * uncontrolled contract the text itself has (D2).
+         *
+         * <p>TEXTAREA ONLY this milestone; an entry refuses, naming
+         * itself (docs/deferred.md carries the measured per-platform
+         * reasons).
+         */
+        public void highlightRanges(Widget w, List<TextRange> ranges) {
+            Object[] flat = new Object[ranges.size() * 2];
+            for (int i = 0; i < ranges.size(); i++) {
+                flat[i * 2] = ranges.get(i).start;
+                flat[i * 2 + 1] = ranges.get(i).stop;
+            }
+            emit(KayaWire.txHighlightRanges(w.id, ranges.size(), flat));
+        }
+
+        /**
+         * Put the textarea's selection at one range; an empty range
+         * ({@code start == stop}) is a caret. Same offsets and the same
+         * validation as {@link #highlightRanges}.
+         *
+         * <p>REFUSED WHILE THE USER IS COMPOSING through an input
+         * method, in every backend, because honouring it commits the
+         * composition mid-word — measured on macOS, where the
+         * half-typed kana land in the document and in the app's own
+         * model. The refusal is a NO-OP AND NOT AN EXCEPTION:
+         * composition state is on no kaya channel, so the same app code
+         * is correct one millisecond and racing the next, and an app
+         * cannot be blamed for the user's typing rhythm. The selection
+         * is still worth asking for after the next change occurrence,
+         * which is what ends a composition anyway.
+         */
+        public void selectRange(Widget w, TextRange range) {
+            emit(KayaWire.txSelectRange(w.id, range.start, range.stop));
+        }
+
+        /**
+         * Scroll the textarea so a range is inside the viewport. A pure
+         * effect: it moves no state, leaves the selection alone, and
+         * undo does not put the scroll position back — undo restores
+         * state, not where you were looking.
+         *
+         * <p>How much context lands around the range is the platform's
+         * own scroll-to-range behaviour. What kaya fixes is
+         * containment, which is the only part every platform agrees on.
+         */
+        public void revealRange(Widget w, TextRange range) {
+            emit(KayaWire.txRevealRange(w.id, range.start, range.stop));
         }
 
         public Collection collection() {

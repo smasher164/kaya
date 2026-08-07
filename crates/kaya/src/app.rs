@@ -25,7 +25,7 @@ use crate::protocol::{
     CollectionId, CommandKind, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind, MenuProp,
     Occurrence, Path, Prop, PropValue,
     Record, SectionProp, SignalId, WindowId, WindowProp,
-    TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
+    TemplateNodeId, TextRange, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
 // --- Records: the app type is the schema --------------------------------
@@ -1574,6 +1574,99 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::WidgetCommand {
             widget,
             command: CommandKind::Focus,
+        });
+    }
+
+    /// Put text into a text widget programmatically — the "open a
+    /// document into the editor" write.
+    ///
+    /// SUGAR OVER THE GENERIC SETTER, and it earns its name here
+    /// because the widget is UNCONTROLLED: the app is not binding the
+    /// field to a value it will keep pushing, it is performing one
+    /// write and handing the text back to the user, who owns it from
+    /// that moment. The field answers with its ordinary `text_changed`
+    /// and the app's fold takes it from there — the same round trip a
+    /// keystroke makes.
+    ///
+    /// A write that CHANGES the text also drops whatever the app had
+    /// declared over it: ranges are bound to the text they were
+    /// declared against (see [`Tx::highlight_ranges`]), and it spends
+    /// the field's native undo history, which is why undo's D7 treats
+    /// it as an episode boundary.
+    pub fn set_text(&mut self, widget: WidgetId, text: &str) {
+        self.set(widget, Prop::Text, text);
+    }
+
+    /// DECLARE the decorated ranges of a textarea, replacing whatever
+    /// was declared before; an empty set is the clear.
+    ///
+    /// THE OFFSETS ARE RUST STRING INDICES — UTF-8 byte offsets into the
+    /// widget's current text — so the ranges an app already has are the
+    /// ranges kaya wants:
+    ///
+    /// ```ignore
+    /// let hits: Vec<_> = doc.match_indices(needle)
+    ///     .map(|(at, hit)| at..at + hit.len())
+    ///     .collect();
+    /// tx.highlight_ranges(editor, hits);
+    /// ```
+    ///
+    /// kaya ships no search: what to highlight is the app's question,
+    /// and a find engine, a find bar and a regex dialect belong to the
+    /// text editor (docs/ranges-plan.md §3). What kaya ships is the
+    /// primitive underneath, which no app can write for itself.
+    ///
+    /// APP-OWNED AND NEVER TRACKED. A declared set is bound to the text
+    /// it was declared against: the first edit of any kind drops it, and
+    /// the app re-declares from the fold `text_changed` already drives —
+    /// the same uncontrolled contract the text itself has. Nothing in
+    /// kaya adjusts a range across an edit.
+    ///
+    /// An offset that is past the end of the text, or that splits a
+    /// character, fails loudly here rather than in a backend: the five
+    /// platforms answer a malformed offset five different ways and one
+    /// of them aborts the process.
+    pub fn highlight_ranges(
+        &mut self,
+        widget: WidgetId,
+        ranges: impl IntoIterator<Item = std::ops::Range<usize>>,
+    ) {
+        self.ops.push(TxOp::HighlightRanges {
+            widget,
+            ranges: ranges
+                .into_iter()
+                .map(|r| TextRange::new(r.start as u64, r.end as u64))
+                .collect(),
+        });
+    }
+
+    /// Put the textarea's selection at one range (an empty range is a
+    /// caret). Same offsets, same validation as
+    /// [`Tx::highlight_ranges`].
+    ///
+    /// REFUSED WHILE THE USER IS COMPOSING through an input method, in
+    /// every backend, because honouring it commits the composition
+    /// mid-word — measured on macOS, where the half-typed kana land in
+    /// the document and in the app's own model. The refusal is a no-op,
+    /// not an error: composition state is on no kaya channel, so an app
+    /// cannot avoid the race and is not blamed for it. The selection the
+    /// app wanted is still worth asking for after the next
+    /// `text_changed`, which is what ends a composition.
+    pub fn select_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>) {
+        self.ops.push(TxOp::SelectRange {
+            widget,
+            range: TextRange::new(range.start as u64, range.end as u64),
+        });
+    }
+
+    /// Scroll the textarea so a range is inside the viewport. A pure
+    /// effect: it moves no state, leaves the selection alone, and undo
+    /// does not put the scroll position back (undo restores state, not
+    /// where you were looking).
+    pub fn reveal_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>) {
+        self.ops.push(TxOp::RevealRange {
+            widget,
+            range: TextRange::new(range.start as u64, range.end as u64),
         });
     }
 

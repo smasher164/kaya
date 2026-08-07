@@ -1194,6 +1194,41 @@ pub enum CommandKind {
     Focus,
 }
 
+/// A span of a text widget's content, in UTF-8 BYTE offsets into the
+/// widget's current guest-visible text — the unit the guest speaks and
+/// the only one with an O(1) validity predicate
+/// (scratchpad/ranges-units.md). `start <= end`; `start == end` is a
+/// caret.
+///
+/// THE SIBLING TYPE [`NativeRange`] IS THE POINT OF BOTH OF THEM.
+/// Every backend counts something else — UTF-16 code units on mac, iOS,
+/// Windows and Android, code points on GTK — and the core converts
+/// before it lowers. Two types rather than one make that conversion
+/// impossible to skip: an [`ApplyOp`] cannot be built out of a
+/// `TextRange`, so a backend physically cannot be handed an unconverted
+/// offset. Types over generation over runtime checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextRange {
+    pub start: u64,
+    pub stop: u64,
+}
+
+impl TextRange {
+    pub fn new(start: u64, stop: u64) -> Self {
+        Self { start, stop }
+    }
+}
+
+/// A span already converted into the unit THIS BUILD'S backend counts
+/// (see [`TextRange`]). Never constructed by a guest, never decoded from
+/// the tx wire: the only way to make one is the core's conversion
+/// against the text it validated the byte offsets against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeRange {
+    pub start: u64,
+    pub stop: u64,
+}
+
 /// A bound property's source: a constant, a signal reference, or —
 /// inside a template — one field of the element (the entry's record)
 /// of an enclosing For, `level` Fors up (0 = nearest). Nothing else;
@@ -1358,6 +1393,17 @@ pub enum TxOp {
     /// vanished-target no-op with them — stamped copies legitimately
     /// disappear under rebuild.
     WidgetCommand { widget: WidgetId, command: CommandKind },
+    /// DECLARE this textarea's decorated ranges, replacing the previous
+    /// set; an empty list is the clear. Byte offsets, validated at
+    /// apply against the widget's current text and never tracked
+    /// afterwards (docs/ranges-plan.md D1/D2).
+    HighlightRanges { widget: WidgetId, ranges: Vec<TextRange> },
+    /// Put the textarea's selection at one range (a caret when empty).
+    /// Refused by the backend during an input-method composition (D4).
+    SelectRange { widget: WidgetId, range: TextRange },
+    /// Scroll a range into the textarea's viewport. A pure effect:
+    /// undo does not restore it (docs/undo-plan.md A2).
+    RevealRange { widget: WidgetId, range: TextRange },
 }
 
 /// A transaction: applied atomically, in submission order, last write
@@ -1449,6 +1495,19 @@ pub enum ApplyOp {
     /// explicitly on toolkits that don't, the Stage set_text
     /// precedent).
     Command { id: WidgetId, command: CommandKind },
+    /// REPLACE the widget's decorated set with these ranges — already in
+    /// this build's native unit — and record the widget's text as it is
+    /// at this moment, painting the set only while the widget still
+    /// holds that text (the spec's lowering contract; docs/ranges-plan.md
+    /// D2). An empty list clears.
+    HighlightRanges { id: WidgetId, ranges: Vec<NativeRange> },
+    /// Move the selection, in native units. REFUSED while an
+    /// input-method composition is active on the widget, under the
+    /// reason `ime_composition` — a silent no-op, never a panic, because
+    /// the app cannot see composition state and so cannot avoid it (D4).
+    SelectRange { id: WidgetId, range: NativeRange },
+    /// Scroll the range into the widget's viewport, in native units.
+    RevealRange { id: WidgetId, range: NativeRange },
 }
 
 /// Where occurrences go: the Rust API consumes over mpsc, the C ABI over

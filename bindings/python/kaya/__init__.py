@@ -91,6 +91,59 @@ def _text_value(what, text):
         )
     return text
 
+
+def _text_range(what, span):
+    """One text range, normalized to the (start, stop) pair the wire
+    carries.
+
+    THE SPELLING IS `range(start, stop)` — Python's own half-open
+    interval of ints, which is exactly what a kaya range is — and a
+    plain (start, stop) pair is taken too, since an app that has just
+    computed two offsets already holds the pair. A `slice` is refused
+    rather than quietly reinterpreted: its endpoints are optional, and a
+    None there means "the text's own end", which this call cannot
+    resolve because it does not have the text.
+
+    NEGATIVE OFFSETS ARE REFUSED HERE, BY NAME, because Python hands
+    them out: `str.find` and `bytes.find` answer -1 for "not found", and
+    an unchecked -1 would reach the wire as a struct.error on one record
+    and as an enormous offset on another. kaya has no end-relative
+    offset.
+
+    EVERY OTHER MALFORMED RANGE IS THE CORE'S TO REFUSE — start after
+    stop, past the end of the text, or splitting a character — at its
+    one chokepoint, with the text in hand and the character it splits
+    nameable. Eight bindings re-deriving that check would be eight
+    approximations of one sentence (scratchpad/ranges-units.md §7).
+    """
+    if isinstance(span, range):
+        if span.step != 1:
+            raise ValueError(
+                f"kaya: {what} takes a contiguous range — {span!r} counts in "
+                f"steps of {span.step}"
+            )
+        start, stop = span.start, span.stop
+    elif isinstance(span, (tuple, list)) and len(span) == 2:
+        start, stop = span
+    else:
+        raise TypeError(
+            f"kaya: {what} takes a text range — range(start, stop), or a "
+            f"(start, stop) pair of UTF-8 byte offsets — not {span!r}"
+        )
+    for name, offset in (("start", start), ("stop", stop)):
+        if isinstance(offset, bool) or not isinstance(offset, int):
+            raise TypeError(
+                f"kaya: {what}: a range's {name} is a UTF-8 byte offset (int), "
+                f"not {type(offset).__name__}"
+            )
+        if offset < 0:
+            raise ValueError(
+                f"kaya: {what}: a range's {name} is {offset} — offsets count "
+                "from the start of the text and kaya has no end-relative "
+                "spelling (str.find answers -1 for no match; test for it)"
+            )
+    return start, stop
+
 _app = None  # the process's App: one core per process, so one of these
 _tx = None  # the ambient transaction's record list, when one is open
 # The thread the dispatch loop runs on, once it starts. None before
@@ -337,6 +390,101 @@ class Widget:
     def focus(self):
         """Give this widget the keyboard focus."""
         _records().append(wire.tx_widget_command(self.id, wire.COMMAND_FOCUS))
+
+    # THE TEXT-RANGE SURFACE (docs/ranges-plan.md D1): the three
+    # primitives an editor cannot write for itself — DECORATE a set of
+    # ranges, put the SELECTION at one, SCROLL one into view — plus the
+    # write that opens a document into the control in the first place.
+    # On the HANDLE, beside clear and focus, because that is where this
+    # binding keeps every widget-addressed verb; the languages that hand
+    # a guest a transaction spell the same four on it.
+    #
+    # kaya ships no search. What to decorate is the app's question, and
+    # a find engine, a find bar and a regex dialect belong to the text
+    # editor (docs/ranges-plan.md §3); what no app can write for itself
+    # is colouring a run of a native text view, moving its selection and
+    # scrolling it into view, which is exactly what these are.
+
+    def set_text(self, text):
+        """Put text into a text widget programmatically — the "open a
+        document into the editor" write, and the dynamic spelling of
+        `kaya.textarea(text=...)`.
+
+        SUGAR OVER THE GENERIC PROP SETTER, and it earns its own name
+        because the widget is UNCONTROLLED: this is ONE write, after
+        which the user owns the text. The field answers with its
+        ordinary `text_changed` and the app's fold takes it from there —
+        the same round trip a keystroke makes.
+
+        A write that CHANGES the text also drops whatever ranges the app
+        had declared over it (a set is bound to the text it was declared
+        against — see `highlight_ranges`) and spends the field's native
+        undo history. Returns the widget, so it chains with the a11y
+        props."""
+        _records().append(wire.tx_set_text(self.id, _text_value("set_text", text)))
+        return self
+
+    def highlight_ranges(self, ranges):
+        """DECLARE this textarea's decorated ranges, replacing whatever
+        was declared before; an empty set is the clear.
+
+        THE OFFSETS ARE UTF-8 BYTE OFFSETS into the widget's current
+        text — kaya's unit on the wire and in all eight bindings — and
+        PYTHON IS ONE OF THE FOUR LANGUAGES WHERE THAT IS NOT WHAT THE
+        LANGUAGE'S OWN SEARCH RETURNS. `str.find` counts scalars:
+        `"日本語 x".find("x")` is 4 where kaya's offset is 10. Search the
+        UTF-8 bytes and the offsets are kaya's by construction (UTF-8 is
+        self-synchronizing, so a byte-level match is always a character
+        boundary — the two searches find the same occurrences):
+
+            data, hit = doc.encode(), needle.encode()
+            at = data.find(hit)
+            while at >= 0:
+                hits.append(range(at, at + len(hit)))
+                at = data.find(hit, at + len(hit))
+            editor.highlight_ranges(hits)
+
+        APP-OWNED AND NEVER TRACKED. A declared set is bound to the text
+        it was declared against: the first edit of any kind — a
+        keystroke, a `set_text`, a native undo — drops it, and the app
+        re-declares from the fold `text_changed` already drives. Nothing
+        in kaya adjusts a range across an edit.
+
+        An offset past the end of the text, or one that splits a
+        character, fails loudly in the core rather than in a backend:
+        the five platforms answer a malformed offset five different ways
+        and one of them aborts the process."""
+        flat = []
+        for span in ranges:
+            start, stop = _text_range("highlight_ranges", span)
+            flat += [start, stop]
+        _records().append(
+            wire.tx_highlight_ranges(self.id, len(flat) // 2, flat)
+        )
+
+    def select_range(self, span):
+        """Put this textarea's selection at one range (an empty range is
+        a caret). Same offsets, same validation as `highlight_ranges`.
+
+        REFUSED WHILE THE USER IS COMPOSING through an input method, in
+        every backend, because honouring it commits the composition
+        mid-word — measured on macOS, where the half-typed kana land in
+        the document and in the app's own model. The refusal is a no-op
+        and not an error: composition state is on no kaya channel, so an
+        app cannot avoid the race and is not blamed for it. The
+        selection is still worth asking for after the next
+        `text_changed`, which is what ends a composition."""
+        start, stop = _text_range("select_range", span)
+        _records().append(wire.tx_select_range(self.id, start, stop))
+
+    def reveal_range(self, span):
+        """Scroll this textarea so a range is inside the viewport. A
+        pure effect: it moves no state, leaves the selection alone, and
+        undo does not put the scroll position back (undo restores state,
+        not where you were looking). How much context lands around the
+        range is the platform's own scroll-to-range behaviour."""
+        start, stop = _text_range("reveal_range", span)
+        _records().append(wire.tx_reveal_range(self.id, start, stop))
 
     def grow(self, weight):
         """Set this widget's flex weight within its row/column: 0 is

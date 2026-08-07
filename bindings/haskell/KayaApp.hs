@@ -85,6 +85,9 @@ module KayaApp
     pickFile,
     clearWidget,
     focusWidget,
+    highlightRanges,
+    selectRange,
+    revealRange,
     bindText,
     bindChecked,
     bindValue,
@@ -1482,6 +1485,75 @@ clearWidget (Widget n) = emitB (W.txWidgetCommand n W.commandClear)
 -- | Give this widget the keyboard focus.
 focusWidget :: Widget -> Build ()
 focusWidget (Widget n) = emitB (W.txWidgetCommand n W.commandFocus)
+
+-- The three text-range verbs (docs\/ranges-plan.md D1): DECLARE a set
+-- of decorated ranges, put the SELECTION at one, SCROLL one into view.
+-- Textarea only this milestone — the entry is deferred with measured
+-- per-platform reasons (docs\/deferred.md).
+--
+-- A RANGE IS A PAIR OF UTF-8 BYTE OFFSETS, half-open: @(start, stop)@
+-- covers the bytes from @start@ up to but not including @stop@, and
+-- @start == stop@ is a caret. The pair is Haskell's spelling of an
+-- interval — 'Data.Array' bounds and the result of 'span' are the same
+-- shape — and Int is what 'length' and 'Data.ByteString.length' answer
+-- with, so an app's own offsets arrive without a conversion.
+--
+-- THE UNIT IS BYTES, AND HASKELL'S OWN UNIT IS NOT. A 'String' is a
+-- list of 'Char', so @findIndex@ over one counts SCALARS: on a document
+-- that opens @日本語@ every offset a String search returns is six short
+-- of the offset kaya wants, and nothing downstream can tell. Search the
+-- document's UTF-8 encoding instead — @Data.ByteString.breakSubstring@
+-- over @toLazyByteString . stringUtf8@, which is what a Haskell editor
+-- holds its buffer as anyway. The core refuses a malformed offset
+-- before any backend sees it (@start <= stop@, inside the text, both
+-- endpoints on a code-point boundary), naming the widget and the
+-- character it splits; a GRAPHEME split is legal and covers exactly the
+-- code points it names.
+
+-- | Declare the decorated ranges of a textarea, replacing whatever was
+-- declared before; @[]@ is the clear.
+--
+-- APP-OWNED AND NEVER TRACKED. A declared set is bound to the text it
+-- was declared against: the first edit of any kind — a keystroke, a
+-- write, a native undo — drops it, and the app re-declares from the
+-- fold 'onChange' already drives, which is the same uncontrolled
+-- contract the text itself has. kaya adjusts no range across an edit,
+-- because range tracking is editor-component work and lives in the app.
+--
+-- kaya likewise ships no search: what to decorate is the app's
+-- question, and a find engine, a find bar and a regex dialect belong to
+-- the editor (docs\/ranges-plan.md §3). What kaya ships is the
+-- primitive underneath, which no app can write for itself.
+highlightRanges :: Widget -> [(Int, Int)] -> Build ()
+highlightRanges (Widget n) ranges =
+  emitB (W.txHighlightRanges n (fromIntegral (length ranges)) (concatMap pair ranges))
+  where
+    -- One flat Values list read IN PAIRS by the core, start then end;
+    -- the count travels beside it and the two must agree.
+    pair (start, stop) = [W.VI64 (fromIntegral start), W.VI64 (fromIntegral stop)]
+
+-- | Put the textarea's selection at one range (an empty range is a
+-- caret). Same offsets, same validation as 'highlightRanges'.
+--
+-- REFUSED WHILE THE USER IS COMPOSING through an input method, in every
+-- backend, because honouring it commits the composition mid-word —
+-- measured on macOS, where the half-typed kana land in the document and
+-- in the app's own model. The refusal is a no-op and not an error:
+-- composition state is on no kaya channel, so an app cannot see the
+-- race and is not blamed for it. The selection is still worth asking
+-- for after the next 'onChange', which is what ends a composition.
+selectRange :: Widget -> (Int, Int) -> Build ()
+selectRange (Widget n) (start, stop) =
+  emitB (W.txSelectRange n (fromIntegral start) (fromIntegral stop))
+
+-- | Scroll the textarea so a range is inside the viewport. A pure
+-- effect: it moves no state, leaves the selection alone, and undo does
+-- not put the scroll position back (undo restores state, not where you
+-- were looking). How much context lands around the range is the
+-- platform's own scroll behaviour; what kaya fixes is containment.
+revealRange :: Widget -> (Int, Int) -> Build ()
+revealRange (Widget n) (start, stop) =
+  emitB (W.txRevealRange n (fromIntegral start) (fromIntegral stop))
 
 bindText :: Widget -> Signal -> Build ()
 bindText (Widget w) (Signal s) = emitB (W.txBindText w s)

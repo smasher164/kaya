@@ -1,0 +1,73 @@
+# The text-ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one, and
+# the two things that make those three a contract rather than three
+# calls — a user's keystroke DROPS a declared set (D2), and a
+# select_range arriving mid-composition is REFUSED (D4).
+#
+# THE OFFSETS ARE UTF-8 BYTE OFFSETS into the document the guest opened
+# (guests/rust/ranges.rs), which is kaya's unit in every binding and on
+# the wire. The document's first line is CJK, so every match sits SIX
+# BYTES further along than it sits in UTF-16 — the unit four of the five
+# backends count. A backend that forwarded kaya's offsets as if they
+# were already its own would decorate six characters early and these
+# numbers would say so.
+#
+# EVERY RANGE ASSERTION CARRIES BOTH the offsets and the text they
+# cover, `start:end=covered`. That is not belt and braces: the core
+# converts bytes into the backend's unit to lower a range and the
+# backend converts back to read one, so two symmetric mistakes would
+# cancel and offsets alone would pass while the wrong characters were
+# decorated. The covered text has no arithmetic in it — the platform
+# slices its own string with the range it is holding.
+#
+# THIS FILE IS PURE ASCII, deliberately. The document's non-ASCII lives
+# in the guest's own source, where every language's compiler guarantees
+# UTF-8; a .steps file travels through three step interpreters, a shell
+# and an environment variable, and none of that decoding is proven yet
+# (scratchpad/ranges-units.md §8.7 asked for it). The CJK prefix buys
+# the unit assertion without needing any of it.
+expect label#0 "0 matches"
+# NOTHING IS DECORATED YET, and asserting it is what stops the next
+# assertion from being untestable: a backend that decorated everything,
+# or that answered from a stale read, fails here first.
+expect_highlights textarea#0 ""
+click button#0
+expect label#0 "3 matches"
+expect_highlights textarea#0 "57:62=alpha|203:208=alpha|753:758=alpha"
+# The SECOND match, so the selection is distinguishable from "the first
+# thing the search found".
+expect_selection textarea#0 "203:208=alpha"
+# REVEAL, asserted in both directions. The `offscreen` leg is what
+# makes the `visible` one mean something: on a document short enough to
+# fit, containment is true before anything scrolls and the whole verb
+# would pass vacuously.
+expect_revealed textarea#0 753:758 offscreen
+click button#1
+expect_revealed textarea#0 753:758 visible
+# A REVEAL IS A PURE EFFECT: it moves the viewport and nothing else, so
+# the declared set is still declared and the selection has not moved.
+expect_highlights textarea#0 "57:62=alpha|203:208=alpha|753:758=alpha"
+expect_selection textarea#0 "203:208=alpha"
+# D2 — A TEXT EDIT DROPS THE DECLARED SET. `type` goes in through the
+# platform's own input path, so this is a user's keystroke and not a
+# write kaya made. The set is DROPPED, not shifted: kaya tracks nothing
+# across an edit, and the app re-declares from the fold text_changed
+# already drives (which is what the label says).
+click button#2
+expect_focused textarea#0
+type " z"
+expect label#0 "0 matches"
+expect_highlights textarea#0 ""
+# D4 — A SELECTION ARRIVING MID-COMPOSITION IS REFUSED. `compose`
+# leaves marked text in the control: displayed, uncommitted, and
+# invisible to the app, exactly as a half-typed pinyin or kana sequence
+# is. Honouring a selection now would COMMIT it into the document
+# mid-word and shift every later offset — data loss shaped like a
+# feature — so every backend refuses, leaves the composition alone and
+# names the reason.
+#
+# THE OBSERVABLE IS THE CARET: a composition parks it at the end of the
+# marked text, and that is where it must still be. Had the select been
+# honoured, this would read `57:62=alpha`.
+compose textarea#0 "nihon"
+click button#3
+expect_selection textarea#0 "820:820="

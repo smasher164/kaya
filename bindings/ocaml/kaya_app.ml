@@ -603,6 +603,16 @@ let widget kind =
   emit tx (Kaya_wire.tx_create_widget id kind);
   Widget id
 
+(* A widget's text: a button's caption, a label's line — and, on the
+   uncontrolled text widgets, the "open a document into the editor"
+   write. One write, after which the user owns the field again: it
+   answers with its ordinary [text_changed] and the app's fold takes it
+   from there, the same round trip a keystroke makes.
+
+   A write that CHANGES the text of a textarea drops whatever ranges
+   were declared over it (see [highlight_ranges]) and spends the field's
+   native undo history, which is why undo's D7 treats it as an episode
+   boundary. *)
 let set_text (Widget id) text = emit (the_tx ()) (Kaya_wire.tx_set_text id text)
 
 (* Set a widget's flex weight within its row/column: 0 is natural
@@ -695,6 +705,89 @@ let clear (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wi
 
 (* Give this widget the keyboard focus. *)
 let focus (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_focus)
+
+(* --- Text ranges: the three primitives an editor cannot write itself -
+
+   A RANGE IS A PAIR OF UTF-8 BYTE OFFSETS [(start, stop)] into the
+   widget's current text, half-open — Python's own [slice] pair, and the
+   spec's field names. OCaml's [string] IS a byte sequence, so the
+   offsets an app already has are the offsets kaya wants: [String.length],
+   [String.index_from] and any literal search over the document count
+   the same units the wire carries, and this binding converts nothing.
+   (Four of the nine guest languages are byte-native like this; the
+   other five convert once at their own edge — scratchpad/ranges-units.md
+   §5.)
+
+   THE OFFSETS ARE [int] AND NOT [int64] deliberately, unlike the ids
+   these functions take: an id is an opaque handle the binding mints,
+   while an offset is arithmetic the APP does with the stdlib, and the
+   stdlib counts in [int]. A range surface in [int64] would put an
+   [Int64.of_int] at every call site of a search loop.
+
+   ONE PAIR TYPE FOR ALL THREE VERBS, so the value flows: the list a
+   find handed [highlight_ranges] is the list [List.nth_opt] takes one
+   out of for [select_range]. Labelled [~start]/[~stop] arguments were
+   the alternative and would have needed the pair anyway (the set is a
+   LIST), leaving two spellings for one datum.
+
+   THE CORE VALIDATES AND REFUSES, at one chokepoint, before any of this
+   reaches a platform: [start <= stop], [stop <= String.length text], and
+   both endpoints on a code-point boundary. A malformed offset is an
+   app-programming error of the same class as ill-formed text on the
+   wire, and it gets the same loud treatment — the five platforms answer
+   one in four different ways and macOS ABORTS THE PROCESS (an out-of-range
+   NSTextStorage attribute is an NSRangeException, exit 134). An endpoint
+   inside a grapheme cluster is NOT refused: the platforms disagree about
+   what a grapheme is, so the range covers exactly the code points it
+   names and a platform may widen what it paints. *)
+
+(* DECLARE the decorated ranges of a textarea, replacing whatever was
+   declared before; [[]] is the clear.
+
+   APP-OWNED AND NEVER TRACKED (docs/ranges-plan.md D2). A declared set
+   is bound to the text it was declared against: the first edit of any
+   kind — a keystroke, a programmatic write, a native undo — DROPS it,
+   with nothing said, and the app re-declares from the fold [~on_change]
+   already drives. That is the uncontrolled contract the text itself
+   has, and it is why kaya ships no range-adjustment machinery: tracking
+   ranges across edits is editor-component work.
+
+   kaya ships no search either. What to decorate is the app's question —
+   a find engine, a find bar and a regex dialect belong to the text
+   editor — and the five lines that answer it live in the guest:
+
+     let hits = find_all !doc needle in
+     highlight_ranges editor hits *)
+let highlight_ranges (Widget id) ranges =
+  emit (the_tx ())
+    (Kaya_wire.tx_highlight_ranges id (List.length ranges)
+       (List.concat_map
+          (fun (start, stop) ->
+            [ Kaya_wire.I64 (Int64.of_int start); Kaya_wire.I64 (Int64.of_int stop) ])
+          ranges))
+
+(* Put the textarea's selection at one range; [(at, at)] is a caret.
+
+   REFUSED WHILE THE USER IS COMPOSING through an input method, in every
+   backend (D4). Honouring it commits the marked text into the document
+   and into the app's own model mid-word — measured on macOS — which is
+   data loss shaped like a feature. The refusal is a NO-OP and not an
+   exception: composition state is on no kaya channel and never will be,
+   so the same call is honoured one millisecond and refused the next,
+   and an app cannot avoid the race. Ask again after the next
+   [~on_change], which is what the end of a composition announces. *)
+let select_range (Widget id) (start, stop) =
+  emit (the_tx ())
+    (Kaya_wire.tx_select_range id (Int64.of_int start) (Int64.of_int stop))
+
+(* Scroll the textarea so a range is inside the viewport. A PURE
+   EFFECT: no state moves, the selection is untouched, and undo does not
+   put the scroll back — undo restores state, not where you were
+   looking. How much context lands around the range is the platform's
+   own scroll behaviour; the observable kaya fixes is containment. *)
+let reveal_range (Widget id) (start, stop) =
+  emit (the_tx ())
+    (Kaya_wire.tx_reveal_range id (Int64.of_int start) (Int64.of_int stop))
 
 let add_child (Widget parent) (Widget child) =
   let tx = the_tx () in

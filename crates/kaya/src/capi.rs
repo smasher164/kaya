@@ -202,6 +202,26 @@ pub const KAYA_TX_READ_CLIPBOARD: u16 = 36;
 /// restored; anything else is refused at apply, naming the op.
 pub const KAYA_TX_UNDO_GROUP: u16 = 37;
 
+/// The three text-range records (docs/ranges-plan.md). Bodies:
+/// HIGHLIGHT_RANGES { u64 widget; u32 count; u32 reserved; Values of
+/// 2*count I64 offsets — start then end }; SELECT_RANGE and
+/// REVEAL_RANGE { u64 widget; u64 start; u64 end }.
+///
+/// THE OFFSETS ARE UTF-8 BYTE OFFSETS into the widget's current text, on
+/// this channel and in every binding. Both ends must be inside the text
+/// and on a code-point boundary; the core refuses otherwise, naming the
+/// character it splits. An end inside a GRAPHEME cluster is legal — the
+/// platforms disagree about what a grapheme is — and a platform may
+/// widen what it paints to the whole cluster.
+pub const KAYA_TX_HIGHLIGHT_RANGES: u16 = 38;
+pub const KAYA_TX_SELECT_RANGE: u16 = 39;
+pub const KAYA_TX_REVEAL_RANGE: u16 = 40;
+const _: () = assert!(
+    KAYA_TX_HIGHLIGHT_RANGES == wire::TX_HIGHLIGHT_RANGES
+        && KAYA_TX_SELECT_RANGE == wire::TX_SELECT_RANGE
+        && KAYA_TX_REVEAL_RANGE == wire::TX_REVEAL_RANGE
+);
+
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
 /// and assert agreement at load: a stale library and a fresh guest —
@@ -370,6 +390,20 @@ pub const KAYA_APPLY_READ_CLIPBOARD: u16 = 26;
 /// doctrine never will, while the backend already asks itself the same
 /// question for role enablement.
 pub const KAYA_APPLY_CLEAR_UNDO: u16 = 27;
+
+/// The three text-range records, apply side. Same layouts as their tx
+/// twins, and NOT the same unit: these offsets are already in this
+/// build's backend unit (UTF-16 code units everywhere but GTK, which
+/// counts code points), converted by the core against the text it
+/// validated them against. A backend does no Unicode arithmetic here.
+pub const KAYA_APPLY_HIGHLIGHT_RANGES: u16 = 28;
+pub const KAYA_APPLY_SELECT_RANGE: u16 = 29;
+pub const KAYA_APPLY_REVEAL_RANGE: u16 = 30;
+const _: () = assert!(
+    KAYA_APPLY_HIGHLIGHT_RANGES == wire::APPLY_HIGHLIGHT_RANGES
+        && KAYA_APPLY_SELECT_RANGE == wire::APPLY_SELECT_RANGE
+        && KAYA_APPLY_REVEAL_RANGE == wire::APPLY_REVEAL_RANGE
+);
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
         && KAYA_APPLY_READ_CLIPBOARD == wire::APPLY_READ_CLIPBOARD
@@ -2453,6 +2487,9 @@ mod tests {
             ("copy", KAYA_TX_COPY),
             ("read_clipboard", KAYA_TX_READ_CLIPBOARD),
             ("undo_group", KAYA_TX_UNDO_GROUP),
+            ("highlight_ranges", KAYA_TX_HIGHLIGHT_RANGES),
+            ("select_range", KAYA_TX_SELECT_RANGE),
+            ("reveal_range", KAYA_TX_REVEAL_RANGE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -2482,6 +2519,9 @@ mod tests {
             ("copy", KAYA_APPLY_COPY),
             ("read_clipboard", KAYA_APPLY_READ_CLIPBOARD),
             ("clear_undo", KAYA_APPLY_CLEAR_UNDO),
+            ("highlight_ranges", KAYA_APPLY_HIGHLIGHT_RANGES),
+            ("select_range", KAYA_APPLY_SELECT_RANGE),
+            ("reveal_range", KAYA_APPLY_REVEAL_RANGE),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

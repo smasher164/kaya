@@ -67,6 +67,73 @@ check_kind() {
     check ocaml   bindings/ocaml/kaya_app.ml           "$kind" "^let ${kind}[a-z_]* "
 }
 
+# --- THE TEXT-RANGE SURFACE, in all eight -------------------------
+#
+# The three primitives (docs/ranges-plan.md D1) plus `set_text`, which
+# is how an app puts a document in front of the user in the first place.
+# WHY THEY NEED A CLAUSE AT ALL: this file's other two sweeps cover
+# widget CONSTRUCTORS and WINDOW props, and a widget-level verb is
+# neither, so nothing structural would have demanded these of the seven
+# non-Rust bindings. check-verbs holds the COMPOSE INTERPRETER open and
+# stops the day that arm lands; without this, the bindings' half of the
+# sweep would then be held by a line in docs/deferred.md and nothing
+# else. That is the shape invariant 2 exists to prevent — a change
+# scoped silently to the languages a request named.
+#
+# RED BY DESIGN until the sweep lands, which is the depth-slice pattern
+# (CLAUDE.md, sequencing).
+# want_verb <language> <file> <verb> <regex> — `check`'s twin, with a
+# message that says what is actually missing.
+want_verb() {
+    if ! grep -qE "$4" "$2"; then
+        echo "check-sugar-surface: $1 has no sugar for the '$3' widget verb" \
+            "(wanted /$4/ in $2)"
+        status=1
+    fi
+}
+
+# check_range_verb <snake_case> <PascalCase> <camelCase>
+check_range_verb() {
+    local snake="$1" pascal="$2" camel="$3"
+    want_verb rust    crates/kaya/src/app.rs              "$snake" "pub fn ${snake}\\("
+    # PYTHON PUTS WIDGET-ADDRESSED VERBS ON THE HANDLE, which is why
+    # this one pattern is indented where the other seven are not. Every
+    # pattern in this clause is that binding's spelling of `clear` and
+    # `focus` — the widget-addressed one-shots these four join — and in
+    # seven bindings that is a transaction method taking a widget
+    # (`func (tx *Tx) Clear(w Widget)`, `let clear (Widget id)`), while
+    # Python's is `Widget.clear(self)` because Python's transaction is
+    # ambient and has no handle to hang it on. A module-level `def
+    # highlight_ranges(widget, ranges)` would sit beside
+    # `editor.focus()` in the same guest and read as two conventions;
+    # the file's other handle-verb clauses (a11y_id, accepts, on_paste)
+    # are all keyed on `(self` for the same reason.
+    want_verb python  bindings/python/kaya/__init__.py    "$snake" "def ${snake}\\(self"
+    want_verb go      bindings/go/app.go                  "$snake" "func \\(tx \\*Tx\\) ${pascal}\\("
+    want_verb csharp  bindings/csharp/KayaApp.cs          "$snake" "public void ${pascal}\\("
+    want_verb java    bindings/java/dev/kaya/KayaApp.java "$snake" "public void ${camel}\\("
+    want_verb swift   bindings/swift/KayaApp.swift        "$snake" "func ${camel}\\("
+    want_verb haskell bindings/haskell/KayaApp.hs         "$snake" "^[[:space:]]*${camel} ::"
+    want_verb ocaml   bindings/ocaml/kaya_app.ml          "$snake" "^let ${snake} "
+}
+check_range_verb highlight_ranges HighlightRanges highlightRanges
+check_range_verb select_range     SelectRange     selectRange
+check_range_verb reveal_range     RevealRange     revealRange
+check_range_verb set_text         SetText         setText
+
+# THE BUILT-IN NEGATIVE TEST FOR THIS SWEEP, the same shape as the
+# fake-kind one below: a verb that exists in no binding must fail in all
+# eight, or the eight patterns have rotted into a rule that can only
+# pass. Runs in a subshell so its status=1 dies with it.
+range_fake=$(check_range_verb kaya_fake_verb KayaFakeVerb kayaFakeVerb 2>&1 \
+    | grep -c "has no sugar for")
+if [ "$range_fake" -ne 8 ]; then
+    echo "check-sugar-surface: self-test failed ($range_fake/8 range-verb patterns" \
+        "fired for a verb that exists nowhere)"
+    exit 1
+fi
+unset range_fake
+
 # The built-in negative test: a kind that exists nowhere must fail in
 # every binding, or the patterns themselves have rotted. The fake runs
 # inside $( ), so its `status=1` dies with that subshell and the real

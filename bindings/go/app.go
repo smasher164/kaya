@@ -648,6 +648,19 @@ func (tx *Tx) autoParent(id uint64) {
 	}
 }
 
+// SetText writes a widget's text — a label's caption, and on a text
+// field or textarea the "open a document into the editor" write.
+//
+// THE TEXT WIDGETS ARE UNCONTROLLED: this is one write, not a binding
+// the app keeps pushing. The user owns the text from the moment it
+// lands, the field answers with its ordinary change handler, and the
+// app's fold takes it from there — the same round trip a keystroke
+// makes.
+//
+// A write that CHANGES the text also drops whatever the app had
+// declared over it (see Tx.HighlightRanges: ranges are bound to the
+// text they were declared against), and it spends the field's native
+// undo history.
 func (tx *Tx) SetText(w Widget, text string) {
 	tx.emit(TxSetText(w.id, text))
 }
@@ -822,6 +835,113 @@ func (tx *Tx) Clear(w Widget) {
 // Clear.
 func (tx *Tx) Focus(w Widget) {
 	tx.emit(TxWidgetCommand(w.id, CommandFocus))
+}
+
+// TextRange is a half-open span of a text widget's content: Start and
+// End are UTF-8 BYTE offsets, which is what Go's own string indexing
+// already produces. strings.Index, bytes.Index, regexp's
+// FindStringIndex and len all speak this unit, so an app hands kaya the
+// offsets it already had:
+//
+//	for at := 0; ; {
+//		i := strings.Index(doc[at:], needle)
+//		if i < 0 {
+//			break
+//		}
+//		hits = append(hits, kaya.TextRange{Start: at + i, End: at + i + len(needle)})
+//		at += i + len(needle)
+//	}
+//
+// THE UNIT IS THE WIRE'S, NEVER THE PLATFORM'S. Four of the five
+// backends count UTF-16 code units and one counts code points; the core
+// converts against its own copy of the widget's text before it lowers
+// anything, so no Go app — and no binding — ever does that arithmetic.
+// A range whose endpoints are byte offsets in the app's own string is
+// correct on every platform, and a range converted "helpfully" here
+// would be wrong on all of them.
+type TextRange struct{ Start, End int }
+
+// check is the ONE thing this binding checks about a range, and it is a
+// GO REPRESENTATION matter rather than a semantic one: Go's int is
+// signed and the wire's offset is not. strings.Index returns -1 when
+// there is no match, which is precisely the mistake this surface
+// invites, and select_range and reveal_range carry their offsets as
+// bare u64 record fields — so a negative would reach the core as
+// 18446744073709551615 and be refused under a number the app never
+// wrote. Refusing here names what the app actually passed.
+//
+// EVERYTHING ELSE IS THE CORE'S, deliberately and not by omission:
+// start <= end, end inside the text, and both endpoints on a code-point
+// boundary are checked once, in Rust, against the text the core holds.
+// This binding has no copy of that text and so could not honestly check
+// any of the three (scratchpad/ranges-units.md §7 — one chokepoint, not
+// eight).
+func (r TextRange) check(verb string, w Widget) {
+	if r.Start < 0 || r.End < 0 {
+		panic(fmt.Sprintf("kaya: %s on widget %d: the range %d:%d has a negative "+
+			"offset — a kaya range is a pair of UTF-8 byte offsets into the "+
+			"widget's text, and strings.Index answers -1 when there is no match",
+			verb, w.id, r.Start, r.End))
+	}
+}
+
+// HighlightRanges DECLARES the decorated ranges of a textarea, replacing
+// whatever was declared before; a nil or empty slice is the clear.
+//
+// kaya ships no search. What to decorate is the app's question, and a
+// find engine, a find bar and a regex dialect belong to the text editor
+// (docs/ranges-plan.md §3); what kaya ships is the primitive
+// underneath, which no app can write for itself — colouring a run of a
+// native text view.
+//
+// APP-OWNED AND NEVER TRACKED. A declared set is bound to the text it
+// was declared against: the first edit of any kind — a keystroke, a
+// programmatic write, a native undo — drops it, and the app re-declares
+// from the fold its change handler already drives, which is the same
+// uncontrolled contract the text itself has. Nothing in kaya adjusts a
+// range across an edit.
+//
+// An offset past the end of the text, or one that splits a character,
+// fails loudly in the core rather than in a backend: the five platforms
+// answer a malformed offset five different ways and one of them aborts
+// the process.
+func (tx *Tx) HighlightRanges(w Widget, ranges []TextRange) {
+	// The offsets ride as one flat Values list read in pairs, so the
+	// declared count and the list length must agree — the core asserts
+	// it, and this is the only place Go could disagree.
+	flat := make([]any, 0, 2*len(ranges))
+	for _, r := range ranges {
+		r.check("HighlightRanges", w)
+		flat = append(flat, int64(r.Start), int64(r.End))
+	}
+	tx.emit(TxHighlightRanges(w.id, uint32(len(ranges)), flat))
+}
+
+// SelectRange puts the textarea's selection at one range; an empty range
+// (Start == End) is a caret, which every platform's text object models.
+// Same offsets and same validation as HighlightRanges.
+//
+// REFUSED WHILE THE USER IS COMPOSING through an input method, in every
+// backend, because honouring it commits the composition mid-word —
+// measured on macOS, where the half-typed kana land in the document and
+// in the app's own model. The refusal is a no-op and not an error:
+// composition state is on no kaya channel, so an app cannot avoid the
+// race and is not blamed for it. The selection is still worth asking
+// for after the next text change, which is what ends a composition.
+func (tx *Tx) SelectRange(w Widget, r TextRange) {
+	r.check("SelectRange", w)
+	tx.emit(TxSelectRange(w.id, uint64(r.Start), uint64(r.End)))
+}
+
+// RevealRange scrolls the textarea so a range is inside the viewport. A
+// pure effect: it moves no state, leaves the selection alone, and undo
+// does not put the scroll position back — undo restores state, not
+// where you were looking. How much context lands around the range is
+// the platform's own scroll-to-range behaviour; containment is the
+// observable kaya fixes.
+func (tx *Tx) RevealRange(w Widget, r TextRange) {
+	r.check("RevealRange", w)
+	tx.emit(TxRevealRange(w.id, uint64(r.Start), uint64(r.End)))
 }
 
 // Construction sugar: containers take their body as a closure and

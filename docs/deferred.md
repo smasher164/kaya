@@ -104,6 +104,148 @@ own the state (see the undo note in this file).
     scene's guests, at which point `dirty` graduates out of
     DEPTH_SCENES.
 
+- **Text ranges** — IN FLIGHT 2026-08-06. The design is ratified
+  (docs/ranges-plan.md D1-D6) off five probe reports and a units
+  ruling: three primitives on the TEXTAREA — `highlight_ranges` (a
+  declared set), `select_range` (one range) and `reveal_range` (scroll
+  into view) — app-declared in UTF-8 byte offsets, validated at one
+  core chokepoint, converted to each backend's own unit before
+  lowering, and NEVER tracked across an edit. kaya ships no find
+  engine, find bar or regex dialect: those belong to the editor, which
+  is what this unblocks. DEPTH LANDED: spec + core + Rust surface + the
+  SwiftUI **mac** arm + the `ranges` scene, with every negative test
+  watched failing. What is still open, each held by a gate that is RED
+  BY DESIGN until it lands:
+  - ~~**DEPTH STUB: ranges on gtk**~~ — LANDED 2026-08-06. `GtkTextTag`
+    for the highlight, `gtk_text_buffer_select_range` for the selection,
+    and `scroll_to_mark` (not `scroll_to_iter`: GTK computes line
+    heights on an idle and documents the mark form as the one that
+    finishes after line validation) through the GtkScrolledWindow the
+    textarea foundation gave it. Both linux-only obligations met and
+    both watched failing: offsets lower in CODE POINTS, and the CRLF
+    correction is now in all three lowerings and in the reads, since the
+    buffer keeps a `\r` that `lf()` never showed the guest. The reads
+    are AT-SPI (attribute runs, `GetSelection`, `GetRangeExtents` against
+    the node's own extents). `compose` needed an input method, because
+    GTK has no other way to make marked text: kaya registers a
+    `GtkIMContext` on GTK's own `gtk-im-module` extension point, at the
+    lowest priority so it is only ever reached by name.
+  - ~~**DEPTH STUB: ranges on winui**~~ — LANDED 2026-08-06. The WinUI
+    arm on the RichEditBox the foundation switched to:
+    `CharacterFormat.BackgroundColor` over `ITextRange` for the set,
+    `Selection.SetRange` for the selection, `ScrollIntoView` for reveal,
+    all three batched behind `BatchDisplayUpdates`. The planned readback
+    was not available: **WinUI publishes no Text pattern on an
+    in-process automation peer**, so `GetAttributeValue(BackgroundColor)`
+    / `GetSelection` / `GetVisibleRanges` have no provider to answer them
+    in this process (`RichEditBoxAutomationPeer` declares one interface
+    in the SDK metadata where `ButtonAutomationPeer` declares
+    `IInvokeProvider` beside its own, and live reflection agrees), and
+    the only route that does publish them is an out-of-process UIA
+    CLIENT — the file-dialog era's crash class, barred at the
+    Cargo.toml. The reads therefore go one layer down, to Rich Edit's
+    own document model: a per-character background scan for the set,
+    `Selection.StartPosition/EndPosition` for the selection, and
+    `ITextRange::GetRect(ClientCoordinates|AllowOffClient)` against the
+    control's own bounds for the viewport. **This is the one lane whose
+    highlight assertion does not go through the accessibility tree**,
+    and closing that gap needs either a WinUI peer that publishes the
+    pattern or a sanctioned way to run a UIA client here; recorded
+    below as its own item.
+  - ~~**DEPTH STUB: ranges on compose**~~ — LANDED 2026-08-06. Not by
+    the route this entry guessed: `BasicTextField(state=)` has NO
+    styling hook at kaya's pins (compile-proven — no
+    `visualTransformation`, `OutputTransformation` can only edit text,
+    `TextHighlightType` is internal and means stylus preview), and the
+    `AnnotatedString` route COMPILES CLEAN, stores a plain String and
+    paints nothing. The arm draws the ranges instead, onto the
+    platform's own `TextLayoutResult.getPathForRange`, inside the
+    field's decorator; the selection is `TextFieldState.edit {}` with
+    D4's refusal asking `TextFieldState.composition`; reveal computes
+    from the field's own layout and drives its own `ScrollState`. The
+    textarea gained a bounded viewport in the process (Compose's was
+    the one backend whose textarea GREW, so reveal had nothing to
+    scroll). The surrogate-pair question this entry raised is answered
+    on the READ side, where the only offset arithmetic lives: a
+    `substring` across a pair yields a lone surrogate that UTF-8
+    encodes as a single `?`, so both conversions refuse a split
+    endpoint rather than rounding.
+  - ~~**DEPTH STUB: ranges on swiftui/ios**~~ — LANDED 2026-08-06. The
+    iOS half of KayaSwiftUI.swift, on the `UITextView` the textarea
+    foundation gave it: `NSTextStorage`'s `.backgroundColor` for the set
+    (the mac arm's mechanism, chosen over TextKit 2 rendering attributes
+    because those paint NOTHING until someone calls `setNeedsDisplay()`
+    and nothing on the SwiftUI update path does — green harness, blank
+    screen), `selectedRange` for the selection, and
+    `scrollRangeToVisible` wrapped in `performWithoutAnimation` for
+    reveal, which is ANIMATED on this platform and reads as a no-op at
+    the call site. The reads are the live control's storage, selection
+    and `textViewportLayoutController.viewportRange` — the iOS sibling of
+    the `AXVisibleCharacterRange` mac reads. The two NOT-MEASURED
+    questions are answered: `UITextView.selectedRange` does NOT snap
+    (both endpoints kept verbatim, unlike AppKit, which snaps the start)
+    and CLAMPS an out-of-range selection to a caret at the end; and
+    `UITextInput.offset(from:to:)` counts UTF-16 code units, as does
+    `NSTextContentManager.offset(from:to:)`, so there is no second unit
+    inside the file.
+  - **DEFERRED — one iOS guard has no leg that can fail for it.** The
+    text push refuses to run while `markedTextRange` is non-nil, and the
+    destruction it prevents is measured on the platform (a programmatic
+    `view.text =` during a composition drops the marked text and fires no
+    delegate callback at all). The `ranges` scene cannot falsify it:
+    UITextView NOTIFIES its delegate for marked text, so kaya's model
+    never lags the view during a composition kaya provoked and the
+    guard's condition is never reached — removing it leaves the leg
+    green, watched. Making it a leg needs a scene in which the APP writes
+    text while the user is composing, which is a cross-lane obligation
+    rather than one backend's.
+  - **DEFERRED — the windows highlight read is not the accessibility
+    tree.** Every other lane asserts its decorated ranges through the
+    surface an assistive client sees (mac's `AXAttributedStringForRange`,
+    linux's AT-SPI text attributes); windows asserts them through Rich
+    Edit's own document model, because WinUI's in-process automation
+    peer for a text control publishes no Text pattern at all (measured
+    twice — SDK metadata and live reflection). The consequence is
+    narrow and worth stating: the windows lane proves the platform is
+    RENDERING the decoration, not that a screen reader can HEAR it. The
+    exits are a WinUI peer that hands out `ITextProvider` (nothing kaya
+    controls) or a sanctioned out-of-process UIA client for this one
+    read, which needs the file-dialog fatality re-measured with a client
+    attached before anyone relies on it.
+  - **A SWEEP ITEM EVERY BACKEND OWES, measured on mac and open
+    everywhere else**: does a programmatic text write during an IME
+    composition destroy the composition? On macOS it did, silently, and
+    told the app the user had typed nothing — `setMarkedText` notifies
+    no delegate, so kaya's model never learns a composition is running
+    and the next update pass assigns over it. Fixed on mac by not
+    pushing while `hasMarkedText()`. **UIKit: ANSWERED 2026-08-06, same
+    verdict, different precondition** — a programmatic write during a
+    composition drops the marked text and fires no delegate callback, so
+    the same guard is in force on iOS; but `setMarkedText` DOES notify
+    the delegate there, so kaya's model never silently lags the view and
+    the mac defect's own mechanism does not arise. The question has still
+    not been put to GTK, WinUI or Compose, and the answer must be
+    MEASURED rather than inherited.
+  - The seven other bindings' sugar (`highlight_ranges`,
+    `select_range`, `reveal_range`, and `set_text`, which this
+    milestone added as sugar over the generic prop setter so an app can
+    open a document into an editor) plus the C floor, at which point
+    `ranges` graduates out of DEPTH_SCENES. `check-sugar-surface` does
+    not police widget props today, so nothing structural holds this
+    open — `check-verbs` does, through the Compose interpreter's four
+    missing verbs and three missing constants.
+  - **The scene is pure ASCII and that is a constraint, not a
+    preference.** A `.steps` file travels through three step
+    interpreters, a shell and an environment variable, and only the
+    Rust reader is proven to decode it as UTF-8 (`check-steps`'s own
+    python lint opens it with the LOCALE's encoding). The unit
+    assertion is bought instead by putting a CJK word in the GUEST's
+    source, which every language's compiler guarantees is UTF-8, so
+    every match sits six bytes further along than it sits in UTF-16.
+    Proving the `.steps` path end to end is its own piece of work
+    (scratchpad/ranges-units.md §8.7 asked for it) and belongs where it
+    can be proven on all five lanes.
+
 - **DEFERRED — wayland lane session architecture (researched
   2026-08-03, no trigger yet).** The GTK clipboard work pinned two
   session-level constraints and researched their exits
@@ -957,6 +1099,17 @@ the a11y scene and the full matrix behind it — and a before/after read
 count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
+
+- **A todos-c leg hung for 180s once on linux/x11 (2026-08-07) and has
+  not reproduced.** It died at the FIRST assertion — the guest never
+  came up at all — inside a full matrix; the leg then passed in the
+  record matrix minutes earlier and in five consecutive targeted runs
+  afterwards (10 legs, 1-2s each). Recorded so the second occurrence
+  starts from here rather than from scratch: what to capture next time
+  is the guest's state while it hangs (is the process alive? did it
+  reach the GTK main loop? does the harness handshake show?), because
+  a 180s stop at step one is a startup deadlock, not a slow scene.
+
 
 - **Undo follow-ups carried out of the depth slice (2026-08-04).**
   CLOSED 2026-08-05 by the completion pass, which took all of them in

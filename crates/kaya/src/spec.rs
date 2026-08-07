@@ -949,6 +949,113 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   it: a signal write names no surface, and the scene keeps \
                   no widget-to-window map. 0 is the primary.",
         },
+        Record {
+            kind: 38,
+            name: "highlight_ranges",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("ranges", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "DECLARE the set of decorated ranges on a textarea, \
+                  replacing whatever was declared before (docs/ranges-plan.md \
+                  D1/D2). `ranges` holds 2*`count` I64 values — start then \
+                  end, in UTF-8 BYTE offsets into the widget's current \
+                  guest-visible text; an empty set is the clear.\n\n\
+                  THE OFFSET UNIT AND ITS THREE RULES, once, here, because \
+                  four of the five platforms answer a malformed offset \
+                  differently and one of them ABORTS THE PROCESS \
+                  (scratchpad/ranges-units.md §3: an out-of-range \
+                  NSTextStorage attribute is an NSRangeException, exit 134). \
+                  The core refuses before lowering: `start <= end`, `end <= \
+                  text.len()`, and both endpoints on a CODE-POINT boundary. \
+                  A GRAPHEME split is deliberately NOT refused and is the \
+                  stated carve-out — the platforms disagree about what a \
+                  grapheme is (java.text.BreakIterator counts the ZWJ family \
+                  as 11 clusters where .NET and Swift count 5, measured), so \
+                  a core that refused by its own table would refuse ranges \
+                  three platforms honor. The range covers exactly the code \
+                  points it names; a platform may widen what it PAINTS to \
+                  the whole cluster.\n\n\
+                  APP-OWNED AND NEVER TRACKED. kaya adjusts nothing across \
+                  edits: a declared set is bound to the text it was \
+                  declared against, and a backend paints it only while the \
+                  widget still holds that text — the first keystroke, \
+                  programmatic write or native undo drops the set with \
+                  nothing said. The app re-declares from the fold \
+                  `text_changed` already drives, which is the same \
+                  uncontrolled contract the text itself has. Range \
+                  tracking is editor-component work and lives in the app.\n\n\
+                  TEXTAREA ONLY this milestone. The entry is deferred with \
+                  measured per-platform reasons (docs/deferred.md): GTK's \
+                  entry highlight rides absolute byte offsets that do not \
+                  follow edits and is not readable over AT-SPI, macOS \
+                  destroys an entry's highlight the moment it loses focus \
+                  (the field editor is the window's, not the field's), and \
+                  no consumer wants it — an editor's find bar decorates a \
+                  document.",
+        },
+        Record {
+            kind: 39,
+            name: "select_range",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "Put the textarea's SELECTION at one range (UTF-8 byte \
+                  offsets, validated exactly as highlight_ranges is). \
+                  `start == end` is a caret and is legal — every platform's \
+                  text object models a degenerate range.\n\n\
+                  ITS OWN RECORD RATHER THAN A `widget_command`, which it \
+                  otherwise is exactly (momentary, fire-and-forget, the \
+                  app's sanctioned crossing into widget-owned state): that \
+                  record's layout has nowhere to put offsets, and growing \
+                  it two U64s would hang two dead fields on `clear` and \
+                  `focus` and make `focus(w, 0, 0)` representable.\n\n\
+                  REFUSED DURING AN INPUT-METHOD COMPOSITION, in every \
+                  backend, under the reason `ime_composition` \
+                  (docs/ranges-plan.md D4). Measured on macOS: honoring it \
+                  COMMITS the marked text into the document and into the \
+                  app's model mid-word, which is data loss shaped like a \
+                  feature, and it shifts every later offset by the \
+                  committed length. A refusal here is a NO-OP AND NOT A \
+                  PANIC — unlike undo's D4, which refuses an app-programming \
+                  error the app can fix. Composition state is on no kaya \
+                  channel and never will be (there are no widget mirror \
+                  reads), so the same app code is correct one millisecond \
+                  and refused the next; the app that wants the selection \
+                  waits for the composition to end, which `text_changed` \
+                  announces anyway. HIGHLIGHT and REVEAL do not disturb a \
+                  composition and are not refused (measured, same probe).",
+        },
+        Record {
+            kind: 40,
+            name: "reveal_range",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "Scroll the textarea so a range is inside the viewport \
+                  (UTF-8 byte offsets, validated exactly as \
+                  highlight_ranges is). A PURE EFFECT: it moves no state, \
+                  the selection is untouched, and per docs/undo-plan.md A2 \
+                  undo does not restore it — undo restores state, not where \
+                  you were looking, which is why it is permitted inside an \
+                  undo group and simply not inverted.\n\n\
+                  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not \
+                  kaya's: each backend calls its own scroll-to-range \
+                  (scrollRangeToVisible, ScrollIntoView, \
+                  gtk_text_view_scroll_to_iter, bringIntoView), so how much \
+                  context lands around the range is native behaviour. The \
+                  observable kaya fixes is containment, which is the only \
+                  thing every platform agrees on.",
+        },
     ],
     apply: &[
         Record {
@@ -1287,6 +1394,79 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   backend is already standing at its set_prop/command arm \
                   with the widget in hand and the old text to compare \
                   against, which is a comparison the core cannot make.",
+        },
+        Record {
+            kind: 28,
+            name: "highlight_ranges",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("count", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("ranges", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The tx record's twin in layout, and NOT in unit: these \
+                  offsets are already in THIS BACKEND'S NATIVE UNIT, \
+                  converted by the core against the same text it validated \
+                  them against (scratchpad/ranges-units.md §7). UTF-16 code \
+                  units on mac, iOS, Windows and Android; CODE POINTS on \
+                  GTK. A backend does no Unicode arithmetic on this path and \
+                  must not: the two interpreters are string-matched rather \
+                  than compile-checked, and an off-by-one in one of them is \
+                  invisible to every gate the compiler runs.\n\n\
+                  THE LOWERING CONTRACT, one sentence for five backends: \
+                  REPLACE the widget's decorated set with these ranges, and \
+                  RECORD THE WIDGET'S TEXT AS IT IS AT THIS MOMENT. Paint \
+                  the set only while the widget still holds that text; on \
+                  the first edit of any kind, drop it. That compare is what \
+                  makes D2's clear-on-edit structural rather than a message \
+                  that can arrive late — and late is this milestone's \
+                  measured hazard (range-probe-mac.md H2: SwiftUI's own \
+                  text push landed 11ms after the app's write and destroyed \
+                  everything declared before it). The invariant it buys, \
+                  stated as the reader wants it: PAINTED OFFSETS WERE \
+                  VALIDATED AGAINST THE TEXT THEY ARE PAINTED ON.\n\n\
+                  WHAT TO PAINT WITH is per platform and is decided by what \
+                  the platform's own ACCESSIBILITY layer publishes, because \
+                  that is what a harness leg reads: a background colour on \
+                  the text runs (NSTextStorage's .backgroundColor, a \
+                  GtkTextTag, a SpanStyle, a CharacterFormat.BackColor). On \
+                  macOS the alternatives were measured and rejected — \
+                  TextKit 2 rendering attributes and NSTextHighlightStyle \
+                  both render and are both INVISIBLE to accessibility, and \
+                  TextKit 1 temporary attributes require reading \
+                  `.layoutManager`, which silently and permanently \
+                  downgrades the view (range-probe-mac.md §1).",
+        },
+        Record {
+            kind: 29,
+            name: "select_range",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "Move the widget's selection, in the backend's native \
+                  unit (see the highlight twin). REFUSE IT SILENTLY, under \
+                  the reason `ime_composition`, while an input-method \
+                  composition is active on that widget — the one thing on \
+                  this channel a backend is expected NOT to do, and the \
+                  only party that can know it (composition state is on no \
+                  kaya channel).",
+        },
+        Record {
+            kind: 30,
+            name: "reveal_range",
+            fields: &[
+                f("widget_id", FieldTy::U64),
+                f("start", FieldTy::U64),
+                f("stop", FieldTy::U64),
+            ],
+            payload: None,
+            doc: "Scroll the range into the widget's viewport, in the \
+                  backend's native unit (see the highlight twin). Touches \
+                  no selection and no composition.",
         },
     ],
     occurrence: &[
@@ -1824,7 +2004,8 @@ mod tests {
     use super::*;
     use crate::protocol::{
         AlertId, AlertSpec, CollectionId, CommandKind, MenuItemId, MenuItemKind, MenuProp, Prop,
-        PropValue, SignalId, TemplateNodeId, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
+        PropValue, SignalId, TemplateNodeId, TextRange, TxOp, Value, ValueType, WidgetId,
+        WidgetKind, WindowId,
     };
     use crate::wire;
 
@@ -1966,6 +2147,9 @@ mod tests {
             ("copy", wire::TX_COPY),
             ("read_clipboard", wire::TX_READ_CLIPBOARD),
             ("undo_group", wire::TX_UNDO_GROUP),
+            ("highlight_ranges", wire::TX_HIGHLIGHT_RANGES),
+            ("select_range", wire::TX_SELECT_RANGE),
+            ("reveal_range", wire::TX_REVEAL_RANGE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -2006,6 +2190,9 @@ mod tests {
                 ("copy", wire::APPLY_COPY),
                 ("read_clipboard", wire::APPLY_READ_CLIPBOARD),
                 ("clear_undo", wire::APPLY_CLEAR_UNDO),
+                ("highlight_ranges", wire::APPLY_HIGHLIGHT_RANGES),
+                ("select_range", wire::APPLY_SELECT_RANGE),
+                ("reveal_range", wire::APPLY_REVEAL_RANGE),
             ]
         );
         // THE SAME TABLE SHAPE AS THE TWO ABOVE, and it was not always:
@@ -2324,6 +2511,27 @@ mod tests {
             w.buf[start + 4..start + 6].copy_from_slice(&wire::TX_SET_MENU_PROP.to_le_bytes());
         }
 
+        // Text ranges: a two-range declaration through the Values list,
+        // then the two single-range commands. The offsets are UTF-8 BYTE
+        // offsets — this test proves the ENCODING round-trips; the core's
+        // validation and unit conversion are scene.rs's tests.
+        w.record(
+            tx_record("highlight_ranges"),
+            &[
+                Arg::U64(2),
+                Arg::U32(2),
+                Arg::U32(0),
+                Arg::Values(vec![
+                    Value::I64(4),
+                    Value::I64(9),
+                    Value::I64(20),
+                    Value::I64(25),
+                ]),
+            ],
+        );
+        w.record(tx_record("select_range"), &[Arg::U64(2), Arg::U64(20), Arg::U64(25)]);
+        w.record(tx_record("reveal_range"), &[Arg::U64(2), Arg::U64(20), Arg::U64(25)]);
+
         let ops = wire::decode_transaction(&w.buf);
         let expected: Vec<TxOp> = vec![
             TxOp::CreateSignal {
@@ -2423,6 +2631,18 @@ mod tests {
                 item: MenuItemId(100),
                 prop: MenuProp::Label,
                 value: PropValue::Const(Value::from("Save")),
+            },
+            TxOp::HighlightRanges {
+                widget: WidgetId(2),
+                ranges: vec![TextRange::new(4, 9), TextRange::new(20, 25)],
+            },
+            TxOp::SelectRange {
+                widget: WidgetId(2),
+                range: TextRange::new(20, 25),
+            },
+            TxOp::RevealRange {
+                widget: WidgetId(2),
+                range: TextRange::new(20, 25),
             },
         ];
         assert_eq!(ops.len(), expected.len());

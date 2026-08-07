@@ -39,14 +39,19 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     NavigationViewItem, NavigationViewPaneDisplayMode, ProgressBar, RadioMenuFlyoutItem,
     RichEditBox, RichEditClipboardFormat, RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
-    Slider, TextBlock, TextBox, TextChangedEventHandler, TextControlPasteEventHandler,
+    Slider, TextBlock, TextBox, TextChangedEventHandler, TextCompositionEndedEventArgs,
+    TextCompositionStartedEventArgs, TextControlPasteEventHandler,
     ToggleMenuFlyoutItem, TwoPaneView,
     TwoPaneViewMode, TwoPaneViewPriority, TwoPaneViewWideModeConfiguration,
 };
 // The RichEdit text object model: the textarea's control keeps its text,
 // its undo stack and its clipboard verbs on a document object rather
 // than on itself (docs/textarea-foundation-plan.md, the windows arm).
-use bindings::Microsoft::UI::Text::{TextGetOptions, TextSetOptions};
+// The text ranges ride the same model — `PointOptions` is reveal's
+// placement and the viewport read's coordinate space, `TextConstants`
+// carries the background an UNPAINTED run wears
+// (docs/ranges-plan.md D1).
+use bindings::Microsoft::UI::Text::{PointOptions, TextConstants, TextGetOptions, TextSetOptions};
 use bindings::Windows::Foundation::TypedEventHandler;
 use bindings::Microsoft::UI::Xaml::Input::KeyboardAccelerator;
 use bindings::Windows::System::{VirtualKey, VirtualKeyModifiers};
@@ -574,6 +579,63 @@ struct CoreState {
     /// the app, because the field is uncontrolled and a native undo is
     /// an edit like any other from the app's side.
     ledger_quiet: HashMap<u64, String>,
+}
+
+// ---- Text ranges: the two pieces of state that CANNOT live in
+// ---- CoreState (docs/ranges-plan.md D2, D4)
+//
+// Both are written by CONTROL EVENT HANDLERS — TextChanged for the
+// first, TextCompositionStarted/Ended for the second — and a handler
+// that touched `CORE` would be one synchronous raise away from aborting
+// the process. `CORE.with_borrow_mut` PANICS on a live borrow, the
+// harness's own `set_text` writes the control from inside `on_ui_mut`
+// (which holds that borrow — the reason `bank_text_changed_on` exists
+// as a second door), and a panic crossing a dispatcher callback aborts
+// rather than unwinds. The existing TextChanged handler is safe only
+// because its swallow test returns BEFORE it reaches the core; D2's
+// compare has to run on every raise, swallowed or not, so it cannot
+// stand behind that test.
+//
+// Thread-local rather than static: every one of these paths is the UI
+// thread, and a `RefCell` says so where a `Mutex` would only imply it.
+
+thread_local! {
+    /// D2'S CLEAR-ON-EDIT, THIS BACKEND'S SPELLING: the widget's text at
+    /// the moment a highlight set was declared over it. The rule is that
+    /// painted offsets were validated against the text they are painted
+    /// on, so a set survives exactly as long as this string is still
+    /// what the control holds; any edit — a keystroke, a programmatic
+    /// write, a native undo — makes it stale and `drop_stale_highlights`
+    /// unpaints everything with nothing said.
+    ///
+    /// THE COMPARE IS AGAINST THE TEXT AND NOT AGAINST THE EVENT, which
+    /// is why this holds a string rather than a generation number.
+    /// TextChanged is raised ASYNCHRONOUSLY here, so a transaction that
+    /// writes new text and declares ranges over it — the obvious
+    /// spelling, and the one the core's same-batch text read exists to
+    /// serve — has its TextChanged land AFTER the highlight. A backend
+    /// that dropped on the event would destroy every set declared in the
+    /// same batch as a write; one that compares the text sees the string
+    /// it just recorded and leaves the set alone.
+    ///
+    /// AND IT IS NOT BELT-AND-BRACES FOR THE PLATFORM'S OWN BEHAVIOUR.
+    /// Rich Edit anchors character formatting to the TEXT, not to
+    /// offsets: an insertion before a painted run MOVES the run
+    /// (measured, range-probe-windows.md §5 — a run painted at 20-30
+    /// read back at 25-35 after a five-character insert at 0), and text
+    /// typed at either edge of a run INHERITS its background. Tracking
+    /// is exactly what D2 refuses to ship, so without this compare a
+    /// stale set would keep painting, drifting and growing, until the
+    /// app happened to declare something else.
+    static HIGHLIGHT_TEXT: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
+
+    /// Widgets with a LIVE INPUT-METHOD COMPOSITION, from the control's
+    /// own `TextCompositionStarted`/`TextCompositionEnded` (D4). The
+    /// only party that can know this is the control: a composition is on
+    /// no kaya channel and never will be, so a `select_range` arriving
+    /// mid-word is a race the app cannot see and must not lose.
+    static COMPOSING: RefCell<std::collections::HashSet<u64>> =
+        RefCell::new(std::collections::HashSet::new());
 }
 
 /// One section's materialized state: the pane Grid (the mount
@@ -4023,6 +4085,597 @@ fn clear_native_undo(field: &Editable) {
     }
 }
 
+// ---- Text ranges (docs/ranges-plan.md D1-D5) ------------------------
+//
+// The three primitives on the one widget that can carry them. TextBox
+// cannot express a decorated run AT ALL — no document object, no
+// per-range formatting, one selection and one selection colour, proved
+// twice by the probe (the complete 120-method metadata surface and live
+// reflection agreed) — which is why the textarea foundation moved to
+// RichEditBox and why these arms are cheap now.
+//
+// OFFSETS ARRIVE NATIVE AND ARE NEVER CONVERTED HERE. An `ApplyOp`
+// carries a `NativeRange`, which the core built by converting UTF-8 byte
+// offsets into THIS backend's unit against the text it validated them
+// on; Rich Edit's character positions are UTF-16 code units, so a lowered
+// range is used as it stands. The only offset arithmetic in this file is
+// in the READING direction, where the harness's spelling is defined in
+// the protocol's byte offsets (`range_spelling` below).
+//
+// AND THE LINE BREAK DOES NOT MOVE THEM, which is the fact worth writing
+// down because its GTK sibling is the opposite. A Rich Edit story stores
+// every line break as a single CR where kaya's text has a single LF, so
+// the counts agree 1:1 and `lf()` shifts nothing. (GTK's buffer stores a
+// pasted CRLF as two characters and every range after one lands early.)
+
+/// The background a declared range wears. Rich Edit's background is
+/// opaque — `ITextCharacterFormat` has no alpha channel of its own —
+/// so this is the flattened equivalent of the mac arm's 55%-yellow over
+/// white rather than a second opinion about what a highlight looks like.
+const HIGHLIGHT_BACKGROUND: bindings::Windows::UI::Color = bindings::Windows::UI::Color {
+    A: 255,
+    R: 255,
+    G: 241,
+    B: 143,
+};
+
+/// The textarea behind a widget id, or None if this id is not one.
+///
+/// TEXTAREA ONLY, and the core already refused anything else at the one
+/// chokepoint (scene.rs: "text ranges are a TEXTAREA surface"), so this
+/// answering None means the widget vanished between the transaction and
+/// its apply — the same race every other arm here tolerates.
+fn textarea_by_id(core: &CoreState, id: u64) -> Option<RichEditBox> {
+    core.textarea_ids
+        .iter()
+        .position(|&t| t == id)
+        .map(|i| core.textareas[i].clone())
+}
+
+/// One background write: get the range, take its format COPY, set the
+/// colour, assign the copy back. Four COM hops, and the round trip is
+/// not optional — `ITextRange::CharacterFormat` hands out a snapshot,
+/// so a colour set on it changes nothing until it is assigned.
+fn set_background(
+    range: &bindings::Microsoft::UI::Text::ITextRange,
+    color: bindings::Windows::UI::Color,
+) -> windows_core::Result<()> {
+    let format = range.CharacterFormat()?;
+    format.SetBackgroundColor(color)?;
+    range.SetCharacterFormat(&format)
+}
+
+/// Unpaint the whole story.
+///
+/// EXPLICIT, AND ON EVERY DECLARATION, because `SetText` does NOT reset
+/// character formatting on this control (measured, range-probe-windows.md
+/// §5: new text takes the ambient format, and a probe that painted eight
+/// characters red ended up with an 80,513-pixel red document after one
+/// re-set). The clear is one range write and the batch pays for it.
+fn clear_highlights(field: &RichEditBox) -> windows_core::Result<()> {
+    let doc = field.TextDocument()?;
+    let story = doc.GetRange(0, TextConstants::MaxUnitCount()?)?;
+    set_background(&story, TextConstants::AutoColor()?)
+}
+
+/// THE DECLARED SET, painted (D1's first primitive).
+fn paint_highlights(
+    field: &RichEditBox,
+    ranges: &[crate::protocol::NativeRange],
+) -> windows_core::Result<()> {
+    let doc = field.TextDocument()?;
+    // Batched unconditionally: measured 2.2x faster per range (96µs ->
+    // 44µs) and it keeps the clear below from being a visible flash of
+    // undecorated text before the new set lands.
+    doc.BatchDisplayUpdates()?;
+    let painted = (|| -> windows_core::Result<()> {
+        clear_highlights(field)?;
+        for range in ranges {
+            set_background(
+                &doc.GetRange(range.start as i32, range.stop as i32)?,
+                HIGHLIGHT_BACKGROUND,
+            )?;
+        }
+        Ok(())
+    })();
+    // ALWAYS, even on the failure above: an unmatched
+    // BatchDisplayUpdates leaves the control's rendering suspended for
+    // the rest of the process, which would turn one failed paint into a
+    // window that stops updating at all.
+    doc.ApplyDisplayUpdates()?;
+    painted
+}
+
+/// D2, ENFORCED WHERE THE EDIT ARRIVES. Called from the textarea's
+/// TextChanged BEFORE the swallow test, so it sees every edit whatever
+/// its origin — a keystroke, a paste, kaya's own write, a native undo.
+///
+/// The compare is against the recorded text, never against the event:
+/// see HIGHLIGHT_TEXT for why that distinction is the whole design.
+fn drop_stale_highlights(id: u64, field: &RichEditBox) {
+    let Some(declared) = HIGHLIGHT_TEXT.with_borrow(|map| map.get(&id).cloned()) else {
+        return;
+    };
+    let now = match Editable::Textarea(field.clone()).text() {
+        Ok(text) => text,
+        Err(_) => return,
+    };
+    if now == declared {
+        return;
+    }
+    HIGHLIGHT_TEXT.with_borrow_mut(|map| map.remove(&id));
+    if let Err(e) = clear_highlights(field) {
+        eprintln!("kaya: winui could not drop a stale highlight set: {}", e.message());
+    }
+}
+
+/// The painted runs the control is actually holding, in its own units.
+///
+/// THE READ GOES TO THE DOCUMENT MODEL, not to kaya's bookkeeping, and
+/// that is the difference between a test and a tautology: delete the
+/// paint and this answers `""` while HIGHLIGHT_TEXT still remembers
+/// everything. It is NOT the accessibility tree, which is what the mac
+/// arm reads and what this arm would prefer — WinUI's in-process
+/// automation peer for a text control publishes no Text pattern at all
+/// (`RichEditBoxAutomationPeer` declares exactly one interface in the
+/// SDK metadata, and live reflection agreed: `GetPattern(Text)` is
+/// NULL), and the only route that does publish it is an out-of-process
+/// UIA CLIENT, which is the file-dialog era's crash class and is barred
+/// at the Cargo.toml. So this reads the layer underneath: Rich Edit's
+/// own model of what it is rendering.
+///
+/// A run is "painted" when its background is not the platform's own
+/// `AutoColor` sentinel — the value an untouched run carries — rather
+/// than when it matches kaya's colour, so a clear that wrote the WRONG
+/// colour reads as still-painted instead of silently passing.
+#[cfg(feature = "harness")]
+fn painted_runs(field: &RichEditBox, units: i32) -> windows_core::Result<Vec<(i32, i32)>> {
+    let doc = field.TextDocument()?;
+    let auto = TextConstants::AutoColor()?;
+    let mut runs: Vec<(i32, i32)> = Vec::new();
+    let mut open: Option<i32> = None;
+    for at in 0..units {
+        let painted = doc
+            .GetRange(at, at + 1)?
+            .CharacterFormat()?
+            .BackgroundColor()?
+            != auto;
+        match (painted, open) {
+            (true, None) => open = Some(at),
+            (false, Some(from)) => {
+                runs.push((from, at));
+                open = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(from) = open {
+        runs.push((from, units));
+    }
+    Ok(runs)
+}
+
+/// A UTF-16 code-unit offset as a UTF-8 byte offset into the same text,
+/// or None when it splits a character — which can only mean something
+/// handed the platform an offset the core would have refused.
+#[cfg(feature = "harness")]
+fn byte_offset(text: &str, utf16: i32) -> Option<usize> {
+    if utf16 < 0 {
+        return None;
+    }
+    let mut units = 0usize;
+    for (byte, ch) in text.char_indices() {
+        if units == utf16 as usize {
+            return Some(byte);
+        }
+        units += ch.len_utf16();
+    }
+    (units == utf16 as usize).then_some(text.len())
+}
+
+/// The inverse, for the one verb that arrives carrying byte offsets:
+/// `expect_revealed` asks whether a range is on screen, so the range has
+/// to be in the control's unit before the control can be asked.
+#[cfg(feature = "harness")]
+fn utf16_offset(text: &str, byte: usize) -> Option<i32> {
+    if byte > text.len() || !text.is_char_boundary(byte) {
+        return None;
+    }
+    Some(text[..byte].encode_utf16().count() as i32)
+}
+
+/// WHERE A RANGE SITS IN THE DOCUMENT: its top and bottom edge, in the
+/// same units the control's ScrollViewer counts.
+///
+/// `ITextRange::GetRect` NAMES ITS OPTION `ClientCoordinates` AND MEANS
+/// DOCUMENT COORDINATES on this control, which is the fact the whole
+/// reveal arm turns on. Measured on the VM 2026-08-06: the last match of
+/// a 40-line document reported Y=689 with the viewport at offset 0 AND
+/// with it at 625 — the rectangle did not move, because the Rich Edit
+/// engine renders into a surface that the XAML ScrollViewer slides, and
+/// the engine's coordinates are the surface's. So a viewport question
+/// is answered by combining this with the ScrollViewer's offset, never
+/// by the rectangle alone.
+///
+/// `ITextRange::ScrollIntoView` — the call the reveal arm makes — does
+/// move the XAML ScrollViewer (measured: offset 0 -> 625 of 662 for the
+/// last match of a 40-line document), so the two coordinate systems have
+/// to be combined for the read even though the write needs only one.
+#[cfg(feature = "harness")]
+fn range_extent(field: &RichEditBox, start: i32, stop: i32) -> windows_core::Result<(f64, f64)> {
+    let mut rect = bindings::Windows::Foundation::Rect::default();
+    let mut hit = 0i32;
+    field.TextDocument()?.GetRange(start, stop)?.GetRect(
+        // AllowOffClient is what makes an off-screen range answerable at
+        // all: without it there is no rectangle to report for one, and a
+        // containment test could only ever say "visible".
+        PointOptions::ClientCoordinates | PointOptions::AllowOffClient,
+        &mut rect,
+        &mut hit,
+    )?;
+    Ok((rect.Y as f64, (rect.Y + rect.Height) as f64))
+}
+
+/// The ScrollViewer inside a text control's template — the part named
+/// `ContentElement`, which is what actually moves when a WinUI text
+/// control scrolls.
+#[cfg(feature = "harness")]
+fn template_scroll(field: &RichEditBox) -> windows_core::Result<ScrollViewer> {
+    fn walk(element: &UIElement) -> windows_core::Result<Option<ScrollViewer>> {
+        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+        if let Ok(viewer) = element.cast::<ScrollViewer>() {
+            return Ok(Some(viewer));
+        }
+        for at in 0..VisualTreeHelper::GetChildrenCount(element)? {
+            let child = VisualTreeHelper::GetChild(element, at)?;
+            if let Ok(child) = child.cast::<UIElement>() {
+                if let Some(found) = walk(&child)? {
+                    return Ok(Some(found));
+                }
+            }
+        }
+        Ok(None)
+    }
+    let element: UIElement = field.cast()?;
+    walk(&element)?.ok_or_else(|| {
+        windows_core::Error::new(
+            windows_core::HRESULT(0x8000_4005u32 as i32),
+            "kaya: the textarea's template has no ScrollViewer — a text control that \
+             cannot scroll cannot reveal a range (docs/ranges-plan.md D1)",
+        )
+    })
+}
+
+/// THE HARNESS'S COMPOSITION, THROUGH THE TEXT SERVICES FRAMEWORK.
+///
+/// Windows has no "insert marked text" call: AppKit has `setMarkedText`,
+/// UIKit has `setMarkedText:selectedRange:`, Android has
+/// `InputConnection.setComposingText`, and Windows has an ARCHITECTURE —
+/// compositions belong to TSF, which owns the focused document and hands
+/// text services a write lock to work inside. So this does what a text
+/// service does, in the app's own process and on its own UI thread: take
+/// the focused context, run an edit session on it, start a composition
+/// over the caret, and write the marked text into the composition's
+/// range. Nothing is committed; the control raises
+/// `TextCompositionStarted` and the text sits in the document as
+/// UNCOMMITTED composition text, which is the state D4's refusal exists
+/// for.
+///
+/// (Injecting keystrokes was never an option: an IME converts what it is
+/// given — a Japanese IME turns "nihon" into kana — so the marked string
+/// would not be the string the frozen scene expects, and the VM has no
+/// IME installed to convert it with. Inserting the text as ordinary
+/// content would prove nothing: it is exactly the state the refusal must
+/// be able to tell a composition apart from.)
+///
+/// THE COMPOSITION IS DELIBERATELY LEFT OPEN. `ITfComposition` is parked
+/// in a thread-local rather than dropped, so the marked text stays marked
+/// for the rest of the scene — a composition that ended on the way out of
+/// this function would leave committed text and a passing D4 assertion
+/// that proved nothing.
+#[cfg(feature = "harness")]
+fn tsf_compose(text: &str) -> Result<(), String> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+    use windows::Win32::UI::TextServices::{
+        CLSID_TF_ThreadMgr, ITfContextComposition, ITfInsertAtSelection, ITfThreadMgr,
+        TF_AE_END, TF_ANCHOR_END,
+        TF_CONTEXT_EDIT_CONTEXT_FLAGS, TF_ES_READWRITE, TF_ES_SYNC, TF_IAS_QUERYONLY,
+        TF_SELECTION, TF_SELECTIONSTYLE,
+    };
+    let named = |what: &str, e: windows_core::Error| format!("{what}: {}", e.message());
+    unsafe {
+        // The thread manager is a per-thread singleton, so this is a
+        // handle to the one WinUI's input stack already activated rather
+        // than a second manager.
+        let manager: ITfThreadMgr = CoCreateInstance(&CLSID_TF_ThreadMgr, None, CLSCTX_INPROC_SERVER)
+            .map_err(|e| named("no TSF thread manager on the UI thread", e))?;
+        let client = manager
+            .Activate()
+            .map_err(|e| named("TSF refused a client id", e))?;
+        let document = manager.GetFocus().map_err(|e| {
+            named(
+                "TSF has no focused document (the control must hold the keyboard focus)",
+                e,
+            )
+        })?;
+        let context = document
+            .GetTop()
+            .map_err(|e| named("the focused document has no context", e))?;
+        let composer: ITfContextComposition = context
+            .cast()
+            .map_err(|e| named("the context owns no compositions", e))?;
+        let marked: Vec<u16> = text.encode_utf16().collect();
+        let inside = context.clone();
+        let session = Box::leak(Box::new(KayaEditSession {
+            vtable: &KAYA_EDIT_SESSION_VTBL,
+            body: RefCell::new(Some(Box::new(move |ec: u32| {
+                let sink = composition_sink();
+                // THE COMPOSITION RANGE COMES FROM `ITfInsertAtSelection`
+                // rather than from `GetSelection`, which is the pattern
+                // Microsoft's own TSF sample uses
+                // (Win7Samples/winui/tsf/tsfmark): a query-only insert
+                // asks the TEXT STORE where text would go, which is the
+                // range a composition may cover, where the selection is
+                // only where the caret is. Stated as the sample's
+                // authority and not as a measurement — what the VM
+                // measured is the SINK (see KayaCompositionSink), which
+                // is what E_INVALIDARG was actually about.
+                let inserter: ITfInsertAtSelection = inside.cast()?;
+                let at = inserter.InsertTextAtSelection(ec, TF_IAS_QUERYONLY, &[])?;
+                let composition = composer.StartComposition(ec, &at, &sink)?;
+                let range = composition.GetRange()?;
+                range.SetText(ec, 0, &marked)?;
+                // A COMPOSITION PARKS THE CARET AT THE END OF ITS MARKED
+                // TEXT — every platform's convention, and the number the
+                // frozen scene asserts.
+                let end = range.Clone()?;
+                end.Collapse(ec, TF_ANCHOR_END)?;
+                let mut moved: [TF_SELECTION; 1] = [core::mem::zeroed()];
+                moved[0].range = core::mem::ManuallyDrop::new(Some(end));
+                moved[0].style = TF_SELECTIONSTYLE {
+                    ase: TF_AE_END,
+                    fInterimChar: false.into(),
+                };
+                inside.SetSelection(ec, &moved)?;
+                LIVE_COMPOSITION.with_borrow_mut(|slot| *slot = Some(composition));
+                Ok(())
+            }))),
+            outcome: RefCell::new(None),
+        }));
+        let raw = session as *const KayaEditSession as *mut core::ffi::c_void;
+        let handle =
+            <windows::Win32::UI::TextServices::ITfEditSession as windows_core::Interface>::from_raw_borrowed(&raw)
+                .expect("the edit session object is not null");
+        // SYNCHRONOUS FIRST so the composition is live before this
+        // returns, ASYNC as the fallback — and the fallback is keyed on
+        // the GRANT, not on the call. `RequestEditSession` answers twice:
+        // the call's own HRESULT (did TSF understand the request) and
+        // `phrSession` (was the lock given), and a refused sync request
+        // comes back as a SUCCESSFUL call carrying a failed grant.
+        // Measured on the VM 2026-08-06: the sync request is answered
+        // E_INVALIDARG — a synchronous lock is the document owner's
+        // privilege and this client is not it — while the async request
+        // is granted and the composition appears.
+        let sync = TF_CONTEXT_EDIT_CONTEXT_FLAGS(TF_ES_SYNC.0 | TF_ES_READWRITE.0);
+        let mut granted = context
+            .RequestEditSession(client, handle, sync)
+            .map_err(|e| named("TSF refused an edit session", e))?;
+        if granted.is_err() {
+            granted = context
+                .RequestEditSession(client, handle, TF_ES_READWRITE)
+                .map_err(|e| named("TSF refused an asynchronous edit session", e))?;
+        }
+        if granted.is_err() {
+            return Err(format!(
+                "TSF granted no edit session (sync and async both refused, {granted:?})"
+            ));
+        }
+        match session.outcome.borrow_mut().take() {
+            Some(Err(e)) => Err(named("the composition was refused", e)),
+            // None means the grant was asynchronous; the caller's poll on
+            // TextCompositionStarted is the report either way.
+            _ => Ok(()),
+        }
+    }
+}
+
+/// TSF's edit session, hand-rolled — one method over `IUnknown`, and the
+/// same nominal-refcount shape as `KayaOuter` above (a process-lifetime
+/// object that is never released). The alternative is the `implement`
+/// macro, which would add a proc-macro dependency to every kaya build
+/// for one harness verb.
+#[cfg(feature = "harness")]
+#[repr(C)]
+struct KayaEditSession {
+    vtable: *const windows::Win32::UI::TextServices::ITfEditSession_Vtbl,
+    /// What to do inside the write lock. Taken on the first (and only)
+    /// call, so a session cannot run twice.
+    #[allow(clippy::type_complexity)]
+    body: RefCell<Option<Box<dyn FnOnce(u32) -> windows_core::Result<()>>>>,
+    outcome: RefCell<Option<windows_core::Result<()>>>,
+}
+
+#[cfg(feature = "harness")]
+static KAYA_EDIT_SESSION_VTBL: windows::Win32::UI::TextServices::ITfEditSession_Vtbl =
+    windows::Win32::UI::TextServices::ITfEditSession_Vtbl {
+        base__: windows_core::IUnknown_Vtbl {
+            QueryInterface: edit_session_qi,
+            AddRef: edit_session_addref,
+            Release: edit_session_release,
+        },
+        DoEditSession: edit_session_do,
+    };
+
+#[cfg(feature = "harness")]
+unsafe extern "system" fn edit_session_qi(
+    this: *mut core::ffi::c_void,
+    iid: *const windows_core::GUID,
+    out: *mut *mut core::ffi::c_void,
+) -> windows_core::HRESULT {
+    use windows_core::Interface;
+    unsafe {
+        if out.is_null() {
+            return windows_core::imp::E_POINTER;
+        }
+        let iid = &*iid;
+        if *iid == windows_core::IUnknown::IID
+            || *iid == <windows::Win32::UI::TextServices::ITfEditSession as Interface>::IID
+        {
+            *out = this;
+            return windows_core::HRESULT(0);
+        }
+        *out = core::ptr::null_mut();
+        windows_core::imp::E_NOINTERFACE
+    }
+}
+
+#[cfg(feature = "harness")]
+unsafe extern "system" fn edit_session_addref(_this: *mut core::ffi::c_void) -> u32 {
+    2
+}
+
+#[cfg(feature = "harness")]
+unsafe extern "system" fn edit_session_release(_this: *mut core::ffi::c_void) -> u32 {
+    1
+}
+
+#[cfg(feature = "harness")]
+unsafe extern "system" fn edit_session_do(
+    this: *mut core::ffi::c_void,
+    cookie: u32,
+) -> windows_core::HRESULT {
+    let session = unsafe { &*(this as *const KayaEditSession) };
+    let body = session.body.borrow_mut().take();
+    let outcome = match body {
+        Some(body) => body(cookie),
+        None => Ok(()),
+    };
+    let code = match &outcome {
+        Ok(()) => windows_core::HRESULT(0),
+        Err(e) => {
+            // SAID HERE AND NOT AT THE CALL SITE, because an
+            // ASYNCHRONOUS grant runs this body long after the caller
+            // returned: a failure the caller reported would be a
+            // failure nobody ever hears about.
+            eprintln!("kaya: the composition edit session failed: {}", e.message());
+            e.code()
+        }
+    };
+    *session.outcome.borrow_mut() = Some(outcome);
+    code
+}
+
+/// TSF'S COMPOSITION SINK — the object a composition reports its own
+/// termination to. Documented as optional, and NOT optional in practice:
+/// `StartComposition` with a NULL sink answers E_INVALIDARG on this
+/// Windows build (measured on the VM 2026-08-06, twice, with the
+/// composition range obtained both ways). Microsoft's own TSF sample
+/// passes its text service here, so the sample is right and the
+/// reference page is optimistic.
+///
+/// One method beyond IUnknown, and nothing to do in it: the harness's
+/// composition is ended by the process exiting.
+#[cfg(feature = "harness")]
+#[repr(C)]
+struct KayaCompositionSink {
+    vtable: *const windows::Win32::UI::TextServices::ITfCompositionSink_Vtbl,
+}
+
+#[cfg(feature = "harness")]
+static KAYA_COMPOSITION_SINK_VTBL: windows::Win32::UI::TextServices::ITfCompositionSink_Vtbl =
+    windows::Win32::UI::TextServices::ITfCompositionSink_Vtbl {
+        base__: windows_core::IUnknown_Vtbl {
+            QueryInterface: composition_sink_qi,
+            AddRef: edit_session_addref,
+            Release: edit_session_release,
+        },
+        OnCompositionTerminated: composition_sink_terminated,
+    };
+
+/// One instance, leaked: the composition outlives the call that starts
+/// it, so the sink must outlive both.
+#[cfg(feature = "harness")]
+fn composition_sink() -> windows::Win32::UI::TextServices::ITfCompositionSink {
+    let object = Box::leak(Box::new(KayaCompositionSink {
+        vtable: &KAYA_COMPOSITION_SINK_VTBL,
+    }));
+    let raw = object as *const KayaCompositionSink as *mut core::ffi::c_void;
+    // Nominal refcounts (see the vtable): taking "ownership" of a
+    // reference that is never released is what this object is for.
+    unsafe { windows_core::Interface::from_raw(raw) }
+}
+
+#[cfg(feature = "harness")]
+unsafe extern "system" fn composition_sink_qi(
+    this: *mut core::ffi::c_void,
+    iid: *const windows_core::GUID,
+    out: *mut *mut core::ffi::c_void,
+) -> windows_core::HRESULT {
+    use windows_core::Interface;
+    unsafe {
+        if out.is_null() {
+            return windows_core::imp::E_POINTER;
+        }
+        let iid = &*iid;
+        if *iid == windows_core::IUnknown::IID
+            || *iid == <windows::Win32::UI::TextServices::ITfCompositionSink as Interface>::IID
+        {
+            *out = this;
+            return windows_core::HRESULT(0);
+        }
+        *out = core::ptr::null_mut();
+        windows_core::imp::E_NOINTERFACE
+    }
+}
+
+#[cfg(feature = "harness")]
+unsafe extern "system" fn composition_sink_terminated(
+    _this: *mut core::ffi::c_void,
+    _cookie: u32,
+    _composition: *mut core::ffi::c_void,
+) -> windows_core::HRESULT {
+    // Nothing to unwind: the composition the harness starts lives until
+    // the scene's process does.
+    windows_core::HRESULT(0)
+}
+
+#[cfg(feature = "harness")]
+thread_local! {
+    /// The open composition, parked so it outlives the edit session that
+    /// started it. Dropping it here would be the one thing that must not
+    /// happen: the marked text has to stay marked for the assertion that
+    /// follows.
+    static LIVE_COMPOSITION: RefCell<Option<windows::Win32::UI::TextServices::ITfComposition>> =
+        const { RefCell::new(None) };
+}
+
+/// A set of platform ranges in the harness's spelling:
+/// `<start>:<end>=<covered text>` per range, `|`-joined, ascending.
+///
+/// THE COVERED TEXT IS NOT DECORATION. Offsets alone would make this
+/// read the exact inverse of the lowering's own conversion, so two
+/// symmetric mistakes would cancel and the leg would pass while the
+/// highlight covered the wrong characters. The covered text has no
+/// arithmetic in it — the string is sliced with the range the platform
+/// is actually holding — so the two halves cannot be wrong together.
+#[cfg(feature = "harness")]
+fn range_spelling(text: &str, ranges: &[(i32, i32)]) -> String {
+    let mut ranges = ranges.to_vec();
+    ranges.sort_by_key(|(start, _)| *start);
+    ranges
+        .iter()
+        .map(|&(start, stop)| {
+            match (byte_offset(text, start), byte_offset(text, stop)) {
+                // Named, not silently coerced: no scene will ever expect
+                // this, and it says which endpoint split a character.
+                (Some(from), Some(to)) => format!("{from}:{to}={}", &text[from..to]),
+                _ => format!("split@{start}:{stop}="),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 /// EPISODE BANKING (docs/undo-plan.md §3), on the way past.
 ///
 /// Every user edit of a text field is shown to the ledger before the
@@ -4657,7 +5310,27 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     let field = RichEditBox::new()?;
                     field.SetAcceptsReturn(true)?;
                     field.SetMinWidth(240.0)?;
-                    field.SetMinHeight(96.0)?;
+                    // A TEXTAREA IS A VIEWPORT ONTO A DOCUMENT, NOT A
+                    // DOCUMENT-SHAPED HOLE IN THE LAYOUT — 96 tall, and
+                    // the control's own ScrollViewer moves the text
+                    // inside it. A MINIMUM alone is not that: WinUI
+                    // measures a control in an Auto row against infinite
+                    // height and gives it whatever it asks for, so a
+                    // textarea with a 40-line document asked for 758
+                    // pixels and got them (measured on the VM
+                    // 2026-08-06). Nothing scrolled, because nothing
+                    // overflowed.
+                    //
+                    // THE OTHER TWO DESKTOP BACKENDS ALREADY SAY 240x96
+                    // — the SwiftUI arm's `.frame(width: 240, height: 96)`
+                    // and the GTK arm's `set_size_request(240, 96)` on the
+                    // scroller — so this is the third spelling of one
+                    // size, not a new opinion. The ranges scene is what
+                    // found the divergence: `reveal_range` has nothing to
+                    // do in a control that is as tall as its text, and
+                    // `expect_revealed ... offscreen` cannot be true
+                    // there, on any platform whose textarea grows.
+                    field.SetHeight(96.0)?;
                     pin_plain_text(&field)?;
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("textareas carry a tag");
@@ -4672,7 +5345,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // event. Same event, same async raise, same swallow
                     // discipline — only the delegate type differs, and
                     // neither arm reads the args.
+                    let ranges_field = field.clone();
                     let handler = RoutedEventHandler::new(move |_, _| {
+                        // D2 FIRST, AND ABOVE THE SWALLOW TEST
+                        // (docs/ranges-plan.md D2). A declared highlight
+                        // set dies with the text it was declared
+                        // against, whatever moved that text — a
+                        // keystroke, a paste, kaya's own write, a native
+                        // undo — and the swallow counter's whole job is
+                        // to hide the last of those from the app. A
+                        // clear-on-edit that stood below it would leave
+                        // a programmatic write painting a stale set,
+                        // which on this control means a set that DRIFTS
+                        // with the edit and GROWS when the user types at
+                        // its edge.
+                        drop_stale_highlights(bank_id, &ranges_field);
                         if handler_swallow
                             .fetch_update(
                                 std::sync::atomic::Ordering::Relaxed,
@@ -4690,6 +5377,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
+                    // D4'S PREMISE, WIRED TO THE ONLY PARTY THAT KNOWS
+                    // IT. An input method's composition is live in this
+                    // control and on no kaya channel; these two events
+                    // are how the control says so, and the select_range
+                    // arm reads the answer. They fire for a real IME and
+                    // for the harness's `compose` alike, because both go
+                    // through the same text store.
+                    let composing_id = id.0;
+                    field.TextCompositionStarted(&TypedEventHandler::<
+                        RichEditBox,
+                        TextCompositionStartedEventArgs,
+                    >::new(move |_, _| {
+                        COMPOSING.with_borrow_mut(|live| live.insert(composing_id));
+                        Ok(())
+                    }))?;
+                    field.TextCompositionEnded(&TypedEventHandler::<
+                        RichEditBox,
+                        TextCompositionEndedEventArgs,
+                    >::new(move |_, _| {
+                        COMPOSING.with_borrow_mut(|live| live.remove(&composing_id));
+                        Ok(())
+                    }))?;
                     // Same focus-handoff refresh as the entry (paste
                     // enablement follows the focused editable).
                     let focus_handler = RoutedEventHandler::new(move |_, _| {
@@ -5290,6 +5999,66 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             if let Some(field) = focused_editable_id(core).and_then(|id| editable_by_id(core, id)) {
                 clear_native_undo(&field);
             }
+        }
+        // THE THREE TEXT-RANGE PRIMITIVES (docs/ranges-plan.md D1). The
+        // offsets in these ops are already UTF-16 code units — the core
+        // converted them against the text it validated them on — so
+        // nothing below counts a character.
+        ApplyOp::HighlightRanges { id, ranges } => {
+            let Some(field) = textarea_by_id(core, id.0) else {
+                return Ok(());
+            };
+            paint_highlights(&field, &ranges)?;
+            // D2's compare needs the text these offsets were validated
+            // against, and the control is holding it RIGHT NOW: a text
+            // write earlier in this same batch has already landed (the
+            // ops are applied in order, and the core read its own
+            // batch's writes to validate against exactly this string).
+            HIGHLIGHT_TEXT.with_borrow_mut(|map| {
+                map.insert(id.0, Editable::Textarea(field.clone()).text().unwrap_or_default())
+            });
+        }
+        ApplyOp::SelectRange { id, range } => {
+            let Some(field) = textarea_by_id(core, id.0) else {
+                return Ok(());
+            };
+            // D4, AND THIS BACKEND IS THE ONLY PARTY THAT CAN ENFORCE IT.
+            // An input-method composition is live in the control and on
+            // no kaya channel, so the core cannot know and the app
+            // cannot avoid the race: the same app code is correct at
+            // 10:00:00.000 and "wrong" four milliseconds later. Moving
+            // the selection now would end the composition and commit the
+            // user's half-typed word into the document — data loss
+            // shaped like a feature, and it would shift every later
+            // offset by the committed length. Refused as a no-op under a
+            // named reason, never a panic: the app wrote correct code
+            // and lost a race with a human being.
+            if COMPOSING.with_borrow(|live| live.contains(&id.0)) {
+                eprintln!("kaya: select_range refused: ime_composition (widget {})", id.0);
+                return Ok(());
+            }
+            field
+                .TextDocument()?
+                .Selection()?
+                .SetRange(range.start as i32, range.stop as i32)?;
+        }
+        ApplyOp::RevealRange { id, range } => {
+            let Some(field) = textarea_by_id(core, id.0) else {
+                return Ok(());
+            };
+            // `PointOptions::None` is the MINIMUM scroll that brings the
+            // range into view, which is every other backend's semantics
+            // (AppKit's scrollRangeToVisible, GTK's scroll_to_iter). The
+            // enum's other placements are opinions about where on screen
+            // a revealed range should sit, and kaya has none: the verb
+            // asserts containment, never the viewport.
+            //
+            // A scroll disturbs neither the selection nor a composition,
+            // so reveal has no refusal arm and needs none.
+            field
+                .TextDocument()?
+                .GetRange(range.start as i32, range.stop as i32)?
+                .ScrollIntoView(PointOptions::None)?;
         }
         ApplyOp::PresentFileDialog(spec) => {
             // The Shell's common item dialog, which is what Windows
@@ -7090,6 +7859,150 @@ impl crate::harness::Stage for WinUiStage {
             Ok(format!("{role}/{name}"))
         })
         .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
+    }
+
+    /// THE DECORATED RANGES, out of the control's own document model.
+    ///
+    /// NOT THE ACCESSIBILITY TREE, and that is a measured limit rather
+    /// than a preference: WinUI's in-process automation peer for a text
+    /// control publishes no Text pattern at all, so
+    /// `GetAttributeValue(BackgroundColor)` — the read the plan named —
+    /// has no provider to answer it in this process. The SDK metadata
+    /// and live reflection agree (`RichEditBoxAutomationPeer` declares
+    /// one interface, `IRichEditBoxAutomationPeer`, where
+    /// `ButtonAutomationPeer` declares `IInvokeProvider` beside its own;
+    /// `GetPattern(Text)` returns NULL on both text controls). The only
+    /// route that does publish it is an out-of-process UIA CLIENT, which
+    /// is barred at the Cargo.toml and for good reason — attaching one
+    /// makes the Shell's file dialog fatal to the java leg. So this
+    /// reads the layer beneath the peer: Rich Edit's own model of what
+    /// it is rendering, which is still the platform answering and still
+    /// fails when the lowering is deleted.
+    fn highlights(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let field = core.textareas[i].clone();
+            let text = lf(Editable::Textarea(field.clone()).text()?);
+            let units = text.encode_utf16().count() as i32;
+            Ok(range_spelling(&text, &painted_runs(&field, units)?))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    /// The selection, from the document model that owns it. A caret is
+    /// the empty range and reads as `12:12=`.
+    fn selection(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let field = core.textareas[i].clone();
+            let text = lf(Editable::Textarea(field.clone()).text()?);
+            let selection = field.TextDocument()?.Selection()?;
+            let (start, stop) = (selection.StartPosition()?, selection.EndPosition()?);
+            Ok(range_spelling(&text, &[(start, stop)]))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    /// WHETHER A RANGE IS IN THE VIEWPORT — containment, never the
+    /// viewport itself.
+    ///
+    /// FROM THE VIEWPORT AND NOT FROM A MODEL: `ITextRange::GetRect` in
+    /// CLIENT coordinates is where the range sits relative to what is on
+    /// screen RIGHT NOW, so it moves when the control scrolls and stays
+    /// put when the text does not. `AllowOffClient` is what makes the
+    /// negative answer real — without it an off-screen range has no
+    /// rectangle to report and the verb could only ever say "visible".
+    fn revealed(
+        &self, t: crate::harness::Target, range: crate::harness::TextRange,
+    ) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+                return Ok("<no such target>".to_string());
+            };
+            let field = core.textareas[i].clone();
+            let text = lf(Editable::Textarea(field.clone()).text()?);
+            // The verb's range arrives in the protocol's UTF-8 byte
+            // offsets; the control counts UTF-16 code units.
+            let (Some(start), Some(stop)) = (
+                utf16_offset(&text, range.start as usize),
+                utf16_offset(&text, range.stop as usize),
+            ) else {
+                return Ok("<offset is not a character boundary>".to_string());
+            };
+            let (top, bottom) = range_extent(&field, start, stop)?;
+            let viewer = template_scroll(&field)?;
+            let (at, viewport) = (viewer.VerticalOffset()?, viewer.ViewportHeight()?);
+            // Containment in the viewport the control is actually
+            // showing — the ScrollViewer's window onto the document,
+            // which is this platform's spelling of mac's
+            // AXVisibleCharacterRange.
+            let inside = top >= at - 0.5 && bottom <= at + viewport + 0.5;
+            Ok(if inside { "visible" } else { "offscreen" }.to_string())
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    /// AN INPUT METHOD'S COMPOSITION, STARTED THROUGH THE INPUT
+    /// METHOD'S OWN MACHINERY (docs/ranges-plan.md D4).
+    ///
+    /// Windows has no "insert marked text" call the way AppKit and UIKit
+    /// do: a composition here belongs to the Text Services Framework,
+    /// and the only honest way to reach the state is to do what a text
+    /// service does — take the focused document's context, run an edit
+    /// session on it, start a composition over the caret and write the
+    /// text into that composition's range. The text is then DISPLAYED
+    /// and UNCOMMITTED, the control raises `TextCompositionStarted`, and
+    /// `select_range` must refuse to run over it.
+    ///
+    /// The alternative — inserting the text and calling it a composition
+    /// — would prove nothing about D4: it is the very state the refusal
+    /// is supposed to distinguish from.
+    fn compose(&self, t: crate::harness::Target, text: &str) {
+        let marked = text.to_owned();
+        // The control must have the keyboard focus, or TSF's focused
+        // document is somebody else's (or nothing at all).
+        let id = Self::on_ui(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len()) else {
+                return Ok(0u64);
+            };
+            let field = core.textareas[i].clone();
+            let end = Editable::Textarea(field.clone()).text()?.encode_utf16().count() as i32;
+            // The composition goes in where the caret is, and a
+            // composition parks the caret at the END of its marked text
+            // — so the end of the document is where the scene's
+            // arithmetic starts (813 bytes + " z" + "nihon" = 820).
+            field.Focus(FocusState::Programmatic)?;
+            field.TextDocument()?.Selection()?.SetRange(end, end)?;
+            Ok(core.textarea_ids[i])
+        });
+        if id == 0 {
+            eprintln!("kaya: compose: no such target");
+            return;
+        }
+        if let Err(trouble) = Self::on_ui(move |_| Ok(tsf_compose(&marked))) {
+            eprintln!("kaya: compose: {trouble}");
+            return;
+        }
+        // Blocking, like type_text: the state under test is the
+        // composition, and the control saying it started is the only
+        // report that it is live.
+        for _ in 0..200 {
+            if Self::on_ui_read(move |_| Ok(COMPOSING.with_borrow(|live| live.contains(&id))))
+                .unwrap_or(false)
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        eprintln!(
+            "kaya: compose: the composition was started but the control never raised \
+             TextCompositionStarted within 1s — D4's refusal keys on that event, so a \
+             select_range arriving now would be HONOURED"
+        );
     }
 
     fn ax_hint(&self, target: crate::harness::Target) -> String {

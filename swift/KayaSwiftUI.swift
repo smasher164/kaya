@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x5b3d760b52e59d91
+let kayaSpecHash: UInt64 = 0xd8165a4995d2554f
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -48,6 +48,16 @@ private let applyReadClipboard: UInt16 = 26
 /// does (kayaScene.focusedId), exactly as it already resolves the
 /// focused widget for role enablement.
 private let applyClearUndo: UInt16 = 27
+/// The three text-range records (docs/ranges-plan.md). THE OFFSETS THAT
+/// ARRIVE HERE ARE UTF-16 CODE UNITS — the core converted them from the
+/// guest's byte offsets against the same text it validated them against
+/// — so nothing on this path counts characters, and nothing on this path
+/// may start (scratchpad/ranges-units.md §7). The read side is the one
+/// place this file converts, back to bytes, so a frozen scene compares
+/// the same numbers on every lane.
+private let applyHighlightRanges: UInt16 = 28
+private let applySelectRange: UInt16 = 29
+private let applyRevealRange: UInt16 = 30
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
@@ -203,6 +213,30 @@ final class KayaNode: Identifiable {
     /// wire values of the align spec enum; 0 = start, the normalized
     /// default). See Prop::Align.
     var align: Int64 = 0
+    /// TEXT RANGES (textarea only), in UTF-16 code units — the unit the
+    /// core converted to and the unit NSRange speaks.
+    ///
+    /// `highlights` is the DECLARED SET and `highlightsFor` is the text
+    /// it was declared against. The pair is D2's clear-on-edit made
+    /// structural: the lowering paints the set only while the widget
+    /// still holds that exact text, so a keystroke, a programmatic write
+    /// or a native undo drops it with nothing to send and nothing to
+    /// remember. A message from the core could not do this job — the
+    /// measured hazard of this whole milestone is a text push arriving
+    /// AFTER the thing that was declared over it (range-probe-mac.md
+    /// H2), and a compare made at paint time cannot arrive late.
+    var highlights: [NSRange] = []
+    var highlightsFor: String?
+    /// The two one-shot effects, each with a SEQUENCE NUMBER rather
+    /// than a consumed optional. `updateNSView` runs many times for one
+    /// model change and it must not write the model back (that is the
+    /// "modifying state during view update" hazard); the view remembers
+    /// the last sequence it performed instead, so a re-run performs
+    /// nothing and a new request performs once.
+    var selectRequest: NSRange?
+    var selectSeq = 0
+    var revealRequest: NSRange?
+    var revealSeq = 0
     var children: [KayaNode] = []
 
     init(id: UInt64, kind: UInt32, tag: [UInt8]) {
@@ -550,6 +584,78 @@ func kayaTempDir() -> String {
 /// nothing at all about the phone. The compiler knows which side it
 /// compiled; a gate grepping the file does not, and would otherwise
 /// read mac's finished implementation as iOS's.
+// ---- Text ranges: the ONE place this file converts an offset -------
+//
+// The lowering path does no arithmetic and must not: offsets arrive
+// from the core already in UTF-16 code units, converted against the
+// same text the core validated them against
+// (scratchpad/ranges-units.md §7). This interpreter is a
+// string-matched layer the compiler cannot hold to the Rust source, so
+// Unicode arithmetic in a lowering arm is the shape that ships wrong
+// and stays wrong.
+//
+// THE READING DIRECTION IS DIFFERENT AND IS DELIBERATE. A harness verb
+// compares one frozen string on five lanes (invariant 6), so a read
+// must answer in the PROTOCOL's unit — UTF-8 byte offsets — and the
+// only party holding the widget's real text is this side. The
+// conversion is exact, not approximate: `String.Index(utf16Offset:in:)`
+// silently ROUNDS an offset that lands inside a character, and
+// `samePosition(in: unicodeScalars)` is nil on precisely the offsets
+// Rust's `is_char_boundary` rejects — measured identical on both hazard
+// strings by the units arm — so an offset that cannot be converted is
+// reported as such rather than quietly moved.
+
+/// A UTF-16 code-unit offset as a UTF-8 byte offset into the same text.
+/// Negative when the offset is not on a character boundary, which can
+/// only mean the lowering handed the platform an offset the core would
+/// have refused.
+func kayaByteOffset(_ text: String, _ utf16: Int) -> Int {
+    guard utf16 >= 0, utf16 <= (text as NSString).length else { return -1 }
+    let index = String.Index(utf16Offset: utf16, in: text)
+    guard let scalar = index.samePosition(in: text.unicodeScalars) else { return -1 }
+    return text.utf8.distance(from: text.startIndex, to: scalar)
+}
+
+/// The inverse, for the one verb that arrives carrying byte offsets
+/// (expect_revealed asks whether a range is on screen, so the range has
+/// to be expressed in the viewport's unit before it can be compared).
+func kayaUtf16Offset(_ text: String, _ byte: Int) -> Int {
+    guard byte >= 0, byte <= text.utf8.count else { return -1 }
+    guard
+        let index = text.utf8.index(
+            text.startIndex, offsetBy: byte, limitedBy: text.endIndex),
+        let scalar = index.samePosition(in: text.unicodeScalars)
+    else { return -1 }
+    return scalar.utf16Offset(in: text)
+}
+
+/// A set of platform ranges in the harness's spelling:
+/// `<start>:<end>=<covered text>` per range, `|`-joined, ascending.
+///
+/// THE COVERED TEXT IS NOT DECORATION. Offsets alone would make this
+/// read the exact inverse of the lowering's own conversion, so two
+/// symmetric mistakes would cancel and the leg would pass while the
+/// highlight covered the wrong characters. The covered text has no
+/// arithmetic in it — the platform slices its own string with the range
+/// it is actually holding — so the two halves cannot be wrong together.
+func kayaRangeSpelling(_ text: String, _ ranges: [NSRange]) -> String {
+    let ns = text as NSString
+    return
+        ranges
+        .sorted { $0.location < $1.location }
+        .map { range -> String in
+            let start = kayaByteOffset(text, range.location)
+            let end = kayaByteOffset(text, range.location + range.length)
+            guard start >= 0, end >= 0 else {
+                // Named, not silently coerced: no scene will ever expect
+                // this, and it says which endpoint split a character.
+                return "split@\(range.location):\(range.location + range.length)="
+            }
+            return "\(start):\(end)=" + ns.substring(with: range)
+        }
+        .joined(separator: "|")
+}
+
 func kayaDepthStub(_ scene: String, on platform: String) -> Never {
     fatalError(
         "kaya: the \(scene) scene is not yet materialized on \(platform) — "
@@ -2651,6 +2757,49 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // is focused and this backend does.
                 let undoWindow = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 kayaClearUndoForGroup(undoWindow)
+            case applyHighlightRanges:
+                // THE DECLARED SET, replacing whatever was declared
+                // before. Offsets ride as a flat Values list of I64s
+                // read IN PAIRS — start then end — and they are already
+                // UTF-16 code units.
+                //
+                // RECORDED WITH THE TEXT IT WAS DECLARED AGAINST, which
+                // is the whole of D2's clear-on-edit: the model's text
+                // at THIS moment is the text the core validated these
+                // offsets against, because a text write earlier in this
+                // same batch has already landed on the node (the core
+                // reads the batch's own writes for exactly this reason).
+                let hid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let hcount = Int(raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self))
+                var hat = body + 24
+                func nextRangeOffset() -> Int {
+                    let n = raw.loadUnaligned(fromByteOffset: hat + 8, as: Int64.self)
+                    hat += 16
+                    return Int(n)
+                }
+                var declared: [NSRange] = []
+                for _ in 0..<hcount {
+                    let start = nextRangeOffset()
+                    let end = nextRangeOffset()
+                    declared.append(NSRange(location: start, length: end - start))
+                }
+                let hnode = kayaScene.nodes[hid]!
+                hnode.highlights = declared
+                hnode.highlightsFor = hnode.text
+            case applySelectRange:
+                let sid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let sstart = Int(raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self))
+                let send = Int(raw.loadUnaligned(fromByteOffset: body + 16, as: UInt64.self))
+                let snode = kayaScene.nodes[sid]!
+                snode.selectRequest = NSRange(location: sstart, length: send - sstart)
+                snode.selectSeq += 1
+            case applyRevealRange:
+                let rid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let rstart = Int(raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self))
+                let rend = Int(raw.loadUnaligned(fromByteOffset: body + 16, as: UInt64.self))
+                let rnode = kayaScene.nodes[rid]!
+                rnode.revealRequest = NSRange(location: rstart, length: rend - rstart)
+                rnode.revealSeq += 1
             case applyReadClipboard:
                 let request = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let acceptLen = Int(raw.loadUnaligned(fromByteOffset: body + 12, as: UInt32.self))
@@ -3378,6 +3527,78 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         return role + "/" + label
     }
 
+    /// What one textarea's text layer, selection and viewport say, read
+    /// in ONE main-thread hop out of the accessibility tree — the same
+    /// data an assistive client receives, and the reason a range leg
+    /// cannot pass because kaya remembered its own intent.
+    ///
+    /// WHY THE HIGHLIGHT READ FORCES THE LOWERING'S HAND. Three macOS
+    /// mechanisms paint a background on a run and only one of them is
+    /// published to accessibility (measured, range-probe-mac.md §1):
+    /// TextKit 2 rendering attributes report `bg=false` through
+    /// `AXAttributedStringForRange`, `NSTextHighlightStyle` likewise,
+    /// and TextKit 1 temporary attributes are not reachable at all
+    /// without touching `.layoutManager`, which silently and
+    /// permanently downgrades the view. `NSTextStorage`'s
+    /// `.backgroundColor` is the one that surfaces, so it is the one
+    /// the lowering writes. The alternative would have been asserting
+    /// kaya's own declared-range map, which passes with the lowering
+    /// deleted.
+    private struct KayaAxRanges {
+        var text: String
+        var highlights: [NSRange]
+        var selection: NSRange?
+        var visible: NSRange?
+    }
+
+    private func kayaAxRangesRead(_ identifier: String) -> KayaAxRanges? {
+        guard !identifier.isEmpty else { return nil }
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> KayaAxRanges? in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            if !kayaAxAnnounced {
+                kayaAxAnnounced = true
+                AXUIElementSetAttributeValue(
+                    app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+                AXUIElementSetAttributeValue(
+                    app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            }
+            guard let hit = kayaAxFind(app, identifier) else { return nil }
+            let text = kayaAxCopy(hit, kAXValueAttribute) as? String ?? ""
+
+            func cfRange(_ attribute: String) -> NSRange? {
+                guard let raw = kayaAxCopy(hit, attribute) else { return nil }
+                var out = CFRange(location: 0, length: 0)
+                guard AXValueGetValue(raw as! AXValue, .cfRange, &out) else { return nil }
+                return NSRange(location: out.location, length: out.length)
+            }
+
+            var runs: [NSRange] = []
+            var whole = CFRange(location: 0, length: (text as NSString).length)
+            if let param = AXValueCreate(.cfRange, &whole) {
+                var out: CFTypeRef?
+                let err = AXUIElementCopyParameterizedAttributeValue(
+                    hit,
+                    kAXAttributedStringForRangeParameterizedAttribute as CFString,
+                    param, &out)
+                if err == .success, let attributed = out as? NSAttributedString {
+                    attributed.enumerateAttribute(
+                        NSAttributedString.Key(rawValue: "AXBackgroundColor"),
+                        in: NSRange(location: 0, length: attributed.length)
+                    ) { value, range, _ in
+                        if value != nil { runs.append(range) }
+                    }
+                }
+            }
+            return KayaAxRanges(
+                text: text,
+                highlights: runs,
+                selection: cfRange(kAXSelectedTextRangeAttribute),
+                visible: cfRange(kAXVisibleCharacterRangeAttribute))
+        }
+    }
+
     /// The HINT as the platform publishes it: AXHelp is where
     /// `.accessibilityHint()` lands on macOS.
     private func kayaAxHintRead(_ identifier: String) -> String? {
@@ -3743,6 +3964,303 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         DispatchQueue.main.sync { () -> Bool? in
             kayaScene.windows[windowId]?.dirty
         }
+    }
+
+    /// The UITextView a range verb is addressed to, found the way every
+    /// other read on this platform finds its target: the accessibility
+    /// walk, by the authored identifier.
+    ///
+    /// ASKED FOR A UITextView SPECIFICALLY, and that is not a downcast of
+    /// convenience. On iOS the accessibility element for a text control
+    /// IS the view — `kayaAxRole`'s own `element is UITextView` clause
+    /// says so, and the range probe measured `sameObject=true` against a
+    /// plain subview walk — so an element that carries the identifier
+    /// without being the control is not the thing a range was declared
+    /// on, and answering off it would be answering off the wrong object.
+    ///
+    /// This is the iOS spelling of the macOS arm's AXUIElement client
+    /// walk, and the two platforms genuinely differ: macOS has to ask the
+    /// accessibility SERVER for an opaque element and read attributes off
+    /// it, while UIKit publishes accessibility in-process and hands back
+    /// the live object. So iOS reads the platform's own text layer
+    /// directly, and there is nothing weaker about that — it is the same
+    /// storage the view draws from, and none of it is kaya's model.
+    private func kayaUITextTarget(_ identifier: String) -> UITextView? {
+        guard !identifier.isEmpty else { return nil }
+        kayaAxEnableAutomation()
+        func walk(_ node: NSObject, _ depth: Int) -> UITextView? {
+            if depth > 64 { return nil }
+            if let view = node as? UITextView, kayaAxIdentifier(node) == identifier {
+                return view
+            }
+            let count = node.accessibilityElementCount()
+            if count != NSNotFound && count > 0 {
+                for i in 0..<count {
+                    if let child = node.accessibilityElement(at: i) as? NSObject,
+                        let hit = walk(child, depth + 1)
+                    {
+                        return hit
+                    }
+                }
+            }
+            if let view = node as? UIView {
+                for sub in view.subviews {
+                    if let hit = walk(sub, depth + 1) { return hit }
+                }
+            }
+            return nil
+        }
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows {
+                if let hit = walk(window, 0) { return hit }
+            }
+        }
+        return nil
+    }
+
+    /// EVERY RANGE READ CROSSES THIS FIRST, and it is the difference
+    /// between an assertion and a coin toss.
+    ///
+    /// The lowering runs in `updateUIView`, which SwiftUI schedules; the
+    /// harness reads from its own thread through `DispatchQueue.main.sync`,
+    /// which jumps the queue. So a read can land BEFORE the pass that
+    /// lowers the thing it is asking about — and a retry does not save it,
+    /// because a step whose "before" already equals its "after" passes on
+    /// the first look and never asks again.
+    ///
+    /// FOUND BY WATCHING THE NEGATIVE TEST, 2026-08-06: with D4's IME
+    /// refusal DELETED the ranges leg still passed, and the read-side log
+    /// said why — the first and only read of `expect_selection` saw
+    /// `{814,0}`, the composition's own caret, 12ms after the click and
+    /// before `updateUIView` had run at all. The refusal was not being
+    /// tested; the race was answering for it. That is the exact shape
+    /// CLAUDE.md calls worse than no guard, and it would have shipped
+    /// green.
+    ///
+    /// `CATransaction.flush()` commits the implicit transaction, which is
+    /// what drives SwiftUI's pending update pass to completion — so after
+    /// it, everything the last batch declared has been lowered onto the
+    /// view, and the read is looking at the state the app asked for rather
+    /// than the one it is about to leave.
+    ///
+    /// HOW FLAKY IT IS, COUNTED, because "it passed for me" is exactly
+    /// what this class of bug says. With the refusal deleted and no
+    /// barrier the leg passed 5 runs out of 7 — a negative test that is a
+    /// coin toss, and four of those five came first, which is how it
+    /// would have been believed. With the barrier and the same deletion
+    /// it failed 3 out of 3
+    /// (`expect_selection 57:62=alpha, wanted 820:820=`).
+    private func kayaSettleRender() {
+        CATransaction.flush()
+    }
+
+    /// What one textarea's text layer and selection say, read off the
+    /// live control on the main thread.
+    ///
+    /// `painted` IS A PIXEL FACT, and it is here because the read-back
+    /// oracle structurally cannot see the failure the iOS probe named:
+    /// a highlight that is real to every query and invisible on screen.
+    /// Measured on this platform (range-probe-ios.md M2/N1): a TextKit 2
+    /// rendering attribute reads back exactly while drawing NOTHING until
+    /// something unrelated happens to repaint the view — green harness,
+    /// blank screen, which is the worst shape a gate can have. This
+    /// lowering does not use rendering attributes for other reasons, but
+    /// the question "does the thing you declared reach the glass" is not
+    /// answered by asking the same layer that was declared to.
+    private struct KayaUIRanges {
+        var text: String
+        var highlights: [NSRange]
+        var selection: NSRange
+        var painted: Bool
+    }
+
+    /// Chromatic pixels in what the view REALLY DRAWS. Text is grayscale
+    /// and so is the border; kaya's highlight is the only coloured thing
+    /// a plain-text control can be showing, so "are any pixels coloured"
+    /// is a colour-agnostic yes/no that survives light mode, dark mode
+    /// and whatever the system tint is.
+    ///
+    /// WHAT IT CANNOT SEE, so nobody has to rediscover it: a FOCUSED text
+    /// view paints its selection in the system tint, which is coloured
+    /// too. A future scene that asserts a non-empty highlight set on a
+    /// focused control could therefore be answered by the selection's own
+    /// pixels. That can only make this clause miss a failure the offsets
+    /// still have to catch on their own — it can never invent one — and
+    /// the `ranges` scene asserts every non-empty set while the control
+    /// is unfocused.
+    ///
+    /// `drawHierarchy(afterScreenUpdates:)` AND NOT `layer.render(in:)`,
+    /// measured 2026-08-06 and the reason this clause exists at all: with
+    /// the view scrolled to the last match, `layer.render` reported ZERO
+    /// coloured pixels while `drawHierarchy` reported 5906 and the
+    /// highlight was plainly on screen. `CALayer.render(in:)` does not
+    /// apply a scroll view's own `bounds.origin`, so it renders the
+    /// unscrolled content into a viewport-sized bitmap — an oracle that
+    /// answers "nothing is painted" for every scrolled control. Believing
+    /// it would have moved this arm onto a different highlight mechanism
+    /// to fix a bug that was in the measurement.
+    private func kayaPaintedPixels(_ view: UIView) -> Int {
+        let size = view.bounds.size
+        guard size.width > 0, size.height > 0 else { return 0 }
+        let format = UIGraphicsImageRendererFormat.default()
+        // Scale 1: this is a yes/no about colour, not a rendering test,
+        // and a 3x bitmap is nine times the pixels to walk for the same
+        // answer.
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            _ = view.drawHierarchy(
+                in: CGRect(origin: .zero, size: size), afterScreenUpdates: true)
+        }
+        guard let cg = image.cgImage else { return 0 }
+        let width = cg.width, height = cg.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn: Bool = pixels.withUnsafeMutableBytes { raw -> Bool in
+            guard
+                let ctx = CGContext(
+                    data: raw.baseAddress, width: width, height: height,
+                    bitsPerComponent: 8, bytesPerRow: width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return 0 }
+        var coloured = 0
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+            if max(r, max(g, b)) - min(r, min(g, b)) > 40 { coloured += 1 }
+        }
+        return coloured
+    }
+
+    /// `wantsPaint` is the highlight verb asking for the pixel fact.
+    /// `expect_selection` shares this read and must NOT ask: iOS paints
+    /// no selection in an unfocused text view at all, and forcing a
+    /// screen update to answer a question nobody posed is a side effect a
+    /// read has no business having.
+    private func kayaUIRangesRead(_ identifier: String, wantsPaint: Bool) -> KayaUIRanges? {
+        DispatchQueue.main.sync { () -> KayaUIRanges? in
+            kayaSettleRender()
+            guard let view = kayaUITextTarget(identifier) else { return nil }
+            let storage = view.textStorage
+            var runs: [NSRange] = []
+            storage.enumerateAttribute(
+                .backgroundColor, in: NSRange(location: 0, length: storage.length)
+            ) { value, range, _ in
+                if value != nil { runs.append(range) }
+            }
+            return KayaUIRanges(
+                text: view.text ?? "",
+                highlights: runs,
+                selection: view.selectedRange,
+                painted: !wantsPaint || runs.isEmpty || kayaPaintedPixels(view) > 0)
+        }
+    }
+
+    /// Is this range on screen? CONTAINMENT, never the viewport itself —
+    /// how much context a scroll leaves around a range is native
+    /// behaviour and differs per lane, while "is my range showing" is the
+    /// same question everywhere.
+    ///
+    /// TWO PREDICATES, BOTH REQUIRED, and the pair is the honest answer
+    /// rather than a belt and braces.
+    ///
+    /// `viewportRange` is the exact iOS sibling of the attribute the mac
+    /// arm reads — `AXVisibleCharacterRange` — a CHARACTER range naming
+    /// what the view has laid out for the region it is showing. Measured
+    /// on the frozen document: `0:91` before the reveal and `644:764`
+    /// after it, against a wanted `747:752`. Same predicate as macOS's,
+    /// spelled in the vocabulary this platform publishes.
+    ///
+    /// It is also, on both platforms, a little GENEROUS: a text system
+    /// lays out somewhat past the visible rectangle, so a character range
+    /// can name a line the user cannot quite see. The segment rectangles
+    /// close that latitude — every segment of the range must intersect
+    /// the viewport rect — so `visible` means the glyphs are inside the
+    /// rectangle and not merely inside the laid-out region.
+    ///
+    /// AND THE TWO ARE ANDed IN ONE DIRECTION ON PURPOSE: `visible`
+    /// requires both, everything else is `offscreen`. A disagreement
+    /// therefore fails a `visible` assertion and can never pass one, which
+    /// is the safe way round for a verb whose whole job is to notice that
+    /// nothing scrolled.
+    ///
+    /// WHY NOT FULL RECT CONTAINMENT, which is what this arm tried first
+    /// and watched fail: UIKit's own `scrollRangeToVisible` does not
+    /// promise it. Measured — revealing `747:752` moved the viewport to
+    /// 729..825 with the line's typographic frame at 814..836, so eleven
+    /// of its twenty-two points sat below the fold and the highlight was
+    /// plainly on screen. An oracle stricter than the platform's own
+    /// scroll would have pushed this arm into computing its own offset,
+    /// which is the tail wagging the dog: every backend calls its
+    /// platform's scroll, and the contract says the leftover context is
+    /// the platform's business.
+    ///
+    /// AND NOT `firstRect(for:)`, which is the obvious UITextInput
+    /// spelling: measured at the same instant it put the range at
+    /// 821..844.7 where the layout manager's own segment said 814..836.
+    /// The segment frame is the geometry that was laid out and drawn;
+    /// `firstRect` is a convenience with its own idea of a line box.
+    private func kayaUIRevealed(_ identifier: String, _ range: NSRange) -> Bool? {
+        DispatchQueue.main.sync { () -> Bool? in
+            kayaSettleRender()
+            guard let view = kayaUITextTarget(identifier),
+                let layout = view.textLayoutManager,
+                let content = layout.textContentManager
+            else { return nil }
+            let document = content.documentRange
+            guard let start = content.location(document.location, offsetBy: range.location),
+                let end = content.location(
+                    document.location, offsetBy: range.location + range.length),
+                let textRange = NSTextRange(location: start, end: end)
+            else { return nil }
+            var segments: [CGRect] = []
+            layout.enumerateTextSegments(in: textRange, type: .standard, options: []) {
+                _, segment, _, _ in
+                segments.append(segment)
+                return true
+            }
+            guard !segments.isEmpty else { return nil }
+            guard let viewport = layout.textViewportLayoutController.viewportRange else {
+                return nil
+            }
+            let low = content.offset(from: document.location, to: viewport.location)
+            let high = content.offset(from: document.location, to: viewport.endLocation)
+            let laidOut = range.location >= low && NSMaxRange(range) <= high
+            return laidOut && segments.allSatisfy { view.bounds.intersects($0) }
+        }
+    }
+
+    /// `compose`: leave MARKED, UNCOMMITTED text in the control — the
+    /// state a person is in mid-word with an input method, which no other
+    /// verb can reach (`type` is printable ASCII by contract, because a
+    /// composed character is an input-method question and not a verb
+    /// argument). This goes in through the view's own `setMarkedText`, so
+    /// the text is displayed, uncommitted, and select_range must refuse
+    /// to run over it.
+    ///
+    /// A MEASURED DIVERGENCE FROM macOS, recorded because a breadth arm
+    /// after this one will need it: UITextView DOES notify its delegate
+    /// for marked text (`textViewDidChange` fired, measured 2026-08-06)
+    /// where AppKit's `setMarkedText` notifies nobody. So on iOS kaya's
+    /// model learns the composition immediately and the app is told, and
+    /// the mac defect's precondition — a view longer than the model that
+    /// the next update pass assigns over — does not arise from the
+    /// composition itself. The guard on the push is still here, because
+    /// the destruction it prevents was measured on this platform too: a
+    /// programmatic `view.text =` during a composition drops
+    /// `markedTextRange` and fires NO delegate callback at all.
+    private func kayaCompose(_ view: UITextView, _ marked: String) -> String? {
+        guard view.becomeFirstResponder() else {
+            return "could not take first responder"
+        }
+        let end = ((view.text ?? "") as NSString).length
+        view.selectedRange = NSRange(location: end, length: 0)
+        // The caret parks at the END of the marked text, which is every
+        // platform's convention and what the scene's frozen offset counts.
+        view.setMarkedText(marked, selectedRange: NSRange(location: marked.utf16.count, length: 0))
+        return view.markedTextRange != nil ? nil : "the view did not take marked text"
     }
 #endif
 
@@ -5006,6 +5524,176 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(got) menus, wanted \(want)")
                 }
+            case "expect_highlights", "expect_selection":
+                // THE PLATFORM'S TEXT LAYER, through the accessibility
+                // tree — the same data an assistive client receives.
+                // Reading the interpreter's own declared-range map would
+                // make the verb agree with itself and would pass with
+                // the whole lowering deleted.
+                let wantRanges = kayaQuoted(Array(parts[2...]))
+                let rangeIdentifier = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaAnyTarget(parts[1]) else { return nil }
+                    return node.a11yId
+                }
+                var gotRanges: String
+                switch rangeIdentifier {
+                case .none: gotRanges = "<no such target>"
+                case .some(let ident) where ident.isEmpty:
+                    gotRanges = "<no a11y_id authored on this widget>"
+                case .some(let ident):
+                    #if os(macOS)
+                        if let read = kayaAxRangesRead(ident) {
+                            gotRanges =
+                                parts[0] == "expect_highlights"
+                                ? kayaRangeSpelling(read.text, read.highlights)
+                                : kayaRangeSpelling(
+                                    read.text, read.selection.map { [$0] } ?? [])
+                        } else {
+                            gotRanges = "<not in the accessibility tree>"
+                        }
+                    #else
+                        if let read = kayaUIRangesRead(
+                            ident, wantsPaint: parts[0] == "expect_highlights")
+                        {
+                            if parts[0] == "expect_highlights" {
+                                // A DECLARED SET THAT REACHES NO PIXEL IS
+                                // NOT A HIGHLIGHT, and this is the one
+                                // failure the offsets cannot report: they
+                                // come out of the same text layer the
+                                // lowering wrote to.
+                                gotRanges =
+                                    read.painted
+                                    ? kayaRangeSpelling(read.text, read.highlights)
+                                    : "<declared but nothing painted>"
+                            } else {
+                                gotRanges = kayaRangeSpelling(read.text, [read.selection])
+                            }
+                        } else {
+                            gotRanges = "<not in the accessibility tree>"
+                        }
+                    #endif
+                }
+                if gotRanges == wantRanges {
+                    observed.append("\(parts[0]) \(wantRanges)")
+                } else {
+                    failures.append("\(parts[0]) \(gotRanges), wanted \(wantRanges)")
+                }
+            case "expect_revealed":
+                // CONTAINMENT, never the viewport itself: how much
+                // context a scroll leaves around a range is native
+                // behaviour and differs per lane, while "is my range on
+                // screen" is the same question everywhere. The
+                // `offscreen` spelling is what keeps this from being
+                // vacuous — a scene asserts it BEFORE the reveal, so a
+                // document short enough to be entirely visible fails
+                // rather than passes.
+                let wantState = parts[3]
+                let bounds = parts[2].split(separator: ":")
+                let wantStart = Int(bounds.first ?? "") ?? -1
+                let wantEnd = Int(bounds.count > 1 ? bounds[1] : "") ?? -1
+                let revealIdentifier = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaAnyTarget(parts[1]) else { return nil }
+                    return node.a11yId
+                }
+                var gotState: String
+                switch revealIdentifier {
+                case .none: gotState = "<no such target>"
+                case .some(let ident) where ident.isEmpty:
+                    gotState = "<no a11y_id authored on this widget>"
+                case .some(let ident):
+                    #if os(macOS)
+                        if let read = kayaAxRangesRead(ident), let visible = read.visible {
+                            let start = kayaUtf16Offset(read.text, wantStart)
+                            let end = kayaUtf16Offset(read.text, wantEnd)
+                            gotState =
+                                (start >= 0 && end >= 0 && start >= visible.location
+                                    && end <= NSMaxRange(visible))
+                                ? "visible" : "offscreen"
+                        } else {
+                            gotState = "<no visible character range>"
+                        }
+                    #else
+                        // The verb's offsets are the PROTOCOL's unit —
+                        // UTF-8 bytes — so they are converted here, in the
+                        // reading direction, against the text the control
+                        // is holding. The lowering path below does no such
+                        // arithmetic and must not: it receives UTF-16 from
+                        // the core.
+                        if let read = kayaUIRangesRead(ident, wantsPaint: false) {
+                            let start = kayaUtf16Offset(read.text, wantStart)
+                            let end = kayaUtf16Offset(read.text, wantEnd)
+                            if start < 0 || end < 0 {
+                                gotState = "<offset off a character boundary>"
+                            } else {
+                                switch kayaUIRevealed(
+                                    ident, NSRange(location: start, length: end - start))
+                                {
+                                case true?: gotState = "visible"
+                                case false?: gotState = "offscreen"
+                                case nil: gotState = "<no laid-out geometry for that range>"
+                                }
+                            }
+                        } else {
+                            gotState = "<not in the accessibility tree>"
+                        }
+                    #endif
+                }
+                if gotState == wantState {
+                    observed.append("\(parts[2]) \(wantState)")
+                } else {
+                    failures.append("\(parts[2]) is \(gotState), wanted \(wantState)")
+                }
+            case "compose":
+                // The state a user is in mid-word with an IME, which no
+                // other verb can reach: `type` is printable ASCII by
+                // contract, precisely because a composed character is an
+                // input-method question and not a verb argument. This
+                // goes through the view's own `setMarkedText`, so the
+                // text is DISPLAYED, UNCOMMITTED and invisible to the
+                // app — exactly the state select_range must refuse to
+                // run over.
+                let marked = kayaQuoted(Array(parts[2...]))
+                #if os(macOS)
+                    let composed = DispatchQueue.main.sync { () -> String? in
+                        guard let node = kayaAnyTarget(parts[1]) else {
+                            return "no such target \(parts[1])"
+                        }
+                        guard let view = kayaMacTextViews[node.id]?.view else {
+                            return "no text view for \(parts[1])"
+                        }
+                        guard view.window?.makeFirstResponder(view) == true else {
+                            return "\(parts[1]) could not take first responder"
+                        }
+                        let end = (view.string as NSString).length
+                        view.setSelectedRange(NSRange(location: end, length: 0))
+                        view.setMarkedText(
+                            marked,
+                            selectedRange: NSRange(location: marked.utf16.count, length: 0),
+                            replacementRange: NSRange(location: end, length: 0))
+                        return view.hasMarkedText()
+                            ? nil : "the view did not take marked text"
+                    }
+                    if let trouble = composed {
+                        failures.append("compose: \(trouble)")
+                    }
+                #else
+                    let composedOnPhone = DispatchQueue.main.sync { () -> String? in
+                        guard let node = kayaAnyTarget(parts[1]) else {
+                            return "no such target \(parts[1])"
+                        }
+                        guard !node.a11yId.isEmpty else {
+                            return "\(parts[1]) has no a11y_id, which is how the verbs "
+                                + "on this platform find a control"
+                        }
+                        guard let view = kayaUITextTarget(node.a11yId) else {
+                            return "no text view for \(parts[1])"
+                        }
+                        return kayaCompose(view, marked).map { "\(parts[1]) \($0)" }
+                    }
+                    if let trouble = composedOnPhone {
+                        failures.append("compose: \(trouble)")
+                    }
+                #endif
             case "expect_ax_hint":
                 // The hint's own verb (harness.rs is the norm): what
                 // activating this control does, read from the platform,
@@ -8872,7 +9560,17 @@ struct KayaTextarea: View {
             focused: kayaScene.focusedId == node.id,
             a11yId: node.a11yId,
             a11yLabel: node.a11yLabel,
-            a11yHint: node.a11yHint
+            a11yHint: node.a11yHint,
+            // READ HERE, in the body, for the same reason the text is:
+            // @Observable tracks a body's reads, so a declaration that
+            // arrived while nothing else changed still brings
+            // updateNSView around to paint it.
+            highlights: node.highlights,
+            highlightsFor: node.highlightsFor,
+            selectRequest: node.selectRequest,
+            selectSeq: node.selectSeq,
+            revealRequest: node.revealRequest,
+            revealSeq: node.revealSeq
         )
         .frame(width: 240, height: 96)
         .border(Color.gray.opacity(0.4))
@@ -9117,12 +9815,29 @@ private struct KayaMacTextarea: NSViewRepresentable {
     let a11yId: String
     let a11yLabel: String
     let a11yHint: String
+    /// The declared set and THE TEXT IT WAS DECLARED AGAINST. Both, or
+    /// the set is unpaintable: see `applyRanges`.
+    let highlights: [NSRange]
+    let highlightsFor: String?
+    let selectRequest: NSRange?
+    let selectSeq: Int
+    let revealRequest: NSRange?
+    let revealSeq: Int
 
     /// The uncontrolled fold, in AppKit's vocabulary: the view tells
     /// kaya what it holds, kaya normalizes it, writes the node and
     /// emits with the widget's identity tag. Nothing is read back.
     final class Coordinator: NSObject, NSTextViewDelegate {
         var node: KayaNode?
+        /// The last one-shot sequence this view performed. A SEQUENCE
+        /// AND NOT A CONSUMED OPTIONAL: `updateNSView` runs many times
+        /// for one model change, and clearing the request there would
+        /// be a model write during a view update — SwiftUI's own
+        /// "modifying state during view update" hazard. Remembering the
+        /// number instead makes a re-run a no-op and a new request a
+        /// single action, with nothing written back.
+        var selectDone = 0
+        var revealDone = 0
         /// THE TEXT STACK'S OWNER. TextKit 2's graph runs content
         /// manager -> layout manager -> container, and the text view is
         /// initialized with the CONTAINER — so nothing the view holds is
@@ -9268,7 +9983,32 @@ private struct KayaMacTextarea: NSViewRepresentable {
         // byte-identical write wipes nothing only if it does not
         // happen). The selection is carried across, clamped, which
         // is the caret behaviour SwiftUI's own push could not give.
-        if view.string != text {
+        //
+        // AND NOT WHILE THE USER IS COMPOSING. A defect this scene
+        // found, measured 2026-08-06 with the whole loop instrumented:
+        //
+        //     PROBE update marked=true push=true viewLen=814 modelLen=809
+        //     PROBE textDidChange marked=false len=809
+        //
+        // `setMarkedText` does NOT notify the delegate, so kaya's model
+        // never hears about a composition in progress and the very next
+        // update pass — ANY of them; a signal write, a label change,
+        // anything that re-runs a body — sees the view five characters
+        // longer than the model, pushes, and DESTROYS the user's
+        // half-typed word. Nothing announced it: the push's own
+        // assignment then fired textDidChange carrying the text without
+        // the composition, so the app was told the user had typed
+        // nothing at all.
+        //
+        // The rule, and it is the same sentence D4 states one line
+        // down: KAYA DOES NOT TOUCH A CONTROL WHILE THE USER IS
+        // COMPOSING IN IT. The uncommitted text is the user's, the app
+        // has not been told about it yet, and AppKit will report the
+        // result through textDidChange the moment the composition
+        // commits. An app write that lands mid-composition therefore
+        // loses to the user, which is the uncontrolled contract's own
+        // rule about who is authoritative over a text control.
+        if view.string != text, !view.hasMarkedText() {
             let selection = view.selectedRange
             view.string = text
             let end = (text as NSString).length
@@ -9290,6 +10030,16 @@ private struct KayaMacTextarea: NSViewRepresentable {
         view.setAccessibilityLabel(a11yLabel.isEmpty ? nil : a11yLabel)
         view.setAccessibilityHelp(a11yHint.isEmpty ? nil : a11yHint)
 
+        // THE RANGES, IN THE SAME PASS AS THE TEXT PUSH ABOVE. That
+        // ordering is the whole reason this widget stopped being a
+        // stock TextEditor: SwiftUI's own push landed a main-queue turn
+        // later and destroyed everything declared before it, and a
+        // re-declare issued in the same batch was applied to the OLD
+        // document and then wiped (range-probe-mac.md H2/G6). Here the
+        // text and what is declared over it land together, in an order
+        // this file chooses.
+        applyRanges(view, context.coordinator)
+
         // FOCUS, both directions, one turn out for the reason the
         // responder callback is: a first-responder change inside a
         // SwiftUI update pass reenters this view's own body. Each
@@ -9309,7 +10059,105 @@ private struct KayaMacTextarea: NSViewRepresentable {
             }
         }
     }
+
+    /// The three primitives, lowered onto the owned view.
+    ///
+    /// HIGHLIGHT WRITES DOCUMENT ATTRIBUTES (`NSTextStorage`'s
+    /// `.backgroundColor`), which is not a free choice: it is the only
+    /// one of macOS's three highlight mechanisms that accessibility
+    /// publishes, and accessibility is where the harness reads. TextKit 2
+    /// rendering attributes and `NSTextHighlightStyle` both render
+    /// beautifully and report `bg=false` through
+    /// `AXAttributedStringForRange`; TextKit 1 temporary attributes need
+    /// `.layoutManager`, one read of which silently and permanently
+    /// converts this view to TextKit 1 and takes the whole surface with
+    /// it. All three measured, range-probe-mac.md §1/§4.
+    ///
+    /// D2'S CLEAR-ON-EDIT IS THE `highlightsFor` COMPARE. The declared
+    /// set is painted only while the widget still holds the text it was
+    /// declared against, so a keystroke, a programmatic write or a
+    /// native undo drops it here, at paint time, with nothing sent and
+    /// nothing remembered. A message from the core could not do this
+    /// job: the measured hazard of this milestone is a text change
+    /// arriving after the thing declared over it, and a compare made
+    /// where the paint happens cannot arrive late.
+    ///
+    /// AND IT IS NOT BELT-AND-BRACES FOR THE PLATFORM'S OWN BEHAVIOUR.
+    /// Measured: an app-driven text write wipes every attribute layer by
+    /// itself, but a USER edit does not — typing three characters at
+    /// offset 0 MOVED a highlight at {20,5} to {23,5}, tracking the edit
+    /// (F1). Tracking is exactly what D2 refuses to ship, so without
+    /// this compare a stale set would keep painting, shifted, until the
+    /// app happened to declare something else.
+    private func applyRanges(_ view: KayaTextView, _ coordinator: Coordinator) {
+        guard let storage = view.textStorage else { return }
+        let full = NSRange(location: 0, length: storage.length)
+        storage.removeAttribute(.backgroundColor, range: full)
+        if highlightsFor == text {
+            // BOUNDS ARE RE-CHECKED AGAINST THE LIVE STORAGE, and this
+            // is not distrust of the core — it is the one call on this
+            // path that kills the process rather than complaining. An
+            // out-of-range `addAttribute` raises NSRangeException and
+            // the app exits 134 (measured), and the storage's length is
+            // a fact only this side holds at this instant.
+            for range in highlights where NSMaxRange(range) <= storage.length {
+                storage.addAttribute(
+                    .backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.55),
+                    range: range)
+            }
+        }
+
+        // THE TWO ONE-SHOTS, each performed once per request. Both are
+        // clamped to the live text for the same reason as above: AppKit
+        // tolerates an out-of-range selection (it clamps) and an
+        // out-of-range scroll (it survives), but tolerating is not a
+        // contract, and a range whose text has already moved on is not
+        // the range the app asked for.
+        let length = (view.string as NSString).length
+        if let range = selectRequest, selectSeq != coordinator.selectDone,
+            NSMaxRange(range) <= length
+        {
+            coordinator.selectDone = selectSeq
+            // D4, AND THE ONLY PARTY THAT CAN ENFORCE IT. An input-method
+            // composition is live in the view and on no kaya channel, so
+            // the core cannot know and the app cannot avoid the race.
+            // Honouring a selection here COMMITS the marked text into
+            // the document AND into the app's model mid-word — measured,
+            // range-probe-mac.md E7 — which is data loss shaped like a
+            // feature, and it shifts every later offset by the committed
+            // length. Refused as a no-op under a named reason, never a
+            // panic: the app wrote correct code and lost a race with a
+            // human being.
+            if view.hasMarkedText() {
+                kayaDiag("select_range refused: ime_composition (widget \(node.id))")
+            } else {
+                view.setSelectedRange(range)
+            }
+        }
+        if let range = revealRequest, revealSeq != coordinator.revealDone,
+            NSMaxRange(range) <= length
+        {
+            coordinator.revealDone = revealSeq
+            // A scroll disturbs neither the selection nor a composition
+            // (measured, F6), so reveal has no refusal arm and needs
+            // none.
+            view.scrollRangeToVisible(range)
+        }
+        kayaMacTextViews[node.id] = KayaWeakTextView(view)
+    }
 }
+
+/// The widget-id -> text-view map, for the ONE harness verb that cannot
+/// go through accessibility: `compose` has to reach the view's own
+/// input-method entry point (`setMarkedText`), which no AX attribute
+/// exposes. The three READS deliberately do not use this map — they go
+/// through the accessibility tree, so a leg cannot pass because kaya
+/// remembered its own intent.
+final class KayaWeakTextView {
+    weak var view: NSTextView?
+    init(_ view: NSTextView) { self.view = view }
+}
+var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
 
 #else
     /// The multi-line editor on iOS: KayaEntry's exact contract
@@ -9334,14 +10182,25 @@ private struct KayaMacTextarea: NSViewRepresentable {
         let node: KayaNode
 
         var body: some View {
-            // BOTH OBSERVATIONS ARE READ HERE, in a SwiftUI body, and
+            // EVERY OBSERVATION IS READ HERE, in a SwiftUI body, and
             // handed down as values. `updateUIView` is not an
             // observation scope of its own, so a representable that
             // reached for `node.text` inside it would render once and
-            // never hear about a model write again.
-            KayaUITextView(node: node, text: node.text, focusedId: kayaScene.focusedId)
-                .frame(width: 240, height: 96)
-                .border(Color.gray.opacity(0.4))
+            // never hear about a model write again — and the ranges are
+            // read here for exactly the same reason: a set declared while
+            // nothing else changed still has to bring `updateUIView`
+            // around to paint it.
+            KayaUITextView(
+                node: node, text: node.text, focusedId: kayaScene.focusedId,
+                highlights: node.highlights,
+                highlightsFor: node.highlightsFor,
+                selectRequest: node.selectRequest,
+                selectSeq: node.selectSeq,
+                revealRequest: node.revealRequest,
+                revealSeq: node.revealSeq
+            )
+            .frame(width: 240, height: 96)
+            .border(Color.gray.opacity(0.4))
         }
     }
 
@@ -9350,9 +10209,25 @@ private struct KayaMacTextarea: NSViewRepresentable {
         let node: KayaNode
         let text: String
         let focusedId: UInt64?
+        /// The declared set and THE TEXT IT WAS DECLARED AGAINST. Both,
+        /// or the set is unpaintable: see `applyRanges`.
+        let highlights: [NSRange]
+        let highlightsFor: String?
+        let selectRequest: NSRange?
+        let selectSeq: Int
+        let revealRequest: NSRange?
+        let revealSeq: Int
 
         final class Coordinator: NSObject, UITextViewDelegate {
             var node: KayaNode?
+            /// The last one-shot sequence this view performed. A SEQUENCE
+            /// AND NOT A CONSUMED OPTIONAL: `updateUIView` runs many times
+            /// for one model change, and clearing the request there would
+            /// be a model write during a view update. Remembering the
+            /// number makes a re-run a no-op and a new request a single
+            /// action, with nothing written back.
+            var selectDone = 0
+            var revealDone = 0
 
             /// The uncontrolled fold, spelled in UIKit. The binding
             /// setter this replaces did exactly this and nothing else:
@@ -9412,13 +10287,41 @@ private struct KayaMacTextarea: NSViewRepresentable {
 
         func updateUIView(_ view: UITextView, context: Context) {
             context.coordinator.node = node
-            if view.text != text { view.text = text }
+            // THE PUSH KAYA OWNS — AND NOT WHILE THE USER IS COMPOSING.
+            // Measured on this platform 2026-08-06, with marked text in
+            // the control:
+            //
+            //     afterProgWrite marked=false text=abc# changes=0
+            //
+            // A programmatic `view.text =` during a composition DROPS
+            // `markedTextRange`, commits nothing, and fires no delegate
+            // callback at all — the user's half-typed word is gone and
+            // nobody is told. Same class as the defect the mac arm found,
+            // measured here rather than inherited, and the answer is the
+            // same sentence D4 states: KAYA DOES NOT TOUCH A CONTROL
+            // WHILE THE USER IS COMPOSING IN IT. An app write that lands
+            // mid-composition loses to the user, which is the
+            // uncontrolled contract's own rule about who is authoritative
+            // over a text control.
+            //
+            // The precondition differs from macOS and it is worth having
+            // written down: UITextView DOES notify its delegate for
+            // marked text (`textViewDidChange` fired, measured), where
+            // AppKit's `setMarkedText` notifies nobody — so on iOS kaya's
+            // model is never silently behind the view, and this guard
+            // covers an app that writes its own text during a composition
+            // rather than kaya's own echo.
+            if view.text != text, view.markedTextRange == nil { view.text = text }
             // APPLIED ON EVERY UPDATE, not once at construction: a pin
             // that only ran in makeUIView would be quietly lost the day
             // SwiftUI hands back a recycled view or UIKit re-derives a
             // trait, and nothing would say so.
             kayaPinPlainText(view)
             kayaAuditPlainTextPins(view)
+            // THE RANGES, IN THE SAME PASS AS THE TEXT PUSH ABOVE, and in
+            // that order: what is declared over a document has to land
+            // with the document, not a main-queue turn after it.
+            applyRanges(view, context.coordinator)
             // FOCUS ON THE FAR SIDE OF THE RENDER. Becoming first
             // responder re-enters this view's delegate, which writes the
             // very model this update is reading; done inline that is a
@@ -9436,6 +10339,122 @@ private struct KayaMacTextarea: NSViewRepresentable {
                         view.resignFirstResponder()
                     }
                 }
+            }
+        }
+
+        /// The three primitives, lowered onto the owned view.
+        ///
+        /// HIGHLIGHT WRITES DOCUMENT ATTRIBUTES (`NSTextStorage`'s
+        /// `.backgroundColor`), the same mechanism the mac arm writes,
+        /// and on this platform that is a measured choice between two
+        /// working options rather than the only one that surfaces.
+        /// TextKit 2 RENDERING attributes are the iOS-native
+        /// non-destructive path and they do paint — but they carry a trap
+        /// this file should not be holding: they are invisible until
+        /// something calls `setNeedsDisplay()`, which nothing on the
+        /// SwiftUI update path does, so a lowering that forgets it reads
+        /// back perfectly and draws nothing (measured, range-probe-ios.md
+        /// N1/S1: six settle rounds at `drawn=0` with the attribute
+        /// present in every read). Document attributes have no such gap:
+        /// a storage edit invalidates the layout and the view repaints
+        /// itself, measured at the top of the document AND with the view
+        /// scrolled to the last match.
+        ///
+        /// AND THE PLAIN-TEXT CONTRACT SURVIVES IT, which was the only
+        /// real argument for the rendering path. Measured on this
+        /// platform: copying a selection out of a storage-attributed
+        /// UITextView puts `["public.utf8-plain-text"]` on the pasteboard
+        /// and nothing else. kaya's decoration does not become the user's
+        /// document.
+        ///
+        /// D2'S CLEAR-ON-EDIT IS THE `highlightsFor` COMPARE. The set is
+        /// painted only while the widget still holds the text it was
+        /// declared against, so a keystroke, a programmatic write or a
+        /// native undo drops it here, at paint time, with nothing sent and
+        /// nothing remembered — and a compare made where the paint happens
+        /// cannot arrive late, which a message from the core could.
+        ///
+        /// IT IS NOT BELT-AND-BRACES FOR THE PLATFORM'S OWN BEHAVIOUR:
+        /// measured here, a USER keystroke SHIFTS these attributes rather
+        /// than dropping them (`["51,56",…]` became `["52,57",…]` after
+        /// one insert at 0). Tracking is exactly what D2 refuses to ship,
+        /// so without this compare a stale set would keep painting,
+        /// shifted, until the app happened to declare something else.
+        private func applyRanges(_ view: UITextView, _ coordinator: Coordinator) {
+            let storage = view.textStorage
+            let full = NSRange(location: 0, length: storage.length)
+            // UNCONDITIONALLY, on every update pass, and that is measured
+            // rather than waved through: 200 clear passes over a 200 KB
+            // document cost 2.47ms — 12µs each — because an attribute
+            // removal that removes nothing invalidates nothing. A
+            // short-circuit here would buy noise and cost a clause.
+            //
+            // CLEARED BEFORE ANYTHING IS APPLIED, and that is not
+            // housekeeping. Measured on this platform: a re-declare that
+            // does not clear first UNIONS with the stale shifted run —
+            // declaring {51,5} over a document the user has typed one
+            // character into leaves {51,6}, wrong at both ends and one
+            // character further wrong per keystroke.
+            storage.beginEditing()
+            storage.removeAttribute(.backgroundColor, range: full)
+            if highlightsFor == text {
+                // Bounds re-checked against the LIVE storage: its length
+                // is a fact only this side holds at this instant, and the
+                // core validated against the text it had.
+                for range in highlights where NSMaxRange(range) <= storage.length {
+                    storage.addAttribute(
+                        .backgroundColor, value: UIColor.systemYellow.withAlphaComponent(0.55),
+                        range: range)
+                }
+            }
+            storage.endEditing()
+
+            // THE TWO ONE-SHOTS, each performed once per request, both
+            // clamped to the live text. UIKit tolerates neither out of
+            // charity: an out-of-range selection is CLAMPED TO A CARET AT
+            // THE END (measured: `set{20,3}` on a 6-unit document reads
+            // back `{6,0}`), which would silently move the caret somewhere
+            // the app never asked for.
+            let length = ((view.text ?? "") as NSString).length
+            if let range = selectRequest, selectSeq != coordinator.selectDone,
+                NSMaxRange(range) <= length
+            {
+                coordinator.selectDone = selectSeq
+                // D4, AND THE ONLY PARTY THAT CAN ENFORCE IT. An
+                // input-method composition is live in the view and on no
+                // kaya channel, so the core cannot know and the app cannot
+                // avoid the race. Refused as a no-op under a named reason,
+                // never a panic: the app wrote correct code and lost a
+                // race with a human being.
+                //
+                // UNIFORM SEMANTICS, NOT INHERITED REASONING. On macOS
+                // honouring the selection COMMITS the marked text into the
+                // document; measured here, it does NOT — iOS leaves the
+                // composition alone and moves the caret anyway. So this
+                // refusal is not iOS protecting itself from a platform
+                // behaviour, it is iOS spelling the SAME contract: a
+                // select_range arriving mid-composition does not move the
+                // selection on any lane, and an app cannot learn to rely
+                // on one platform's tolerance.
+                if view.markedTextRange != nil {
+                    kayaDiag("select_range refused: ime_composition (widget \(node.id))")
+                } else {
+                    view.selectedRange = range
+                }
+            }
+            if let range = revealRequest, revealSeq != coordinator.revealDone,
+                NSMaxRange(range) <= length
+            {
+                coordinator.revealDone = revealSeq
+                // WITHOUT ANIMATION, and this is the difference between a
+                // deterministic verb and a sleep. `scrollRangeToVisible`
+                // is ANIMATED on iOS — measured at ~300ms over a standard
+                // UIKit curve, reading as a complete no-op at the call
+                // site — so a leg that asserts immediately fails and a leg
+                // that sleeps long enough passes for the wrong reason.
+                // Wrapped, it lands synchronously (3.95ms measured), and a
+                // scroll disturbs neither the selection nor a composition.
+                UIView.performWithoutAnimation { view.scrollRangeToVisible(range) }
             }
         }
     }

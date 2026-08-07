@@ -746,3 +746,66 @@ func TestAMintAfterAnUndoAndARedoIsStillFresh(t *testing.T) {
 		}
 	})
 }
+
+// THE ONE THING THIS BINDING CHECKS ABOUT A TEXT RANGE, and the reason
+// it is Go's job rather than the core's: Go's int is SIGNED and the
+// wire's offset is not. strings.Index answers -1 for "no match", which
+// is exactly the mistake this surface invites, and select_range and
+// reveal_range carry their offsets as bare u64 record fields — so an
+// unguarded -1 arrives at the core as 18446744073709551615 and is
+// refused under a number the app never wrote.
+//
+// ALL THREE VERBS, not one: they reach the check from three separate
+// call sites, and a test that drove only one would pass with the other
+// two unguarded.
+//
+// THE TWO u64 VERBS GO FIRST, and the order is load-bearing rather than
+// tidy. HighlightRanges has a SECOND WALL behind this one — its offsets
+// ride as I64 Values, so the core refuses a negative one while decoding
+// the record and aborts the process (wire.rs, "a text range offset is
+// -1, which is negative"). Driving it first would kill the test binary
+// before SelectRange and RevealRange — the two with nothing behind
+// them — had been driven at all, which is a test that cannot fail for
+// the reason it exists. Watched: with the check deleted, this ordering
+// reports the binding's own refusal for SelectRange.
+//
+// AND THE ACCEPTING HALF, so the guard cannot be over-broad: a
+// well-formed range and a zero-length caret must go through untouched.
+// A guard that refused those would make the framework unable to express
+// a correct range, which is worse than no guard at all.
+func TestANegativeRangeOffsetIsRefusedByEveryRangeVerb(t *testing.T) {
+	app := NewApp()
+	var editor Widget
+	app.Build(func(tx *Tx) { editor = tx.Textarea(nil) })
+
+	refuses := func(what string, fn func(*Tx)) {
+		t.Helper()
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatalf("%s with a negative offset was accepted — it would reach "+
+					"the core as a u64 near 2^64 and be refused under a number the "+
+					"app never wrote", what)
+			}
+			msg, _ := r.(string)
+			if !strings.Contains(msg, "negative offset") {
+				t.Fatalf("%s panicked with %v — wanted the negative-offset refusal, "+
+					"so this panic is a different bug wearing the guard's clothes",
+					what, r)
+			}
+		}()
+		app.Build(fn)
+	}
+	refuses("SelectRange", func(tx *Tx) { tx.SelectRange(editor, TextRange{Start: 0, End: -1}) })
+	refuses("RevealRange", func(tx *Tx) { tx.RevealRange(editor, TextRange{Start: -1, End: -1}) })
+	refuses("HighlightRanges", func(tx *Tx) {
+		tx.HighlightRanges(editor, []TextRange{{Start: 0, End: 4}, {Start: -1, End: 4}})
+	})
+
+	app.Build(func(tx *Tx) {
+		tx.HighlightRanges(editor, []TextRange{{Start: 0, End: 4}, {Start: 9, End: 18}})
+		tx.HighlightRanges(editor, nil) // the clear
+		tx.SelectRange(editor, TextRange{Start: 4, End: 4})
+		tx.RevealRange(editor, TextRange{Start: 0, End: 0})
+	})
+}

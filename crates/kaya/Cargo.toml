@@ -83,6 +83,17 @@ windows = { version = "0.62", features = [
 # unexplained JVM crash on one lane.
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
+    # Win32_UI_TextServices is the Text Services Framework, and it is
+    # NOT UI Automation — the wall above is about attaching an automation
+    # CLIENT, which reaches into other processes' UI; TSF is the input
+    # stack of this process's own focused control. The harness's
+    # `compose` verb needs it because Windows has no "insert marked text"
+    # call: a composition belongs to TSF, so the verb starts one the way
+    # a text service does (winui/mod.rs, tsf_compose). Without a real
+    # composition the ranges scene's D4 leg would be asserting against
+    # ordinary inserted text, which is the state the refusal exists to
+    # tell a composition apart from.
+    "Win32_UI_TextServices",
     # IShellBrowser derives from IOleWindow, so the metadata gates it
     # behind Ole. It is the route from the file dialog to the view it is
     # showing (sample_folder_view) — the read that replaced UI
@@ -274,6 +285,10 @@ path = "../../guests/rust/commands.rs"
 [[example]]
 name = "a11y"
 path = "../../guests/rust/a11y.rs"
+
+[[example]]
+name = "ranges"
+path = "../../guests/rust/ranges.rs"
 
 # Android has no native process entry (Zygote forks the process and an
 # Activity is the way in), so the Android packaging of milestone 0 is a

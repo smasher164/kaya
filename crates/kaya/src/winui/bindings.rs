@@ -538,6 +538,894 @@ pub mod Microsoft {
         }
         pub mod Text {
             windows_core::imp::define_interface!(
+                ITextCharacterFormat,
+                ITextCharacterFormat_Vtbl,
+                0xf5710050_98e5_5788_b1e3_32191eebf94d
+            );
+            impl windows_core::RuntimeType for ITextCharacterFormat {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            windows_core::imp::interface_hierarchy!(
+                ITextCharacterFormat,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl ITextCharacterFormat {
+                pub fn BackgroundColor(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::UI::Color> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).BackgroundColor)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetBackgroundColor(
+                    &self,
+                    value: super::super::super::Windows::UI::Color,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetBackgroundColor)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ForegroundColor(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::UI::Color> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ForegroundColor)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetForegroundColor(
+                    &self,
+                    value: super::super::super::Windows::UI::Color,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetForegroundColor)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Kerning(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Kerning)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetKerning(&self, value: f32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetKerning)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn LanguageTag(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).LanguageTag)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetLanguageTag(
+                    &self,
+                    value: &windows_core::HSTRING,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetLanguageTag)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Name(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Name)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn SetName(&self, value: &windows_core::HSTRING) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetName)(
+                            windows_core::Interface::as_raw(this),
+                            core::mem::transmute_copy(value),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Position(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Position)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetPosition(&self, value: f32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetPosition)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Size(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Size)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetSize(&self, value: f32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetSize)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Spacing(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Spacing)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetSpacing(&self, value: f32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetSpacing)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn Weight(&self) -> windows_core::Result<i32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Weight)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetWeight(&self, value: i32) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetWeight)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetClone<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ITextCharacterFormat>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetClone)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn GetClone(&self) -> windows_core::Result<ITextCharacterFormat> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetClone)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn IsEqual<P0>(&self, format: P0) -> windows_core::Result<bool>
+                where
+                    P0: windows_core::Param<ITextCharacterFormat>,
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).IsEqual)(
+                            windows_core::Interface::as_raw(this),
+                            format.param().abi(),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+            }
+            impl windows_core::RuntimeName for ITextCharacterFormat {
+                const NAME: &'static str = "Microsoft.UI.Text.ITextCharacterFormat";
+            }
+            pub trait ITextCharacterFormat_Impl: windows_core::IUnknownImpl {
+                fn BackgroundColor(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::UI::Color>;
+                fn SetBackgroundColor(
+                    &self,
+                    value: &super::super::super::Windows::UI::Color,
+                ) -> windows_core::Result<()>;
+                fn ForegroundColor(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::UI::Color>;
+                fn SetForegroundColor(
+                    &self,
+                    value: &super::super::super::Windows::UI::Color,
+                ) -> windows_core::Result<()>;
+                fn Kerning(&self) -> windows_core::Result<f32>;
+                fn SetKerning(&self, value: f32) -> windows_core::Result<()>;
+                fn LanguageTag(&self) -> windows_core::Result<windows_core::HSTRING>;
+                fn SetLanguageTag(&self, value: &windows_core::HSTRING)
+                    -> windows_core::Result<()>;
+                fn Name(&self) -> windows_core::Result<windows_core::HSTRING>;
+                fn SetName(&self, value: &windows_core::HSTRING) -> windows_core::Result<()>;
+                fn Position(&self) -> windows_core::Result<f32>;
+                fn SetPosition(&self, value: f32) -> windows_core::Result<()>;
+                fn Size(&self) -> windows_core::Result<f32>;
+                fn SetSize(&self, value: f32) -> windows_core::Result<()>;
+                fn Spacing(&self) -> windows_core::Result<f32>;
+                fn SetSpacing(&self, value: f32) -> windows_core::Result<()>;
+                fn Weight(&self) -> windows_core::Result<i32>;
+                fn SetWeight(&self, value: i32) -> windows_core::Result<()>;
+                fn SetClone(
+                    &self,
+                    value: windows_core::Ref<'_, ITextCharacterFormat>,
+                ) -> windows_core::Result<()>;
+                fn GetClone(&self) -> windows_core::Result<ITextCharacterFormat>;
+                fn IsEqual(
+                    &self,
+                    format: windows_core::Ref<'_, ITextCharacterFormat>,
+                ) -> windows_core::Result<bool>;
+            }
+            impl ITextCharacterFormat_Vtbl {
+                pub const fn new<Identity: ITextCharacterFormat_Impl, const OFFSET: isize>() -> Self
+                {
+                    unsafe extern "system" fn BackgroundColor<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut super::super::super::Windows::UI::Color,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::BackgroundColor(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetBackgroundColor<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: super::super::super::Windows::UI::Color,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetBackgroundColor(
+                                this,
+                                core::mem::transmute(&value),
+                            )
+                            .into()
+                        }
+                    }
+                    unsafe extern "system" fn ForegroundColor<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut super::super::super::Windows::UI::Color,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::ForegroundColor(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetForegroundColor<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: super::super::super::Windows::UI::Color,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetForegroundColor(
+                                this,
+                                core::mem::transmute(&value),
+                            )
+                            .into()
+                        }
+                    }
+                    unsafe extern "system" fn Kerning<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Kerning(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetKerning<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetKerning(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn LanguageTag<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::LanguageTag(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetLanguageTag<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetLanguageTag(
+                                this,
+                                core::mem::transmute(&value),
+                            )
+                            .into()
+                        }
+                    }
+                    unsafe extern "system" fn Name<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Name(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetName<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetName(this, core::mem::transmute(&value))
+                                .into()
+                        }
+                    }
+                    unsafe extern "system" fn Position<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Position(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetPosition<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetPosition(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn Size<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Size(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetSize<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetSize(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn Spacing<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Spacing(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetSpacing<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetSpacing(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn Weight<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut i32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::Weight(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetWeight<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: i32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetWeight(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn SetClone<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetClone(
+                                this,
+                                core::mem::transmute_copy(&value),
+                            )
+                            .into()
+                        }
+                    }
+                    unsafe extern "system" fn GetClone<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::GetClone(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn IsEqual<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        format: *mut core::ffi::c_void,
+                        result__: *mut bool,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::IsEqual(
+                                this,
+                                core::mem::transmute_copy(&format),
+                            ) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    Self {
+                        base__: windows_core::IInspectable_Vtbl::new::<
+                            Identity,
+                            ITextCharacterFormat,
+                            OFFSET,
+                        >(),
+                        AllCaps: 0,
+                        SetAllCaps: 0,
+                        BackgroundColor: BackgroundColor::<Identity, OFFSET>,
+                        SetBackgroundColor: SetBackgroundColor::<Identity, OFFSET>,
+                        Bold: 0,
+                        SetBold: 0,
+                        FontStretch: 0,
+                        SetFontStretch: 0,
+                        FontStyle: 0,
+                        SetFontStyle: 0,
+                        ForegroundColor: ForegroundColor::<Identity, OFFSET>,
+                        SetForegroundColor: SetForegroundColor::<Identity, OFFSET>,
+                        Hidden: 0,
+                        SetHidden: 0,
+                        Italic: 0,
+                        SetItalic: 0,
+                        Kerning: Kerning::<Identity, OFFSET>,
+                        SetKerning: SetKerning::<Identity, OFFSET>,
+                        LanguageTag: LanguageTag::<Identity, OFFSET>,
+                        SetLanguageTag: SetLanguageTag::<Identity, OFFSET>,
+                        LinkType: 0,
+                        Name: Name::<Identity, OFFSET>,
+                        SetName: SetName::<Identity, OFFSET>,
+                        Outline: 0,
+                        SetOutline: 0,
+                        Position: Position::<Identity, OFFSET>,
+                        SetPosition: SetPosition::<Identity, OFFSET>,
+                        ProtectedText: 0,
+                        SetProtectedText: 0,
+                        Size: Size::<Identity, OFFSET>,
+                        SetSize: SetSize::<Identity, OFFSET>,
+                        SmallCaps: 0,
+                        SetSmallCaps: 0,
+                        Spacing: Spacing::<Identity, OFFSET>,
+                        SetSpacing: SetSpacing::<Identity, OFFSET>,
+                        Strikethrough: 0,
+                        SetStrikethrough: 0,
+                        Subscript: 0,
+                        SetSubscript: 0,
+                        Superscript: 0,
+                        SetSuperscript: 0,
+                        TextScript: 0,
+                        SetTextScript: 0,
+                        Underline: 0,
+                        SetUnderline: 0,
+                        Weight: Weight::<Identity, OFFSET>,
+                        SetWeight: SetWeight::<Identity, OFFSET>,
+                        SetClone: SetClone::<Identity, OFFSET>,
+                        GetClone: GetClone::<Identity, OFFSET>,
+                        IsEqual: IsEqual::<Identity, OFFSET>,
+                    }
+                }
+                pub fn matches(iid: &windows_core::GUID) -> bool {
+                    iid == &<ITextCharacterFormat as windows_core::Interface>::IID
+                }
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct ITextCharacterFormat_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                AllCaps: usize,
+                SetAllCaps: usize,
+                pub BackgroundColor: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::UI::Color,
+                )
+                    -> windows_core::HRESULT,
+                pub SetBackgroundColor: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::UI::Color,
+                )
+                    -> windows_core::HRESULT,
+                Bold: usize,
+                SetBold: usize,
+                FontStretch: usize,
+                SetFontStretch: usize,
+                FontStyle: usize,
+                SetFontStyle: usize,
+                pub ForegroundColor: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::UI::Color,
+                )
+                    -> windows_core::HRESULT,
+                pub SetForegroundColor: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::UI::Color,
+                )
+                    -> windows_core::HRESULT,
+                Hidden: usize,
+                SetHidden: usize,
+                Italic: usize,
+                SetItalic: usize,
+                pub Kerning: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                ) -> windows_core::HRESULT,
+                pub SetKerning:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+                pub LanguageTag: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub SetLanguageTag: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                LinkType: usize,
+                pub Name: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub SetName: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                Outline: usize,
+                SetOutline: usize,
+                pub Position: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                ) -> windows_core::HRESULT,
+                pub SetPosition:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+                ProtectedText: usize,
+                SetProtectedText: usize,
+                pub Size: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                ) -> windows_core::HRESULT,
+                pub SetSize:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+                SmallCaps: usize,
+                SetSmallCaps: usize,
+                pub Spacing: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                ) -> windows_core::HRESULT,
+                pub SetSpacing:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, f32) -> windows_core::HRESULT,
+                Strikethrough: usize,
+                SetStrikethrough: usize,
+                Subscript: usize,
+                SetSubscript: usize,
+                Superscript: usize,
+                SetSuperscript: usize,
+                TextScript: usize,
+                SetTextScript: usize,
+                Underline: usize,
+                SetUnderline: usize,
+                pub Weight: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i32,
+                ) -> windows_core::HRESULT,
+                pub SetWeight:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i32) -> windows_core::HRESULT,
+                pub SetClone: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub GetClone: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub IsEqual: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                ITextConstantsStatics,
+                ITextConstantsStatics_Vtbl,
+                0xcd353b3c_af63_5cfb_918c_0f9c8931a161
+            );
+            impl windows_core::RuntimeType for ITextConstantsStatics {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct ITextConstantsStatics_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub AutoColor: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::UI::Color,
+                ) -> windows_core::HRESULT,
+                pub MinUnitCount: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i32,
+                )
+                    -> windows_core::HRESULT,
+                pub MaxUnitCount: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i32,
+                )
+                    -> windows_core::HRESULT,
+                pub UndefinedColor: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::UI::Color,
+                )
+                    -> windows_core::HRESULT,
+                pub UndefinedFloatValue: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                )
+                    -> windows_core::HRESULT,
+                pub UndefinedInt32Value: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i32,
+                )
+                    -> windows_core::HRESULT,
+                UndefinedFontStretch: usize,
+                UndefinedFontStyle: usize,
+            }
+            windows_core::imp::define_interface!(
                 ITextDocument,
                 ITextDocument_Vtbl,
                 0x1149d57d_86a6_59dd_88d9_196f27bc5c85
@@ -599,7 +1487,11 @@ pub mod Microsoft {
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 pub EndUndoGroup:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
-                GetDefaultCharacterFormat: usize,
+                pub GetDefaultCharacterFormat: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 GetDefaultParagraphFormat: usize,
                 pub GetRange: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
@@ -607,7 +1499,13 @@ pub mod Microsoft {
                     i32,
                     *mut *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                GetRangeFromPoint: usize,
+                pub GetRangeFromPoint: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Foundation::Point,
+                    PointOptions,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 pub GetText: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     TextGetOptions,
@@ -627,7 +1525,11 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                 )
                     -> windows_core::HRESULT,
-                SetDefaultCharacterFormat: usize,
+                pub SetDefaultCharacterFormat: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 SetDefaultParagraphFormat: usize,
                 pub SetText: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
@@ -715,6 +1617,30 @@ pub mod Microsoft {
                         (windows_core::Interface::vtable(this).SetCharacter)(
                             windows_core::Interface::as_raw(this),
                             value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn CharacterFormat(&self) -> windows_core::Result<ITextCharacterFormat> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CharacterFormat)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetCharacterFormat<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ITextCharacterFormat>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetCharacterFormat)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
                         )
                         .ok()
                     }
@@ -915,6 +1841,23 @@ pub mod Microsoft {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
+                pub fn GetRect(
+                    &self,
+                    options: PointOptions,
+                    rect: &mut super::super::super::Windows::Foundation::Rect,
+                    hit: &mut i32,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).GetRect)(
+                            windows_core::Interface::as_raw(this),
+                            options,
+                            rect,
+                            hit,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn GetText(
                     &self,
                     options: TextGetOptions,
@@ -1005,11 +1948,38 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn ScrollIntoView(&self, value: PointOptions) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).ScrollIntoView)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn MatchSelection(&self) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
                         (windows_core::Interface::vtable(this).MatchSelection)(
                             windows_core::Interface::as_raw(this),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetPoint(
+                    &self,
+                    point: super::super::super::Windows::Foundation::Point,
+                    options: PointOptions,
+                    extend: bool,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetPoint)(
+                            windows_core::Interface::as_raw(this),
+                            point,
+                            options,
+                            extend,
                         )
                         .ok()
                     }
@@ -1071,6 +2041,11 @@ pub mod Microsoft {
             pub trait ITextRange_Impl: windows_core::IUnknownImpl {
                 fn Character(&self) -> windows_core::Result<u16>;
                 fn SetCharacter(&self, value: u16) -> windows_core::Result<()>;
+                fn CharacterFormat(&self) -> windows_core::Result<ITextCharacterFormat>;
+                fn SetCharacterFormat(
+                    &self,
+                    value: windows_core::Ref<'_, ITextCharacterFormat>,
+                ) -> windows_core::Result<()>;
                 fn FormattedText(&self) -> windows_core::Result<ITextRange>;
                 fn SetFormattedText(
                     &self,
@@ -1096,6 +2071,12 @@ pub mod Microsoft {
                     offset: i32,
                 ) -> windows_core::Result<()>;
                 fn GetClone(&self) -> windows_core::Result<ITextRange>;
+                fn GetRect(
+                    &self,
+                    options: PointOptions,
+                    rect: &mut super::super::super::Windows::Foundation::Rect,
+                    hit: &mut i32,
+                ) -> windows_core::Result<()>;
                 fn GetText(
                     &self,
                     options: TextGetOptions,
@@ -1122,7 +2103,14 @@ pub mod Microsoft {
                     range: windows_core::Ref<'_, ITextRange>,
                 ) -> windows_core::Result<bool>;
                 fn Paste(&self, format: i32) -> windows_core::Result<()>;
+                fn ScrollIntoView(&self, value: PointOptions) -> windows_core::Result<()>;
                 fn MatchSelection(&self) -> windows_core::Result<()>;
+                fn SetPoint(
+                    &self,
+                    point: &super::super::super::Windows::Foundation::Point,
+                    options: PointOptions,
+                    extend: bool,
+                ) -> windows_core::Result<()>;
                 fn SetRange(
                     &self,
                     startPosition: i32,
@@ -1174,6 +2162,43 @@ pub mod Microsoft {
                             let this: &Identity =
                                 &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                             ITextRange_Impl::SetCharacter(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn CharacterFormat<
+                        Identity: ITextRange_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextRange_Impl::CharacterFormat(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetCharacterFormat<
+                        Identity: ITextRange_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextRange_Impl::SetCharacterFormat(
+                                this,
+                                core::mem::transmute_copy(&value),
+                            )
+                            .into()
                         }
                     }
                     unsafe extern "system" fn FormattedText<
@@ -1477,6 +2502,27 @@ pub mod Microsoft {
                             }
                         }
                     }
+                    unsafe extern "system" fn GetRect<
+                        Identity: ITextRange_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        options: PointOptions,
+                        rect: *mut super::super::super::Windows::Foundation::Rect,
+                        hit: *mut i32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextRange_Impl::GetRect(
+                                this,
+                                options,
+                                core::mem::transmute_copy(&rect),
+                                core::mem::transmute_copy(&hit),
+                            )
+                            .into()
+                        }
+                    }
                     unsafe extern "system" fn GetText<
                         Identity: ITextRange_Impl,
                         const OFFSET: isize,
@@ -1591,6 +2637,19 @@ pub mod Microsoft {
                             ITextRange_Impl::Paste(this, format).into()
                         }
                     }
+                    unsafe extern "system" fn ScrollIntoView<
+                        Identity: ITextRange_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: PointOptions,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextRange_Impl::ScrollIntoView(this, value).into()
+                        }
+                    }
                     unsafe extern "system" fn MatchSelection<
                         Identity: ITextRange_Impl,
                         const OFFSET: isize,
@@ -1601,6 +2660,27 @@ pub mod Microsoft {
                             let this: &Identity =
                                 &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                             ITextRange_Impl::MatchSelection(this).into()
+                        }
+                    }
+                    unsafe extern "system" fn SetPoint<
+                        Identity: ITextRange_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        point: super::super::super::Windows::Foundation::Point,
+                        options: PointOptions,
+                        extend: bool,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextRange_Impl::SetPoint(
+                                this,
+                                core::mem::transmute(&point),
+                                options,
+                                extend,
+                            )
+                            .into()
                         }
                     }
                     unsafe extern "system" fn SetRange<
@@ -1656,8 +2736,8 @@ pub mod Microsoft {
                         ),
                         Character: Character::<Identity, OFFSET>,
                         SetCharacter: SetCharacter::<Identity, OFFSET>,
-                        CharacterFormat: 0,
-                        SetCharacterFormat: 0,
+                        CharacterFormat: CharacterFormat::<Identity, OFFSET>,
+                        SetCharacterFormat: SetCharacterFormat::<Identity, OFFSET>,
                         FormattedText: FormattedText::<Identity, OFFSET>,
                         SetFormattedText: SetFormattedText::<Identity, OFFSET>,
                         EndPosition: EndPosition::<Identity, OFFSET>,
@@ -1687,7 +2767,7 @@ pub mod Microsoft {
                         GetClone: GetClone::<Identity, OFFSET>,
                         GetIndex: 0,
                         GetPoint: 0,
-                        GetRect: 0,
+                        GetRect: GetRect::<Identity, OFFSET>,
                         GetText: GetText::<Identity, OFFSET>,
                         GetTextViaStream: GetTextViaStream::<Identity, OFFSET>,
                         InRange: InRange::<Identity, OFFSET>,
@@ -1698,10 +2778,10 @@ pub mod Microsoft {
                         MoveEnd: 0,
                         MoveStart: 0,
                         Paste: Paste::<Identity, OFFSET>,
-                        ScrollIntoView: 0,
+                        ScrollIntoView: ScrollIntoView::<Identity, OFFSET>,
                         MatchSelection: MatchSelection::<Identity, OFFSET>,
                         SetIndex: 0,
-                        SetPoint: 0,
+                        SetPoint: SetPoint::<Identity, OFFSET>,
                         SetRange: SetRange::<Identity, OFFSET>,
                         SetText2: SetText2::<Identity, OFFSET>,
                         SetTextViaStream: SetTextViaStream::<Identity, OFFSET>,
@@ -1722,8 +2802,16 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
                 pub SetCharacter:
                     unsafe extern "system" fn(*mut core::ffi::c_void, u16) -> windows_core::HRESULT,
-                CharacterFormat: usize,
-                SetCharacterFormat: usize,
+                pub CharacterFormat: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub SetCharacterFormat: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 pub FormattedText: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
@@ -1806,7 +2894,12 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
                 GetIndex: usize,
                 GetPoint: usize,
-                GetRect: usize,
+                pub GetRect: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    PointOptions,
+                    *mut super::super::super::Windows::Foundation::Rect,
+                    *mut i32,
+                ) -> windows_core::HRESULT,
                 pub GetText: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     TextGetOptions,
@@ -1839,11 +2932,20 @@ pub mod Microsoft {
                 MoveStart: usize,
                 pub Paste:
                     unsafe extern "system" fn(*mut core::ffi::c_void, i32) -> windows_core::HRESULT,
-                ScrollIntoView: usize,
+                pub ScrollIntoView: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    PointOptions,
+                )
+                    -> windows_core::HRESULT,
                 pub MatchSelection:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
                 SetIndex: usize,
-                SetPoint: usize,
+                pub SetPoint: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Foundation::Point,
+                    PointOptions,
+                    bool,
+                ) -> windows_core::HRESULT,
                 pub SetRange: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     i32,
@@ -1905,6 +3007,30 @@ pub mod Microsoft {
                         (windows_core::Interface::vtable(this).SetCharacter)(
                             windows_core::Interface::as_raw(this),
                             value,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn CharacterFormat(&self) -> windows_core::Result<ITextCharacterFormat> {
+                    let this = &windows_core::Interface::cast::<ITextRange>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CharacterFormat)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn SetCharacterFormat<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ITextCharacterFormat>,
+                {
+                    let this = &windows_core::Interface::cast::<ITextRange>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetCharacterFormat)(
+                            windows_core::Interface::as_raw(this),
+                            value.param().abi(),
                         )
                         .ok()
                     }
@@ -2105,6 +3231,23 @@ pub mod Microsoft {
                         .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
+                pub fn GetRect(
+                    &self,
+                    options: PointOptions,
+                    rect: &mut super::super::super::Windows::Foundation::Rect,
+                    hit: &mut i32,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<ITextRange>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).GetRect)(
+                            windows_core::Interface::as_raw(this),
+                            options,
+                            rect,
+                            hit,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn GetText(
                     &self,
                     options: TextGetOptions,
@@ -2195,11 +3338,38 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn ScrollIntoView(&self, value: PointOptions) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<ITextRange>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).ScrollIntoView)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn MatchSelection(&self) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<ITextRange>(self)?;
                     unsafe {
                         (windows_core::Interface::vtable(this).MatchSelection)(
                             windows_core::Interface::as_raw(this),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetPoint(
+                    &self,
+                    point: super::super::super::Windows::Foundation::Point,
+                    options: PointOptions,
+                    extend: bool,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<ITextRange>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetPoint)(
+                            windows_core::Interface::as_raw(this),
+                            point,
+                            options,
+                            extend,
                         )
                         .ok()
                     }
@@ -2315,6 +3485,61 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct PointOptions(pub u32);
+            impl PointOptions {
+                pub const None: Self = Self(0u32);
+                pub const IncludeInset: Self = Self(1u32);
+                pub const Start: Self = Self(32u32);
+                pub const ClientCoordinates: Self = Self(256u32);
+                pub const AllowOffClient: Self = Self(512u32);
+                pub const Transform: Self = Self(1024u32);
+                pub const NoHorizontalScroll: Self = Self(65536u32);
+                pub const NoVerticalScroll: Self = Self(262144u32);
+            }
+            impl windows_core::TypeKind for PointOptions {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for PointOptions {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Text.PointOptions;u4)",
+                    );
+            }
+            impl PointOptions {
+                pub const fn contains(&self, other: Self) -> bool {
+                    self.0 & other.0 == other.0
+                }
+            }
+            impl core::ops::BitOr for PointOptions {
+                type Output = Self;
+                fn bitor(self, other: Self) -> Self {
+                    Self(self.0 | other.0)
+                }
+            }
+            impl core::ops::BitAnd for PointOptions {
+                type Output = Self;
+                fn bitand(self, other: Self) -> Self {
+                    Self(self.0 & other.0)
+                }
+            }
+            impl core::ops::BitOrAssign for PointOptions {
+                fn bitor_assign(&mut self, other: Self) {
+                    self.0.bitor_assign(other.0)
+                }
+            }
+            impl core::ops::BitAndAssign for PointOptions {
+                fn bitand_assign(&mut self, other: Self) {
+                    self.0.bitand_assign(other.0)
+                }
+            }
+            impl core::ops::Not for PointOptions {
+                type Output = Self;
+                fn not(self) -> Self {
+                    Self(self.0.not())
+                }
             }
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2462,6 +3687,19 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn GetDefaultCharacterFormat(
+                    &self,
+                ) -> windows_core::Result<ITextCharacterFormat> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetDefaultCharacterFormat)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
                 pub fn GetRange(
                     &self,
                     startposition: i32,
@@ -2474,6 +3712,23 @@ pub mod Microsoft {
                             windows_core::Interface::as_raw(this),
                             startposition,
                             endposition,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn GetRangeFromPoint(
+                    &self,
+                    point: super::super::super::Windows::Foundation::Point,
+                    options: PointOptions,
+                ) -> windows_core::Result<ITextRange> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetRangeFromPoint)(
+                            windows_core::Interface::as_raw(this),
+                            point,
+                            options,
                             &mut result__,
                         )
                         .and_then(|| windows_core::Type::from_abi(result__))
@@ -2538,6 +3793,19 @@ pub mod Microsoft {
                         (windows_core::Interface::vtable(this).SaveToStream)(
                             windows_core::Interface::as_raw(this),
                             options,
+                            value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetDefaultCharacterFormat<P0>(&self, value: P0) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<ITextCharacterFormat>,
+                {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetDefaultCharacterFormat)(
+                            windows_core::Interface::as_raw(this),
                             value.param().abi(),
                         )
                         .ok()
@@ -2662,6 +3930,86 @@ pub mod Microsoft {
             }
             unsafe impl Send for RichEditTextDocument {}
             unsafe impl Sync for RichEditTextDocument {}
+            pub struct TextConstants;
+            impl TextConstants {
+                pub fn AutoColor() -> windows_core::Result<super::super::super::Windows::UI::Color>
+                {
+                    Self::ITextConstantsStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).AutoColor)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    })
+                }
+                pub fn MinUnitCount() -> windows_core::Result<i32> {
+                    Self::ITextConstantsStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).MinUnitCount)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    })
+                }
+                pub fn MaxUnitCount() -> windows_core::Result<i32> {
+                    Self::ITextConstantsStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).MaxUnitCount)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    })
+                }
+                pub fn UndefinedColor(
+                ) -> windows_core::Result<super::super::super::Windows::UI::Color> {
+                    Self::ITextConstantsStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).UndefinedColor)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    })
+                }
+                pub fn UndefinedFloatValue() -> windows_core::Result<f32> {
+                    Self::ITextConstantsStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).UndefinedFloatValue)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    })
+                }
+                pub fn UndefinedInt32Value() -> windows_core::Result<i32> {
+                    Self::ITextConstantsStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).UndefinedInt32Value)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    })
+                }
+                fn ITextConstantsStatics<
+                    R,
+                    F: FnOnce(&ITextConstantsStatics) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        TextConstants,
+                        ITextConstantsStatics,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeName for TextConstants {
+                const NAME: &'static str = "Microsoft.UI.Text.TextConstants";
+            }
             #[repr(transparent)]
             #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
             pub struct TextGetOptions(pub u32);
@@ -5401,6 +6749,19 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn Arrange(
+                    &self,
+                    finalrect: super::super::super::Windows::Foundation::Rect,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Arrange)(
+                            windows_core::Interface::as_raw(this),
+                            finalrect,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -5507,6 +6868,29 @@ pub mod Microsoft {
                             windows_core::Interface::as_raw(this),
                         )
                         .ok()
+                    }
+                }
+                pub fn FindSubElementsForTouchTargeting(
+                    &self,
+                    point: super::super::super::Windows::Foundation::Point,
+                    boundingrect: super::super::super::Windows::Foundation::Rect,
+                ) -> windows_core::Result<
+                    windows_collections::IIterable<
+                        windows_collections::IIterable<
+                            super::super::super::Windows::Foundation::Point,
+                        >,
+                    >,
+                > {
+                    let this = &windows_core::Interface::cast::<IUIElementOverrides>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).FindSubElementsForTouchTargeting)(
+                            windows_core::Interface::as_raw(this),
+                            point,
+                            boundingrect,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
                 pub fn GetChildrenInTabFocusOrder(
@@ -6922,7 +8306,10 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     super::super::super::Windows::Foundation::Size,
                 ) -> windows_core::HRESULT,
-                Arrange: usize,
+                pub Arrange: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::Foundation::Rect,
+                ) -> windows_core::HRESULT,
                 CapturePointer: usize,
                 ReleasePointerCapture: usize,
                 pub ReleasePointerCaptures:
@@ -6993,7 +8380,13 @@ pub mod Microsoft {
                     -> windows_core::HRESULT,
                 pub OnDisconnectVisualChildren:
                     unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
-                FindSubElementsForTouchTargeting: usize,
+                pub FindSubElementsForTouchTargeting:
+                    unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::Windows::Foundation::Point,
+                        super::super::super::Windows::Foundation::Rect,
+                        *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT,
                 pub GetChildrenInTabFocusOrder: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut *mut core::ffi::c_void,
@@ -7163,7 +8556,10 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct IWindow_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                Bounds: usize,
+                pub Bounds: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::Foundation::Rect,
+                ) -> windows_core::HRESULT,
                 pub Visible: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut bool,
@@ -9460,6 +10856,19 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn Arrange(
+                    &self,
+                    finalrect: super::super::super::Windows::Foundation::Rect,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Arrange)(
+                            windows_core::Interface::as_raw(this),
+                            finalrect,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -9566,6 +10975,29 @@ pub mod Microsoft {
                             windows_core::Interface::as_raw(this),
                         )
                         .ok()
+                    }
+                }
+                pub fn FindSubElementsForTouchTargeting(
+                    &self,
+                    point: super::super::super::Windows::Foundation::Point,
+                    boundingrect: super::super::super::Windows::Foundation::Rect,
+                ) -> windows_core::Result<
+                    windows_collections::IIterable<
+                        windows_collections::IIterable<
+                            super::super::super::Windows::Foundation::Point,
+                        >,
+                    >,
+                > {
+                    let this = &windows_core::Interface::cast::<IUIElementOverrides>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).FindSubElementsForTouchTargeting)(
+                            windows_core::Interface::as_raw(this),
+                            point,
+                            boundingrect,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
                     }
                 }
                 pub fn GetChildrenInTabFocusOrder(
@@ -9882,6 +11314,20 @@ pub mod Microsoft {
                 windows_core::IInspectable
             );
             impl Window {
+                pub fn Bounds(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::Foundation::Rect>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Bounds)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
                 pub fn Visible(&self) -> windows_core::Result<bool> {
                     let this = self;
                     unsafe {
@@ -11438,6 +12884,21 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetBoundingRectangle(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangle)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetChildren(
                             &self,
                         ) -> windows_core::Result<windows_collections::IVector<AutomationPeer>>
@@ -11909,6 +13370,22 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetBoundingRectangleCore(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangleCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn GetChildrenCore(
@@ -12515,6 +13992,21 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetBoundingRectangle(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangle)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetChildren(
                             &self,
                         ) -> windows_core::Result<windows_collections::IVector<AutomationPeer>>
@@ -12974,6 +14466,22 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetBoundingRectangleCore(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangleCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn GetChildrenCore(
@@ -13609,6 +15117,21 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetBoundingRectangle(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangle)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetChildren(
                             &self,
                         ) -> windows_core::Result<windows_collections::IVector<AutomationPeer>>
@@ -14068,6 +15591,22 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetBoundingRectangleCore(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangleCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn GetChildrenCore(
@@ -14694,6 +16233,21 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetBoundingRectangle(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangle)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetChildren(
                             &self,
                         ) -> windows_core::Result<windows_collections::IVector<AutomationPeer>>
@@ -15153,6 +16707,22 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetBoundingRectangleCore(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangleCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn GetChildrenCore(
@@ -15782,7 +17352,12 @@ pub mod Microsoft {
                             *mut *mut core::ffi::c_void,
                         )
                             -> windows_core::HRESULT,
-                        GetBoundingRectangle: usize,
+                        pub GetBoundingRectangle:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut super::super::super::super::super::Windows::Foundation::Rect,
+                            )
+                                -> windows_core::HRESULT,
                         pub GetChildren: unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                             *mut *mut core::ffi::c_void,
@@ -16026,7 +17601,12 @@ pub mod Microsoft {
                             *mut *mut core::ffi::c_void,
                         )
                             -> windows_core::HRESULT,
-                        GetBoundingRectangleCore: usize,
+                        pub GetBoundingRectangleCore:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut super::super::super::super::super::Windows::Foundation::Rect,
+                            )
+                                -> windows_core::HRESULT,
                         pub GetChildrenCore: unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                             *mut *mut core::ffi::c_void,
@@ -16600,6 +18180,21 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetBoundingRectangle(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangle)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetChildren(
                             &self,
                         ) -> windows_core::Result<windows_collections::IVector<AutomationPeer>>
@@ -17059,6 +18654,22 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetBoundingRectangleCore(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangleCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn GetChildrenCore(
@@ -17720,6 +19331,21 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetBoundingRectangle(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangle)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetChildren(
                             &self,
                         ) -> windows_core::Result<windows_collections::IVector<AutomationPeer>>
@@ -18179,6 +19805,22 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetBoundingRectangleCore(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangleCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn GetChildrenCore(
@@ -18820,6 +20462,21 @@ pub mod Microsoft {
                                 .map(|| core::mem::transmute(result__))
                             }
                         }
+                        pub fn GetBoundingRectangle(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangle)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn GetChildren(
                             &self,
                         ) -> windows_core::Result<windows_collections::IVector<AutomationPeer>>
@@ -19279,6 +20936,22 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn GetBoundingRectangleCore(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::Foundation::Rect,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetBoundingRectangleCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
                             }
                         }
                         pub fn GetChildrenCore(
@@ -22990,6 +24663,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -23099,6 +24785,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -26180,6 +27884,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -26289,6 +28006,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -30243,6 +31978,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -30352,6 +32100,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -33241,6 +35007,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -33350,6 +35129,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -36206,6 +38003,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -36315,6 +38125,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -39618,6 +41446,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -39727,6 +41568,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -42635,6 +44494,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -42744,6 +44616,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -45476,6 +47366,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -45585,6 +47488,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -49242,7 +51163,12 @@ pub mod Microsoft {
                         i64,
                     )
                         -> windows_core::HRESULT,
-                    TextCompositionStarted: usize,
+                    pub TextCompositionStarted: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveTextCompositionStarted:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -49254,7 +51180,12 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                             i64,
                         ) -> windows_core::HRESULT,
-                    TextCompositionEnded: usize,
+                    pub TextCompositionEnded: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveTextCompositionEnded:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -50904,7 +52835,12 @@ pub mod Microsoft {
                         i64,
                     )
                         -> windows_core::HRESULT,
-                    TextCompositionStarted: usize,
+                    pub TextCompositionStarted: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveTextCompositionStarted:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -50916,7 +52852,12 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                             i64,
                         ) -> windows_core::HRESULT,
-                    TextCompositionEnded: usize,
+                    pub TextCompositionEnded: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveTextCompositionEnded:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -50954,7 +52895,13 @@ pub mod Microsoft {
                         -> windows_core::HRESULT,
                     pub SelectAll:
                         unsafe extern "system" fn(*mut core::ffi::c_void) -> windows_core::HRESULT,
-                    GetRectFromCharacterIndex: usize,
+                    pub GetRectFromCharacterIndex:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            i32,
+                            bool,
+                            *mut super::super::super::super::Windows::Foundation::Rect,
+                        ) -> windows_core::HRESULT,
                     pub GetLinguisticAlternativesAsync:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -51064,6 +53011,54 @@ pub mod Microsoft {
                 #[doc(hidden)]
                 pub struct ITextChangedEventArgs_Vtbl {
                     pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    ITextCompositionEndedEventArgs,
+                    ITextCompositionEndedEventArgs_Vtbl,
+                    0x19d0a5c5_8d0f_5118_8c30_e709326f1283
+                );
+                impl windows_core::RuntimeType for ITextCompositionEndedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextCompositionEndedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub StartIndex: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut i32,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Length: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut i32,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    ITextCompositionStartedEventArgs,
+                    ITextCompositionStartedEventArgs_Vtbl,
+                    0xa604ff71_5d44_5859_8d71_72030ed78bc8
+                );
+                impl windows_core::RuntimeType for ITextCompositionStartedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextCompositionStartedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub StartIndex: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut i32,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Length: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut i32,
+                    )
+                        -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
                     ITextControlPasteEventArgs,
@@ -53800,6 +55795,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -53909,6 +55917,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -57309,6 +59335,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -57418,6 +59457,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -60245,6 +62302,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -60354,6 +62424,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -63201,6 +65289,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -63310,6 +65411,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -66687,6 +68806,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -66796,6 +68928,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -69598,6 +71748,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -69707,6 +71870,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -72498,6 +74679,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -72607,6 +74801,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -75451,6 +77663,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -75560,6 +77785,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -79273,6 +81516,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -79382,6 +81638,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -82444,6 +84718,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -82553,6 +84840,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -85458,6 +87763,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -85567,6 +87885,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -88097,6 +90433,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -88206,6 +90555,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -91254,6 +93621,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -91363,6 +93743,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -94369,6 +96767,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -94478,6 +96889,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -97470,6 +99899,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -97579,6 +100021,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -99456,6 +101916,29 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TextCompositionStarted<P0>(
+                        &self,
+                        handler: P0,
+                    ) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                RichEditBox,
+                                TextCompositionStartedEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TextCompositionStarted)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveTextCompositionStarted(
                         &self,
                         token: i64,
@@ -99480,6 +101963,26 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn TextCompositionEnded<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                RichEditBox,
+                                TextCompositionEndedEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TextCompositionEnded)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveTextCompositionEnded(
@@ -101007,6 +103510,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -101116,6 +103632,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -105727,6 +108261,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -105836,6 +108383,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -109217,6 +111782,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -109326,6 +111904,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -112087,6 +114683,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -112196,6 +114805,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -114145,6 +116772,29 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn TextCompositionStarted<P0>(
+                        &self,
+                        handler: P0,
+                    ) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                TextBox,
+                                TextCompositionStartedEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TextCompositionStarted)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveTextCompositionStarted(
                         &self,
                         token: i64,
@@ -114169,6 +116819,26 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn TextCompositionEnded<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                TextBox,
+                                TextCompositionEndedEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TextCompositionEnded)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveTextCompositionEnded(
@@ -114242,6 +116912,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn GetRectFromCharacterIndex(
+                        &self,
+                        charindex: i32,
+                        trailingedge: bool,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Rect>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetRectFromCharacterIndex)(
+                                windows_core::Interface::as_raw(this),
+                                charindex,
+                                trailingedge,
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn GetLinguisticAlternativesAsync(
@@ -115754,6 +118442,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -115863,6 +118564,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -116088,6 +118807,108 @@ pub mod Microsoft {
                         }
                     }
                 }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct TextCompositionEndedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    TextCompositionEndedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl TextCompositionEndedEventArgs {
+                    pub fn StartIndex(&self) -> windows_core::Result<i32> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).StartIndex)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn Length(&self) -> windows_core::Result<i32> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Length)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for TextCompositionEndedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            ITextCompositionEndedEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for TextCompositionEndedEventArgs {
+                    type Vtable =
+                        <ITextCompositionEndedEventArgs as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <ITextCompositionEndedEventArgs as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for TextCompositionEndedEventArgs {
+                    const NAME: &'static str =
+                        "Microsoft.UI.Xaml.Controls.TextCompositionEndedEventArgs";
+                }
+                unsafe impl Send for TextCompositionEndedEventArgs {}
+                unsafe impl Sync for TextCompositionEndedEventArgs {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct TextCompositionStartedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    TextCompositionStartedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl TextCompositionStartedEventArgs {
+                    pub fn StartIndex(&self) -> windows_core::Result<i32> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).StartIndex)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn Length(&self) -> windows_core::Result<i32> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Length)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for TextCompositionStartedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            ITextCompositionStartedEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for TextCompositionStartedEventArgs {
+                    type Vtable =
+                        <ITextCompositionStartedEventArgs as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <ITextCompositionStartedEventArgs as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for TextCompositionStartedEventArgs {
+                    const NAME: &'static str =
+                        "Microsoft.UI.Xaml.Controls.TextCompositionStartedEventArgs";
+                }
+                unsafe impl Send for TextCompositionStartedEventArgs {}
+                unsafe impl Sync for TextCompositionStartedEventArgs {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct TextControlPasteEventArgs(windows_core::IUnknown);
@@ -119152,6 +121973,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -119261,6 +122095,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -122332,6 +125184,19 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn Arrange(
+                        &self,
+                        finalrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).Arrange)(
+                                windows_core::Interface::as_raw(this),
+                                finalrect,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -122441,6 +125306,24 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                             )
                             .ok()
+                        }
+                    }
+                    pub fn FindSubElementsForTouchTargeting(
+                        &self,
+                        point: super::super::super::super::Windows::Foundation::Point,
+                        boundingrect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<
+                        windows_collections::IIterable<
+                            windows_collections::IIterable<
+                                super::super::super::super::Windows::Foundation::Point,
+                            >,
+                        >,
+                    > {
+                        let this =
+                            &windows_core::Interface::cast::<super::IUIElementOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . FindSubElementsForTouchTargeting ) ( windows_core::Interface::as_raw ( this ) , point , boundingrect , & mut result__ ) . and_then ( || windows_core::Type::from_abi ( result__ ) )
                         }
                     }
                     pub fn GetChildrenInTabFocusOrder(
@@ -126297,6 +129180,20 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn Arrange(
+                            &self,
+                            finalrect: super::super::super::super::super::Windows::Foundation::Rect,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Arrange)(
+                                    windows_core::Interface::as_raw(this),
+                                    finalrect,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -126419,6 +129316,32 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn FindSubElementsForTouchTargeting(
+                            &self,
+                            point: super::super::super::super::super::Windows::Foundation::Point,
+                            boundingrect : super::super::super::super::super::Windows::Foundation:: Rect,
+                        ) -> windows_core::Result<
+                            windows_collections::IIterable<
+                                windows_collections::IIterable<
+                                    super::super::super::super::super::Windows::Foundation::Point,
+                                >,
+                            >,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IUIElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .FindSubElementsForTouchTargeting)(
+                                    windows_core::Interface::as_raw(this),
+                                    point,
+                                    boundingrect,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetChildrenInTabFocusOrder(
@@ -130828,6 +133751,20 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn Arrange(
+                            &self,
+                            finalrect: super::super::super::super::super::Windows::Foundation::Rect,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Arrange)(
+                                    windows_core::Interface::as_raw(this),
+                                    finalrect,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -130950,6 +133887,32 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn FindSubElementsForTouchTargeting(
+                            &self,
+                            point: super::super::super::super::super::Windows::Foundation::Point,
+                            boundingrect : super::super::super::super::super::Windows::Foundation:: Rect,
+                        ) -> windows_core::Result<
+                            windows_collections::IIterable<
+                                windows_collections::IIterable<
+                                    super::super::super::super::super::Windows::Foundation::Point,
+                                >,
+                            >,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IUIElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .FindSubElementsForTouchTargeting)(
+                                    windows_core::Interface::as_raw(this),
+                                    point,
+                                    boundingrect,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetChildrenInTabFocusOrder(
@@ -134238,6 +137201,20 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn Arrange(
+                            &self,
+                            finalrect: super::super::super::super::super::Windows::Foundation::Rect,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Arrange)(
+                                    windows_core::Interface::as_raw(this),
+                                    finalrect,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -134360,6 +137337,32 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn FindSubElementsForTouchTargeting(
+                            &self,
+                            point: super::super::super::super::super::Windows::Foundation::Point,
+                            boundingrect : super::super::super::super::super::Windows::Foundation:: Rect,
+                        ) -> windows_core::Result<
+                            windows_collections::IIterable<
+                                windows_collections::IIterable<
+                                    super::super::super::super::super::Windows::Foundation::Point,
+                                >,
+                            >,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IUIElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .FindSubElementsForTouchTargeting)(
+                                    windows_core::Interface::as_raw(this),
+                                    point,
+                                    boundingrect,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetChildrenInTabFocusOrder(
@@ -138186,6 +141189,20 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn Arrange(
+                            &self,
+                            finalrect: super::super::super::super::super::Windows::Foundation::Rect,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Arrange)(
+                                    windows_core::Interface::as_raw(this),
+                                    finalrect,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -138308,6 +141325,32 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn FindSubElementsForTouchTargeting(
+                            &self,
+                            point: super::super::super::super::super::Windows::Foundation::Point,
+                            boundingrect : super::super::super::super::super::Windows::Foundation:: Rect,
+                        ) -> windows_core::Result<
+                            windows_collections::IIterable<
+                                windows_collections::IIterable<
+                                    super::super::super::super::super::Windows::Foundation::Point,
+                                >,
+                            >,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IUIElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .FindSubElementsForTouchTargeting)(
+                                    windows_core::Interface::as_raw(this),
+                                    point,
+                                    boundingrect,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetChildrenInTabFocusOrder(
@@ -141486,6 +144529,20 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn Arrange(
+                            &self,
+                            finalrect: super::super::super::super::super::Windows::Foundation::Rect,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Arrange)(
+                                    windows_core::Interface::as_raw(this),
+                                    finalrect,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -141608,6 +144665,32 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn FindSubElementsForTouchTargeting(
+                            &self,
+                            point: super::super::super::super::super::Windows::Foundation::Point,
+                            boundingrect : super::super::super::super::super::Windows::Foundation:: Rect,
+                        ) -> windows_core::Result<
+                            windows_collections::IIterable<
+                                windows_collections::IIterable<
+                                    super::super::super::super::super::Windows::Foundation::Point,
+                                >,
+                            >,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IUIElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .FindSubElementsForTouchTargeting)(
+                                    windows_core::Interface::as_raw(this),
+                                    point,
+                                    boundingrect,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetChildrenInTabFocusOrder(
@@ -144994,6 +148077,20 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn Arrange(
+                            &self,
+                            finalrect: super::super::super::super::super::Windows::Foundation::Rect,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Arrange)(
+                                    windows_core::Interface::as_raw(this),
+                                    finalrect,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn ReleasePointerCaptures(&self) -> windows_core::Result<()> {
                             let this =
                                 &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
@@ -145116,6 +148213,32 @@ pub mod Microsoft {
                                     windows_core::Interface::as_raw(this),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn FindSubElementsForTouchTargeting(
+                            &self,
+                            point: super::super::super::super::super::Windows::Foundation::Point,
+                            boundingrect : super::super::super::super::super::Windows::Foundation:: Rect,
+                        ) -> windows_core::Result<
+                            windows_collections::IIterable<
+                                windows_collections::IIterable<
+                                    super::super::super::super::super::Windows::Foundation::Point,
+                                >,
+                            >,
+                        > {
+                            let this = &windows_core::Interface::cast::<
+                                super::super::IUIElementOverrides,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .FindSubElementsForTouchTargeting)(
+                                    windows_core::Interface::as_raw(this),
+                                    point,
+                                    boundingrect,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetChildrenInTabFocusOrder(
@@ -147117,6 +150240,22 @@ pub mod Microsoft {
                             .map(|| result__)
                         }
                     }
+                    pub fn TransformBounds(
+                        &self,
+                        rect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Rect>
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformBounds)(
+                                windows_core::Interface::as_raw(this),
+                                rect,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn new() -> windows_core::Result<GeneralTransform> {
                         Self::IGeneralTransformFactory(|this| unsafe {
                             let mut result__ = core::mem::zeroed();
@@ -147154,6 +150293,23 @@ pub mod Microsoft {
                                 windows_core::Interface::as_raw(this),
                                 inpoint,
                                 outpoint,
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn TransformBoundsCore(
+                        &self,
+                        rect: super::super::super::super::Windows::Foundation::Rect,
+                    ) -> windows_core::Result<super::super::super::super::Windows::Foundation::Rect>
+                    {
+                        let this =
+                            &windows_core::Interface::cast::<IGeneralTransformOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TransformBoundsCore)(
+                                windows_core::Interface::as_raw(this),
+                                rect,
                                 &mut result__,
                             )
                             .map(|| result__)
@@ -147298,7 +150454,12 @@ pub mod Microsoft {
                         *mut bool,
                     )
                         -> windows_core::HRESULT,
-                    TransformBounds: usize,
+                    pub TransformBounds: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::Foundation::Rect,
+                        *mut super::super::super::super::Windows::Foundation::Rect,
+                    )
+                        -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
                     IGeneralTransformFactory,
@@ -147346,7 +150507,12 @@ pub mod Microsoft {
                         *mut bool,
                     )
                         -> windows_core::HRESULT,
-                    TransformBoundsCore: usize,
+                    pub TransformBoundsCore: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::Foundation::Rect,
+                        *mut super::super::super::super::Windows::Foundation::Rect,
+                    )
+                        -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
                     IImageSource,
@@ -147469,7 +150635,13 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                             *mut *mut core::ffi::c_void,
                         ) -> windows_core::HRESULT,
-                    FindElementsInHostCoordinatesRect: usize,
+                    pub FindElementsInHostCoordinatesRect:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            super::super::super::super::Windows::Foundation::Rect,
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
                     pub FindAllElementsInHostCoordinatesPoint:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -147478,7 +150650,14 @@ pub mod Microsoft {
                             bool,
                             *mut *mut core::ffi::c_void,
                         ) -> windows_core::HRESULT,
-                    FindAllElementsInHostCoordinatesRect: usize,
+                    pub FindAllElementsInHostCoordinatesRect:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            super::super::super::super::Windows::Foundation::Rect,
+                            *mut core::ffi::c_void,
+                            bool,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
                     pub GetChild: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut core::ffi::c_void,
@@ -147728,6 +150907,25 @@ pub mod Microsoft {
                             .and_then(|| windows_core::Type::from_abi(result__))
                         })
                     }
+                    pub fn FindElementsInHostCoordinatesRect<P1>(
+                        intersectingrect: super::super::super::super::Windows::Foundation::Rect,
+                        subtree: P1,
+                    ) -> windows_core::Result<windows_collections::IIterable<super::UIElement>>
+                    where
+                        P1: windows_core::Param<super::UIElement>,
+                    {
+                        Self::IVisualTreeHelperStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this)
+                                .FindElementsInHostCoordinatesRect)(
+                                windows_core::Interface::as_raw(this),
+                                intersectingrect,
+                                subtree.param().abi(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
                     pub fn FindAllElementsInHostCoordinatesPoint<P1>(
                         intersectingpoint: super::super::super::super::Windows::Foundation::Point,
                         subtree: P1,
@@ -147742,6 +150940,27 @@ pub mod Microsoft {
                                 .FindAllElementsInHostCoordinatesPoint)(
                                 windows_core::Interface::as_raw(this),
                                 intersectingpoint,
+                                subtree.param().abi(),
+                                includeallelements,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn FindAllElementsInHostCoordinatesRect<P1>(
+                        intersectingrect: super::super::super::super::Windows::Foundation::Rect,
+                        subtree: P1,
+                        includeallelements: bool,
+                    ) -> windows_core::Result<windows_collections::IIterable<super::UIElement>>
+                    where
+                        P1: windows_core::Param<super::UIElement>,
+                    {
+                        Self::IVisualTreeHelperStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this)
+                                .FindAllElementsInHostCoordinatesRect)(
+                                windows_core::Interface::as_raw(this),
+                                intersectingrect,
                                 subtree.param().abi(),
                                 includeallelements,
                                 &mut result__,
@@ -149300,6 +152519,17 @@ pub mod Windows {
                     .map(|| result__)
                 }
             }
+            pub fn GetRect(&self) -> windows_core::Result<Rect> {
+                let this = self;
+                unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).GetRect)(
+                        windows_core::Interface::as_raw(this),
+                        &mut result__,
+                    )
+                    .map(|| result__)
+                }
+            }
             pub fn GetUInt8Array(
                 &self,
                 value: &mut windows_core::Array<u8>,
@@ -149524,6 +152754,20 @@ pub mod Windows {
                     .ok()
                 }
             }
+            pub fn GetRectArray(
+                &self,
+                value: &mut windows_core::Array<Rect>,
+            ) -> windows_core::Result<()> {
+                let this = self;
+                unsafe {
+                    (windows_core::Interface::vtable(this).GetRectArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.set_abi_len(),
+                        value as *mut _ as _,
+                    )
+                    .ok()
+                }
+            }
         }
         impl windows_core::RuntimeName for IPropertyValue {
             const NAME: &'static str = "Windows.Foundation.IPropertyValue";
@@ -149545,6 +152789,7 @@ pub mod Windows {
             fn GetGuid(&self) -> windows_core::Result<windows_core::GUID>;
             fn GetPoint(&self) -> windows_core::Result<Point>;
             fn GetSize(&self) -> windows_core::Result<Size>;
+            fn GetRect(&self) -> windows_core::Result<Rect>;
             fn GetUInt8Array(
                 &self,
                 value: &mut windows_core::Array<u8>,
@@ -149608,6 +152853,10 @@ pub mod Windows {
             fn GetSizeArray(
                 &self,
                 value: &mut windows_core::Array<Size>,
+            ) -> windows_core::Result<()>;
+            fn GetRectArray(
+                &self,
+                value: &mut windows_core::Array<Rect>,
             ) -> windows_core::Result<()>;
         }
         impl IPropertyValue_Vtbl {
@@ -149909,6 +153158,25 @@ pub mod Windows {
                         let this: &Identity =
                             &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                         match IPropertyValue_Impl::GetSize(this) {
+                            Ok(ok__) => {
+                                result__.write(core::mem::transmute_copy(&ok__));
+                                windows_core::HRESULT(0)
+                            }
+                            Err(err) => err.into(),
+                        }
+                    }
+                }
+                unsafe extern "system" fn GetRect<
+                    Identity: IPropertyValue_Impl,
+                    const OFFSET: isize,
+                >(
+                    this: *mut core::ffi::c_void,
+                    result__: *mut Rect,
+                ) -> windows_core::HRESULT {
+                    unsafe {
+                        let this: &Identity =
+                            &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                        match IPropertyValue_Impl::GetRect(this) {
                             Ok(ok__) => {
                                 result__.write(core::mem::transmute_copy(&ok__));
                                 windows_core::HRESULT(0)
@@ -150253,6 +153521,27 @@ pub mod Windows {
                         .into()
                     }
                 }
+                unsafe extern "system" fn GetRectArray<
+                    Identity: IPropertyValue_Impl,
+                    const OFFSET: isize,
+                >(
+                    this: *mut core::ffi::c_void,
+                    value_array_size: *mut u32,
+                    value: *mut *mut Rect,
+                ) -> windows_core::HRESULT {
+                    unsafe {
+                        let this: &Identity =
+                            &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                        IPropertyValue_Impl::GetRectArray(
+                            this,
+                            &mut windows_core::imp::array_proxy(
+                                core::mem::transmute_copy(&value),
+                                value_array_size,
+                            ),
+                        )
+                        .into()
+                    }
+                }
                 Self {
                     base__: windows_core::IInspectable_Vtbl::new::<Identity, IPropertyValue, OFFSET>(
                     ),
@@ -150275,7 +153564,7 @@ pub mod Windows {
                     GetTimeSpan: 0,
                     GetPoint: GetPoint::<Identity, OFFSET>,
                     GetSize: GetSize::<Identity, OFFSET>,
-                    GetRect: 0,
+                    GetRect: GetRect::<Identity, OFFSET>,
                     GetUInt8Array: GetUInt8Array::<Identity, OFFSET>,
                     GetInt16Array: GetInt16Array::<Identity, OFFSET>,
                     GetUInt16Array: GetUInt16Array::<Identity, OFFSET>,
@@ -150294,7 +153583,7 @@ pub mod Windows {
                     GetTimeSpanArray: 0,
                     GetPointArray: GetPointArray::<Identity, OFFSET>,
                     GetSizeArray: GetSizeArray::<Identity, OFFSET>,
-                    GetRectArray: 0,
+                    GetRectArray: GetRectArray::<Identity, OFFSET>,
                 }
             }
             pub fn matches(iid: &windows_core::GUID) -> bool {
@@ -150370,7 +153659,10 @@ pub mod Windows {
                 *mut core::ffi::c_void,
                 *mut Size,
             ) -> windows_core::HRESULT,
-            GetRect: usize,
+            pub GetRect: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut Rect,
+            ) -> windows_core::HRESULT,
             pub GetUInt8Array: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 *mut u32,
@@ -150454,7 +153746,11 @@ pub mod Windows {
                 *mut u32,
                 *mut *mut Size,
             ) -> windows_core::HRESULT,
-            GetRectArray: usize,
+            pub GetRectArray: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                *mut u32,
+                *mut *mut Rect,
+            ) -> windows_core::HRESULT,
         }
         windows_core::imp::define_interface!(
             IPropertyValueStatics,
@@ -150555,7 +153851,11 @@ pub mod Windows {
                 Size,
                 *mut *mut core::ffi::c_void,
             ) -> windows_core::HRESULT,
-            CreateRect: usize,
+            pub CreateRect: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                Rect,
+                *mut *mut core::ffi::c_void,
+            ) -> windows_core::HRESULT,
             pub CreateUInt8Array: unsafe extern "system" fn(
                 *mut core::ffi::c_void,
                 u32,
@@ -150655,7 +153955,12 @@ pub mod Windows {
                 *const Size,
                 *mut *mut core::ffi::c_void,
             ) -> windows_core::HRESULT,
-            CreateRectArray: usize,
+            pub CreateRectArray: unsafe extern "system" fn(
+                *mut core::ffi::c_void,
+                u32,
+                *const Rect,
+                *mut *mut core::ffi::c_void,
+            ) -> windows_core::HRESULT,
         }
         #[repr(transparent)]
         #[derive(Clone, Debug, Eq, PartialEq)]
@@ -150869,6 +154174,17 @@ pub mod Windows {
                 unsafe {
                     let mut result__ = core::mem::zeroed();
                     (windows_core::Interface::vtable(this).GetSize)(
+                        windows_core::Interface::as_raw(this),
+                        &mut result__,
+                    )
+                    .map(|| result__)
+                }
+            }
+            pub fn GetRect(&self) -> windows_core::Result<Rect> {
+                let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
+                unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).GetRect)(
                         windows_core::Interface::as_raw(this),
                         &mut result__,
                     )
@@ -151092,6 +154408,20 @@ pub mod Windows {
                 let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
                 unsafe {
                     (windows_core::Interface::vtable(this).GetSizeArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.set_abi_len(),
+                        value as *mut _ as _,
+                    )
+                    .ok()
+                }
+            }
+            pub fn GetRectArray(
+                &self,
+                value: &mut windows_core::Array<Rect>,
+            ) -> windows_core::Result<()> {
+                let this = &windows_core::Interface::cast::<IPropertyValue>(self)?;
+                unsafe {
+                    (windows_core::Interface::vtable(this).GetRectArray)(
                         windows_core::Interface::as_raw(this),
                         value.set_abi_len(),
                         value as *mut _ as _,
@@ -151368,6 +154698,17 @@ pub mod Windows {
                     .and_then(|| windows_core::Type::from_abi(result__))
                 })
             }
+            pub fn CreateRect(value: Rect) -> windows_core::Result<windows_core::IInspectable> {
+                Self::IPropertyValueStatics(|this| unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).CreateRect)(
+                        windows_core::Interface::as_raw(this),
+                        value,
+                        &mut result__,
+                    )
+                    .and_then(|| windows_core::Type::from_abi(result__))
+                })
+            }
             pub fn CreateUInt8Array(
                 value: &[u8],
             ) -> windows_core::Result<windows_core::IInspectable> {
@@ -151592,6 +154933,20 @@ pub mod Windows {
                     .and_then(|| windows_core::Type::from_abi(result__))
                 })
             }
+            pub fn CreateRectArray(
+                value: &[Rect],
+            ) -> windows_core::Result<windows_core::IInspectable> {
+                Self::IPropertyValueStatics(|this| unsafe {
+                    let mut result__ = core::mem::zeroed();
+                    (windows_core::Interface::vtable(this).CreateRectArray)(
+                        windows_core::Interface::as_raw(this),
+                        value.len().try_into().unwrap(),
+                        value.as_ptr(),
+                        &mut result__,
+                    )
+                    .and_then(|| windows_core::Type::from_abi(result__))
+                })
+            }
             fn IPropertyValueStatics<
                 R,
                 F: FnOnce(&IPropertyValueStatics) -> windows_core::Result<R>,
@@ -151607,6 +154962,23 @@ pub mod Windows {
         }
         impl windows_core::RuntimeName for PropertyValue {
             const NAME: &'static str = "Windows.Foundation.PropertyValue";
+        }
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct Rect {
+            pub X: f32,
+            pub Y: f32,
+            pub Width: f32,
+            pub Height: f32,
+        }
+        impl windows_core::TypeKind for Rect {
+            type TypeKind = windows_core::CopyType;
+        }
+        impl windows_core::RuntimeType for Rect {
+            const SIGNATURE: windows_core::imp::ConstBuffer =
+                windows_core::imp::ConstBuffer::from_slice(
+                    b"struct(Windows.Foundation.Rect;f4;f4;f4;f4)",
+                );
         }
         #[repr(C)]
         #[derive(Clone, Copy, Debug, Default, PartialEq)]

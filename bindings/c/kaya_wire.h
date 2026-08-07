@@ -141,178 +141,178 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x5b3d760b52e59d91ULL
+#define KAYA_SPEC_HASH 0xd8165a4995d2554fULL
 
 
 /* Create a signal holding `initial`. */
 static inline void kaya_tx_create_signal(KayaTx *tx, uint64_t signal_id, KayaVal initial) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_CREATE_SIGNAL);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
     kaya_wire_value(tx, initial);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Replace a signal's value; keep-latest per batch. */
 static inline void kaya_tx_write_signal(KayaTx *tx, uint64_t signal_id, KayaVal value) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_WRITE_SIGNAL);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_WRITE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
     kaya_wire_value(tx, value);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Create a live widget, or declare a template node inside a scope. */
 static inline void kaya_tx_create_widget(KayaTx *tx, uint64_t widget_id, uint32_t kind) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_CREATE_WIDGET);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_WIDGET);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, kind);
     kaya_wire_u32(tx, 0);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Append `child` to `parent` (same zone only). */
 static inline void kaya_tx_add_child(KayaTx *tx, uint64_t parent, uint64_t child) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_ADD_CHILD);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_ADD_CHILD);
     kaya_wire_u64(tx, parent);
     kaya_wire_u64(tx, child);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Mount a root into a window (0 = the default window). */
 static inline void kaya_tx_mount(KayaTx *tx, uint64_t window, uint64_t root) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_MOUNT);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_MOUNT);
     kaya_wire_u64(tx, window);
     kaya_wire_u64(tx, root);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Declare a collection and its schema: one ordered field-type list per variant of the element sum. A record collection is the one-variant case and a scalar collection the one-variant one-field case. Variants are indices; names never travel. A blueprint when inside a template. */
 static inline void kaya_tx_create_collection(KayaTx *tx, uint64_t collection_id, const KayaVariantSchema *variants, uint32_t variants_len) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_CREATE_COLLECTION);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_COLLECTION);
     kaya_wire_u64(tx, collection_id);
     kaya_wire_variant_schemas(tx, variants, variants_len);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Insert an entry into the instance at `path`; the fields match `variant`'s schema positionally. Stamps a copy from that variant's case. */
 static inline void kaya_tx_collection_insert(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, uint32_t variant, const KayaVal *fields, uint32_t fields_len) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_INSERT);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_COLLECTION_INSERT);
     kaya_wire_u64(tx, collection_id);
     kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
     kaya_wire_u32(tx, variant);
     kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, fields, fields_len);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Replace an entry's record; every element binding follows. A different `variant` than the entry's current one tears down its stamped copy and restamps from the new variant's case, in place. */
 static inline void kaya_tx_collection_update(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, uint32_t variant, const KayaVal *fields, uint32_t fields_len) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_UPDATE);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_COLLECTION_UPDATE);
     kaya_wire_u64(tx, collection_id);
     kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
     kaya_wire_u32(tx, variant);
     kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, fields, fields_len);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Remove an entry; its stamped copy tears down. */
 static inline void kaya_tx_collection_remove(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_REMOVE);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_COLLECTION_REMOVE);
     kaya_wire_u64(tx, collection_id);
     kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* A For over a collection; opens a template scope until template_end. */
 static inline void kaya_tx_create_for(KayaTx *tx, uint64_t id, uint64_t collection_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_CREATE_FOR);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_FOR);
     kaya_wire_u64(tx, id);
     kaya_wire_u64(tx, collection_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* A When over a Bool signal; opens a template scope until template_end. */
 static inline void kaya_tx_create_when(KayaTx *tx, uint64_t id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_CREATE_WHEN);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_WHEN);
     kaya_wire_u64(tx, id);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Close the innermost template scope. */
 static inline void kaya_tx_template_end(KayaTx *tx) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_TEMPLATE_END);
-    kaya_wire_end(tx, start);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_TEMPLATE_END);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Move an entry so it sits before the entry whose key is the one value in `before`, or to the end when `before` is empty. Keys, never indices: order is data, and indices would race the very deltas that change them. */
 static inline void kaya_tx_collection_move(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, const KayaVal *before, uint32_t before_len) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_MOVE);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_COLLECTION_MOVE);
     kaya_wire_u64(tx, collection_id);
     kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
     kaya_wire_values(tx, before, before_len);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Set one field of an entry's record; only bindings on that field re-resolve. `variant` is the discriminant the guest witnessed in the match that produced this write — the scene asserts it against the entry's stored variant, so a drifted model fails loudly; it never changes a constructor (update does). */
 static inline void kaya_tx_collection_update_field(KayaTx *tx, uint64_t collection_id, const KayaVal *path, uint32_t path_len, KayaVal key, uint32_t field, uint32_t variant, KayaVal value) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_COLLECTION_UPDATE_FIELD);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_COLLECTION_UPDATE_FIELD);
     kaya_wire_u64(tx, collection_id);
     kaya_wire_values(tx, path, path_len);
     kaya_wire_value(tx, key);
     kaya_wire_u32(tx, field);
     kaya_wire_u32(tx, variant);
     kaya_wire_value(tx, value);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Inside a For over a sum: the records that follow (until the next variant_case or template_end) are the blueprint for this variant. Cases must be total at template_end; an empty case renders a constructor as nothing, explicitly. */
 static inline void kaya_tx_variant_case(KayaTx *tx, uint32_t variant) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_VARIANT_CASE);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_VARIANT_CASE);
     kaya_wire_u32(tx, variant);
     kaya_wire_u32(tx, 0);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* A one-shot command aimed at a live widget: momentary, fire-and-forget, never state at rest — the app's sanctioned crossing into widget-owned state (clear, focus). The widget answers through its normal occurrence path; nothing is recorded and nothing replays on rebuild. The command enum is the closed vocabulary; each verb is admitted by a real artifact, per the escalation policy. */
 static inline void kaya_tx_widget_command(KayaTx *tx, uint64_t widget_id, uint32_t command) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_WIDGET_COMMAND);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_WIDGET_COMMAND);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, command);
     kaya_wire_u32(tx, 0);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Bind a window property (WINDOW_PROPS; window 0 = the primary surface). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — windows are not collection elements. */
 static inline void kaya_tx_set_window_prop(KayaTx *tx, uint64_t window, uint32_t prop, uint32_t source) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_WINDOW_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_WINDOW_PROP);
     kaya_wire_u64(tx, window);
     kaya_wire_u32(tx, prop);
     kaya_wire_u32(tx, source);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Create an auxiliary window (capability-gated: a host without KAYA_CAP_AUX_WINDOWS rejects it at the root). Materializes hidden; mounting a root presents it. Ids are guest-allocated, below the internal bit; 0 is the primary and always exists. */
 static inline void kaya_tx_create_window(KayaTx *tx, uint64_t window_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_CREATE_WINDOW);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_WINDOW);
     kaya_wire_u64(tx, window_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Close and forget an auxiliary window: the native window and its views are released wholesale, and the scene forgets the mounted tree (widget ids are never reused, so stale entries are inert). The primary is not destroyable: the process owns it. */
 static inline void kaya_tx_destroy_window(KayaTx *tx, uint64_t window_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_DESTROY_WINDOW);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_DESTROY_WINDOW);
     kaya_wire_u64(tx, window_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Request a modal alert over a live window (0 = primary): the request/result grammar's first client (DESIGN.md, Presentation contexts). One atomic record: title, message, `actions` action labels (0..=2 — the platform floor; ContentDialog's three slots are two actions plus close), and the always-present cancel slot, which is what EVERY platform-native dismissal (Esc, back, outside tap) resolves to. All five Values are Str; action slots beyond `actions` ride empty and are ignored. Alert ids are guest-chosen; one alert may be live per process, and the id retires when its result fires. */
 static inline void kaya_tx_show_alert(KayaTx *tx, uint64_t window, uint64_t alert, uint32_t actions, KayaVal title, KayaVal message, KayaVal action0, KayaVal action1, KayaVal cancel) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SHOW_ALERT);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SHOW_ALERT);
     kaya_wire_u64(tx, window);
     kaya_wire_u64(tx, alert);
     kaya_wire_u32(tx, actions);
@@ -322,724 +322,752 @@ static inline void kaya_tx_show_alert(KayaTx *tx, uint64_t window, uint64_t aler
     kaya_wire_value(tx, action0);
     kaya_wire_value(tx, action1);
     kaya_wire_value(tx, cancel);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Push a navigation entry onto `window`'s stack (0 = the primary surface; no capability gate — every host materializes a serial stack natively). Entry ids share the surface namespace with windows: one guest-side allocator, and mount's target field addresses either. Materializes covered/incoming; mounting a root into it presents it. The covered root below stays alive — retained until popped (DESIGN.md, Navigation). */
 static inline void kaya_tx_push_entry(KayaTx *tx, uint64_t window, uint64_t entry) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_PUSH_ENTRY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_PUSH_ENTRY);
     kaya_wire_u64(tx, window);
     kaya_wire_u64(tx, entry);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Pop the top navigation entry from `window`'s stack and forget its mounted tree, exactly as destroy_window does (ids are never reused, so stale targets fail loudly). Popping an empty stack is a scene error. Multi-pop is binding sugar: N of these in one transaction, animated by backends as the NET stack change per batch. */
 static inline void kaya_tx_pop_entry(KayaTx *tx, uint64_t window) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_POP_ENTRY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_POP_ENTRY);
     kaya_wire_u64(tx, window);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Bind a navigation-entry property (ENTRY_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — entries are not collection elements. */
 static inline void kaya_tx_set_entry_prop(KayaTx *tx, uint64_t entry, uint32_t prop, uint32_t source) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_ENTRY_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_ENTRY_PROP);
     kaya_wire_u64(tx, entry);
     kaya_wire_u32(tx, prop);
     kaya_wire_u32(tx, source);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Append a section to `window`'s section set (0 = the primary surface; no capability gate — every platform has a sections idiom). Section ids share the surface namespace with windows and entries: one guest-side allocator, and mount's target field addresses any of them. The first section added becomes the selected one; the set is APPEND-ONLY — this grammar has no destruction verbs by design, and every section's root is retained while covered (DESIGN.md, Sections). */
 static inline void kaya_tx_add_section(KayaTx *tx, uint64_t window, uint64_t section) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_ADD_SECTION);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_ADD_SECTION);
     kaya_wire_u64(tx, window);
     kaya_wire_u64(tx, section);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Select a section programmatically: configuration, not a user act — it never echoes section_selected (the echo doctrine). The section must already be added to `window`; switching is SELECTION, not lifecycle — the covered root stays alive. */
 static inline void kaya_tx_select_section(KayaTx *tx, uint64_t window, uint64_t section) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SELECT_SECTION);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SELECT_SECTION);
     kaya_wire_u64(tx, window);
     kaya_wire_u64(tx, section);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Bind a section property (SECTION_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — sections are not collection elements. */
 static inline void kaya_tx_set_section_prop(KayaTx *tx, uint64_t section, uint32_t prop, uint32_t source) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_SECTION_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_SECTION_PROP);
     kaya_wire_u64(tx, section);
     kaya_wire_u32(tx, prop);
     kaya_wire_u32(tx, source);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Create a menu item of `kind` (menu_kind) in the menu-item id space — its own guest allocator (c_menu_item), distinct from every widget, node, and surface space. Items are live, append-only, and never removed in v1 (DESIGN.md, Menus). */
 static inline void kaya_tx_menu_item_create(KayaTx *tx, uint64_t item, uint32_t kind) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_MENU_ITEM_CREATE);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_MENU_ITEM_CREATE);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, kind);
     kaya_wire_u32(tx, 0);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Append `child` under grouping node `parent`. Single-parent: an item acquires exactly one parent or anchor and ids are never reused. The closed parent/child grammar (menu accepts menu/radio_group/action/toggle/separator; radio_group accepts only radio_option; leaves accept nothing) and the depth cap are validated at the root. */
 static inline void kaya_tx_menu_item_append(KayaTx *tx, uint64_t parent, uint64_t child) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_MENU_ITEM_APPEND);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_MENU_ITEM_APPEND);
     kaya_wire_u64(tx, parent);
     kaya_wire_u64(tx, child);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Append a top-level grouping node (menu or radio_group) to `window`'s command catalog — the window anchor, riding the window construct under the window-attribute unification rule (0 = the primary surface). The bar accepts only grouping nodes; duplicate shortcuts within the window's catalog are a root error. */
 static inline void kaya_tx_menubar_append(KayaTx *tx, uint64_t window, uint64_t item) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_MENUBAR_APPEND);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_MENUBAR_APPEND);
     kaya_wire_u64(tx, window);
     kaya_wire_u64(tx, item);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Attach a context catalog rooted at `item` to a live widget — the same command vocabulary scoped to a noun. The editable text controls (entry, textarea) reject attachment (their native edit menus are dress), a context root cannot be a radio_option, and a shortcut anywhere in the subtree is a root error (shortcuts need a window catalog home). */
 static inline void kaya_tx_context_attach(KayaTx *tx, uint64_t widget, uint64_t item) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_CONTEXT_ATTACH);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CONTEXT_ATTACH);
     kaya_wire_u64(tx, widget);
     kaya_wire_u64(tx, item);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Attach a context catalog to a template node (the Tpl zone): every stamped copy shows the same catalog, and an activation carries that copy's key path — the keys ARE the noun (the on_click_node encoding). Same rejections as context_attach. */
 static inline void kaya_tx_context_attach_node(KayaTx *tx, uint64_t node, uint64_t item) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_CONTEXT_ATTACH_NODE);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CONTEXT_ATTACH_NODE);
     kaya_wire_u64(tx, node);
     kaya_wire_u64(tx, item);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Bind a menu property (MENU_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected — menu items are not collection elements — and icon/primary/ shortcut reject SOURCE_SIGNAL (const-only). label and enabled fan out through the signal-write path; the domain of a signal-bound value is validated on the COMPLETE coalesced value at the transaction barrier. */
 static inline void kaya_tx_set_menu_prop(KayaTx *tx, uint64_t item, uint32_t prop, uint32_t source) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, prop);
     kaya_wire_u32(tx, source);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Request the platform's file picker over a live window (0 = primary), on the alert's request/result grammar (DESIGN.md, File dialogs). Dialog ids are guest-chosen; one dialog may be live per process, and the id retires when its result fires. `multiple` is 0 or 1 — every backend supports both, spelled four ways (a flag on SwiftUI and AppKit, a different METHOD on GTK and WinUI, a different CONTRACT on Android). `filters` is advisory and rides as alternating Str values, a label then its space-separated extensions: every platform treats them as a default view rather than a guarantee, so the guest still validates what it got. */
 static inline void kaya_tx_show_file_dialog(KayaTx *tx, uint64_t window, uint64_t dialog, uint32_t multiple, const KayaVal *filters, uint32_t filters_len) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SHOW_FILE_DIALOG);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SHOW_FILE_DIALOG);
     kaya_wire_u64(tx, window);
     kaya_wire_u64(tx, dialog);
     kaya_wire_u32(tx, multiple);
     kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, filters, filters_len);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Put one clip on the system clipboard, offered in several REPRESENTATIONS at once (DESIGN.md, Clipboard; docs/clipboard-plan.md). A clip is not a string: every platform models it as one item available in several types, and the consumer takes the richest it understands — so an app offers html AND text, and pasting into Pages keeps the formatting while a plain field still works. A RECORD RATHER THAN A LIST, which is what makes at-most-one-per-kind structural instead of a runtime duplicate check. `present` is a mask over the `clip` enum for the single-valued kinds; the two plural ones carry counts. `reps` holds the populated ones in the CANONICAL ORDER, which kaya fixes once because richness is a property of the kind rather than of the app's intent, and the wire's preference order (macOS type order, X11 TARGETS) has to be right whoever wrote the guest. THE ORDER IS DESCENDING CLIP VALUE, which is descending richness, so a backend writes what it is handed in the order it is handed: `custom_count` pairs of Str id and I64 blob, `file_count` I64 handles, I64 image blob, Str html, Str text. Files are the SAME CAPABILITY the picker returns — a handle redeemed with kaya_open_picked — so copying a file and picking one are one currency and the bytes never move through kaya. */
 static inline void kaya_tx_copy(KayaTx *tx, uint32_t present, uint32_t file_count, uint32_t custom_count, const KayaVal *reps, uint32_t reps_len) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_COPY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_COPY);
     kaya_wire_u32(tx, present);
     kaya_wire_u32(tx, file_count);
     kaya_wire_u32(tx, custom_count);
     kaya_wire_u32(tx, 0);
     kaya_wire_values(tx, reps, reps_len);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Read the clipboard OUTSIDE any paste gesture, on the alert's request/result grammar. `accepting` is an ACCEPT LIST, the same space-separated Str the widget prop carries: the closed kinds by name plus any custom ids, which are open and so could never be a mask. The answer carries the first match by canonical richness, so exactly one representation is ever materialised. THIS IS THE PRIVILEGED ONE, and it is named for what it is rather than for pasting. A user's paste arrives at the widget's hook and costs nothing; this asks without a gesture, which the platforms have deliberately made expensive — iOS 16 PROMPTS when the content came from another app, and the read blocks until the user answers (measured); Android returns nothing unless the app has focus; Wayland delivers no offer to an unfocused client. Reaching for a thing called paste in an editor would have cost a permission prompt for content the hook delivers free, which is why this name is not that one. An empty answer covers denied, absent, and nothing-we-accept alike. */
 static inline void kaya_tx_read_clipboard(KayaTx *tx, uint64_t request, KayaVal accepting) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_READ_CLIPBOARD);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_READ_CLIPBOARD);
     kaya_wire_u64(tx, request);
     kaya_wire_value(tx, accepting);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Mark this transaction as ONE undoable step in `window`'s ledger, under `label` (a non-empty Str, validated at the root like every other authored grammar). MUST BE THE FIRST RECORD OF THE BATCH and may appear once: a transaction is a bare list with no header, so per-transaction metadata has nowhere else to live, and head-of-batch is the one position that cannot be ambiguous (docs/undo-plan.md D2). A WIRE FACT AND NOT A BINDING CONVENTION, so both interpreters and check-verbs see it and a binding that forgets to emit it fails a byte-compared scene instead of grouping wrong in silence.  THE UNDOABLE SET IS THE REACTIVE HALF (D4): a marked batch may hold signal writes and the five collection deltas, whose inverse the core derives from state it already keeps. PURE EFFECTS — focus today, scroll when it lands — are permitted and simply not restored (A2): undo restores state, not where you were looking. Anything else (const prop sets, create/destroy/mount, window/nav/section/menu structure, clear, commands, dialog and clipboard requests) is REFUSED at apply, loudly, naming the op — an app that wants a widget property undoable binds it to a signal, which is the reactive doctrine saying what it already said. A refused group leaves the scene exactly as it was.  The window is explicit because the core cannot derive it: a signal write names no surface, and the scene keeps no widget-to-window map. 0 is the primary. */
 static inline void kaya_tx_undo_group(KayaTx *tx, uint64_t window, KayaVal label) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_UNDO_GROUP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_UNDO_GROUP);
     kaya_wire_u64(tx, window);
     kaya_wire_value(tx, label);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* DECLARE the set of decorated ranges on a textarea, replacing whatever was declared before (docs/ranges-plan.md D1/D2). `ranges` holds 2*`count` I64 values — start then end, in UTF-8 BYTE offsets into the widget's current guest-visible text; an empty set is the clear.  THE OFFSET UNIT AND ITS THREE RULES, once, here, because four of the five platforms answer a malformed offset differently and one of them ABORTS THE PROCESS (scratchpad/ranges-units.md §3: an out-of-range NSTextStorage attribute is an NSRangeException, exit 134). The core refuses before lowering: `start <= end`, `end <= text.len()`, and both endpoints on a CODE-POINT boundary. A GRAPHEME split is deliberately NOT refused and is the stated carve-out — the platforms disagree about what a grapheme is (java.text.BreakIterator counts the ZWJ family as 11 clusters where .NET and Swift count 5, measured), so a core that refused by its own table would refuse ranges three platforms honor. The range covers exactly the code points it names; a platform may widen what it PAINTS to the whole cluster.  APP-OWNED AND NEVER TRACKED. kaya adjusts nothing across edits: a declared set is bound to the text it was declared against, and a backend paints it only while the widget still holds that text — the first keystroke, programmatic write or native undo drops the set with nothing said. The app re-declares from the fold `text_changed` already drives, which is the same uncontrolled contract the text itself has. Range tracking is editor-component work and lives in the app.  TEXTAREA ONLY this milestone. The entry is deferred with measured per-platform reasons (docs/deferred.md): GTK's entry highlight rides absolute byte offsets that do not follow edits and is not readable over AT-SPI, macOS destroys an entry's highlight the moment it loses focus (the field editor is the window's, not the field's), and no consumer wants it — an editor's find bar decorates a document. */
+static inline void kaya_tx_highlight_ranges(KayaTx *tx, uint64_t widget_id, uint32_t count, const KayaVal *ranges, uint32_t ranges_len) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_HIGHLIGHT_RANGES);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, count);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_values(tx, ranges, ranges_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Put the textarea's SELECTION at one range (UTF-8 byte offsets, validated exactly as highlight_ranges is). `start == end` is a caret and is legal — every platform's text object models a degenerate range.  ITS OWN RECORD RATHER THAN A `widget_command`, which it otherwise is exactly (momentary, fire-and-forget, the app's sanctioned crossing into widget-owned state): that record's layout has nowhere to put offsets, and growing it two U64s would hang two dead fields on `clear` and `focus` and make `focus(w, 0, 0)` representable.  REFUSED DURING AN INPUT-METHOD COMPOSITION, in every backend, under the reason `ime_composition` (docs/ranges-plan.md D4). Measured on macOS: honoring it COMMITS the marked text into the document and into the app's model mid-word, which is data loss shaped like a feature, and it shifts every later offset by the committed length. A refusal here is a NO-OP AND NOT A PANIC — unlike undo's D4, which refuses an app-programming error the app can fix. Composition state is on no kaya channel and never will be (there are no widget mirror reads), so the same app code is correct one millisecond and refused the next; the app that wants the selection waits for the composition to end, which `text_changed` announces anyway. HIGHLIGHT and REVEAL do not disturb a composition and are not refused (measured, same probe). */
+static inline void kaya_tx_select_range(KayaTx *tx, uint64_t widget_id, uint64_t start, uint64_t stop) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SELECT_RANGE);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u64(tx, start);
+    kaya_wire_u64(tx, stop);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Scroll the textarea so a range is inside the viewport (UTF-8 byte offsets, validated exactly as highlight_ranges is). A PURE EFFECT: it moves no state, the selection is untouched, and per docs/undo-plan.md A2 undo does not restore it — undo restores state, not where you were looking, which is why it is permitted inside an undo group and simply not inverted.  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not kaya's: each backend calls its own scroll-to-range (scrollRangeToVisible, ScrollIntoView, gtk_text_view_scroll_to_iter, bringIntoView), so how much context lands around the range is native behaviour. The observable kaya fixes is containment, which is the only thing every platform agrees on. */
+static inline void kaya_tx_reveal_range(KayaTx *tx, uint64_t widget_id, uint64_t start, uint64_t stop) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_REVEAL_RANGE);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u64(tx, start);
+    kaya_wire_u64(tx, stop);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant text value. */
 static inline void kaya_tx_set_text(KayaTx *tx, uint64_t widget_id, const char *text) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_TEXT);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_str(text));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound text value. */
 static inline void kaya_tx_bind_text(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_TEXT);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_text_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_TEXT);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant checked value. */
 static inline void kaya_tx_set_checked(KayaTx *tx, uint64_t widget_id, int checked) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_CHECKED);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_bool(checked));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound checked value. */
 static inline void kaya_tx_bind_checked(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_CHECKED);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_checked_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_CHECKED);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant value value. */
 static inline void kaya_tx_set_value(KayaTx *tx, uint64_t widget_id, double value) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_VALUE);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_f64(value));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound value value. */
 static inline void kaya_tx_bind_value(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_VALUE);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_value_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_VALUE);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant min value. */
 static inline void kaya_tx_set_min(KayaTx *tx, uint64_t widget_id, double min) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_MIN);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_f64(min));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound min value. */
 static inline void kaya_tx_bind_min(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_MIN);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_min_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_MIN);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant max value. */
 static inline void kaya_tx_set_max(KayaTx *tx, uint64_t widget_id, double max) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_MAX);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_f64(max));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound max value. */
 static inline void kaya_tx_bind_max(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_MAX);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_max_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_MAX);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant source value. */
 static inline void kaya_tx_set_source(KayaTx *tx, uint64_t widget_id, uint64_t handle) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_SOURCE);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_blob(handle));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound source value. */
 static inline void kaya_tx_bind_source(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_SOURCE);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_source_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_SOURCE);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant grow value. */
 static inline void kaya_tx_set_grow(KayaTx *tx, uint64_t widget_id, double grow) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_GROW);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_f64(grow));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound grow value. */
 static inline void kaya_tx_bind_grow(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_GROW);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_grow_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_GROW);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant spacing value. */
 static inline void kaya_tx_set_spacing(KayaTx *tx, uint64_t widget_id, double spacing) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_SPACING);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_f64(spacing));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound spacing value. */
 static inline void kaya_tx_bind_spacing(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_SPACING);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_spacing_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_SPACING);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant align value. */
 static inline void kaya_tx_set_align(KayaTx *tx, uint64_t widget_id, int64_t align) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ALIGN);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_i64(align));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound align value. */
 static inline void kaya_tx_bind_align(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ALIGN);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_align_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ALIGN);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant indeterminate value. */
 static inline void kaya_tx_set_indeterminate(KayaTx *tx, uint64_t widget_id, int indeterminate) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_INDETERMINATE);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_bool(indeterminate));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound indeterminate value. */
 static inline void kaya_tx_bind_indeterminate(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_INDETERMINATE);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_indeterminate_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_INDETERMINATE);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant columns value. */
 static inline void kaya_tx_set_columns(KayaTx *tx, uint64_t widget_id, double columns) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_COLUMNS);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_f64(columns));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound columns value. */
 static inline void kaya_tx_bind_columns(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_COLUMNS);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_columns_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_COLUMNS);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant a11y_id value. */
 static inline void kaya_tx_set_a11y_id(KayaTx *tx, uint64_t widget_id, const char *a11y_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_A11Y_ID);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_str(a11y_id));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound a11y_id value. */
 static inline void kaya_tx_bind_a11y_id(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_A11Y_ID);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_a11y_id_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_A11Y_ID);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant a11y_label value. */
 static inline void kaya_tx_set_a11y_label(KayaTx *tx, uint64_t widget_id, const char *a11y_label) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_A11Y_LABEL);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_str(a11y_label));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound a11y_label value. */
 static inline void kaya_tx_bind_a11y_label(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_A11Y_LABEL);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_a11y_label_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_A11Y_LABEL);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant a11y_hint value. */
 static inline void kaya_tx_set_a11y_hint(KayaTx *tx, uint64_t widget_id, const char *a11y_hint) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_A11Y_HINT);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_str(a11y_hint));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound a11y_hint value. */
 static inline void kaya_tx_bind_a11y_hint(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_A11Y_HINT);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_a11y_hint_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_A11Y_HINT);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a constant accepts value. */
 static inline void kaya_tx_set_accepts(KayaTx *tx, uint64_t widget_id, const char *accepts) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ACCEPTS);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_str(accepts));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property with a signal-bound accepts value. */
 static inline void kaya_tx_bind_accepts(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ACCEPTS);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_property bound to one field of the element of the enclosing
  * For, `level` Fors up (field 0 for a scalar collection). */
 static inline void kaya_tx_bind_accepts_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ACCEPTS);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a constant label value. */
 static inline void kaya_tx_set_menu_label(KayaTx *tx, uint64_t item, const char *label) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_LABEL);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_str(label));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a signal-bound label value. */
 static inline void kaya_tx_bind_menu_label(KayaTx *tx, uint64_t item, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_LABEL);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a constant enabled value. */
 static inline void kaya_tx_set_menu_enabled(KayaTx *tx, uint64_t item, int enabled) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_ENABLED);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_bool(enabled));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a signal-bound enabled value. */
 static inline void kaya_tx_bind_menu_enabled(KayaTx *tx, uint64_t item, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_ENABLED);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a constant checked value. */
 static inline void kaya_tx_set_menu_checked(KayaTx *tx, uint64_t item, int checked) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_CHECKED);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_bool(checked));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a signal-bound checked value. */
 static inline void kaya_tx_bind_menu_checked(KayaTx *tx, uint64_t item, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_CHECKED);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a constant value value. */
 static inline void kaya_tx_set_menu_value(KayaTx *tx, uint64_t item, double value) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_VALUE);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_f64(value));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a signal-bound value value. */
 static inline void kaya_tx_bind_menu_value(KayaTx *tx, uint64_t item, uint64_t signal_id) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_VALUE);
     kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
     kaya_wire_u64(tx, signal_id);
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a constant icon value. */
 static inline void kaya_tx_set_menu_icon(KayaTx *tx, uint64_t item, uint64_t handle) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_ICON);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_blob(handle));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a constant primary value. */
 static inline void kaya_tx_set_menu_primary(KayaTx *tx, uint64_t item, int primary) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_PRIMARY);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_bool(primary));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a constant shortcut value. NO canonicalizer
@@ -1052,22 +1080,22 @@ static inline void kaya_tx_set_menu_primary(KayaTx *tx, uint64_t item, int prima
  * the same root errors every generated binding gets after its
  * canonicalizer (DESIGN.md, Menus). */
 static inline void kaya_tx_set_menu_shortcut(KayaTx *tx, uint64_t item, const char *shortcut) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_SHORTCUT);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_str(shortcut));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* set_menu_prop with a constant role value. */
 static inline void kaya_tx_set_menu_role(KayaTx *tx, uint64_t item, const char *role) {
-    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, KAYA_MPROP_ROLE);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_str(role));
-    kaya_wire_end(tx, start);
+    kaya_wire_end(tx, kaya_at);
 }
 
 /* Decode one value at `at`; returns the next offset. */

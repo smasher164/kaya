@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -559,7 +559,7 @@ build_c() {
     # very assignment to say so — every name here must have a leg below.
     # SCENES is a command-line override, so the Makefile keeps one list
     # and the linux suite keeps building all of them.
-    make -C guests/c SCENES="undo dirty" TARGET_DIR="$ROOT/target/debug" \
+    make -C guests/c SCENES="undo dirty ranges" TARGET_DIR="$ROOT/target/debug" \
         OUT="$ROOT/target/c-guests"
 }
 
@@ -1201,6 +1201,44 @@ run dirty-swift-swiftui env KAYA_SELFTEST=dirty target/swift-guests/dirty
 run dirty-csharp-swiftui env KAYA_SELFTEST=dirty KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet exec "$CS_GUEST"
 
+# The text-ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one, plus
+# the two rules that make them a contract — a keystroke drops a
+# declared set (D2), and a select_range mid-composition is refused
+# (D4). Every assertion reads the PLATFORM'S accessibility tree, never
+# kaya's memory of what it declared.
+#
+# DEPTH, rust-only, until the sugar reaches the other seven bindings and
+# the four other backends grow their arms — which is why `ranges` is in
+# DEPTH_SCENES and why gtk.rs, winui/mod.rs, KayaCompose.kt and this
+# file's iOS half all carry `depth_stub("ranges")`. check-stubs and
+# check-steps read those from their two sides and between them hold
+# every other runner's ranges legs shut until the feature is there.
+KAYA_SELFTEST_SCRIPT="$(scene_script ranges)"
+export KAYA_SELFTEST_SCRIPT
+run ranges-rust-swiftui env KAYA_SELFTEST=ranges target/debug/examples/ranges
+run ranges-python-swiftui env KAYA_SELFTEST=ranges python3 guests/python/ranges.py
+# The C floor's ranges guest, which does not wait on the seven sugar
+# bindings because it takes no sugar (the undo-c and dirty-c precedent):
+# the three primitives spelled as the wire records they are, the day the
+# constants exist. It is also where the unit ruling is most legible —
+# `at - doc` is a pointer difference into the app's own buffer, i.e. a
+# UTF-8 byte offset, and the frozen 57/203/753 are those bytes rather
+# than the 51/197/747 a UTF-16 counter would produce.
+run ranges-c-swiftui env KAYA_SELFTEST=ranges target/c-guests/ranges
+# The C# guest, where the unit ruling costs something rather than being
+# free: .NET's IndexOf answers in UTF-16 code units, so this leg passes
+# only if the binding's TextRange.In converted — an unconverted hit
+# decorates `e 02:` instead of `alpha`, six characters early, and the
+# scene's frozen offsets say so (watched failing, scratchpad/ranges-csharp.md).
+run ranges-csharp-swiftui env KAYA_SELFTEST=ranges KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run ranges-go-swiftui env KAYA_SELFTEST=ranges target/go-guests/ranges
+run ranges-java-swiftui env KAYA_SELFTEST=ranges KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+run ranges-haskell-swiftui env KAYA_SELFTEST=ranges "$(hs_bin ranges)"
+run ranges-swift-swiftui env KAYA_SELFTEST=ranges target/swift-guests/ranges
+run ranges-ocaml-swiftui env KAYA_SELFTEST=ranges KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/ranges.exe
 KAYA_SELFTEST_SCRIPT="$(scene_script align)"
 export KAYA_SELFTEST_SCRIPT
 run align-rust-swiftui env KAYA_SELFTEST=align target/debug/examples/align

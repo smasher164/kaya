@@ -73,6 +73,13 @@ class MainActivity : ComponentActivity() {
             // the moment that arm lands, rather than silently running
             // milestone2 against the undo script.
             "undo" -> Undo::app
+            // Same rule as undo above: the JVM guest for the ranges
+            // scene is language-complete, and whether a leg RUNS it is
+            // the Compose arm's question (tools/check-stubs.sh reads the
+            // backend, not this switch). Registered so the leg has a
+            // scene to select the moment that arm lands, rather than
+            // silently running milestone2 against the ranges script.
+            "ranges" -> Ranges::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

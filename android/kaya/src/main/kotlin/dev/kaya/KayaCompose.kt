@@ -90,9 +90,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.node.RootForTest
@@ -227,8 +231,96 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * default). See Prop::Align.
      */
     var align by mutableStateOf(0L)
+    /**
+     * THE DECLARED SET OF DECORATED RANGES (textarea only), and the text
+     * it was declared against.
+     *
+     * The PAIR is what makes D2's clear-on-edit structural rather than a
+     * message: the draw scope paints the set only while the field still
+     * holds [highlightsFor], so a keystroke, a programmatic write or a
+     * native undo drops it at paint time with nothing sent and nothing
+     * remembered. A message from the core could not do this job — the
+     * measured hazard of this whole milestone is a text change arriving
+     * AFTER the thing declared over it (range-probe-mac.md H2), and a
+     * compare made on the pass that paints cannot arrive late. The
+     * invariant it buys: PAINTED OFFSETS WERE VALIDATED AGAINST THE TEXT
+     * THEY ARE PAINTED ON.
+     */
+    var highlights by mutableStateOf<List<KayaRange>>(emptyList())
+    var highlightsFor by mutableStateOf<String?>(null)
+    /**
+     * The REVEAL one-shot: the range to scroll into view, and a sequence
+     * number rather than a consumed optional.
+     *
+     * A scroll needs the field's own [androidx.compose.ui.text.TextLayoutResult],
+     * which exists only after a layout pass, so this cannot be performed
+     * where it is decoded the way the selection can. The effect that
+     * performs it is keyed on [revealSeq]: a recomposition for any other
+     * reason re-runs nothing, and a second reveal of the SAME range still
+     * runs, which a nullable request alone could not express.
+     */
+    var revealRequest by mutableStateOf<KayaRange?>(null)
+    var revealSeq by mutableStateOf(0)
     val children = mutableStateListOf<KayaNode>()
 }
+
+/**
+ * WHAT THE DRAW SCOPE ACTUALLY PAINTED, by node id, in UTF-16 code
+ * units — written inside the draw lambda beside the `drawPath` calls,
+ * which is the only place the answer is true.
+ *
+ * NOT the declared set: the declaration is [KayaNode.highlights], and a
+ * verb that read it would agree with the apply arm by construction and
+ * pass with the whole paint deleted — the exact shape of the trap the
+ * android probe measured (§1a: pushing an `AnnotatedString` into the
+ * state compiles clean, stores a plain String and paints NOTHING). This
+ * is written after the staleness compare, from the ranges the platform's
+ * own `getPathForRange` was handed, so a dropped set and a stale set
+ * both show up here as they show up on screen.
+ *
+ * Android has no accessibility channel carrying a background span (the
+ * probe's §4 searched for one), so this is the honest in-process read;
+ * the harness pairs it with the FIELD'S OWN text for the covered half,
+ * which is where a wrong offset shows up as wrong characters.
+ */
+val kayaPaintedRanges = HashMap<Long, List<KayaRange>>()
+
+/**
+ * The field's own text layout, by node id — the `onTextLayout` provider
+ * `BasicTextField(state=)` hands out, kept as a lambda rather than a
+ * result so reading it stays in the LAYOUT/DRAW phase and never
+ * invalidates composition (range-probe-android.md §1c measured the
+ * naive spelling recomposing the field 200 times in 200 frames).
+ *
+ * A plain map and not snapshot state for the same reason: it is written
+ * during layout, and a snapshot write there would invalidate the pass
+ * that wrote it.
+ */
+val kayaTextLayouts = HashMap<Long, () -> androidx.compose.ui.text.TextLayoutResult?>()
+
+/**
+ * Where each textarea's viewport sits IN THE WINDOW — the rectangle the
+ * paint witness photographs.
+ *
+ * Window coordinates because that is the space `PixelCopy` takes, and
+ * measured from the laid-out node rather than computed from anything
+ * kaya knows, in the same discipline the layout observations already
+ * keep (`kayaCrossRects` and friends).
+ */
+val kayaTextBoxes = HashMap<Long, android.graphics.Rect>()
+
+/**
+ * How many apply batches this interpreter has finished — the signal an
+ * ACTION verb waits on so the app's answer lands before the next step
+ * reads (see KayaCompose.kayaAwaitAnswer).
+ *
+ * `@Volatile` because it is written on the UI thread and read on the
+ * harness thread, which is every other cross-thread read in this file's
+ * arrangement — and an unpublished counter would make the wait either
+ * instant or forever.
+ */
+@Volatile
+var kayaBatches = 0
 
 /**
  * The main-axis extent each node was allocated, by node id — what
@@ -275,12 +367,11 @@ var kayaDensity = 1.0
 var kayaRootSize = androidx.compose.ui.unit.IntSize.Zero
 var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
-// THE DEPTH-STUB HELPER IS GONE AGAIN, and its own doc asked for this:
-// it lived here through the clipboard depth slice, was removed the day
-// those arms landed, came back for the undo slice, went again, came
-// back for `dirty`, and is removed now that the dirty arm's last call
-// site is gone. Dead code kept "for later" is what a reader has to
-// reason about for nothing.
+// THE DEPTH-STUB HELPER IS GONE AGAIN, the sixth time it has come and
+// gone — it came back for the text-ranges slice and leaves with it, now
+// that this backend has the three range primitives and the android
+// runner carries the legs. Dead code kept "for later" is what a reader
+// has to reason about for nothing.
 //
 // The next Compose depth slice re-adds it, in exactly this shape — a
 // CALL and not a sentence, because tools/check-stubs.sh and
@@ -290,6 +381,25 @@ var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 //     internal fun depthStub(scene: String): Nothing =
 //         error("kaya: the $scene scene is not yet materialized on this " +
 //               "backend — it is a depth slice; see CLAUDE.md's sequencing")
+
+/**
+ * TEXT RANGES, in the unit this backend counts.
+ *
+ * `start`/`stop` are UTF-16 CODE UNITS — the offsets the core converted
+ * to before lowering (scratchpad/ranges-units.md §7), and the unit a
+ * Kotlin `CharSequence` indexes, which is what every Compose text API
+ * takes. NOTHING ON THE LOWERING PATH CONVERTS: this interpreter is
+ * string-matched rather than compile-checked, so Unicode arithmetic in
+ * an apply arm is the shape that ships wrong and stays wrong. The one
+ * place this file does convert is the READING direction, where a
+ * harness verb has to answer in the protocol's own unit so one frozen
+ * scene compares byte-for-byte on five lanes.
+ *
+ * Its own type rather than a pair of Ints so a lowering cannot take two
+ * loose integers in the wrong order, and so the unit has a name a
+ * reader can look up.
+ */
+data class KayaRange(val start: Int, val stop: Int)
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
@@ -543,7 +653,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x5b3d760b52e59d91uL
+    private const val SPEC_HASH: ULong = 0xd8165a4995d2554fuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -576,6 +686,17 @@ object KayaCompose {
      * "ask the most recent first".
      */
     private const val APPLY_CLEAR_UNDO = 27
+
+    /**
+     * The three text-range records (docs/ranges-plan.md). THE OFFSETS
+     * THAT ARRIVE HERE ARE UTF-16 CODE UNITS — the core converted them
+     * from the guest's UTF-8 byte offsets against the same text it
+     * validated them against — so nothing on this path counts
+     * characters, and nothing on this path may start.
+     */
+    private const val APPLY_HIGHLIGHT_RANGES = 28
+    private const val APPLY_SELECT_RANGE = 29
+    private const val APPLY_REVEAL_RANGE = 30
     private const val APPLY_PUSH_ENTRY = 12
     private const val APPLY_POP_ENTRY = 13
     private const val APPLY_SET_ENTRY_PROP = 14
@@ -1072,6 +1193,73 @@ object KayaCompose {
                     val accepting = readString(b)
                     kayaAnswerClipboardRead(request, accepting)
                 }
+                APPLY_HIGHLIGHT_RANGES -> {
+                    // { u64 widget_id; u32 count; u32 reserved } then a
+                    // Values block of 2*count I64s, read IN PAIRS —
+                    // start then end — already in UTF-16 code units.
+                    //
+                    // RECORDED WITH THE TEXT IT WAS DECLARED AGAINST,
+                    // which is the whole of D2's clear-on-edit: the
+                    // field's text at THIS moment is the text the core
+                    // validated these offsets against, because a text
+                    // write earlier in this same batch has already
+                    // landed on the field (kayaWriteText writes the
+                    // TextFieldState synchronously, and the core reads
+                    // the batch's own writes for exactly this reason).
+                    val hid = b.long
+                    val hcount = b.int
+                    b.int // reserved
+                    // The Values block's own header, exactly as the copy
+                    // record's is read: a slot count and a pad before
+                    // the first value. It is 2*count here and reading it
+                    // as a value's type tag is how this arm failed the
+                    // first time (`expected an i64 value, got type 6`,
+                    // which was three ranges' six slots).
+                    b.int // slots
+                    b.int // reserved
+                    val declared = ArrayList<KayaRange>(hcount)
+                    repeat(hcount) {
+                        val from = readI64(b).toInt()
+                        val to = readI64(b).toInt()
+                        declared.add(KayaRange(from, to))
+                    }
+                    val hnode = KayaSceneModel.nodes[hid]
+                        ?: error("kaya: highlight_ranges on an unknown widget $hid")
+                    hnode.highlights = declared
+                    hnode.highlightsFor = hnode.textState.text.toString()
+                }
+                APPLY_SELECT_RANGE -> {
+                    // { u64 widget_id; u64 start; u64 stop }, UTF-16.
+                    //
+                    // PERFORMED WHERE IT IS DECODED, unlike the reveal
+                    // below: a selection needs no layout, this arm
+                    // already runs on the UI thread, and any text write
+                    // of the same transaction has already landed — which
+                    // is the order this has to happen in, because kaya's
+                    // own write places the cursor at the end
+                    // (setTextAndPlaceCursorAtEnd) and would otherwise
+                    // undo the selection it was asked for.
+                    val sid = b.long
+                    val sstart = b.long.toInt()
+                    val sstop = b.long.toInt()
+                    val snode = KayaSceneModel.nodes[sid]
+                        ?: error("kaya: select_range on an unknown widget $sid")
+                    kayaSelectRange(snode, KayaRange(sstart, sstop))
+                }
+                APPLY_REVEAL_RANGE -> {
+                    // { u64 widget_id; u64 start; u64 stop }, UTF-16.
+                    // A REQUEST and not an action: scrolling a range
+                    // into view needs the field's own TextLayoutResult,
+                    // which exists only after a layout pass, so the
+                    // effect keyed on the sequence number performs it.
+                    val rid = b.long
+                    val rstart = b.long.toInt()
+                    val rstop = b.long.toInt()
+                    val rnode = KayaSceneModel.nodes[rid]
+                        ?: error("kaya: reveal_range on an unknown widget $rid")
+                    rnode.revealRequest = KayaRange(rstart, rstop)
+                    rnode.revealSeq += 1
+                }
                 APPLY_CLEAR_UNDO -> {
                     // A1 (docs/undo-plan.md §3): { u64 window }, and
                     // nothing else — the record is TARGETLESS because the
@@ -1402,6 +1590,67 @@ object KayaCompose {
             }
             b.position(start + size)
         }
+        // THE APP ANSWERED. An action verb waits for this before it
+        // returns (see kayaAwaitAnswer) — written last, so the count
+        // moves only once everything in the batch has landed.
+        kayaBatches += 1
+    }
+
+    /**
+     * AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT.
+     *
+     * `click` emits an occurrence and the guest answers on its own
+     * thread, so without this the next step runs against the scene as it
+     * was BEFORE the click. Every `expect` is a bounded retry, which
+     * hides that completely — until the assertion is one that was
+     * ALREADY TRUE, and then the retry passes on its first sample and
+     * the step verified nothing.
+     *
+     * Measured 2026-08-06, and it is why this exists: the ranges scene's
+     * last step asserts that a select_range arriving mid-composition did
+     * NOT move the caret (D4). The caret is already there when the click
+     * is sent, so with the refusal DELETED the leg still passed — the
+     * read landed before the app's answer did. A guard nobody has
+     * watched fail is worse than none, and this is what made that one
+     * watchable.
+     *
+     * BOUNDED AND SILENT. Some actions legitimately produce no batch at
+     * all (a click the app ignores), so a timeout here is not a verdict
+     * — it is the normal end of the wait for those, and the following
+     * assertion is what reports anything wrong.
+     */
+    private fun kayaAwaitAnswer(seen: Int) {
+        var last = seen
+        var quiet = 0
+        repeat(60) {
+            val now = kayaBatches
+            when {
+                now != last -> { last = now; quiet = 0 }
+                // A BATCH IS NOT ENOUGH, IT HAS TO BE THE LAST ONE. The
+                // app may still have been answering something that
+                // happened BEFORE this action — the ranges scene's
+                // `compose` provokes a text_changed whose reply lands
+                // right about when the next click is sent — and
+                // returning on that batch leaves the action's own answer
+                // in flight, which is the vacuous pass all over again.
+                // Wait for the batches to stop instead of for one to
+                // arrive.
+                now != seen -> { quiet += 1; if (quiet >= 3) return }
+            }
+            Thread.sleep(5)
+        }
+    }
+
+    /** The app has nothing left to say. Called BEFORE an action so the
+     * wait after it cannot mistake the previous answer for this one. */
+    private fun kayaAwaitQuiet() {
+        var last = kayaBatches
+        var quiet = 0
+        repeat(40) {
+            val now = kayaBatches
+            if (now != last) { last = now; quiet = 0 } else { quiet += 1; if (quiet >= 3) return }
+            Thread.sleep(5)
+        }
     }
 
     private fun readString(b: ByteBuffer): String {
@@ -1539,32 +1788,118 @@ object KayaCompose {
      */
     private fun kayaTypeAtFocus(activity: ComponentActivity, text: String): String? {
         if (text.isEmpty()) return "type wants some text to type"
+        // CONTRACT POINT 3: TYPING APPENDS. Keys arriving at a non-empty
+        // selection REPLACE what is there, so the same script would
+        // append on a lane whose caret sits at the end and replace on
+        // one whose does — and one script is compared byte-for-byte
+        // across all five (invariant 6). Both Swift arms do exactly
+        // this, in as many words; this backend never needed it because
+        // nothing before text ranges could leave a selection in a field,
+        // and `select_range` now can.
+        //
+        // Before the keys and not between them: a selection change
+        // mid-run would break the field's own edit coalescing, which is
+        // the granularity the delegated undo tier is made of.
+        //
+        // SKIPPED WHEN THE CARET IS ALREADY THERE, which is every scene
+        // that existed before this one: kaya's own write places the
+        // cursor at the end, so an unconditional edit would spend a
+        // state commit per `type` on eleven legs to change nothing.
+        onUi(activity) {
+            kayaFocusedTextNode()?.let { node ->
+                val end = node.textState.text.length
+                val at = node.textState.selection
+                if (at.start != end || at.end != end) {
+                    node.textState.edit {
+                        selection = androidx.compose.ui.text.TextRange(end, end)
+                    }
+                }
+            }
+        }
+        // The text before the first key, so the settle below can tell
+        // "landed" from "has not started yet".
+        val before = onUi(activity) { kayaFocusedTextNode()?.text }
         val map = android.view.KeyCharacterMap.load(
             android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
         for (c in text) {
             val events = map.getEvents(charArrayOf(c))
                 ?: return "type: this keyboard layout cannot generate ${c.code} ($c)"
-            // ONE UI-THREAD HOP PER CHARACTER, so a runloop turn passes
-            // between them exactly as it does between a user's keystrokes.
-            onUi(activity) {
-                val now = android.os.SystemClock.uptimeMillis()
-                for (e in events) {
-                    // Rebuilt rather than replayed: the events a
-                    // KeyCharacterMap hands back carry zeroed timestamps
-                    // and no input source, and a key event with no source
-                    // is not the thing a keyboard delivers.
-                    activity.dispatchKeyEvent(
-                        KeyEvent(
-                            now, now, e.action, e.keyCode, 0, e.metaState,
-                            android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, e.scanCode, 0,
-                            android.view.InputDevice.SOURCE_KEYBOARD,
-                        ),
+            // A KEY NOTHING CONSUMED WAS NOT TYPED, so it is sent again.
+            //
+            // Measured 2026-08-06, two runs in six: the FIRST key-down of
+            // a leg came back `handled=false` and the field's text did
+            // not move — the focus had been requested and the model
+            // reported it, but the field was not yet taking keys.
+            // Everything before this scene hid it, because the step after
+            // a `type` is normally an `expect` and an expect POLLS: the
+            // remaining characters landed inside the retry window and the
+            // leg passed. `compose` is an ACTION that inserts at the end
+            // of the CURRENT text, so a swallowed keystroke moved every
+            // offset after it and the failure surfaced two verbs later
+            // as an off-by-one caret.
+            //
+            // The signal is the FIELD'S OWN LENGTH rather than
+            // dispatchKeyEvent's return, because "somebody consumed this"
+            // and "the text I am typing into changed" are different
+            // claims and only the second is the one point 4 makes. Every
+            // character this verb may send is printable ASCII (point 6)
+            // and the caret was collapsed above, so each one grows the
+            // text by exactly one — there is no character for which
+            // "nothing moved" is a correct outcome.
+            var tries = 0
+            while (true) {
+                val was = onUi(activity) { kayaFocusedTextNode()?.textState?.text?.length }
+                // ONE UI-THREAD HOP PER CHARACTER, so a runloop turn
+                // passes between them exactly as it does between a
+                // user's keystrokes.
+                onUi(activity) {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    for (e in events) {
+                        // Rebuilt rather than replayed: the events a
+                        // KeyCharacterMap hands back carry zeroed
+                        // timestamps and no input source, and a key event
+                        // with no source is not the thing a keyboard
+                        // delivers.
+                        activity.dispatchKeyEvent(
+                            KeyEvent(
+                                now, now, e.action, e.keyCode, 0, e.metaState,
+                                android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, e.scanCode, 0,
+                                android.view.InputDevice.SOURCE_KEYBOARD,
+                            ),
+                        )
+                    }
+                }
+                // Nothing focused is a legitimate state under point 2 —
+                // the keys go where the platform sends them and a
+                // following assertion reports the mismatch — so there is
+                // nothing to confirm and nothing to retry.
+                if (was == null || kayaKeyLanded(activity, was)) break
+                tries += 1
+                if (tries >= 10) {
+                    Log.e(
+                        "kaya",
+                        "KAYA_UNDO_TRACE: the keystroke '$c' was dispatched 10 times and " +
+                            "the focused field's text never moved — either nothing is " +
+                            "taking keys or this key does not insert"
                     )
+                    break
                 }
             }
         }
-        kayaSettleTypedText(activity)
+        kayaSettleTypedText(activity, before)
         return null
+    }
+
+    /** Did the last dispatched key reach the focused field? Bounded, and
+     * free in the common case: the field applies a key on the turn it is
+     * dispatched, so the first sample already differs. */
+    private fun kayaKeyLanded(activity: ComponentActivity, was: Int): Boolean {
+        repeat(20) {
+            val now = onUi(activity) { kayaFocusedTextNode()?.textState?.text?.length }
+            if (now != was) return true
+            Thread.sleep(5)
+        }
+        return false
     }
 
     /**
@@ -1574,17 +1909,48 @@ object KayaCompose {
      * emits in the same step, so an agreeing pair means the app has heard
      * every keystroke.
      *
+     * AND THEN HELD STILL, which the first version of this did not
+     * require and which cost a flaky leg. "Model equals widget" is true
+     * the instant the collector catches up with the FIRST keystroke, so
+     * a two-character `type` could return with one character delivered
+     * and one still in flight. Every scene before text ranges hid it:
+     * the step after a `type` is normally an `expect`, and an expect
+     * POLLS, so the late keystroke arrived inside the retry window and
+     * nothing ever failed. `compose` is an ACTION with no retry that
+     * inserts at the end of the current text, so a keystroke still in
+     * flight moved every offset after it — measured on this backend
+     * 2026-08-06, one run in three.
+     *
+     * MOVED THEN STABLE, the shape both Swift arms already use: wait for
+     * the text to change at all, then for two consecutive samples that
+     * agree. A stability window cannot be replaced by a longer single
+     * wait, because the thing being waited for is an ABSENCE of further
+     * changes.
+     *
      * A TIMEOUT IS NOT A VERDICT. Nothing focused is legitimate under the
      * contract (point 2), and a following assertion is what reports the
      * mismatch; this says so on the record and returns.
      */
-    private fun kayaSettleTypedText(activity: ComponentActivity) {
+    private fun kayaSettleTypedText(activity: ComponentActivity, before: String?) {
+        var last: String? = null
+        var stable = 0
+        var moved = false
         repeat(200) {
-            val settled = onUi(activity) {
-                val node = kayaFocusedTextNode() ?: return@onUi true
-                node.text == kayaLf(node.textState.text.toString())
+            val now = onUi(activity) {
+                val node = kayaFocusedTextNode() ?: return@onUi null
+                if (node.text != kayaLf(node.textState.text.toString())) return@onUi null
+                node.text
             }
-            if (settled) return
+            // Nothing focused is a legitimate state; so is a widget the
+            // model has not caught up with yet. Both read as "not settled".
+            if (now != null) {
+                moved = moved || now != before
+                if (moved) {
+                    stable = if (now == last) stable + 1 else 0
+                    if (stable >= 2) return
+                }
+                last = now
+            }
             Thread.sleep(5)
         }
         Log.e(
@@ -2356,9 +2722,14 @@ object KayaCompose {
      * exactly why these had to be platform COMMANDS rather than
      * something an app assembles out of the data layer. (The field's
      * `TextFieldState` DOES carry a selection since the undo migration,
-     * and reaching for it would be the wrong fix: `edit {}` commits, and
-     * a commit CLEARS the field's undo history — D7's clear firing for a
-     * read.) What Compose does publish is
+     * and reaching for it would still be the wrong fix — a cut is the
+     * platform's own edit and its own undo entry, not a read plus a
+     * write kaya assembles. It is NOT wrong for the reason this comment
+     * used to give: `edit {}` was measured
+     * (range-probe-android.md §2) to leave `canUndo` true when it
+     * changes only the SELECTION, so D7's clear is keyed on the text
+     * moving and not on `edit {}` being called — which is what let
+     * `select_range` be lowered on that call.) What Compose does publish is
      * SemanticsActions.CutText / CopyText on the field's own node,
      * present only while a selection exists, and invoking one runs
      * BasicTextField's own cut/copy — the same action the platform's
@@ -2381,6 +2752,349 @@ object KayaCompose {
             if (role == "cut") node.config.getOrNull(SemanticsActions.CutText)
             else node.config.getOrNull(SemanticsActions.CopyText)
         action?.action?.invoke()
+    }
+
+    /**
+     * THE TEXT-RANGE READS, all three, off the platform.
+     *
+     * The a11y id is how a leg finds a control in the semantics tree, so
+     * a textarea with no `a11y_id` cannot be asserted about — the same
+     * requirement every other backend's range reads make, and the ranges
+     * guest authors one for exactly this reason.
+     *
+     * MAIN THREAD ONLY, like every other read in this backend: Compose
+     * owns its semantics tree from the thread that lays out, and reading
+     * it from the harness thread is a hard crash rather than a wrong
+     * answer (kayaAx's own note).
+     */
+    private fun kayaSelectionRead(activity: ComponentActivity, spec: String): String {
+        val node = kayaTextTarget(spec) ?: return "<no such target>"
+        if (node.a11yId.isEmpty()) return "<no a11y_id authored on this widget>"
+        val semantics = kayaSemanticsByTag(activity, node.a11yId)
+            ?: return "<not in the semantics tree>"
+        // THE FIELD'S OWN TEXT, as the platform publishes it — the same
+        // property TalkBack reads a field's content from. Slicing THIS
+        // with the range the platform is holding is what makes the
+        // covered half free of arithmetic.
+        val text = kayaSemanticsValue(semantics, SemanticsProperties.EditableText)?.text
+            ?: return "<no editable text>"
+        val selection = kayaSemanticsValue(semantics, SemanticsProperties.TextSelectionRange)
+            ?: return "<no selection>"
+        return kayaRangeSpelling(text, listOf(KayaRange(selection.start, selection.end)))
+    }
+
+    /**
+     * THE HIGHLIGHT READ, AND ITS PAINT WITNESS.
+     *
+     * The record alone is not enough and this arm proved it rather than
+     * assuming it: deleting the `drawPath` call and leaving everything
+     * else — the apply arm, the staleness compare, the record — left the
+     * leg GREEN with nothing decorated on screen (flip proof 1, watched
+     * failing to fail on 2026-08-06). That is the same silent shape the
+     * android probe measured from the other side: pushing an
+     * `AnnotatedString` into the state compiles clean, stores a plain
+     * String and paints zero pixels. A read that cannot tell those apart
+     * is a gate satisfiable without exercising the real thing.
+     *
+     * So every range whose box is ON SCREEN is photographed:
+     * `PixelCopy` reads the field's own viewport out of the window —
+     * in process, no adb, no screenshot tool, API 24 against kaya's
+     * floor of 26 — and the range's rectangle must actually contain the
+     * decoration. A range scrolled out of the viewport cannot be
+     * witnessed by anything on screen and is reported on the record
+     * alone; the scene keeps that from being a loophole, because at
+     * every `expect_highlights` with a non-empty set at least one match
+     * is inside the viewport.
+     *
+     * THE PREDICATE IS MEASURED, not eyeballed: the decoration blends to
+     * #F4E689 over this field's #E6E0E9 container (sampled from a device
+     * screenshot, and exactly what 0x8CFFEB3B over that background
+     * computes to), so "much more red and green than blue" separates it
+     * from both the container and the glyphs drawn on top of it, with
+     * no dependence on the theme's own colours.
+     *
+     * NOT ON THE UI THREAD: `PixelCopy` answers on a main-thread
+     * callback, so waiting for it there would deadlock. The semantics
+     * and geometry are gathered in one UI hop, the photograph is taken
+     * from the harness thread, and the spelling is assembled after.
+     */
+    private fun kayaHighlightRead(activity: ComponentActivity, spec: String): String {
+        val gathered = onUi(activity) { kayaGatherHighlights(activity, spec) }
+        if (gathered.trouble != null) return gathered.trouble
+        val unpainted = kayaUnwitnessed(activity, gathered)
+        return kayaRangeSpelling(gathered.text, gathered.ranges, unpainted)
+    }
+
+    /** Everything the witness needs, read in ONE main-thread hop: the
+     * platform's text, what the draw scope recorded, the viewport's
+     * rectangle in the window, and each range's rectangle inside it. */
+    private class KayaHighlights(
+        val trouble: String? = null,
+        val text: String = "",
+        val ranges: List<KayaRange> = emptyList(),
+        val viewport: android.graphics.Rect? = null,
+        // Per range, its rectangle in WINDOW coordinates, or null when
+        // the range is scrolled out of the viewport.
+        val onScreen: List<android.graphics.Rect?> = emptyList(),
+    )
+
+    private fun kayaGatherHighlights(
+        activity: ComponentActivity,
+        spec: String,
+    ): KayaHighlights {
+        val node = kayaTextTarget(spec) ?: return KayaHighlights("<no such target>")
+        if (node.a11yId.isEmpty()) {
+            return KayaHighlights("<no a11y_id authored on this widget>")
+        }
+        val semantics = kayaSemanticsByTag(activity, node.a11yId)
+            ?: return KayaHighlights("<not in the semantics tree>")
+        val text = kayaSemanticsValue(semantics, SemanticsProperties.EditableText)?.text
+            ?: return KayaHighlights("<no editable text>")
+        val ranges = kayaPaintedRanges[node.id] ?: emptyList()
+        val box = kayaTextBoxes[node.id]
+        val layout = kayaTextLayouts[node.id]?.invoke()
+        if (box == null || layout == null || ranges.isEmpty()) {
+            return KayaHighlights(text = text, ranges = ranges)
+        }
+        val scroll = node.scrollState.value
+        val rects = ranges.map { r ->
+            if (r.start < 0 || r.start > r.stop || r.stop > text.length) return@map null
+            val bounds = layout.getPathForRange(r.start, r.stop).getBounds()
+            // Text coordinates -> the scrolled viewport -> the window.
+            val top = (bounds.top - scroll).toInt() + box.top
+            val bottom = (bounds.bottom - scroll).toInt() + box.top
+            val clipped = android.graphics.Rect(
+                bounds.left.toInt() + box.left,
+                maxOf(top, box.top),
+                bounds.right.toInt() + box.left,
+                minOf(bottom, box.bottom),
+            )
+            if (clipped.width() <= 0 || clipped.height() <= 0) null else clipped
+        }
+        return KayaHighlights(
+            text = text, ranges = ranges, viewport = box, onScreen = rects)
+    }
+
+    /** The ranges that are on screen and are NOT actually decorated
+     * there — empty when everything the record claims is really painted. */
+    private fun kayaUnwitnessed(
+        activity: ComponentActivity,
+        read: KayaHighlights,
+    ): Set<KayaRange> {
+        val box = read.viewport ?: return emptySet()
+        if (read.onScreen.all { it == null }) return emptySet()
+        val shot = kayaPhotograph(activity, box) ?: return emptySet()
+        val missing = HashSet<KayaRange>()
+        for ((i, rect) in read.onScreen.withIndex()) {
+            if (rect == null) continue
+            var found = false
+            var y = rect.top - box.top
+            while (y < rect.bottom - box.top && !found) {
+                var x = rect.left - box.left
+                while (x < rect.right - box.left) {
+                    if (x in 0 until shot.width && y in 0 until shot.height) {
+                        val p = shot.getPixel(x, y)
+                        val r = (p shr 16) and 0xFF
+                        val g = (p shr 8) and 0xFF
+                        val b = p and 0xFF
+                        if (r - b > 48 && g - b > 40) {
+                            found = true
+                            break
+                        }
+                    }
+                    x += 1
+                }
+                y += 1
+            }
+            if (!found) missing.add(read.ranges[i])
+        }
+        shot.recycle()
+        return missing
+    }
+
+    /** The field's viewport, out of the window's own surface. */
+    private fun kayaPhotograph(
+        activity: ComponentActivity,
+        box: android.graphics.Rect,
+    ): android.graphics.Bitmap? {
+        if (box.width() <= 0 || box.height() <= 0) return null
+        val bitmap = android.graphics.Bitmap.createBitmap(
+            box.width(), box.height(), android.graphics.Bitmap.Config.ARGB_8888)
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var ok = false
+        android.view.PixelCopy.request(
+            activity.window,
+            box,
+            bitmap,
+            { result ->
+                ok = result == android.view.PixelCopy.SUCCESS
+                latch.countDown()
+            },
+            android.os.Handler(android.os.Looper.getMainLooper()),
+        )
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        if (!ok) {
+            bitmap.recycle()
+            return null
+        }
+        return bitmap
+    }
+
+    /** `visible` when the byte range is inside the textarea's viewport,
+     * `offscreen` when it is not. */
+    private fun kayaRevealedRead(
+        activity: ComponentActivity,
+        spec: String,
+        range: String,
+    ): String {
+        val node = kayaTextTarget(spec) ?: return "<no such target>"
+        if (node.a11yId.isEmpty()) return "<no a11y_id authored on this widget>"
+        val semantics = kayaSemanticsByTag(activity, node.a11yId)
+            ?: return "<not in the semantics tree>"
+        val text = kayaSemanticsValue(semantics, SemanticsProperties.EditableText)?.text
+            ?: return "<no editable text>"
+        val bounds = range.split(":")
+        if (bounds.size != 2) return "<malformed range>"
+        // The verb carries BYTE offsets — the protocol's unit, so one
+        // frozen scene compares on five lanes — and the layout indexes
+        // UTF-16, so this is the reading-direction conversion.
+        val from = kayaUtf16Offset(text, bounds[0].toIntOrNull() ?: -1)
+        val to = kayaUtf16Offset(text, bounds[1].toIntOrNull() ?: -1)
+        if (from < 0 || to < 0) return "<offset splits a character>"
+        // THE PLATFORM'S OWN LAYOUT, fetched through the semantics
+        // action an accessibility service uses to ask where text is —
+        // not the provider this backend keeps for the draw, so the read
+        // does not share the lowering's copy of anything.
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        semantics.config.getOrNull(SemanticsActions.GetTextLayoutResult)
+            ?.action?.invoke(layouts)
+        val layout = layouts.firstOrNull() ?: return "<no text layout>"
+        val length = text.length
+        if (length == 0) return "<empty field>"
+        val first = from.coerceIn(0, length - 1)
+        val last = (if (to > from) to - 1 else from).coerceIn(0, length - 1)
+        val top = minOf(layout.getBoundingBox(first).top, layout.getBoundingBox(last).top)
+        val bottom =
+            maxOf(layout.getBoundingBox(first).bottom, layout.getBoundingBox(last).bottom)
+        val scroll = node.scrollState
+        val viewport = kayaViewportHeight(layout, scroll)
+        if (viewport <= 0) return "<no viewport>"
+        return if (top >= scroll.value && bottom <= scroll.value + viewport) "visible"
+        else "offscreen"
+    }
+
+    /**
+     * Start an input-method composition in the target, leaving `text`
+     * MARKED — displayed, uncommitted, invisible to the app.
+     *
+     * THE PLATFORM'S OWN ENTRY POINT AND NOT A TEXT WRITE. No adb
+     * command can open a composing region (`input text` injects key
+     * events and never calls `setComposingText` — measured, §5), but the
+     * harness runs INSIDE the app, so it can take the very connection
+     * the input method holds: `AndroidComposeView.onCreateInputConnection`
+     * hands out the current text-input session's connection, which only
+     * exists while a field is focused. A backend that faked this with a
+     * plain insertion would prove nothing about D4.
+     *
+     * The caret goes to the end first, explicitly, so `compose` inserts
+     * at the end of the current text on every lane — the frozen scene's
+     * caret arithmetic is the same number everywhere or it is not one
+     * assertion.
+     *
+     * BLOCKS UNTIL THE COMPOSITION IS LIVE, like `type`: the step after
+     * this one is what observes the refusal, and a composition still in
+     * flight would read as a backend that honoured the selection.
+     */
+    private fun kayaComposeMarkedText(
+        activity: ComponentActivity,
+        spec: String,
+        marked: String,
+    ): String? {
+        val opened = onUi(activity) {
+            val node = kayaTextTarget(spec) ?: return@onUi "no such target $spec"
+            val view = kayaComposeRoot(activity.window.decorView)
+                ?: return@onUi "no compose view"
+            val connection =
+                view.onCreateInputConnection(android.view.inputmethod.EditorInfo())
+                    ?: return@onUi "no input connection — nothing has an input session " +
+                        "(a field must be focused before it can compose)"
+            val end = node.textState.text.length
+            connection.setSelection(end, end)
+            connection.setComposingText(marked, 1)
+            null
+        }
+        if (opened != null) return opened
+        repeat(200) {
+            val live = onUi(activity) {
+                kayaTextTarget(spec)?.textState?.composition != null
+            }
+            if (live) return null
+            Thread.sleep(5)
+        }
+        return "the field never reported a composing region after setComposingText"
+    }
+
+    /** The textarea (or entry) a range verb names. */
+    private fun kayaTextTarget(spec: String): KayaNode? =
+        if (spec.startsWith("textarea")) target(spec, "textarea", KayaSceneModel.textareas)
+        else target(spec, "entry", KayaSceneModel.entryWidgets)
+
+    /** The merged semantics node carrying this test tag — [kayaAxFind]'s
+     * walk, because "the node a leg names" is one question with one
+     * answer and the accessibility verbs already ask it. */
+    // THE FILE'S THIRD AND LAST EXPERIMENTAL OPT-IN, at the smallest
+    // scope that covers it and proven required rather than assumed:
+    // removing it fails the compile with "This API is experimental and
+    // is likely to change in the future" at exactly the
+    // `measureAndLayoutForTest` call, one error, at compose-ui 1.7.5.
+    // What it buys is in the call's own comment — a semantics read that
+    // is not a frame behind the apply it is asserting about.
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaSemanticsByTag(activity: ComponentActivity, tag: String): SemanticsNode? {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return null
+        val root = view as RootForTest
+        // THE TREE IS BROUGHT UP TO DATE FIRST, which is not tidiness:
+        // Compose publishes semantics on the pass that lays out, so a
+        // read taken between an apply and the next frame answers with
+        // the state BEFORE the apply. That is invisible while an
+        // assertion is waiting for a value to CHANGE — the retry covers
+        // it — and fatal when the assertion is one that was already
+        // true, because the stale answer matches and the step verifies
+        // nothing. Measured 2026-08-06: with D4's refusal deleted the
+        // selection really did move, `TextFieldState` said so
+        // immediately, and this tree still reported the old caret for
+        // ~400ms — long enough for the leg to pass having watched the
+        // defect happen. `measureAndLayoutForTest` is the same call
+        // Compose's own test framework makes before it reads.
+        root.measureAndLayoutForTest()
+        return kayaAxFind(root.semanticsOwner.rootSemanticsNode, tag)
+    }
+
+    /**
+     * A property off this node OR the subtree under it.
+     *
+     * A text field publishes its editable text, its selection and its
+     * layout action from the modifier chain, and whether those land on
+     * the same semantics node as the caller's `testTag` is Compose's
+     * business and has changed across versions. Searching down from the
+     * tagged node is the spelling that does not depend on it.
+     */
+    private fun <T> kayaSemanticsValue(
+        node: SemanticsNode,
+        key: androidx.compose.ui.semantics.SemanticsPropertyKey<T>,
+    ): T? = kayaSemanticsWith(node) { it.config.getOrNull(key) != null }?.config?.getOrNull(key)
+
+    private fun kayaSemanticsWith(
+        node: SemanticsNode,
+        depth: Int = 0,
+        match: (SemanticsNode) -> Boolean,
+    ): SemanticsNode? {
+        if (depth > 64) return null
+        if (match(node)) return node
+        for (child in node.children) {
+            kayaSemanticsWith(child, depth + 1, match)?.let { return it }
+        }
+        return null
     }
 
     /// The merged semantics node that holds focus — the platform's own
@@ -2904,11 +3618,14 @@ object KayaCompose {
                         }
                     }
                     "click" -> {
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
                         val ok = onUi(activity) {
                             target(parts[1], "button", KayaSceneModel.buttons)
                                 ?.also { KayaPresent.emitClicked(it.tag) } != null
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
+                        else kayaAwaitAnswer(answered)
                     }
                     "toggle" -> {
                         val ok = onUi(activity) {
@@ -3478,6 +4195,67 @@ object KayaCompose {
                             failures.add(
                                 "$target short of end (${st.value} of ${st.maxValue})")
                         }
+                    }
+                    // THE THREE TEXT-RANGE READS. Every one of them goes
+                    // to the platform for the half it can: the SELECTION
+                    // and the field's own TEXT come out of the merged
+                    // semantics tree (the data an assistive client
+                    // receives, and TalkBack's own channel), the
+                    // VIEWPORT geometry out of the field's own
+                    // TextLayoutResult and ScrollState.
+                    //
+                    // HIGHLIGHT IS THE ONE WITH NO PLATFORM CHANNEL:
+                    // Android publishes no accessibility property
+                    // carrying a background span (range-probe-android.md
+                    // §4 went looking). So it reads what the DRAW SCOPE
+                    // painted — recorded beside the drawPath calls,
+                    // after the staleness compare — and never the
+                    // declaration, which would agree with the apply arm
+                    // by construction and pass with the paint deleted.
+                    // That failure is not hypothetical here: pushing an
+                    // AnnotatedString into the state compiles clean and
+                    // paints nothing (§1a).
+                    "expect_highlights", "expect_selection" -> {
+                        val want = quoted(parts.drop(2))
+                        val got =
+                            if (parts[0] == "expect_highlights") {
+                                kayaHighlightRead(activity, parts[1])
+                            } else {
+                                onUi(activity) { kayaSelectionRead(activity, parts[1]) }
+                            }
+                        if (got == want) observed.add("${parts[0]} $want")
+                        else failures.add("${parts[0]} $got, wanted $want")
+                    }
+                    "expect_revealed" -> {
+                        // CONTAINMENT, never the viewport itself: how
+                        // much context a scroll leaves around a range is
+                        // native behaviour and differs per lane, while
+                        // "is my range on screen" is the same question
+                        // everywhere. The `offscreen` spelling is what
+                        // keeps this from being vacuous — a scene
+                        // asserts it BEFORE the reveal, so a document
+                        // short enough to be entirely visible fails
+                        // rather than passes.
+                        val want = parts[3]
+                        val got = onUi(activity) {
+                            kayaRevealedRead(activity, parts[1], parts[2])
+                        }
+                        if (got == want) observed.add("${parts[2]} $want")
+                        else failures.add("${parts[2]} is $got, wanted $want")
+                    }
+                    "compose" -> {
+                        // The state a user is in mid-word with an IME,
+                        // which no other verb can reach: `type` is
+                        // printable ASCII by contract, precisely because
+                        // a composed character is an input-method
+                        // question and not a verb argument. This goes
+                        // through the field's own InputConnection —
+                        // `setComposingText`, the call an IME makes — so
+                        // the text is DISPLAYED, UNCOMMITTED and
+                        // invisible to the app, which is exactly the
+                        // state select_range must refuse to run over.
+                        kayaComposeMarkedText(activity, parts[1], quoted(parts.drop(2)))
+                            ?.let { failures.add("compose: $it") }
                     }
                     "expect_title" -> {
                         // The REAL materialized title (the Activity
@@ -4072,6 +4850,206 @@ internal fun kayaWriteText(node: KayaNode, next: String) {
     if (node.textState.text.contentEquals(next)) return
     node.textState.setTextAndPlaceCursorAtEnd(next)
     KayaUndoState.clearHistory(node)
+}
+
+// ---- Text ranges: the ONE place this file converts an offset ---------
+//
+// The LOWERING path does no arithmetic and must not: offsets arrive from
+// the core already in UTF-16 code units, converted against the same text
+// the core validated them against (scratchpad/ranges-units.md §7). This
+// interpreter is a string-matched layer the compiler cannot hold to the
+// Rust source, so Unicode arithmetic in an apply arm is the shape that
+// ships wrong and stays wrong.
+//
+// THE READING DIRECTION IS DIFFERENT AND IS DELIBERATE. A harness verb
+// compares one frozen string on five lanes (invariant 6), so a read must
+// answer in the PROTOCOL's unit — UTF-8 byte offsets — and the only
+// party holding the widget's real text is this side.
+//
+// BOTH CONVERSIONS REFUSE A SPLIT CHARACTER RATHER THAN ROUNDING, which
+// on this runtime is not pedantry: `String.substring` across a surrogate
+// pair hands back a LONE SURROGATE, and encoding that to UTF-8 yields a
+// single `?` (0x3F) with no error anywhere (scratchpad/ranges-units.md
+// §4 measured exactly this on the JVM). A silent one-byte answer where
+// four were owed is the kind of wrong number that reads like a real one.
+
+/** A UTF-16 code-unit offset as a UTF-8 byte offset into the same text,
+ * or -1 when the offset splits a character — which can only mean the
+ * lowering handed the platform an offset the core would have refused. */
+internal fun kayaByteOffset(text: String, utf16: Int): Int {
+    if (utf16 < 0 || utf16 > text.length) return -1
+    // The low half of a surrogate pair at this index IS the split: the
+    // prefix would end on a lone high surrogate.
+    if (utf16 < text.length && Character.isLowSurrogate(text[utf16])) return -1
+    return text.substring(0, utf16).toByteArray(Charsets.UTF_8).size
+}
+
+/** The inverse, for the one verb that arrives carrying byte offsets:
+ * expect_revealed asks whether a range is on screen, so the range has to
+ * be expressed in the layout's unit before it can be compared. */
+internal fun kayaUtf16Offset(text: String, byte: Int): Int {
+    if (byte < 0) return -1
+    val bytes = text.toByteArray(Charsets.UTF_8)
+    if (byte > bytes.size) return -1
+    // A continuation byte (10xxxxxx) is inside a character.
+    if (byte < bytes.size && (bytes[byte].toInt() and 0xC0) == 0x80) return -1
+    return String(bytes, 0, byte, Charsets.UTF_8).length
+}
+
+/**
+ * A set of platform ranges in the harness's spelling:
+ * `<start>:<end>=<covered text>` per range, `|`-joined, ascending.
+ *
+ * THE COVERED TEXT IS NOT DECORATION. Offsets alone would let a wrong
+ * lowering report its own wrong numbers back unharmed; the covered half
+ * has no arithmetic in it — the platform slices its own string with the
+ * range it is actually holding — so a backend that forwarded kaya's byte
+ * offsets as if they were UTF-16 shows up as the wrong CHARACTERS, which
+ * is a failure nobody can read as a rounding difference.
+ */
+internal fun kayaRangeSpelling(
+    text: String,
+    ranges: List<KayaRange>,
+    unpainted: Set<KayaRange> = emptySet(),
+): String =
+    ranges.sortedBy { it.start }.joinToString("|") { r ->
+        val from = kayaByteOffset(text, r.start)
+        val to = kayaByteOffset(text, r.stop)
+        when {
+            // Named, not silently coerced: no scene will ever expect
+            // either of these, and each says which defect it is.
+            from < 0 || to < 0 || r.start > r.stop -> "split@${r.start}:${r.stop}="
+            // The range was declared, was recorded as painted, and the
+            // pixels where it should be say otherwise.
+            unpainted.contains(r) -> "unpainted@${r.start}:${r.stop}="
+            else -> "$from:$to=" + text.substring(r.start, r.stop)
+        }
+    }
+
+/**
+ * SELECT one range — and REFUSE while an input method is composing (D4).
+ *
+ * THE REFUSAL ASKS THE PLATFORM, not the harness. `TextFieldState`
+ * publishes the composing region (`composition`), so this backend can
+ * see the state the core never will: composition is on no kaya channel
+ * and never will be, so the app cannot avoid the race and the core
+ * cannot know about it. Measured on this backend
+ * (range-probe-android.md §5): a `state.edit {}` selection while a
+ * composing region is live DESTROYS it — a half-typed word is committed
+ * and its underline vanishes, an in-progress kana conversion is
+ * force-committed. That is data loss shaped like a feature.
+ *
+ * A NO-OP UNDER A NAMED REASON AND NOT A PANIC. The app wrote correct
+ * code and lost a race with a human being; the app that wants the
+ * selection waits for the composition to end, which `text_changed`
+ * announces anyway.
+ *
+ * ROUTE A (`edit { selection = }`) rather than the semantics
+ * `SetSelection` action, and the reason is D4 itself: the semantics
+ * route PRESERVES a composing region, so it would move the selection
+ * mid-composition — which is the thing that must not happen — and the
+ * explicit refusal would still be owed. Given that, the public mutator
+ * on the state API is the simpler of the two, and it needs neither
+ * focus nor a live semantics node. Its one recorded hazard does not
+ * apply: a SELECTION-ONLY `edit {}` leaves the field's undo history
+ * intact (measured, §2 — D7's clear is keyed on the TEXT changing, not
+ * on `edit {}` being called).
+ */
+internal fun kayaSelectRange(node: KayaNode, range: KayaRange) {
+    val length = node.textState.text.length
+    // Bounds are re-checked against the LIVE field, and this is not
+    // distrust of the core: Compose THROWS IllegalArgumentException on
+    // an out-of-bounds selection (documented `requireValidRange`,
+    // scratchpad/ranges-units.md §3), and the field's length is a fact
+    // only this side holds at this instant.
+    if (range.start < 0 || range.start > range.stop || range.stop > length) return
+    if (node.textState.composition != null) {
+        Log.i(
+            "kaya",
+            "KAYA_DIAG select_range refused: ime_composition (widget ${node.id})")
+        return
+    }
+    node.textState.edit {
+        selection = androidx.compose.ui.text.TextRange(range.start, range.stop)
+    }
+}
+
+/**
+ * REVEAL one range: scroll the textarea's own viewport until the range's
+ * box is inside it.
+ *
+ * THE GEOMETRY IS THE PLATFORM'S — `TextLayoutResult.getBoundingBox`
+ * over the layout `BasicTextField` handed out, and the field's own
+ * `ScrollState` — so nothing here models where text is. It scrolls
+ * MINIMALLY, which is what every other backend's scroll-to-range does
+ * and what `bringIntoView` measured on this one (range-probe-android.md
+ * §3): the range lands at the viewport edge, not centred. How much
+ * context that leaves is native behaviour, which is exactly why the
+ * observable kaya fixes is CONTAINMENT and never the viewport itself.
+ *
+ * A PURE EFFECT: it touches no selection and no composition (measured,
+ * §5 — only the selection route disturbs a composing region), so reveal
+ * has no refusal arm and needs none.
+ */
+internal suspend fun kayaRevealRange(node: KayaNode, range: KayaRange) {
+    val layout = kayaTextLayouts[node.id]?.invoke() ?: return
+    val box = kayaRangeBox(node, range) ?: return
+    val scroll = node.scrollState
+    val viewport = kayaViewportHeight(layout, scroll)
+    if (viewport <= 0) return
+    val at = scroll.value
+    val target =
+        when {
+            box.first < at -> box.first
+            box.second > at + viewport -> box.second - viewport
+            else -> return
+        }
+    scroll.scrollTo(target.coerceIn(0, scroll.maxValue))
+}
+
+/**
+ * The (top, bottom) of a range in the field's own text coordinates, from
+ * the layout the platform published — null when there is no layout yet.
+ *
+ * ONE HELPER FOR BOTH DIRECTIONS, deliberately: the reveal scrolls until
+ * this box is inside the viewport and `expect_revealed` asks whether it
+ * is, so the two cannot disagree about what "the range" means while
+ * disagreeing about whether it is on screen.
+ */
+/**
+ * THE VIEWPORT'S HEIGHT, in the one spelling this field publishes:
+ * content height minus how far it can scroll.
+ *
+ * `ScrollState.viewportSize` IS NOT IT and reads 0 here — measured
+ * 2026-08-06 on this backend: `TextFieldCoreModifier` sets `maxValue`
+ * (548 for a 644px layout in a 96px box) and never touches
+ * `viewportSize`, which only `Modifier.verticalScroll`'s own measure
+ * policy writes. A read that trusted that field would call every range
+ * `<no viewport>` forever, which is how this was found.
+ *
+ * Both numbers are the platform's, so the arithmetic states a fact
+ * rather than modelling one: content - scrollable = what fits. When the
+ * content fits entirely, maxValue is 0 and this is the content height,
+ * so containment is true for every range — which is the right answer.
+ */
+internal fun kayaViewportHeight(
+    layout: androidx.compose.ui.text.TextLayoutResult,
+    scroll: androidx.compose.foundation.ScrollState,
+): Int = layout.size.height - scroll.maxValue
+
+internal fun kayaRangeBox(node: KayaNode, range: KayaRange): Pair<Int, Int>? {
+    val layout = kayaTextLayouts[node.id]?.invoke() ?: return null
+    val length = node.textState.text.length
+    if (length == 0) return null
+    // getBoundingBox indexes a CHARACTER, so a half-open range's end is
+    // one past the last one it covers, and a degenerate range (a caret)
+    // still names the character it sits before.
+    val first = range.start.coerceIn(0, length - 1)
+    val last = (if (range.stop > range.start) range.stop - 1 else range.start)
+        .coerceIn(0, length - 1)
+    val a = layout.getBoundingBox(first)
+    val b = layout.getBoundingBox(last)
+    return Pair(minOf(a.top, b.top).toInt(), maxOf(a.bottom, b.bottom).toInt())
 }
 
 /**
@@ -4780,9 +5758,36 @@ fun KayaTextField(node: KayaNode, a11y: Modifier, singleLine: Boolean) {
     }
     BasicTextField(
         state = node.textState,
+        // THE TEXTAREA IS A BOUNDED EDITOR WITH ITS OWN VIEWPORT, which
+        // is what every other backend's already is — macOS an NSTextView
+        // in its scroll view at 240x96, GTK a GtkTextView inside the
+        // GtkScrolledWindow the textarea foundation gave it at the same
+        // size, WinUI a RichEditBox. Compose's was the one that GREW:
+        // `MultiLine(minHeightInLines = 3)` leaves the maximum at
+        // Int.MAX_VALUE, so a 40-line document rendered 2496px tall
+        // (measured, range-probe-android.md §0.2) with nothing able to
+        // scroll it — and reveal is then not a hard feature, it is an
+        // UNRUNNABLE one: `expect_revealed offscreen` would be true
+        // forever. Bounding it here uses the field's OWN scroll rather
+        // than a verticalScroll wrapper, which would also cost the
+        // field's keep-the-caret-visible behaviour while typing.
         lineLimits =
             if (singleLine) TextFieldLineLimits.SingleLine
-            else TextFieldLineLimits.MultiLine(minHeightInLines = 3),
+            else TextFieldLineLimits.MultiLine(
+                minHeightInLines = 3, maxHeightInLines = KAYA_TEXTAREA_LINES),
+        // The viewport's REAL state, owned here rather than remembered
+        // inside the field, because reveal drives it and expect_revealed
+        // reads it — the same ScrollState `expect_at_end` already reads
+        // off a scroll node.
+        scrollState = node.scrollState,
+        // The platform's own text layout, kept as the PROVIDER LAMBDA
+        // and not as a result: reading it stays in the layout/draw phase
+        // and never invalidates composition. Measured on this backend
+        // (§1c): the naive spelling — hoist the ranges into the
+        // composable body — recomposed the field 200 times in 200
+        // frames, where the draw-scope read recomposes zero times and
+        // re-lays-out zero times.
+        onTextLayout = { layout -> kayaTextLayouts[node.id] = layout },
         interactionSource = interaction,
         textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
         modifier = a11y
@@ -4800,7 +5805,11 @@ fun KayaTextField(node: KayaNode, a11y: Modifier, singleLine: Boolean) {
         decorator = { inner ->
             TextFieldDefaults.DecorationBox(
                 value = node.textState.text.toString(),
-                innerTextField = inner,
+                // THE HIGHLIGHT LAYER GOES AROUND THE INNER FIELD, not
+                // around the decoration: the inner field IS the scrolling
+                // viewport, so a decoration-level draw would sit still
+                // while the text moved under it.
+                innerTextField = { KayaHighlightLayer(node, inner) },
                 enabled = true,
                 singleLine = singleLine,
                 visualTransformation = VisualTransformation.None,
@@ -4812,7 +5821,118 @@ fun KayaTextField(node: KayaNode, a11y: Modifier, singleLine: Boolean) {
     LaunchedEffect(KayaSceneModel.focusedId) {
         if (KayaSceneModel.focusedId == node.id) focusRequester.requestFocus()
     }
+    // THE REVEAL ONE-SHOT, keyed on the sequence rather than consuming
+    // the request: a recomposition for any other reason re-runs nothing,
+    // and a second reveal of the SAME range still runs. It has to be an
+    // effect rather than an apply arm because a scroll needs the field's
+    // layout, which does not exist until a pass has run.
+    LaunchedEffect(node.revealSeq) {
+        if (node.revealSeq > 0) node.revealRequest?.let { kayaRevealRange(node, it) }
+    }
 }
+
+/**
+ * THE DECORATED RANGES, painted behind the text from the platform's own
+ * layout — the whole highlight lowering, and the reason it is a DRAW and
+ * not a styled string.
+ *
+ * THERE IS NO STYLING HOOK ON THIS FIELD, compile-proven at kaya's pins
+ * (range-probe-android.md §1a): `BasicTextField(state=)` has no
+ * `visualTransformation` — that parameter exists only on the
+ * `value:`/`TextFieldValue:` overloads the undo milestone deliberately
+ * left — `OutputTransformation` can only EDIT text
+ * (`TextFieldBuffer` has no style API at all), and the
+ * `TextHighlightType` the state does carry is one range, Kotlin-internal,
+ * and means stylus preview. THE TRAP IS THE FOURTH ROUTE: an
+ * `AnnotatedString` IS a `CharSequence`, so `state.edit { replace(0,
+ * length, annotated) }` COMPILES CLEAN, and the state stores it as a
+ * plain String and paints NOTHING — measured, zero highlight pixels. A
+ * backend that "supported" highlight that way would pass every compile
+ * gate in this repo and decorate nothing on screen.
+ *
+ * So the ranges are drawn, and drawn onto `getPathForRange`, which
+ * handles a wrapped range and bidi where a hand-rolled per-line rect
+ * does not — the probe's own rect helper got a range crossing a line
+ * break subtly wrong while the path matched the pixels to within one.
+ *
+ * PHASE DISCIPLINE IS THE RULE THIS PLACE EXISTS TO KEEP. Everything the
+ * paint depends on is read INSIDE the draw lambda: the declared set, the
+ * text it was declared against, the live text and the scroll offset. A
+ * read hoisted into the composable body recomposes the field on every
+ * re-declaration (measured: 200 recompositions in 200 frames, against
+ * zero here), and at 40 lines it would still fit inside a frame — so it
+ * would never fail a lane and would only ever show up on somebody's real
+ * document.
+ */
+@Composable
+private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.Box(
+        propagateMinConstraints = true,
+        modifier = Modifier
+            // The viewport's rectangle in the window, for the paint
+            // witness. This box IS the scrolling viewport — measured
+            // 2026-08-06: 96px tall around a 644px layout — so it is
+            // both what gets clipped and what a photograph must cover.
+            .onGloballyPositioned {
+                val r = it.boundsInWindow()
+                kayaTextBoxes[node.id] = android.graphics.Rect(
+                    r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+            }
+            .drawBehind {
+            // D2's CLEAR-ON-EDIT, made structural. The set is painted
+            // only while the field still holds the text it was declared
+            // against, so a keystroke, a programmatic write or a native
+            // undo drops it HERE, at paint time, with nothing sent and
+            // nothing remembered. A message from the core could not do
+            // this job: the measured hazard of this milestone is a text
+            // change arriving after the thing declared over it, and a
+            // compare made on the pass that paints cannot arrive late.
+            //
+            // It is also not belt-and-braces for the platform. Stale
+            // offsets on this backend are a WRONG highlight rather than
+            // a crash — measured (§1c): after prepending three
+            // characters the old offsets kept painting at the old glyph
+            // positions until re-declared. Painting a stale set is
+            // exactly what D2 refuses to ship.
+            val live = node.textState.text.toString()
+            val paint =
+                if (node.highlightsFor == live) node.highlights else emptyList()
+            // WHAT WAS ACTUALLY PAINTED, published from the only place
+            // the answer is true. expect_highlights reads this and not
+            // the declaration, so a verb cannot pass on kaya's intent.
+            kayaPaintedRanges[node.id] = paint
+            if (paint.isEmpty()) return@drawBehind
+            val layout = kayaTextLayouts[node.id]?.invoke() ?: return@drawBehind
+            // The field scrolls its text inside this box, so the paint
+            // moves with it. Clipped for the same reason: a range below
+            // the viewport must not bleed over the decoration.
+            val scrolled = node.scrollState.value.toFloat()
+            clipRect {
+                translate(top = -scrolled) {
+                    for (r in paint) {
+                        if (r.start < 0 || r.start > r.stop || r.stop > live.length) continue
+                        drawPath(
+                            layout.getPathForRange(r.start, r.stop),
+                            KAYA_HIGHLIGHT_COLOR)
+                    }
+                }
+            }
+        },
+    ) {
+        inner()
+    }
+}
+
+/** How many lines of the textarea are on screen at once — this host's
+ * spelling of the 240x96 viewport the desktop backends give it. */
+private const val KAYA_TEXTAREA_LINES = 6
+
+/** The decoration itself. A background wash under the glyphs, which is
+ * the same thing every other backend paints (NSTextStorage's
+ * .backgroundColor, a GtkTextTag, CharacterFormat.BackColor) — chosen
+ * there because it is what accessibility publishes, and matched here so
+ * one scene describes one appearance. */
+private val KAYA_HIGHLIGHT_COLOR = androidx.compose.ui.graphics.Color(0x8CFFEB3B)
 
 @Composable
 fun KayaRoot() {

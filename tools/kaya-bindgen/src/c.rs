@@ -15,6 +15,11 @@ pub const RESERVED: &[&str] = &[
     "enum", "extern", "float", "for", "goto", "if", "inline", "int", "long", "register",
     "restrict", "return", "short", "signed", "sizeof", "static", "struct", "switch", "typedef",
     "union", "unsigned", "void", "volatile", "while",
+    // NOT A KEYWORD — a local this generator EMITS, `size_t kaya_at =
+    // kaya_wire_begin(...)`, which a spec field of the same name would
+    // redeclare in the same scope. See swift.rs's twin for the hour
+    // this cost.
+    "kaya_at",
 ];
 
 pub fn emit(spec: &ProtocolSpec) -> String {
@@ -190,7 +195,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             sig.join(", ")
         ));
         c.line(&format!(
-            "    size_t start = kaya_wire_begin(tx, KAYA_TX_{});",
+            "    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_{});",
             r.name.to_uppercase()
         ));
         for f in r.fields {
@@ -207,7 +212,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 }
             });
         }
-        c.line("    kaya_wire_end(tx, start);");
+        c.line("    kaya_wire_end(tx, kaya_at);");
         c.line("}");
     }
 
@@ -230,34 +235,34 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("");
         c.line(&format!("/* set_property with a constant {prop} value. */"));
         c.line(&format!("static inline void kaya_tx_set_{prop}(KayaTx *tx, uint64_t widget_id, {ty}{param}) {{"));
-        c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
+        c.line("    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
         c.line("    kaya_wire_u64(tx, widget_id);");
         c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
         c.line("    kaya_wire_u32(tx, KAYA_SOURCE_CONST);");
         c.line(&format!("    kaya_wire_value(tx, {ctor}({param}));"));
-        c.line("    kaya_wire_end(tx, start);");
+        c.line("    kaya_wire_end(tx, kaya_at);");
         c.line("}");
         c.line("");
         c.line(&format!("/* set_property with a signal-bound {prop} value. */"));
         c.line(&format!("static inline void kaya_tx_bind_{prop}(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {{"));
-        c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
+        c.line("    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
         c.line("    kaya_wire_u64(tx, widget_id);");
         c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
         c.line("    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);");
         c.line("    kaya_wire_u64(tx, signal_id);");
-        c.line("    kaya_wire_end(tx, start);");
+        c.line("    kaya_wire_end(tx, kaya_at);");
         c.line("}");
         c.line("");
         c.line("/* set_property bound to one field of the element of the enclosing");
         c.line(" * For, `level` Fors up (field 0 for a scalar collection). */");
         c.line(&format!("static inline void kaya_tx_bind_{prop}_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {{"));
-        c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
+        c.line("    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);");
         c.line("    kaya_wire_u64(tx, widget_id);");
         c.line(&format!("    kaya_wire_u32(tx, KAYA_PROP_{up});"));
         c.line("    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);");
         c.line("    kaya_wire_u32(tx, level);");
         c.line("    kaya_wire_u32(tx, field);");
-        c.line("    kaya_wire_end(tx, start);");
+        c.line("    kaya_wire_end(tx, kaya_at);");
         c.line("}");
     }
 
@@ -292,23 +297,23 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             c.line(&format!("/* set_menu_prop with a constant {prop} value. */"));
         }
         c.line(&format!("static inline void kaya_tx_set_menu_{prop}(KayaTx *tx, uint64_t item, {ty}{param}) {{"));
-        c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);");
+        c.line("    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);");
         c.line("    kaya_wire_u64(tx, item);");
         c.line(&format!("    kaya_wire_u32(tx, KAYA_MPROP_{up});"));
         c.line("    kaya_wire_u32(tx, KAYA_SOURCE_CONST);");
         c.line(&format!("    kaya_wire_value(tx, {ctor}({param}));"));
-        c.line("    kaya_wire_end(tx, start);");
+        c.line("    kaya_wire_end(tx, kaya_at);");
         c.line("}");
         if crate::menu_prop_bindable(prop) {
             c.line("");
             c.line(&format!("/* set_menu_prop with a signal-bound {prop} value. */"));
             c.line(&format!("static inline void kaya_tx_bind_menu_{prop}(KayaTx *tx, uint64_t item, uint64_t signal_id) {{"));
-            c.line("    size_t start = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);");
+            c.line("    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);");
             c.line("    kaya_wire_u64(tx, item);");
             c.line(&format!("    kaya_wire_u32(tx, KAYA_MPROP_{up});"));
             c.line("    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);");
             c.line("    kaya_wire_u64(tx, signal_id);");
-            c.line("    kaya_wire_end(tx, start);");
+            c.line("    kaya_wire_end(tx, kaya_at);");
             c.line("}");
         }
     }

@@ -22,8 +22,9 @@ use std::sync::Arc;
 
 use crate::protocol::{
     ApplyOp, CollectionId, CommandKind, EntryProp, Key, MenuItemId, MenuItemKind, MenuProp,
-    Occurrence, Prop, PropValue, Record, SectionProp, SignalId, Transaction, TxOp, UndoDelta,
-    UndoEntry, UndoOrder, Value, ValueType, WidgetId, WidgetKind, WindowId, WindowProp,
+    NativeRange, Occurrence, Prop, PropValue, Record, SectionProp, SignalId, TextRange,
+    Transaction, TxOp, UndoDelta, UndoEntry, UndoOrder, Value, ValueType, WidgetId, WidgetKind,
+    WindowId, WindowProp,
 };
 
 /// Internal instance ids live above this bit; guest widget ids below it.
@@ -329,13 +330,26 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         | TxOp::CollectionUpdateField { .. }
         | TxOp::CollectionRemove { .. }
         | TxOp::CollectionMove { .. } => UndoVerdict::Invertible,
-        // Focus is the only pure effect built; scroll_to joins it when
-        // it lands. Clear is NOT one — it destroys widget-owned text
-        // the core never held, so it cannot be put back.
+        // Focus was the first pure effect; the three text-range ops are
+        // the rest of the set A2 anticipated ("scroll when it lands").
+        // Clear is NOT one — it destroys widget-owned text the core
+        // never held, so it cannot be put back.
         TxOp::WidgetCommand {
             command: CommandKind::Focus,
             ..
         } => UndoVerdict::PureEffect,
+        // ALL THREE, together, so no app author has to remember which of
+        // them a group admits. reveal is A2's own example. select moves
+        // the caret, which is where you were looking. And HIGHLIGHT,
+        // which looks like state and is not: the core keeps no declared
+        // set to invert (docs/ranges-plan.md D2 rejects tracking
+        // outright), and a set is bound to the text it was declared
+        // against — an undo that restores the text therefore drops it
+        // anyway, and the app re-declares from the `undone` occurrence
+        // exactly as it re-declares from `text_changed`.
+        TxOp::HighlightRanges { .. } | TxOp::SelectRange { .. } | TxOp::RevealRange { .. } => {
+            UndoVerdict::PureEffect
+        }
         TxOp::WidgetCommand {
             command: CommandKind::Clear,
             ..
@@ -563,6 +577,96 @@ fn check_command(kind: WidgetKind, command: CommandKind) {
         ),
     };
     assert!(ok, "kaya: command {command:?} does not apply to {kind:?}");
+}
+
+/// A UTF-8 byte offset into `text`, converted into the unit THIS BUILD'S
+/// backend counts. `cfg!` and not `#[cfg]` on purpose: both arms compile
+/// on every target, so the linux conversion is type-checked and
+/// unit-tested on the machine writing it rather than discovered by the
+/// linux lane.
+pub(crate) fn native_offset(text: &str, byte: u64) -> u64 {
+    if cfg!(target_os = "linux") {
+        native_offset_chars(text, byte)
+    } else {
+        native_offset_utf16(text, byte)
+    }
+}
+
+/// Foundation's `NSRange`, TOM's character positions and Compose's
+/// `TextRange` all index UTF-16 code units — four of the five backends.
+fn native_offset_utf16(text: &str, byte: u64) -> u64 {
+    text[..byte as usize].encode_utf16().count() as u64
+}
+
+/// GTK's `GtkTextBuffer` counts CODE POINTS: `gtk_text_buffer_get_char_count`
+/// is 5 for `ab😀cd`, whose UTF-8 length is 8 (measured live on GTK
+/// 4.18.6, scratchpad/ranges-units.md §3).
+fn native_offset_chars(text: &str, byte: u64) -> u64 {
+    text[..byte as usize].chars().count() as u64
+}
+
+/// THE ONE CHOKEPOINT every declared range crosses (docs/ranges-plan.md
+/// D2, scratchpad/ranges-units.md §7): validate against the text, then
+/// convert to the backend's unit. Both halves here, in this order,
+/// because the conversion is only meaningful on an offset that is
+/// already known to be a code-point boundary inside the text —
+/// `&text[..byte]` panics with Rust's own message otherwise, which is a
+/// worse version of the same complaint.
+///
+/// WHY IT PANICS rather than dropping the op: it is the same class as
+/// `wire.rs`'s `expect("kaya: string value is not UTF-8")` — an
+/// app-programming error, deterministic, and fixable by the app. A
+/// dropped op is the failure that SHIPS, because the app sees a
+/// highlight that did not appear and blames the backend. Snapping is
+/// what the platforms do and the measurements show snapping is not one
+/// behaviour: AppKit snaps a bad start and keeps a bad end (whose copy
+/// then yields U+FFFD), GTK accepts a split verbatim, Compose snaps
+/// outward and throws out of bounds, Windows clamps silently. Adopting
+/// any of them would mean adopting whichever platform ran first.
+///
+/// WHAT IT DOES NOT REFUSE, deliberately: a GRAPHEME split. The
+/// platforms disagree about what a grapheme is — java.text.BreakIterator
+/// counts the ZWJ family as 11 clusters where .NET StringInfo and Swift
+/// count 5, same string, measured — so a core refusing by its own table
+/// would refuse ranges three platforms honour. It also does not refuse
+/// an empty range (that is a caret, and select_range needs it) or an
+/// empty set.
+fn check_range(text: &str, widget: WidgetId, op: &str, range: TextRange) -> NativeRange {
+    let where_ = format!("kaya: {op} on {widget:?}");
+    assert!(
+        range.start <= range.stop,
+        "{where_}: start {} is after end {}",
+        range.start,
+        range.stop
+    );
+    assert!(
+        range.stop <= text.len() as u64,
+        "{where_}: end {} is past the end of the text ({} bytes)",
+        range.stop,
+        text.len()
+    );
+    for offset in [range.start, range.stop] {
+        assert!(
+            text.is_char_boundary(offset as usize),
+            "{where_}: byte offset {offset} is not a character boundary; \
+             it is inside {}",
+            split_char(text, offset as usize)
+        );
+    }
+    NativeRange {
+        start: native_offset(text, range.start),
+        stop: native_offset(text, range.stop),
+    }
+}
+
+/// Which character a mid-sequence offset splits, spelled the way Rust's
+/// own slice panic spells it — the core can say this because it holds
+/// the text, and it is the difference between a message that names the
+/// bug and one that names a number.
+fn split_char(text: &str, offset: usize) -> String {
+    let start = (0..=offset).rev().find(|i| text.is_char_boundary(*i)).unwrap_or(0);
+    let ch = text[start..].chars().next().unwrap_or('\u{fffd}');
+    format!("{ch:?} (bytes {start}..{})", start + ch.len_utf8())
 }
 
 /// Every property has one value type (spec::PROPS). The match is
@@ -1866,6 +1970,24 @@ impl Scene {
                     // forgotten.
                     out.push(ApplyOp::Command { id: widget, command });
                 }
+                TxOp::HighlightRanges { widget, ranges } => {
+                    let text = self.range_text(widget, "highlight_ranges", &out);
+                    let native = ranges
+                        .iter()
+                        .map(|r| check_range(&text, widget, "highlight_ranges", *r))
+                        .collect();
+                    out.push(ApplyOp::HighlightRanges { id: widget, ranges: native });
+                }
+                TxOp::SelectRange { widget, range } => {
+                    let text = self.range_text(widget, "select_range", &out);
+                    let native = check_range(&text, widget, "select_range", range);
+                    out.push(ApplyOp::SelectRange { id: widget, range: native });
+                }
+                TxOp::RevealRange { widget, range } => {
+                    let text = self.range_text(widget, "reveal_range", &out);
+                    let native = check_range(&text, widget, "reveal_range", range);
+                    out.push(ApplyOp::RevealRange { id: widget, range: native });
+                }
                 TxOp::VariantCase { .. } => {
                     panic!("kaya: variant_case outside a template scope")
                 }
@@ -2181,6 +2303,59 @@ impl Scene {
     /// A3: only a write that CHANGES the text closes an episode. An app
     /// that mirrors a field into a signal and writes it back would
     /// otherwise lose its typing history on every keystroke.
+    /// The text a range op is addressed against: the widget's content AS
+    /// IT WILL BE when this batch lands.
+    ///
+    /// NOT SIMPLY `field_text`, and that is the whole method.
+    /// `absorb_text_writes` runs at the END of a batch (one place, so a
+    /// fifth emit site cannot bypass it), so while the batch is being
+    /// applied `field_text` still holds the PREVIOUS text. The obvious
+    /// app spelling —
+    ///
+    /// ```text
+    /// tx.set_text(editor, new_document);
+    /// tx.highlight(editor, matches_in(new_document));
+    /// ```
+    ///
+    /// — would then be validated and converted against the old document.
+    /// That is not a wrong colour: on macOS an out-of-range attribute is
+    /// an NSRangeException and the process dies with exit 134
+    /// (scratchpad/ranges-units.md §3, measured). So the ops this batch
+    /// has already produced are consulted first, newest write wins.
+    ///
+    /// TEXTAREA ONLY (docs/ranges-plan.md D1): the entry's deferral is
+    /// enforced here rather than described in a document, because the
+    /// three platforms that cannot honour it honestly would each fail in
+    /// their own way and one of them silently (GTK's entry highlight
+    /// rides byte offsets that do not follow edits and is unreadable
+    /// over AT-SPI).
+    fn range_text(&self, widget: WidgetId, op: &str, out: &[ApplyOp]) -> String {
+        let kind = self
+            .widgets
+            .get(&widget)
+            .unwrap_or_else(|| panic!("kaya: {op} on unknown widget {widget:?}"));
+        assert!(
+            matches!(kind, WidgetKind::Textarea),
+            "kaya: {op} on {widget:?}, which is a {kind:?} — text ranges are a \
+             TEXTAREA surface this milestone. The entry is deferred with measured \
+             reasons per platform (docs/deferred.md); an editor decorates a document"
+        );
+        for op in out.iter().rev() {
+            match op {
+                ApplyOp::SetProp { id, prop: Prop::Text, value: Value::Str(text) }
+                    if *id == widget =>
+                {
+                    return text.clone()
+                }
+                ApplyOp::Command { id, command: CommandKind::Clear } if *id == widget => {
+                    return String::new()
+                }
+                _ => {}
+            }
+        }
+        self.field_text.get(&widget).cloned().unwrap_or_default()
+    }
+
     fn absorb_text_writes(&mut self, out: &[ApplyOp]) {
         let mut writes: Vec<(WidgetId, String)> = Vec::new();
         for op in out {
@@ -6721,6 +6896,315 @@ mod tests {
             TxOp::CreateWidget { id: WidgetId(30), kind: WidgetKind::Textarea },
             TxOp::ContextAttachNode { node: TemplateNodeId(30), item: MenuItemId(1) },
         ]);
+    }
+
+    // --- Text ranges (docs/ranges-plan.md, scratchpad/ranges-units.md) ---
+
+    /// The five hazard strings the units arm measured, so every test
+    /// below argues over the same material.
+    const EMOJI: &str = "ab\u{1f600}cd"; // 8 bytes, 6 UTF-16, 5 scalars
+    const COMBINING: &str = "ae\u{301}b"; // e + COMBINING ACUTE
+    const FAMILY: &str = "ab\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}\u{200d}\u{1f466}cd";
+
+    /// A live textarea holding `text`.
+    fn editor(text: &str) -> Transaction {
+        vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Textarea },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Text,
+                value: PropValue::Const(Value::Str(text.to_owned())),
+            },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]
+    }
+
+    fn highlight(ranges: &[(u64, u64)]) -> TxOp {
+        TxOp::HighlightRanges {
+            widget: WidgetId(1),
+            ranges: ranges.iter().map(|(a, b)| TextRange::new(*a, *b)).collect(),
+        }
+    }
+
+    fn lowered(ops: &[ApplyOp]) -> Vec<(u64, u64)> {
+        ops.iter()
+            .find_map(|op| match op {
+                ApplyOp::HighlightRanges { ranges, .. } => {
+                    Some(ranges.iter().map(|r| (r.start, r.stop)).collect())
+                }
+                _ => None,
+            })
+            .expect("a highlight was lowered")
+    }
+
+    /// THE CONVERSION TABLE ITSELF, pinned against the units arm's
+    /// measurements — both units, on every hazard string, on every
+    /// platform. `native_offset` picks one of these at build time and a
+    /// test of the picked one alone would say nothing about the arm the
+    /// linux lane runs.
+    #[test]
+    fn the_two_offset_conversions_match_the_measured_table() {
+        // ab😀cd: the emoji is bytes 2..6, UTF-16 units 2..4, scalars 2..3.
+        assert_eq!(super::native_offset_utf16(EMOJI, 2), 2);
+        assert_eq!(super::native_offset_utf16(EMOJI, 6), 4);
+        assert_eq!(super::native_offset_utf16(EMOJI, 8), 6);
+        assert_eq!(super::native_offset_chars(EMOJI, 2), 2);
+        assert_eq!(super::native_offset_chars(EMOJI, 6), 3);
+        assert_eq!(super::native_offset_chars(EMOJI, 8), 5);
+        // The ZWJ family is the discriminator: 25 bytes, 11 UTF-16 units,
+        // 7 scalars for ONE visible glyph. An off-by-one CJK would hide.
+        // 29 bytes end to end: `ab` + the 25-byte family + `cd`, so
+        // `cd` starts at byte 27 and at UTF-16 unit 13.
+        assert_eq!(FAMILY.len(), 29);
+        assert_eq!(super::native_offset_utf16(FAMILY, 2), 2);
+        assert_eq!(super::native_offset_utf16(FAMILY, 27), 13);
+        assert_eq!(super::native_offset_chars(FAMILY, 27), 9);
+        // The combining sequence: every unit but graphemes keeps them
+        // apart, which is why an offset between them is ACCEPTED.
+        assert_eq!(super::native_offset_utf16(COMBINING, 2), 2);
+        assert_eq!(super::native_offset_utf16(COMBINING, 4), 3);
+        assert_eq!(super::native_offset_chars(COMBINING, 4), 3);
+        // And the benign case, stated so the safe intuition is on record.
+        assert_eq!(super::native_offset_utf16("a\u{65e5}\u{672c}\u{8a9e}b", 7), 3);
+        assert_eq!(super::native_offset_chars("a\u{65e5}\u{672c}\u{8a9e}b", 7), 3);
+    }
+
+    /// The one this build actually lowers with, so a wrong `cfg!` arm
+    /// fails here rather than on a lane.
+    #[test]
+    fn the_build_lowers_in_its_own_backends_unit() {
+        let want = if cfg!(target_os = "linux") { 3 } else { 4 };
+        assert_eq!(super::native_offset(EMOJI, 6), want);
+    }
+
+    #[test]
+    fn a_declared_set_lowers_converted() {
+        let mut scene = Scene::new();
+        scene.apply(editor(EMOJI));
+        // The emoji alone, in bytes.
+        let ops = scene.apply(vec![highlight(&[(2, 6)])]);
+        let want = if cfg!(target_os = "linux") { (2, 3) } else { (2, 4) };
+        assert_eq!(lowered(&ops), vec![want]);
+    }
+
+    #[test]
+    fn an_empty_set_is_the_clear_and_still_lowers() {
+        let mut scene = Scene::new();
+        scene.apply(editor("hello"));
+        let ops = scene.apply(vec![highlight(&[])]);
+        assert_eq!(lowered(&ops), Vec::<(u64, u64)>::new());
+    }
+
+    /// ACCEPTANCE, and it matters as much as the refusals: a guard that
+    /// refused these would make the framework unable to express a
+    /// correct range (scratchpad/ranges-units.md §8.2).
+    #[test]
+    fn a_grapheme_split_is_accepted_because_the_platforms_disagree() {
+        let mut scene = Scene::new();
+        scene.apply(editor(COMBINING));
+        // Between `e` and its combining acute — one grapheme, two code
+        // points. java.text.BreakIterator, .NET StringInfo and Swift
+        // give three different answers about this cluster; the core
+        // gives none, on purpose.
+        let ops = scene.apply(vec![highlight(&[(1, 2)])]);
+        assert_eq!(lowered(&ops).len(), 1);
+        // And the whole ZWJ family, which is the same carve-out at size.
+        let mut scene = Scene::new();
+        scene.apply(editor(FAMILY));
+        let ops = scene.apply(vec![highlight(&[(2, 27)])]);
+        assert_eq!(lowered(&ops).len(), 1);
+    }
+
+    #[test]
+    fn a_caret_is_a_legal_selection() {
+        let mut scene = Scene::new();
+        scene.apply(editor("hello"));
+        let ops = scene.apply(vec![TxOp::SelectRange {
+            widget: WidgetId(1),
+            range: TextRange::new(3, 3),
+        }]);
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::SelectRange { range: NativeRange { start: 3, stop: 3 }, .. }
+        )));
+    }
+
+    #[test]
+    #[should_panic(expected = "start 12 is after end 4")]
+    fn a_backwards_range_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(editor("hello world, and so on"));
+        scene.apply(vec![highlight(&[(12, 4)])]);
+    }
+
+    /// THE CLAUSE THAT IS NOT POLITENESS: an out-of-range attribute on
+    /// macOS is an NSRangeException and the process dies with exit 134
+    /// (scratchpad/ranges-units.md §3, measured).
+    #[test]
+    #[should_panic(expected = "end 40 is past the end of the text (5 bytes)")]
+    fn an_offset_past_the_end_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(editor("hello"));
+        scene.apply(vec![highlight(&[(0, 40)])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "byte offset 3 is not a character boundary; it is inside")]
+    fn a_start_inside_a_character_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(editor(EMOJI));
+        scene.apply(vec![highlight(&[(3, 6)])]);
+    }
+
+    /// The END clause has its own test because AppKit treats the two
+    /// endpoints DIFFERENTLY — it snaps a bad start and keeps a bad end,
+    /// whose selected text then copies as U+FFFD (measured). One test
+    /// over both endpoints would pass with the end clause deleted.
+    #[test]
+    #[should_panic(expected = "byte offset 5 is not a character boundary; it is inside")]
+    fn an_end_inside_a_character_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(editor(EMOJI));
+        scene.apply(vec![highlight(&[(2, 5)])]);
+    }
+
+    /// Every op of the family crosses the same chokepoint — a rule that
+    /// held for one of three would be a rule nobody could rely on.
+    #[test]
+    #[should_panic(expected = "select_range on WidgetId(1): end 99 is past the end")]
+    fn select_range_is_validated_too() {
+        let mut scene = Scene::new();
+        scene.apply(editor("hello"));
+        scene.apply(vec![TxOp::SelectRange {
+            widget: WidgetId(1),
+            range: TextRange::new(0, 99),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "reveal_range on WidgetId(1): end 99 is past the end")]
+    fn reveal_range_is_validated_too() {
+        let mut scene = Scene::new();
+        scene.apply(editor("hello"));
+        scene.apply(vec![TxOp::RevealRange {
+            widget: WidgetId(1),
+            range: TextRange::new(0, 99),
+        }]);
+    }
+
+    /// D1's deferral, structural. The entry's per-platform reasons are
+    /// recorded in docs/deferred.md; this is what makes them true of the
+    /// running code rather than of a document.
+    #[test]
+    #[should_panic(expected = "text ranges are a TEXTAREA surface")]
+    fn ranges_refuse_an_entry() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Entry },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        scene.apply(vec![highlight(&[(0, 0)])]);
+    }
+
+    /// THE SAME-BATCH ORDERING HAZARD. `absorb_text_writes` runs at the
+    /// END of a batch, so `field_text` still holds the old text while
+    /// the batch is applying. A range declared over text this same
+    /// transaction wrote must be read against the NEW text — otherwise
+    /// the obvious app spelling validates against the wrong document,
+    /// and on macOS that is not a wrong colour, it is exit 134.
+    #[test]
+    fn a_range_reads_the_text_this_batch_wrote() {
+        let mut scene = Scene::new();
+        scene.apply(editor("short"));
+        let ops = scene.apply(vec![
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Text,
+                value: PropValue::Const(Value::Str("a much longer document".to_owned())),
+            },
+            highlight(&[(7, 13)]),
+        ]);
+        assert_eq!(lowered(&ops), vec![(7, 13)]);
+    }
+
+    /// The same rule the other way: without the batch-local read this
+    /// would be accepted against the LONG text that is no longer there.
+    #[test]
+    #[should_panic(expected = "past the end of the text (5 bytes)")]
+    fn a_range_over_text_this_batch_shortened_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(editor("a much longer document"));
+        scene.apply(vec![
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Text,
+                value: PropValue::Const(Value::Str("short".to_owned())),
+            },
+            highlight(&[(7, 13)]),
+        ]);
+    }
+
+    /// A `clear` in the same batch empties the text for the same reason.
+    #[test]
+    #[should_panic(expected = "past the end of the text (0 bytes)")]
+    fn a_range_after_a_clear_in_the_same_batch_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(editor("hello"));
+        scene.apply(vec![
+            TxOp::WidgetCommand { widget: WidgetId(1), command: CommandKind::Clear },
+            highlight(&[(0, 5)]),
+        ]);
+    }
+
+    /// D2's other half, in the core: what the user typed is what the
+    /// next declaration is measured against. The paint-time half — a
+    /// declared set is dropped the moment the widget's text moves — is
+    /// the backend's, and the ranges scene watches it there.
+    #[test]
+    fn a_user_edit_moves_the_text_a_range_is_measured_against() {
+        let mut scene = Scene::new();
+        scene.apply(editor("hello"));
+        scene.note_text_changed(DEFAULT_WINDOW, WidgetId(1), "hello world", true);
+        let ops = scene.apply(vec![highlight(&[(6, 11)])]);
+        assert_eq!(lowered(&ops), vec![(6, 11)]);
+    }
+
+    /// All three ride in an undo group and none of them comes back —
+    /// A2's rule, stated once for the whole family so no app author has
+    /// to remember which of the three a group admits.
+    #[test]
+    fn the_three_range_ops_are_pure_effects_in_a_group() {
+        let mut scene = Scene::new();
+        scene.apply(undo_scene());
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(9), kind: WidgetKind::Textarea },
+            TxOp::SetProperty {
+                widget: WidgetId(9),
+                prop: Prop::Text,
+                value: PropValue::Const(Value::Str("hello".to_owned())),
+            },
+        ]);
+        let ops = scene.apply(vec![
+            group("find"),
+            insert(1, vec![], "a", "Alpha"),
+            TxOp::HighlightRanges {
+                widget: WidgetId(9),
+                ranges: vec![TextRange::new(0, 5)],
+            },
+            TxOp::SelectRange { widget: WidgetId(9), range: TextRange::new(0, 5) },
+            TxOp::RevealRange { widget: WidgetId(9), range: TextRange::new(0, 5) },
+        ]);
+        assert_eq!(lowered(&ops), vec![(0, 5)]);
+        let (ops, _) = scene.undo(DEFAULT_WINDOW).expect("one group to undo");
+        assert!(
+            !ops.iter().any(|op| matches!(
+                op,
+                ApplyOp::HighlightRanges { .. }
+                    | ApplyOp::SelectRange { .. }
+                    | ApplyOp::RevealRange { .. }
+            )),
+            "a pure effect is permitted, never replayed backwards"
+        );
     }
 
     /// Shift-only alphanumeric through the scene root (the grammar

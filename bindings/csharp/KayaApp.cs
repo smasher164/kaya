@@ -109,6 +109,114 @@ readonly struct Widget
     internal Widget(ulong id) => Id = id;
 }
 
+/// A half-open span of a text widget's content — Start up to but not
+/// including Stop — in UTF-8 BYTE offsets into the widget's current
+/// guest-visible text, which is kaya's unit on the wire and in every
+/// binding.
+///
+/// IT IS A TYPE RATHER THAN TWO INTS BECAUSE C# COUNTS SOMETHING ELSE.
+/// A .NET string index counts UTF-16 code units, and the two units
+/// agree only on ASCII: over a document opening with three CJK
+/// characters, every later match sits SIX BYTES further along than
+/// IndexOf reports it. Six is not a crash — it is a valid offset on a
+/// character boundary inside the text, so the core's validation passes
+/// it and the highlight simply lands on the wrong six characters. `In`
+/// does the conversion once, here, so no app hand-rolls it and no app
+/// can hand kaya a number in the wrong unit by writing the obvious
+/// thing.
+///
+/// WHAT THE CORE REFUSES, wherever a range reaches it: endpoints out of
+/// order, an endpoint past the end of the text, or an endpoint inside a
+/// character. A range that splits a GRAPHEME CLUSTER is accepted and
+/// covers exactly the code points it names — the platforms disagree
+/// about what a grapheme is (.NET's StringInfo counts the ZWJ family as
+/// one cluster where java.text.BreakIterator counts eleven), so a
+/// platform may widen what it PAINTS to the whole cluster.
+readonly struct TextRange
+{
+    internal readonly ulong Start;
+    internal readonly ulong Stop;
+
+    TextRange(ulong start, ulong stop)
+    {
+        Start = start;
+        Stop = stop;
+    }
+
+    /// The range covering `length` .NET chars from `index` — the
+    /// conversion from C#'s unit into kaya's, and the spelling an app
+    /// reaches for, because IndexOf and Length are what it has:
+    ///
+    ///     hits.Add(TextRange.In(doc, at, needle.Length));
+    ///
+    /// The text is an argument rather than remembered state: a byte
+    /// offset means nothing without the string it indexes, and the
+    /// string the app searched is the only authority on what its own
+    /// numbers meant.
+    public static TextRange In(string text, int index, int length)
+    {
+        if (text == null)
+            throw new ArgumentNullException(
+                nameof(text), "kaya: a range is measured against the text it indexes");
+        if (index < 0 || length < 0 || index > text.Length - length)
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                $"kaya: range {index}..{index + (long)length} is outside a text of "
+                    + $"{text.Length} chars");
+        ulong start = ByteOffset(text, index);
+        return new TextRange(start, start + Utf8Length(text, index, length));
+    }
+
+    /// Offsets that are ALREADY UTF-8 byte offsets — for an app whose
+    /// positions came out of something byte-oriented (a file it read, a
+    /// parser it ran) rather than out of a .NET string. Named for its
+    /// unit, because the only way to misuse it is to believe it takes
+    /// char indices.
+    public static TextRange Bytes(long start, long stop)
+    {
+        if (start < 0 || stop < 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(start), $"kaya: a text range offset is negative ({start}..{stop})");
+        return new TextRange((ulong)start, (ulong)stop);
+    }
+
+    static ulong ByteOffset(string text, int at) =>
+        Utf8Length(text, 0, at);
+
+    static ulong Utf8Length(string text, int at, int length)
+    {
+        // A .NET INDEX INSIDE A SURROGATE PAIR is the one error the core
+        // cannot name for the app, because by the time it arrives the
+        // evidence is gone: System.Text.Encoding.UTF8 encodes the
+        // orphaned half as U+FFFD, three bytes where the whole character
+        // is four, so the offset that comes back points into the middle
+        // of a character the app never meant to split. The core does
+        // refuse it — its boundary clause cannot do otherwise — but it
+        // refuses a number this method invented. Refuse the index
+        // instead, in the unit the app was thinking in.
+        Boundary(text, at);
+        Boundary(text, at + length);
+        return (ulong)System.Text.Encoding.UTF8.GetByteCount(text.AsSpan(at, length));
+    }
+
+    static void Boundary(string text, int at)
+    {
+        // BOTH HALVES, not just the low one: a low surrogate whose
+        // neighbour is NOT a high surrogate is an orphan in the app's
+        // own string — ill-formed text, which the FFI boundary already
+        // owns (DESIGN.md, string observations) and a different problem
+        // from an index landing between two halves of a real character.
+        // Testing only the low half would also make this very message
+        // throw, since ConvertToUtf32 refuses the pair it was handed.
+        if (at > 0 && at < text.Length
+            && char.IsHighSurrogate(text[at - 1]) && char.IsLowSurrogate(text[at]))
+            throw new ArgumentException(
+                $"kaya: char index {at} is inside the surrogate pair at {at - 1}..{at + 1} "
+                    + $"('{char.ConvertFromUtf32(char.ConvertToUtf32(text[at - 1], text[at]))}'), "
+                    + "which is half a character");
+    }
+}
+
 /// A template node: a blueprint entry, stamped per collection entry.
 /// Never on screen by itself; clicks on its copies arrive with the
 /// copy's key path.
@@ -1229,6 +1337,69 @@ sealed class Tx
     /// like Clear.
     public void Focus(Widget w) =>
         Records.Add(KayaWire.TxWidgetCommand(w.Id, KayaWire.CommandFocus));
+
+    /// DECLARE the decorated ranges of a textarea, replacing whatever
+    /// was declared before; an empty set is the clear.
+    ///
+    /// kaya ships no search. What to highlight is the app's question —
+    /// case folding, word boundaries, a regex dialect and the find bar
+    /// itself belong to the text editor (docs/ranges-plan.md §3) — and
+    /// five lines of IndexOf is the honest amount of machinery for it:
+    ///
+    ///     for (int at = doc.IndexOf(needle, StringComparison.Ordinal); at >= 0;
+    ///          at = doc.IndexOf(needle, at + needle.Length, StringComparison.Ordinal))
+    ///         hits.Add(TextRange.In(doc, at, needle.Length));
+    ///     tx.HighlightRanges(editor, hits);
+    ///
+    /// What no app can write for itself is the other half — colouring a
+    /// run of the platform's own text view — and that is what this is.
+    ///
+    /// APP-OWNED AND NEVER TRACKED. A declared set is bound to the text
+    /// it was declared against: the first edit of any kind — a
+    /// keystroke, a SetText, a native undo — drops it with nothing said,
+    /// and the app re-declares from the fold its change handler already
+    /// drives. That is the same uncontrolled contract the text itself
+    /// has; nothing in kaya adjusts a range across an edit.
+    public void HighlightRanges(Widget w, IEnumerable<TextRange> ranges)
+    {
+        if (ranges == null)
+            throw new ArgumentNullException(
+                nameof(ranges),
+                "kaya: HighlightRanges takes the set to declare — an empty one is the clear");
+        // The offsets ride as one flat Values list read in pairs, start
+        // then end, with the count beside it; the core asserts the two
+        // agree rather than painting half a set (wire.rs, TX_HIGHLIGHT_RANGES).
+        var flat = new List<object>();
+        foreach (TextRange r in ranges)
+        {
+            flat.Add((long)r.Start);
+            flat.Add((long)r.Stop);
+        }
+        Records.Add(KayaWire.TxHighlightRanges(w.Id, (uint)(flat.Count / 2), flat.ToArray()));
+    }
+
+    /// Put the textarea's selection at one range (an empty range is a
+    /// caret). Same offsets and same validation as HighlightRanges.
+    ///
+    /// REFUSED WHILE THE USER IS COMPOSING through an input method, in
+    /// every backend, because honouring it commits the composition
+    /// mid-word — measured on macOS, where the half-typed kana land in
+    /// the document and in the app's own model. The refusal is a no-op
+    /// and not an exception: composition state is on no kaya channel, so
+    /// an app cannot avoid the race and is not blamed for it. The
+    /// selection is still worth asking for after the next change
+    /// notification, which is what ends a composition.
+    public void SelectRange(Widget w, TextRange range) =>
+        Records.Add(KayaWire.TxSelectRange(w.Id, range.Start, range.Stop));
+
+    /// Scroll the textarea so a range is inside the viewport. A pure
+    /// effect: it moves no state, leaves the selection alone, and undo
+    /// does not put the scroll position back — undo restores state, not
+    /// where you were looking. How much context lands around the range
+    /// is the platform's own scroll-to-range behaviour; what kaya fixes
+    /// is containment.
+    public void RevealRange(Widget w, TextRange range) =>
+        Records.Add(KayaWire.TxRevealRange(w.Id, range.Start, range.Stop));
 
     // --- Construction sugar: the tree reads as a tree ----------------
     //

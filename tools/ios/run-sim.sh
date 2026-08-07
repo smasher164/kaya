@@ -1499,6 +1499,24 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on a11y-swiftui "$APP" dev.kaya.a11yswiftui a11y-swiftui a11y a11y
 
+    # The text-ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one,
+    # plus the two things that make those three a contract — a user's
+    # keystroke DROPS a declared set (D2), and a select_range arriving
+    # mid-composition is REFUSED (D4).
+    #
+    # THE OFFSETS ARE THIS LANE'S UNIT TEST. The scene's document opens
+    # with a CJK word, so every match sits SIX BYTES further along than
+    # it sits in UTF-16 — the unit this backend counts — and a lowering
+    # that forwarded kaya's byte offsets unconverted would decorate six
+    # characters early on all three. The assertions carry the covered
+    # TEXT beside the offsets for the same reason: the core converts
+    # bytes to UTF-16 to lower a range and this backend converts back to
+    # read one, so offsets alone would let two symmetric mistakes cancel.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example ranges
+    APP=$(make_bundle rangesrs-swiftui dev.kaya.rangesswiftui "$TARGET_DIR/examples/ranges")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on ranges-swiftui "$APP" dev.kaya.rangesswiftui ranges-swiftui ranges ranges
+
     # The progress scene (see the swift leg).
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example progress
     APP=$(make_bundle progressrs-swiftui dev.kaya.progressswiftui "$TARGET_DIR/examples/progress")

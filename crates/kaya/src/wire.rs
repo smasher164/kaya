@@ -19,7 +19,8 @@ use crate::protocol::{
     EntryProp, MenuItemId, MenuItemKind, MenuProp, SectionProp, WindowProp,
     AlertChoice, AlertId, AlertSpec,
     ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
-    TemplateNodeId, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind, WindowId,
+    TemplateNodeId, TextRange, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
+    WindowId,
 };
 
 pub const HEADER_SIZE: usize = 8;
@@ -64,6 +65,12 @@ pub const TX_COPY: u16 = 35;
 pub const TX_READ_CLIPBOARD: u16 = 36;
 /// The head-of-batch undo group marker (docs/undo-plan.md D2).
 pub const TX_UNDO_GROUP: u16 = 37;
+/// The three text-range records (docs/ranges-plan.md D6). Byte offsets
+/// on this channel; the core converts to the backend's unit before it
+/// lowers (scratchpad/ranges-units.md §7).
+pub const TX_HIGHLIGHT_RANGES: u16 = 38;
+pub const TX_SELECT_RANGE: u16 = 39;
+pub const TX_REVEAL_RANGE: u16 = 40;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -97,6 +104,10 @@ pub const APPLY_READ_CLIPBOARD: u16 = 26;
 /// what is focused and never will — the backends do, and each already
 /// asks itself that question for role enablement.
 pub const APPLY_CLEAR_UNDO: u16 = 27;
+/// The three text-range records, apply side — NATIVE units.
+pub const APPLY_HIGHLIGHT_RANGES: u16 = 28;
+pub const APPLY_SELECT_RANGE: u16 = 29;
+pub const APPLY_REVEAL_RANGE: u16 = 30;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -725,6 +736,37 @@ pub fn decode_transaction_with_blobs(
                 };
                 TxOp::UndoGroup { window, label }
             }
+            TX_HIGHLIGHT_RANGES => {
+                let widget = WidgetId(r.u64());
+                let count = r.u32() as usize;
+                let _reserved = r.u32();
+                // The offsets ride as one flat Values list read IN PAIRS
+                // — start then end — which is show_file_dialog's filter
+                // encoding one type over. The declared `count` and the
+                // list's own length must agree: a binding that writes one
+                // and means the other is a broken binding, and it fails
+                // here rather than painting half a set.
+                let flat = r.record();
+                assert!(
+                    flat.len() == count * 2,
+                    "kaya: highlight_ranges declares {count} ranges but carries {} \
+                     offsets (two per range)",
+                    flat.len()
+                );
+                let ranges = flat
+                    .chunks_exact(2)
+                    .map(|pair| TextRange::new(range_offset(&pair[0]), range_offset(&pair[1])))
+                    .collect();
+                TxOp::HighlightRanges { widget, ranges }
+            }
+            TX_SELECT_RANGE => TxOp::SelectRange {
+                widget: WidgetId(r.u64()),
+                range: TextRange::new(r.u64(), r.u64()),
+            },
+            TX_REVEAL_RANGE => TxOp::RevealRange {
+                widget: WidgetId(r.u64()),
+                range: TextRange::new(r.u64(), r.u64()),
+            },
             TX_SHOW_FILE_DIALOG => {
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
@@ -876,6 +918,20 @@ fn alert_value_slots(spec: &AlertSpec) -> [String; 5] {
         spec.actions.get(1).cloned().unwrap_or_default(),
         spec.cancel.clone(),
     ]
+}
+
+/// One end of a declared range, off the flat Values list.
+///
+/// I64 AND NOT U64 ON THE WIRE, because the wire's scalar vocabulary has
+/// no unsigned integer — every binding's integer is signed, so a guest
+/// with a bug writes a negative one and it must fail HERE rather than
+/// wrap into a 2^64-sized offset that the length check would then pass.
+fn range_offset(v: &Value) -> u64 {
+    match v {
+        Value::I64(n) if *n >= 0 => *n as u64,
+        Value::I64(n) => panic!("kaya: a text range offset is {n}, which is negative"),
+        other => panic!("kaya: a text range offset is {other:?}, wanted an integer"),
+    }
 }
 
 fn alert_str(v: Value, field: &str) -> String {
@@ -1609,6 +1665,29 @@ impl Writer {
             ApplyOp::ClearUndo { window } => self.record(APPLY_CLEAR_UNDO, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
             }),
+            ApplyOp::HighlightRanges { id, ranges } => {
+                self.record(APPLY_HIGHLIGHT_RANGES, |b, blobs| {
+                    b.extend_from_slice(&id.0.to_le_bytes());
+                    b.extend_from_slice(&(ranges.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&((ranges.len() * 2) as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for r in ranges {
+                        write_value(b, &Value::I64(r.start as i64), blobs);
+                        write_value(b, &Value::I64(r.stop as i64), blobs);
+                    }
+                })
+            }
+            ApplyOp::SelectRange { id, range } => self.record(APPLY_SELECT_RANGE, |b, _| {
+                b.extend_from_slice(&id.0.to_le_bytes());
+                b.extend_from_slice(&range.start.to_le_bytes());
+                b.extend_from_slice(&range.stop.to_le_bytes());
+            }),
+            ApplyOp::RevealRange { id, range } => self.record(APPLY_REVEAL_RANGE, |b, _| {
+                b.extend_from_slice(&id.0.to_le_bytes());
+                b.extend_from_slice(&range.start.to_le_bytes());
+                b.extend_from_slice(&range.stop.to_le_bytes());
+            }),
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
@@ -1916,6 +1995,29 @@ impl Writer {
                     write_value(b, &Value::Str(accepting.clone()), blobs);
                 })
             }
+            TxOp::HighlightRanges { widget, ranges } => {
+                self.record(TX_HIGHLIGHT_RANGES, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    b.extend_from_slice(&(ranges.len() as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    b.extend_from_slice(&((ranges.len() * 2) as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for r in ranges {
+                        write_value(b, &Value::I64(r.start as i64), blobs);
+                        write_value(b, &Value::I64(r.stop as i64), blobs);
+                    }
+                })
+            }
+            TxOp::SelectRange { widget, range } => self.record(TX_SELECT_RANGE, |b, _| {
+                b.extend_from_slice(&widget.0.to_le_bytes());
+                b.extend_from_slice(&range.start.to_le_bytes());
+                b.extend_from_slice(&range.stop.to_le_bytes());
+            }),
+            TxOp::RevealRange { widget, range } => self.record(TX_REVEAL_RANGE, |b, _| {
+                b.extend_from_slice(&widget.0.to_le_bytes());
+                b.extend_from_slice(&range.start.to_le_bytes());
+                b.extend_from_slice(&range.stop.to_le_bytes());
+            }),
             TxOp::PushEntry { window, entry } => self.record(TX_PUSH_ENTRY, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&entry.0.to_le_bytes());

@@ -140,6 +140,17 @@
  */
 #define TX_UNDO_GROUP 37
 
+/**
+ * The three text-range records (docs/ranges-plan.md D6). Byte offsets
+ * on this channel; the core converts to the backend's unit before it
+ * lowers (scratchpad/ranges-units.md §7).
+ */
+#define TX_HIGHLIGHT_RANGES 38
+
+#define TX_SELECT_RANGE 39
+
+#define TX_REVEAL_RANGE 40
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -199,6 +210,15 @@
  * asks itself that question for role enablement.
  */
 #define APPLY_CLEAR_UNDO 27
+
+/**
+ * The three text-range records, apply side — NATIVE units.
+ */
+#define APPLY_HIGHLIGHT_RANGES 28
+
+#define APPLY_SELECT_RANGE 29
+
+#define APPLY_REVEAL_RANGE 30
 
 #define VALUE_BOOL 1
 
@@ -638,6 +658,25 @@
 #define KAYA_TX_UNDO_GROUP 37
 
 /**
+ * The three text-range records (docs/ranges-plan.md). Bodies:
+ * HIGHLIGHT_RANGES { u64 widget; u32 count; u32 reserved; Values of
+ * 2*count I64 offsets — start then end }; SELECT_RANGE and
+ * REVEAL_RANGE { u64 widget; u64 start; u64 end }.
+ *
+ * THE OFFSETS ARE UTF-8 BYTE OFFSETS into the widget's current text, on
+ * this channel and in every binding. Both ends must be inside the text
+ * and on a code-point boundary; the core refuses otherwise, naming the
+ * character it splits. An end inside a GRAPHEME cluster is legal — the
+ * platforms disagree about what a grapheme is — and a platform may
+ * widen what it paints to the whole cluster.
+ */
+#define KAYA_TX_HIGHLIGHT_RANGES 38
+
+#define KAYA_TX_SELECT_RANGE 39
+
+#define KAYA_TX_REVEAL_RANGE 40
+
+/**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
  * geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
@@ -759,6 +798,19 @@
  * question for role enablement.
  */
 #define KAYA_APPLY_CLEAR_UNDO 27
+
+/**
+ * The three text-range records, apply side. Same layouts as their tx
+ * twins, and NOT the same unit: these offsets are already in this
+ * build's backend unit (UTF-16 code units everywhere but GTK, which
+ * counts code points), converted by the core against the text it
+ * validated them against. A backend does no Unicode arithmetic here.
+ */
+#define KAYA_APPLY_HIGHLIGHT_RANGES 28
+
+#define KAYA_APPLY_SELECT_RANGE 29
+
+#define KAYA_APPLY_REVEAL_RANGE 30
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply

@@ -45,6 +45,369 @@ fn lf(s: String) -> String {
     }
 }
 
+/// kaya AS AN INPUT METHOD — the harness `compose` verb's engine, and
+/// nothing else in this file uses it.
+///
+/// WHY A WHOLE GObject FOR ONE VERB. A preedit is not text and there is
+/// no setter for it: GTK's widgets render the string their
+/// `GtkIMContext` hands back from `get_preedit_string`, the preedit
+/// never enters the buffer at all (measured — `char_count` stayed at 4
+/// with a live preedit), and emitting `preedit-changed` by hand only
+/// makes the view ask the same context the same question and get "".
+/// The only party that can produce marked text on GTK is an input
+/// method, so the harness supplies one.
+///
+/// AND THAT IS WHAT MAKES THE D4 LEG REAL. Once installed, every
+/// downstream behaviour is the platform's: the view renders our preedit
+/// as marked text, republishes it on `GtkTextView::preedit-changed`, and
+/// — the whole point — calls `reset` on us whenever something moves the
+/// cursor or the selection programmatically. So a backend that honoured
+/// a `select_range` mid-composition would have the composition destroyed
+/// by GTK's own machinery rather than by a mock, and the scene's caret
+/// assertion is what notices.
+#[cfg(feature = "harness")]
+mod kaya_im {
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+
+    // Every kaya input method GTK has constructed, by the widget it was
+    // given. GTK creates the delegate itself and exposes no getter for
+    // it, so the instance registers ITSELF at the one moment both sides
+    // can name — `set_client_widget`, which the multicontext calls with
+    // the very view the harness asked about.
+    thread_local! {
+        static LIVE: std::cell::RefCell<Vec<(gtk4::Widget, KayaIMContext)>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// The kaya input method serving this widget, if GTK has made one.
+    pub fn for_widget(widget: &gtk4::Widget) -> Option<KayaIMContext> {
+        LIVE.with_borrow(|live| {
+            live.iter().find(|(w, _)| w == widget).map(|(_, c)| c.clone())
+        })
+    }
+
+    #[derive(Default)]
+    pub struct KayaIMContextInner {
+        pub preedit: std::cell::RefCell<String>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for KayaIMContextInner {
+        const NAME: &'static str = "KayaIMContext";
+        type Type = KayaIMContext;
+        type ParentType = gtk4::IMContext;
+    }
+
+    impl ObjectImpl for KayaIMContextInner {}
+
+    impl IMContextImpl for KayaIMContextInner {
+        /// What the widget renders as marked text. The caret goes at the
+        /// END of the composition, which is every platform's convention
+        /// and the rule the scene's frozen caret offset is built on.
+        fn preedit_string(&self) -> (glib::GString, gtk4::pango::AttrList, i32) {
+            let text = self.preedit.borrow().clone();
+            let caret = text.chars().count() as i32;
+            (glib::GString::from(text), gtk4::pango::AttrList::new(), caret)
+        }
+
+        /// THE CANCELLATION PATH, and it is GTK that walks it. A
+        /// programmatic cursor or selection move resets the input method
+        /// unconditionally — even for a range identical to the one
+        /// already selected, even for a caret placement where the caret
+        /// already is (all three measured,
+        /// scratchpad/range-probe-linux.md §5). Dropping the preedit
+        /// here is what an input method does when it is reset, and it is
+        /// how a D4 violation becomes observable.
+        fn reset(&self) {
+            let had = !self.preedit.borrow().is_empty();
+            self.preedit.replace(String::new());
+            if had {
+                self.obj().emit_by_name::<()>("preedit-changed", &[]);
+                self.obj().emit_by_name::<()>("preedit-end", &[]);
+            }
+            self.parent_reset();
+        }
+
+        /// GTK hands the delegate the widget it serves; that is the one
+        /// moment this instance and the harness's view can be tied
+        /// together, since the multicontext never hands its delegate out.
+        fn set_client_widget<P: IsA<gtk4::Widget>>(&self, widget: Option<&P>) {
+            let me = self.obj().clone();
+            LIVE.with_borrow_mut(|live| match widget {
+                Some(widget) => {
+                    let widget = widget.as_ref().clone();
+                    live.retain(|(w, _)| *w != widget);
+                    live.push((widget, me));
+                }
+                None => live.retain(|(_, c)| *c != me),
+            });
+            self.parent_set_client_widget(widget);
+        }
+    }
+
+    glib::wrapper! {
+        pub struct KayaIMContext(ObjectSubclass<KayaIMContextInner>)
+            @extends gtk4::IMContext;
+    }
+
+    impl Default for KayaIMContext {
+        fn default() -> Self {
+            glib::Object::new()
+        }
+    }
+
+    impl KayaIMContext {
+        /// Put marked text in front of the widget, through the signals a
+        /// real input method emits and in the order it emits them.
+        pub fn set_preedit(&self, text: &str) {
+            let starting = self.imp().preedit.borrow().is_empty();
+            self.imp().preedit.replace(text.to_owned());
+            if starting {
+                self.emit_by_name::<()>("preedit-start", &[]);
+            }
+            self.emit_by_name::<()>("preedit-changed", &[]);
+        }
+    }
+}
+
+/// The name kaya's input method answers to on GTK's `gtk-im-module`
+/// extension point — the same channel ibus and fcitx register on, and
+/// the only public way to hand a widget a different `GtkIMContext`.
+#[cfg(feature = "harness")]
+const KAYA_IM_ID: &str = "kaya";
+
+/// Install kaya's input method as this view's, and answer with it.
+///
+/// TWO PUBLIC CALLS AND NO PRIVATE ONES. `observe_controllers` yields
+/// the view's own event controllers; GtkTextView builds a
+/// `GtkEventControllerKey` around the very `GtkIMMulticontext` it renders
+/// preedit from, and `set_context_id` is that multicontext's documented
+/// way to choose a delegate. The delegate is then created by GTK, which
+/// is why the instance comes back out of the multicontext rather than
+/// being constructed here.
+#[cfg(feature = "harness")]
+fn install_kaya_im(view: &gtk4::TextView) -> Option<kaya_im::KayaIMContext> {
+    // REGISTERED ONCE, and registering is idempotent by GIO's own
+    // contract: `g_io_extension_point_register` answers with the
+    // existing point when the name is taken, which it always is here —
+    // GTK creates this one during init.
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    REGISTERED.call_once(|| {
+        use glib::translate::IntoGlib;
+        // SAFETY: both calls take a NUL-terminated name (C string
+        // literals) and a GType registered by the glib::wrapper! above.
+        // The extension point is GTK's own and already requires a
+        // GtkIMContext, which this type is.
+        unsafe {
+            let point = gio::ffi::g_io_extension_point_register(c"gtk-im-module".as_ptr());
+            gio::ffi::g_io_extension_point_set_required_type(
+                point,
+                gtk4::IMContext::static_type().into_glib(),
+            );
+            // THE LOWEST PRIORITY IN THE POINT, and that is the whole
+            // safety argument. GTK picks a DEFAULT input method off this
+            // same list when nothing names one, so an implementation
+            // registered above the platform's own would silently become
+            // every text widget's input method the moment this ran. This
+            // one is only ever reached BY NAME, through the
+            // `set_context_id` below.
+            gio::ffi::g_io_extension_point_implement(
+                c"gtk-im-module".as_ptr(),
+                kaya_im::KayaIMContext::static_type().into_glib(),
+                c"kaya".as_ptr(),
+                i32::MIN,
+            );
+        }
+    });
+
+    let controllers = view.observe_controllers();
+    for i in 0..controllers.n_items() {
+        let Some(controller) = controllers.item(i) else { continue };
+        let Ok(keys) = controller.downcast::<gtk4::EventControllerKey>() else {
+            continue;
+        };
+        let Some(context) = keys.im_context() else { continue };
+        let Ok(multi) = context.downcast::<gtk4::IMMulticontext>() else {
+            continue;
+        };
+        if multi.context_id() != KAYA_IM_ID {
+            multi.set_context_id(Some(KAYA_IM_ID));
+        }
+        // FORCE THE DELEGATE TO EXIST. A multicontext creates its
+        // delegate lazily and hands it the client widget then; without
+        // this the instance does not exist until the next key event, and
+        // the verb would have nothing to set a preedit on.
+        multi.focus_in();
+        return kaya_im::for_widget(view.upcast_ref::<gtk4::Widget>());
+    }
+    None
+}
+
+/// Put marked text in the view, through the input method installed above.
+#[cfg(feature = "harness")]
+fn set_kaya_preedit(view: &gtk4::TextView, text: &str) {
+    if let Some(context) = install_kaya_im(view) {
+        context.set_preedit(text);
+    }
+}
+
+/// The ONE tag every declared range wears, named so it can be found
+/// again in the buffer's tag table rather than remembered in a map.
+const HIGHLIGHT_TAG: &str = "kaya-highlight";
+
+/// The mark REVEAL scrolls to. A mark and not an iterator on purpose:
+/// GTK computes line heights in an idle handler, and `scroll_to_mark`
+/// is documented to save the point and finish after line validation
+/// while `scroll_to_iter` does not — measured on this backend as the
+/// difference between landing at y=264 of a 5600px target and landing
+/// at 5560 (scratchpad/range-probe-linux.md §3).
+const REVEAL_MARK: &str = "kaya-reveal";
+
+/// The buffer's highlight tag, created on first use.
+///
+/// ONE TAG FOR THE WHOLE SET, which is GTK's own idiom: a `GtkTextTag`
+/// is a style, applied to as many ranges as you like, and re-declaring
+/// is `remove_all_tags` plus one `apply_tag` per range — measured at
+/// 570us for 400 ranges over a 19k-character buffer, with no `changed`
+/// emission and no extra frames.
+///
+/// A BACKGROUND COLOUR AND NOTHING ELSE, because the background is what
+/// the accessibility tree publishes (`bg-color` on the attribute run)
+/// and accessibility is where the harness reads. The VALUE is not
+/// assertable on this widget: a GtkTextView truncates each channel
+/// before scaling, so `#ffe066` and `#ff0000` both read back
+/// `65535,0,0` and `#808080` reads as black — a GTK defect, measured
+/// twice, and the reason `highlights` keys on the attribute's PRESENCE.
+fn highlight_tag(buffer: &gtk4::TextBuffer) -> gtk4::TextTag {
+    use gtk4::prelude::{TextBufferExt, TextTagExt};
+    let table = buffer.tag_table();
+    if let Some(tag) = table.lookup(HIGHLIGHT_TAG) {
+        return tag;
+    }
+    let tag = gtk4::TextTag::new(Some(HIGHLIGHT_TAG));
+    tag.set_background(Some("#ffe066"));
+    table.add(&tag);
+    tag
+}
+
+/// THE OTHER COORDINATE DIVERGENCE, and it is not a Unicode one.
+///
+/// `lf()` collapses a `\r\n` into the single `\n` the guest is told
+/// about, and GTK's buffer keeps BOTH characters (measured: the buffer
+/// holds 6 code points for `ab␍␊cd` where the guest's text is 5,
+/// scratchpad/ranges-units.md §3). Every offset kaya carries is into
+/// the guest's text, so after one CRLF a declared range lands one
+/// position early — and nothing anywhere says so. This is the "ships
+/// silently" case of this milestone on linux and it has nothing to do
+/// with Unicode: it is reachable from any app that writes a document
+/// with Windows line endings into an editor.
+///
+/// Three walks, one rule, each with the free fast path — a buffer with
+/// no CR in it maps one-to-one and the whole question disappears, which
+/// is every scene in the tree.
+///
+/// A GUEST CHARACTER offset -> the buffer character offset to apply at.
+fn buffer_offset(buffer_text: &str, guest_chars: u64) -> i32 {
+    if !buffer_text.contains('\r') {
+        return guest_chars as i32;
+    }
+    let (mut seen, mut at) = (0u64, 0i32);
+    let mut chars = buffer_text.chars().peekable();
+    while seen < guest_chars {
+        let Some(c) = chars.next() else { break };
+        at += 1;
+        if c == '\r' && chars.peek() == Some(&'\n') {
+            chars.next();
+            at += 1;
+        }
+        seen += 1;
+    }
+    at
+}
+
+/// A GUEST BYTE offset -> the buffer character offset to apply at. The
+/// same walk, counting the guest's bytes instead of its characters.
+fn buffer_offset_of_byte(buffer_text: &str, guest_byte: u64) -> i32 {
+    let (mut bytes, mut at) = (0u64, 0i32);
+    let mut chars = buffer_text.chars().peekable();
+    while bytes < guest_byte {
+        let Some(c) = chars.next() else { break };
+        at += 1;
+        if c == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+                at += 1;
+            }
+            bytes += 1;
+        } else {
+            bytes += c.len_utf8() as u64;
+        }
+    }
+    at
+}
+
+/// And the READING direction: a buffer character offset -> the GUEST
+/// byte offset the harness spelling is written in.
+fn guest_byte_of(buffer_text: &str, buffer_chars: i32) -> u64 {
+    if !buffer_text.contains('\r') {
+        return buffer_text
+            .char_indices()
+            .nth(buffer_chars.max(0) as usize)
+            .map(|(byte, _)| byte as u64)
+            .unwrap_or(buffer_text.len() as u64);
+    }
+    let (mut at, mut bytes) = (0i32, 0u64);
+    let mut chars = buffer_text.chars().peekable();
+    while at < buffer_chars {
+        let Some(c) = chars.next() else { break };
+        at += 1;
+        if c == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+                at += 1;
+            }
+            // The guest sees one LF wherever the buffer holds either.
+            bytes += 1;
+        } else {
+            bytes += c.len_utf8() as u64;
+        }
+    }
+    bytes
+}
+
+/// D2's drop, at the one place on this backend that cannot be late: the
+/// buffer's own `changed` handler. Every edit reaches it — a keystroke,
+/// a programmatic write, a native undo — and a declared set whose text
+/// has moved on is removed with nothing said, because the app
+/// re-declares from the fold `text_changed` already drives.
+///
+/// A COMPARE RATHER THAN A BLANKET DROP, so the invariant it states is
+/// the true one: PAINTED OFFSETS WERE VALIDATED AGAINST THE TEXT THEY
+/// ARE PAINTED ON. `apply_tag` fires no `changed` (measured — 20 full
+/// re-declare cycles produced 0 emissions), so declaring a set can
+/// never trip this.
+fn drop_stale_highlights(
+    declared: &std::rc::Rc<RefCell<HashMap<u64, String>>>, id: u64, buffer: &gtk4::TextBuffer,
+) {
+    use gtk4::prelude::TextBufferExt;
+    let stale = {
+        let map = declared.borrow();
+        match map.get(&id) {
+            Some(text) => {
+                *text != lf(buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string())
+            }
+            None => false,
+        }
+    };
+    if !stale {
+        return;
+    }
+    declared.borrow_mut().remove(&id);
+    buffer.remove_all_tags(&buffer.start_iter(), &buffer.end_iter());
+}
+
 fn grow_weight(widget: &gtk4::Widget) -> f64 {
     // SAFETY: the key is private to this module and only ever set to an
     // f64 by set_grow_weight below.
@@ -533,6 +896,34 @@ struct CoreState {
     /// This set is that model, and it is the backend fact the core
     /// cannot derive — not a second copy of the ledger.
     native_dirty: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
+    /// D2 SPELLED GTK: per textarea, the text its declared highlight set
+    /// was validated against (docs/ranges-plan.md D2). Membership IS the
+    /// "a set is declared" flag; the ranges themselves are not kept,
+    /// because the buffer holds them and the read goes to the platform.
+    ///
+    /// THE COMPARE IS WHY THIS EXISTS AT ALL, and on this backend it is
+    /// not belt-and-braces. A GtkTextTag range lives in the buffer's
+    /// b-tree and is anchored to the TEXT: typing three characters ahead
+    /// of a tagged range MOVES the range (measured,
+    /// scratchpad/range-probe-linux.md §4). Tracking is exactly what D2
+    /// refuses to ship — a stale set would keep painting, shifted, until
+    /// the app happened to declare something else — so the set is
+    /// dropped the moment the recorded text stops being the buffer's
+    /// text, in the buffer's own `changed` handler, which is the one
+    /// place on this backend that cannot be late.
+    highlight_text: std::rc::Rc<RefCell<HashMap<u64, String>>>,
+    /// The LIVE input-method preedit per textarea, straight off GTK's
+    /// own `GtkTextView::preedit-changed` — which carries the input
+    /// method's string as its argument, so this is the platform
+    /// reporting its own state and not kaya remembering its intent.
+    ///
+    /// It answers the D4 question (`ApplyOp::SelectRange` is refused
+    /// while a composition is live) and it is the second half of the
+    /// `selection` read: GTK renders the preedit out of the LAYOUT and
+    /// never puts it in the buffer (measured — the probe's §5 left
+    /// `char_count` at 4 with a live preedit), so the buffer's caret
+    /// offset alone does not describe where the caret is on screen.
+    preedit: std::rc::Rc<RefCell<HashMap<u64, String>>>,
     /// Indeterminate bars pulse on a shared ticker (GTK's activity
     /// mode is pulse-driven, not a property); membership here IS the
     /// indeterminate flag the observation reads.
@@ -3326,7 +3717,31 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // cycle that outlives the window.
                     let weak_view = glib::WeakRef::<gtk4::TextView>::new();
                     weak_view.set(Some(&view));
+                    // THE LIVE COMPOSITION, reported by GTK itself. The
+                    // signal carries the input method's string, so this
+                    // is the platform saying what it is displaying —
+                    // and when a programmatic selection move resets the
+                    // IM context (which GTK does unconditionally,
+                    // measured), it arrives here empty and the D4 read
+                    // reports the caret where it really is.
+                    let composing = core.preedit.clone();
+                    view.connect_preedit_changed(move |_, preedit| {
+                        let mut map = composing.borrow_mut();
+                        if preedit.is_empty() {
+                            map.remove(&wid);
+                        } else {
+                            map.insert(wid, preedit.to_owned());
+                        }
+                    });
+                    let declared = core.highlight_text.clone();
                     buffer.connect_changed(move |b| {
+                        // D2 FIRST, and unconditionally — before the
+                        // quiet gate, because a programmatic write
+                        // invalidates a declared set exactly as a
+                        // keystroke does and the gate is about who
+                        // hears the occurrence, not about what is
+                        // painted.
+                        drop_stale_highlights(&declared, wid, b);
                         if !quiet.get() {
                             let text =
                                 lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string());
@@ -4033,6 +4448,118 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         // Targetless by design: the core does not know what is focused,
         // and this backend already asks itself that for role
         // enablement.
+        // THE THREE TEXT-RANGE PRIMITIVES (docs/ranges-plan.md D1). All
+        // three arrive in GTK'S OWN UNIT — CODE POINTS, converted by the
+        // core against the text it validated the byte offsets against
+        // (scene.rs `native_offset`) — so there is no Unicode arithmetic
+        // anywhere below and there must never be: a `NativeRange` is the
+        // only thing an ApplyOp can carry, and it is unbuildable from
+        // the wire.
+        ApplyOp::HighlightRanges { id, ranges } => {
+            let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
+                return;
+            };
+            let buffer = view.buffer();
+            // THE BUFFER'S OWN TEXT, read once: the D2 record needs it
+            // and so does every offset below, because the buffer keeps a
+            // CR the guest was never told about.
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            // DECLARATIVE: the set REPLACES the previous one, and an
+            // empty list is the clear. `remove_all_tags` is safe to
+            // aim at the whole buffer because kaya creates exactly one
+            // tag on it.
+            buffer.remove_all_tags(&buffer.start_iter(), &buffer.end_iter());
+            let tag = highlight_tag(&buffer);
+            for range in &ranges {
+                // THE UNIT ASSERTION, and it is cheap because GTK is the
+                // one backend whose native unit differs from everyone
+                // else's: a byte offset that reached here unconverted
+                // is an offset into a LONGER string, so it runs off the
+                // end of a buffer holding any non-ASCII at all. The
+                // ranges scene's document opens with CJK precisely so
+                // that a forwarded byte offset is six characters wrong
+                // rather than accidentally right.
+                assert!(
+                    range.stop <= buffer.char_count() as u64,
+                    "kaya: highlight_ranges on {id:?}: offset {} is past the buffer's {} \
+                     CODE POINTS — GTK counts code points and the core converts byte \
+                     offsets before lowering (scene.rs native_offset); an unconverted \
+                     byte offset looks exactly like this",
+                    range.stop,
+                    buffer.char_count()
+                );
+                buffer.apply_tag(
+                    &tag,
+                    &buffer.iter_at_offset(buffer_offset(&raw, range.start)),
+                    &buffer.iter_at_offset(buffer_offset(&raw, range.stop)),
+                );
+            }
+            // AND RECORD THE TEXT IT WAS DECLARED AGAINST — D2's whole
+            // mechanism on this backend, since GTK's tags would
+            // otherwise follow the next edit rather than being dropped
+            // by it.
+            core.highlight_text.borrow_mut().insert(id.0, lf(raw));
+        }
+        ApplyOp::SelectRange { id, range } => {
+            let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
+                return;
+            };
+            // D4, AND THIS BACKEND IS WHERE THE HAZARD WAS MEASURED.
+            // `select_range` cancels an active composition
+            // UNCONDITIONALLY — even when the requested range is the one
+            // already selected, even when it is the caret's existing
+            // position (scratchpad/range-probe-linux.md §5, all three
+            // rows measured). GTK resets the IM context on any
+            // programmatic cursor move and asks no questions. So the
+            // backend asks them: a live preedit means the user is
+            // mid-word, and moving the selection now would take the
+            // half-typed syllable away from them. Refused as a no-op
+            // under a named reason, never a panic — the app wrote
+            // correct code and lost a race with a human being.
+            if let Some(preedit) = core.preedit.borrow().get(&id.0) {
+                eprintln!(
+                    "KAYA_DIAG select_range refused: ime_composition (widget {}, preedit {preedit:?})",
+                    id.0
+                );
+                return;
+            }
+            let buffer = view.buffer();
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let start = buffer.iter_at_offset(buffer_offset(&raw, range.start));
+            let stop = buffer.iter_at_offset(buffer_offset(&raw, range.stop));
+            // The insert mark goes FIRST, so the caret lands at the end
+            // of the range — the direction a search result is selected
+            // in. `selection_bounds()` normalizes either way; the marks
+            // are what keep the direction.
+            buffer.select_range(&stop, &start);
+        }
+        ApplyOp::RevealRange { id, range } => {
+            let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
+                return;
+            };
+            // A PURE EFFECT: it moves the viewport and nothing else — no
+            // selection change, no `changed`, and no interference with a
+            // composition (measured: a `scroll_to_mark` mid-preedit left
+            // the preedit alive and the commit intact). Undo does not
+            // restore it.
+            //
+            // THE VIEWPORT IS THE FOUNDATION'S, and without it this arm
+            // could not exist: a bare GtkTextView grows to its content,
+            // so its page size equals its content height, and
+            // `scroll_to_mark` returned TRUE while moving nothing — the
+            // worst kind of no-op.
+            let buffer = view.buffer();
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let at = buffer.iter_at_offset(buffer_offset(&raw, range.start));
+            let mark = match buffer.mark(REVEAL_MARK) {
+                Some(mark) => {
+                    buffer.move_mark(&mark, &at);
+                    mark
+                }
+                None => buffer.create_mark(Some(REVEAL_MARK), &at, true),
+            };
+            view.scroll_to_mark(&mark, 0.0, false, 0.0, 0.0);
+        }
         ApplyOp::ClearUndo { window } => {
             if let Some(id) = focused_text_in(core, window) {
                 core.clear_native_undo(id);
@@ -4929,6 +5456,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 apply_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
                 ledger_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
                 native_dirty: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
+                highlight_text: std::rc::Rc::new(RefCell::new(HashMap::new())),
+                preedit: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 indeterminate: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 columns: Vec::new(),
                 rows: Vec::new(),
@@ -5149,6 +5678,34 @@ impl GtkStage {
             glib::ControlFlow::Break
         });
         rx.recv().expect("the main context applied the step")
+    }
+
+    /// Resolve a range verb's target to the two things every one of them
+    /// needs: the ordinal to ask the accessibility bus for, and the live
+    /// preedit GTK has reported for that widget.
+    ///
+    /// TOTAL, like `menu_state`: every miss is a short description
+    /// rather than a panic, so the three verbs double as the wait for a
+    /// render to land.
+    fn range_target(target: crate::harness::Target) -> Result<RangeTarget, String> {
+        if target.kind != crate::harness::TargetKind::Textarea {
+            return Err(format!("<{:?} is not a textarea>", target.kind));
+        }
+        Self::on_main(move |core| {
+            let Some(widget) = target_widget(core, target) else {
+                return Err("<no such target>".to_owned());
+            };
+            let Some(rank) = atspi_rank(&core.window, &widget) else {
+                return Err("<not in the accessibility tree>".to_owned());
+            };
+            let preedit = core
+                .widgets
+                .iter()
+                .find(|(_, w)| w.control() == widget)
+                .and_then(|(id, _)| core.preedit.borrow().get(&id.0).cloned())
+                .unwrap_or_default();
+            Ok(RangeTarget { rank, preedit })
+        })
     }
 
     fn on_main<T: Send + 'static>(
@@ -5377,6 +5934,109 @@ impl crate::harness::Stage for GtkStage {
         // `<role>/<label>` spelling, so any scene asserting on this
         // backend fails loudly instead of quietly passing. Reads GtkAccessible / AT-SPI when it lands.
             "<the GTK accessibility read is not implemented yet>".to_owned()
+        }
+    }
+
+    /// THE THREE RANGE READS, all three off the ACCESSIBILITY BUS — the
+    /// same tree `ax` reads and the same correspondence rules (kaya's
+    /// index picks a widget, the widget's rank among same-role nodes
+    /// picks the bus ordinal). Nothing here consults what kaya declared:
+    /// a leg that passed because the backend remembered its own intent
+    /// would prove nothing about the GtkTextTag, the selection or the
+    /// viewport.
+    fn highlights(&self, target: crate::harness::Target) -> String {
+        match Self::range_target(target) {
+            Ok(at) => atspi_range_read(at.rank, RangeRead::Highlights)
+                .unwrap_or_else(|| "<the accessibility tree did not answer>".to_owned()),
+            Err(why) => why,
+        }
+    }
+
+    fn selection(&self, target: crate::harness::Target) -> String {
+        match Self::range_target(target) {
+            Ok(at) => atspi_range_read(at.rank, RangeRead::Selection { preedit: at.preedit })
+                .unwrap_or_else(|| "<the accessibility tree did not answer>".to_owned()),
+            Err(why) => why,
+        }
+    }
+
+    fn revealed(
+        &self, target: crate::harness::Target, range: crate::harness::TextRange,
+    ) -> String {
+        match Self::range_target(target) {
+            Ok(at) => atspi_range_read(
+                at.rank,
+                RangeRead::Revealed { start: range.start, stop: range.stop },
+            )
+            .unwrap_or_else(|| "<the accessibility tree did not answer>".to_owned()),
+            Err(why) => why,
+        }
+    }
+
+    /// Start a real input-method composition in the textarea.
+    ///
+    /// THE ONLY DOOR GTK LEAVES OPEN, and it is the real one. A preedit
+    /// exists because an INPUT METHOD produced it: GTK's text widgets
+    /// render `priv->im_context`'s preedit string and nothing else can
+    /// put one there — `gtk_im_context_set_preedit` does not exist, the
+    /// preedit never enters the buffer (measured: `char_count` stayed at
+    /// 4 with a live preedit), and emitting `preedit-changed` by hand
+    /// only makes the view ask the same context the same question.
+    ///
+    /// So kaya BECOMES the input method for the duration: a
+    /// `GtkIMContext` subclass registered on GTK's own `gtk-im-module`
+    /// extension point, installed as the slave of the view's
+    /// GtkIMMulticontext through the public `set_context_id`. Everything
+    /// downstream is then the platform's: the view asks our context for
+    /// its preedit string, renders it as marked text, reports it on
+    /// `GtkTextView::preedit-changed` — and, crucially, RESETS it on any
+    /// programmatic cursor or selection move, which is the D4 hazard
+    /// this scene exists to prove. A backend that honoured a
+    /// `select_range` here would destroy the composition through GTK's
+    /// own machinery, not through a mock, and the caret assertion would
+    /// say so.
+    fn compose(&self, target: crate::harness::Target, text: &str) {
+        let text = text.to_owned();
+        let marked = text.clone();
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(target.index, core.textareas.len()) else {
+                return;
+            };
+            let view = core.textareas[i].clone();
+            set_kaya_preedit(&view, &marked);
+        });
+        // Like `type_text`: block until the composition is LIVE, read
+        // back through GTK's own signal rather than assumed from the
+        // call. A composition the view never rendered is not a
+        // composition, and the next step would assert against a state
+        // that never existed.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
+        loop {
+            let live = Self::on_main(move |core| {
+                crate::harness::try_resolve(target.index, core.textareas.len())
+                    .and_then(|i| {
+                        let view = &core.textareas[i];
+                        core.widgets
+                            .iter()
+                            .find(|(_, w)| {
+                                w.control() == view.clone().upcast::<gtk4::Widget>()
+                            })
+                            .map(|(id, _)| id.0)
+                    })
+                    .and_then(|id| core.preedit.borrow().get(&id).cloned())
+                    .unwrap_or_default()
+            });
+            if live == text {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "kaya: compose {text:?} never reached the view — GTK reported the preedit \
+                 as {live:?}. The IM context is installed through the gtk-im-module \
+                 extension point (install_kaya_im); a miss there means the view's key \
+                 controller published no GtkIMMulticontext."
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 
@@ -7176,6 +7836,229 @@ fn file_dialog_atspi(op: DialogOp<'_>) -> Option<(String, Vec<String>)> {
             DialogOp::Read => Some((found.dir, found.rows)),
             _ if found.acted => Some((found.dir, found.rows)),
             _ => None,
+        }
+    })
+}
+
+/// A range verb's resolved target: the accessibility-bus ordinal, and
+/// the live input-method preedit GTK reported for that widget.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+struct RangeTarget {
+    rank: usize,
+    preedit: String,
+}
+
+/// Which of the three range observables to read off one Text node.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+enum RangeRead {
+    Highlights,
+    /// `preedit` is what GTK says the input method is displaying — see
+    /// the caret arm below for why the selection read needs it.
+    Selection { preedit: String },
+    /// UTF-8 BYTE offsets, straight from the scene: the one verb whose
+    /// argument arrives in the protocol's unit rather than being read
+    /// back in it.
+    Revealed { start: u64, stop: u64 },
+}
+
+/// Read one of the three range observables off the Nth `Text` node this
+/// application publishes.
+///
+/// ONE WALK, ONE CONNECTION, THREE READS — the shape `atspi_collect`
+/// already uses, with the node's own `Text` (and, for reveal,
+/// `Component`) interface asked instead of its name.
+///
+/// AT-SPI OFFSETS ARE CHARACTERS, which for GTK means CODE POINTS — the
+/// same unit the buffer counts and the same unit the core lowered. The
+/// harness spelling is UTF-8 BYTES, so every offset below is converted
+/// against the text the BUS returned, never against kaya's copy.
+///
+/// NEVER `GetAttributeValue`: the deprecated point getter SIGSEGVs a
+/// GtkTextView, reproduced twice (scratchpad/range-probe-linux.md §6).
+/// `GetAttributeRun` is the safe one.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_range_read(index: usize, read: RangeRead) -> Option<String> {
+    use atspi::proxy::accessible::AccessibleProxy;
+    use atspi::proxy::component::ComponentProxy;
+    use atspi::proxy::text::TextProxy;
+
+    atspi::zbus::block_on(async move {
+        let conn = atspi::connection::AccessibilityConnection::new()
+            .await
+            .ok()?;
+        let root = AccessibleProxy::builder(conn.connection())
+            .destination("org.a11y.atspi.Registry")
+            .ok()?
+            .path("/org/a11y/atspi/accessible/root")
+            .ok()?
+            .build()
+            .await
+            .ok()?;
+
+        /// Depth-first over our own application, collecting the bus
+        /// ADDRESS of every node — `atspi_collect` collects names, and
+        /// this needs the node itself to ask its other interfaces.
+        async fn walk(
+            node: AccessibleProxy<'_>, out: &mut Vec<(atspi::Role, String, String)>, depth: usize,
+        ) {
+            if depth > 24 {
+                return;
+            }
+            if let Ok(role) = node.get_role().await {
+                out.push((
+                    role,
+                    node.inner().destination().to_string(),
+                    node.inner().path().to_string(),
+                ));
+            }
+            let Ok(children) = node.get_children().await else {
+                return;
+            };
+            for child in children {
+                let Some(dest) = child.name() else { continue };
+                let Ok(proxy) = AccessibleProxy::builder(node.inner().connection())
+                    .destination(dest.to_owned())
+                    .and_then(|b| b.path(child.path().to_owned()))
+                else {
+                    continue;
+                };
+                if let Ok(proxy) = proxy.build().await {
+                    Box::pin(walk(proxy, out, depth + 1)).await;
+                }
+            }
+        }
+
+        let mut found: Vec<(atspi::Role, String, String)> = Vec::new();
+        for app in root.get_children().await.ok()? {
+            let Some(dest) = app.name() else { continue };
+            let Ok(builder) = AccessibleProxy::builder(conn.connection())
+                .destination(dest.to_owned())
+                .and_then(|b| b.path(app.path().to_owned()))
+            else {
+                continue;
+            };
+            let Ok(proxy) = builder.build().await else { continue };
+            if proxy.get_application().await.is_err() {
+                continue;
+            }
+            Box::pin(walk(proxy, &mut found, 0)).await;
+        }
+        let (_, dest, path) = found
+            .iter()
+            .filter(|(role, _, _)| *role == atspi::Role::Text)
+            .nth(index)?;
+        let text = TextProxy::builder(conn.connection())
+            .destination(dest.to_owned())
+            .ok()?
+            .path(path.to_owned())
+            .ok()?
+            .build()
+            .await
+            .ok()?;
+        // THE PLATFORM'S OWN STRING, read once and used for every
+        // conversion and every slice below.
+        let count = text.character_count().await.ok()?;
+        let full = text.get_text(0, count).await.ok()?;
+
+        match read {
+            RangeRead::Highlights => {
+                // WALKED, NOT ENUMERATED: for an offset no tag covers,
+                // GTK answers with the empty range (0,0) rather than the
+                // run of unattributed text, so a reader cannot skip
+                // forward and has to probe every character. Measured at
+                // ~0.15ms a call, which a scene-sized document affords
+                // and a real one would not.
+                let mut out: Vec<String> = Vec::new();
+                let mut at = 0i32;
+                while at < count {
+                    let Ok((attrs, start, stop)) = text.get_attribute_run(at, false).await else {
+                        return None;
+                    };
+                    if stop > start && attrs.contains_key("bg-color") {
+                        // THE COVERED TEXT COMES FROM THE PLATFORM, and
+                        // that is the whole point of the spelling: the
+                        // offsets alone would be this read agreeing with
+                        // the lowering's own conversion, two symmetric
+                        // mistakes cancelling while the wrong characters
+                        // were decorated. This slice has no arithmetic
+                        // in it — the bus slices its own string with the
+                        // range it is actually holding.
+                        let covered = lf(text.get_text(start, stop).await.ok()?);
+                        out.push(format!(
+                            "{}:{}={covered}",
+                            guest_byte_of(&full, start),
+                            guest_byte_of(&full, stop)
+                        ));
+                    }
+                    // The run's own end when there is one, a single
+                    // character when GTK answered with nothing.
+                    at = if stop > at { stop } else { at + 1 };
+                }
+                Some(out.join("|"))
+            }
+            RangeRead::Selection { preedit } => {
+                let selections = text.get_n_selections().await.ok()?;
+                if selections > 0 {
+                    let (start, stop) = text.get_selection(0).await.ok()?;
+                    let covered = lf(text.get_text(start, stop).await.ok()?);
+                    return Some(format!(
+                        "{}:{}={covered}",
+                        guest_byte_of(&full, start),
+                        guest_byte_of(&full, stop)
+                    ));
+                }
+                // AN EMPTY RANGE IS A CARET, NOT A SELECTION, on this
+                // platform: `select_range(50, 50)` leaves
+                // `GetNSelections` at 0 and puts the caret at 50
+                // (measured), so "no selection" and "empty selection at
+                // N" are told apart by asking for the caret.
+                let caret = text.caret_offset().await.ok()?;
+                // AND THE COMPOSITION COUNTS, because the offsets in
+                // this spelling are into the text the widget is
+                // DISPLAYING — which on every platform includes the
+                // marked text. AppKit's NSTextView literally holds it in
+                // `string`; GTK renders it out of the layout and leaves
+                // the buffer alone (measured: `char_count` stayed 4 with
+                // a live preedit), so the buffer's caret describes where
+                // the caret is in the DOCUMENT and the preedit is the
+                // rest of the answer. The string is GTK's own, reported
+                // on `preedit-changed` — so a backend that let a
+                // `select_range` through would have its composition
+                // reset by GTK, this would arrive empty, and the number
+                // would move.
+                let at = guest_byte_of(&full, caret) + preedit.len() as u64;
+                Some(format!("{at}:{at}="))
+            }
+            RangeRead::Revealed { start, stop } => {
+                let (start, stop) =
+                    (buffer_offset_of_byte(&full, start), buffer_offset_of_byte(&full, stop));
+                let (rx, ry, rw, rh) = text
+                    .get_range_extents(start, stop, atspi::CoordType::Window)
+                    .await
+                    .ok()?;
+                let component = ComponentProxy::builder(conn.connection())
+                    .destination(dest.to_owned())
+                    .ok()?
+                    .path(path.to_owned())
+                    .ok()?
+                    .build()
+                    .await
+                    .ok()?;
+                let (wx, wy, ww, wh) =
+                    component.get_extents(atspi::CoordType::Window).await.ok()?;
+                // CONTAINMENT, NEVER THE VIEWPORT ITSELF: how much
+                // context a scroll leaves is native behaviour, and a
+                // scene that asserted a scroll offset would be asserting
+                // GTK's taste. The arithmetic is consistent by
+                // measurement — `extents.y = widget.y + buffer_y -
+                // scroll_offset` — and it is only meaningful because the
+                // textarea now HAS a viewport: on the old unscrolled
+                // shape the widget box was the whole buffer and every
+                // range was vacuously inside it.
+                let inside =
+                    rx >= wx && ry >= wy && rx + rw <= wx + ww && ry + rh <= wy + wh;
+                Some(if inside { "visible" } else { "offscreen" }.to_owned())
+            }
         }
     })
 }

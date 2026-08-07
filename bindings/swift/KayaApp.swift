@@ -528,6 +528,39 @@ func kayaAcceptList(_ kinds: [String]) -> String {
     return kinds.joined(separator: " ")
 }
 
+/// The UTF-8 BYTE OFFSET of a position in `text` — kaya's unit for
+/// every text range, and the one number Swift's `String.Index` will not
+/// hand you.
+///
+/// WHY THIS EXISTS RATHER THAN A LINE IN EACH APP. Swift is the only
+/// guest language whose string is indexed by neither bytes nor an
+/// integer, and its two reachable substitutes are both wrong and both
+/// silent. Measured on a string whose first line is `日本語`:
+///
+///     text.utf8.distance(from: text.startIndex, to: i)  // 57  <- kaya's
+///     text.distance(from: text.startIndex, to: i)       // 51  (Characters)
+///     i.utf16Offset(in: text)                           // 51  (UTF-16)
+///
+/// The last two are what an author reaches for; each would decorate six
+/// characters early on this milestone's own document, with nothing to
+/// blame. `String.Index(utf16Offset:in:)` is worse still — it ROUNDS a
+/// split offset and then reports the offset it was given
+/// (scratchpad/ranges-units.md §5).
+///
+/// The result is a code-point boundary by construction: a `String.Index`
+/// is one, so the core's boundary clause cannot fire on anything this
+/// produced.
+func kayaByteOffset(_ i: String.Index, in text: String) -> Int {
+    text.utf8.distance(from: text.startIndex, to: i)
+}
+
+/// A Swift string range as kaya's pair of UTF-8 byte offsets — the
+/// conversion `highlightRanges`, `selectRange` and `revealRange` apply
+/// to the ranges Swift's own search returns.
+func kayaByteRange(_ r: Range<String.Index>, in text: String) -> Range<Int> {
+    kayaByteOffset(r.lowerBound, in: text)..<kayaByteOffset(r.upperBound, in: text)
+}
+
 /// The copy chain: a clip record under construction. Each method fills
 /// one representation, and send() puts it on the clipboard.
 ///
@@ -1860,6 +1893,118 @@ final class KayaAppTx {
     /// Give this widget the keyboard focus.
     func focus(_ w: KayaWidget) {
         tx.widgetCommand(w.id, UInt32(KAYA_COMMAND_FOCUS))
+    }
+
+    // --- Text ranges: decorate a set, select one, reveal one ----------
+    //
+    // The three primitives an editor cannot write for itself
+    // (docs/ranges-plan.md D1). kaya ships no search: WHAT to decorate
+    // is the app's question and every editor answers it differently.
+    //
+    // EVERY OFFSET HERE IS A UTF-8 BYTE OFFSET into the widget's current
+    // text — kaya's unit on the wire, in all nine languages. Swift is
+    // the one guest language whose strings are indexed by NEITHER bytes
+    // nor an integer, so it is the one where "hand kaya the ranges you
+    // already have" needs the binding to mean it. Hence two spellings
+    // per verb:
+    //
+    //   * `Range<String.Index>` + the string they index — what Swift's
+    //     own search returns, converted here. REACH FOR THIS ONE.
+    //   * `Range<Int>` — the byte-offset floor, for an app that already
+    //     holds offsets in kaya's unit.
+    //
+    // The conversion is not a formality, it is the trap. Measured on
+    // this milestone's own document (a CJK word on line 0, ASCII after):
+    // for the first match of "alpha" the byte offset is 57, while
+    // `doc.distance(from:to:)` (Characters) says 51 and
+    // `String.Index.utf16Offset(in:)` says 51 — the two spellings a
+    // Swift author reaches for first, both six early, both silent. An
+    // app that hand-rolled either would decorate six characters off and
+    // find nothing in kaya to blame.
+
+    /// DECLARE the decorated ranges of a textarea, replacing whatever
+    /// was declared before; an empty set is the clear.
+    ///
+    /// The ranges are Swift's own — `String.range(of:)` and friends
+    /// return exactly this — and `text` is the string they index, which
+    /// is what makes a `String.Index` mean anything at all.
+    ///
+    /// APP-OWNED AND NEVER TRACKED. A declared set is bound to the text
+    /// it was declared against: the first edit of any kind drops it, and
+    /// the app re-declares from the fold `onChange` already drives — the
+    /// same uncontrolled contract the text itself has. Nothing in kaya
+    /// adjusts a range across an edit.
+    func highlightRanges(
+        _ w: KayaWidget, _ ranges: [Range<String.Index>], in text: String
+    ) {
+        highlightRanges(w, ranges.map { kayaByteRange($0, in: text) })
+    }
+
+    /// The byte-offset floor of `highlightRanges(_:_:in:)`: offsets are
+    /// UTF-8 byte offsets into the widget's current text.
+    ///
+    /// An offset past the end of the text, or one that splits a
+    /// character, fails loudly in the core rather than in a backend: the
+    /// five platforms answer a malformed offset five different ways and
+    /// one of them aborts the process.
+    func highlightRanges(_ w: KayaWidget, _ ranges: [Range<Int>]) {
+        var flat: [KayaValue] = []
+        flat.reserveCapacity(ranges.count * 2)
+        for r in ranges {
+            let (start, stop) = kayaRangeOffsets(r)
+            flat.append(.i64(Int64(start)))
+            flat.append(.i64(Int64(stop)))
+        }
+        tx.highlightRanges(w.id, UInt32(ranges.count), flat)
+    }
+
+    /// Put the textarea's selection at one range (an empty range is a
+    /// caret). Same offsets, same validation as `highlightRanges`.
+    ///
+    /// REFUSED WHILE THE USER IS COMPOSING through an input method, in
+    /// every backend, because honouring it commits the composition
+    /// mid-word — measured on macOS, where the half-typed kana land in
+    /// the document and in the app's own model. The refusal is a no-op,
+    /// not an error: composition state is on no kaya channel, so an app
+    /// cannot avoid the race and is not blamed for it. The selection the
+    /// app wanted is still worth asking for after the next `onChange`,
+    /// which is what ends a composition.
+    func selectRange(_ w: KayaWidget, _ range: Range<String.Index>, in text: String) {
+        selectRange(w, kayaByteRange(range, in: text))
+    }
+
+    /// The byte-offset floor of `selectRange(_:_:in:)`.
+    func selectRange(_ w: KayaWidget, _ range: Range<Int>) {
+        let (start, stop) = kayaRangeOffsets(range)
+        tx.selectRange(w.id, start, stop)
+    }
+
+    /// Scroll the textarea so a range is inside the viewport. A pure
+    /// effect: it moves no state, leaves the selection alone, and undo
+    /// does not put the scroll position back (undo restores state, not
+    /// where you were looking).
+    func revealRange(_ w: KayaWidget, _ range: Range<String.Index>, in text: String) {
+        revealRange(w, kayaByteRange(range, in: text))
+    }
+
+    /// The byte-offset floor of `revealRange(_:_:in:)`.
+    func revealRange(_ w: KayaWidget, _ range: Range<Int>) {
+        let (start, stop) = kayaRangeOffsets(range)
+        tx.revealRange(w.id, start, stop)
+    }
+
+    /// A `Range<Int>` as the wire's two unsigned offsets. `Range`
+    /// already guarantees lower <= upper, so one bound is the only
+    /// thing left to check — and checking it here names kaya instead of
+    /// letting `UInt64.init` trap with "Negative value is not
+    /// representable", or letting a select_range wrap a negative into a
+    /// nonsense offset the core then reports as past the end.
+    private func kayaRangeOffsets(_ r: Range<Int>) -> (UInt64, UInt64) {
+        precondition(
+            r.lowerBound >= 0,
+            "kaya: a text range starts at \(r.lowerBound) — offsets are UTF-8 byte "
+                + "offsets into the widget's text and cannot be negative")
+        return (UInt64(r.lowerBound), UInt64(r.upperBound))
     }
 
     // --- Construction sugar: the tree reads as a tree ----------------
