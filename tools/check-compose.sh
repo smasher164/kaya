@@ -23,7 +23,7 @@ fi
 # is the swift-typecheck/java-typecheck sibling for the Kotlin layer:
 # seconds warm under the gradle daemon.
 #
-# The two APP modules compile here too, for the same reason one level
+# The three APP modules compile here too, for the same reason one level
 # up: they carry per-scene registration (each MainActivity's scene
 # arm) and the hardware-chord override that forwards to the
 # interpreter's dispatch table. That code is Kotlin no other gate
@@ -49,12 +49,15 @@ gradle --console=plain -q :kaya:compileDebugKotlin || {
     exit 1
 }
 gradle --console=plain -q :milestone2:compileDebugKotlin \
-    :milestone2kt:compileDebugKotlin || {
+    :milestone2kt:compileDebugKotlin :milestone2go:compileDebugKotlin || {
     echo "check-compose: FAIL (an Android app module does not compile)" >&2
     exit 1
 }
-# The Java half of the same two modules — the guests, against the
-# ANDROID java.lang rather than the desktop one. See the note above.
+# The Java half of the two JVM-carrying modules — the guests, against
+# the ANDROID java.lang rather than the desktop one. See the note above.
+# :milestone2go is absent here and only here: its guest is Go, in a .so
+# built by tools/android/run-emulator.sh, and it carries no Java of its
+# own for javac to see.
 gradle --console=plain -q :milestone2:compileDebugJavaWithJavac \
     :milestone2kt:compileDebugJavaWithJavac || {
     echo "check-compose: FAIL (a Java guest does not compile for Android)" >&2

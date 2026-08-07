@@ -134,6 +134,14 @@ GATES = {
     "check-diagnostics": ["crates", "swift", "android", "bindings",
                           "guests", "cmd"],
     "check-verbs": ["crates", "bindings", "swift", "android"],
+    # The two Go source roots the environment rule covers, and nothing
+    # else: the gate parses bindings/go and guests/go and reads no built
+    # artifact. bindings/ and guests/ whole rather than their go/
+    # subdirectories, following this table's own over-approximate rule —
+    # the scanner walks a directory tree, so a NEW Go file is the input
+    # that matters and a key blind to its arrival is the one way this
+    # gate could hand back a stale PASS.
+    "check-go-env": ["bindings", "guests"],
     # The JNI registration cross-check reads the two rust registration
     # modules, the Kotlin classes and the desktop Java class.
     "check-jni": ["crates", "android/kaya/src", "bindings/java-desktop"],

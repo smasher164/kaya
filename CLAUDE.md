@@ -262,6 +262,13 @@ in docs/deferred.md.
    handler — the binding already did, and a guest that opens its own is
    CAMOUFLAGE: five of them hid a real Python defect behind green
    scenes for months),
+   `tools/check-go-env.sh` (a Go guest reads the HOST's environment
+   through kaya.Env, never Go's copy of it: in a c-shared library — the
+   Android artifact — os.Getenv is EMPTY FOREVER while C's getenv reads
+   the live one, and the failure is silent because an empty
+   KAYA_SELFTEST is not an unknown scene name, it is the default arm.
+   A parser rather than a grep, because every file the rule protects
+   documents the rule),
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
    One gate sits outside the sweep because it needs docker — gates.sh
    carries it in EXCLUDED, with that reason, so it is excluded on the

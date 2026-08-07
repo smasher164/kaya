@@ -47,6 +47,7 @@ SOURCES=(
     android/kaya/src/main/kotlin
     android/milestone2/src/main/kotlin
     android/milestone2kt/src/main/kotlin
+    android/milestone2go/src/main/kotlin
 )
 
 for src in "${SOURCES[@]}"; do

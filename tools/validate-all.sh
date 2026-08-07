@@ -121,15 +121,19 @@ if [ "$MODE" = parallel ]; then
         # legitimately slower lane raises its number in the same commit
         # that makes it slower, which is the conversation worth forcing.
         case "$name" in
-            # 540 since 2026-08-04, raised in the commit that made the
-            # lane slower, as this block asks. The lane's own phases grew
-            # ~19s (core-build+gates 116->127s: check-jni, the new
-            # check-steps clauses and their self-tests, swift-typecheck
-            # now compiling tools/ios/clipctl, and -warnings-as-errors on
-            # the interpreter builds); the rest is five-lane contention.
-            # Measured on a quiet host, three consecutive matrices:
-            # 420s, 428s, 442s.
-            mac) budget=540 ;;
+            # 680 since 2026-08-07, raised in the commit that makes the
+            # lane slower, as this block asks. Since 540 was set the lane
+            # gained TWO SCENES (dirty and ranges, nine guests each: 232
+            # -> 258 legs) and FOUR GATES (check-gates, check-diagnostics,
+            # check-native-undo and the Go environment guard; the gate
+            # block is now 122s of the lane, measured). STANDALONE the
+            # lane is 432s — 122s gates + 8s guest builds + 302s legs,
+            # 258 legs, 0 failures, measured on the final tree. Under
+            # five-lane contention today it measured 502, 506, 518, 523
+            # and 547s; the last crossed 540 and forced this. 680 keeps
+            # the same ~1.25x headroom over the contended time that the
+            # other lanes' ceilings keep.
+            mac) budget=680 ;;
             # 420 since 2026-08-07, raised in the commit that made the
             # lane slower, as this block asks. The text-ranges scene added
             # 16 legs (rust and the C floor, both protocols, plus the

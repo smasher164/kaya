@@ -3017,6 +3017,195 @@ func (a *App) OnToggleNode(n Node, fn func(*Tx, []any, bool)) {
 	a.nodeToggles[n.id] = fn
 }
 
+// Serve dispatches occurrences ON THE CALLING GOROUTINE and returns
+// when the core has shut down. This is the app thread's whole job, and
+// it is separate from Run because WHO OWNS THE PROCESS ENTRY differs by
+// platform and nothing else does.
+//
+// On the desktops and iOS the guest owns main and LENDS it to kaya, so
+// Run spawns this loop on a second goroutine and hands the calling
+// thread to kaya_run. On Android the OS owns main (Zygote forks the
+// process, ActivityThread owns the Looper) and kaya_run is a hard panic
+// — crates/kaya/src/capi.rs:815-818 — so the shim Activity attaches and
+// the guest runs this loop on a thread the attach entry started, which
+// is what bindings/go/android.go does.
+//
+// The JVM tier already spells exactly this split, and its two launchers
+// are the shape to compare against: KayaApp.dispatchLoop() is this
+// function, guests/java-desktop/.../Main.java is Run's half, and
+// android/milestone2kt/.../MainActivity.kt:29-90 is the attach half.
+//
+// A guest never calls this directly on a platform where Run works.
+func (a *App) Serve() {
+	for {
+		// Posted work first, then the ring, then park. Draining at
+		// the TOP is what makes a wake sufficient: whatever reason
+		// the goroutine came back for, it looks here before it looks
+		// anywhere else. Posts queued after the core shuts down are
+		// dropped — the last drain before the false below is the
+		// last one there is.
+		a.drainPosted()
+		kind, id, keys, payload, ready := PollOccurrence()
+		if !ready {
+			if !WaitOccurrences() {
+				return // shutdown
+			}
+			continue
+		}
+		text, _ := payload.(string)
+		checked, _ := payload.(bool)
+		value, _ := payload.(float64)
+		choice, _ := payload.(uint32)
+		files, _ := payload.([]PickedFile)
+		clipValues, isClip := payload.(ClipValues)
+		undo, isUndo := payload.(undoReport)
+		switch {
+		case kind == occButtonClicked && len(keys) == 0:
+			if fn := a.widgetHandlers[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occButtonClicked:
+			if fn := a.nodeHandlers[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys) })
+			}
+		case kind == occTextChanged && len(keys) == 0:
+			if fn := a.widgetChanges[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, text) })
+			}
+		case kind == occTextChanged:
+			if fn := a.nodeChanges[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, text) })
+			}
+		case kind == occToggled && len(keys) == 0:
+			if fn := a.widgetToggles[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, checked) })
+			}
+		case kind == occToggled:
+			if fn := a.nodeToggles[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, checked) })
+			}
+		case kind == occValueChanged && len(keys) == 0:
+			if fn := a.widgetValues[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, value) })
+			}
+		case kind == occCloseRequested:
+			if fn := a.closeRequested[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occWindowClosed:
+			// One-shot: the window is gone; both registrations
+			// retire with it.
+			delete(a.closeRequested, id)
+			if fn := a.windowClosed[id]; fn != nil {
+				delete(a.windowClosed, id)
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occEntryPopped:
+			// One-shot: the entry is gone; both registrations
+			// retire with it.
+			delete(a.backRequested, id)
+			if fn := a.entryPopped[id]; fn != nil {
+				delete(a.entryPopped, id)
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occSectionSelected:
+			// NOT one-shot: sections never die, and the user can
+			// return any number of times (id is the section; the
+			// window rides as the payload). A programmatic
+			// SelectSection never lands here (the echo doctrine).
+			if fn := a.sectionSelected[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occBackRequested:
+			if fn := a.backRequested[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occAlertResult:
+			// One-shot: the registration retires with the result.
+			if fn := a.alerts[id]; fn != nil {
+				delete(a.alerts, id)
+				a.dispatch(func(tx *Tx) { fn(tx, choice) })
+			}
+		case kind == occClipboardResult:
+			// One-shot like the alert, and the request retires with
+			// it. EMPTY IS THE UNIVERSAL NO and arrives as a nil
+			// Representation — denied, unfocused, absent and
+			// nothing-we-accept alike, because no platform says which.
+			if fn := a.clipboardReads[id]; fn != nil {
+				delete(a.clipboardReads, id)
+				clip := representation(clipValues)
+				a.dispatch(func(tx *Tx) { fn(tx, clip) })
+			}
+		// A paste rides a click tag verbatim, so it arrives on the
+		// ordinary widget/node split — one record kind, the key path
+		// deciding. Never empty: a paste that delivered nothing is
+		// not an occurrence.
+		case kind == occPasted && len(keys) == 0:
+			if fn := a.widgetPastes[id]; fn != nil && isClip {
+				clip := representation(clipValues)
+				a.dispatch(func(tx *Tx) { fn(tx, clip) })
+			}
+		case kind == occPasted:
+			if fn := a.nodePastes[id]; fn != nil && isClip {
+				clip := representation(clipValues)
+				a.dispatch(func(tx *Tx) { fn(tx, keys, clip) })
+			}
+		// An undo moved core state without a transaction, so the
+		// model mirror follows HERE, before any handler and whether
+		// or not one is registered — an app that never asked to hear
+		// about undo still reads its own collection back correctly.
+		// The window is the id; the ledger is per window.
+		case (kind == occUndone || kind == occRedone) && isUndo:
+			a.absorbUndo(undo.delta)
+			table := a.undone
+			if kind == occRedone {
+				table = a.redone
+			}
+			if fn := table[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, undo.label, undo.delta) })
+			}
+		case kind == occFileDialogResult:
+			// One-shot like the alert, and the id retires with it.
+			// EMPTY IS CANCEL — no platform can confirm an empty
+			// selection, so there is no sentinel to invent.
+			if fn := a.fileDialogs[id]; fn != nil {
+				delete(a.fileDialogs, id)
+				a.dispatch(func(tx *Tx) { fn(tx, files) })
+			}
+		// Menu occurrences key the menu-item tables — their own
+		// id space, so neither widget nor node ids can collide
+		// with them. Node-anchored context items carry the
+		// stamped copy's keys (the keys ARE the noun); toggles
+		// carry the new state, radio groups the new 0-based
+		// index.
+		case kind == occMenuActivated && len(keys) == 0:
+			if fn := a.menuActivated[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occMenuActivated:
+			if fn := a.menuActivatedNode[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys) })
+			}
+		case kind == occMenuToggled && len(keys) == 0:
+			if fn := a.menuToggled[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, checked) })
+			}
+		case kind == occMenuToggled:
+			if fn := a.menuToggledNode[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, checked) })
+			}
+		case kind == occMenuValueChanged && len(keys) == 0:
+			if fn := a.menuSelected[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, int(value)) })
+			}
+		case kind == occMenuValueChanged:
+			if fn := a.menuSelectedNode[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, int(value)) })
+			}
+		}
+	}
+}
+
 // Run enters the core on the calling goroutine's thread (which must be
 // the process main thread; use runtime.LockOSThread in an init
 // function), dispatching occurrences on a second goroutine. Returns the
@@ -3025,173 +3214,7 @@ func (a *App) Run() int {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for {
-			// Posted work first, then the ring, then park. Draining at
-			// the TOP is what makes a wake sufficient: whatever reason
-			// the goroutine came back for, it looks here before it looks
-			// anywhere else. Posts queued after the core shuts down are
-			// dropped — the last drain before the false below is the
-			// last one there is.
-			a.drainPosted()
-			kind, id, keys, payload, ready := PollOccurrence()
-			if !ready {
-				if !WaitOccurrences() {
-					return // shutdown
-				}
-				continue
-			}
-			text, _ := payload.(string)
-			checked, _ := payload.(bool)
-			value, _ := payload.(float64)
-			choice, _ := payload.(uint32)
-			files, _ := payload.([]PickedFile)
-			clipValues, isClip := payload.(ClipValues)
-			undo, isUndo := payload.(undoReport)
-			switch {
-			case kind == occButtonClicked && len(keys) == 0:
-				if fn := a.widgetHandlers[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx) })
-				}
-			case kind == occButtonClicked:
-				if fn := a.nodeHandlers[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, keys) })
-				}
-			case kind == occTextChanged && len(keys) == 0:
-				if fn := a.widgetChanges[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, text) })
-				}
-			case kind == occTextChanged:
-				if fn := a.nodeChanges[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, keys, text) })
-				}
-			case kind == occToggled && len(keys) == 0:
-				if fn := a.widgetToggles[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, checked) })
-				}
-			case kind == occToggled:
-				if fn := a.nodeToggles[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, keys, checked) })
-				}
-			case kind == occValueChanged && len(keys) == 0:
-				if fn := a.widgetValues[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, value) })
-				}
-			case kind == occCloseRequested:
-				if fn := a.closeRequested[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx) })
-				}
-			case kind == occWindowClosed:
-				// One-shot: the window is gone; both registrations
-				// retire with it.
-				delete(a.closeRequested, id)
-				if fn := a.windowClosed[id]; fn != nil {
-					delete(a.windowClosed, id)
-					a.dispatch(func(tx *Tx) { fn(tx) })
-				}
-			case kind == occEntryPopped:
-				// One-shot: the entry is gone; both registrations
-				// retire with it.
-				delete(a.backRequested, id)
-				if fn := a.entryPopped[id]; fn != nil {
-					delete(a.entryPopped, id)
-					a.dispatch(func(tx *Tx) { fn(tx) })
-				}
-			case kind == occSectionSelected:
-				// NOT one-shot: sections never die, and the user can
-				// return any number of times (id is the section; the
-				// window rides as the payload). A programmatic
-				// SelectSection never lands here (the echo doctrine).
-				if fn := a.sectionSelected[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx) })
-				}
-			case kind == occBackRequested:
-				if fn := a.backRequested[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx) })
-				}
-			case kind == occAlertResult:
-				// One-shot: the registration retires with the result.
-				if fn := a.alerts[id]; fn != nil {
-					delete(a.alerts, id)
-					a.dispatch(func(tx *Tx) { fn(tx, choice) })
-				}
-			case kind == occClipboardResult:
-				// One-shot like the alert, and the request retires with
-				// it. EMPTY IS THE UNIVERSAL NO and arrives as a nil
-				// Representation — denied, unfocused, absent and
-				// nothing-we-accept alike, because no platform says which.
-				if fn := a.clipboardReads[id]; fn != nil {
-					delete(a.clipboardReads, id)
-					clip := representation(clipValues)
-					a.dispatch(func(tx *Tx) { fn(tx, clip) })
-				}
-			// A paste rides a click tag verbatim, so it arrives on the
-			// ordinary widget/node split — one record kind, the key path
-			// deciding. Never empty: a paste that delivered nothing is
-			// not an occurrence.
-			case kind == occPasted && len(keys) == 0:
-				if fn := a.widgetPastes[id]; fn != nil && isClip {
-					clip := representation(clipValues)
-					a.dispatch(func(tx *Tx) { fn(tx, clip) })
-				}
-			case kind == occPasted:
-				if fn := a.nodePastes[id]; fn != nil && isClip {
-					clip := representation(clipValues)
-					a.dispatch(func(tx *Tx) { fn(tx, keys, clip) })
-				}
-			// An undo moved core state without a transaction, so the
-			// model mirror follows HERE, before any handler and whether
-			// or not one is registered — an app that never asked to hear
-			// about undo still reads its own collection back correctly.
-			// The window is the id; the ledger is per window.
-			case (kind == occUndone || kind == occRedone) && isUndo:
-				a.absorbUndo(undo.delta)
-				table := a.undone
-				if kind == occRedone {
-					table = a.redone
-				}
-				if fn := table[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, undo.label, undo.delta) })
-				}
-			case kind == occFileDialogResult:
-				// One-shot like the alert, and the id retires with it.
-				// EMPTY IS CANCEL — no platform can confirm an empty
-				// selection, so there is no sentinel to invent.
-				if fn := a.fileDialogs[id]; fn != nil {
-					delete(a.fileDialogs, id)
-					a.dispatch(func(tx *Tx) { fn(tx, files) })
-				}
-			// Menu occurrences key the menu-item tables — their own
-			// id space, so neither widget nor node ids can collide
-			// with them. Node-anchored context items carry the
-			// stamped copy's keys (the keys ARE the noun); toggles
-			// carry the new state, radio groups the new 0-based
-			// index.
-			case kind == occMenuActivated && len(keys) == 0:
-				if fn := a.menuActivated[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx) })
-				}
-			case kind == occMenuActivated:
-				if fn := a.menuActivatedNode[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, keys) })
-				}
-			case kind == occMenuToggled && len(keys) == 0:
-				if fn := a.menuToggled[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, checked) })
-				}
-			case kind == occMenuToggled:
-				if fn := a.menuToggledNode[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, keys, checked) })
-				}
-			case kind == occMenuValueChanged && len(keys) == 0:
-				if fn := a.menuSelected[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, int(value)) })
-				}
-			case kind == occMenuValueChanged:
-				if fn := a.menuSelectedNode[id]; fn != nil {
-					a.dispatch(func(tx *Tx) { fn(tx, keys, int(value)) })
-				}
-			}
-		}
+		a.Serve()
 	}()
 	code := Run()
 	<-done

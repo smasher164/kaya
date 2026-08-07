@@ -88,9 +88,17 @@ var noteBytes = []byte("note=1")
 // guests/rust/clipboard.rs `#[cfg(target_os = "ios")] fn scene_root`,
 // guests/swift/clipboard.swift `#if os(iOS)`. runtime.GOOS is a
 // compile-time constant, so the branch not taken is not compiled in.
+//
+// HOME COMES FROM kaya.Env AND NEVER FROM os.Getenv. os.Getenv would be
+// right here today — this branch is iOS, where the guest owns main and
+// Go's environment is filled — and wrong the moment the same read is
+// copied into an Android arm, where the guest is a loaded .so and Go's
+// copy of the environment is empty forever. One spelling everywhere is
+// what stops that copy being a defect (docs/go-mobile-plan.md D2;
+// tools/check-go-env.sh).
 func sceneRoot() string {
 	if runtime.GOOS == "ios" {
-		return filepath.Join(os.Getenv("HOME"), "Documents")
+		return filepath.Join(kaya.Env("HOME"), "Documents")
 	}
 	return os.TempDir()
 }

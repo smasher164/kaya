@@ -32,18 +32,19 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"runtime"
 
 	kaya "dev.kaya/bindings/go"
 )
 
-func init() {
-	// The core must own the process main thread.
-	runtime.LockOSThread()
-}
-
-func main() {
+// milestone2 builds the scene and hands it back ready to be served.
+// THE TAIL IS THE ONLY THING THAT DIFFERS BY PLATFORM, and it differs
+// because the hosting does: a desktop or iOS guest owns the process main
+// thread and lends it to kaya (main_desktop.go), while on Android the OS
+// owns main and kaya starts the guest on a thread of its own
+// (main_android.go). Everything above the tail — the transaction, the
+// handlers, the strings — is one body, compiled into every platform's
+// artifact from these bytes.
+func milestone2() *kaya.App {
 	app := kaya.NewApp()
 
 	// The two handles the central registration below needs, plus the
@@ -123,5 +124,5 @@ func main() {
 		tx.Write(status, fmt.Sprintf("removed %s/%s, %d left", group, item, left))
 	})
 
-	os.Exit(app.Run())
+	return app
 }

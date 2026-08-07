@@ -147,6 +147,12 @@ GATES = [
     ("check-ambient-tx", ["tools/check-ambient-tx.sh"], False,
      "no input set is declared for it in build-id.sh's GATES; same shape as "
      "check-tx-liveness above"),
+    # A Go guest reads the HOST's environment, never Go's copy of it: in
+    # a c-shared library (Android) os.Getenv is empty forever while C's
+    # getenv reads the live one, and an empty KAYA_SELFTEST is not an
+    # unknown scene name, it is the default arm. Pure source scan; its
+    # four self-tests run first, inside it.
+    ("check-go-env", ["tools/check-go-env.sh"], True, ""),
     ("check-build-id", ["tools/check-build-id.sh"], False,
      "it inspects the built libkaya and the built interpreter; this is THE "
      "gate that must never be answered from a cache"),

@@ -15,8 +15,19 @@
 // macOS build — the failure is `ld: building for 'iOS-simulator', but
 // linking in dylib built for 'macOS'`, at the end of a cross-build that
 // looked fine until then. `darwin,!ios` is what keeps the two apart.
-// (GOOS=android satisfies `linux` the same way; the Android arm gets
-// the matching `linux,!android` split when it lands its target dir.)
+// GOOS=android satisfies `linux` exactly the same way, and its own line
+// points at the NDK-built target dir the android lane fills
+// (target/aarch64-linux-android/debug/libkaya.so, the same .so the APK
+// carries in jniLibs) — so `linux,!android` is the second half of the
+// same rule.
+//
+// Android names -lkaya rather than a path because the artifact is a
+// SHARED library there and the app's linker resolves it at load time:
+// the APK ships libkaya.so beside the guest's own .so, and both are
+// found by SONAME under the app's linker namespace. That is the
+// opposite of the iOS line below for the opposite reason — iOS has one
+// executable and nowhere to put a dylib, Android has a jniLibs
+// directory and a linker namespace that already holds one.
 //
 // The ios line NAMES THE ARCHIVE BY PATH rather than using -L/-lkaya,
 // and that is not a style choice: target/aarch64-apple-ios-sim/debug
@@ -40,7 +51,8 @@ package kaya
 #cgo darwin,!ios LDFLAGS: -L${SRCDIR}/../../target/debug -lkaya -Wl,-rpath,${SRCDIR}/../../target/debug
 #cgo ios LDFLAGS: ${SRCDIR}/../../target/aarch64-apple-ios-sim/debug/libkaya.a -framework UIKit -framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore
 #cgo windows LDFLAGS: -L${SRCDIR}/../.. -L${SRCDIR}/../../target/aarch64-pc-windows-msvc/release -lkaya
-#cgo linux LDFLAGS: -L${SRCDIR}/../../target-linux/debug -lkaya -Wl,-rpath,${SRCDIR}/../../target-linux/debug
+#cgo linux,!android LDFLAGS: -L${SRCDIR}/../../target-linux/debug -lkaya -Wl,-rpath,${SRCDIR}/../../target-linux/debug
+#cgo android LDFLAGS: -L${SRCDIR}/../../target/aarch64-linux-android/debug -lkaya
 #include <kaya.h>
 */
 import "C"
@@ -57,6 +69,51 @@ var ring C.KayaRingInfo
 // Init fetches the ring layout. Call once, before the occurrence loop.
 func Init() {
 	C.kaya_occurrence_ring(&ring)
+}
+
+// Env reads one environment variable AS THE HOST PROCESS SEES IT, and
+// is the only spelling a kaya guest may use. Empty when unset; use
+// LookupEnv to tell an unset variable from one set to the empty string.
+//
+// os.Getenv IS NOT AN ALTERNATIVE SPELLING OF THIS, AND ON ANDROID IT
+// IS SILENTLY WRONG. Go fills runtime.envs from the envp handed to the
+// PROCESS ENTRY. An -buildmode=c-shared library loaded by
+// System.loadLibrary never sees one, so Go's view of the environment is
+// empty forever while C's getenv(3) reads the live `environ` the host
+// wrote — measured side by side in a real app process
+// (mobilepkg-go.md §4.4): os.Getenv("KAYA_SELFTEST") == "" and
+// len(os.Environ()) == 0 while C.getenv("KAYA_SELFTEST") == "milestone2".
+//
+// The consequence is the reason this function exists rather than a
+// comment somewhere. kaya picks its scene by name from KAYA_SELFTEST,
+// and the selector's guard is a panic on an UNKNOWN name — but "" is
+// not an unknown name, it is the default arm, so the idiomatic Go
+// spelling runs milestone2 against every other scene's script and fails
+// every step for the wrong reason. It works on iOS, where the guest is
+// -buildmode=exe and Go owns main, so the natural build order tests the
+// broken call on the platform where it is not broken.
+//
+// tools/check-go-env.sh keeps os.Getenv/os.LookupEnv/os.Environ out of
+// bindings/go and guests/go, because nothing at compile time or run
+// time can tell the two spellings apart: both compile everywhere, and
+// on Android both return a value — one right, one empty.
+func Env(name string) string {
+	value, _ := LookupEnv(name)
+	return value
+}
+
+// LookupEnv is Env with the found bit, for a caller that must tell
+// unset from set-to-empty. Same C view, same reason.
+func LookupEnv(name string) (string, bool) {
+	key := C.CString(name)
+	defer C.free(unsafe.Pointer(key))
+	// getenv returns a pointer INTO the host's environ, live and
+	// borrowed; GoString copies before anything can rewrite it.
+	value := C.getenv(key)
+	if value == nil {
+		return "", false
+	}
+	return C.GoString(value), true
 }
 
 // Run enters the core on the calling thread (which must be the process

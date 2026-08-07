@@ -26,7 +26,7 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # Build, install, and self-test the milestone scene in the Android emulator.
-# Usage: tools/android/run-emulator.sh [compose|jvm|all]
+# Usage: tools/android/run-emulator.sh [compose|jvm|go|all]
 #
 # rust    - the milestone-0 app logic as a Rust cdylib behind the JNI
 #           entry (android.widget backend driven over JNI)
@@ -34,6 +34,9 @@ fi
 #           direct ring tier (Unsafe fenced access on raw addresses)
 # compose - the rust app on the Compose interpreter (the one Android
 #           backend)
+# go      - a Go guest as a c-shared .so on the same direct ring, loaded
+#           and attached by a shell Activity (docs/go-mobile-plan.md D1);
+#           milestone2 only until the scene-library split (D3 step 3)
 #
 # Run inside the dev shell (direnv or `nix develop`); the SDK, emulator,
 # NDK, JDK, and Gradle all come from the flake. stdout is invisible to an
@@ -623,7 +626,18 @@ run_apk_on() {
         # A guest that never printed a verdict crashed before dispatch;
         # the kaya-tag filter above cannot see that, so surface the
         # runtime's own crash log.
-        adb -s "$serial" logcat -d -s AndroidRuntime:E | tail -30
+        #
+        # THREE TAGS, NOT ONE, and the second was paid for. AndroidRuntime
+        # carries JVM exceptions only. A GO guest's panic goes to Go's
+        # runtime log under the tag `Go`, so a Go crash used to leave this
+        # branch printing NOTHING AT ALL — 60 seconds of logcat timeout
+        # and then a bare `FAIL`, with the message that names the cause
+        # sitting in the buffer under a tag nobody asked for. Measured
+        # 2026-08-07 while watching the environment guard fail: the panic
+        # said exactly what to do next and the leg never showed it.
+        # DEBUG:F is the tombstone header, which covers the rest of the
+        # native aborts (any language) the same way.
+        adb -s "$serial" logcat -d -s AndroidRuntime:E Go:E DEBUG:F | tail -30
         failed=1
     fi
     [ "$failed" = 0 ]
@@ -734,6 +748,99 @@ public final class KayaBuildId {
     private KayaBuildId() {}
 }
 EOF
+}
+
+# THE GO GUEST'S ARTIFACT: a `-buildmode=c-shared` .so the shell Activity
+# loads beside libkaya.so, which is the JVM guest's packaging shape and
+# not the Rust one (the Rust guest carries a statically-linked kaya
+# inside a 48 MB .so; here kaya is a NEEDED, resolved by the app's
+# linker). docs/go-mobile-plan.md D1.
+#
+# THREE THINGS THIS FUNCTION REFUSES TO ASSUME, each of which fails far
+# from its cause when it is wrong:
+#
+#   1. THE NDK API LEVEL FOLLOWS THE MODULE'S minSdk, read out of the
+#      module's own build.gradle.kts rather than written twice. A guest
+#      cross-built against a newer platform than the manifest claims
+#      links fine here and dies at load time on the device with a
+#      relocation nobody can read.
+#   2. THE JNI SYMBOL MUST BE IN THE BUILT .so. It is the one name that
+#      binds android/kaya/.../KayaGo.kt to bindings/go/android.go, and
+#      NO COMPILER ON EITHER SIDE CHECKS IT — rename either half and the
+#      failure is an UnsatisfiedLinkError inside onCreate, after an
+#      install and a boot, reported as a leg that never printed a
+#      verdict. Two seconds of llvm-nm here instead.
+#   3. `go build` writes its output even when the link only half
+#      succeeded? No — but the COPY into jniLibs is what gradle
+#      packages, so the build lands in target/ and the copy is what gets
+#      checked, the same order the cargo-ndk steps below use.
+kaya_go_build() { # scene lib-name jnilibs-dir
+    local scene="$1" lib="$2" jnilibs="$3"
+    local module="$ROOT/android/milestone2go/build.gradle.kts"
+    local api ndkbin out
+    api="$(python3 - "$module" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text()
+# The one `minSdk = N` in the module, ignoring comment lines — the
+# comment above it explains this very coupling and names the number.
+for line in text.splitlines():
+    if line.lstrip().startswith("//"):
+        continue
+    m = re.search(r"\bminSdk\s*=\s*(\d+)", line)
+    if m:
+        print(m.group(1))
+        break
+else:
+    sys.exit(f"run-emulator: {sys.argv[1]} declares no minSdk, so the Go guest "
+             f"has no platform to cross-build against")
+PY
+)"
+    local rc=$?
+    if [ "$rc" -ne 0 ] || [ -z "$api" ]; then
+        echo "run-emulator: could not read minSdk from $module" >&2
+        return 1
+    fi
+    ndkbin="$(echo "$ANDROID_NDK_ROOT"/toolchains/llvm/prebuilt/*/bin)"
+    if [ ! -x "$ndkbin/aarch64-linux-android$api-clang" ]; then
+        echo "run-emulator: the NDK has no aarch64-linux-android$api-clang" >&2
+        echo "  (looked in $ndkbin; minSdk $api comes from $module)" >&2
+        return 1
+    fi
+    mkdir -p "$ROOT/target/go-android"
+    # cgo uses CC to LINK as well as to compile, so the cross compiler
+    # rides CC and the #cgo android line in bindings/go/runtime.go
+    # carries -L…/aarch64-linux-android/debug -lkaya. That directory is
+    # filled by the cargo ndk build at the callsite, above this.
+    CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
+        CC="$ndkbin/aarch64-linux-android$api-clang" \
+        go build -buildmode=c-shared \
+        -o "$ROOT/target/go-android/lib$lib.so" "dev.kaya/guests/go/$scene"
+    local build_rc=$?
+    if [ "$build_rc" -ne 0 ]; then
+        echo "run-emulator: the Go guest for $scene did not cross-build" >&2
+        return 1
+    fi
+    cp "$ROOT/target/go-android/lib$lib.so" "$jnilibs/" || return 1
+    # THE LEADING SPACE IS THE POINT. llvm-nm prints `<addr> T <name>`,
+    # and cgo emits a SECOND symbol for every //export — the generated
+    # trampoline `_cgoexp_<hash>_Java_dev_kaya_KayaGo_attach`, which ends
+    # in the same characters. An end-anchor alone counts two and this
+    # check refuses a correct build. (Measured on the first run of this
+    # very block: "found 2".)
+    out="$("$ndkbin/llvm-nm" -D --defined-only "$jnilibs/lib$lib.so" 2>/dev/null \
+        | grep -c ' Java_dev_kaya_KayaGo_attach$')"
+    if [ "$out" != 1 ]; then
+        echo "run-emulator: lib$lib.so does not export exactly one" >&2
+        echo "  Java_dev_kaya_KayaGo_attach (found $out). That symbol is the whole" >&2
+        echo "  contract between android/kaya/src/main/kotlin/dev/kaya/KayaGo.kt" >&2
+        echo "  and the //export in bindings/go/android.go; nothing else checks" >&2
+        echo "  it, and the failure on a device is an UnsatisfiedLinkError in" >&2
+        echo "  onCreate that reads as a leg which never printed a verdict." >&2
+        return 1
+    fi
 }
 
 if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
@@ -1179,6 +1286,55 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script undo)'"
     drain
     timing legs-jvm
+fi
+
+# THE GO SUITE: the third language on this host, and the first one whose
+# guest is neither Rust nor a JVM language. The composition is the JVM
+# suite's, line for line — libkaya.so in jniLibs, the Compose interpreter
+# as the backend, KayaRing.attach for the pump, the direct occurrence
+# ring as the transport — with ONE difference, and it is forced: the JVM
+# shell can start a JVM guest's thread itself, and it has no way to call
+# a Go function, so the guest's own .so is asked to start the thread
+# (KayaGo.attach -> bindings/go/android.go). docs/go-mobile-plan.md D1.
+#
+# ONE SCENE, DELIBERATELY, and this is the half that has to be said out
+# loud because nothing enforces it: check-steps' wired() keys on scene x
+# runner and never on language, so a Go suite that stalled here would
+# leave every gate green. `milestone2` is D3 step 2's whole scope — one
+# scene green end to end before any fan-out — because the other 31 need
+# the scene-library split (D3 step 3), which turns each guest's `main`
+# into a callable and touches the desktop lanes' invocation shape. The
+# subset is argued in the plan, and any future divergence from "all of
+# them" has to be written down right here.
+if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
+    JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
+    mkdir -p "$JNILIBS"
+    # The same libkaya.so the JVM suite ships, built the same way and
+    # verified the same way — the Go guest NEEDs it by SONAME and the
+    # app's linker resolves it out of this directory at load time.
+    cargo ndk -t arm64-v8a build --locked --lib || exit 1
+    cp "$ROOT/target/aarch64-linux-android/debug/libkaya.so" "$JNILIBS/"
+    "$ROOT/tools/build-id.sh" --verify "$JNILIBS/libkaya.so" || exit 1
+    # NO --verify ON THE GO .so, and that is the honest answer rather
+    # than a gap: the build id lives inside libkaya, and here libkaya is
+    # a SHARED library the guest merely names — so the guest carries no
+    # marker, exactly as milestone2kt's guest classes carry none. (On
+    # iOS the same Go sources DO carry it, because there kaya is a static
+    # archive linked in, and tools/ios/run-sim.sh verifies it for that
+    # reason.) What can go stale here is libkaya and the interpreter, and
+    # both are verified — above and below.
+    kaya_go_build milestone2 milestone2go "$JNILIBS" || exit 1
+    kaya_write_compose_marker
+    (cd android && gradle --console=plain -q :milestone2go:assembleDebug) || exit 1
+    "$ROOT/tools/build-id.sh" --verify --component compose \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" || exit 1
+    timing build-go
+    run_apk go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity 1 \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script milestone2)'"
+    drain
+    timing legs-go
 fi
 
 exit "$status"

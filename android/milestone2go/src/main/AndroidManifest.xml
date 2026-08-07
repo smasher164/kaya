@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:label="kaya milestone 0 (go)"
+        android:theme="@android:style/Theme.Material.Light">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- THE HARNESS'S EYES OUTSIDE THIS APP, declared by the
+             validation apps and never by the kaya library, so a user's
+             app never carries an accessibility service it did not ask
+             for. The reasoning is spelled once, in milestone2kt's
+             manifest. Declared here even though the go suite runs one
+             scene that needs no picker: tools/android/run-emulator.sh
+             enables and WAITS FOR this service on every leg it runs,
+             and an app that does not declare it fails the bind wait
+             three arms and a reboot later, saying the picker never
+             appeared. -->
+        <service
+            android:name="dev.kaya.KayaHarnessAccessibility"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/kaya_harness_accessibility" />
+        </service>
+    </application>
+</manifest>
