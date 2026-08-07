@@ -67,16 +67,42 @@ const noteID = "dev.kaya/note"
 // spelled in the expectation.
 var noteBytes = []byte("note=1")
 
+// sceneRoot is where this scene keeps the files an OUTSIDE process has
+// to reach, and it is not the temp directory everywhere.
+//
+// On the desktops os.TempDir is Go's OWN answer to "where is temp",
+// which is what lets guest and interpreter agree on a path without
+// either consulting the other (the filedialog rule).
+//
+// ON iOS IT IS THE APP'S OWN Documents DIRECTORY INSTEAD, because the
+// reader is outside the app: `simctl` and the document picker browse
+// PROVIDERS and cannot see another app's private container, so a file
+// written to TMPDIR there is written where nothing looks. The bundle's
+// UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace
+// (tools/ios/Info.plist.in) are what make Documents browsable at all.
+// HOME is the app container in every iOS process, so both halves still
+// compute the same place from the same rule — the interpreter spells it
+// NSHomeDirectory()/Documents (swift/KayaSwiftUI.swift's kayaTempDir).
+//
+// This is the Go spelling of a carve-out the other guests already have:
+// guests/rust/clipboard.rs `#[cfg(target_os = "ios")] fn scene_root`,
+// guests/swift/clipboard.swift `#if os(iOS)`. runtime.GOOS is a
+// compile-time constant, so the branch not taken is not compiled in.
+func sceneRoot() string {
+	if runtime.GOOS == "ios" {
+		return filepath.Join(os.Getenv("HOME"), "Documents")
+	}
+	return os.TempDir()
+}
+
 func main() {
 	app := kaya.NewApp()
 
 	// Both halves compute this identically, the filedialog rule: guest
 	// and interpreter are the same process, so they agree on a path with
 	// no runner involvement, and the pid keeps parallel legs from
-	// colliding. os.TempDir is Go's OWN answer to "where is temp", which
-	// is what makes the two halves agree without either consulting the
-	// other.
-	dir := filepath.Join(os.TempDir(), "kaya-clip-"+strconv.Itoa(os.Getpid()))
+	// colliding.
+	dir := filepath.Join(sceneRoot(), "kaya-clip-"+strconv.Itoa(os.Getpid()))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		panic("failed to make the scene's directory: " + err.Error())
 	}

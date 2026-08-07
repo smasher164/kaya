@@ -8,11 +8,37 @@
 // kaya.h. Call Init once, run the occurrence loop on one goroutine, and
 // give kaya the process main thread via Run (runtime.LockOSThread in
 // the caller's init).
+//
+// THE #cgo LINES ARE PER-PLATFORM AND THE NEGATIONS ARE LOAD-BEARING.
+// GOOS=ios also satisfies the `darwin` build tag, so an unqualified
+// `#cgo darwin` line answers for iOS too and points the link at the
+// macOS build — the failure is `ld: building for 'iOS-simulator', but
+// linking in dylib built for 'macOS'`, at the end of a cross-build that
+// looked fine until then. `darwin,!ios` is what keeps the two apart.
+// (GOOS=android satisfies `linux` the same way; the Android arm gets
+// the matching `linux,!android` split when it lands its target dir.)
+//
+// The ios line NAMES THE ARCHIVE BY PATH rather than using -L/-lkaya,
+// and that is not a style choice: target/aarch64-apple-ios-sim/debug
+// holds both libkaya.a and libkaya.dylib, and ld64 prefers the dylib
+// when both answer -lkaya. A bundle linked that way carries an absolute
+// build-machine path to a library outside itself and runs only in the
+// Simulator, where the host filesystem happens to be visible — which is
+// exactly the defect the Swift leg still has (mobilepkg-contract.md
+// §1.2). Naming the .a is what makes the bundle self-contained, and
+// `otool -L` is what proves it.
+//
+// The path is the SIMULATOR triple because that is the only iOS the
+// lane runs (tools/ios/run-sim.sh; bundles are unsigned, no device is
+// attached). A device build wants
+// target/aarch64-apple-ios/debug/libkaya.a instead; it fails loudly at
+// link time rather than silently, ld naming both platforms.
 package kaya
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../crates/kaya/include -I${SRCDIR}/../.. -I${SRCDIR}
-#cgo darwin LDFLAGS: -L${SRCDIR}/../../target/debug -lkaya -Wl,-rpath,${SRCDIR}/../../target/debug
+#cgo darwin,!ios LDFLAGS: -L${SRCDIR}/../../target/debug -lkaya -Wl,-rpath,${SRCDIR}/../../target/debug
+#cgo ios LDFLAGS: ${SRCDIR}/../../target/aarch64-apple-ios-sim/debug/libkaya.a -framework UIKit -framework Foundation -framework CoreFoundation -framework CoreGraphics -framework QuartzCore
 #cgo windows LDFLAGS: -L${SRCDIR}/../.. -L${SRCDIR}/../../target/aarch64-pc-windows-msvc/release -lkaya
 #cgo linux LDFLAGS: -L${SRCDIR}/../../target-linux/debug -lkaya -Wl,-rpath,${SRCDIR}/../../target-linux/debug
 #include <kaya.h>

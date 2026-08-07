@@ -1202,23 +1202,31 @@ for n, line in joined:
                    f"— the host-side seed/read bridge is started there and nowhere else, "
                    f"and iOS cannot answer either verb in the guest process")
 
-# The swift guests are legs too, spelled as a list rather than as calls.
-scenes = re.search("IOS_SWIFT_SCENES=\"([^\"]*)\"", text)
-if scenes is None:
-    bad.append(f"{path}: IOS_SWIFT_SCENES is not where this gate looks — the runner shape "
-               f"moved and the swift half of the check went vacuous")
-elif any(entry.split(":")[0] == "clipboard" for entry in scenes.group(1).split()):
+# The guest-language suites are legs too, spelled as a list rather than
+# as calls. EVERY such list is read, not the swift one by name: the go
+# suite arrived as a second IOS_<LANG>_SCENES list driving its legs
+# through the same loop, and a gate that knew only the first name would
+# have gone half-vacuous the moment it landed — green, while the
+# clipboard leg of a whole suite answered to nobody.
+lists = list(re.finditer("IOS_([A-Z0-9]+)_SCENES=\"([^\"]*)\"", text))
+if not lists:
+    bad.append(f"{path}: no IOS_<LANG>_SCENES list is where this gate looks — the runner "
+               f"shape moved and the guest-suite half of the check went vacuous")
+for scenes in lists:
+    lang = scenes.group(1)
+    if not any(entry.split(":")[0] == "clipboard" for entry in scenes.group(2).split()):
+        continue
     seen += 1
     block = text[scenes.end():]
     stop = block.find("\n    drain\n")
     if stop >= 0:
         block = block[:stop]
     if "queue_pad_leg" in block:
-        bad.append(f"{path}: clipboard is in IOS_SWIFT_SCENES and that block queues with "
+        bad.append(f"{path}: clipboard is in IOS_{lang}_SCENES and that block queues with "
                    f"queue_pad_leg — the pad is one lockless device")
     if "queue_leg " not in block:
-        bad.append(f"{path}: clipboard is in IOS_SWIFT_SCENES but that block no longer "
-                   f"queues through queue_leg, so the swift leg claims no device")
+        bad.append(f"{path}: clipboard is in IOS_{lang}_SCENES but that block no longer "
+                   f"queues through queue_leg, so the {lang.lower()} leg claims no device")
 
 if seen == 0:
     bad.append(f"{path}: no clipboard leg found (the scene must stay wired)")
@@ -1359,11 +1367,12 @@ print(n)
 ' "$@"
 }
 
-ios_applied() { # count label
-    if [ "$1" = 1 ]; then
+ios_applied() { # count label [want, default 1]
+    local want="${3:-1}"
+    if [ "$1" = "$want" ]; then
         return 0
     fi
-    echo "check-steps: SELF-TEST FAIL ($2 applied $1 times, want 1 — an unchanged copy cannot prove the rule fires)" >&2
+    echo "check-steps: SELF-TEST FAIL ($2 applied $1 times, want $want — an unchanged copy cannot prove the rule fires)" >&2
     rm -rf "$IOS_T"
     exit 1
 }
@@ -1403,14 +1412,19 @@ hits="$(ios_perturb tools/ios/run-sim.sh \
 ios_applied "$hits" "the slot-lock perturbation"
 ios_selftest "$IOS_T/unlocked.sh" "holds its simulator alone" "an unlocked queue_leg"
 
-# ...and an unwired scene must fail, which takes BOTH legs away: the
-# rust example names itself, the swift one is a word in IOS_SWIFT_SCENES.
+# ...and an unwired scene must fail, which takes EVERY leg away: the
+# rust example names itself, and each guest-language suite spells its
+# leg as a word in an IOS_<LANG>_SCENES list. The expected count is the
+# number of those lists — 2 today, swift and go — and it is stated
+# rather than derived on purpose: a third guest suite lands here as a
+# loud "applied 3 times, want 2" rather than as a self-test that quietly
+# proves less than it used to.
 hits="$(ios_perturb tools/ios/run-sim.sh \
     'queue_leg run_swiftui_on clipboard-swiftui[\s\S]*?clipboard clipboard\n' '' \
     "$IOS_T/half.sh")"
 ios_applied "$hits" "the rust-leg removal"
 hits="$(ios_perturb "$IOS_T/half.sh" ' clipboard"' '"' "$IOS_T/unwired.sh")"
-ios_applied "$hits" "the swift-leg removal"
+ios_applied "$hits" "the guest-list removal" 2
 ios_selftest "$IOS_T/unwired.sh" "no clipboard leg found" "a runner with no clipboard leg"
 
 # ...and a live host-pasteboard line must fail: the seed once rode

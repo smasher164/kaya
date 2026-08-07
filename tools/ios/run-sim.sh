@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# The menus scene runs both of this runner's flavors: the swift guest
-# (IOS_SWIFT_SCENES) and the rust example (rust-swiftui). The phone
-# half of the command vocabulary is the interesting part — promoted
-# primaries in the bar, everything else behind More.
+# The menus scene runs every one of this runner's flavors: the swift
+# guest (IOS_SWIFT_SCENES), the go guest (IOS_GO_SCENES) and the rust
+# example (rust-swiftui). The phone half of the command vocabulary is
+# the interesting part — promoted primaries in the bar, everything else
+# behind More.
 
 # The split scene is desktop-only BY DESIGN and deliberately not a leg
 # here: it drives resize_window, and a phone or tablet host does not
@@ -30,10 +31,12 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # Build, install, and self-test the milestone scene in the iOS Simulator.
-# Usage: tools/ios/run-sim.sh [swift|rust-swiftui|all]
+# Usage: tools/ios/run-sim.sh [swift|go|rust-swiftui|all]
 #
 # rust         - the kaya example app (UIKit backend)
 # swift        - Swift over the C ABI function floor (UIKit backend)
+# go           - Go over the same function floor, cross-built with
+#                GOOS=ios and owning the process main thread
 # rust-swiftui - the Rust example with the SwiftUI backend selected at
 #                runtime (dylib embedded in the bundle)
 #
@@ -1372,6 +1375,107 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     done
     drain
     timing swift-build+legs
+fi
+
+# The Go guest suite: the same C ABI floor the swift suite reaches, from
+# a language that brings its own runtime and its own scheduler. The
+# composition is identical to Swift's and that is the point — Go owns
+# `main` (`-buildmode=exe`), pins it to thread 0 with
+# runtime.LockOSThread in the guest's init, and hands that thread to
+# kaya_run, which never returns (guests/go/*/main.go; the host contract's
+# C1). No gomobile is involved anywhere: `go build` reaches ios/arm64
+# directly, with no extra tool and no extra pin (docs/go-mobile-plan.md
+# D1). The only thing the binding needed was its #cgo lines, because
+# GOOS=ios also satisfies the `darwin` tag and was silently answering
+# with the macOS link (bindings/go/runtime.go).
+#
+# THE SCENE LIST IS THE SWIFT SUITE'S, ENTRY FOR ENTRY, and the reason is
+# the whole justification for the set. Swift is the reference
+# guest-language suite on this host: same hand-assembled bundle, same
+# embedded interpreter, same SIMCTL_CHILD_ transport, same verdict grep.
+# Running the same scenes is what makes the two comparable leg for leg,
+# and comparing them is how uniform semantics is checked at all
+# (CLAUDE.md invariant 1).
+#
+# NOT WIDER: filedialog, ranges, undo and dirty run on this runner from
+# the rust example only — the blocks below say "rust only until the
+# sweep" — and window/panels/split are desktop-only by design (the note
+# at the top of this file). A Go leg on any of those would make Go the
+# first NON-RUST guest there, which is a sweep, not this depth slice.
+#
+# NOT NARROWER, and this is the half that has to be said out loud
+# because nothing enforces it: check-steps' wired() keys on scene x
+# runner and never on language, so a Go suite that stalled at six scenes
+# would leave every gate green. Mirroring a sibling list is what keeps
+# the choice auditable — the subset is the swift list's, already argued
+# there — and any future divergence has to be written down right here.
+if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --lib
+    # Every bundle below links this archive; verify it once, here, rather
+    # than trusting the copies downstream — the swift suite's rule.
+    "$ROOT/tools/build-id.sh" --verify \
+        target/aarch64-apple-ios-sim/debug/libkaya.a || exit 1
+    build_swiftui_dylib
+    # cgo needs a cross compiler. The #cgo ios line in
+    # bindings/go/runtime.go carries the archive and the frameworks; this
+    # carries the triple and the sysroot. Both ride CC rather than
+    # CGO_CFLAGS/CGO_LDFLAGS because cgo uses CC to LINK as well as to
+    # compile, and -isysroot has to reach both halves.
+    IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
+    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y clipboard"
+    # Pooled like the swift and mac-lane builds: the links are
+    # independent, and serial they would be this suite's critical path.
+    mkdir -p "$BUNDLES/.golog"
+    go_pids=()
+    go_names=()
+    for entry in $IOS_GO_SCENES; do
+        (
+            guest="${entry%%:*}"
+            src="${entry##*:}"
+            log="$BUNDLES/.golog/$guest.log"
+            CGO_ENABLED=1 GOOS=ios GOARCH=arm64 CC="$IOS_GO_CC" \
+                go build -o "$BUNDLES/${guest}go-bin" "dev.kaya/guests/go/$src" \
+                >"$log" 2>&1 || exit 1
+            # AND THE BINARY MUST CARRY THE MARKER ITSELF, which is this
+            # lane's cheapest test that the bundle is SELF-CONTAINED. The
+            # id lives in libkaya.a, so it is in this executable only if
+            # the archive really was linked into it. Point the #cgo line
+            # back at `-L… -lkaya` and ld64 prefers the .dylib sitting in
+            # the same directory (mobilepkg-contract.md §1.2, the defect
+            # the swift leg still has): the guest then names an absolute
+            # build-machine path to a library outside its own bundle, runs
+            # anyway because the Simulator shares the host filesystem, and
+            # tells nobody. This is the line that notices, at build time,
+            # naming the guest.
+            "$ROOT/tools/build-id.sh" --verify "$BUNDLES/${guest}go-bin" >>"$log" 2>&1
+        ) &
+        go_pids+=($!)
+        go_names+=("${entry%%:*}")
+    done
+    go_status=0
+    i=0
+    for pid in "${go_pids[@]}"; do
+        if ! wait "$pid"; then
+            echo "go guest build FAILED: ${go_names[$i]}" >&2
+            cat "$BUNDLES/.golog/${go_names[$i]}.log" >&2
+            go_status=1
+        fi
+        i=$((i + 1))
+    done
+    rm -rf "$BUNDLES/.golog"
+    [ "$go_status" = 0 ] || exit 1
+    for entry in $IOS_GO_SCENES; do
+        guest="${entry%%:*}"
+        APP=$(make_bundle "${guest}go" "dev.kaya.${guest}go" "$BUNDLES/${guest}go-bin")
+        cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+        if [ "$guest" = milestone2 ]; then
+            queue_leg run_swiftui_on go "$APP" dev.kaya.milestone2go go 1 milestone2
+        else
+            queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest"
+        fi
+    done
+    drain
+    timing go-build+legs
 fi
 
 if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then

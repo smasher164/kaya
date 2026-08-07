@@ -1100,6 +1100,44 @@ count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
 
+- **The Swift iOS bundle is not self-contained** (measured 2026-08-07
+  while landing Go on iOS, by a negative test aimed at something else).
+  The Go arm proved that linking `-L … -lkaya` instead of naming the
+  archive by path still BUILDS, and `otool -L` then shows the binary
+  naming an absolute build-machine path to `…/deps/libkaya.dylib` —
+  which is what the SWIFT iOS leg ships today. It works only because
+  the lane builds and runs on one machine. Fix: name the archive by
+  path as the Go arm does; the cheap guard already exists — a
+  `build-id.sh --verify` per built binary, since the id only reaches
+  the executable if the archive was really linked in.
+- **guests/go/filedialog/main.go computes its scene directory from a
+  bare `os.TempDir()`** — the same defect the Go clipboard guest had on
+  iOS, where the harness expands `$TMP` to the app's Documents rather
+  than a private container (Rust and Swift both carve this out). It
+  cannot fail today because filedialog is rust-only on the iOS runner;
+  it becomes a real failure the moment that leg is added.
+
+
+- **DEFECT — the handle bindings' transaction liveness check tests
+  `closed` but not the THREAD** (bindings/go/app.go,
+  bindings/csharp/KayaApp.cs; found 2026-08-07 by the mobile-threading
+  research, not by a gate). tools/check-tx-liveness.sh's own doctrine
+  says the HANDLE bindings refuse a closed transaction at a write
+  chokepoint while the AMBIENT ones check the thread instead — but a
+  handle binding used from the wrong thread with an OPEN transaction
+  passes the check. A C# `async` handler resuming on a pool thread
+  walks straight into it. This is a desktop defect today, not a mobile
+  one. Fix: the handle bindings check both; guard: extend
+  check-tx-liveness with the wrong-thread clause and watch it fail.
+- Two smaller findings from the same research: CPython's
+  `PyGILState_Ensure`-during-finalization hang would compound the known
+  exit hang at crates/kaya/src/harness.rs:1832-1854 if Python ever runs
+  on mobile; and signal-handler ordering (Rust std's stack guard, a
+  guest runtime's handlers, the host crash reporter) is a three-way
+  negotiation nobody currently owns — it becomes real the moment a
+  second runtime lives in the process.
+
+
 - **A todos-c leg hung for 180s once on linux/x11 (2026-08-07) and has
   not reproduced.** It died at the FIRST assertion — the guest never
   came up at all — inside a full matrix; the leg then passed in the
