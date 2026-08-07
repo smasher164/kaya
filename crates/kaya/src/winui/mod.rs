@@ -33,14 +33,20 @@ use windows_core::{HSTRING, Interface as _};
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
     Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, ContentDialog,
-    ContentDialogButton, ContentDialogResult, Grid, Image, MenuBar, MenuBarItem, MenuFlyout,
+    ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, Grid, Image, MenuBar,
+    MenuBarItem, MenuFlyout,
     MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
     NavigationViewItem, NavigationViewPaneDisplayMode, ProgressBar, RadioMenuFlyoutItem,
-    RowDefinition,
+    RichEditBox, RichEditClipboardFormat, RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
-    Slider, TextBlock, TextBox, TextChangedEventHandler, ToggleMenuFlyoutItem, TwoPaneView,
+    Slider, TextBlock, TextBox, TextChangedEventHandler, TextControlPasteEventHandler,
+    ToggleMenuFlyoutItem, TwoPaneView,
     TwoPaneViewMode, TwoPaneViewPriority, TwoPaneViewWideModeConfiguration,
 };
+// The RichEdit text object model: the textarea's control keeps its text,
+// its undo stack and its clipboard verbs on a document object rather
+// than on itself (docs/textarea-foundation-plan.md, the windows arm).
+use bindings::Microsoft::UI::Text::{TextGetOptions, TextSetOptions};
 use bindings::Windows::Foundation::TypedEventHandler;
 use bindings::Microsoft::UI::Xaml::Input::KeyboardAccelerator;
 use bindings::Windows::System::{VirtualKey, VirtualKeyModifiers};
@@ -77,7 +83,16 @@ enum NativeWidget {
     /// The 2D grid widget (KIND_GRID) — a WinUI Grid with Auto
     /// tracks, distinct from Column/Row's star-sized Grids.
     Grid2D(Grid),
-    Textarea(TextBox),
+    /// THE RICH-CAPABLE CONTROL, PINNED TO PLAIN TEXT
+    /// (docs/textarea-foundation-plan.md). RichEditBox and not TextBox
+    /// because TextBox cannot express an attributed run at all — it has
+    /// no document object and no per-range formatting, only the one
+    /// selection — so the widget that the ranges era must colour is the
+    /// one the textarea sits on now. Nothing kaya's textarea contract
+    /// promises moves with it: string in, string out, text_changed
+    /// through the uncontrolled fold, and every opinion the RichEdit
+    /// engine carries pinned off in `pin_plain_text`.
+    Textarea(RichEditBox),
 }
 
 impl NativeWidget {
@@ -98,6 +113,208 @@ impl NativeWidget {
             NativeWidget::Radio(group) => group.cast(),
             NativeWidget::Grid2D(grid) => grid.cast(),
             NativeWidget::Textarea(field) => field.cast(),
+        }
+    }
+
+    /// The editable behind a text widget, if this is one.
+    ///
+    /// ONE PLACE THAT KNOWS WHICH KINDS ARE EDITABLE, so the apply arms
+    /// name the pair once instead of spelling `Entry | Textarea` beside
+    /// every operation that works on both (the shape `Editable` exists
+    /// to keep honest — see it).
+    fn editable(&self) -> Option<Editable> {
+        match self {
+            NativeWidget::Entry(field) => Some(Editable::Entry(field.clone())),
+            NativeWidget::Textarea(field) => Some(Editable::Textarea(field.clone())),
+            _ => None,
+        }
+    }
+}
+
+/// AN ORDINARY RANGE OVER WHATEVER THE SELECTION COVERS — the shape
+/// every textarea mutation takes, and it cost a crash to learn.
+///
+/// MEASURED ON THE VM, 2026-08-06, five builds deep into a bisection.
+/// A `ITextSelection` obtained from `TextDocument().Selection()` is fine
+/// to READ (positions, story length) and fine to MOVE (`SetRange`), and
+/// the harness's `type` verb does both on every run. But MUTATING THE
+/// DOCUMENT THROUGH IT — `Selection().SetText(..)` after a real Ctrl+V —
+/// produced the correct text and then killed the process at teardown
+/// with an access violation (0xC0000005), reproducibly, on every run.
+/// The same insertion through `GetRange(start, end)` — the identical
+/// span, read off that same selection — exits cleanly, as does a
+/// whole-document `SetText`. Deferring the mutation a dispatcher tick
+/// did NOT help, which is how the selection object rather than the
+/// paste's re-entrancy was identified as the cause.
+///
+/// So the rule this file states once, here: READ the selection, MUTATE
+/// a range. The cut and copy arms take the same shape by analogy rather
+/// than by their own measurement — they mutate through the same object,
+/// the cost of the range is one COM hop, and a second spelling of a rule
+/// that already crashed once is not worth the saving.
+fn selection_range(
+    doc: &bindings::Microsoft::UI::Text::RichEditTextDocument,
+) -> windows_core::Result<bindings::Microsoft::UI::Text::ITextRange> {
+    let selection = doc.Selection()?;
+    let (start, end) = (selection.StartPosition()?, selection.EndPosition()?);
+    doc.GetRange(start, end)
+}
+
+/// THE TWO NATIVE EDITABLES, BEHIND ONE CONTRACT.
+///
+/// The entry is a `TextBox` and the textarea a `RichEditBox`, and the
+/// second is not a drop-in for the first: it has no `Text` property and
+/// none of TextBox's editing commands — every one of them lives on its
+/// `TextDocument` (docs/textarea-foundation-plan.md, the windows arm's
+/// measured table). Both are the SAME widget to the undo ledger, the
+/// clipboard roles, the menu-role enablement and the harness, which is
+/// why the two spellings are named ONCE, here, rather than at the
+/// fourteen call sites that used to hold a bare `TextBox`.
+///
+/// THE POINT IS THAT THEY CANNOT DRIFT. Before the swap, entry and
+/// textarea were the same native type and every shared path got the
+/// uniform behaviour for free; a second `if kind == Textarea` at each
+/// site would have handed that guarantee back. Adding an operation
+/// means adding it here, for both, or it does not compile.
+#[derive(Clone)]
+enum Editable {
+    Entry(TextBox),
+    Textarea(RichEditBox),
+}
+
+impl Editable {
+    /// The text AS THE CONTROL STORES IT — CR line breaks, no trailing
+    /// paragraph mark. Callers apply `lf` on the way to the guest,
+    /// exactly as they did when both were TextBoxes.
+    ///
+    /// `AdjustCrlf` IS A PIN (docs/textarea-foundation-plan.md). A
+    /// RichEdit story always ends in a paragraph mark, and
+    /// `GetText(None)` hands it out: `set 'abc'` reads back `'abc\r'`,
+    /// and after `lf` that is a trailing newline the guest never wrote —
+    /// invariant 6 broken (tools/scenes/textarea.steps compares its
+    /// strings byte-for-byte on five platforms). Measured on the VM
+    /// before it was written, all four cases: with `AdjustCrlf` the read
+    /// matches the source exactly, empty string included.
+    fn text(&self) -> windows_core::Result<String> {
+        match self {
+            Editable::Entry(field) => Ok(field.Text()?.to_string()),
+            Editable::Textarea(field) => {
+                let mut out = HSTRING::new();
+                field
+                    .TextDocument()?
+                    .GetText(TextGetOptions::AdjustCrlf, &mut out)?;
+                Ok(out.to_string())
+            }
+        }
+    }
+
+    /// `TextSetOptions::None` IS A PIN, and the enum says why: the same
+    /// call with `FormatRtf` PARSES the string as a document. A guest
+    /// whose textarea text happened to begin `{\rtf1` would then see it
+    /// rendered on windows and stored literally on the other four
+    /// platforms — measured on the VM 2026-08-06, `{\rtf1 KAYARTF}` set
+    /// with `FormatRtf` reads back as `KAYARTF`, and with `None` reads
+    /// back whole.
+    fn set_text(&self, text: &str) -> windows_core::Result<()> {
+        match self {
+            Editable::Entry(field) => field.SetText(&HSTRING::from(text)),
+            Editable::Textarea(field) => field
+                .TextDocument()?
+                .SetText(TextSetOptions::None, &HSTRING::from(text)),
+        }
+    }
+
+    fn focus_state(&self) -> windows_core::Result<FocusState> {
+        match self {
+            Editable::Entry(field) => field.FocusState(),
+            Editable::Textarea(field) => field.FocusState(),
+        }
+    }
+
+    fn can_undo(&self) -> windows_core::Result<bool> {
+        match self {
+            Editable::Entry(field) => field.CanUndo(),
+            Editable::Textarea(field) => field.TextDocument()?.CanUndo(),
+        }
+    }
+
+    fn can_redo(&self) -> windows_core::Result<bool> {
+        match self {
+            Editable::Entry(field) => field.CanRedo(),
+            Editable::Textarea(field) => field.TextDocument()?.CanRedo(),
+        }
+    }
+
+    fn undo(&self) -> windows_core::Result<()> {
+        match self {
+            Editable::Entry(field) => field.Undo(),
+            Editable::Textarea(field) => field.TextDocument()?.Undo(),
+        }
+    }
+
+    fn redo(&self) -> windows_core::Result<()> {
+        match self {
+            Editable::Entry(field) => field.Redo(),
+            Editable::Textarea(field) => field.TextDocument()?.Redo(),
+        }
+    }
+
+    fn clear_undo_redo_history(&self) -> windows_core::Result<()> {
+        match self {
+            Editable::Entry(field) => field.ClearUndoRedoHistory(),
+            Editable::Textarea(field) => field.TextDocument()?.ClearUndoRedoHistory(),
+        }
+    }
+
+    fn cut_selection_to_clipboard(&self) -> windows_core::Result<()> {
+        match self {
+            Editable::Entry(field) => field.CutSelectionToClipboard(),
+            Editable::Textarea(field) => selection_range(&field.TextDocument()?)?.Cut(),
+        }
+    }
+
+    fn copy_selection_to_clipboard(&self) -> windows_core::Result<()> {
+        match self {
+            Editable::Entry(field) => field.CopySelectionToClipboard(),
+            Editable::Textarea(field) => selection_range(&field.TextDocument()?)?.Copy(),
+        }
+    }
+
+    /// The platform's own insertion — for a widget that declared no
+    /// accept list, this IS the paste (DESIGN.md's paste split).
+    ///
+    /// PLAIN TEXT ON BOTH ARMS, which is what makes the swap invisible.
+    /// TextBox has nothing but plain text to insert. RichEditBox's own
+    /// `ITextRange::Paste(0)` would take the RICHEST format the
+    /// clipboard offers — RTF, with its fonts and colours — so the
+    /// textarea reads CF_UNICODETEXT itself and sets it as text. The
+    /// control's OWN paste routes (Ctrl+V, its context menu) are turned
+    /// into this same call by the `Paste` handler `pin_plain_text`
+    /// attaches, so no route into a kaya textarea can carry formatting.
+    fn paste_from_clipboard(&self) -> windows_core::Result<()> {
+        match self {
+            Editable::Entry(field) => field.PasteFromClipboard(),
+            Editable::Textarea(field) => {
+                let Some(text) = clipboard_plain_text() else {
+                    return Ok(());
+                };
+                // `ITextRange::SetText` — TOM's `put_Text`, the setter
+                // that takes no options at all, so there is no flag here
+                // to get wrong on the one string kaya controls least.
+                selection_range(&field.TextDocument()?)?.SetText(&HSTRING::from(text))
+            }
+        }
+    }
+
+    /// Put the caret at `at` (in UTF-16 units), collapsed — what the
+    /// harness's `type` verb does before injecting a run of keys.
+    fn set_caret(&self, at: i32) -> windows_core::Result<()> {
+        match self {
+            Editable::Entry(field) => {
+                field.SetSelectionStart(at)?;
+                field.SetSelectionLength(0)
+            }
+            Editable::Textarea(field) => field.TextDocument()?.Selection()?.SetRange(at, at),
         }
     }
 }
@@ -160,7 +377,7 @@ struct CoreState {
     selects: Vec<ComboBox>,
     radios: Vec<RadioButtons>,
     grids: Vec<Grid>,
-    textareas: Vec<TextBox>,
+    textareas: Vec<RichEditBox>,
     textarea_ids: Vec<u64>,
     /// Grid layout state: ordered children + column count; both the
     /// adds and the columns prop re-flow the attach positions
@@ -1681,14 +1898,21 @@ fn refresh_section_pane(core: &mut CoreState, sid: u64) -> windows_core::Result<
     Ok(())
 }
 
-/// WinUI's TextBox stores every line break as a bare CR (its Rich Edit
-/// heritage): text SET with LF reads back with CR. The wire and every
-/// other backend speak LF, and guest-visible strings are compared
-/// byte-for-byte across languages, so CR is normalized to LF at every
-/// point where TextBox text escapes toward the guest (occurrence
-/// payloads, harness reads) or is compared against guest text (the
-/// quiet-set and set_text guards — an unnormalized compare never
-/// matches multi-line text and re-sets on every write).
+/// WinUI's editable controls store every line break as a bare CR: text
+/// SET with LF reads back with CR. TextBox does it out of its Rich Edit
+/// heritage; the textarea's RichEditBox IS Rich Edit, and does the same.
+/// The wire and every other backend speak LF, and guest-visible strings
+/// are compared byte-for-byte across languages, so CR is normalized to
+/// LF at every point where that text escapes toward the guest
+/// (occurrence payloads, harness reads) or is compared against guest
+/// text (the quiet-set and set_text guards — an unnormalized compare
+/// never matches multi-line text and re-sets on every write).
+///
+/// THE TRAILING PARAGRAPH MARK IS A SEPARATE PROBLEM AND IS NOT SOLVED
+/// HERE: a RichEdit story always ends in one, and `lf` would faithfully
+/// turn it into a newline no guest ever wrote. `Editable::text` reads
+/// with `TextGetOptions::AdjustCrlf`, which drops it, so what arrives
+/// here is already the entry's shape.
 fn lf(s: String) -> String {
     if s.contains('\r') {
         s.replace("\r\n", "\n").replace('\r', "\n")
@@ -3016,8 +3240,9 @@ unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> i
                 // is eaten rather than sprayed at whatever is behind.
                 //
                 // WHICH IS WHY THE UNDO ROUTING LIVES ON THIS PATH
-                // (docs/undo-plan.md §1.1, measured): a focused TextBox
-                // never sees Ctrl+Z once this catalog owns the chord —
+                // (docs/undo-plan.md §1.1, measured on a TextBox and
+                // true of either editable): a focused field never sees
+                // Ctrl+Z once this catalog owns the chord —
                 // the hook returns 1 and the WM_KEYDOWN never reaches
                 // XAML — so native text undo would die in every field of
                 // the app if dispatch alone happened here. It does not:
@@ -3439,6 +3664,39 @@ fn clip_get_bytes(format: u32) -> Option<Vec<u8>> {
     }
 }
 
+/// CF_UNICODETEXT and nothing else, with the clipboard opened and
+/// closed around it — the read behind the textarea's plain-text paste
+/// pin (`Editable::paste_from_clipboard`, `pin_plain_text`).
+///
+/// NOT `materialize_clipboard`, deliberately: that one answers the
+/// RICHEST representation an accept list takes, and this is the path
+/// for a widget that declared no accept list at all, where the platform
+/// itself would have inserted. What TextBox inserts there is plain
+/// text, so this is what the textarea inserts too.
+fn clipboard_plain_text() -> Option<String> {
+    if clip_open_retry().is_err() {
+        return None;
+    }
+    let answer = clip_available(CF_UNICODETEXT)
+        .then(|| clip_get_bytes(CF_UNICODETEXT))
+        .flatten()
+        .map(|bytes| {
+            let units: Vec<u16> = bytes
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .take_while(|&u| u != 0)
+                .collect();
+            // The lf boundary, same as every other read here: clipboard
+            // text is CRLF by Windows convention and the control
+            // re-normalizes on the way in.
+            lf(String::from_utf16_lossy(&units))
+        });
+    unsafe {
+        let _ = windows::Win32::System::DataExchange::CloseClipboard();
+    }
+    answer
+}
+
 fn clip_utf16z(s: &str) -> Vec<u8> {
     s.encode_utf16()
         .chain(std::iter::once(0))
@@ -3619,46 +3877,135 @@ fn materialize_clipboard(accepting: &str) -> windows_core::Result<Option<crate::
 }
 
 /// The focused editable widget, if any: the root admits `accepts` on
-/// entries and textareas alone (scene.rs), and a TextBox IS its own
+/// entries and textareas alone (scene.rs), and each control IS its own
 /// focus target here — no GtkText delegation to walk.
 fn focused_editable_id(core: &CoreState) -> Option<u64> {
-    let focused = |field: &TextBox| {
+    let focused = |field: &Editable| {
         field
-            .FocusState()
+            .focus_state()
             .map(|s| s != FocusState::Unfocused)
             .unwrap_or(false)
     };
     for (i, field) in core.entries.iter().enumerate() {
-        if focused(field) {
+        if focused(&Editable::Entry(field.clone())) {
             return Some(core.entry_ids[i]);
         }
     }
     for (i, field) in core.textareas.iter().enumerate() {
-        if focused(field) {
+        if focused(&Editable::Textarea(field.clone())) {
             return Some(core.textarea_ids[i]);
         }
     }
     None
 }
 
-fn editable_by_id(core: &CoreState, id: u64) -> Option<TextBox> {
+fn editable_by_id(core: &CoreState, id: u64) -> Option<Editable> {
     if let Some(i) = core.entry_ids.iter().position(|&e| e == id) {
-        return Some(core.entries[i].clone());
+        return Some(Editable::Entry(core.entries[i].clone()));
     }
     core.textarea_ids
         .iter()
         .position(|&t| t == id)
-        .map(|i| core.textareas[i].clone())
+        .map(|i| Editable::Textarea(core.textareas[i].clone()))
+}
+
+/// RICH-CAPABLE CONTROL, PLAIN-TEXT CONTRACT — the pins, in one place,
+/// with their read-back (docs/textarea-foundation-plan.md).
+///
+/// The textarea's control can express attributed runs, which is why the
+/// ranges milestone can be cheap; it must express NONE of them today.
+/// RichEditBox's defaults are the opposite of what kaya wants — measured
+/// on the VM before this was written — so each one is set, and each one
+/// is READ BACK:
+///
+/// - `ClipboardCopyFormat` defaults to `AllFormats`, so a copy out of a
+///   kaya textarea would put RTF on the clipboard beside the text and a
+///   paste in would take formatting. `PlainText` is the entry's
+///   behaviour, which TextBox has no way not to have.
+/// - `DisabledFormattingAccelerators` defaults to `None`, which does
+///   NOT mean "no accelerators" — it means none are disabled, so
+///   Ctrl+B/I/U actively bold, italicize and underline the user's text
+///   inside a kaya textarea. `All` is the pin; the chords then either
+///   reach kaya's own keyboard hook (where a menu carries them) or do
+///   nothing at all.
+/// - The control's OWN paste routes — Ctrl+V and its context menu —
+///   bypass every kaya path, so the `Paste` event is cancelled and kaya
+///   inserts the clipboard's plain text itself. `ClipboardCopyFormat`
+///   governs the COPY side only; without this handler, RTF still
+///   arrives by the two doors the user has.
+///
+/// THE READ-BACK IS THE GUARD, and it is deliberately a panic on a path
+/// nobody can avoid: every scene that builds a textarea runs this line.
+/// A pin someone deletes — or one a future App SDK refuses — fails the
+/// FIRST textarea leg with a sentence, rather than shipping a control
+/// with opinions kaya never agreed to. That is the failure mode this
+/// milestone is named after.
+///
+/// Two more pins are not properties and live at their chokepoints
+/// instead: the read's `TextGetOptions::AdjustCrlf` (`Editable::text`,
+/// watched by the textarea scene itself) and the write's
+/// `TextSetOptions::None` (`Editable::set_text` — `FormatRtf` in that
+/// slot renders a guest's `{\rtf1`-shaped string as a document).
+///
+/// SPELL-CHECK AND TEXT PREDICTION ARE NOT PINNED, on purpose. Both
+/// controls carry `IsSpellCheckEnabled` and `IsTextPredictionEnabled`
+/// with the same defaults (measured: True on both), so they are not
+/// opinions the swap introduces — they are the entry's existing
+/// behaviour, and turning them off HERE would be the divergence.
+fn pin_plain_text(field: &RichEditBox) -> windows_core::Result<()> {
+    field.SetClipboardCopyFormat(RichEditClipboardFormat::PlainText)?;
+    field.SetDisabledFormattingAccelerators(DisabledFormattingAccelerators::All)?;
+    let pasting = Editable::Textarea(field.clone());
+    let paste_handler = TextControlPasteEventHandler::new(move |_, args| {
+        // Cancel the control's own insertion FIRST — an unhandled
+        // paste here is the RichEdit engine's, which takes RTF.
+        if let Some(args) = args.as_ref() {
+            args.SetHandled(true)?;
+        }
+        // Then paste what the entry would have pasted. INLINE, and
+        // through a range rather than through the live selection — see
+        // `selection_range`, whose measurement started right here.
+        //
+        // The swallow counter is deliberately not bumped: a paste acts
+        // like the user, and the control's TextChanged is the report
+        // (the same rule the role's paste arm states).
+        pasting.paste_from_clipboard()
+    });
+    field.Paste(&paste_handler)?;
+
+    // AND NOW ASK THE CONTROL WHAT IT ACTUALLY HAS.
+    let copy_format = field.ClipboardCopyFormat()?;
+    let accelerators = field.DisabledFormattingAccelerators()?;
+    assert!(
+        copy_format == RichEditClipboardFormat::PlainText
+            && accelerators == DisabledFormattingAccelerators::All,
+        "kaya: winui: a textarea's plain-text pins did not take \
+         (ClipboardCopyFormat={copy_format:?}, wanted PlainText; \
+         DisabledFormattingAccelerators={accelerators:?}, wanted All). \
+         kaya's textarea is a RichEditBox — a control that CAN carry \
+         formatting — held to the plain-text contract every other \
+         backend has by construction: string in, string out, nothing \
+         rich on the clipboard, Ctrl+B/I/U never bold. Restore the \
+         setters in pin_plain_text (crates/kaya/src/winui/mod.rs), or \
+         if a Windows App SDK update refused them, work out what it \
+         wants instead before shipping a textarea with opinions kaya \
+         never agreed to. docs/textarea-foundation-plan.md."
+    );
+    Ok(())
 }
 
 /// D7/A1's clear, in this platform's one available spelling.
 ///
-/// MEASURED A NO-OP, AND CALLED ANYWAY (§1.1, re-verified by this arm's
-/// probe: CanUndo true -> SetText -> false -> explicit clear -> false).
-/// Setting `TextBox.Text` resets the control's undo buffer by itself, so
-/// D7's semantics already hold on Windows before any code is added. The
-/// call costs one COM hop on a path that already crosses COM, it makes
-/// the uniform rule visible and greppable beside GTK's
+/// MEASURED A NO-OP ON THE ENTRY, AND CALLED ANYWAY (§1.1, re-verified
+/// by the undo arm's probe: CanUndo true -> SetText -> false -> explicit
+/// clear -> false). Setting `TextBox.Text` resets the control's undo
+/// buffer by itself, so D7's semantics already hold on Windows before
+/// any code is added. NOT MEASURED ON THE TEXTAREA'S RichEditBox, whose
+/// undo stack is the RichEdit engine's rather than the XAML control's —
+/// which is precisely why the call is not skipped anywhere: this is the
+/// lever that makes the rule hold whether or not the write happens to.
+/// The call costs one COM hop on a path that already crosses COM, it
+/// makes the uniform rule visible and greppable beside GTK's
 /// begin/end_irreversible_action and Compose's undoState.clearHistory(),
 /// and it is the ONLY lever left if a future WinUI stops resetting on
 /// the Text setter — WinUI 3 having already dropped WPF's
@@ -3670,8 +4017,8 @@ fn editable_by_id(core: &CoreState, id: u64) -> Option<TextBox> {
 /// branch, because an app that mirrors a field into a signal and writes
 /// it back would otherwise lose the user's native history on every
 /// keystroke.
-fn clear_native_undo(field: &TextBox) {
-    if let Err(e) = field.ClearUndoRedoHistory() {
+fn clear_native_undo(field: &Editable) {
+    if let Err(e) = field.clear_undo_redo_history() {
         eprintln!("kaya: winui ClearUndoRedoHistory failed: {}", e.message());
     }
 }
@@ -3748,7 +4095,7 @@ fn bank_text_changed_on(core: &mut CoreState, id: u64, text: &str) {
 fn focused_can_undo(core: &CoreState) -> bool {
     focused_editable_id(core)
         .and_then(|id| editable_by_id(core, id))
-        .and_then(|field| field.CanUndo().ok())
+        .and_then(|field| field.can_undo().ok())
         .unwrap_or(false)
 }
 
@@ -3756,7 +4103,7 @@ fn focused_can_undo(core: &CoreState) -> bool {
 fn focused_can_redo(core: &CoreState) -> bool {
     focused_editable_id(core)
         .and_then(|id| editable_by_id(core, id))
-        .and_then(|field| field.CanRedo().ok())
+        .and_then(|field| field.can_redo().ok())
         .unwrap_or(false)
 }
 
@@ -3936,6 +4283,12 @@ fn perform_undo_role(core: &mut CoreState, role: &str) -> bool {
 /// channel it always hears edits through. Only the LEDGER would hear it
 /// twice, and `ledger_quiet` is the bracket that stops it.
 ///
+/// The textarea's `TextDocument().Undo()` is the same shape asked of a
+/// different object, and the same bracket covers it: whether the
+/// RichEdit engine raises TextChanged one turn later or none at all,
+/// `ledger_quiet` is keyed on the TEXT the walk landed on, so an echo
+/// that arrives is absorbed and one that never comes costs nothing.
+///
 /// THE THIRD FACT IS `CanUndo` IN BOTH DIRECTIONS, deliberately. It is
 /// not "did this walk have more to give" — it is the core's test for the
 /// one case A1's clear is meant to make unreachable: a platform that
@@ -3953,13 +4306,13 @@ fn native_walk(core: &mut CoreState, redo: bool) {
     let Some(field) = editable_by_id(core, id) else {
         return;
     };
-    let called = if redo { field.Redo() } else { field.Undo() };
+    let called = if redo { field.redo() } else { field.undo() };
     if let Err(e) = called {
         eprintln!("kaya: winui native {} failed: {}", if redo { "redo" } else { "undo" }, e.message());
         return;
     }
-    let text = lf(field.Text().map(|t| t.to_string()).unwrap_or_default());
-    let can_undo = field.CanUndo().unwrap_or(false);
+    let text = lf(field.text().unwrap_or_default());
+    let can_undo = field.can_undo().unwrap_or(false);
     // The bracket goes in BEFORE anything can arrive (the raise is a
     // runloop turn away, but the order is not this code's to assume).
     core.ledger_quiet.insert(id, text.clone());
@@ -4015,19 +4368,20 @@ fn deliver_undo(core: &mut CoreState, ops: Vec<ApplyOp>, occurrence: Occurrence)
 /// accepts takes the content itself — the same materialization walk
 /// as the privileged read, delivered to the paste hook — while one
 /// that declared nothing gets the platform's own insertion
-/// (TextBox::PasteFromClipboard, the method its own context menu
-/// calls) and its ordinary change path reports the result. The
-/// swallow counter is NOT bumped for that insertion: a paste acts
-/// like the user, and the field's TextChanged is the report.
+/// (`Editable::paste_from_clipboard` — TextBox's own
+/// PasteFromClipboard for an entry, the same plain text set on the
+/// selection for a textarea) and its ordinary change path reports the
+/// result. The swallow counter is NOT bumped for that insertion: a
+/// paste acts like the user, and the field's TextChanged is the report.
 fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
     match role {
         "cut" | "copy" => {
             if let Some(field) = focused_editable_id(core).and_then(|id| editable_by_id(core, id))
             {
                 let _ = if role == "cut" {
-                    field.CutSelectionToClipboard()
+                    field.cut_selection_to_clipboard()
                 } else {
-                    field.CopySelectionToClipboard()
+                    field.copy_selection_to_clipboard()
                 };
             }
             true
@@ -4039,7 +4393,7 @@ fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
             let accepts = core.accepts.get(&id).cloned().unwrap_or_default();
             if accepts.is_empty() {
                 if let Some(field) = editable_by_id(core, id) {
-                    let _ = field.PasteFromClipboard();
+                    let _ = field.paste_from_clipboard();
                 }
                 return true;
             }
@@ -4286,25 +4640,39 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Progress(bar)
                 }
                 WidgetKind::Textarea => {
-                    // The multi-line editor: a TextBox with
-                    // AcceptsReturn — the entry's exact contract,
-                    // including the swallow counters (TextChanged is
-                    // raised async; entry_swallow/entry_tags are
-                    // id-keyed and kind-agnostic, so the plumbing is
-                    // shared).
-                    let field = TextBox::new()?;
+                    // The multi-line editor: a RichEditBox with
+                    // AcceptsReturn, PINNED TO PLAIN TEXT — the entry's
+                    // exact contract, including the swallow counters
+                    // (TextChanged is raised async; entry_swallow /
+                    // entry_tags are id-keyed and kind-agnostic, so the
+                    // plumbing is shared).
+                    //
+                    // THE CONTROL IS RICH-CAPABLE AND THE CONTRACT IS
+                    // NOT (docs/textarea-foundation-plan.md): every
+                    // opinion the RichEdit engine carries is pinned off
+                    // in `pin_plain_text`, which also READS ITS PINS
+                    // BACK — so a deleted pin is a panic at the first
+                    // textarea a scene builds, not a divergence that
+                    // ships.
+                    let field = RichEditBox::new()?;
                     field.SetAcceptsReturn(true)?;
                     field.SetMinWidth(240.0)?;
                     field.SetMinHeight(96.0)?;
+                    pin_plain_text(&field)?;
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("textareas carry a tag");
                     let handler_tag = tag.clone();
                     let bank_id = id.0;
-                    let field_for_handler = field.clone();
+                    let field_for_handler = Editable::Textarea(field.clone());
                     let swallow =
                         std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
                     let handler_swallow = swallow.clone();
-                    let handler = TextChangedEventHandler::new(move |_, _| {
+                    // A ROUTED HANDLER, not a TextChangedEventHandler:
+                    // RichEditBox raises TextChanged as a plain routed
+                    // event. Same event, same async raise, same swallow
+                    // discipline — only the delegate type differs, and
+                    // neither arm reads the args.
+                    let handler = RoutedEventHandler::new(move |_, _| {
                         if handler_swallow
                             .fetch_update(
                                 std::sync::atomic::Ordering::Relaxed,
@@ -4315,7 +4683,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         {
                             return Ok(());
                         }
-                        let text = lf(field_for_handler.Text()?.to_string());
+                        let text = lf(field_for_handler.text()?);
                         // The ledger sees it BEFORE the app does (§3).
                         bank_text_changed(bank_id, &text);
                         sink.send_text_tag(&handler_tag, &text);
@@ -5119,17 +5487,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             .SetAt(*row, &PropertyValue::CreateString(&HSTRING::from(&s))?)?;
                     }
                 }
-                (NativeWidget::Entry(field), Prop::Text, Value::Str(s))
-                | (NativeWidget::Textarea(field), Prop::Text, Value::Str(s)) => {
+                (NativeWidget::Entry(_), Prop::Text, Value::Str(s))
+                | (NativeWidget::Textarea(_), Prop::Text, Value::Str(s)) => {
+                    // ONE ARM FOR BOTH, still: entry and textarea sit on
+                    // different native types now, and `Editable` is what
+                    // keeps that from becoming two spellings of one rule.
+                    let field = widget.editable().expect("the arm matched a text widget");
                     // Quiet: a property write is configuration, not a
                     // user edit — and TextChanged is raised async, so
                     // the flag is a counter (see entry_swallow).
-                    if lf(field.Text()?.to_string()) != s {
+                    if lf(field.text()?) != s {
                         if let Some(swallow) = core.entry_swallow.get(&id.0) {
                             swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
-                        field.SetText(&HSTRING::from(&s))?;
-                        clear_native_undo(field);
+                        field.set_text(&s)?;
+                        clear_native_undo(&field);
                     }
                 }
                 (NativeWidget::Checkbox { caption, .. }, Prop::Text, Value::Str(s)) => {
@@ -5460,21 +5832,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match command {
                 CommandKind::Clear => {
-                    let field = match widget {
-                        NativeWidget::Entry(field) | NativeWidget::Textarea(field) => field,
-                        _ => panic!("kaya: clear on a non-text widget (scene validates kinds)"),
-                    };
+                    let field = widget
+                        .editable()
+                        .expect("kaya: clear on a non-text widget (scene validates kinds)");
                     // A command ACTS LIKE THE USER, and its echo must
                     // stay ORDERED with what follows — TextChanged is
                     // raised async, so the echo is emitted here
                     // synchronously and the late raise is swallowed
                     // (see entry_swallow).
-                    if !field.Text()?.to_string().is_empty() {
+                    if !field.text()?.is_empty() {
                         if let Some(swallow) = core.entry_swallow.get(&id.0) {
                             swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
-                        field.SetText(&HSTRING::new())?;
-                        clear_native_undo(field);
+                        field.set_text("")?;
+                        clear_native_undo(&field);
                         if let Some(tag) = core.entry_tags.get(&id.0) {
                             core.occurrences.send_text_tag(tag, "");
                         }
@@ -6687,9 +7058,17 @@ impl crate::harness::Stage for WinUiStage {
             // same fallback chain the other platforms take (macOS
             // description -> title -> AXValue; GTK name -> AT-SPI Text
             // content), so `field/<its text>` reads the same
-            // everywhere. The TextBox's Text IS the value the peer's
-            // ValueProvider serves; reading it here stays inside the
-            // platform's own property surface.
+            // everywhere. The control's own text IS the value its peer
+            // serves; reading it here stays inside the platform's own
+            // property surface.
+            //
+            // THE TWO KINDS ANSWER THROUGH DIFFERENT PATTERNS NOW, and
+            // this read is why it does not matter: a TextBox peer
+            // publishes ValuePattern and a RichEditBox peer publishes
+            // TextPattern instead (measured), but kaya asks the CONTROL,
+            // not the pattern, so `field/<text>` is the same string on
+            // both. The control TYPE the peer reports is `Edit` for
+            // both, so the role half is unmoved as well.
             let name = if name.is_empty()
                 && matches!(target.kind, K::Entry | K::Textarea)
             {
@@ -6698,7 +7077,11 @@ impl crate::harness::Stage for WinUiStage {
                         .map(|i| lf(core.entries[i].Text().map(|t| t.to_string()).unwrap_or_default()))
                         .unwrap_or_default(),
                     _ => try_resolve(target.index, core.textareas.len())
-                        .map(|i| lf(core.textareas[i].Text().map(|t| t.to_string()).unwrap_or_default()))
+                        .map(|i| {
+                            lf(Editable::Textarea(core.textareas[i].clone())
+                                .text()
+                                .unwrap_or_default())
+                        })
                         .unwrap_or_default(),
                 }
             } else {
@@ -7085,10 +7468,9 @@ impl crate::harness::Stage for WinUiStage {
             let Some(field) = editable_by_id(core, id) else {
                 return Ok(None);
             };
-            let now = lf(field.Text()?.to_string());
+            let now = lf(field.text()?);
             let n = now.chars().count() as i32;
-            field.SetSelectionStart(n)?;
-            field.SetSelectionLength(0)?;
+            field.set_caret(n)?;
             Ok(Some((id, now)))
         });
         Self::foreground_guest("type");
@@ -7154,8 +7536,8 @@ impl crate::harness::Stage for WinUiStage {
         // whoever reads the transcript that the verb knew.
         let shown = Self::on_ui_read(move |core| {
             Ok(editable_by_id(core, id)
-                .and_then(|field| field.Text().ok())
-                .map(|t| lf(t.to_string())))
+                .and_then(|field| field.text().ok())
+                .map(lf))
         })
         .unwrap_or(None);
         eprintln!(
@@ -7186,16 +7568,19 @@ impl crate::harness::Stage for WinUiStage {
             // held across it would not compile.
             let (field, id) = if t.kind == crate::harness::TargetKind::Textarea {
                 let i = crate::harness::resolve(t.index, core.textareas.len());
-                (core.textareas[i].clone(), core.textarea_ids[i])
+                (
+                    Editable::Textarea(core.textareas[i].clone()),
+                    core.textarea_ids[i],
+                )
             } else {
                 let i = crate::harness::resolve(t.index, core.entries.len());
-                (core.entries[i].clone(), core.entry_ids[i])
+                (Editable::Entry(core.entries[i].clone()), core.entry_ids[i])
             };
-            if lf(field.Text()?.to_string()) != text {
+            if lf(field.text()?) != text {
                 if let Some(swallow) = core.entry_swallow.get(&id) {
                     swallow.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
-                field.SetText(&HSTRING::from(&text))?;
+                field.set_text(&text)?;
                 // AND THE LEDGER SEES IT FIRST, exactly as it does for a
                 // keystroke (§3's banking, and the same order the
                 // TextChanged handler uses: bank, then tell the app).
@@ -7251,7 +7636,7 @@ impl crate::harness::Stage for WinUiStage {
                 else {
                     return Ok("<no such target>".to_string());
                 };
-                return Ok(lf(core.textareas[i].Text()?.to_string()));
+                return Ok(lf(Editable::Textarea(core.textareas[i].clone()).text()?));
             }
             let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
                 return Ok("<no such target>".to_string());

@@ -1375,14 +1375,105 @@ func kayaExpandPath(_ path: String) -> String {
 }
 
 #if os(macOS)
-    /// The AX identifiers NSOpenPanel publishes, measured with
-    /// tools/mac/paneldrive.swift rather than assumed. Building a
-    /// reader against a guessed tree cost this project a day once
-    /// already (docs/traps.md, the macOS a11y read).
-    private let kayaPanelListId = "ListView"
+    /// The AX identifiers NSOpenPanel publishes, measured rather than
+    /// assumed. Building a reader against a guessed tree cost this
+    /// project a day once already (docs/traps.md, the macOS a11y read).
+    private let kayaPanelSheetId = "open-panel"
     private let kayaPanelWhereId = "where popup"
     private let kayaPanelOkId = "OKButton"
     private let kayaPanelCancelId = "CancelButton"
+
+    /// THE FILE BROWSER HAS THREE SPELLINGS, ONE PER VIEW MODE, and
+    /// which one you get is not the app's choice: it is the MACHINE-WIDE
+    /// `NSGlobalDomain NSNavPanelFileListModeForOpenMode2` (1 columns,
+    /// 2 list, 3 icons), which any application's open panel writes for
+    /// every application on the box the moment a human picks a view.
+    ///
+    /// A reader that knew only `ListView` therefore had the lane's
+    /// colour decided by a preference no gate reads. Measured
+    /// 2026-08-06: eight legs in eight languages went red together
+    /// while the panel presented perfectly, correctly aimed, with both
+    /// files in it — the tree simply said `IconView`.
+    ///
+    ///     View Options -> List     AXOutline               id=ListView
+    ///     View Options -> Icons    AXList/AXCollectionList id=IconView
+    ///     View Options -> Columns  AXBrowser               id=ColumnView
+    ///
+    /// AN ENUM RATHER THAN THREE STRINGS, so that the identifiers the
+    /// reader HUNTS FOR and the shapes it can actually READ are one
+    /// list. Both switches below are exhaustive and carry no `default`:
+    /// a fourth mode is added by adding a case, and the build then
+    /// refuses until someone has written how to read it AND how to
+    /// select in it. The failure that got us here was a hardcoded
+    /// identifier drifting away from what the platform publishes; the
+    /// compiler is a better guard against that than a comment.
+    private enum KayaPanelShape: String, CaseIterable {
+        case list = "ListView"
+        case icons = "IconView"
+        case columns = "ColumnView"
+    }
+    private let kayaPanelBrowserIds = KayaPanelShape.allCases.map { $0.rawValue }
+
+    /// Roles that carry CONTENT rather than structure. No panel lookup
+    /// ever descends into one, and that is a correctness rule, not a
+    /// tidiness one: in columns mode the panel publishes a column per
+    /// path component, one of which held 8362 items here, and every
+    /// attribute read is a mach round trip to the panel service. The
+    /// unpruned walk this file used to do did not finish in 45 seconds
+    /// there; the pruned walk below reads the same panel in 40ms.
+    /// A whole-tree `kayaAxFind` for the OK button — which sorts AFTER
+    /// the browser — was the same trap with a different name.
+    private let kayaPanelOpaqueRoles: Set<String> = [
+        "AXRow", "AXCell", "AXStaticText", "AXImage", "AXTextField", "AXGroup",
+        "AXColumn", "AXMenuButton", "AXButton", "AXPopUpButton", "AXScrollBar",
+        "AXList", "AXOutline", "AXBrowser", "AXToolbar", "AXCheckBox", "AXMenuBar",
+    ]
+
+    /// The panel's own identifier search: the FIRST match wins, an
+    /// identifier is checked before the role is pruned (the browsers are
+    /// themselves opaque roles), and the walk never enters an item.
+    private func kayaPanelFind(
+        _ node: AXUIElement, _ identifiers: [String], _ depth: Int = 0
+    ) -> AXUIElement? {
+        if depth > 12 { return nil }
+        if let ident = kayaAxCopy(node, kAXIdentifierAttribute) as? String,
+            identifiers.contains(ident)
+        {
+            return node
+        }
+        if depth > 0, let role = kayaAxCopy(node, kAXRoleAttribute) as? String,
+            kayaPanelOpaqueRoles.contains(role)
+        {
+            return nil
+        }
+        for child in kayaAxKids(node) {
+            if let hit = kayaPanelFind(child, identifiers, depth + 1) { return hit }
+        }
+        return nil
+    }
+
+    /// Every identifier the sheet publishes above the item level. Only
+    /// the diagnostic uses this — when the browser is a shape this
+    /// reader does not know, the message says what the sheet DID
+    /// publish instead of guessing why.
+    private func kayaPanelIdentifiers(
+        _ node: AXUIElement, _ depth: Int = 0
+    ) -> [String] {
+        if depth > 12 { return [] }
+        var out: [String] = []
+        if let ident = kayaAxCopy(node, kAXIdentifierAttribute) as? String, !ident.isEmpty {
+            out.append(ident)
+        }
+        if depth > 0, let role = kayaAxCopy(node, kAXRoleAttribute) as? String,
+            kayaPanelOpaqueRoles.contains(role)
+        {
+            return out
+        }
+        for child in kayaAxKids(node) {
+            out.append(contentsOf: kayaPanelIdentifiers(child, depth + 1))
+        }
+        return out
+    }
 
     /// The app element with the announce dance done. macOS builds the
     /// tree LAZILY, so without these two attributes the walk returns
@@ -1414,65 +1505,161 @@ func kayaExpandPath(_ path: String) -> String {
         return out
     }
 
-    /// What the live panel is REALLY showing: its directory, and the
-    /// file names its list holds. nil when no panel is live.
-    /// Why the panel could not be read, in the caller's words.
-    ///
-    /// "no file dialog live" is true and useless: it is the same answer
-    /// for "the guest never asked", "the panel is up but the tree has
-    /// not materialized", and the one that cost half an hour — ANOTHER
-    /// APPLICATION IS FULLSCREEN, so this app cannot become frontmost,
-    /// and NSOpenPanel is XPC-hosted and has to be key before it will
-    /// present. An in-process NSAlert sheet presents anyway, which is
-    /// why the confirm scene stays green and only this one fails; every
-    /// downstream step then fails too, and the undismissed dialog trips
-    /// the one-per-process guard, whose abort takes the failure list
-    /// with it. Nothing in that names the cause.
-    func kayaOpenPanelWhyNot() -> String {
-        if kayaLiveOpenPanel == nil {
-            return "no panel was requested"
-        }
-        if !NSApplication.shared.isActive {
-            return
-                "a panel is up but this app is not frontmost — another application "
-                + "is probably fullscreen, and NSOpenPanel is XPC-hosted and must "
-                + "become key before it presents (an in-process alert sheet would "
-                + "not care, which is why only the file dialog legs fail)"
-        }
-        return "a panel is up but its accessibility tree has no \(kayaPanelListId)"
+    /// The panel's file browser in whatever view mode the machine is
+    /// set to, with the files already extracted and — the part that
+    /// differs per shape — the element a SELECTION goes through.
+    private struct KayaPanelBrowser {
+        /// The view mode this panel is in; the failure messages name it.
+        let kind: KayaPanelShape
+        /// Where the selection is set. The same element as the browser
+        /// for list and icons; the LAST COLUMN for columns, since an
+        /// NSBrowser selects per column and the current directory is
+        /// the rightmost one.
+        let container: AXUIElement
+        let rows: [(element: AXUIElement, name: String)]
     }
 
+    private func kayaPanelBrowser(_ sheet: AXUIElement) -> KayaPanelBrowser? {
+        guard let browser = kayaPanelFind(sheet, kayaPanelBrowserIds) else { return nil }
+        guard let ident = kayaAxCopy(browser, kAXIdentifierAttribute) as? String,
+            let kind = KayaPanelShape(rawValue: ident)
+        else { return nil }
+        switch kind {
+        case .list:
+            // THE COLUMN HEADER IS A ROW TOO, and an identical one: role
+            // AXRow and subrole AXOutlineRow, exactly like a file. So the
+            // list came back as ["Name", "decoy.txt", "picked.txt", "Name"]
+            // and every assertion about the panel's contents was reading
+            // column titles as filenames. The subset check hid it for weeks;
+            // the file_choose guard printed the list and showed it.
+            //
+            // AXDisclosureLevel is what separates them — 0 on the header, 1
+            // on the files — measured, because kAXHeader is present but
+            // points at the header VIEW and equals no row, and kAXRows
+            // returns the header along with the rest. A row that publishes
+            // no level at all is kept: an empty list would be a confusing
+            // way to say "Apple changed this".
+            //
+            // Icons and columns have no header row, so this filter is
+            // this arm's alone — applied to an icon item it would
+            // discard the files.
+            var rows: [(AXUIElement, String)] = []
+            let all =
+                (kayaAxCopy(browser, kAXRowsAttribute) as? [AXUIElement])
+                ?? (kayaAxCopy(browser, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+            for row in all {
+                if let level = kayaAxCopy(row, "AXDisclosureLevel") as? Int, level == 0 {
+                    continue
+                }
+                if let first = kayaPanelTexts(row).first { rows.append((row, first)) }
+            }
+            return KayaPanelBrowser(kind: kind, container: browser, rows: rows)
+        case .icons:
+            // A collection view with its items one AXSectionList down,
+            // and THE NAME IS THE IDENTIFIER: the item is an AXGroup
+            // whose id is "picked.txt", whose only text lives on the
+            // AXImage inside it. Taking the identifier first keeps the
+            // read one round trip shallower than the text walk.
+            var items: [(AXUIElement, String)] = []
+            func collect(_ e: AXUIElement, _ depth: Int) {
+                if depth > 3 { return }
+                for child in kayaAxKids(e) {
+                    if (kayaAxCopy(child, kAXRoleAttribute) as? String) == "AXList" {
+                        collect(child, depth + 1)
+                    } else if let ident = kayaAxCopy(child, kAXIdentifierAttribute) as? String,
+                        !ident.isEmpty
+                    {
+                        items.append((child, ident))
+                    } else if let first = kayaPanelTexts(child).first {
+                        items.append((child, first))
+                    }
+                }
+            }
+            collect(browser, 0)
+            return KayaPanelBrowser(kind: kind, container: browser, rows: items)
+        case .columns:
+            // One AXList per path component, and ONLY THE LAST ONE IS
+            // THIS DIRECTORY. Never walk the others: an ancestor column
+            // here held 8362 items, and each is a round trip.
+            var columns: [AXUIElement] = []
+            func hunt(_ e: AXUIElement, _ depth: Int) {
+                if depth > 4 { return }
+                for child in kayaAxKids(e) {
+                    switch kayaAxCopy(child, kAXRoleAttribute) as? String {
+                    case "AXList": columns.append(child)
+                    case "AXScrollArea": hunt(child, depth + 1)
+                    default: break
+                    }
+                }
+            }
+            hunt(browser, 0)
+            guard let last = columns.last else {
+                return KayaPanelBrowser(kind: kind, container: browser, rows: [])
+            }
+            var items: [(AXUIElement, String)] = []
+            for child in kayaAxKids(last) {
+                if let first = kayaPanelTexts(child).first { items.append((child, first)) }
+            }
+            return KayaPanelBrowser(kind: kind, container: last, rows: items)
+        }
+    }
+
+    /// Why the panel could not be read, IN MEASUREMENTS. Every clause
+    /// below prints something this process just observed; none of them
+    /// names a cause it cannot see.
+    ///
+    /// That rule is written in blood. The sentence that used to live
+    /// here blamed a FULLSCREEN APPLICATION for keeping this app off the
+    /// front, on the theory that NSOpenPanel is XPC-hosted and must
+    /// become key before it presents. Both halves are wrong, and the
+    /// arm that printed it was reached on EVERY mac leg — kaya's guests
+    /// run `.accessory` and never call `activate`, so `isActive` is
+    /// always false and that branch never discriminated anything. It
+    /// misdirected two investigations, hours apart, before anyone
+    /// checked it: measured 2026-08-06, the panel presents and its
+    /// accessibility tree fully materializes — sheet, browser, both
+    /// files, the where popup, Cancel and OK — with this app inactive,
+    /// another app frontmost, and no fullscreen app anywhere.
+    func kayaOpenPanelWhyNot() -> String {
+        guard let panel = kayaLiveOpenPanel else { return "no panel was requested" }
+        let app = kayaPanelAxApp()
+        guard let sheet = kayaPanelFind(app, [kayaPanelSheetId]) else {
+            // The three facts anyone would ask for next, and no story
+            // about them. Presentation needs NONE of them to be true.
+            let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "<none>"
+            return
+                "a panel is up (visible=\(panel.isVisible)) but published no "
+                + "\"\(kayaPanelSheetId)\" accessibility sheet — app active="
+                + "\(NSApplication.shared.isActive), frontmost=\(front), "
+                + "windows=\(NSApp.windows.count)"
+        }
+        guard let browser = kayaPanelBrowser(sheet) else {
+            let ids = Set(kayaPanelIdentifiers(sheet)).sorted()
+            return
+                "the panel's sheet is up but its file browser is none of "
+                + "\(kayaPanelBrowserIds.joined(separator: "/")) — the sheet publishes "
+                + "\(ids). The view mode is the machine-wide NSGlobalDomain "
+                + "NSNavPanelFileListModeForOpenMode2 (1 columns, 2 list, 3 icons), "
+                + "so a fourth shape means a new arm in kayaPanelBrowser"
+        }
+        return
+            "the panel's \(browser.kind.rawValue) browser lists \(browser.rows.map { $0.name }) "
+            + "— the read that failed raced the panel"
+    }
+
+    /// What the live panel is REALLY showing: its directory, and the
+    /// file names its browser holds, in any view mode. nil when no
+    /// panel is live, or when the tree is not readable — and then
+    /// kayaOpenPanelWhyNot says which.
     func kayaOpenPanelState() -> (String, [String])? {
         guard kayaLiveOpenPanel != nil else { return nil }
         let app = kayaPanelAxApp()
-        guard let list = kayaAxFind(app, kayaPanelListId) else { return nil }
+        guard let sheet = kayaPanelFind(app, [kayaPanelSheetId]) else { return nil }
+        guard let browser = kayaPanelBrowser(sheet) else { return nil }
         let where_ =
-            kayaAxFind(app, kayaPanelWhereId)
+            kayaPanelFind(sheet, [kayaPanelWhereId])
             .flatMap { kayaAxCopy($0, kAXValueAttribute) as? String } ?? ""
-        // THE COLUMN HEADER IS A ROW TOO, and an identical one: role
-        // AXRow and subrole AXOutlineRow, exactly like a file. So the
-        // list came back as ["Name", "decoy.txt", "picked.txt", "Name"]
-        // and every assertion about the panel's contents was reading
-        // column titles as filenames. The subset check hid it for weeks;
-        // the file_choose guard printed the list and showed it.
-        //
-        // AXDisclosureLevel is what separates them — 0 on the header, 1
-        // on the files — measured, because kAXHeader is present but
-        // points at the header VIEW and equals no row, and kAXRows
-        // returns the header along with the rest. A row that publishes
-        // no level at all is kept: an empty list would be a confusing
-        // way to say "Apple changed this".
-        var names: [String] = []
-        let rows =
-            (kayaAxCopy(list, kAXRowsAttribute) as? [AXUIElement])
-            ?? (kayaAxCopy(list, kAXChildrenAttribute) as? [AXUIElement]) ?? []
-        for row in rows {
-            if let level = kayaAxCopy(row, "AXDisclosureLevel") as? Int, level == 0 {
-                continue
-            }
-            if let first = kayaPanelTexts(row).first { names.append(first) }
-        }
-        return (where_, names)
+        return (where_, browser.rows.map { $0.name })
     }
 
     /// Point the live panel at a directory. The harness placing the app
@@ -1490,24 +1677,45 @@ func kayaExpandPath(_ path: String) -> String {
     /// element down before the AX call finishes its round trip. The
     /// panel's completion firing is the proof. Measured — do not
     /// "fix" it by checking the return code.
+    ///
+    /// THE SELECTION SET LIES THE SAME WAY. In columns mode setting
+    /// AXSelectedChildren returns kAXErrorAttributeUnsupported (-25205)
+    /// and the selection takes anyway — proved differentially rather
+    /// than by trusting either the code or the wish: asking for
+    /// picked.txt answered picked.txt, asking for decoy.txt answered
+    /// decoy.txt, same panel, same call, same error. What the return
+    /// code cannot tell you, the completion can, so the caller checks
+    /// the panel is gone and the scene checks the bytes.
     func kayaOpenPanelDrive(_ name: String) {
         guard kayaLiveOpenPanel != nil else { return }
         let app = kayaPanelAxApp()
+        guard let sheet = kayaPanelFind(app, [kayaPanelSheetId]) else { return }
         if name == "cancel" {
-            if let cancel = kayaAxFind(app, kayaPanelCancelId) {
+            if let cancel = kayaPanelFind(sheet, [kayaPanelCancelId]) {
                 AXUIElementPerformAction(cancel, kAXPressAction as CFString)
             }
             return
         }
-        guard let list = kayaAxFind(app, kayaPanelListId) else { return }
-        var target: AXUIElement?
-        for row in (kayaAxCopy(list, kAXChildrenAttribute) as? [AXUIElement]) ?? [] {
-            if kayaPanelTexts(row).contains(name) { target = row }
+        guard let browser = kayaPanelBrowser(sheet) else { return }
+        guard let row = browser.rows.last(where: { $0.name == name }) else { return }
+        // A ROW IS SELECTED WHERE ITS CONTAINER SAYS, and the attribute
+        // is not the same one twice: an AXOutline takes AXSelectedRows
+        // and refuses AXSelectedChildren, a collection view and an
+        // NSBrowser column take AXSelectedChildren and IGNORE
+        // AXSelectedRows — silently, returning success, which is how a
+        // list-shaped call on an icon-shaped panel would look like it
+        // worked and then open whatever was already selected.
+        switch browser.kind {
+        case .list:
+            AXUIElementSetAttributeValue(
+                browser.container, kAXSelectedRowsAttribute as CFString,
+                [row.element] as CFArray)
+        case .icons, .columns:
+            AXUIElementSetAttributeValue(
+                browser.container, kAXSelectedChildrenAttribute as CFString,
+                [row.element] as CFArray)
         }
-        guard let row = target else { return }
-        AXUIElementSetAttributeValue(
-            list, kAXSelectedRowsAttribute as CFString, [row] as CFArray)
-        if let ok = kayaAxFind(app, kayaPanelOkId) {
+        if let ok = kayaPanelFind(sheet, [kayaPanelOkId]) {
             AXUIElementPerformAction(ok, kAXPressAction as CFString)
         }
     }
@@ -5170,6 +5378,25 @@ private func kayaRunScript(_ script: String) {
             }
         }
     }
+    // THE PINS ARE PART OF THE SCENE'S VERDICT. A rich control's
+    // opinion shipping by accident is this milestone's named failure
+    // mode, so a pin that is not in force fails the leg that rendered
+    // the widget rather than waiting for a gate somebody has to
+    // remember to run.
+    //
+    // ONE CLAUSE FOR BOTH APPLE ARMS, on purpose: the two platforms
+    // pin a different vocabulary (a UITextView's keyboard traits, an
+    // NSTextView's checking and find flags) but they hold the SAME
+    // rule, so they fill the same set and answer through the same
+    // sentence. Two clauses would be two rules, and the next arm would
+    // inherit whichever one it read first.
+    let pinBreaches = DispatchQueue.main.sync { kayaPlainTextPinBreaches.sorted() }
+    if !pinBreaches.isEmpty {
+        failures.append(
+            "the textarea's plain-text pins are not in force on the live text view: "
+                + pinBreaches.joined(separator: ", ")
+                + " — restore them in swift/KayaSwiftUI.swift, kayaPinPlainText")
+    }
     if failures.isEmpty && observed.isEmpty {
         failures.append("script has no expects")
     }
@@ -8614,38 +8841,743 @@ struct KayaEntry: View {
     }
 }
 
-/// The multi-line editor: KayaEntry's exact contract (uncontrolled
-/// binding, identity-tag emits, model-driven focus) over TextEditor.
+#if os(macOS)
+/// The multi-line editor on macOS: KayaEntry's exact contract
+/// (uncontrolled fold, identity-tag emits, model-driven focus) over an
+/// NSTextView this file holds directly.
+///
+/// RICH-CAPABLE CONTROL, PLAIN-TEXT CONTRACT (docs/textarea-foundation-plan.md).
+/// The control underneath is the one that can express attributed runs
+/// — the ranges milestone needs a handle on it — and kaya's textarea
+/// contract does not move by one byte: string in, string out,
+/// text_changed through the uncontrolled fold, model-driven focus,
+/// AXTextArea carrying the authored id and label. Every opinion the
+/// rich control carries is pinned off in `kayaPinPlainText`, audited on
+/// the live control, and a breach fails the leg that rendered it.
 struct KayaTextarea: View {
     let node: KayaNode
-    @FocusState private var focused: Bool
 
     var body: some View {
-        TextEditor(
-            text: Binding(
-                get: { node.text },
-                set: { newValue in
-                    let value = kayaLF(newValue)
-                    node.text = value
-                    KayaHost.emitText(node, value)
-                })
+        // EVERY MODEL FACT THE VIEW NEEDS IS READ HERE, in a SwiftUI
+        // body, and handed down as a value. That is not style:
+        // @Observable tracks the reads a BODY makes, so reading
+        // `node.text` here is what makes a model write re-run this body
+        // — and the re-run is what brings `updateNSView` around to push
+        // the text into AppKit. A representable that reached for the
+        // node inside `updateNSView` would register no dependency and
+        // would render once and never hear about a write again.
+        KayaMacTextarea(
+            node: node,
+            text: node.text,
+            focused: kayaScene.focusedId == node.id,
+            a11yId: node.a11yId,
+            a11yLabel: node.a11yLabel,
+            a11yHint: node.a11yHint
         )
         .frame(width: 240, height: 96)
         .border(Color.gray.opacity(0.4))
-        .focused($focused)
-        .onAppear { focused = kayaScene.focusedId == node.id }
-        .onChange(of: kayaScene.focusedId) { _, newValue in
-            focused = newValue == node.id
+    }
+}
+
+/// The owned text view.
+///
+/// THE SUBCLASS EXISTS FOR ONE REASON: focus is a kaya model fact,
+/// and it has to stay truthful in BOTH directions. The model-driven
+/// direction is a `makeFirstResponder` from `updateNSView`; the
+/// user-driven one has no delegate hook — `textDidBeginEditing`
+/// fires on the first EDIT, not when the caret arrives — so a click
+/// into an empty editor would leave `kayaScene.focusedId` naming
+/// whatever was focused before. The responder callbacks are where
+/// AppKit says it plainly.
+private final class KayaTextView: NSTextView {
+    var onFocusChange: ((Bool) -> Void)?
+    /// Whose widget this is, so the view can ask the model whether it
+    /// should be focused at a moment only the view knows about.
+    var nodeId: UInt64 = 0
+
+    /// FOCUS IS APPLIED WHEN THE VIEW HAS SOMEWHERE TO BE FOCUSED, and
+    /// this hook is not belt-and-braces for the one in `updateNSView` —
+    /// it is the case that hook CANNOT cover.
+    ///
+    /// MEASURED, and it cost two runs in three: SwiftUI creates and
+    /// updates a representable's NSView BEFORE putting it in a window,
+    /// so the update carrying "this widget is focused" runs with
+    /// `window == nil`, `makeFirstResponder` has nobody to send to, and
+    /// the focus is lost with no error and no second chance — nothing
+    /// else changes, so no later body run comes to fix it. The symptom
+    /// is remote from the cause: `expect_focused` passes (it reads the
+    /// model), and the NEXT `type` reports "reached no window".
+    /// Entering the window is the event; this is where AppKit announces
+    /// it.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, kayaScene.focusedId == nodeId else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window, kayaScene.focusedId == self.nodeId else { return }
+            window.makeFirstResponder(self)
         }
-        .onChange(of: focused) { _, newValue in
-            if newValue {
-                kayaScene.focusedId = node.id
-            } else if kayaScene.focusedId == node.id {
-                kayaScene.focusedId = nil
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { onFocusChange?(true) }
+        return took
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let gave = super.resignFirstResponder()
+        if gave { onFocusChange?(false) }
+        return gave
+    }
+}
+
+/// PIN OFF EVERY OPINION THE RICH CONTROL CARRIES.
+///
+/// This is the milestone's named failure mode: NSTextView is a rich
+/// text editor with a decade of opinions about what the user
+/// "meant", and shipping one of them by accident would move kaya's
+/// plain-text contract without anything saying so. A person typing
+/// `"` into an unpinned control gets `"`, and the app is told the
+/// character it never entered; a paste of styled text arrives
+/// carrying a font; Writing Tools rewrites a sentence out from under
+/// the app's model.
+///
+/// EACH LINE IS LOAD-BEARING ON ITS OWN, deliberately. NSTextView
+/// also has `enabledTextCheckingTypes`, one bitmask that would zero
+/// the checking group in a single statement — and that is exactly
+/// why it is not used: an umbrella makes every individual pin
+/// unfalsifiable, so deleting one would change nothing and its
+/// negative test would pass vacuously.
+///
+/// THE DEFAULTS ARE NOT KAYA'S TO CHOOSE. Most of these read their
+/// initial value from the user's own system settings (Smart Quotes,
+/// spelling, text replacement), so "it was already false on the
+/// machine I tested" is a fact about that machine and not about the
+/// contract. Pinning is what makes the widget behave identically on
+/// a machine whose owner likes smart quotes.
+///
+/// The entry is deliberately not here: it stays a SwiftUI TextField,
+/// which is the milestone's scope (docs/textarea-foundation-plan.md).
+func kayaPinPlainText(_ view: NSTextView) {
+    // THE VALUE IS A STRING. Plain text refuses rich paste at the
+    // control (RTF arrives as its characters and nothing else),
+    // refuses dropped/pasted graphics — which would otherwise
+    // insert U+FFFC attachment characters INTO the string the app
+    // reads — and keeps the format panels away from a widget that
+    // has no way to carry what they would apply.
+    view.isRichText = false
+    view.importsGraphics = false
+    view.allowsImageEditing = false
+    view.usesFontPanel = false
+    view.usesRuler = false
+    view.isRulerVisible = false
+    view.allowsDocumentBackgroundColorChange = false
+    // NOTHING REWRITES WHAT THE USER TYPED. Each of these edits the
+    // string the app is told about, which is the observable kaya
+    // compares byte-for-byte across eight languages and five lanes
+    // (invariant 6).
+    view.isAutomaticQuoteSubstitutionEnabled = false
+    view.isAutomaticDashSubstitutionEnabled = false
+    view.isAutomaticTextReplacementEnabled = false
+    view.isAutomaticSpellingCorrectionEnabled = false
+    view.isAutomaticTextCompletionEnabled = false
+    view.smartInsertDeleteEnabled = false
+    // AND NOTHING ANNOTATES IT EITHER. These do not change the
+    // characters, they attach attributes and draw over them — a
+    // squiggle, a link — which is state the ranges milestone is
+    // about to declare on the same runs.
+    view.isContinuousSpellCheckingEnabled = false
+    view.isGrammarCheckingEnabled = false
+    view.isAutomaticLinkDetectionEnabled = false
+    view.isAutomaticDataDetectionEnabled = false
+    // WRITING TOOLS REWRITE WHOLE SENTENCES (macOS 15+), in place,
+    // on the user's command — the largest opinion on this list and
+    // the newest. `.none` is the API's own way to say the control
+    // is not a document.
+    view.writingToolsBehavior = .none
+    // THE FIND BAR STAYS OUT. kaya owns Cmd+F: it is a menu the app
+    // authors and a role kaya routes, and a text view that installs
+    // its own find bar takes the key first AND grows a bar inside
+    // the widget's 240x96 frame. The ranges milestone will drive
+    // find-like highlighting through kaya's own protocol, so the
+    // system bar is not a fallback, it is a competitor.
+    view.usesFindBar = false
+    view.usesFindPanel = false
+    view.isIncrementalSearchingEnabled = false
+}
+
+/// Is the scene interpreter running? The pin audit is a harness
+/// instrument and costs a shipped app nothing.
+let kayaHarnessActive = ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil
+
+/// Pins found NOT in force on a live control, by name. Written on the
+/// main thread by the audit, folded into the scene's failures by
+/// kayaRunScript.
+var kayaPlainTextPinBreaches: Set<String> = []
+
+/// The pins, read back off the LIVE control, plus the one fact AppKit
+/// derives for itself.
+///
+/// WHAT THIS PROVES AND WHAT IT CANNOT, stated plainly, because a guard
+/// nobody has watched fail is worse than none. It proves each pin is in
+/// force on the object the user types into: delete a pin, flip one,
+/// apply them to the wrong view, or let SwiftUI hand back a view that
+/// never saw them, and every textarea-bearing leg fails naming the
+/// trait. What it cannot prove is that AppKit HONOURS a trait, and on
+/// this platform that half could not be measured from inside a leg
+/// either: with the quote and dash substitutions flipped ON, the
+/// harness's own `type` verb — real NSEvents through `NSApp.sendEvent`,
+/// the path a hardware key takes — still produced straight quotes and
+/// two hyphens (measured 2026-08-06). The substitution machinery does
+/// not act on a process that never becomes active, and under
+/// KAYA_SELFTEST no kaya guest ever does. So the read-back is the whole
+/// instrument here, as it is on iOS for a different reason. It also
+/// cannot say whether a pin whose PLATFORM DEFAULT already matches is
+/// doing any work on THIS machine — those defaults come from the user's
+/// own system settings, which is the reason to pin them rather than a
+/// reason not to.
+///
+/// ONE CLAUSE IS APPKIT'S OWN ANSWER rather than a read-back: a
+/// TextKit 2 layout manager exists only while nothing has touched
+/// `.layoutManager` — one stray read of that property downgrades the
+/// view to TextKit 1 and takes the whole ranges surface with it,
+/// silently (range-probe-mac.md §1). "This is kaya's own view class"
+/// is deliberately NOT asserted here: `updateNSView` already casts to
+/// it, so the clause could only ever be true, and a guard that cannot
+/// fail is the shape this project keeps paying for.
+func kayaAuditPlainTextPins(_ view: NSTextView) {
+    guard kayaHarnessActive else { return }
+    var breaches: [String] = []
+    func want(_ ok: Bool, _ name: String) {
+        if !ok { breaches.append(name) }
+    }
+    want(!view.isRichText, "isRichText")
+    want(!view.importsGraphics, "importsGraphics")
+    want(!view.allowsImageEditing, "allowsImageEditing")
+    want(!view.usesFontPanel, "usesFontPanel")
+    want(!view.usesRuler, "usesRuler")
+    want(!view.isRulerVisible, "isRulerVisible")
+    want(!view.allowsDocumentBackgroundColorChange, "allowsDocumentBackgroundColorChange")
+    want(!view.isAutomaticQuoteSubstitutionEnabled, "isAutomaticQuoteSubstitutionEnabled")
+    want(!view.isAutomaticDashSubstitutionEnabled, "isAutomaticDashSubstitutionEnabled")
+    want(!view.isAutomaticTextReplacementEnabled, "isAutomaticTextReplacementEnabled")
+    want(!view.isAutomaticSpellingCorrectionEnabled, "isAutomaticSpellingCorrectionEnabled")
+    want(!view.isAutomaticTextCompletionEnabled, "isAutomaticTextCompletionEnabled")
+    want(!view.smartInsertDeleteEnabled, "smartInsertDeleteEnabled")
+    want(!view.isContinuousSpellCheckingEnabled, "isContinuousSpellCheckingEnabled")
+    want(!view.isGrammarCheckingEnabled, "isGrammarCheckingEnabled")
+    want(!view.isAutomaticLinkDetectionEnabled, "isAutomaticLinkDetectionEnabled")
+    want(!view.isAutomaticDataDetectionEnabled, "isAutomaticDataDetectionEnabled")
+    want(view.writingToolsBehavior == .none, "writingToolsBehavior")
+    want(!view.usesFindBar, "usesFindBar")
+    want(!view.usesFindPanel, "usesFindPanel")
+    want(!view.isIncrementalSearchingEnabled, "isIncrementalSearchingEnabled")
+    // The enabled checking types are the umbrella the pins deliberately
+    // do not use — asserted rather than set, so a checker switched on
+    // through the mask (or handed back by the system) is a breach here
+    // instead of a silent substitution. ORTHOGRAPHY is the one bit
+    // AppKit keeps whatever the individual properties say: it is the
+    // language identification the checkers are built on, has no
+    // property of its own to pin, and rewrites nothing. Measured at
+    // exactly 1 (orthography alone) on macOS 26.5 with every pin above
+    // in force.
+    want(
+        view.enabledTextCheckingTypes
+            & ~NSTextCheckingResult.CheckingType.orthography.rawValue == 0,
+        "enabledTextCheckingTypes")
+    want(view.textLayoutManager != nil, "textLayoutManager")
+    if !breaches.isEmpty { kayaPlainTextPinBreaches.formUnion(breaches) }
+}
+
+/// The macOS textarea: an NSTextView kaya owns, wrapped by kaya
+/// rather than by SwiftUI.
+///
+/// WHY THE STOCK TextEditor HAD TO GO (range-probe-mac.md H2/G6,
+/// measured against this very file): TextEditor pushes an
+/// app-driven text change into its private AppKit view ONE
+/// MAIN-QUEUE TURN LATER — 11ms after kaya's write — and that late
+/// push resets the caret to the end of the document and destroys
+/// every attribute declared on the text. kaya could not order
+/// anything against it because kaya never saw the push. Owning the
+/// view moves the push into `updateNSView`, which is kaya's own
+/// code: the text and whatever else the widget carries land in ONE
+/// pass, in an order this file chooses. Measured on the owned view
+/// (H3): 3 declared ranges and the selection survive an app text
+/// change that wiped both under TextEditor.
+///
+/// NEVER READ `.layoutManager` ON THIS VIEW, not even in a
+/// diagnostic: reading it silently and permanently converts a
+/// TextKit 2 view to TextKit 1, and it did exactly that to a whole
+/// probe process (range-probe-mac.md §1). The stack below is
+/// assembled as TextKit 2 explicitly so the conversion has a name.
+private struct KayaMacTextarea: NSViewRepresentable {
+    let node: KayaNode
+    let text: String
+    let focused: Bool
+    let a11yId: String
+    let a11yLabel: String
+    let a11yHint: String
+
+    /// The uncontrolled fold, in AppKit's vocabulary: the view tells
+    /// kaya what it holds, kaya normalizes it, writes the node and
+    /// emits with the widget's identity tag. Nothing is read back.
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var node: KayaNode?
+        /// THE TEXT STACK'S OWNER. TextKit 2's graph runs content
+        /// manager -> layout manager -> container, and the text view is
+        /// initialized with the CONTAINER — so nothing the view holds is
+        /// documented to keep the content manager alive, and a widget
+        /// whose content manager is collected has no text at all. The
+        /// coordinator outlives every update, so it holds it.
+        var content: NSTextContentStorage?
+
+        func textDidChange(_ notification: Notification) {
+            guard let node, let view = notification.object as? NSTextView else { return }
+            let value = kayaLF(view.string)
+            // THE ECHO DOCTRINE, held at the one place an echo could
+            // enter: a programmatic write emits nothing. AppKit does
+            // not notify a delegate about a change kaya made through
+            // `string` — but "AppKit does not" is a premise, and the
+            // cost of it being wrong is a text_changed the app never
+            // caused, folded into its model and banked into the undo
+            // ledger. Comparing against the model refuses that
+            // whatever AppKit decides to notify about.
+            guard value != node.text else { return }
+            node.text = value
+            KayaHost.emitText(node, value)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        // TextKit 2, assembled by name rather than inherited from a
+        // convenience initializer, so what this widget sits on is
+        // stated in the source the ranges milestone will read.
+        let content = NSTextContentStorage()
+        let layout = NSTextLayoutManager()
+        content.addTextLayoutManager(layout)
+        let container = NSTextContainer(
+            size: CGSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        layout.textContainer = container
+
+        context.coordinator.content = content
+
+        let view = KayaTextView(frame: .zero, textContainer: container)
+        view.isEditable = true
+        view.isSelectable = true
+        // The delegated undo tier lives on this manager: a kaya
+        // textarea's undoManager resolves to the WINDOW's, and
+        // `kayaFocusedTextResponder` reaches it as an NSText.
+        // Without this the native tier has nothing to delegate to
+        // and Edit>Undo would only ever reach the core's ledger.
+        view.allowsUndo = true
+        view.font = .preferredFont(forTextStyle: .body)
+        view.textContainerInset = CGSize(width: 2, height: 2)
+        view.isVerticallyResizable = true
+        view.isHorizontallyResizable = false
+        view.minSize = .zero
+        view.maxSize = CGSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude)
+        view.autoresizingMask = [.width]
+        view.nodeId = node.id
+        kayaPinPlainText(view)
+        view.delegate = context.coordinator
+
+        let coordinator = context.coordinator
+        view.onFocusChange = { [weak view] took in
+            // ONE TURN OUT, and the model re-read INSIDE the turn.
+            // This fires from inside AppKit's first-responder
+            // change, which can be inside a SwiftUI update pass —
+            // writing the model there is the "modifying state during
+            // view update" hazard. And by the time the turn arrives
+            // the answer may have moved (a click that lands while
+            // the previously focused entry is still resigning), so
+            // the closure asks who holds focus NOW instead of
+            // asserting what was true when it was queued.
+            DispatchQueue.main.async {
+                guard let node = coordinator.node, view != nil else { return }
+                if took {
+                    if kayaScene.focusedId != node.id { kayaScene.focusedId = node.id }
+                } else if kayaScene.focusedId == node.id {
+                    kayaScene.focusedId = nil
+                }
+            }
+        }
+
+        // THE VIEWPORT. A text view that is not a document view grows
+        // with its content and clips against the widget's 240x96 frame,
+        // with no way to reach what fell off the bottom — the wart the
+        // linux arm of this same milestone exists to remove.
+        let scroll = NSScrollView()
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = true
+        scroll.backgroundColor = .textBackgroundColor
+        // AND THE ONE LANDMINE OF THIS SWAP (range-probe-mac.md J1).
+        //
+        // `kayaA11y` applies `.accessibilityIdentifier` to the widget
+        // from KayaRender; on a representable SwiftUI lands it on the
+        // ROOT AppKit view — this scroll view — and PROPAGATES it down
+        // to the first child besides (the same propagation kayaA11y's
+        // own comment records for containers). `kayaAxFind` takes the
+        // FIRST element whose identifier matches, walking down, so a
+        // published scroll area wins the search and `expect_ax
+        // textarea#0` reads `group/Notes` where the a11y milestone
+        // pinned `field/Notes` — measured here, exactly as J1 predicted.
+        //
+        // Not publishing the viewport is what puts the text area first.
+        // It is also the honest tree: this scroll view is a viewport
+        // with no name, no value and nothing to activate, and iOS
+        // publishes no such element at all (a UITextView IS its scroll
+        // view), so suppressing it makes the two Apple arms agree.
+        // Overriding `accessibilityIdentifier()` on a subclass does NOT
+        // work and was tried first: the identifier is served by the
+        // accessibility element SwiftUI installs, not by the view's own
+        // method, and the tree still read `group/Notes` with the
+        // override returning "" (measured 2026-08-06).
+        scroll.setAccessibilityElement(false)
+        scroll.documentView = view
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let view = scroll.documentView as? KayaTextView else { return }
+        context.coordinator.node = node
+        view.nodeId = node.id
+
+        // APPLIED ON EVERY UPDATE, not once at construction: a pin that
+        // only ran in makeNSView would be quietly lost the day SwiftUI
+        // hands back a recycled view or AppKit re-derives a trait from
+        // the user's settings, and nothing would say so. The audit
+        // beside it reads the live control back — a breach fails the
+        // leg that rendered the widget (kayaRunScript's verdict), which
+        // is a wall on the path every textarea-bearing scene already
+        // walks rather than one more gate to remember.
+        kayaPinPlainText(view)
+        kayaAuditPlainTextPins(view)
+
+        // THE PUSH KAYA OWNS. Guarded by a comparison rather than
+        // written unconditionally: an identical write would still
+        // rebuild the text storage, and a rebuild throws away
+        // everything declared on the runs (measured, G2 — a
+        // byte-identical write wipes nothing only if it does not
+        // happen). The selection is carried across, clamped, which
+        // is the caret behaviour SwiftUI's own push could not give.
+        if view.string != text {
+            let selection = view.selectedRange
+            view.string = text
+            let end = (text as NSString).length
+            let location = min(selection.location, end)
+            view.setSelectedRange(
+                NSRange(location: location, length: min(selection.length, end - location)))
+        }
+
+        // THE UNIVERSAL PROPS, ON THE ELEMENT THAT PUBLISHES AS THE
+        // TEXT AREA. They ride SwiftUI modifiers from KayaRender for
+        // every other kind and land on the representable's root view,
+        // which is the viewport (J1, and makeNSView's note) — so they
+        // are set again here, on the text view itself, and kaya's own
+        // set WINS: measured by setting `a11yId + "-own"` and reading
+        // `AXTextArea id=notes-own` back out of the tree. Empty stays
+        // unset, the same rule kayaA11y states: a control keeps
+        // whatever it derives from its own content.
+        view.setAccessibilityIdentifier(a11yId)
+        view.setAccessibilityLabel(a11yLabel.isEmpty ? nil : a11yLabel)
+        view.setAccessibilityHelp(a11yHint.isEmpty ? nil : a11yHint)
+
+        // FOCUS, both directions, one turn out for the reason the
+        // responder callback is: a first-responder change inside a
+        // SwiftUI update pass reenters this view's own body. Each
+        // closure re-reads the model, so whichever order the turns
+        // arrive in, the resting state is the model's.
+        if focused, view.window?.firstResponder !== view {
+            DispatchQueue.main.async { [weak view] in
+                guard let view, kayaScene.focusedId == node.id else { return }
+                view.window?.makeFirstResponder(view)
+            }
+        } else if !focused, view.window?.firstResponder === view {
+            DispatchQueue.main.async { [weak view] in
+                guard let view, kayaScene.focusedId != node.id,
+                    view.window?.firstResponder === view
+                else { return }
+                view.window?.makeFirstResponder(nil)
             }
         }
     }
 }
+
+#else
+    /// The multi-line editor on iOS: KayaEntry's exact contract
+    /// (uncontrolled fold, identity-tag emits, model-driven focus) over
+    /// a UITextView this file holds directly.
+    ///
+    /// RICH-CAPABLE CONTROL, PLAIN-TEXT CONTRACT, and the control is the
+    /// only half that moved. `TextEditor` was already a UITextView
+    /// underneath (the range probe found `TextEditorTextView` under the
+    /// hosting adaptor, on TextKit 2, scroll-enabled), but SwiftUI owned
+    /// that object: nothing kaya could reach named its layout manager,
+    /// its selection or its scroll offset, and every editorial opinion
+    /// the keyboard carries arrived at whatever default SwiftUI had
+    /// picked. Holding the view changes NOTHING an app or a scene can
+    /// observe — string in, string out, `text_changed` through the
+    /// uncontrolled fold, focus mirrored from the model, the same
+    /// accessibility element and role — and it buys the handle the
+    /// ranges milestone needs (TextKit 2 rendering attributes,
+    /// `selectedRange`, `scrollRangeToVisible`), all public API at
+    /// kaya's iOS 16 floor.
+    struct KayaTextarea: View {
+        let node: KayaNode
+
+        var body: some View {
+            // BOTH OBSERVATIONS ARE READ HERE, in a SwiftUI body, and
+            // handed down as values. `updateUIView` is not an
+            // observation scope of its own, so a representable that
+            // reached for `node.text` inside it would render once and
+            // never hear about a model write again.
+            KayaUITextView(node: node, text: node.text, focusedId: kayaScene.focusedId)
+                .frame(width: 240, height: 96)
+                .border(Color.gray.opacity(0.4))
+        }
+    }
+
+    /// kaya's textarea control: a UITextView, pinned to plain text.
+    struct KayaUITextView: UIViewRepresentable {
+        let node: KayaNode
+        let text: String
+        let focusedId: UInt64?
+
+        final class Coordinator: NSObject, UITextViewDelegate {
+            var node: KayaNode?
+
+            /// The uncontrolled fold, spelled in UIKit. The binding
+            /// setter this replaces did exactly this and nothing else:
+            /// normalize line endings, mirror the value into the node
+            /// (the render needs something to show), and emit with the
+            /// widget's identity tag for the app to fold into its own
+            /// model. Nothing is read back from the app.
+            ///
+            /// THE EQUALITY GUARD IS WHAT KEEPS THE ECHO OUT. Setting
+            /// `UITextView.text` programmatically does not call this
+            /// delegate method, so a model write cannot reach here on
+            /// its own; the guard covers the paths that could (a
+            /// UIKit-internal re-set, a future edit that lands the same
+            /// bytes) and makes "no change, no emission" true by
+            /// construction rather than by trust.
+            func textViewDidChange(_ textView: UITextView) {
+                guard let node else { return }
+                let value = kayaLF(textView.text ?? "")
+                guard value != node.text else { return }
+                node.text = value
+                KayaHost.emitText(node, value)
+            }
+
+            /// A user-driven focus change flows back so the model stays
+            /// truthful, exactly as the `@FocusState` mirror did.
+            func textViewDidBeginEditing(_ textView: UITextView) {
+                guard let node, kayaScene.focusedId != node.id else { return }
+                kayaScene.focusedId = node.id
+            }
+
+            func textViewDidEndEditing(_ textView: UITextView) {
+                guard let node, kayaScene.focusedId == node.id else { return }
+                kayaScene.focusedId = nil
+            }
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        func makeUIView(context: Context) -> UITextView {
+            // THE BARE INITIALIZER IS THE TEXTKIT 2 ONE. `UITextView()`
+            // gets an NSTextLayoutManager from iOS 16 on; the
+            // container-taking initializer and any read of
+            // `.layoutManager` silently downgrade the view to TextKit 1,
+            // which has no non-destructive styling on this platform at
+            // all (AppKit's temporary attributes have no iOS sibling).
+            // The audit below asserts the layout manager is still there
+            // for exactly that reason.
+            let view = UITextView()
+            view.delegate = context.coordinator
+            view.font = UIFont.preferredFont(forTextStyle: .body)
+            view.adjustsFontForContentSizeCategory = true
+            view.backgroundColor = .clear
+            view.contentInsetAdjustmentBehavior = .never
+            kayaPinPlainText(view)
+            return view
+        }
+
+        func updateUIView(_ view: UITextView, context: Context) {
+            context.coordinator.node = node
+            if view.text != text { view.text = text }
+            // APPLIED ON EVERY UPDATE, not once at construction: a pin
+            // that only ran in makeUIView would be quietly lost the day
+            // SwiftUI hands back a recycled view or UIKit re-derives a
+            // trait, and nothing would say so.
+            kayaPinPlainText(view)
+            kayaAuditPlainTextPins(view)
+            // FOCUS ON THE FAR SIDE OF THE RENDER. Becoming first
+            // responder re-enters this view's delegate, which writes the
+            // very model this update is reading; done inline that is a
+            // write during a SwiftUI update. The next main-queue turn
+            // has no such problem, and re-reads the model before acting
+            // so a focus that moved in between wins.
+            let wants = focusedId == node.id
+            if wants != view.isFirstResponder {
+                let id = node.id
+                DispatchQueue.main.async { [weak view] in
+                    guard let view, (kayaScene.focusedId == id) == wants else { return }
+                    if wants {
+                        view.becomeFirstResponder()
+                    } else {
+                        view.resignFirstResponder()
+                    }
+                }
+            }
+        }
+    }
+
+    /// EVERY OPINION THE RICH CONTROL CARRIES, PINNED OFF.
+    ///
+    /// A UITextView arrives with the keyboard's whole editorial voice
+    /// switched on: it capitalizes the first letter of a sentence,
+    /// autocorrects words, turns "quotes" typographic and `--` into an
+    /// em dash, adds and removes spaces around a paste, offers inline
+    /// predictions, completes arithmetic, hands the document to Writing
+    /// Tools, takes attributed runs off the pasteboard, and owns a find
+    /// interaction. kaya's textarea contract is BYTES: what the user
+    /// types is what `text_changed` carries and what the app folds.
+    /// Every one of those defaults would edit that string on the user's
+    /// behalf and tell nobody, and a rich control's opinion shipping by
+    /// accident is this milestone's named failure mode.
+    ///
+    /// The entry is deliberately not here: it stays a SwiftUI TextField,
+    /// which is the milestone's scope (docs/textarea-foundation-plan.md).
+    func kayaPinPlainText(_ view: UITextView) {
+        // The substitutions the keyboard performs on typed text. The
+        // first is the one with teeth on a phone: `.sentences` is the
+        // SDK default, so an unpinned textarea capitalizes the first
+        // letter the user types and `text_changed` carries a byte
+        // nobody entered.
+        view.autocapitalizationType = .none
+        view.autocorrectionType = .no
+        view.spellCheckingType = .no
+        view.smartQuotesType = .no
+        view.smartDashesType = .no
+        // Smart insert/delete rewrites the SPACES around a paste or a
+        // deletion, which is the same class of unasked-for edit.
+        view.smartInsertDeleteType = .no
+        // The QuickType bar's inline prediction (iOS 17) inserts a run
+        // the app never saw typed.
+        view.inlinePredictionType = .no
+        // Rich editing and rich paste. `NO` is already the SDK default
+        // for allowsEditingTextAttributes, which is exactly why it is
+        // written down rather than assumed: a default is a decision
+        // somebody else can revisit, and this one decides whether
+        // Bold/Italic/Underline appear in the edit menu and whether an
+        // RTF paste keeps its attributes.
+        view.allowsEditingTextAttributes = false
+        // The item-provider side of the same claim: this control takes
+        // what reads as a plain String and nothing else. NSString's own
+        // readable list is what that means, so the type set is
+        // Foundation's rather than one written here — measured on the
+        // simulator as three plain-text encodings, public.plain-text and
+        // public.url, where the NSAttributedString configuration a rich
+        // editor would use brings RTF, RTFD, flat RTFD, HTML, a
+        // webarchive and UIKit's own attributed-string type.
+        view.pasteConfiguration = UIPasteConfiguration(forAccepting: NSString.self)
+        // Data detectors run only on a non-editable view, so this is a
+        // declaration rather than a fix, kept for the same reason.
+        view.dataDetectorTypes = []
+        // THE FIND INTERACTION IS THE CANARY (iOS 16), and the one pin
+        // UIKit will answer for itself: `findInteraction` is non-nil if
+        // and only if this flag is set, so the audit reads UIKit rather
+        // than the line above. Off for the mac arm's reason as well as
+        // this one: the ranges milestone owns this control's selection
+        // and scroll offset, and a find bar moves both without telling
+        // kaya.
+        view.isFindInteractionEnabled = false
+        if #available(iOS 18.0, *) {
+            // Writing Tools rewrites the whole document, in place,
+            // through a path that is not this view's delegate.
+            view.writingToolsBehavior = .none
+            // Math completion turns a typed `2+2=` into `2+2=4`.
+            view.mathExpressionCompletionType = .no
+        }
+    }
+
+    /// Is the scene interpreter running? The pin audit is a harness
+    /// instrument and costs a shipped app nothing.
+    let kayaHarnessActive = ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil
+
+    /// Pins found NOT in force on a live control, by name. Written on
+    /// the main thread by the audit, folded into the scene's failures by
+    /// kayaRunScript.
+    var kayaPlainTextPinBreaches: Set<String> = []
+
+    /// The pins, read back off the LIVE control, plus the two facts
+    /// UIKit derives for itself.
+    ///
+    /// WHAT THIS PROVES AND WHAT IT CANNOT, stated plainly, because a
+    /// guard nobody has watched fail is worse than none. It proves each
+    /// pin is in force on the object the user types into: delete a pin,
+    /// flip one, apply them to the wrong view, or let SwiftUI hand back
+    /// a view that never saw them, and every textarea-bearing leg fails
+    /// naming the trait. It does NOT prove UIKit honours the trait,
+    /// because iOS has no in-process way to press a key: there is no API
+    /// to post a UIPressesEvent, and `insertText` (the harness's own
+    /// `type` path) goes in below the keyboard, so the substitutions
+    /// these pins switch off cannot be provoked from inside the process
+    /// at all. That half is the SDK header's contract and it is the same
+    /// half every platform's pins rest on.
+    ///
+    /// TWO CLAUSES ARE UIKIT'S OWN ANSWER rather than a read-back: the
+    /// find interaction exists if and only if the flag is set, and a
+    /// TextKit 2 layout manager exists only while nothing has touched
+    /// `.layoutManager` — one stray read of that property downgrades the
+    /// view and takes the whole ranges surface with it, silently.
+    func kayaAuditPlainTextPins(_ view: UITextView) {
+        guard kayaHarnessActive else { return }
+        var breaches: [String] = []
+        func want(_ ok: Bool, _ name: String) {
+            if !ok { breaches.append(name) }
+        }
+        want(view.autocapitalizationType == .none, "autocapitalizationType")
+        want(view.autocorrectionType == .no, "autocorrectionType")
+        want(view.spellCheckingType == .no, "spellCheckingType")
+        want(view.smartQuotesType == .no, "smartQuotesType")
+        want(view.smartDashesType == .no, "smartDashesType")
+        want(view.smartInsertDeleteType == .no, "smartInsertDeleteType")
+        want(view.inlinePredictionType == .no, "inlinePredictionType")
+        want(!view.allowsEditingTextAttributes, "allowsEditingTextAttributes")
+        want(view.dataDetectorTypes.isEmpty, "dataDetectorTypes")
+        // The pasteboard side, against FOUNDATION'S OWN ANSWER to "what
+        // reads as a plain String" rather than a list maintained here.
+        // Measured on the simulator: the five identifiers NSString
+        // declares (three plain-text encodings, public.plain-text, and
+        // public.url, which reads as its absolute string), against the
+        // eight an NSAttributedString configuration would bring
+        // (public.rtf, com.apple.rtfd, com.apple.flat-rtfd, public.html,
+        // com.apple.webarchive, com.apple.uikit.attributedstring and
+        // two plain ones). A cleared configuration reads as the empty
+        // set, which is UITextView's own default back again, so it is a
+        // breach too.
+        let accepts = Set(view.pasteConfiguration?.acceptableTypeIdentifiers ?? [])
+        want(
+            !accepts.isEmpty && accepts == Set(NSString.readableTypeIdentifiersForItemProvider),
+            "pasteConfiguration")
+        want(view.findInteraction == nil, "findInteraction")
+        want(view.textLayoutManager != nil, "textLayoutManager")
+        if #available(iOS 18.0, *) {
+            want(view.writingToolsBehavior == .none, "writingToolsBehavior")
+            want(view.mathExpressionCompletionType == .no, "mathExpressionCompletionType")
+        }
+        if !breaches.isEmpty { kayaPlainTextPinBreaches.formUnion(breaches) }
+    }
+#endif
 
 /// A window's sections materialized: SwiftUI's TabView carries the
 /// platform's dominant idiom under the `auto` hint — toolbar tabs on

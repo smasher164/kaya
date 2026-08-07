@@ -11,6 +11,14 @@ fn main() {
         "default".to_string(),
         "--in".to_string(),
         format!("{sdk}/Microsoft.WindowsAppSDK.WinUI-2.2.1/extracted/metadata/Microsoft.UI.Xaml.winmd"),
+        // The RichEdit text object model, which is a SEPARATE winmd in
+        // the same WinUI package: RichEditBox has no Text property and
+        // no editing commands of its own — every one of them lives on
+        // Microsoft.UI.Text.RichEditTextDocument, so the textarea's
+        // control cannot be bound without this input
+        // (docs/textarea-foundation-plan.md, the windows arm).
+        "--in".to_string(),
+        format!("{sdk}/Microsoft.WindowsAppSDK.WinUI-2.2.1/extracted/metadata/Microsoft.UI.Text.winmd"),
         "--in".to_string(),
         format!("{sdk}/Microsoft.WindowsAppSDK.InteractiveExperiences-2.0.15/extracted/metadata/10.0.18362.0/Microsoft.UI.winmd"),
         "--in".to_string(),
@@ -48,6 +56,50 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Button".to_string(),
         "Microsoft.UI.Xaml.Controls.TextBlock".to_string(),
         "Microsoft.UI.Xaml.Controls.TextBox".to_string(),
+        // THE TEXTAREA'S CONTROL (docs/textarea-foundation-plan.md).
+        // RichEditBox is the rich-CAPABLE control kaya pins to
+        // plain-text behavior; TextBox stays the entry's. It is not a
+        // drop-in — it has no Text property and none of the editing
+        // commands — so the text object model comes with it, and each
+        // type is named explicitly because the filter never pulls
+        // referenced types transitively (docs/traps.md).
+        //
+        // RichEditTextDocument is what RichEditBox.TextDocument
+        // answers with; ITextDocument/ITextDocument2 are the
+        // interfaces it implements (a class whose default interface is
+        // filtered out keeps its methods as bare vtable pads).
+        // ITextSelection is Document.Selection — cut, copy, paste and
+        // the caret — and ITextRange is the base it extends.
+        "Microsoft.UI.Xaml.Controls.RichEditBox".to_string(),
+        "Microsoft.UI.Text.RichEditTextDocument".to_string(),
+        "Microsoft.UI.Text.ITextDocument".to_string(),
+        "Microsoft.UI.Text.ITextDocument2".to_string(),
+        "Microsoft.UI.Text.ITextSelection".to_string(),
+        "Microsoft.UI.Text.ITextRange".to_string(),
+        // The plain-text PINS, each an enum the setter takes — and an
+        // unfiltered enum takes its setter down with it, silently, so
+        // an unnamed pin here reads as "no such method" rather than as
+        // a missing filter:
+        //   TextGetOptions::AdjustCrlf  — the read that does NOT append
+        //     the story's trailing paragraph mark (GetText(None) does,
+        //     and after lf() that is a newline the guest never wrote).
+        //   TextSetOptions::None        — the write that treats kaya's
+        //     string as TEXT rather than as RTF markup.
+        //   RichEditClipboardFormat::PlainText — nothing RTF leaves a
+        //     kaya textarea on copy or cut.
+        //   DisabledFormattingAccelerators::All — Ctrl+B/I/U never
+        //     format; the default (None) makes them bold/italic/
+        //     underline the user's text.
+        // The Paste pair is the fourth pin's mechanism: the control's
+        // own paste is cancelled and kaya inserts the clipboard's plain
+        // text itself, so every paste route lands what the entry's
+        // TextBox would land.
+        "Microsoft.UI.Text.TextGetOptions".to_string(),
+        "Microsoft.UI.Text.TextSetOptions".to_string(),
+        "Microsoft.UI.Xaml.Controls.RichEditClipboardFormat".to_string(),
+        "Microsoft.UI.Xaml.Controls.DisabledFormattingAccelerators".to_string(),
+        "Microsoft.UI.Xaml.Controls.TextControlPasteEventHandler".to_string(),
+        "Microsoft.UI.Xaml.Controls.TextControlPasteEventArgs".to_string(),
         "Microsoft.UI.Xaml.Controls.XamlControlsResources".to_string(),
         "Microsoft.UI.Xaml.ResourceDictionary".to_string(),
         "Microsoft.UI.Xaml.Controls.TextChangedEventHandler".to_string(),

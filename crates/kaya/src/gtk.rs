@@ -375,10 +375,19 @@ enum NativeWidget {
     Select(gtk4::DropDown),
     Radio(gtk4::Box),
     Grid(gtk4::Grid),
-    Textarea(gtk4::TextView),
+    /// THE ONE COMPOSITE KIND WITH A CONTROL INSIDE IT: the multi-line
+    /// editor is a `GtkTextView` in a `GtkScrolledWindow`, held in that
+    /// order (viewport, control). `Radio(gtk4::Box)` is the precedent
+    /// for a kind whose native widget is a container, and the textarea
+    /// is the case where the container and the control BOTH have to be
+    /// reachable — see `widget` and `control` below.
+    Textarea(gtk4::ScrolledWindow, gtk4::TextView),
 }
 
 impl NativeWidget {
+    /// The widget the LAYOUT sees: what gets parented, ordered,
+    /// unparented, grown and measured. For every kind but the textarea
+    /// this is the control itself.
     fn widget(&self) -> gtk4::Widget {
         match self {
             NativeWidget::Column(w) => w.clone().upcast(),
@@ -394,7 +403,29 @@ impl NativeWidget {
             NativeWidget::Select(w) => w.clone().upcast(),
             NativeWidget::Radio(w) => w.clone().upcast(),
             NativeWidget::Grid(w) => w.clone().upcast(),
-            NativeWidget::Textarea(w) => w.clone().upcast(),
+            NativeWidget::Textarea(scroller, _) => scroller.clone().upcast(),
+        }
+    }
+
+    /// The widget the USER sees: the control that takes focus, holds
+    /// the text, and publishes the accessible role a scene names it by.
+    /// Identical to [`NativeWidget::widget`] for every kind whose
+    /// native widget IS its control; the textarea's `GtkTextView`
+    /// inside its viewport.
+    ///
+    /// THE SPLIT EXISTS BECAUSE THE TWO ANSWERS DIVERGED, silently, in
+    /// exactly four places: the accessible label/hint/id (a name on the
+    /// viewport leaves the `text` node unnamed, so `expect_ax
+    /// textarea#0` reads `field/` — the a11y scene's canary, §4),
+    /// focus (the scroll pane is not the focusable thing), and the
+    /// harness `set_text`'s reverse lookup from widget to id (which
+    /// found nothing, so a set_text stopped clearing the native undo
+    /// history the model claims it clears). Everything else wants the
+    /// layout widget.
+    fn control(&self) -> gtk4::Widget {
+        match self {
+            NativeWidget::Textarea(_, view) => view.clone().upcast(),
+            other => other.widget(),
         }
     }
 }
@@ -2503,7 +2534,7 @@ impl CoreState {
             return false;
         };
         match self.widgets.get(&WidgetId(id)) {
-            Some(NativeWidget::Textarea(view)) => {
+            Some(NativeWidget::Textarea(_, view)) => {
                 let buffer = view.buffer();
                 if redo { buffer.can_redo() } else { buffer.can_undo() }
             }
@@ -2518,7 +2549,7 @@ impl CoreState {
     #[cfg(feature = "harness")]
     fn native_undo_filled(&self, id: WidgetId) -> bool {
         match self.widgets.get(&id) {
-            Some(NativeWidget::Textarea(view)) => view.buffer().can_undo(),
+            Some(NativeWidget::Textarea(_, view)) => view.buffer().can_undo(),
             Some(NativeWidget::Entry(_)) => self.native_dirty.borrow().contains(&id.0),
             _ => false,
         }
@@ -2553,7 +2584,7 @@ impl CoreState {
             .filter(|id| {
                 matches!(
                     self.widgets.get(id),
-                    Some(NativeWidget::Entry(_) | NativeWidget::Textarea(_))
+                    Some(NativeWidget::Entry(_) | NativeWidget::Textarea(..))
                 )
             });
         let window = self.undo_window();
@@ -2613,7 +2644,7 @@ impl CoreState {
                 entry.set_enable_undo(false);
                 entry.set_enable_undo(true);
             }
-            Some(NativeWidget::Textarea(view)) => {
+            Some(NativeWidget::Textarea(_, view)) => {
                 let buffer = view.buffer();
                 buffer.begin_irreversible_action();
                 buffer.end_irreversible_action();
@@ -2630,7 +2661,7 @@ impl CoreState {
     fn text_of(&self, id: WidgetId) -> Option<String> {
         match self.widgets.get(&id) {
             Some(NativeWidget::Entry(entry)) => Some(lf(entry.text().to_string())),
-            Some(NativeWidget::Textarea(view)) => {
+            Some(NativeWidget::Textarea(_, view)) => {
                 let b = view.buffer();
                 Some(lf(b.text(&b.start_iter(), &b.end_iter(), false).to_string()))
             }
@@ -2686,7 +2717,7 @@ fn note_native_undo(core: &mut CoreState, field: WidgetId, moved: bool) {
     // as an exhausted BACKWARD walk and coarse-restore to the
     // before-image — undoing the redo it was just told about.
     let can = match core.widgets.get(&field) {
-        Some(NativeWidget::Textarea(view)) => view.buffer().can_undo(),
+        Some(NativeWidget::Textarea(_, view)) => view.buffer().can_undo(),
         _ => moved,
     };
     if let Some((ops, occurrence)) = core.scene.note_native_undo(window, field, &text, can) {
@@ -2747,7 +2778,7 @@ fn perform_undo_role(role: &str) -> bool {
                                 .unwrap_or_else(|| entry.clone().upcast());
                             let _ = delegate.activate_action(action, None);
                         }
-                        Some(NativeWidget::Textarea(view)) => {
+                        Some(NativeWidget::Textarea(_, view)) => {
                             let buffer = view.buffer();
                             if redo {
                                 buffer.redo();
@@ -2880,8 +2911,8 @@ fn focused_text_in(core: &CoreState, window: WindowId) -> Option<WidgetId> {
     core.widgets
         .iter()
         .find(|(_, w)| {
-            matches!(w, NativeWidget::Entry(_) | NativeWidget::Textarea(_))
-                && (focus == w.widget() || focus.is_ancestor(&w.widget()))
+            matches!(w, NativeWidget::Entry(_) | NativeWidget::Textarea(..))
+                && (focus == w.control() || focus.is_ancestor(&w.control()))
         })
         .map(|(id, _)| *id)
 }
@@ -3224,7 +3255,65 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // for programmatic set_text too, so the
                     // USER/programmatic split rides apply_quiet.
                     let view = gtk4::TextView::new();
-                    view.set_size_request(240, 96);
+                    // THE SIZING CONTRACT. The editor takes its LAYOUT
+                    // size and its content scrolls inside it, which is
+                    // what every other kaya widget does and what this
+                    // one alone did not: a bare GtkTextView grows to
+                    // its content, so 400 lines made a 6400px widget in
+                    // a 6692px window — no scrollbar, no keyboard
+                    // scroll, the text simply unreachable, and
+                    // `scroll_to_mark` returning true while moving
+                    // nothing because the view believed the whole
+                    // buffer was visible (all measured, GTK 4.18.6,
+                    // scratchpad/range-probe-linux.md §3).
+                    //
+                    // The viewport is the fix, in the ONE shape that
+                    // works: the TextView as the DIRECT child of the
+                    // GtkScrolledWindow. GtkTextView implements
+                    // GtkScrollable, so the scrolled window drives the
+                    // view's own adjustments and adds no GtkViewport;
+                    // put a Box between them and the view is handed its
+                    // natural height again and nothing scrolls (shape C
+                    // in the same measurement — which is what an app
+                    // gets TODAY by putting a textarea inside kaya's
+                    // `scroll` kind).
+                    //
+                    // The 240x96 minimum moves from the view to the
+                    // viewport, because the viewport is now the widget
+                    // the parent measures: it keeps the same layout
+                    // floor the textarea has always declared, and
+                    // `grow` still stretches it through the flex
+                    // manager exactly as before.
+                    //
+                    // ONE AXIS, like kaya's `scroll` kind: vertical
+                    // scrolling, never a horizontal bar. Which is only
+                    // honest if no line can escape sideways, so the
+                    // view WRAPS — WordChar rather than Word so a
+                    // single unbreakable token cannot reopen the
+                    // unbounded-width half of the same wart. Wrapping
+                    // is a rendering decision and touches no
+                    // observable: the buffer, `read_text`, and the
+                    // AT-SPI Text interface all speak the stored
+                    // string, which still holds exactly the newlines
+                    // the app wrote.
+                    view.set_wrap_mode(gtk4::WrapMode::WordChar);
+                    let scroller = gtk4::ScrolledWindow::new();
+                    scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+                    // THE PIN THAT KEEPS THE VIEWPORT A VIEWPORT. Both
+                    // default to false, and both are stated because
+                    // either one set to true asks the scrolled window
+                    // for its CHILD's natural size and restores the
+                    // wart this arm exists to remove — the negative
+                    // test is in the report, and it is the one pin the
+                    // GTK arm has to make (the control's own opinion
+                    // set is empty: GTK 4 has no rich-text clipboard
+                    // format at all, no spell checker, no autocorrect
+                    // and no formatting bindings — audited against the
+                    // shipped library, §1 of the report).
+                    scroller.set_propagate_natural_width(false);
+                    scroller.set_propagate_natural_height(false);
+                    scroller.set_size_request(240, 96);
+                    scroller.set_child(Some(&view));
                     let sink = core.occurrences.clone();
                     let tag = tag.expect("textareas carry a tag");
                     let quiet = core.apply_quiet.clone();
@@ -3251,7 +3340,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         }
                     });
                     core.textareas.push(view.clone());
-                    NativeWidget::Textarea(view)
+                    NativeWidget::Textarea(scroller, view)
                 }
                 WidgetKind::Grid => {
                     // The 2D layout contract on GTK's own Grid:
@@ -3313,8 +3402,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
             };
             {
+                // THE CONTROL: focus resolution picks the DEEPEST
+                // registered widget containing the toplevel's focus
+                // widget, so the textarea registers its GtkTextView
+                // rather than the viewport around it — the same node
+                // the toolkit actually focuses.
                 let weak = glib::WeakRef::new();
-                weak.set(Some(&native.widget()));
+                weak.set(Some(&native.control()));
                 core.clipboard
                     .widgets
                     .borrow_mut()
@@ -4143,7 +4237,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.apply_quiet.set(false);
                     note_quiet_text_write(core, id, &previous, &s);
                 }
-                (NativeWidget::Textarea(view), Prop::Text, Value::Str(s)) => {
+                (NativeWidget::Textarea(_, view), Prop::Text, Value::Str(s)) => {
                     let buffer = view.buffer();
                     let previous =
                         lf(buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string());
@@ -4176,7 +4270,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // (kind, prop) pair because every other prop names
                 // something only some controls have; these name
                 // something every element has, so they match the prop
-                // alone and reach the widget through NativeWidget::widget.
+                // alone and reach the widget through
+                // NativeWidget::control.
+                //
+                // THE CONTROL AND NOT THE LAYOUT WIDGET, which is the
+                // same node for every kind but the textarea, and for
+                // that one is the difference between naming the
+                // `text` node an assistive client reads and naming the
+                // `scroll pane` wrapped around it (§4's negative test:
+                // route this to `widget` and `expect_ax textarea#0`
+                // reads `field/` instead of `field/Notes`).
                 //
                 // The LABEL is a real accessible property — it is what
                 // an assistive client speaks, and setting it OVERRIDES
@@ -4185,7 +4288,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (w, Prop::A11yLabel, Value::Str(label)) => {
                     use gtk4::prelude::{AccessibleExt, AccessibleExtManual};
                     if !label.is_empty() {
-                        let widget = w.widget();
+                        let widget = w.control();
                         // Promote a CONTAINER to a semantic group. GTK
                         // made GtkBox's role GENERIC in 4.12 (it was
                         // GROUP before), and GENERIC is documented as "a
@@ -4249,14 +4352,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (w, Prop::A11yHint, Value::Str(hint)) => {
                     use gtk4::prelude::AccessibleExtManual;
                     if !hint.is_empty() {
-                        w.widget().update_property(&[
+                        w.control().update_property(&[
                             gtk4::accessible::Property::Description(hint.as_str()),
                         ]);
                     }
                 }
                 (w, Prop::A11yId, Value::Str(id)) => {
                     use gtk4::prelude::WidgetExt;
-                    w.widget().set_widget_name(id.as_str());
+                    w.control().set_widget_name(id.as_str());
                 }
                 // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard): the
                 // list drives the paste split and Paste's enablement,
@@ -4594,7 +4697,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let previous = core.text_of(id).unwrap_or_default();
                     match widget {
                         NativeWidget::Entry(entry) => entry.set_text(""),
-                        NativeWidget::Textarea(view) => view.buffer().set_text(""),
+                        NativeWidget::Textarea(_, view) => view.buffer().set_text(""),
                         _ => panic!("kaya: clear on a non-text widget (scene validates kinds)"),
                     }
                     note_quiet_text_write(core, id, &previous, "");
@@ -4608,7 +4711,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // is discarded — a mount-tx focus would silently
                     // drop. Not mapped yet: one-shot re-grab from the
                     // widget's own map signal.
-                    let w = widget.widget();
+                    //
+                    // THE CONTROL, not the layout widget: the
+                    // textarea's viewport is not the focusable thing
+                    // inside it, and `expect_focused textarea#0` reads
+                    // the GtkTextView.
+                    let w = widget.control();
                     if w.is_mapped() {
                         w.grab_focus();
                     } else {
@@ -5662,7 +5770,7 @@ impl crate::harness::Stage for GtkStage {
                 Some(NativeWidget::Entry(entry)) => {
                     gtk4::prelude::EditableExt::set_position(entry, -1);
                 }
-                Some(NativeWidget::Textarea(view)) => {
+                Some(NativeWidget::Textarea(_, view)) => {
                     let buffer = view.buffer();
                     buffer.place_cursor(&buffer.end_iter());
                 }
@@ -5777,7 +5885,11 @@ impl crate::harness::Stage for GtkStage {
             // set_texts a focused field and then activates Edit>Undo
             // routes NATIVE into an empty stack and spends an
             // activation discovering it.
-            if let Some((id, _)) = core.widgets.iter().find(|(_, w)| w.widget() == widget) {
+            // BY CONTROL, not by layout widget: this verb resolved the
+            // textarea through core.textareas (the GtkTextView), and a
+            // lookup keyed on the viewport would simply find nothing —
+            // silently leaving the native-undo model uncorrected.
+            if let Some((id, _)) = core.widgets.iter().find(|(_, w)| w.control() == widget) {
                 let id = *id;
                 core.clear_native_undo(id);
             }
@@ -6739,6 +6851,20 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     // name but NOT the role — the bus still publishes `scroll pane`
     // (measured). Reading the promotion here instead would rank it
     // among groupings and shift every named container after it.
+    //
+    // AND EVERY TEXTAREA'S VIEWPORT IS ONE OF THESE. The rule this
+    // function lives by is that its count must MATCH the bus's, never
+    // that it counts only the widgets kaya's scene named: the bus
+    // publishes the textarea's scroll pane exactly like the scene's
+    // own, so counting it here keeps `scroll#N` pointing at the same
+    // node it did before the viewport existed. Skipping it is the
+    // failure — the count would fall one behind the bus and every
+    // scene holding both a textarea and a scroll viewport would read
+    // the wrong element's name (the negative test in the foundation
+    // report does exactly that, and `expect_ax scroll#0 "group/Feed"`
+    // fails). This is the SAME rule the unmapped-subtree guard below
+    // states from the other side: count what the bus publishes,
+    // nothing more and nothing less.
     if w.is::<gtk4::ScrolledWindow>() {
         return Some(atspi::Role::ScrollPane);
     }

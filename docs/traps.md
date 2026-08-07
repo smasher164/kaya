@@ -1943,39 +1943,103 @@ scene that armed the directory once and relied on the platform
 remembering reads a directory nobody chose on one platform and an empty
 one on the other. The scene arms before every pick.
 
-## The mac file-dialog legs need the app to reach the front
+## The mac open panel has THREE shapes, and the machine picks one
 
-Half an hour went into a filedialog regression that was not a
-regression: the committed tree failed too, on a machine where every
-other mac leg passed. The cause was that ANOTHER APPLICATION WAS
-FULLSCREEN. NSOpenPanel is hosted in a shared XPC service
-(com.apple.appkit.xpc.openAndSavePanelService) and has to become key
-before it presents, so an app that cannot come to the front never gets a
-panel. An in-process NSAlert sheet does not care, which is why the
-confirm scene stayed green and pointed the search away from the
-environment.
+The file browser inside NSOpenPanel publishes a different accessibility
+identifier per view mode, and the mode is not the app's to choose: it is
+the machine-wide `NSGlobalDomain NSNavPanelFileListModeForOpenMode2`
+(1 columns, 2 list, 3 icons), which any application's open panel writes
+for every application on the box the moment a human clicks View Options.
 
-The failure said "no file dialog live", which is true and useless — the
-same words serve "the guest never asked", "the tree has not
-materialized" and this. Worse, every step after it failed too, and the
-undismissed dialog then tripped the one-per-process guard, whose abort
-took the failure list with it. The run died naming a cause three
-removes from the real one.
+    View Options -> List     AXOutline                id=ListView
+    View Options -> Icons    AXList/AXCollectionList   id=IconView
+    View Options -> Columns  AXBrowser                 id=ColumnView
 
-`kayaOpenPanelWhyNot()` answers the question instead: no panel
-requested, or a panel up but the app not frontmost, or a panel up whose
-tree has no list. The first run with it printed the middle answer and
-ended the search.
+The harness knew only `ListView`. On 2026-08-06 the eight filedialog
+legs — one per language — went red together, an hour after passing 8/8,
+because that preference had moved to Icons. The panel itself was
+perfect: presented, aimed at the right directory, both files in it,
+Cancel and OK reachable. Only the identifier had changed. THE LANE'S
+COLOUR WAS DECIDED BY A SETTING NO GATE READS AND NOTHING IN THE LOG
+NAMED IT.
 
-TWO GENERAL LESSONS. A failure message that cannot distinguish between
-"you did not ask", "not ready yet" and "the environment forbids it" is
-one message doing three jobs, and it will send someone to the wrong one.
-And when a whole class of leg fails while its siblings pass, ask what
-the class needs that the siblings do not — here, being frontmost — before
-bisecting code that has not changed.
+Three measured facts about driving that browser, all of which cost
+something to learn:
+
+**The wrong selection attribute fails silently.** `AXSelectedRows` on an
+icon-view browser returns err=0 and selects nothing; icons and columns
+take `AXSelectedChildren`, list takes `AXSelectedRows`. A list-shaped
+call on an icon-shaped panel therefore looks like it worked and then
+opens whatever was already selected — the silent wrong file the scene's
+decoy exists to catch.
+
+**In columns mode the selection call lies the other way**, returning
+kAXErrorAttributeUnsupported (-25205) while the selection takes. Proved
+differentially rather than by hope: picked.txt answered picked.txt,
+decoy.txt answered decoy.txt, same panel, same call, same error. The OK
+press has always lied the same way (-25204); trust the completion, not
+the return code.
+
+**Never walk the whole tree.** In columns mode the panel publishes one
+column per path component, and an ancestor column here held 8362 items,
+each attribute read a mach round trip to the panel service. An unpruned
+identifier search did not finish in 45 seconds; pruned at item roles it
+reads the same panel in 40ms. That applies to every panel lookup, not
+just the browser — the OK button sorts after the browser in the walk.
+
+## The diagnostic that named a cause nobody had measured
+
+The entry that used to sit here said the legs need the app to reach the
+front: that NSOpenPanel is XPC-hosted and must become key before it will
+present, so a FULLSCREEN application elsewhere keeps this app off the
+front and no panel appears. `kayaOpenPanelWhyNot()` printed that
+sentence, and half an hour went into a filedialog "regression" that was
+not one.
+
+Every load-bearing claim in it is false, and the shape of the error is
+worth more than the correction.
+
+* The panel presents and its accessibility tree fully materializes —
+  sheet, browser, both files, where popup, Cancel, OK — with the app
+  INACTIVE, another app frontmost, no fullscreen app anywhere, unbundled
+  and `.accessory`. Measured 2026-08-06 in eight conditions.
+* Apple documents no activation requirement anywhere: `NSSavePanel.h`
+  conditions `beginSheetModal(for:)` on nothing at all.
+* The branch printing it was reached on EVERY mac leg. kaya's guests run
+  `.accessory` and never call `activate`, so `NSApp.isActive` is always
+  false. **That clause never discriminated anything — it was the only
+  sentence that arm could print**, so it was guaranteed to be the answer
+  whatever the real cause was.
+
+It then misdirected a second investigation, months later, for the icon
+view failure above — an entire session spent on cooperative activation,
+`yieldActivation`, launch chains and responsible processes, all of it
+downstream of one confident sentence in a failure message.
+
+THE RULE, and it is not about file dialogs: A DIAGNOSTIC MAY ONLY PRINT
+WHAT IT MEASURED. `kayaOpenPanelWhyNot()` now answers in facts — no
+panel requested; or a panel up (visible=true) that published no
+`open-panel` sheet, with `isActive`, the frontmost app's name and the
+window count printed as FACTS rather than as a theory; or a sheet whose
+browser is none of the three known shapes, listing the identifiers the
+sheet actually published and naming the preference that chooses among
+them. Both of those branches were perturbed and watched to print before
+this was written down, because a message nobody has ever seen fail is
+not a guard.
+
+A cause that is merely PLAUSIBLE, printed in the failure text, is worse
+than "unknown": it is believed. If the code cannot tell two causes
+apart, it says so and prints what it can see.
+
+Activation was measured while the true cause was still open, so the
+answer is on the record: an unbundled `.accessory` process CAN take the
+front, but only with `activate(ignoringOtherApps:)` — the cooperative
+macOS 14 `NSApp.activate()` is refused. kaya does not call either.
+Presentation never needed it, and the call that works would take the
+user's focus, or another lane's mid-`type` keystrokes, for nothing.
 
 Stale `openAndSavePanelService` processes from earlier aborted runs are
-a red herring, checked and cleared during that search: killing them
+a red herring, checked and cleared during both searches: killing them
 changes nothing, and the system relaunches on demand.
 
 ## What the Windows file dialog publishes, and the setting that changes it
