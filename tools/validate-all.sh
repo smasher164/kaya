@@ -130,7 +130,18 @@ if [ "$MODE" = parallel ]; then
             # Measured on a quiet host, three consecutive matrices:
             # 420s, 428s, 442s.
             mac) budget=540 ;;
-            linux) budget=300 ;;
+            # 420 since 2026-08-07, raised in the commit that made the
+            # lane slower, as this block asks. The text-ranges scene added
+            # 16 legs (rust and the C floor, both protocols, plus the
+            # eight-language sweep): 444 -> 460. STANDALONE the lane is
+            # UNCHANGED in kind — measured twice on the final tree, 218s
+            # and 219s, 460 legs, 0 failures, slowest leg 8s (stall, as
+            # ever). Under five-lane contention those 16 legs cost ~95s:
+            # three consecutive matrices measured 337s, 338s, 337s, where
+            # the old 300 was set against ~240s at 444 legs. 420 keeps the
+            # same ~1.25x headroom over the contended time that mac's 540
+            # keeps over its 420-442.
+            linux) budget=420 ;;
             # 480 since 2026-08-03, and the ceiling moved in the commit
             # that made the lane slower, as this block asks. Two
             # measured reasons, neither a change in kind: filedialog_java

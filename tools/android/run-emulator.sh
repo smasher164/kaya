@@ -317,6 +317,38 @@ for serial in "${SERIALS[@]}"; do
 done
 timing cliphelper
 
+# THE SELECTION HALF OF THE ABOVE, ON ITS OWN, because the default input
+# method DOES NOT STAY PUT: measured 2026-08-06 on emulator-5554, the
+# selection reverted to the stock keyboard between runs with nothing in
+# this lane asking it to. The clipboard leg tolerates that (it reads its
+# helper through a broadcast, not through the IME), but the RANGES leg
+# cannot: D4's whole assertion is that a composing region is still open
+# when the app's select arrives, and a third-party input method finishes
+# a composing region it did not create — measured, within tens of
+# milliseconds. So the ranges leg re-asserts this immediately before it
+# runs, and says so rather than failing three removes away as a caret in
+# the wrong place. No install and no wait for the service to register:
+# cliphelper_prepare already did both at the top of the run.
+select_helper_ime() { # serial
+    local serial="$1" tries=0 current=''
+    adb -s "$serial" shell ime enable "$CLIPHELPER_IME" >/dev/null || true
+    adb -s "$serial" shell ime set "$CLIPHELPER_IME" >/dev/null || true
+    while [ "$tries" -lt 50 ]; do
+        current="$(adb -s "$serial" shell settings get secure default_input_method \
+            2>/dev/null | tr -d '\r')"
+        case "$current" in
+            "$CLIPHELPER_PKG/"*) return 0 ;;
+        esac
+        tries=$((tries + 1))
+        sleep 0.2
+    done
+    echo "run-emulator: $CLIPHELPER_IME is not the default IME on $serial" >&2
+    echo "  (default_input_method reads \"$current\") — the ranges leg's D4 step needs a" >&2
+    echo "  device where nothing else is composing, and another input method will" >&2
+    echo "  finish the composing region before the select arrives" >&2
+    return 1
+}
+
 leg_names=()
 leg_pids=()
 # The tablet's leg is tracked apart from the pool's. If it rode
@@ -453,31 +485,71 @@ run_apk_on() {
     # of evidence erased, which reads exactly like a service that never
     # started.
     local a11y="${component%%/*}/dev.kaya.KayaHarnessAccessibility"
-    adb -s "$serial" shell settings put secure enabled_accessibility_services "$a11y" >/dev/null
-    adb -s "$serial" shell settings put secure accessibility_enabled 1 >/dev/null
-    # AND IT MUST ACTUALLY BE BOUND. Writing the setting is not the same
-    # as the system binding the service, and an unbound one fails exactly
-    # like a picker that never appeared — the scene sees no windows and
-    # says the dialog is missing, three removes from the cause. dumpsys
-    # is the only place that distinguishes them, so ask it here rather
-    # than debugging it from the far end.
-    # BOUNDED WAIT, because binding is asynchronous: the setting returns
-    # long before the system has started the service, and sampling once
-    # reports every leg as broken.
-    local bound=0 tries=0
-    while [ "$tries" -lt 50 ]; do
-        if adb -s "$serial" shell dumpsys accessibility 2>/dev/null \
-            | tr -d '\r' | grep -q "Bound services:.*kaya"; then
-            bound=1
-            break
+    # THE ARM, RETRIED — because enabling races the install that precedes
+    # it. MEASURED 2026-08-06, after three lane runs died to "never bound"
+    # on three different devices: on an IDLE device the identical sequence
+    # binds in ONE SECOND, and the same service binds on a sibling device
+    # at the same moment. What differs in a lane is that `install -r` has
+    # just REPLACED the package that declares this service, and enabling
+    # on the heels of that replacement sometimes lands before the package
+    # manager has finished with it — the setting reads correct, dumpsys
+    # says Enabled, and Bound stays empty forever. Re-arming costs a
+    # second and clears it; a reboot (the hand-recovery that day) is kept
+    # as the last resort because it was proven to work when re-arming was
+    # never tried.
+    #
+    # CLEARED BEFORE EACH SET: `settings put` with the value already there
+    # is a no-op, and a no-op notifies nobody.
+    local a11y="${component%%/*}/dev.kaya.KayaHarnessAccessibility"
+    local bound=0 arm=0
+    while [ "$arm" -lt 3 ] && [ "$bound" != 1 ]; do
+        arm=$((arm + 1))
+        adb -s "$serial" shell settings put secure enabled_accessibility_services "" >/dev/null
+        adb -s "$serial" shell settings put secure enabled_accessibility_services "$a11y" >/dev/null
+        adb -s "$serial" shell settings put secure accessibility_enabled 1 >/dev/null
+        # BOUNDED WAIT, because binding is asynchronous: the setting
+        # returns long before the system has started the service, and
+        # sampling once reports every leg as broken.
+        local tries=0
+        while [ "$tries" -lt 50 ]; do
+            if adb -s "$serial" shell dumpsys accessibility 2>/dev/null \
+                | tr -d '\r' | grep -q "Bound services:.*kaya"; then
+                bound=1
+                break
+            fi
+            tries=$((tries + 1))
+            sleep 0.2
+        done
+        if [ "$bound" != 1 ] && [ "$arm" -lt 3 ]; then
+            echo "run-emulator: $serial did not bind on arm $arm — re-arming" >&2
         fi
-        tries=$((tries + 1))
-        sleep 0.2
     done
+    # DEVICE-LEVEL RECOVERY, ONCE, LOUDLY: rebooting cleared this by hand
+    # on 5554 and 5558. The post-boot settle matters — sys.boot_completed
+    # goes 1 before the accessibility manager will bind anything, and a
+    # retry that ignores that fails for a second, unrelated reason.
+    if [ "$bound" != 1 ] && [ "${KAYA_A11Y_REBOOTED:-}" != "$serial" ]; then
+        echo "run-emulator: $serial did not bind after 3 arms — rebooting it once" >&2
+        adb -s "$serial" reboot >/dev/null 2>&1
+        adb -s "$serial" wait-for-device >/dev/null 2>&1
+        local waited=0
+        while [ "$waited" -lt 90 ]; do
+            if [ "$(adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+                break
+            fi
+            waited=$((waited + 1))
+            sleep 1
+        done
+        sleep 5
+        KAYA_A11Y_REBOOTED="$serial" run_apk_on "$serial" "$name" "$apk" "$component" "$script" "$@"
+        local retry_rc=$?
+        return "$retry_rc"
+    fi
     if [ "$bound" != 1 ]; then
         echo "run-emulator: the harness accessibility service never bound on $serial" >&2
-        echo "  (enabled_accessibility_services was set to $a11y, but the system" >&2
-        echo "   did not bind it — the scene would report a picker that never came up)" >&2
+        echo "  (three arms and a reboot; enabled_accessibility_services was set to" >&2
+        echo "   $a11y, but the system never bound it — the scene would report a" >&2
+        echo "   picker that never came up)" >&2
         return 1
     fi
     # Recording mode (KAYA_RECORD=1): the emulator display is its own
@@ -918,6 +990,52 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity dirty \
         --es KAYA_SELFTEST_SCRIPT "'${dirty_script}expect_title \"dirty\"'"
+    # The text-ranges scene (docs/ranges-plan.md): HIGHLIGHT a set,
+    # SELECT one, REVEAL one, and the two rules that make those three a
+    # contract — a user's keystroke DROPS the declared set (D2) and a
+    # select_range arriving mid-composition is REFUSED (D4).
+    #
+    # THE WHOLE SCRIPT RUNS HERE, unlike `dirty` above: nothing in it
+    # needs chrome this host does not have. Two of its verbs are only
+    # reachable at all because this harness lives INSIDE the app —
+    # `compose` takes the field's own InputConnection (no adb command
+    # can open a composing region; `input text` injects key events and
+    # never calls setComposingText), and the range reads walk the merged
+    # semantics tree from the UI thread, which is where TalkBack's data
+    # comes from.
+    #
+    # AND IT NEEDS THE LANE'S OWN IME, which every device in this pool
+    # already has: `cliphelper_prepare` makes the helper's bare
+    # InputMethodService the default input method, and D4 needs exactly
+    # that. Measured 2026-08-06 with Gboard as the default instead: the
+    # composing region this leg opens is FINISHED by the other input
+    # method a few tens of milliseconds later — an IME resyncs when it
+    # sees a composing region it did not create — so the select arrived
+    # after the composition was gone, was honoured, and the leg failed
+    # with a caret 763 bytes from where it wanted one. That is Android
+    # being Android rather than a bug in the arm (D4's own words: the
+    # same app code is correct one millisecond and refused the next),
+    # and it is why the assertion needs a device where nothing else is
+    # composing.
+    #
+    # AND THE OFFSETS ARE THE ASSERTION. The document's first line is
+    # CJK, so every match sits six bytes further along than it sits in
+    # UTF-16 — the unit a Kotlin CharSequence indexes — and a backend
+    # that forwarded kaya's byte offsets unconverted would decorate six
+    # characters early. The scene is byte-identical on all five lanes.
+    # ...AND THE INPUT METHOD IS RE-ASSERTED FIRST, on every device in
+    # the pool, because which one this leg lands on is the pool's choice.
+    # The drain is what makes that safe: no other leg is in flight, so
+    # nothing is disturbed by the switch, and the leg that needs the
+    # quiet device gets it.
+    drain
+    for serial in "${SERIALS[@]}"; do
+        select_helper_ime "$serial" || exit 1
+    done
+    run_apk ranges-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity ranges \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script ranges)'"
     drain
     timing legs-compose
 fi
