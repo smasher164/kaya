@@ -1987,6 +1987,78 @@ identifier search did not finish in 45 seconds; pruned at item roles it
 reads the same panel in 40ms. That applies to every panel lookup, not
 just the browser — the OK button sorts after the browser in the walk.
 
+**There is a second preference and it decides nothing.**
+`NSNavPanelFileLastListModeForOpenModeKey` sits in the same domain, holds
+the same 1/2/3 vocabulary, and is the obvious thing to reach for. Every
+rotation moved `…ForOpenMode2` alone and the panel followed it while this
+key stayed put — measured across all three modes on 2026-08-06, and
+again while the rotation landed. Write the one with the `2`.
+
+**Fix the MEASUREMENT TOOL as well as the reader.** The shipped reader
+learned all three shapes on 2026-08-06; `tools/mac/paneldrive.swift` —
+the probe the reader's own comments cite for those identifiers — kept
+hunting `ListView` alone for two more milestones. That is worse than an
+ordinary residual: a probe is reached for by someone who does not yet
+know what is wrong, so `NO ListView` on a perfectly good panel is the
+same wrong answer that cost the original day, delivered by the tool
+brought in to answer it. Watched on 2026-08-07: the old probe failed in
+columns and icons and passed in list, and in list it printed the header
+row twice beside the file. It now reads and drives all three (pruned
+walk, per-shape rows, per-shape selection attribute), and names the mode
+and the published identifiers when it cannot.
+
+### The browser EXISTS BEFORE ITS CONTENTS DO, and one blocked hop eats the retry
+
+Rotating that preference across the filedialog legs — which is what
+`tools/validate-mac.sh` now does, so columns mode runs on every mac lane
+— turned up a live race the tree had never exercised.
+`filedialog-rust-swiftui` failed every time in columns mode with
+
+    step-failed file dialog list has [], missing "decoy.txt"
+
+on a panel that was up, correctly aimed, and holding both files.
+
+The obvious reading is wrong, and it is worth knowing why, because the
+mechanism is not about file dialogs at all. Every `expect` is a bounded
+retry (5s on macOS), so the natural conclusion is that the retry compared
+content once and gave up. It did not: **it never ran a second time.**
+Instrumented on 2026-08-07, the read was submitted 15ms into the step and
+returned 6695ms later, HAVING RUN ONCE. The read is a
+`DispatchQueue.main.sync`, and the main thread is the very thread busy
+presenting the panel, so the whole retry budget went by *inside a single
+blocked hop*. When it landed the panel was live, the ColumnView published
+0 children, and the deadline was already past, so the miss was final.
+
+    A RETRY BUDGET SPENT WAITING ON THE MAIN QUEUE IS NOT A RETRY BUDGET.
+    If a wait is a hop to the thread that is doing the work, the loop
+    around it can be arbitrarily generous and still take exactly one
+    sample.
+
+python and go pass in columns mode for no better reason than that their
+panels present in ~1.3s, so their one hop returns with budget left over.
+That is the shape of every "only language X fails" report: a timing
+threshold, not a property of X. And the second panel in the same process
+reads `rows=2` immediately — the race is with the FIRST panel's fill.
+
+The fix is a bounded poll BELOW the deadline —
+`kayaAwaitOpenPanelState(requireRows:)` in `swift/KayaSwiftUI.swift`,
+same shape as `kayaAwaitTextWindow` — whose second read is the first one
+the main thread is free to serve. Measured fill after the panel presents:
+3 polls, ~120ms, in every mode.
+
+`requireRows` is a parameter and not a constant, which is the load-bearing
+part: **an empty list is a legitimate answer** to the bare
+`expect_file_dialog` (the "wait until a panel exists" form) and to the
+directory-only form aimed at an empty directory. Forcing the wait on
+regardless was watched costing ~2.9s per expect on an empty directory —
+a stall on every use, in exchange for nothing. Only the forms that NAME
+FILES wait.
+
+`file_choose <name>` needs the same wait and for a sharper reason: it is
+an ACTION, so the step wrapper never re-runs it, and its own read of the
+empty browser refuses the row permanently. A read with no retry cover
+must do its own waiting.
+
 ## The diagnostic that named a cause nobody had measured
 
 The entry that used to sit here said the legs need the app to reach the

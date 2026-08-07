@@ -87,6 +87,38 @@ else
     report mac-capture COLD "recorder not built yet (first recorded run builds it)"
 fi
 
+# --- macOS file-panel view mode --------------------------------------
+# NSOpenPanel's file browser publishes a different accessibility
+# identifier per view mode, and the mode is MACHINE-WIDE: any
+# application's open panel writes `NSGlobalDomain
+# NSNavPanelFileListModeForOpenMode2` for every application on the box
+# the moment a human clicks View Options. On 2026-08-06 it moved to
+# Icons and the eight mac filedialog legs went red together an hour
+# after passing 8/8 — and nothing in the log named the setting, which
+# cost two hours across three agents (docs/traps.md).
+#
+# It is REPORTED rather than demanded, because the lane no longer
+# inherits it: validate-mac rotates 1/2/3 across the filedialog legs and
+# restores this value. What this line buys is the two minutes at the
+# start of a filedialog investigation — and the one state that IS a
+# problem, a fourth mode the interpreter's KayaPanelShape cannot read.
+panel_mode=$(defaults read -g NSNavPanelFileListModeForOpenMode2 2>/dev/null || echo unset)
+panel_stamp=""
+# A stamp file left behind means a validate-mac run died before putting
+# the mode back (SIGKILL, or a restore that itself failed). The next
+# validate-mac restores it, but a human reading a strange panel today
+# deserves to know why the box is in this mode.
+if [ -f "$ROOT/target/panel-mode.orig" ]; then
+    panel_stamp=" — a validate-mac run left the mode rotated (killed mid-run, or a restore that could not write); target/panel-mode.orig says the machine's own value is $(cat "$ROOT/target/panel-mode.orig"), and the next validate-mac puts it back"
+fi
+case "$panel_mode" in
+    1) report panel-mode OK "open panel view mode 1 = columns (AXBrowser/ColumnView); validate-mac rotates 1/2/3 and restores this$panel_stamp" ;;
+    2) report panel-mode OK "open panel view mode 2 = list (AXOutline/ListView); validate-mac rotates 1/2/3 and restores this$panel_stamp" ;;
+    3) report panel-mode OK "open panel view mode 3 = icons (AXList/IconView); validate-mac rotates 1/2/3 and restores this$panel_stamp" ;;
+    unset) report panel-mode OK "open panel view mode unset — the panel chooses; validate-mac rotates 1/2/3 and deletes the key again$panel_stamp" ;;
+    *) report panel-mode CHECK "NSNavPanelFileListModeForOpenMode2 reads \"$panel_mode\", which is none of 1 columns / 2 list / 3 icons — a fourth shape needs a KayaPanelShape arm in swift/KayaSwiftUI.swift before any filedialog leg can read the panel$panel_stamp" ;;
+esac
+
 # --- iOS simulator ---------------------------------------------------
 # Same fallback run-sim.sh uses: the nix xcrun stub and the
 # CommandLineTools default both lack simctl; only Xcode has it.

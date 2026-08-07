@@ -1209,21 +1209,76 @@ count, so the saving is measured rather than assumed.
     tier so the split cannot silently re-open.
 
   From the milestone2 graduation (2026-08-05):
-  - **GUARD GAP — the harness resolves widgets by registry, so a leg
-    cannot see a widget that never got parented.** Proven by the
-    defect it hid: Swift's milestone2 window rendered TWO widgets (the
-    step button and status label) instead of its full UI for
-    milestones, with every leg green, because `kind#index` targets
+  - **CLOSED 2026-08-07 — GUARD GAP: the harness resolves widgets by
+    registry, so a leg cannot see a widget that never got parented.**
+    Proven by the defect it hid: Swift's milestone2 window rendered TWO
+    widgets (the step button and status label) instead of its full UI
+    for milestones, with every leg green, because `kind#index` targets
     resolve against per-kind registries populated at create/stamp time
     (KayaSwiftUI.swift:410-431) — never by walking the mounted tree.
     An unparented widget answers reads, produces expected strings, and
-    displays nothing. The wall this needs: a harness-level assertion
-    that every widget a script names is REACHABLE FROM THE MOUNTED
-    ROOT (both interpreters), so an orphan turns the leg red instead
-    of invisible. Sibling suspicion flagged by the same arm:
-    guests/swift/menus.swift has the identical discarded-builder shape
-    and is likely rendering an empty group column today — verify by
-    tree-walk when the wall exists, or by eye before.
+    displays nothing.
+
+    The entry asked for a HARNESS-level assertion in both
+    interpreters. It was built one layer lower instead, and the reason
+    is the reason it is now free: `Scene::apply` is the funnel for all
+    five backends (gtk.rs:1079/:6412, winui/mod.rs:829, capi.rs:2335
+    for the two interpreters), so ONE implementation covers nine guest
+    languages, fires at BUILD time rather than read time — which
+    catches an orphan no scene happens to name — and fires in a real
+    app that never runs the harness, which a harness-side wall never
+    could. The rule the core now enforces:
+
+    > A widget created in a transaction must be reachable from a
+    > mounted root by the end of that transaction.
+
+    `crates/kaya/src/scene.rs`: `parent_of` (child -> parent, live
+    zone), `mounted_windows` widened from a set to surface -> its root
+    widget, and `first_unreachable` at the barrier beside the menu
+    domain check. Batch-scoped, not a global sweep, because the core
+    never prunes `self.widgets` — DestroyWindow and PopEntry drop the
+    surface and leave the ids (that leak is real and still open; see
+    the entry below). 14 tests, 4 perturbations watched failing
+    (barrier off -> 6 negatives fail; the perturbation helper neutered
+    -> the two shipped-defect negatives fail on their substitution
+    count rather than passing vacuously; DestroyWindow keeping its dead
+    root -> 1 fails; the cycle refusal off -> 1 fails and the bounded
+    walk still terminates).
+
+    WHAT IT DOES NOT COVER, so nobody reads it as total: an orphan made
+    by a BACKEND — one that receives `ApplyOp::AddChild` and fails to
+    reparent — is invisible to the core, which sees the op and not the
+    toolkit's tree. Only GTK's `WidgetExt::root()`, WinUI's `XamlRoot`
+    and the interpreters' `parents` maps can see that one. No such
+    defect is on record; all three recorded instances were made above
+    the core, in a binding. That tier stays open below.
+  - **The sibling suspicion was right, and a THIRD instance was still
+    live at HEAD.** `guests/swift/menus.swift` was fixed by eye in
+    aadbe9e. `guests/swift/feed.swift:29-65` was not: `promote`,
+    `status` and `list` were built at ambient parent 0 and only
+    MENTIONED inside `tx.row { }`, whose result builder discards a bare
+    expression — so the mounted row had no children at all and
+    `feed-swift-swiftui` passed every leg against an invisible window
+    for two weeks. The wall's first run named it in one line, with no
+    debugging: the whole mac lane came back 257 PASS / 1 FAIL and the
+    one failure printed which widget and why.
+
+    OPEN — the fix is one guest file, and the wall arm does not own
+    guests/. The correction is aadbe9e's: declare each child WHERE IT
+    STANDS, inside `tx.row { }`, instead of building it outside and
+    naming it within. Proven green in scratch before this was written
+    (the doctored guest ran the real `feed.steps` to
+    `KAYA_SELFTEST: OK`), so it needs applying and re-running, not
+    designing.
+  - **STILL OPEN — the core never prunes `self.widgets`.**
+    `DestroyWindow` (scene.rs) removes the window, its nav stacks, its
+    sections and its shortcuts, and touches `self.widgets` not at all;
+    `PopEntry` is the same. A destroyed tree's live widget ids stay in
+    the map forever. Harmless today and deliberately routed around (the
+    reachability barrier is batch-scoped for exactly this reason, and a
+    test pins that a destroyed window's widgets are not re-accused),
+    but it is a leak in a long-running app that opens and closes
+    windows.
   - The Swift binding's template zone never pushed a parenting frame
     for forEach/when bodies (fixed 2026-08-05 in the graduation: an
     inTemplateBody frame at all four combinators, matching Java's

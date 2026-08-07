@@ -79,6 +79,24 @@ in docs/deferred.md.
    guard's negative test passed VACUOUSLY TWICE because the pattern
    never matched the file at all. A guard you believe in but have never
    seen fail is worse than none: it stops you looking.
+   AND THE SAME RULE COVERS DIAGNOSTICS. A why-not — any function whose
+   job is to answer "why did that fail?" — is believed: the sentence it
+   prints is what the next reader chases. So every branch of one must
+   have been MADE TO PRINT before you trust it, exactly as a negative
+   test must be watched failing. A branch nobody has seen print is a
+   guess about a state nobody has reached. `kayaOpenPanelWhyNot()`
+   blamed a fullscreen application for a missing NSOpenPanel; that
+   branch was taken on EVERY mac leg (kaya's guests run `.accessory`,
+   so `isActive` is always false), the branch under it was dead, and
+   every claim in the sentence was false. Half an hour lost when it was
+   written, and a whole session months later spent on macOS activation
+   while the real cause was the panel's view mode. A DIAGNOSTIC MAY ONLY
+   PRINT WHAT IT MEASURED; if it cannot tell two causes apart it says so
+   and prints what it can see (docs/traps.md).
+   `tools/check-diagnostics.sh` holds the shape of that — one answer, or
+   an answer on the failure path that interpolates nothing, is a
+   sentence that cannot discriminate — but a branch that discriminates
+   and is still wrong is caught only by the review question.
 4. **Validation scripts build and verify what they ship.** No stale
    artifacts, no bypassed mechanisms, no false PASS. A gate that can be
    satisfied without exercising the real thing is a bug in the gate.
@@ -105,7 +123,21 @@ in docs/deferred.md.
    without it the 22 harness tests silently vanish (194 -> 172) rather
    than failing. GTK and WinUI builds need it too — mac/iOS do not,
    since the SwiftUI interpreter carries its own harness.
-2. Fast gates (all run by validate-mac, all runnable standalone):
+2. Fast gates. `tools/gates.sh` runs ALL of them and is the only thing
+   that should. It builds libkaya and the SwiftUI interpreter FIRST — a
+   gate cannot verify an artifact the run has not built yet, and one
+   that tried read the PREVIOUS run's dylib and called it stale, which
+   was true and useless — and then runs every gate below and REFUSES A
+   VERDICT unless the number that ran equals the number it declared. A
+   sweep that under-runs and still prints green is measured, not
+   hypothetical: a hand-rolled loop over a shell variable ran 1 of 24
+   gates and reported a clean run. There is deliberately no subset flag,
+   because a flag that runs part of the list and still prints a verdict
+   is that same defect with an interface; to run one gate, run that gate
+   — each is standalone. `tools/check-gates.sh` holds this prose list,
+   gates.sh's list and validate-mac's delegation to ONE census and fails
+   naming both sides of any disagreement; the three had already drifted
+   by four gates the day it landed. What each gate is for:
    `tools/gen-header.sh --check`, `tools/gen-bindings.sh --check`,
    `tools/gen-guests.sh --check` (NOTE: diffs generated surfaces against
    git HEAD — cannot pass pre-commit if generated files changed; prove
@@ -114,6 +146,18 @@ in docs/deferred.md.
    `tools/check-mirror.sh` (CLAUDE.md and AGENTS.md are true mirrors
    modulo the line-3 comment — they drifted once, silently, for two
    milestones),
+   `tools/check-gates.sh` (the drift sibling of the above, one file over:
+   the gates this paragraph names, the gates gates.sh runs and the ones
+   validate-mac reaches must be one list. Its census clause is the part
+   that bites — every gate script on disk is either in the sweep or in
+   gates.sh's EXCLUDED table WITH A REASON — and it is what would have
+   caught the four gates this paragraph was missing while the lane ran
+   them),
+   `tools/check-case.sh` (every tracked path matches the filesystem's
+   case exactly. macOS is case-insensitive and Linux is not, so a Haskell
+   guest created as `Background.hs` against a cabal stanza reading
+   `background.hs` built locally, went green on mac, and would have died
+   on the lane furthest from the change, after a full matrix),
    `tools/check-targets.sh` (cross-compiles every cfg'd backend, in BOTH
    feature configurations — it once reported "windows OK" while the
    windows lane failed to build the WinUI accessibility read, which
@@ -130,7 +174,32 @@ in docs/deferred.md.
    `tools/check-universal-props.sh` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
-   still keyed on the prop alone), `tools/check-abort.sh` (uniform abort
+   still keyed on the prop alone),
+   `tools/check-roles.sh` (the role vocabulary reaches every backend:
+   `MENU_ROLES` is one line, it is not in the spec hash, and adding an
+   entry regenerates nothing — so before this gate a role could ship with
+   the root accepting it and all four backends ignoring it. RED BY DESIGN
+   across a fan-out; the role joins the vocabulary first and the arms
+   follow),
+   `tools/check-native-undo.sh` (the two native-tier undo guards that NO
+   shared scene can fail — both sit inside a SECOND consecutive native
+   walk, which the routing makes unreachable, and each was broken with
+   the lane watched staying green. The scene cannot be fixed to reach
+   them, so static pairing is the only wall available),
+   `tools/check-diagnostics.sh` (a why-not may not print a sentence it
+   cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
+   is read as a diagnostic by that name alone; one answer, or an answer
+   after the early-out that interpolates nothing, is a sentence the
+   reader will believe for every cause it does not name — which is what
+   `kayaOpenPanelWhyNot` did for months, twice sending someone after
+   macOS activation rules. Its self-test splices the pre-fix body back
+   in from git and requires the red),
+   `tools/check-diagnostics.sh` (a why-not may not print a sentence it
+   cannot have measured — see invariant 3. The shape it can see is a
+   failure path with ONE answer, or an answer that interpolates nothing:
+   such a sentence is printed for every cause it does not name, and it is
+   believed),
+   `tools/check-abort.sh` (uniform abort
    semantics, all languages),
    `tools/check-tx-liveness.sh` (a transaction is usable only inside
    the build or handler that made it, on the app thread — the HANDLE
@@ -164,6 +233,13 @@ in docs/deferred.md.
    IDE inspections (KT-69698), so a computed-and-never-applied local
    compiles clean, which is how a dead lowering once shipped a false
    green),
+   `tools/check-jni.sh` (every native a Kotlin or Java class declares is
+   in a registration list. JNI's own check runs one way only: it fails
+   loudly at attach for a registered native the class lacks, but a
+   declared-and-unregistered one just waits, and the UnsatisfiedLinkError
+   fires at FIRST USE — which is how `KayaRing.openPicked` sat in the
+   desktop-only list for months, under a comment promising it was
+   shared),
    `tools/check-build-id.sh` (the stale-artifact guard is live: each of
    the three compiled artifacts — libkaya, the SwiftUI interpreter, the
    Compose interpreter — carries the id of the sources it came from,
@@ -187,7 +263,9 @@ in docs/deferred.md.
    CAMOUFLAGE: five of them hid a real Python defect behind green
    scenes for months),
    `tools/check-wheel.sh`, `python3 bindings/python/kaya_app_checks.py`.
-   One gate sits outside validate-mac because it needs docker:
+   One gate sits outside the sweep because it needs docker — gates.sh
+   carries it in EXCLUDED, with that reason, so it is excluded on the
+   record rather than merely absent:
    `tools/check-gtk.sh` compile-checks the GTK backend, which
    check-targets structurally cannot (gtk-sys needs the distro's
    pkg-config world). Run it after any gtk.rs change — a green

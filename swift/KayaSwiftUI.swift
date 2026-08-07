@@ -1768,6 +1768,59 @@ func kayaExpandPath(_ path: String) -> String {
         return (where_, browser.rows.map { $0.name })
     }
 
+    /// How long a read waits for a PRESENTED panel's browser to publish
+    /// its contents: main-queue turns 20ms apart, so the budget is
+    /// render-latency scale on a panel that is already up, and a wedged
+    /// sync reports rather than hangs. Measured fill after the panel
+    /// presents: under 0.5s in every mode.
+    private let kayaPanelFillTurns = 100
+
+    /// The panel's state, WAITED FOR — because the browser exists before
+    /// its contents do.
+    ///
+    /// THE STEP'S OWN RETRY CANNOT COVER THIS ONE, and the reason is
+    /// worth the paragraph. Every expect is a bounded retry (5s here),
+    /// and that budget is what waits for a slow guest's panel to
+    /// present — but the wait is spent inside a
+    /// `DispatchQueue.main.sync`, and the main thread is the very thread
+    /// that is busy presenting. Measured 2026-08-07, rust guest, columns
+    /// mode, with this read instrumented: the hop was submitted 15ms
+    /// into the step and returned 6695ms later, HAVING RUN ONCE. The
+    /// whole 5s budget went by inside one blocked call; the panel was
+    /// live when it finally landed; the ColumnView published 0 children;
+    /// and the deadline was long gone, so the miss was final and the
+    /// loop never took a second look. python and go pass in the same
+    /// mode only because their panels present in ~1.3s and their read
+    /// lands after the columns fill — a race, not a property of columns
+    /// mode.
+    ///
+    /// So the wait for CONTENT lives below the deadline, here, in the
+    /// same bounded-poll shape as `kayaAwaitTextWindow`. The poll's
+    /// SECOND read is the first one the main thread is free to serve,
+    /// which is exactly the read the old shape never made.
+    ///
+    /// `requireRows` IS NOT ALWAYS TRUE, and that is the point. The bare
+    /// `expect_file_dialog` asks only whether a panel is up, and an
+    /// empty list is a legitimate answer to that question; so is an
+    /// empty directory for the form that names a directory and no files.
+    /// Waiting for rows nobody asked for would turn "the panel exists"
+    /// into a two-second stall on every use, and in a genuinely empty
+    /// directory into a wait for something that is never coming. A nil
+    /// state — no panel yet — is returned at once in BOTH forms: that
+    /// wait is the step retry's, it is the one the retry can actually
+    /// serve, and duplicating it here would only make the failure slower
+    /// to arrive.
+    func kayaAwaitOpenPanelState(requireRows: Bool) -> (String, [String])? {
+        var state = DispatchQueue.main.sync { kayaOpenPanelState() }
+        guard requireRows else { return state }
+        for _ in 0..<kayaPanelFillTurns {
+            guard let (_, rows) = state, rows.isEmpty else { return state }
+            Thread.sleep(forTimeInterval: 0.02)
+            state = DispatchQueue.main.sync { kayaOpenPanelState() }
+        }
+        return state
+    }
+
     /// Point the live panel at a directory. The harness placing the app
     /// where a user would have navigated — set_text's tier, not a
     /// stamp: expect_file_dialog reads the "where" popup back, so a
@@ -5116,7 +5169,16 @@ private func kayaRunScript(_ script: String) {
                             + "only $TMP and $PID exist")
                 }
                 #if os(macOS)
-                    let state = DispatchQueue.main.sync { kayaOpenPanelState() }
+                    // THE WAIT FOR CONTENT IS THIS CALL'S, NOT THE STEP
+                    // RETRY'S: a live panel whose browser lists nothing
+                    // is not an answer, it is a read that beat the
+                    // browser, and by the time it lands the retry
+                    // budget is already spent inside the blocked hop
+                    // that made it. kayaAwaitOpenPanelState carries the
+                    // measurement. Only the forms that NAME FILES wait —
+                    // for the bare form and the directory-only form an
+                    // empty list is a legitimate answer.
+                    let state = kayaAwaitOpenPanelState(requireRows: !wantNames.isEmpty)
                 #else
                     // OFF the main thread, deliberately: the read goes
                     // out to the host and back, and the app must keep
@@ -5267,7 +5329,14 @@ private func kayaRunScript(_ script: String) {
                 let arg = parts.count > 1 ? String(parts[1]) : ""
                 if arg != "cancel", !arg.isEmpty {
                     #if os(macOS)
-                        let rows = DispatchQueue.main.sync { kayaOpenPanelState()?.1 }
+                        // THE SAME WAIT, and here it is the only one
+                        // there is: file_choose is an ACTION, so the
+                        // step wrapper never re-runs it, and a read that
+                        // beat the browser refuses the row for good.
+                        // Measured in the same run as the expect above —
+                        // this read saw the empty ColumnView 10ms later
+                        // and failed on it.
+                        let rows = kayaAwaitOpenPanelState(requireRows: true)?.1
                         guard let rows else {
                             failures.append("file_choose \(arg): no file dialog is live")
                             break

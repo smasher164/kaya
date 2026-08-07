@@ -449,7 +449,22 @@ pub(crate) struct Scene {
     stamps: HashMap<EntryRef, Stamp>,
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
-    mounted_windows: std::collections::HashSet<WindowId>,
+    /// Every live surface that has a mounted root, and WHICH widget that
+    /// root is. `Mount` is the only site that inserts; six sites remove
+    /// (DestroyWindow's window, its entries and its sections' entries,
+    /// PopEntry, user_popped). Held as one map rather than a set plus a
+    /// side table because the two facts have one lifetime: a seventh
+    /// removal site that updated only one of them would make an
+    /// unreachable widget look reachable, which is the exact defect the
+    /// barrier below exists to catch.
+    mounted_windows: HashMap<WindowId, WidgetId>,
+    /// child -> parent, LIVE ZONE ONLY. The template zone keeps its own
+    /// (`TplSection::childed`) and promotes an unparented node to a root
+    /// of the stamped copy; the live zone has nowhere to promote to, so
+    /// an unclaimed widget renders nowhere while still answering every
+    /// read. This map plus `mounted_windows` is what proves it does not
+    /// happen (`check_reachable_from_mounted_root`).
+    parent_of: HashMap<WidgetId, WidgetId>,
     /// Scroll viewports that already hold their one child: a scroll
     /// takes EXACTLY ONE (the ScrolledWindow shape) and a second
     /// add_child fails loudly here, at the root.
@@ -1142,6 +1157,14 @@ impl Scene {
         // The undo group this batch declared at its head, if any, with
         // the pre-state of everything it has touched so far (D2/D3).
         let mut group: Option<GroupCapture> = None;
+        // Every LIVE widget this batch minted, in creation order — the
+        // domain of the reachability barrier below. Batch-scoped, not a
+        // global sweep over `self.widgets`, because the core never
+        // prunes that map: DestroyWindow (:1401) and PopEntry (:1584)
+        // drop the surfaces and leave their widget ids behind forever,
+        // so a global sweep would re-accuse widgets that were checked
+        // when they were alive and parented.
+        let mut created: Vec<WidgetId> = Vec::new();
 
         for (at, op) in tx.into_iter().enumerate() {
             if !scopes.is_empty() {
@@ -1227,6 +1250,7 @@ impl Scene {
                     );
                     let clash = self.widgets.insert(id, kind).is_some();
                     assert!(!clash, "kaya: widget id {id:?} already exists");
+                    created.push(id);
                     // Interactive widgets carry their identity tag:
                     // buttons emit it on click, entries on edit.
                     let tag = match kind {
@@ -1824,6 +1848,21 @@ impl Scene {
                         );
                         *self.select_options.entry(parent).or_insert(0) += 1;
                     }
+                    // The edge, kept. Everything above validates it and
+                    // forgets it; the reachability barrier needs it to
+                    // survive the op. Last write wins, matching the
+                    // backends: a second add_child of the same child
+                    // reparents it.
+                    assert!(
+                        parent != child,
+                        "kaya: add_child of {child:?} to itself"
+                    );
+                    assert!(
+                        !self.widget_subtree_contains(child, parent),
+                        "kaya: add_child of {child:?} under {parent:?} would create a \
+                         cycle — {parent:?} is already inside {child:?}"
+                    );
+                    self.parent_of.insert(child, parent);
                     out.push(ApplyOp::AddChild { parent, child });
                 }
                 TxOp::Mount { window, root } => {
@@ -1847,7 +1886,7 @@ impl Scene {
                     // The vocabulary landed: one mounted root PER
                     // WINDOW (a remount into the same window replaces
                     // its root wholesale on the backends).
-                    let fresh = self.mounted_windows.insert(window);
+                    let fresh = self.mounted_windows.insert(window, root).is_none();
                     assert!(
                         fresh,
                         "kaya: window {window:?} already has a mounted root"
@@ -1914,6 +1953,7 @@ impl Scene {
                     );
                     let clash = self.widgets.insert(wid, WidgetKind::Column).is_some();
                     assert!(!clash, "kaya: widget id {wid:?} already exists");
+                    created.push(wid);
                     out.push(ApplyOp::Create {
                         id: wid,
                         kind: WidgetKind::Column,
@@ -1937,6 +1977,7 @@ impl Scene {
                     );
                     let clash = self.widgets.insert(wid, WidgetKind::Column).is_some();
                     assert!(!clash, "kaya: widget id {wid:?} already exists");
+                    created.push(wid);
                     out.push(ApplyOp::Create {
                         id: wid,
                         kind: WidgetKind::Column,
@@ -2028,6 +2069,31 @@ impl Scene {
                     }
                 }
             }
+        }
+
+        // Barrier: every widget this batch created must be reachable
+        // from a mounted root. Here — beside the menu domain check and
+        // before the fan-out — for the same two reasons that one is
+        // here. It must be a BARRIER and not a per-op check, because
+        // ordering inside a transaction is free and a widget is an
+        // orphan for most of the batch's length by design (guests/c/
+        // a11y.c mints every widget, then makes 24 add_child calls, then
+        // mounts, in one transaction). And it must run BEFORE the
+        // fan-out, so a refusal has nothing derived to unwind.
+        if let Some(orphan) = self.first_unreachable(&created) {
+            // Signals only, and that is not an omission: a MARKED batch
+            // cannot get here with anything to check, because
+            // `undo_verdict` refuses create_widget/create_for/create_when
+            // outright (:359, :383-384), so `created` is empty whenever
+            // `group` is live and `first_unreachable` has already
+            // returned None. The menu barrier above needs both arms; this
+            // one has only the reachable arm, so it does not carry a
+            // second that no input can take.
+            debug_assert!(group.is_none(), "a marked batch cannot create widgets");
+            for (sid, old) in &rollback {
+                self.signals.insert(*sid, old.clone());
+            }
+            panic!("{}", self.orphan_message(orphan));
         }
 
         self.fan_out_signals(&dirty, &mut out);
@@ -2979,6 +3045,126 @@ impl Scene {
         not(any(target_os = "macos", target_os = "ios", target_os = "android")),
         allow(dead_code)
     )]
+    // --- Mounted-root reachability ---------------------------------------
+    //
+    // A widget with no parent is not an error the way a bad id is: it is
+    // WELL-FORMED and INVISIBLE. It enters the backends' per-kind
+    // registries at create time, so `kind#index` resolves to it and every
+    // harness read answers about it — while the screen shows nothing.
+    // Swift's milestone2 window displayed two widgets for over two weeks
+    // with every leg green (docs/deferred.md, the orphan entry), and its
+    // menus.swift sibling shipped the same shape in the same commit.
+    //
+    // The core is the one layer that can refuse it once for everybody:
+    // `Scene::apply` is the funnel for all five backends (gtk.rs:1079 and
+    // :6412, winui/mod.rs:829, capi.rs:2335 for the two interpreters), so
+    // this walk is one implementation covering nine guest languages, and
+    // it fires in a real app that never runs the harness.
+    //
+    // WHAT IT DOES NOT COVER, stated so nobody reads it as total: an
+    // orphan made by a BACKEND — one that receives ApplyOp::AddChild and
+    // fails to reparent — is invisible here, because the core sees the op
+    // and not the toolkit's tree. Only GTK's `WidgetExt::root()`, WinUI's
+    // `XamlRoot` and the interpreters' `parents` maps can see that one.
+    // No such defect is on record; all three recorded instances were made
+    // above the core, in a binding.
+
+    /// Is `target` inside `root`'s subtree (or `root` itself)? Walks
+    /// UP from `target`, which is the direction the map runs. Bounded by
+    /// the map's size so a pre-existing cycle cannot hang the caller
+    /// that is checking for cycles.
+    fn widget_subtree_contains(&self, root: WidgetId, target: WidgetId) -> bool {
+        let mut at = target;
+        for _ in 0..=self.parent_of.len() {
+            if at == root {
+                return true;
+            }
+            match self.parent_of.get(&at) {
+                Some(parent) => at = *parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    /// The first widget in `created` that no mounted root reaches, or
+    /// None. Order is creation order, so the message names the widget an
+    /// author wrote first rather than whichever one a hash map yielded.
+    fn first_unreachable(&self, created: &[WidgetId]) -> Option<WidgetId> {
+        if created.is_empty() {
+            return None;
+        }
+        let roots: std::collections::HashSet<WidgetId> =
+            self.mounted_windows.values().copied().collect();
+        created
+            .iter()
+            .copied()
+            .find(|id| !roots.contains(&self.top_ancestor(*id)))
+    }
+
+    /// The topmost widget above `id` (itself when it has no parent).
+    /// Bounded by the map's size: `add_child` refuses to make a cycle, so
+    /// this cannot spin — and if that refusal is ever removed, this
+    /// returns a wrong answer instead of hanging the app thread.
+    fn top_ancestor(&self, id: WidgetId) -> WidgetId {
+        let mut at = id;
+        for _ in 0..=self.parent_of.len() {
+            match self.parent_of.get(&at) {
+                Some(parent) => at = *parent,
+                None => return at,
+            }
+        }
+        at
+    }
+
+    /// The refusal text. It carries the diagnosis because the whole
+    /// failure class is "it looked fine": the reader's screen is missing
+    /// a widget and every assertion passed, so a bare "invalid tree"
+    /// would send them to the backend. Every clause here is READ OFF THE
+    /// SCENE, not guessed (docs/traps.md, "a diagnostic may only print
+    /// what it measured"): the kind, the chain that was actually walked,
+    /// and how many surfaces have a root at all.
+    fn orphan_message(&self, orphan: WidgetId) -> String {
+        let kind = self.widgets.get(&orphan);
+        let top = self.top_ancestor(orphan);
+        let mut chain = String::new();
+        if top != orphan {
+            // Strictly what was walked. NOT "its window was destroyed" —
+            // the core cannot tell a root whose surface died from one
+            // that was never mounted, and a diagnostic may only print
+            // what it measured (docs/traps.md).
+            chain = format!(
+                " Walking up, its topmost ancestor is {top:?} ({:?}), and no live \
+                 surface has that widget as its root.",
+                self.widgets.get(&top)
+            );
+        }
+        let surfaces = if self.mounted_windows.is_empty() {
+            " NO surface in this app has a mounted root yet — if this \
+             transaction builds the scene, it is missing its mount(root)."
+                .to_string()
+        } else {
+            let mut mounted: Vec<String> = self
+                .mounted_windows
+                .iter()
+                .map(|(w, r)| format!("{w:?}->{r:?}"))
+                .collect();
+            mounted.sort();
+            format!(" Mounted roots right now: {}.", mounted.join(", "))
+        };
+        format!(
+            "kaya: widget {orphan:?} ({kind:?}) was created by this transaction and is \
+             not reachable from any mounted root — it will render NOWHERE while still \
+             answering every harness read, so a scene asserting on it passes against an \
+             invisible widget.{chain}{surfaces} Add it to a container (add_child), or \
+             mount it as a surface's root. If you built it with a container's builder, \
+             check that the body USES the handle rather than MENTIONING it: a bare \
+             expression is discarded by Swift result builders and Kotlin lambdas, which \
+             is how guests/swift/milestone2.swift and guests/swift/menus.swift both \
+             shipped invisible widgets. Nothing was applied."
+        )
+    }
+
     /// The user switched sections through the platform's switcher —
     /// post-fact reconciliation of the core's selected-section mirror
     /// (the user_popped stance). Selecting a section that was never
@@ -4405,6 +4591,266 @@ mod tests {
         ]
     }
 
+    // --- The mounted-root reachability wall ------------------------------
+    //
+    // The two negatives below RE-CREATE THE SHIPPED DEFECT rather than a
+    // synthetic one. `milestone2_scene()` above is byte-for-byte the shape
+    // guests/swift/milestone2.swift had before aadbe9e: a column, a When
+    // container and a For container, with the two AddChild ops that claim
+    // them. Delete the first and you have the Swift result builder
+    // discarding `banner`; delete the second and you have menus.swift's
+    // `itemList`, built outside its column and only mentioned inside it.
+    // Both shipped in the same commit and both rendered nothing while
+    // every leg stayed green.
+    //
+    // Each negative asserts the PERTURBATION COUNT. A `should_panic` test
+    // whose edit silently matched nothing passes for the wrong reason, and
+    // this repo has been bitten by exactly that twice (check-tx-liveness's
+    // three vacuous clauses, the wayland seat guard's two vacuous runs).
+    // An unchanged fixture fails here as loudly as a missing wall.
+
+    /// Remove every `AddChild` that claims `child`, returning how many
+    /// went. Printed, and every caller asserts on it.
+    fn strip_add_child(tx: &mut Transaction, child: WidgetId) -> usize {
+        let before = tx.len();
+        tx.retain(|op| !matches!(op, TxOp::AddChild { child: c, .. } if *c == child));
+        let n = before - tx.len();
+        println!("strip_add_child({child:?}): {n} op(s) removed");
+        n
+    }
+
+    /// E2, the one that shipped: the `When` container is created at
+    /// ambient parent 0 (app.rs:1239 emits no AddChild there), the column
+    /// never claims it, and it renders nowhere while answering every read.
+    #[test]
+    #[should_panic(expected = "not reachable from any mounted root")]
+    fn a_when_container_never_parented_fails_the_batch() {
+        let mut tx = milestone2_scene();
+        let n = strip_add_child(&mut tx, WidgetId(2));
+        assert_eq!(n, 1, "the perturbation did not apply — the fixture moved");
+        Scene::new().apply(tx);
+    }
+
+    /// E3, its sibling in the same commit: a `For` container built outside
+    /// the column that was supposed to hold it.
+    #[test]
+    #[should_panic(expected = "not reachable from any mounted root")]
+    fn a_for_container_built_outside_its_column_fails_the_batch() {
+        let mut tx = milestone2_scene();
+        let n = strip_add_child(&mut tx, WidgetId(3));
+        assert_eq!(n, 1, "the perturbation did not apply — the fixture moved");
+        Scene::new().apply(tx);
+    }
+
+    /// The unperturbed fixture passes. Without this, the two negatives
+    /// above would also be satisfied by a wall that refused everything.
+    #[test]
+    fn the_unperturbed_milestone2_scene_is_reachable() {
+        Scene::new().apply(milestone2_scene());
+    }
+
+    /// A whole detached subtree is caught, and it is named at the widget
+    /// the author wrote FIRST — the container — rather than at whichever
+    /// leaf a hash map happened to yield. `created` is in creation order
+    /// for exactly this reason.
+    #[test]
+    #[should_panic(expected = "widget WidgetId(2)")]
+    fn a_detached_subtree_is_named_at_its_container() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            // 3 has a parent; 2 does not. Neither is on screen.
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+        ]);
+    }
+
+    /// The scene that creates widgets and never mounts at all. The
+    /// SwiftUI interpreter carries a diagnosis for exactly this
+    /// (KayaSwiftUI.swift's UNMOUNTED-SCENE DIAGNOSIS, and the comment
+    /// there records the afternoon it cost) — but that one runs only on
+    /// the failure path, so a scene whose legs all pass never reaches it.
+    /// This fires first, in the core, for every backend.
+    #[test]
+    #[should_panic(expected = "missing its mount(root)")]
+    fn a_scene_that_never_mounts_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Button },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+        ]);
+    }
+
+    // --- The positives: the wall must not fire on legitimate code --------
+
+    /// guests/c/a11y.c's shape, which is the decisive one: ONE
+    /// transaction, every widget created first, then the add_child calls
+    /// in a block, then the mount. Every widget in that file is an orphan
+    /// for most of the transaction's length, so a per-op check would fail
+    /// the whole C floor. This is why the wall is a BARRIER.
+    #[test]
+    fn create_then_parent_later_in_the_same_batch_is_fine() {
+        let mut scene = Scene::new();
+        let mut tx = vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Row },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            TxOp::CreateWidget { id: WidgetId(4), kind: WidgetKind::Button },
+        ];
+        tx.extend([
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(4) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+        ]);
+        tx.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+        scene.apply(tx);
+    }
+
+    /// guests/rust/nav.rs:51-58's shape: a pane built INSIDE A CLICK
+    /// HANDLER — push the entry, create the widgets, parent them, mount
+    /// into the entry — all in one handler transaction, long after the
+    /// app's first batch.
+    #[test]
+    fn a_pane_built_and_mounted_in_a_handler_is_fine() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        // The handler's own transaction.
+        scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(7) },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+            TxOp::Mount { window: WindowId(7), root: WidgetId(2) },
+        ]);
+    }
+
+    /// A widget parented into a tree that is mounted in a LATER op of the
+    /// same batch. Ordering inside a transaction is free; only the
+    /// finished state is judged.
+    #[test]
+    fn parenting_before_the_mount_op_is_fine() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    /// The batch scope, and why it is not a nicety: the core NEVER prunes
+    /// `self.widgets` (DestroyWindow at :1401 and PopEntry at :1584 drop
+    /// the surface and leave the widget ids behind forever), so a global
+    /// sweep would re-accuse a destroyed window's widgets on every later
+    /// transaction and redden three scenes in the matrix today —
+    /// guests/rust/dirty.rs, guests/rust/panels.rs, guests/rust/nav.rs.
+    #[test]
+    fn a_destroyed_windows_widgets_are_not_re_accused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CreateWindow { window: WindowId(2) },
+            TxOp::CreateWidget { id: WidgetId(5), kind: WidgetKind::Column },
+            TxOp::Mount { window: WindowId(2), root: WidgetId(5) },
+        ]);
+        scene.apply(vec![TxOp::DestroyWindow { window: WindowId(2) }]);
+        // Widget 5 is still in `self.widgets` and is now unreachable —
+        // and this batch is judged on ITS creations, not on the leak.
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(6), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(6) },
+        ]);
+    }
+
+    /// The other half of that, and the one that makes the six
+    /// `mounted_windows.remove` sites load-bearing: parenting a NEW widget
+    /// into a destroyed window's tree is refused. Without the removal the
+    /// dead root would still count as mounted and this would pass.
+    ///
+    /// It is also the case that exercises the WALK: widget 6's immediate
+    /// parent exists and is perfectly real, so only following the chain to
+    /// its top finds the problem — which is what the expected substring
+    /// pins.
+    #[test]
+    #[should_panic(expected = "no live surface has that widget as its root")]
+    fn a_widget_added_to_a_destroyed_windows_tree_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWindow { window: WindowId(2) },
+            TxOp::CreateWidget { id: WidgetId(5), kind: WidgetKind::Column },
+            TxOp::Mount { window: WindowId(2), root: WidgetId(5) },
+        ]);
+        scene.apply(vec![TxOp::DestroyWindow { window: WindowId(2) }]);
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(6), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(5), child: WidgetId(6) },
+        ]);
+    }
+
+    /// Same, for a popped navigation entry.
+    #[test]
+    #[should_panic(expected = "not reachable from any mounted root")]
+    fn a_widget_added_to_a_popped_entrys_tree_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(7) },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Column },
+            TxOp::Mount { window: WindowId(7), root: WidgetId(2) },
+        ]);
+        scene.apply(vec![TxOp::PopEntry { window: DEFAULT_WINDOW }]);
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+        ]);
+    }
+
+    /// Stamped copies are out of scope BY CONSTRUCTION, not by an
+    /// exemption: `run_body` mints them with `alloc_internal()` and never
+    /// puts them in `self.widgets`, so they are never in `created`. The
+    /// inserts here stamp three group copies with nested item copies; a
+    /// wall that swept the whole widget map would drown in them.
+    #[test]
+    fn stamped_copies_are_not_live_widgets() {
+        let mut scene = Scene::new();
+        scene.apply(milestone2_scene());
+        scene.apply(vec![
+            insert(1, vec![], "g1", "Groceries"),
+            insert(1, vec![], "g2", "Chores"),
+        ]);
+        scene.apply(vec![insert(2, vec![v("g1")], "i1", "milk")]);
+    }
+
+    // --- Termination: the walk cannot be made to spin ---------------------
+
+    #[test]
+    #[should_panic(expected = "to itself")]
+    fn add_child_refuses_a_self_parent() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "would create a cycle")]
+    fn add_child_refuses_a_cycle() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Column },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(2), child: WidgetId(1) },
+        ]);
+    }
+
     fn insert(id: u64, path: Vec<Value>, key: &str, value: &str) -> TxOp {
         TxOp::CollectionInsert {
             id: CollectionId(id),
@@ -5302,6 +5748,7 @@ mod tests {
                 prop: Prop::Grow,
                 value: PropValue::Const(Value::F64(0.0)),
             },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
     }
 
@@ -5345,6 +5792,7 @@ mod tests {
                     prop: Prop::A11yHint,
                     value: PropValue::Const(v("do the thing")),
                 },
+                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
             ]);
         }
     }
@@ -5806,6 +6254,7 @@ mod tests {
                 prop: Prop::Value,
                 value: PropValue::Const(Value::F64(1.0)),
             },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
         let tagged = ops.iter().any(|op| {
             matches!(op, ApplyOp::Create { id, kind: WidgetKind::Select, tag: Some(_) }
@@ -5900,6 +6349,7 @@ mod tests {
                 prop: Prop::Value,
                 value: PropValue::Const(Value::F64(1.0)),
             },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
         let tagged = ops.iter().any(|op| {
             matches!(op, ApplyOp::Create { id, kind: WidgetKind::Radio, tag: Some(_) }
@@ -7183,6 +7633,11 @@ mod tests {
                 prop: Prop::Text,
                 value: PropValue::Const(Value::Str("hello".to_owned())),
             },
+            // Into undo_scene's mounted column. A later transaction may
+            // add to a tree the app already mounted; what it may not do
+            // is leave the widget hanging, which is what this fixture
+            // used to do because nothing was looking.
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(9) },
         ]);
         let ops = scene.apply(vec![
             group("find"),

@@ -100,6 +100,14 @@ GATES = {
     "check-steps": ["guests", "crates", "swift", "android"],
     "check-shell": [],
     "check-mirror": ["CLAUDE.md", "AGENTS.md"],
+    # The three-list census — CLAUDE.md's rung 2 against tools/gates.sh's
+    # list against what validate-mac invokes. Two of the three are under
+    # tools/, which rides every key; CLAUDE.md is the one input outside
+    # it. AGENTS.md is declared as well although this gate does not read
+    # it: check-mirror holds the two identical, and this table's own rule
+    # is that naming too much costs a re-run nobody notices while naming
+    # too little hands back a PASS about a file that changed.
+    "check-gates": ["CLAUDE.md", "AGENTS.md"],
     "check-targets": ["crates", "Cargo.toml", "Cargo.lock", ".cargo"],
     # guests/ joined this set when the gate grew its SCENE-TIER clause
     # (the example scenes must USE the sugar, not only the bindings
@@ -118,6 +126,13 @@ GATES = {
     # backend-side, and no binding sits between the core seam and the
     # arm that calls it.
     "check-native-undo": ["crates", "swift", "android"],
+    # Every source root the diagnostic census walks, and it walks them
+    # all on purpose: the gate's job is to notice a NEW why-not by its
+    # name alone, so a key blind to one root would hand back a stale PASS
+    # for exactly the file that just grew one. tools/ rides every key
+    # already, which covers the Swift under tools/mac and tools/ios.
+    "check-diagnostics": ["crates", "swift", "android", "bindings",
+                          "guests", "cmd"],
     "check-verbs": ["crates", "bindings", "swift", "android"],
     # The JNI registration cross-check reads the two rust registration
     # modules, the Kotlin classes and the desktop Java class.

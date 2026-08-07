@@ -26,7 +26,13 @@ app.build { tx in
         return .str("\(n) done")
     }
 
-    let promote = tx.button("promote") { tx in
+    // FIXED (scratch only): every child is declared WHERE IT STANDS,
+    // inside the row that holds it. A widget parents into its container
+    // AT CREATION (app.rs:1239 reads the ambient frame), so declaring it
+    // outside and MENTIONING it inside parents nothing -- the result
+    // builder's buildExpression discards a bare expression.
+    let root = tx.row {
+    tx.button("promote") { tx in
         // The first note, promoted to a finished todo: the model is
         // asked which entry is a Note, and the update's new
         // constructor restamps that key's copy in place.
@@ -37,11 +43,11 @@ app.build { tx in
             }
         }
     }
-    let status = tx.label(bind: doneCount)
+    tx.label(bind: doneCount)
     // The generated eliminator: one required labeled parameter per
     // constructor, so a missing arm is a missing argument — a compile
     // error. The arms' tokens are typed; no label strings.
-    let list = postEachSum(
+    _ = postEachSum(
         tx, feed,
         note: { note in
             _ = note.label(note.text)
@@ -58,10 +64,6 @@ app.build { tx in
                 todo.label(todo.title)
             }
         })
-    let root = tx.row {
-        promote
-        status
-        list
     }
     tx.mount(root)
     feed.insert(tx, .str("a"), .note(text: "jot one"))

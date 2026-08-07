@@ -60,73 +60,17 @@ cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
 # a build whose failure went unnoticed leaves the previous one in
 # place and every verdict below is then about stale code.
 tools/build-id.sh --verify target/debug/libkaya.dylib || exit 1
-# The SwiftUI interpreter is BUILT HERE, before the gates, not beside
-# the legs. check-build-id verifies it as one of the three compiled
-# artifacts, and a gate cannot verify something the lane has not built
-# yet — it read the PREVIOUS run's dylib and reported it stale, which
-# was true and useless. Build every artifact, then verify all of them.
-#
-# The build's exit status is load-bearing: unchecked, a swiftc failure
-# left the PREVIOUS dylib in place and 152 legs false-PASSed against
-# stale code (2026-07-22; iOS caught the same source because its lane
-# checks its compile). A failed build must kill the lane, not degrade
-# it to yesterday's interpreter.
-tools/swiftui/build-dylib.sh >/dev/null || {
-    echo "validate-mac: SwiftUI interpreter dylib build FAILED" >&2
-    exit 1
-}
-tools/keyed.sh gen-header -- tools/gen-header.sh --check || exit 1
-tools/keyed.sh gen-bindings -- tools/gen-bindings.sh --check || exit 1
-tools/keyed.sh gen-guests -- tools/gen-guests.sh --check || exit 1
-tools/keyed.sh check-steps -- tools/check-steps.sh || exit 1
-# The Python surface's guard and mirror semantics, checked headlessly
-# (records queue; the core is never entered).
-python3 bindings/python/kaya_app_checks.py >/dev/null || { echo "kaya_app checks: FAIL"; exit 1; }
-# Fast cross-language/-platform gates: catch cfg'd-backend and guest
-# breakage here, in seconds, not on an emulator or VM.
-#
-# The pure ones run through tools/keyed.sh, which under KAYA_FAST=1
-# skips a gate whose declared inputs have not moved since it last
-# passed. Unset — which is how the matrix runs — the wrapper is
-# transparent and every gate runs. check-wheel, check-abort and
-# check-build-id are NOT wrapped and must not be: each loads or
-# inspects a built artifact, so an unchanged source tree is not an
-# unchanged answer.
-tools/keyed.sh check-targets -- tools/check-targets.sh || exit 1
-tools/keyed.sh check-shell -- tools/check-shell.sh || exit 1
-tools/keyed.sh check-mirror -- tools/check-mirror.sh || exit 1
-# NOT keyed: its input is every tracked path plus the directory
-# listings around them, so any add, delete or rename is a real input.
-# A cache key that cheap to invalidate is a cache that never hits.
-tools/check-case.sh || exit 1
-tools/keyed.sh check-sugar-surface -- tools/check-sugar-surface.sh || exit 1
-tools/keyed.sh check-universal-props -- tools/check-universal-props.sh || exit 1
-# The role vocabulary's lowering-side sibling: MENU_ROLES is one line
-# that no generator reads, so a role can ship with the root accepting it
-# and every backend ignoring it (docs/undo-plan.md D6). RED BY DESIGN
-# across a fan-out — the role joins the vocabulary first and the four
-# arms follow.
-tools/keyed.sh check-roles -- tools/check-roles.sh || exit 1
-# The native undo tier's two guards, which NO shared scene can fail: the
-# ledger-quiet bracket and A1's clear both live inside a SECOND
-# consecutive native walk, and the routing makes that unreachable
-# (scratchpad/compose-undo-arm.md §3.3/§3.4, watched green with each
-# guard broken). Static pairing is the only wall available.
-tools/keyed.sh check-native-undo -- tools/check-native-undo.sh || exit 1
-tools/check-wheel.sh || exit 1
-tools/check-abort.sh || exit 1
-tools/check-tx-liveness.sh || exit 1
-tools/check-ambient-tx.sh || exit 1
-tools/check-build-id.sh || exit 1
-tools/check-keyed.sh || exit 1
-tools/keyed.sh check-pins -- tools/check-pins.sh || exit 1
-tools/keyed.sh check-verbs -- tools/check-verbs.sh || exit 1
-tools/keyed.sh check-jni -- tools/check-jni.sh || exit 1
-tools/keyed.sh check-stubs -- tools/check-stubs.sh || exit 1
-tools/keyed.sh check-compose -- tools/check-compose.sh || exit 1
-tools/keyed.sh check-detekt -- tools/check-detekt.sh || exit 1
-tools/keyed.sh swift-typecheck -- tools/swift-typecheck.sh || exit 1
-tools/keyed.sh java-typecheck -- tools/java-typecheck.sh || exit 1
+# THE GATE SWEEP, and the artifacts it reads, in one entry point. The
+# list used to live right here as twenty-six lines nobody could count,
+# and it had already drifted four gates from the list CLAUDE.md
+# documents — so an agent that "ran the fast gates" from the prose ran
+# 22 of 26 and called it a sweep. tools/gates.sh owns the list now, it
+# BUILDS libkaya and the SwiftUI interpreter before any gate reads them,
+# and it refuses to report success unless the number of gates that ran
+# equals the number it declared. tools/check-gates.sh (one of the gates)
+# holds this file, that list and CLAUDE.md's rung 2 to the same census,
+# and refuses this file the right to invoke a gate directly.
+tools/gates.sh || exit 1
 timing core-build+gates
 
 status=0
@@ -138,7 +82,125 @@ status=0
 # drain, and a FAIL prints its log.
 JOBS="${KAYA_JOBS:-8}"
 LEGS_DIR="$(mktemp -d)"
-trap 'rm -rf "$LEGS_DIR"' EXIT
+
+# ── THE MAC FILE-PANEL VIEW MODE, ROTATED RATHER THAN INHERITED ──────
+# NSOpenPanel's file browser publishes a DIFFERENT accessibility
+# identifier per view mode — ListView / IconView / ColumnView — and the
+# mode is not the app's to choose: it is the machine-wide `NSGlobalDomain
+# NSNavPanelFileListModeForOpenMode2` (1 columns, 2 list, 3 icons), which
+# any application's open panel writes for EVERY application on the box
+# the moment a human clicks View Options. On 2026-08-06 it moved to Icons
+# and the eight filedialog legs went red together an hour after passing
+# 8/8: "the lane's colour was decided by a setting no gate reads and
+# nothing in the log named it" (docs/traps.md).
+#
+# The interpreter now reads all three shapes (swift/KayaSwiftUI.swift,
+# KayaPanelShape). Nothing EXERCISED two of them — the lane ran whichever
+# mode the machine happened to be in, so the other two readers, and both
+# selection idioms (AXSelectedRows for the outline, AXSelectedChildren
+# for the collection view and the browser column, whose wrong choice is
+# a SILENT WRONG FILE), were dead code on any given run. So the lane sets
+# the mode itself and splits the eight legs across the three modes: same
+# leg count, three readers proven every run instead of one.
+#
+# WRITING A MACHINE-WIDE USER PREFERENCE IS A SIDE EFFECT ON THE
+# DEVELOPER'S BOX. The original value is captured before the first
+# change, restored on EXIT/INT/TERM, and — because SIGKILL runs no trap
+# — written to a stamp file that the next run restores from before it
+# does anything else. probe-env.sh reports both the live value and a
+# leftover stamp.
+PANEL_MODE_KEY=NSNavPanelFileListModeForOpenMode2
+PANEL_MODE_STAMP="$ROOT/target/panel-mode.orig"
+
+# "unset" is a real value here: the key may be absent, and restoring to
+# absent is a delete, not a write of some guessed default.
+panel_mode_read() { defaults read -g "$PANEL_MODE_KEY" 2>/dev/null || echo unset; }
+
+panel_mode_write() { # value | unset
+    if [ "$1" = unset ]; then
+        defaults delete -g "$PANEL_MODE_KEY" 2>/dev/null || true
+    else
+        defaults write -g "$PANEL_MODE_KEY" -int "$1"
+    fi
+}
+
+# Idempotent, and it VERIFIES rather than assumes: the stamp is removed
+# only once the box reads back the value it started with. A restore that
+# failed keeps the stamp, so the next run and probe-env both still see
+# the debt.
+panel_mode_restore() {
+    [ -f "$PANEL_MODE_STAMP" ] || return 0
+    local want back
+    want="$(cat "$PANEL_MODE_STAMP")"
+    panel_mode_write "$want"
+    back="$(panel_mode_read)"
+    if [ "$back" != "$want" ]; then
+        echo "validate-mac: FAILED to put $PANEL_MODE_KEY back: wanted $want," \
+            "reads $back. By hand: defaults write -g $PANEL_MODE_KEY -int $want" >&2
+        return 1
+    fi
+    rm -f "$PANEL_MODE_STAMP"
+}
+
+# Put the panel in one mode for the group of legs that follows, and say
+# so in the log. The mode is printed as a FACT for every group, passing
+# or failing — the 2026-08-06 outage cost two hours of diagnosis for a
+# value nothing logged.
+PANEL_MODES_RUN=""
+panel_mode_set() { # mode name
+    if [ ! -f "$PANEL_MODE_STAMP" ]; then
+        mkdir -p "$(dirname "$PANEL_MODE_STAMP")"
+        panel_mode_read >"$PANEL_MODE_STAMP"
+    fi
+    panel_mode_write "$1"
+    local back
+    back="$(panel_mode_read)"
+    # A ROTATION THAT DID NOT TAKE PROVES NOTHING: it leaves the other
+    # two readers exactly as unexercised as before and the legs still
+    # pass, which is the vacuous-guard shape this project keeps paying
+    # for. The write is read back and the lane refuses rather than
+    # pretend it rotated.
+    if [ "$back" != "$1" ]; then
+        echo "validate-mac: $PANEL_MODE_KEY did not take — wrote $1, reads \"$back\"" >&2
+        status=1
+        return 1
+    fi
+    PANEL_MODES_RUN="$PANEL_MODES_RUN $1"
+    echo "== file panel view mode $1 ($2); restoring $(cat "$PANEL_MODE_STAMP") at exit"
+}
+
+# Which of the three modes no leg ran under. Deleting a group — or a
+# refused write — leaves a lane that still reports ALL PASS while one of
+# the interpreter's three readers goes back to being dead code, which is
+# the silence this whole block exists to end. So the census is checked
+# rather than assumed, on the one path every mac run takes.
+panel_modes_missing() {
+    local m out=""
+    for m in 1 2 3; do
+        case " $PANEL_MODES_RUN " in
+            *" $m "*) ;;
+            *) out="$out $m" ;;
+        esac
+    done
+    printf '%s' "$out"
+}
+
+# A previous run that was SIGKILLed, or a machine that lost power, left
+# the box rotated and its original value on disk. Hand it back HERE,
+# before this run reads anything, and say so out loud.
+if [ -f "$PANEL_MODE_STAMP" ]; then
+    echo "validate-mac: an earlier run left the file-panel view mode changed;" \
+        "restoring $(cat "$PANEL_MODE_STAMP")"
+    panel_mode_restore || status=1
+fi
+
+trap 'rm -rf "$LEGS_DIR"; panel_mode_restore' EXIT
+# EXIT alone is not enough for ^C: whether a signal death runs the EXIT
+# trap depends on the shell and on whether the signal is trapped, and a
+# lane interrupted mid-rotation must still hand the box back. Restore,
+# then re-raise so the caller still sees a signal death.
+trap 'panel_mode_restore; trap - INT; kill -INT $$' INT
+trap 'panel_mode_restore; trap - TERM; kill -TERM $$' TERM
 leg_names=()
 leg_pids=()
 
@@ -835,19 +897,48 @@ run background-java-swiftui env KAYA_SELFTEST=background KAYA_LIB="$ROOT/target/
 # capability it hands back, in every language. It drives REAL NSOpenPanel
 # chrome over accessibility, so it needs the same logged-in GUI session
 # the alert legs do.
+#
+# THE EIGHT LEGS ARE SPLIT ACROSS THE THREE PANEL VIEW MODES rather than
+# all inheriting whichever one the machine is in (panel_mode_set above
+# says why, and restores the developer's value at exit). The view mode
+# is a property of the PANEL, read by one language-independent reader in
+# swift/KayaSwiftUI.swift, so crossing it with the language axis would
+# buy nothing: 8 legs in 3 groups prove all three readers and both
+# selection idioms every run, at the cost of two drains rather than
+# sixteen extra legs.
+#
+# A drain BEFORE the first group as well, because a mode is set for
+# whatever is running, not for a leg: no filedialog leg may still be in
+# flight when the next group's write lands.
 KAYA_SELFTEST_SCRIPT="$(scene_script filedialog)"
 export KAYA_SELFTEST_SCRIPT
+drain
+panel_mode_set 1 columns
 run filedialog-rust-swiftui env KAYA_SELFTEST=filedialog target/debug/examples/filedialog
 run filedialog-python-swiftui env KAYA_SELFTEST=filedialog python3 guests/python/filedialog.py
 run filedialog-go-swiftui env KAYA_SELFTEST=filedialog target/go-guests/filedialog
+drain
+panel_mode_set 2 list
 run filedialog-csharp-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet exec "$CS_GUEST"
 run filedialog-ocaml-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/filedialog.exe
 run filedialog-haskell-swiftui env KAYA_SELFTEST=filedialog "$(hs_bin filedialog)"
+drain
+panel_mode_set 3 icons
 run filedialog-swift-swiftui env KAYA_SELFTEST=filedialog target/swift-guests/filedialog
 run filedialog-java-swiftui env KAYA_SELFTEST=filedialog KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+drain
+panel_modes_gap="$(panel_modes_missing)"
+if [ -n "$panel_modes_gap" ]; then
+    echo "validate-mac: the filedialog legs ran panel view modes \"$PANEL_MODES_RUN\" —" \
+        "mode(s)$panel_modes_gap were exercised by nothing (1 columns, 2 list, 3 icons)." \
+        "One of KayaPanelShape's three readers in swift/KayaSwiftUI.swift is dead code" \
+        "this run, which is exactly how 2026-08-06 happened" >&2
+    status=1
+fi
+panel_mode_restore || status=1
 
 # The clipboard scene: one clip in several representations, and the
 # privileged read. Still a DEPTH slice while the bindings fan out, and

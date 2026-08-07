@@ -202,17 +202,29 @@ touching layout code:
 
 ## The fast inner loop (KAYA_FAST=1)
 
-    KAYA_FAST=1 tools/validate-mac.sh      # skip gates whose inputs did not move
+    KAYA_FAST=1 tools/gates.sh             # the gate sweep alone, cached
+    tools/gates.sh                         # the gate sweep alone, always
+    KAYA_FAST=1 tools/validate-mac.sh      # gates + every leg, cached gates
     tools/validate-mac.sh                  # everything, always — the ladder's rung 3
 
-Sixteen gates are keyed on a declared input set (tools/build-id.sh's
-GATES table). Under KAYA_FAST=1 a gate whose inputs are unchanged since
-it last PASSED prints `CACHED (<key>)` and is skipped. Measured on a
-warm tree: the gate phase goes 55s to 17s, and what remains is the
-cargo build plus the three gates that are deliberately never keyed.
+`tools/gates.sh` is the sweep: it builds what the gates read and then
+runs every one of them, refusing a verdict unless the number that ran
+equals the number it declared. validate-mac calls it and holds no gate
+list of its own.
+
+Most of those gates are keyed on a declared input set — which ones is
+the `keyed` field in tools/gates.sh's list, and the sets themselves are
+tools/build-id.sh's GATES table. (No count here on purpose: this
+paragraph said "sixteen" for long enough to be wrong by three, which is
+the same drift tools/check-gates.sh now refuses between the sweep and
+CLAUDE.md.) Under KAYA_FAST=1 a gate whose inputs are unchanged since it
+last PASSED prints `CACHED (<key>)` and is skipped. Measured on a warm
+tree: the gate phase goes 55s to 17s, and what remains is the cargo
+build plus the gates that are deliberately never keyed.
 
 What the keys actually buy is not the all-cached case — it is that
-different work re-runs different gates:
+different work re-runs different gates. Measured 2026-07-28, when 16
+gates were keyed; read the ratios, not the denominator:
 
 | edit | gates that re-run |
 |---|---|
@@ -227,10 +239,14 @@ itself gated by `gen-header`, which IS keyed on all of crates/. Key a
 downstream gate on an interface, and something must be guarding that
 interface; here it is.
 
-THREE GATES ARE NEVER KEYED and must stay that way: check-abort,
-check-wheel and check-build-id each load or inspect something under
-target/, so an unchanged source tree does not imply an unchanged
-answer. tools/check-keyed.sh fails if any of them is ever wrapped.
+THE ARTIFACT-READING GATES ARE NEVER KEYED and must stay that way:
+check-abort, check-wheel and check-build-id each load or inspect
+something under target/, so an unchanged source tree does not imply an
+unchanged answer. tools/check-keyed.sh fails if any of them is ever
+wrapped. Other gates are unkeyed for their own reasons — check-case's
+inputs are every tracked path, check-keyed is the cache's own gate —
+and each states that reason beside itself in tools/gates.sh's list,
+where check-keyed also insists it be non-empty.
 
 Adding a gate to the cache means adding its input set to GATES. Name
 DIRECTORIES, not files. The asymmetry is the whole safety argument:
