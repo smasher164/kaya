@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xd8165a4995d2554fL;
+    public static final long SPEC_HASH = 0xbfba1ee8ec9461cbL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -143,6 +143,7 @@ public final class KayaWire {
     public static final short TX_KIND_HIGHLIGHT_RANGES = 38;
     public static final short TX_KIND_SELECT_RANGE = 39;
     public static final short TX_KIND_REVEAL_RANGE = 40;
+    public static final short TX_KIND_SHOW_SAVE_DIALOG = 41;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -173,6 +174,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_HIGHLIGHT_RANGES = 28;
     public static final short APPLY_KIND_SELECT_RANGE = 29;
     public static final short APPLY_KIND_REVEAL_RANGE = 30;
+    public static final short APPLY_KIND_PRESENT_SAVE_DIALOG = 31;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -592,6 +594,16 @@ public final class KayaWire {
         b.putLong(widgetId);
         b.putLong(start);
         b.putLong(stop);
+        return finish(b);
+    }
+
+    /** Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened. */
+    public static byte[] txShowSaveDialog(long window, long dialog, Object suggestedName, Object[] filters) {
+        ByteBuffer b = begin(TX_KIND_SHOW_SAVE_DIALOG);
+        b.putLong(window);
+        b.putLong(dialog);
+        encodeValue(b, suggestedName);
+        encodeValues(b, filters);
         return finish(b);
     }
 

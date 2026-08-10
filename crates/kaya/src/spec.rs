@@ -1056,6 +1056,49 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   observable kaya fixes is containment, which is the only \
                   thing every platform agrees on.",
         },
+        Record {
+            kind: 41,
+            name: "show_save_dialog",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("dialog", FieldTy::U64),
+                f("suggested_name", FieldTy::Value),
+                f("filters", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Request the platform's save dialog over a live window \
+                  (0 = primary), on the SAME request/result grammar as the \
+                  open picker (docs/save-plan.md D2): guest-chosen dialog \
+                  ids out of the one id space, one dialog live per process \
+                  whichever kind it is, and the answer arriving as a \
+                  file_dialog_result whose id retires there. `filters` is \
+                  the picker's advisory encoding unchanged — alternating \
+                  Str values, a label then its space-separated extensions. \
+                  `suggested_name` is the name the dialog opens with, which \
+                  every platform takes (nameFieldStringValue, \
+                  GtkFileDialog's initial name, IFileSaveDialog's \
+                  SetFileName, EXTRA_TITLE, the export controller's \
+                  filename) and none guarantees: the user renames it, and \
+                  Android may append an extension matching the mime type, \
+                  so a guest reads the name it GOT rather than the name it \
+                  asked for.\n\n\
+                  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is \
+                  no `multiple` twin of the picker's flag: no platform's \
+                  save dialog names two destinations. Cancel is the empty \
+                  answer, the picker's rule verbatim.\n\n\
+                  WHAT THE DESTINATION IS FOR is the decision with the \
+                  semantics in it (docs/save-plan.md D1): the result's \
+                  handle opens with CREATE, so opening a name the dialog \
+                  invented succeeds and yields an EMPTY file on every \
+                  platform. Android and iOS hand back a document that \
+                  already exists; macOS, GTK and Windows hand back a name \
+                  for a file nobody has made (measured: macOS does not even \
+                  truncate on Replace). The core absorbs that, not the \
+                  guest, and NOT a fourth file mode — creation is a property \
+                  of the destination the dialog promised, never of the \
+                  caller's intent, and a mode would let a guest ask for it \
+                  on a file it merely opened.",
+        },
     ],
     apply: &[
         Record {
@@ -1467,6 +1510,25 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "Scroll the range into the widget's viewport, in the \
                   backend's native unit (see the highlight twin). Touches \
                   no selection and no composition.",
+        },
+        Record {
+            kind: 31,
+            name: "present_save_dialog",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("dialog", FieldTy::U64),
+                f("suggested_name", FieldTy::Value),
+                f("filters", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Present the platform's real save dialog over the window \
+                  (SHOW_SAVE_DIALOG, already validated by the core). The \
+                  presentation answers with kaya_emit_save_dialog_result \
+                  exactly once — ONE locator, or a null one for cancel. \
+                  That entry is what makes the destination a destination: \
+                  it registers a source whose open creates, so the two \
+                  platforms that hand back a name for a file nobody has \
+                  made behave like the two that hand back a document.",
         },
     ],
     occurrence: &[
@@ -2150,6 +2212,7 @@ mod tests {
             ("highlight_ranges", wire::TX_HIGHLIGHT_RANGES),
             ("select_range", wire::TX_SELECT_RANGE),
             ("reveal_range", wire::TX_REVEAL_RANGE),
+            ("show_save_dialog", wire::TX_SHOW_SAVE_DIALOG),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -2193,6 +2256,7 @@ mod tests {
                 ("highlight_ranges", wire::APPLY_HIGHLIGHT_RANGES),
                 ("select_range", wire::APPLY_SELECT_RANGE),
                 ("reveal_range", wire::APPLY_REVEAL_RANGE),
+                ("present_save_dialog", wire::APPLY_PRESENT_SAVE_DIALOG),
             ]
         );
         // THE SAME TABLE SHAPE AS THE TWO ABOVE, and it was not always:

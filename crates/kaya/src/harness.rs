@@ -330,6 +330,19 @@ pub enum Step {
     ExpectFileDialog(Option<String>, Vec<String>),
     FileChoose(Option<String>),
     FileDialogGoto(String),
+    /// The save dialog's observation: the directory it is REALLY showing
+    /// and the name REALLY in its name field, both read from the platform
+    /// panel. The name half is what catches a backend that ignored the
+    /// name it was told — a wrong destination whose bytes are all
+    /// correct, so every downstream assertion passes.
+    ExpectSaveDialog(String, String),
+    /// Type a name into the live save dialog's name field — set_text's
+    /// tier, the harness doing what a user's keyboard would. Silent, like
+    /// every action: `expect_save_dialog` reads it back.
+    FileDialogName(String),
+    /// Press the live save dialog's own Save (true) or Cancel (false).
+    /// The panel's completion runs; nothing is synthesized.
+    FileSave(bool),
     /// A FOREIGN process puts something on the system clipboard, so a
     /// read leg is answering content this app did not write — the one
     /// thing a kaya-reads-what-kaya-wrote check cannot be.
@@ -559,6 +572,9 @@ impl Step {
             Step::ExpectAlert { .. } => true,
             Step::FileChoose(..) => false,
             Step::FileDialogGoto(..) => false,
+            Step::ExpectSaveDialog(..) => true,
+            Step::FileDialogName(..) => false,
+            Step::FileSave(..) => false,
             Step::ClipboardSeed(..) => false,
             Step::ExpectClipboard(..) => true,
             Step::ExpectFileDialog(..) => true,
@@ -802,6 +818,60 @@ pub trait Stage: Send + 'static {
     /// not assumed either: expect_file_dialog reads the panel back.
     /// No default.
     fn goto_directory(&self, path: &str);
+    /// What the live SAVE dialog is really showing: the directory, and
+    /// the name in its name field. None when no save dialog is live.
+    ///
+    /// THE NAME HALF IS THE WHOLE POINT of reading a save dialog back. A
+    /// backend that ignored the name it was told saves under the
+    /// SUGGESTED name, and every assertion downstream — the bytes, the
+    /// reopen, the round trip — passes on the wrong file. Nothing else in
+    /// the scene can see that.
+    ///
+    /// NEVER REQUIRE ROWS HERE. A save dialog may have no file browser at
+    /// all: NSSavePanel's collapsed form is the default and publishes
+    /// none, and whether it is collapsed is decided by a MACHINE-WIDE
+    /// preference (`NSNavPanelExpandedStateForSaveMode`) that no gate
+    /// reads — the 2026-08-06 view-mode trap with a worse default. A
+    /// reader written on a box where someone once expanded a save panel
+    /// would hang forever on a fresh one.
+    ///
+    /// DEFAULTED, AND THAT IS TEMPORARY. Every other observation here is
+    /// no-default so a backend that forgets fails to COMPILE; these three
+    /// carry a panicking body only because the save milestone landed
+    /// depth-first and gtk.rs / winui/mod.rs are the breadth arms' files.
+    /// The panic is still a wall — the first save leg on those backends
+    /// dies naming the file to edit — but the moment all four backends
+    /// implement them, drop the bodies and end the signatures with `;`
+    /// (tools/lib/stage-coverage.py then holds them like the rest).
+    fn save_dialog_state(&self) -> Option<(String, String)> {
+        unimplemented!(
+            "Stage::save_dialog_state: this backend has no save-dialog read yet \
+             — implement it beside file_dialog_state (crates/kaya/src/gtk.rs, \
+             crates/kaya/src/winui/mod.rs)"
+        )
+    }
+    /// Type a name into the live save dialog's name field, the way a user
+    /// would leave it. set_text's tier; whether it took is not assumed —
+    /// expect_save_dialog reads it back. Defaulted, see above.
+    fn set_save_name(&self, name: &str) {
+        let _ = name;
+        unimplemented!(
+            "Stage::set_save_name: this backend cannot type into a save dialog yet \
+             — implement it beside goto_directory (crates/kaya/src/gtk.rs, \
+             crates/kaya/src/winui/mod.rs)"
+        )
+    }
+    /// Press the live save dialog's REAL Save (`save`) or Cancel — the
+    /// same controls a user works, so the dialog's own completion runs.
+    /// Defaulted, see above.
+    fn confirm_save(&self, save: bool) {
+        let _ = save;
+        unimplemented!(
+            "Stage::confirm_save: this backend cannot press a save dialog yet \
+             — implement it beside choose_file (crates/kaya/src/gtk.rs, \
+             crates/kaya/src/winui/mod.rs)"
+        )
+    }
     /// Put content on the system clipboard FROM OUTSIDE THIS APP, and
     /// read it back the same way: a child process using whatever the
     /// platform's own clipboard tool is (pbcopy/pbpaste and osascript,
@@ -1191,6 +1261,54 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("file_dialog_goto wants a directory: {line:?}"));
                 }
                 Step::FileDialogGoto(path.to_owned())
+            }
+            "expect_save_dialog" => {
+                // `expect_save_dialog <dir> <name>`: the directory the
+                // dialog is showing, and the name in its name field.
+                // BOTH REQUIRED, unlike the picker's bare form — a save
+                // dialog with no browser publishes nothing else worth
+                // asserting, and "a dialog is up" is a claim this scene
+                // never needs on its own.
+                let mut words = rest.split_whitespace().map(str::to_owned);
+                let (Some(dir), Some(name)) = (words.next(), words.next()) else {
+                    return Err(format!(
+                        "expect_save_dialog wants a directory and a name: {line:?}"
+                    ));
+                };
+                if words.next().is_some() {
+                    // A name with a space in it would silently assert
+                    // against its first word.
+                    return Err(format!(
+                        "expect_save_dialog takes exactly a directory and a name: {line:?}"
+                    ));
+                }
+                Step::ExpectSaveDialog(dir, name)
+            }
+            "file_dialog_name" => {
+                let name = rest.trim();
+                if name.is_empty() {
+                    return Err(format!("file_dialog_name wants a file name: {line:?}"));
+                }
+                if name.split_whitespace().count() != 1 {
+                    return Err(format!(
+                        "file_dialog_name takes one name and no spaces: {line:?}"
+                    ));
+                }
+                Step::FileDialogName(name.to_owned())
+            }
+            "file_save" => {
+                // `file_save` presses Save; `file_save cancel` presses
+                // Cancel. The picker's `file_choose <name>|cancel` shape,
+                // minus the row — a save dialog has nothing to select.
+                match rest.trim() {
+                    "" => Step::FileSave(true),
+                    "cancel" => Step::FileSave(false),
+                    other => {
+                        return Err(format!(
+                            "file_save takes nothing or `cancel`, got {other:?}: {line:?}"
+                        ))
+                    }
+                }
             }
             "clipboard_seed" => {
                 // `clipboard_seed <kind> <argument>`: the kind is a
@@ -2176,6 +2294,72 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }
                 }
             }
+            Step::FileDialogName(name) => {
+                // An action, silent like click — expect_save_dialog is
+                // what says whether it landed. EXCEPT that the dialog
+                // must BE there: typing into a panel that has not
+                // presented yet does nothing at all, and the leg would
+                // then save under the SUGGESTED name with every byte
+                // assertion still passing. The file_choose rule, one
+                // dialog over.
+                match stage.save_dialog_state() {
+                    Some(_) => {
+                        stage.set_save_name(name);
+                        None
+                    }
+                    None => Some(Err(format!(
+                        "file_dialog_name {name:?}: no save dialog is live"
+                    ))),
+                }
+            }
+            Step::FileSave(save) => {
+                // The picker's postcondition, verbatim: a press that
+                // lands before the dialog is interactive is swallowed
+                // with no error anywhere, and the leg then fails three
+                // steps later on an assertion about the GUEST.
+                if stage.save_dialog_state().is_none() {
+                    Some(Err("file_save: no save dialog is live".to_string()))
+                } else {
+                    stage.confirm_save(*save);
+                    match poll(|| match stage.save_dialog_state() {
+                        None => Ok(String::new()),
+                        Some((_, name)) => Err(format!(
+                            "file_save: the dialog is still up (naming {name:?}) — the \
+                             press was swallowed, which a backend cannot tell you \
+                             because nothing returns an error for it"
+                        )),
+                    }) {
+                        Ok(_) => None,
+                        Err(why) => Some(Err(why)),
+                    }
+                }
+            }
+            Step::ExpectSaveDialog(dir, name) => {
+                Some(poll(|| match stage.save_dialog_state() {
+                    Some((where_, got)) => {
+                        // Expanded like the picker's, and refused for the
+                        // same reason: an unexpanded expectation reads as
+                        // a broken dialog rather than a broken script.
+                        let dir = expand_path(dir);
+                        if dir.contains('$') {
+                            return Err(format!(
+                                "expect_save_dialog {dir}: unexpanded substitution — \
+                                 only $TMP and $PID exist"
+                            ));
+                        }
+                        if !where_.ends_with(dir.as_str()) {
+                            return Err(format!("save dialog showing {where_:?}, wanted {dir:?}"));
+                        }
+                        if &got != name {
+                            return Err(format!(
+                                "save dialog names {got:?}, wanted {name:?}"
+                            ));
+                        }
+                        Ok(format!("save dialog {dir:?} {name:?}"))
+                    }
+                    None => Err("no save dialog live".to_string()),
+                }))
+            }
             Step::ExpectFileDialog(dir, names) => Some(poll(|| match stage.file_dialog_state() {
                 Some((where_, rows)) => {
                     let Some(dir) = dir else {
@@ -2936,6 +3120,36 @@ mod tests {
         );
     }
 
+    /// THE SAVE VERBS' GRAMMAR, and the refusals that matter. Each one is
+    /// a mistake that would otherwise be SILENT: a name with a space in
+    /// it asserts against its first word, a save-dialog read with one
+    /// argument compares a directory against a name, and `file_save save`
+    /// — the spelling a hand reaches for — would parse as something and
+    /// press nothing.
+    #[test]
+    fn save_verbs_parse() {
+        assert_eq!(
+            parse("expect_save_dialog $TMP/kaya-save-$PID copy").unwrap()[0],
+            Step::ExpectSaveDialog("$TMP/kaya-save-$PID".into(), "copy".into())
+        );
+        assert_eq!(
+            parse("file_dialog_name final").unwrap()[0],
+            Step::FileDialogName("final".into())
+        );
+        assert_eq!(parse("file_save").unwrap()[0], Step::FileSave(true));
+        assert_eq!(parse("file_save cancel").unwrap()[0], Step::FileSave(false));
+        assert!(parse("expect_save_dialog somewhere").is_err());
+        assert!(parse("expect_save_dialog a b c").is_err());
+        assert!(parse("file_dialog_name a b").is_err());
+        assert!(parse("file_dialog_name").is_err());
+        assert!(parse("file_save save").is_err());
+        // Actions are silent, observations are not — the same split the
+        // rest of the grammar keeps.
+        assert!(!Step::FileSave(true).is_assertion());
+        assert!(!Step::FileDialogName("x".into()).is_assertion());
+        assert!(Step::ExpectSaveDialog("d".into(), "n".into()).is_assertion());
+    }
+
     /// Shares are percentages of the children's *sum*, so container
     /// spacing and padding — platform metrics both — stay out of the
     /// number, and every backend rounds identically.
@@ -3181,6 +3395,11 @@ mod tests {
         }
         fn choose_file(&self, _: Option<&str>) {}
         fn goto_directory(&self, _: &str) {}
+        fn save_dialog_state(&self) -> Option<(String, String)> {
+            None
+        }
+        fn set_save_name(&self, _: &str) {}
+        fn confirm_save(&self, _: bool) {}
         fn clipboard_seed(&self, _: &str, _: &str) {}
         fn clipboard_read(&self, _: &str) -> String {
             String::new()
@@ -3417,6 +3636,11 @@ mod tests {
         }
         fn choose_file(&self, _: Option<&str>) {}
         fn goto_directory(&self, _: &str) {}
+        fn save_dialog_state(&self) -> Option<(String, String)> {
+            None
+        }
+        fn set_save_name(&self, _: &str) {}
+        fn confirm_save(&self, _: bool) {}
         fn alert_count(&self) -> usize {
             0
         }
@@ -3588,6 +3812,11 @@ mod tests {
         }
         fn choose_file(&self, _: Option<&str>) {}
         fn goto_directory(&self, _: &str) {}
+        fn save_dialog_state(&self) -> Option<(String, String)> {
+            None
+        }
+        fn set_save_name(&self, _: &str) {}
+        fn confirm_save(&self, _: bool) {}
         fn alert_count(&self) -> usize {
             0
         }

@@ -258,6 +258,66 @@ impl PickedSource for PathSource {
     }
 }
 
+/// WHERE A SAVE DIALOG SAID TO WRITE — the same path, opened by a
+/// different rule, and the rule IS docs/save-plan.md D1.
+///
+/// A save dialog on macOS, GTK and Windows answers with a name for a file
+/// NOBODY HAS MADE (measured on macOS: `exists=false` after a clean Save,
+/// and pressing Replace does not truncate either), while Android's
+/// `ACTION_CREATE_DOCUMENT` and iOS's export controller answer with a
+/// document that already exists. Same guest code, two behaviours — which
+/// is the divergence the binding conventions forbid, one layer under the
+/// bindings. So the destination's open CREATES, and the guest sees the
+/// one behaviour the plan states: after a save dialog, opening the result
+/// succeeds, and opening it for WRITE yields an empty file.
+///
+/// A SEPARATE SOURCE RATHER THAN A FOURTH FILE MODE, because creation is
+/// a property of the DESTINATION — the dialog promised the file — and not
+/// of the caller's intent. A `FILE_MODE_CREATE` would let a guest ask for
+/// creation on a file it merely opened, which is how "save" quietly
+/// becomes "clobber".
+///
+/// CREATE ON EVERY MODE, TRUNCATE ONLY ON `Write`, and the second half is
+/// exactly `PathSource`'s rule: a destination is never missing, so no
+/// mode may answer ENOENT for a file the dialog just named, but a reopen
+/// must still find the bytes the guest wrote (the save scene reads its
+/// own work back through the same handle). `Read` and `ReadWrite`
+/// therefore coincide here: creating a file costs write access on every
+/// OS kaya targets — POSIX `O_CREAT` needs `O_WRONLY`/`O_RDWR`, and Rust
+/// refuses `.create(true)` without `.write(true)` — so there is no
+/// read-only way to make one, and pretending otherwise would only mean
+/// opening twice.
+pub struct SaveDestination {
+    pub name: String,
+    pub path: String,
+}
+
+impl PickedSource for SaveDestination {
+    fn open(&self, mode: FileMode) -> std::io::Result<(i64, bool)> {
+        let mut opts = std::fs::OpenOptions::new();
+        match mode {
+            FileMode::Read => opts.read(true).write(true).create(true),
+            FileMode::Write => opts.write(true).create(true).truncate(true),
+            FileMode::ReadWrite => opts.read(true).write(true).create(true),
+        };
+        let file = opts.open(&self.path)?;
+        let seekable = file.metadata().map(|m| m.is_file()).unwrap_or(false);
+        Ok((raw_handle(file), seekable))
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn local_path(&self) -> &str {
+        &self.path
+    }
+
+    fn locator(&self) -> &str {
+        &self.path
+    }
+}
+
 /// An alert's one answer. The wire carries a u32: action indices, or
 /// the deliberately-not-an-index cancel sentinel (ALERT_CHOICE_CANCEL)
 /// that every platform-native dismissal — Esc, back, outside tap, the
@@ -293,6 +353,21 @@ pub struct FileDialogSpec {
     pub window: WindowId,
     pub dialog: FileDialogId,
     pub multiple: bool,
+    pub filters: Vec<(String, String)>,
+}
+
+/// A save-dialog request. The picker's twin with two differences and no
+/// others: there is no `multiple` (no platform's save dialog names two
+/// destinations), and `suggested_name` is the name the dialog opens with.
+///
+/// ADVISORY LIKE THE FILTERS, and for the same reason: every platform
+/// takes it, none guarantees it. The user renames it; Android may append
+/// an extension matching the mime type. A guest reads the name it GOT.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveDialogSpec {
+    pub window: WindowId,
+    pub dialog: FileDialogId,
+    pub suggested_name: String,
     pub filters: Vec<(String, String)>,
 }
 
@@ -1281,6 +1356,10 @@ pub enum TxOp {
     /// alert's grammar exactly, answered by one FileDialogResult. One
     /// dialog may be live per process.
     ShowFileDialog(FileDialogSpec),
+    /// Request the platform's save dialog: the picker's grammar, one
+    /// id space, one live slot, and the same FileDialogResult back
+    /// carrying one file or none (docs/save-plan.md D2).
+    ShowSaveDialog(SaveDialogSpec),
     /// Put one clip on the system clipboard.
     Copy(Clip),
     /// Read the clipboard outside any paste gesture — the privileged
@@ -1434,6 +1513,8 @@ pub enum ApplyOp {
     PresentAlert(AlertSpec),
     /// Present the platform's real file picker (already validated).
     PresentFileDialog(FileDialogSpec),
+    /// Present the platform's real save dialog (already validated).
+    PresentSaveDialog(SaveDialogSpec),
     /// Put this clip on the system clipboard. The backend owns the
     /// lowering per representation — CF_HTML's offset header, Android's
     /// content:// URI for an image, CF_HDROP's struct — which is the

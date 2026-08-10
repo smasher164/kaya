@@ -41,11 +41,21 @@
 //  4. The bridge delegate must go on EVERY AXPTranslator singleton.
 //     With it on only one, the first fetch works and every attribute
 //     read afterwards silently returns nothing.
-//
 // And one that is not a failure at all: the row's accessibility
 // description omits the file extension ("picked, Text file, 12 bytes")
 // while the PICKED URL carries it in full ("picked.txt"). Rows are
 // therefore matched on the stem — see `rowName`.
+//
+// AND ONE THAT LOOKS LIKE SUCCESS AND IS NOT, which is why the save
+// sheet has verbs of its own rather than riding `press`: the sheet's
+// real Save button is not in the tree at all — only `navigationStrip`
+// finds it — while the tree carries a decoy AXStaticText "Save as" one
+// line above the filename field. Measured 2026-08-09, against a live
+// export sheet: `press Save` matched that label by containment, printed
+// `pressed AXStaticText Save as … in overlay`, exited 0, and left the
+// sheet up with the delegate never firing. `savepress` takes the strip
+// and an EXACT match instead; `press` still has this hazard for any
+// label a static text merely contains.
 import CoreGraphics
 import Foundation
 import ObjectiveC
@@ -234,6 +244,18 @@ func text(_ element: NSObject, _ name: String) -> String {
     (attribute(element, name) as? String) ?? ""
 }
 
+/// Write an attribute back, through the same legacy api the reads use
+/// (note 3 in the header: the modern properties are not there). False
+/// when the element does not answer the setter at all, which is a
+/// different failure from a set that routes nowhere — and neither one
+/// reports itself, so every caller reads the value back.
+func setAttribute(_ element: NSObject, _ name: String, _ value: Any) -> Bool {
+    let sel = NSSelectorFromString("accessibilitySetValue:forAttribute:")
+    guard element.responds(to: sel) else { return false }
+    element.perform(sel, with: value, with: name)
+    return true
+}
+
 func children(_ element: NSObject) -> [NSObject] {
     (attribute(element, "AXChildren") as? [NSObject]) ?? []
 }
@@ -245,6 +267,13 @@ func frame(_ element: NSObject) -> CGRect {
 }
 
 struct Node {
+    /// THE ELEMENT ITSELF, carried so a node can be read further or
+    /// written to without walking the tree again. Values are NOT snapped
+    /// here: every attribute is a synchronous round trip to the device,
+    /// and only the save sheet's one text field is ever asked for its
+    /// value — paying for that on all two thousand nodes of every walk
+    /// would slow every other verb to buy one.
+    let element: NSObject
     let role: String
     let description: String
     let frame: CGRect
@@ -253,6 +282,7 @@ struct Node {
 func flatten(_ element: NSObject, _ depth: Int = 0, into out: inout [Node]) {
     if out.count > 2000 || depth > 25 { return }
     out.append(Node(
+        element: element,
         role: text(element, "AXRole"),
         description: text(element, "AXDescription"),
         frame: frame(element)))
@@ -458,7 +488,9 @@ final class Tapper {
 
 let arguments = CommandLine.arguments
 guard arguments.count >= 4 else {
-    fail("usage: simdrive <udid> <app-pid> state|choose <name>|cancel|describe|press <label>")
+    fail(
+        "usage: simdrive <udid> <app-pid> state|choose <name>|cancel|describe|press <label>"
+            + "|savestate|savename <name>|savepress|savecancel")
 }
 let udid = arguments[1]
 guard let appPid = Int32(arguments[2]) else { fail("app pid must be a number") }
@@ -518,6 +550,88 @@ func waitForPickerGone(_ tries: Int = 20) -> Bool {
         usleep(300_000)
     }
     return false
+}
+
+// MARK: - the save sheet
+
+/// The export sheet's name fields, BY ROLE. The field publishes no
+/// description of its own — the words "Save as" belong to a static text
+/// beside it (measured, scratchpad/save-probe-ios.md B.4) — so there is
+/// no label to match on, and role is what is left.
+///
+/// The callers all require exactly ONE and say what they saw otherwise,
+/// rather than taking the first: a sheet with two text fields is not the
+/// shape this was written against, and guessing which one holds the name
+/// is how a driver types into a search box and reports success.
+func nameFields(_ nodes: [Node]) -> [Node] {
+    nodes.filter { $0.role == "AXTextField" && !$0.frame.isEmpty }
+}
+
+/// The export sheet, waited for BY ITS FIELD.
+///
+/// Same race as waitForRows and the same cost if it is skipped: the sheet
+/// is a remote view controller that publishes its chrome as soon as it
+/// presents and fills the content in a moment later, so `waitForPicker`'s
+/// `count > 1` is satisfied by the chrome alone and a read landing in that
+/// window reports a sheet with no name field — which reads as "no save
+/// dialog live" for a dialog that is on the screen.
+func waitForSaveSheet(_ tries: Int = 20) -> [Node]? {
+    var last: [Node]? = nil
+    for _ in 0..<tries {
+        guard let nodes = waitForPicker() else { return last }
+        last = nodes
+        if !nameFields(nodes).isEmpty { return nodes }
+        usleep(300_000)
+    }
+    return last
+}
+
+/// The one name field, or a refusal naming what was there instead.
+func theNameField(_ nodes: [Node], _ doing: String) -> Node {
+    let fields = nameFields(nodes)
+    guard fields.count == 1 else {
+        let listed = nodes.map { "\($0.role) \($0.description)" }.filter { !$0.isEmpty }
+        fail(
+            "\(doing): the save dialog publishes \(fields.count) text fields, not one; "
+                + "it shows \(listed)")
+    }
+    return fields[0]
+}
+
+/// Press the sheet's own dismissal and require it to be gone.
+///
+/// NO CANCEL BUTTON WHEN THE SHEET IS AIMED INTO A SUBDIRECTORY.
+/// Measured on the open picker: a single-selection picker opened at a
+/// directory shows a BACK chevron where a Cancel would be, and only the
+/// provider's root carries Cancel. (A multi-selection picker carries it
+/// throughout, which is why this looked like it worked.) The export sheet
+/// is the same browser and inherits it. So walk back until the dismissal
+/// exists, the way a person would, and press it.
+///
+/// The back control's accessibility label is the PRESENTING APP'S NAME,
+/// not "Back" — so it is identified by position, as the leftmost thing in
+/// the strip, rather than by a word that changes with whatever bundle is
+/// under test.
+func cancelSheet(_ what: String) {
+    let tapper = Tapper(device: sim.device)
+    var cancelled = false
+    for _ in 0..<5 {
+        let strip = navigationStrip(sim, screen: screen)
+        if let (_, centre) = strip.first(where: { $0.0.hasPrefix("Cancel") }) {
+            tapper.tap(at: centre, screen: screen)
+            cancelled = true
+            break
+        }
+        guard let back = strip.filter({ $0.1.y < 120 }).min(by: { $0.1.x < $1.1.x })
+        else { break }
+        tapper.tap(at: back.1, screen: screen)
+        usleep(600_000)
+    }
+    if !cancelled {
+        let strip = navigationStrip(sim, screen: screen).map { $0.0 }
+        fail("no Cancel reachable from the \(what); it offers \(strip)")
+    }
+    if !waitForPickerGone() { fail("the \(what) was still up after cancelling") }
 }
 
 switch verb {
@@ -594,37 +708,101 @@ case "choose":
 
 case "cancel":
     guard waitForPicker() != nil else { fail("no picker is up to cancel") }
-    let tapper = Tapper(device: sim.device)
-    // NO CANCEL BUTTON WHEN THE PICKER IS AIMED INTO A SUBDIRECTORY.
-    // Measured: a single-selection picker opened at a directory shows a
-    // BACK chevron where a Cancel would be, and only the provider's
-    // root carries Cancel. (A multi-selection picker carries it
-    // throughout, which is why this looked like it worked.) So walk
-    // back until the dismissal exists, the way a person would, and
-    // press it.
+    cancelSheet("picker")
+
+case "savestate":
+    // `<directory>` then the name in the "Save as" field — what
+    // expect_save_dialog reads. Empty output means no save sheet is up,
+    // which must FAIL that verb rather than pass it quietly.
     //
-    // The back control's accessibility label is the PRESENTING APP'S
-    // NAME, not "Back" — so it is identified by position, as the
-    // leftmost thing in the strip, rather than by a word that changes
-    // with whatever bundle is under test.
-    var cancelled = false
-    for _ in 0..<5 {
-        let strip = navigationStrip(sim, screen: screen)
-        if let (_, centre) = strip.first(where: { $0.0.hasPrefix("Cancel") }) {
-            tapper.tap(at: centre, screen: screen)
-            cancelled = true
-            break
+    // BOTH HALVES MATTER. The directory alone would pass for a sheet
+    // that ignored the name it was told, which then saves under the
+    // SUGGESTED name with every byte assertion downstream still green
+    // and pointing at the wrong file.
+    guard let nodes = waitForSaveSheet(), !nameFields(nodes).isEmpty else { exit(0) }
+    print(currentDirectory(sim, screen: screen))
+    print(text(theNameField(nodes, "savestate").element, "AXValue"))
+
+case "savename":
+    // TYPE INTO THE FIELD — the verb docs/save-plan.md D4 says this
+    // driver must gain, because a save dialog whose name nobody can
+    // change is a dialog the scene would have to assert around.
+    //
+    // Through the accessibility VALUE, which is what a keyboard reaches
+    // and what the macOS arm sets on NSSavePanel's name field. A set has
+    // no return worth trusting — the legacy setter answers nothing, and
+    // a set that routes nowhere looks identical from here — so the field
+    // is READ BACK, and a field that did not take the name is a failure
+    // with what it says instead.
+    //
+    // AND THE SET IS RETRIED, NOT ONLY THE READ. Measured 2026-08-09
+    // against a live export sheet: twenty-three drives took the name
+    // first time, and two consecutive ones — on a machine also running
+    // an iOS lane — did not take it at all. Not slowly: the field still
+    // read the SUGGESTED name three seconds later, and the sheet went on
+    // to export under that name, so the leg would have been green about
+    // the wrong file if the read-back were not there. From this side a
+    // dropped set and a slow one are the same silence, so the loop sets
+    // AGAIN rather than waiting longer, and walks the tree again first
+    // in case what went stale was the element rather than the set.
+    // Setting the same value twice is idempotent; a leg that fails once
+    // a matrix is not.
+    guard arguments.count >= 5 else { fail("savename needs a name") }
+    let wanted = arguments[4...].joined(separator: " ")
+    var settled = ""
+    var attempts = 0
+    while attempts < 5 && settled != wanted {
+        attempts += 1
+        guard let nodes = waitForSaveSheet(), !nameFields(nodes).isEmpty else {
+            fail("no save dialog is up to name \(wanted)")
         }
-        guard let back = strip.filter({ $0.1.y < 120 }).min(by: { $0.1.x < $1.1.x })
-        else { break }
-        tapper.tap(at: back.1, screen: screen)
-        usleep(600_000)
+        let field = theNameField(nodes, "savename")
+        guard setAttribute(field.element, "AXValue", wanted) else {
+            fail("the save dialog's name field does not answer the accessibility setter")
+        }
+        for _ in 0..<20 {
+            settled = text(field.element, "AXValue")
+            if settled == wanted { break }
+            usleep(150_000)
+        }
     }
-    if !cancelled {
-        let strip = navigationStrip(sim, screen: screen).map { $0.0 }
-        fail("no Cancel reachable from the picker; it offers \(strip)")
+    guard settled == wanted else {
+        fail(
+            "the save dialog's name field reads \"\(settled)\" after \(attempts) attempts "
+                + "to set it to \"\(wanted)\"")
     }
-    if !waitForPickerGone() { fail("the picker was still up after cancelling") }
+
+case "savepress":
+    // THE REAL SAVE BUTTON IS IN THE NAVIGATION STRIP AND NOWHERE ELSE:
+    // `describe` does not list it, so the flattened overlay tree cannot
+    // reach it — the same split `cancel` documents.
+    //
+    // AND THE MATCH IS EXACT, which is the whole reason this is not
+    // `press Save`. Measured: `press Save` FALSELY SUCCEEDS on this
+    // sheet — it matches the STATIC TEXT "Save as" by containment,
+    // reports a press, and the sheet stays up with the delegate never
+    // firing. A save leg written on that verb would go green having
+    // pressed nothing. A prefix match is no better: it lands on
+    // "<App>, Actions Menu" and opens a context menu (measured).
+    guard waitForSaveSheet() != nil else { fail("no save dialog is up to save") }
+    let strip = navigationStrip(sim, screen: screen)
+    guard let (_, saveCentre) = strip.first(where: { $0.0 == "Save" }) else {
+        fail("no Save in the navigation strip; it offers \(strip.map { $0.0 })")
+    }
+    Tapper(device: sim.device).tap(at: saveCentre, screen: screen)
+    // THE SHEET BEING GONE IS THE PROOF the tap landed, the same
+    // postcondition `choose` carries, and self-diagnosing for the same
+    // reason: a miss and a swallowed press look identical from here.
+    if !waitForPickerGone() {
+        let after = navigationStrip(sim, screen: screen).map { $0.0 }
+        fail(
+            "the save dialog was still up after pressing Save: tapped \(saveCentre) "
+                + "of a \(screen) screen; it now offers \(after)")
+    }
+
+case "savecancel":
+    guard waitForSaveSheet() != nil else { fail("no save dialog is up to cancel") }
+    cancelSheet("save dialog")
 
 case "press":
     // Tap a control by its accessibility description, wherever it

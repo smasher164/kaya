@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xd8165a4995d2554f
+specHash = 0xbfba1ee8ec9461cb
 
 valueBool :: Word32
 valueBool = 1
@@ -282,6 +282,8 @@ txKindSelectRange :: Word16
 txKindSelectRange = 39
 txKindRevealRange :: Word16
 txKindRevealRange = 40
+txKindShowSaveDialog :: Word16
+txKindShowSaveDialog = 41
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -342,6 +344,8 @@ applyKindSelectRange :: Word16
 applyKindSelectRange = 29
 applyKindRevealRange :: Word16
 applyKindRevealRange = 30
+applyKindPresentSaveDialog :: Word16
+applyKindPresentSaveDialog = 31
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -569,6 +573,10 @@ txSelectRange widgetId start stop = wireRecord txKindSelectRange (word64LE widge
 -- Scroll the textarea so a range is inside the viewport (UTF-8 byte offsets, validated exactly as highlight_ranges is). A PURE EFFECT: it moves no state, the selection is untouched, and per docs/undo-plan.md A2 undo does not restore it — undo restores state, not where you were looking, which is why it is permitted inside an undo group and simply not inverted.  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not kaya's: each backend calls its own scroll-to-range (scrollRangeToVisible, ScrollIntoView, gtk_text_view_scroll_to_iter, bringIntoView), so how much context lands around the range is native behaviour. The observable kaya fixes is containment, which is the only thing every platform agrees on.
 txRevealRange :: Word64 -> Word64 -> Word64 -> Builder
 txRevealRange widgetId start stop = wireRecord txKindRevealRange (word64LE widgetId <> word64LE start <> word64LE stop)
+
+-- Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened.
+txShowSaveDialog :: Word64 -> Word64 -> Value -> [Value] -> Builder
+txShowSaveDialog window dialog suggestedName filters = wireRecord txKindShowSaveDialog (word64LE window <> word64LE dialog <> encodeValue suggestedName <> encodeValues filters)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder

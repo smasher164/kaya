@@ -2212,6 +2212,124 @@ fn live_dialog() -> Option<isize> {
     (found != 0).then_some(found)
 }
 
+/// A window's caption. Only ever read for the log line below.
+#[cfg(feature = "harness")]
+fn window_text(hwnd: isize) -> String {
+    let mut buf = [0u16; 128];
+    let n = unsafe { GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+    String::from_utf16_lossy(&buf[..n.max(0) as usize])
+}
+
+/// Answer the save dialog's overwrite confirmation, if one is up.
+///
+/// WHY THERE IS ANYTHING TO ANSWER: `FOS_OVERWRITEPROMPT` is in the save
+/// dialog's DEFAULT options (measured `0x880a`) and this backend keeps it,
+/// because clearing it would make Windows the only platform that replaces
+/// a file without asking. Unanswered, `Show()` NEVER RETURNS — the
+/// apartment thread stays in its nested modal loop, `file_save` reports
+/// "the dialog is still up" twenty seconds later, and the leg's real
+/// failure is invisible behind that.
+///
+/// FOUND BY IDENTITY, NOT BY CAPTION AND NOT BY SHAPE. Measured
+/// (scratchpad/save-probe-windows.md §B.3): the prompt is a SECOND
+/// top-level `#32770` whose 17 descendants are a `DirectUIHWND` plus
+/// `CtrlNotifySink`-wrapped Buttons **with id 0** — so no id lookup finds
+/// anything and `dialog_control` is useless here. Matching its caption
+/// ("Confirm Save As") would make the answer stop working on a Windows
+/// that speaks anything else; matching its shape would risk taking the
+/// SAVE DIALOG for the prompt mid-teardown and pressing an unknown
+/// button. The caller already knows which window it pressed Save on, so
+/// the prompt is simply "the other one".
+///
+/// THE FIRST VISIBLE BUTTON, and the failure mode of guessing wrong is the
+/// safe one: measured enumeration order is `"&Yes"` then `"&No"`, and
+/// pressing No CANCELS the save — the destination never arrives and the
+/// leg fails loudly — rather than overwriting something quietly.
+#[cfg(feature = "harness")]
+fn answer_overwrite_prompt(dialog: isize) {
+    struct Hunt {
+        dialog: isize,
+        found: isize,
+    }
+    unsafe extern "system" fn visit_top(hwnd: isize, param: isize) -> i32 {
+        let hunt = unsafe { &mut *(param as *mut Hunt) };
+        let mut class = [0u16; 64];
+        let n = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
+        if hwnd != hunt.dialog
+            && n > 0
+            && unsafe { IsWindowVisible(hwnd) } != 0
+            && String::from_utf16_lossy(&class[..n as usize]) == "#32770"
+        {
+            hunt.found = hwnd;
+            return 0;
+        }
+        1
+    }
+    let mut hunt = Hunt { dialog, found: 0 };
+    unsafe { EnumWindows(Some(visit_top), &mut hunt as *mut Hunt as isize) };
+    if hunt.found == 0 {
+        return;
+    }
+    // The first visible Button under it, by class alone.
+    struct Press {
+        found: isize,
+    }
+    unsafe extern "system" fn visit_button(hwnd: isize, param: isize) -> i32 {
+        let press = unsafe { &mut *(param as *mut Press) };
+        let mut class = [0u16; 64];
+        let n = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
+        if n > 0
+            && unsafe { IsWindowVisible(hwnd) } != 0
+            && String::from_utf16_lossy(&class[..n as usize]) == "Button"
+        {
+            press.found = hwnd;
+            return 0;
+        }
+        unsafe { EnumChildWindows(hwnd, Some(visit_button), param) };
+        1
+    }
+    let mut press = Press { found: 0 };
+    unsafe { EnumChildWindows(hunt.found, Some(visit_button), &mut press as *mut Press as isize) };
+    if press.found == 0 {
+        return;
+    }
+    // ONCE, and it is the record that this arm ran at all: the shared
+    // scene cannot reach here (it saves to a name in a per-pid directory
+    // nobody has made), so a log line is the only thing that distinguishes
+    // "the prompt never came up" from "the answer did nothing".
+    eprintln!(
+        "kaya: answered the save dialog's overwrite prompt {:?} with {:?}",
+        window_text(hunt.found),
+        window_text(press.found)
+    );
+    unsafe { PostMessageW(press.found, BM_CLICK, 0, 0) };
+}
+
+/// ASK THE LIVE DIALOG WHAT IT IS SHOWING, then wait briefly for its own
+/// thread to answer. Every dialog observation goes through here, so the
+/// two readers differ only in which variant they accept.
+///
+/// The bounded wait is not the assertion's: `expect_file_dialog` and
+/// `expect_save_dialog` are themselves retries, so a slow first sample
+/// costs one more lap rather than a failure.
+#[cfg(feature = "harness")]
+fn sample_dialog() -> Option<sampler::Sampled> {
+    let window = sampler::WINDOW.load(std::sync::atomic::Ordering::SeqCst);
+    if window == 0 {
+        return None;
+    }
+    unsafe { PostMessageW(window, sampler::SAMPLE, 0, 0) };
+    for _ in 0..20 {
+        if let Ok(slot) = sampler::VIEW.lock() {
+            if let Some(state) = slot.as_ref() {
+                return Some(state.clone());
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    None
+}
+
 /// What the live dialog is SHOWING, sampled through the shell's own
 /// interfaces rather than through UI Automation.
 ///
@@ -2248,9 +2366,38 @@ mod sampler {
     /// is up.
     pub(crate) static WINDOW: std::sync::atomic::AtomicIsize =
         std::sync::atomic::AtomicIsize::new(0);
+
+    /// WHICH DIALOG THIS SAMPLE CAME OFF, carried in the type rather
+    /// than left to the reader to assume.
+    ///
+    /// One process may have one live file dialog (capi::file_dialog_shown
+    /// panics on a second) and this backend has one sampler window, so
+    /// the picker's reader and the save dialog's reader share a slot. A
+    /// pair of strings would have let either read the other's answer —
+    /// `expect_file_dialog` would find a save dialog's directory with an
+    /// empty row list and merely say "wanted these rows", and
+    /// `expect_save_dialog` would take a picker's directory and its first
+    /// row as a name. The variant makes each reader's `None` mean "no
+    /// dialog OF MINE is live", which is what both callers already do
+    /// with it. Same rule the mac arm spells as two computed panel
+    /// readers asking the TYPE of one slot.
+    #[derive(Clone)]
+    pub(crate) enum Sampled {
+        /// A picker: the directory it is browsing, and every row its view
+        /// is displaying.
+        Open(String, Vec<String>),
+        /// A save dialog: the directory it is browsing, and the text
+        /// currently in its file-name box. NEVER ROWS — a save dialog's
+        /// browser is not what the scene reads, and the platform whose
+        /// save panel publishes none at all is the reason the observation
+        /// is shaped this way in every backend (harness.rs,
+        /// Stage::save_dialog_state).
+        Save(String, String),
+    }
+
     /// The last sample. Cleared when a dialog opens, so a stale answer
     /// can never satisfy an assertion about a new one.
-    pub(crate) static VIEW: Mutex<Option<(String, Vec<String>)>> = Mutex::new(None);
+    pub(crate) static VIEW: Mutex<Option<Sampled>> = Mutex::new(None);
     /// WM_APP: "sample now". pub(crate) and not pub: cbindgen scrapes
     /// public constants into the C header regardless of the privacy of
     /// the module holding them, and this is an internal detail of one
@@ -2258,12 +2405,35 @@ mod sampler {
     pub(crate) const SAMPLE: u32 = 0x8000;
 }
 
+/// A shell-allocated wide string, read and RELEASED. Every `PWSTR` the
+/// Shell answers with is CoTaskMemAlloc'd and belongs to the caller, and
+/// these reads sit inside a poll — an assertion samples the dialog tens
+/// of times — so the release is per-sample rather than per-dialog.
 #[cfg(feature = "harness")]
-fn sample_folder_view(dialog: &windows::Win32::UI::Shell::IFileOpenDialog) {
+fn take_pwstr(text: windows_core::PWSTR) -> windows_core::Result<String> {
+    let owned = unsafe { text.to_string() };
+    unsafe {
+        windows::Win32::System::Com::CoTaskMemFree(Some(text.0 as *const core::ffi::c_void))
+    };
+    Ok(owned?)
+}
+
+/// The directory the live dialog is browsing — asked of `IFileDialog`,
+/// which BOTH dialogs are, so the picker and the save dialog answer the
+/// "where" half of their observation through one call.
+#[cfg(feature = "harness")]
+fn sample_folder(dialog: &windows::Win32::UI::Shell::IFileDialog) -> windows_core::Result<String> {
+    use windows::Win32::UI::Shell::SIGDN_FILESYSPATH;
+    take_pwstr(unsafe { dialog.GetFolder()?.GetDisplayName(SIGDN_FILESYSPATH)? })
+}
+
+#[cfg(feature = "harness")]
+fn sample_folder_view(
+    dialog: &windows::Win32::UI::Shell::IFileOpenDialog,
+) -> windows_core::Result<sampler::Sampled> {
     use windows::Win32::System::Com::IServiceProvider;
     use windows::Win32::UI::Shell::{
-        IFolderView, IShellBrowser, IShellItemArray, SVGIO_ALLVIEW, SIGDN_FILESYSPATH,
-        SIGDN_PARENTRELATIVEFORUI,
+        IFolderView, IShellBrowser, IShellItemArray, SVGIO_ALLVIEW, SIGDN_PARENTRELATIVEFORUI,
     };
     // {4C96BE40-915C-11CF-99D3-00AA004AE837}, the top-level browser the
     // dialog hosts its view in. Not exported by the metadata, so it is
@@ -2273,31 +2443,68 @@ fn sample_folder_view(dialog: &windows::Win32::UI::Shell::IFileOpenDialog) {
     // SVGIO_ALLVIEW is everything the view is displaying, which is the
     // question the scene asks — not the selection, not the background.
 
-    let sampled = (|| -> windows_core::Result<(String, Vec<String>)> {
-        let directory = unsafe { dialog.GetFolder()?.GetDisplayName(SIGDN_FILESYSPATH)? };
-        let directory = unsafe { directory.to_string()? };
+    let directory = sample_folder(dialog)?;
 
-        let provider: IServiceProvider = dialog.cast()?;
-        let browser: IShellBrowser =
-            unsafe { provider.QueryService(&SID_S_TOP_LEVEL_BROWSER)? };
-        let view = unsafe { browser.QueryActiveShellView()? };
-        let folder: IFolderView = view.cast()?;
-        let items: IShellItemArray = unsafe { folder.Items(SVGIO_ALLVIEW)? };
+    let provider: IServiceProvider = dialog.cast()?;
+    let browser: IShellBrowser = unsafe { provider.QueryService(&SID_S_TOP_LEVEL_BROWSER)? };
+    let view = unsafe { browser.QueryActiveShellView()? };
+    let folder: IFolderView = view.cast()?;
+    let items: IShellItemArray = unsafe { folder.Items(SVGIO_ALLVIEW)? };
 
-        let mut rows = Vec::new();
-        for i in 0..unsafe { items.GetCount()? } {
-            let item = unsafe { items.GetItemAt(i)? };
-            // PARENTRELATIVEFORUI is WHAT THE USER SEES, which is what
-            // every other backend reports and what the shared scene
-            // compares byte for byte. It honours Explorer's HideFileExt,
-            // so the deploy still has to set that to 0 — the same guard
-            // as before, for the same reason.
-            let name = unsafe { item.GetDisplayName(SIGDN_PARENTRELATIVEFORUI)? };
-            rows.push(unsafe { name.to_string()? });
-        }
-        Ok((directory, rows))
-    })();
+    let mut rows = Vec::new();
+    for i in 0..unsafe { items.GetCount()? } {
+        let item = unsafe { items.GetItemAt(i)? };
+        // PARENTRELATIVEFORUI is WHAT THE USER SEES, which is what
+        // every other backend reports and what the shared scene
+        // compares byte for byte. It honours Explorer's HideFileExt,
+        // so the deploy still has to set that to 0 — the same guard
+        // as before, for the same reason.
+        rows.push(take_pwstr(unsafe {
+            item.GetDisplayName(SIGDN_PARENTRELATIVEFORUI)?
+        })?);
+    }
+    Ok(sampler::Sampled::Open(directory, rows))
+}
 
+/// The save dialog's observation: where it is browsing, and THE NAME IT
+/// WOULD SAVE UNDER.
+///
+/// `IFileDialog::GetFileName` and not the file-name Edit's text, though
+/// both were on the table and the control is right there (id 1001, class
+/// `Edit`, measured — scratchpad/save-probe-windows.md §B.3). Reading the
+/// control would mean `WM_GETTEXT`, whose lParam is a POINTER: only
+/// `SendMessage` marshals one, and a send is what puts the receiving
+/// thread into the input-synchronous call that makes this dialog fatal to
+/// a JVM (see `sample_folder_view`). The send would be safe HERE, from
+/// the dialog's own thread, and that is exactly the kind of "safe in this
+/// one caller" reasoning that stops being true when someone moves the
+/// call. The Shell's own accessor asks no id and sends no message.
+///
+/// IT IS A LIVE READ, not the echo of `SetFileName` — the leg is the
+/// proof: `file_dialog_name final` types over the suggested `copy` with
+/// posted `WM_CHAR`s, and the very next step asserts the field reads
+/// `final`. Posted messages leave a thread's queue in the order they
+/// entered it, so the characters are dispatched before the SAMPLE that
+/// follows them, and a stale accessor would fail that assertion with
+/// `save dialog names "copy", wanted "final"`.
+#[cfg(feature = "harness")]
+fn sample_save_state(
+    dialog: &windows::Win32::UI::Shell::IFileSaveDialog,
+) -> windows_core::Result<sampler::Sampled> {
+    let directory = sample_folder(dialog)?;
+    let name = take_pwstr(unsafe { dialog.GetFileName()? })?;
+    Ok(sampler::Sampled::Save(directory, name))
+}
+
+/// Sample whichever dialog is live, on ITS thread. A failed read leaves
+/// the previous answer alone rather than publishing a half one: the
+/// callers poll, and `open_sampler` is what clears the slot.
+#[cfg(feature = "harness")]
+fn sample_live(live: &LiveDialog) {
+    let sampled = match live {
+        LiveDialog::Open(dialog) => sample_folder_view(dialog),
+        LiveDialog::Save(dialog) => sample_save_state(dialog),
+    };
     if let Ok(state) = sampled {
         if let Ok(mut slot) = sampler::VIEW.lock() {
             *slot = Some(state);
@@ -2340,6 +2547,16 @@ const ID_OK: i32 = 1;
 const ID_CANCEL: i32 = 2;
 #[cfg(feature = "harness")]
 const ID_FILENAME: i32 = 1148;
+/// The SAVE dialog's file-name box, and it is a DIFFERENT CONTROL — not
+/// the same id in a different place. Measured in one session against both
+/// dialogs (scratchpad/save-probe-windows.md §B.3): the save dialog has no
+/// id 1148 at all, and `dialog_control(dialog, 1148, "Edit")` answers
+/// nothing, which is a SILENT no-op rather than an error. Its box is id
+/// 1001, class `Edit` — and the class half of the lookup is load-bearing
+/// here, because id 1001 is ALSO the address bar (`ToolbarWindow32`) in
+/// both dialogs.
+#[cfg(feature = "harness")]
+const ID_SAVE_FILENAME: i32 = 1001;
 #[cfg(feature = "harness")]
 const WM_CHAR: u32 = 0x0102;
 #[cfg(feature = "harness")]
@@ -2382,8 +2599,8 @@ unsafe extern "system" fn sampler_proc(
 ) -> isize {
     if msg == sampler::SAMPLE {
         SAMPLED_DIALOG.with(|held| {
-            if let Some(dialog) = held.borrow().as_ref() {
-                sample_folder_view(dialog);
+            if let Some(live) = held.borrow().as_ref() {
+                sample_live(live);
             }
         });
         return 0;
@@ -2391,12 +2608,24 @@ unsafe extern "system" fn sampler_proc(
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
+/// The dialog the sampler is holding, and WHICH KIND IT IS. The two are
+/// separate COM interfaces — `IFileOpenDialog` and `IFileSaveDialog`,
+/// siblings under `IFileDialog` rather than one deriving from the other,
+/// so unlike AppKit's panels there is no single type to hold and ask
+/// about later.
+#[cfg(feature = "harness")]
+#[derive(Clone)]
+enum LiveDialog {
+    Open(windows::Win32::UI::Shell::IFileOpenDialog),
+    Save(windows::Win32::UI::Shell::IFileSaveDialog),
+}
+
 #[cfg(feature = "harness")]
 thread_local! {
     /// The live dialog, reachable from the window proc above. A
     /// thread-local and not a global: an STA interface pointer is only
     /// valid on the thread that created it, and this is that thread.
-    static SAMPLED_DIALOG: std::cell::RefCell<Option<windows::Win32::UI::Shell::IFileOpenDialog>> =
+    static SAMPLED_DIALOG: std::cell::RefCell<Option<LiveDialog>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -2407,7 +2636,7 @@ fn utf16(s: &str) -> Vec<u16> {
 
 /// Stand the sampler up for the life of one dialog.
 #[cfg(feature = "harness")]
-fn open_sampler(dialog: &windows::Win32::UI::Shell::IFileOpenDialog) {
+fn open_sampler(dialog: LiveDialog) {
     let class = utf16("KayaFileDialogSampler");
     let instance = unsafe { GetModuleHandleW(core::ptr::null()) };
     let mut wc: WndClassW = unsafe { core::mem::zeroed() };
@@ -2435,7 +2664,7 @@ fn open_sampler(dialog: &windows::Win32::UI::Shell::IFileOpenDialog) {
             core::ptr::null_mut(),
         )
     };
-    SAMPLED_DIALOG.with(|held| *held.borrow_mut() = Some(dialog.clone()));
+    SAMPLED_DIALOG.with(|held| *held.borrow_mut() = Some(dialog));
     // A NEW DIALOG STARTS WITH NO ANSWER, so a sample of the previous
     // one can never satisfy an assertion about this one.
     if let Ok(mut slot) = sampler::VIEW.lock() {
@@ -2538,7 +2767,7 @@ fn file_dialog_show(
             // it returns (below, outside this closure, because cancel
             // leaves through the `?`).
             #[cfg(feature = "harness")]
-            open_sampler(&dialog);
+            open_sampler(LiveDialog::Open(dialog.clone()));
 
             stage = "Show";
             // NO OWNER, and that is not laziness. Show() disables its
@@ -2584,6 +2813,158 @@ fn file_dialog_show(
                 eprintln!(
                     "kaya: file dialog failed at {stage} (hwnd={hwnd:#x}, \
                      folder={folder:?}, filters={filters:?}): {err}"
+                );
+            }
+        }
+    }
+    out
+}
+
+/// Show the Shell's SAVE dialog and return the one (name, path) it was
+/// pointed at, or nothing for cancel. Runs on the dialog apartment's
+/// thread, exactly as the picker does.
+///
+/// `IFileSaveDialog` AND NOT `FileSavePicker`, measured
+/// (scratchpad/save-probe-windows.md §B.1) rather than assumed, and the
+/// first charge is the one that decides it: the WinRT picker's
+/// `SetSuggestedStartLocation` takes a `PickerLocationId` — an ENUM of
+/// well-known folders — so it cannot be aimed at `<temp>/kaya-save-<pid>`
+/// at all, which is precisely the charge `PresentFileDialog` already
+/// records against `FileOpenPicker`. Three more: a non-packaged desktop
+/// app must hand it an owner HWND; the documentation says the
+/// `Windows.Storage.Pickers` APIs "don't work when apps run as
+/// administrator", and every leg on this lane runs `schtasks /rl highest`;
+/// and it is async, so it wants a pump on the STA rather than the blocking
+/// modal `Show()` this thread already runs. Microsoft's own documented
+/// remedy for a desktop app is the call sequence below.
+///
+/// IT CREATES NOTHING, measured three times with three names:
+/// `exists_after_show=false` every one. So the path handed back names a
+/// file that is not there, and the ONE thing that will ever create it is
+/// the core's `SaveDestination::open` (docs/save-plan.md D1). This
+/// function must not "help" by touching the file system — Android and iOS
+/// hand back a document that exists, mac/linux/windows hand back a name,
+/// and the core is where those two are made one behaviour.
+///
+/// THE OVERWRITE PROMPT STAYS ON. `FOS_OVERWRITEPROMPT` is in the save
+/// dialog's default options (measured: `0x880a`), and clearing it would
+/// make Windows the one platform that replaces a file without asking —
+/// NSSavePanel prompts too. What that costs is a second window the harness
+/// has to answer, and `Stage::confirm_save` answers it; leaving it
+/// unanswered does not fail, it WEDGES, because `Show()` never returns.
+fn file_save_show(
+    hwnd: isize,
+    suggested_name: &str,
+    filters: &[(String, String)],
+    folder: Option<&str>,
+) -> Option<(String, String)> {
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{
+        FileSaveDialog, IFileSaveDialog, IShellItem, SHCreateItemFromParsingName,
+        SIGDN_FILESYSPATH, FOS_FORCEFILESYSTEM,
+    };
+
+    let mut out = None;
+    unsafe {
+        // WHICH CALL FAILED, not merely that one did — the picker's rule,
+        // and it cost a deploy cycle there.
+        let mut stage = "CoCreateInstance";
+        let result = (|| -> windows_core::Result<()> {
+            let dialog: IFileSaveDialog =
+                CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)?;
+
+            stage = "GetOptions";
+            let mut options = dialog.GetOptions()?;
+            // FORCEFILESYSTEM for the picker's reason: the guest is handed
+            // a capability it opens with its own file API, and a virtual
+            // shell item has no path to open. The defaults this ORs into
+            // (OVERWRITEPROMPT, NOREADONLYRETURN, PATHMUSTEXIST,
+            // NOCHANGEDIR) are the platform's own and are kept.
+            options |= FOS_FORCEFILESYSTEM;
+            stage = "SetOptions";
+            dialog.SetOptions(options)?;
+
+            let specs: Vec<(HSTRING, HSTRING)> = filters
+                .iter()
+                .map(|(label, suffix)| {
+                    (HSTRING::from(label.as_str()), HSTRING::from(format!("*.{suffix}")))
+                })
+                .collect();
+            if !specs.is_empty() {
+                let raw: Vec<COMDLG_FILTERSPEC> = specs
+                    .iter()
+                    .map(|(label, pattern)| COMDLG_FILTERSPEC {
+                        pszName: windows_core::PCWSTR(label.as_ptr()),
+                        pszSpec: windows_core::PCWSTR(pattern.as_ptr()),
+                    })
+                    .collect();
+                stage = "SetFileTypes";
+                dialog.SetFileTypes(&raw)?;
+                // THE SAME EXTENSION RULE THE OTHER DESKTOP HAS. With
+                // `allowedContentTypes` set, NSSavePanel completes an
+                // extension-less name with the first allowed extension;
+                // SetDefaultExtension is how this platform spells that, so
+                // a filtered save answers the same shape of name on both
+                // (measured: typing `bare` under a `txt` filter answers
+                // `bare.txt`). Only under a filter — with none there is no
+                // extension to be the default, and the shared scene sends
+                // none for exactly that reason (docs/save-plan.md, and
+                // scratchpad/save-depth.md §8: a completed name would be
+                // read back by `expect_save_dialog` on one platform and
+                // not another).
+                stage = "SetDefaultExtension";
+                dialog.SetDefaultExtension(&HSTRING::from(filters[0].1.as_str()))?;
+            }
+
+            // THE NAME THE DIALOG OPENS WITH — advisory, like the filters:
+            // the user renames it, and the guest reads back the name it
+            // GOT rather than the one it asked for.
+            stage = "SetFileName";
+            dialog.SetFileName(&HSTRING::from(suggested_name))?;
+
+            // The armed directory, applied HERE because that is the only
+            // moment it is read.
+            if let Some(dir) = folder {
+                let wide = HSTRING::from(dir);
+                stage = "SHCreateItemFromParsingName";
+                let item: IShellItem =
+                    SHCreateItemFromParsingName(windows_core::PCWSTR(wide.as_ptr()), None)?;
+                stage = "SetFolder";
+                dialog.SetFolder(&item)?;
+            }
+
+            #[cfg(feature = "harness")]
+            open_sampler(LiveDialog::Save(dialog.clone()));
+
+            stage = "Show";
+            // NO OWNER, and for the measured reason at `file_dialog_show`:
+            // Show() waits on its owner's input queue, and this is not the
+            // UI thread, so passing the app window blocks before the
+            // dialog is ever created. One live file dialog per process is
+            // the guarantee kaya actually makes.
+            let _ = hwnd;
+            dialog.Show(None)?;
+
+            stage = "GetResult";
+            let item = dialog.GetResult()?;
+            let path = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+            let path = path.to_string()?;
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            out = Some((name, path));
+            Ok(())
+        })();
+        #[cfg(feature = "harness")]
+        close_sampler();
+        if let Err(err) = result {
+            const CANCELLED: windows_core::HRESULT = windows_core::HRESULT(0x8007_04C7u32 as i32);
+            if err.code() != CANCELLED {
+                eprintln!(
+                    "kaya: save dialog failed at {stage} (hwnd={hwnd:#x}, \
+                     name={suggested_name:?}, folder={folder:?}, filters={filters:?}): {err}"
                 );
             }
         }
@@ -2667,10 +3048,22 @@ fn install_seh_probe() {
     unsafe { AddVectoredExceptionHandler(1, seh_probe) };
 }
 
-/// One request to put a picker up, handed to the apartment thread.
+/// WHICH DIALOG, and everything that differs between the two. The
+/// picker's `multiple` and the save dialog's `suggested_name` are each
+/// meaningless to the other, so they sit in the variant rather than
+/// beside a flag: a save request PHYSICALLY CANNOT carry "name two
+/// destinations", which is the same guarantee `kaya_emit_save_dialog_result`
+/// makes on the answering side by taking ONE locator rather than an array
+/// (docs/save-plan.md D2).
+enum DialogKind {
+    Open { multiple: bool },
+    Save { suggested_name: String },
+}
+
+/// One request to put a dialog up, handed to the apartment thread.
 struct DialogRequest {
     hwnd: isize,
-    multiple: bool,
+    kind: DialogKind,
     filters: Vec<(String, String)>,
     folder: Option<String>,
     dialog: u64,
@@ -2774,15 +3167,26 @@ fn dialog_apartment() {
     });
 }
 
-/// Put one picker up and answer it. Runs ON the apartment thread.
+/// Put one dialog up and answer it. Runs ON the apartment thread.
+///
+/// ONE ANSWERING PATH FOR BOTH, and that is docs/save-plan.md D2 landing
+/// here: the save dialog answers on the picker's result grammar, so the
+/// occurrence, the live slot and the retire gate are the picker's and only
+/// the request differed. What is NOT shared is the source each registers,
+/// and that is the whole of D1 on this platform — a picked file exists, a
+/// destination does not, so the picker registers a `PathSource` (whose
+/// open would answer ERROR_FILE_NOT_FOUND for a file the dialog just
+/// named) and the save dialog registers a `SaveDestination` (whose open
+/// creates). The backend hands over the locator UNCHANGED and creates
+/// nothing itself.
 fn run_dialog_request(request: DialogRequest) {
-    let files = file_dialog_show(
-        request.hwnd,
-        request.multiple,
-        &request.filters,
-        request.folder.as_deref(),
-    );
-    let picked = files
+    let picked = match request.kind {
+        DialogKind::Open { multiple } => file_dialog_show(
+            request.hwnd,
+            multiple,
+            &request.filters,
+            request.folder.as_deref(),
+        )
         .into_iter()
         .map(|(name, path)| {
             let handle = crate::capi::picked_register(std::sync::Arc::new(
@@ -2797,10 +3201,34 @@ fn run_dialog_request(request: DialogRequest) {
                 local_path: path,
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>(),
+        DialogKind::Save { suggested_name } => file_save_show(
+            request.hwnd,
+            &suggested_name,
+            &request.filters,
+            request.folder.as_deref(),
+        )
+        .into_iter()
+        .map(|(name, path)| {
+            let handle = crate::capi::picked_register(std::sync::Arc::new(
+                crate::protocol::SaveDestination {
+                    name: name.clone(),
+                    path: path.clone(),
+                },
+            ));
+            crate::protocol::PickedFile {
+                handle,
+                name,
+                local_path: path,
+            }
+        })
+        .collect::<Vec<_>>(),
+    };
     // Cancel is the EMPTY LIST, faithfully: Show() returns
     // ERROR_CANCELLED and no platform can confirm an empty selection,
-    // so there is no sentinel to invent (DESIGN.md, File dialogs).
+    // so there is no sentinel to invent (DESIGN.md, File dialogs). The
+    // save dialog spells the same thing as `Option::None`, which is why
+    // its arm above iterates an Option rather than a Vec.
     crate::capi::file_dialog_retire(request.dialog);
     request.sink.send(Occurrence::FileDialogResult {
         dialog: crate::protocol::FileDialogId(request.dialog),
@@ -6060,6 +6488,39 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .GetRange(range.start as i32, range.stop as i32)?
                 .ScrollIntoView(PointOptions::None)?;
         }
+        ApplyOp::PresentSaveDialog(spec) => {
+            // The Shell's SAVE dialog — the picker's presentation with the
+            // multiplicity flag replaced by a name, on the SAME apartment,
+            // the SAME queue and doorbell, and the same one-live-dialog
+            // rule. See `file_save_show` for why it is IFileSaveDialog and
+            // not the WinRT FileSavePicker, and why it hands back a path
+            // to a file that does not exist.
+            let target = winui_window(core, spec.window.0);
+            let hwnd = target
+                .ok()
+                .and_then(|t| windows_core::Interface::cast::<IWindowNative>(&t).ok())
+                .and_then(|n| n.window_handle().ok())
+                .unwrap_or(0);
+            let request = DialogRequest {
+                hwnd,
+                kind: DialogKind::Save {
+                    suggested_name: spec.suggested_name.clone(),
+                },
+                filters: spec.filters.clone(),
+                // The SAME armed directory the picker reads, taken the
+                // same way: `file_dialog_goto` arms one slot and whichever
+                // dialog presents next consumes it, because a dialog reads
+                // its folder only at presentation.
+                folder: core.pending_dialog_dir.borrow_mut().take(),
+                dialog: spec.dialog.0,
+                sink: core.occurrences.clone(),
+            };
+            // QUEUE, THEN RING: whichever order the apartment thread
+            // starts in, the request is already there to be found.
+            DIALOG_QUEUE.lock().unwrap().push(request);
+            dialog_apartment();
+            unsafe { SetEvent(dialog_doorbell()) };
+        }
         ApplyOp::PresentFileDialog(spec) => {
             // The Shell's common item dialog, which is what Windows
             // means by a file picker.
@@ -6088,7 +6549,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .unwrap_or(0);
             let request = DialogRequest {
                 hwnd,
-                multiple: spec.multiple,
+                kind: DialogKind::Open {
+                    multiple: spec.multiple,
+                },
                 filters: spec.filters.clone(),
                 folder: core.pending_dialog_dir.borrow_mut().take(),
                 dialog: spec.dialog.0,
@@ -7030,6 +7493,11 @@ unsafe extern "system" {
     ) -> i32;
     fn GetClassNameW(hwnd: isize, buf: *mut u16, len: i32) -> i32;
     fn IsWindowVisible(hwnd: isize) -> i32;
+    /// The save dialog's overwrite prompt is answered by STRUCTURE, not
+    /// by caption; this reads the caption only for the log line that
+    /// records the answer happened (`answer_overwrite_prompt`).
+    #[cfg(feature = "harness")]
+    fn GetWindowTextW(hwnd: isize, buf: *mut u16, len: i32) -> i32;
     fn GetDpiForWindow(hwnd: isize) -> u32;
     fn SetWindowLongPtrW(hwnd: isize, index: i32, value: isize) -> isize;
     // The shortcut verb's REAL dispatch: foreground the guest and put
@@ -9200,23 +9668,128 @@ impl crate::harness::Stage for WinUiStage {
         //
         // NOT through on_ui_read either: the picker is a #32770 the
         // shell owns, not a XAML object, and it runs on its own thread.
-        let window = sampler::WINDOW.load(std::sync::atomic::Ordering::SeqCst);
-        if window == 0 {
-            return None;
+        match sample_dialog() {
+            Some(sampler::Sampled::Open(directory, rows)) => Some((directory, rows)),
+            // A SAVE dialog is live, or none is. Either way no PICKER is,
+            // and that is what this observation answers — the variant is
+            // what keeps a save dialog's directory from satisfying
+            // `expect_file_dialog` with an empty row list.
+            _ => None,
         }
-        // Ask, then wait briefly for the dialog's own thread to answer.
-        // expect_file_dialog is itself a bounded retry, so a slow first
-        // sample costs nothing but a second lap.
-        unsafe { PostMessageW(window, sampler::SAMPLE, 0, 0) };
-        for _ in 0..20 {
-            if let Ok(slot) = sampler::VIEW.lock() {
-                if let Some(state) = slot.as_ref() {
-                    return Some(state.clone());
+    }
+
+    fn save_dialog_state(&self) -> Option<(String, String)> {
+        match sample_dialog() {
+            Some(sampler::Sampled::Save(directory, name)) => Some((directory, name)),
+            _ => None,
+        }
+    }
+
+    /// Type a name into the live save dialog's file-name box.
+    ///
+    /// THE SAME POSTED KEYSTROKES `choose_file` USES, and posted for the
+    /// same measured reason: a `SendMessage` puts the dialog's thread into
+    /// an input-synchronous call, and everything in this dialog calls out
+    /// over COM while handling messages — the file-name box is backed by
+    /// shell autocomplete. Windows refuses those callouts with a
+    /// NONCONTINUABLE `RPC_E_CANTCALLOUT_ININPUTSYNCCALL`, which is fatal
+    /// under a JVM.
+    ///
+    /// EM_SETSEL(0, -1) FIRST, so the first character REPLACES the
+    /// suggested name instead of joining it. Without it the field would
+    /// read `copyfinal` and the read-back below would say so.
+    ///
+    /// POSTED AND THEN VERIFIED, IN A LOOP, and that loop is not caution —
+    /// it is the whole difference between this working and this silently
+    /// not. MEASURED 2026-08-09 on the lane VM: the FIRST burst of
+    /// characters a process posts into a freshly created save dialog's
+    /// name box is DISCARDED. Same window, same control (the log carried
+    /// one `dialog=0xd50584 edit=Some(1967526)` for both attempts), the
+    /// field still reading `"copy"` 50ms later; the identical burst on the
+    /// second attempt landed at once. It is not a readiness race that
+    /// waiting fixes — a 3000ms `settle` before a single post failed
+    /// exactly the same way. Only repeating works.
+    ///
+    /// THE SHARED SCENE CANNOT SEE THIS, which is why it was found with a
+    /// scratch script and is written down here. `save.steps` shows a save
+    /// dialog, CANCELS it, and types into the second one — so the single
+    /// post that this loop replaces passed the leg while a guest that put
+    /// up ONE save dialog and typed into it would have saved under the
+    /// SUGGESTED name, every byte assertion still green and pointing at
+    /// the wrong file. That is precisely the failure
+    /// `expect_save_dialog`'s name half exists to catch, hiding one dialog
+    /// upstream of where the scene looks.
+    ///
+    /// The other two dialog actions were already shaped this way —
+    /// `choose_file` and `confirm_save` both post-and-check until the
+    /// dialog goes — so this was the one single-shot action in the
+    /// backend. Silent to the scene either way: `expect_save_dialog` is
+    /// still what asserts the name.
+    fn set_save_name(&self, name: &str) {
+        for _ in 0..40 {
+            let Some(dialog) = live_dialog() else { return };
+            if let Some(edit) = dialog_control(dialog, ID_SAVE_FILENAME, "Edit") {
+                unsafe { PostMessageW(edit, EM_SETSEL, 0, -1) };
+                for ch in name.encode_utf16() {
+                    unsafe { PostMessageW(edit, WM_CHAR, ch as usize, 1) };
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(25));
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if let Some(sampler::Sampled::Save(_, got)) = sample_dialog() {
+                if got == name {
+                    return;
+                }
+            }
         }
-        None
+    }
+
+    /// Press the live save dialog's own Save or Cancel, and see the press
+    /// through — including the confirmation Windows may put in front of
+    /// it.
+    ///
+    /// THE OVERWRITE PROMPT IS THE REASON THIS IS NOT `choose_file` WITH
+    /// TWO IDS. `FOS_OVERWRITEPROMPT` is in the save dialog's DEFAULT
+    /// options (measured `0x880a`), and this backend keeps it, because
+    /// clearing it would make Windows the only platform that replaces a
+    /// file without asking. When it fires, the answer is a SECOND
+    /// top-level `#32770` titled "Confirm Save As" — and it is not a
+    /// classic dialog: its 17 descendants are a `DirectUIHWND` plus
+    /// `CtrlNotifySink`-wrapped Buttons WITH ID 0, so no id lookup finds
+    /// anything (measured, scratchpad/save-probe-windows.md §B.3). Class
+    /// plus caption does, and `BM_CLICK` on the "&Yes" button dismisses
+    /// it.
+    ///
+    /// LEAVING IT UNANSWERED DOES NOT FAIL, IT WEDGES: `Show()` never
+    /// returns, the apartment thread stays inside its nested modal loop
+    /// for the rest of the process's life, and the leg dies on a timeout
+    /// with a modal window still on the desktop. That is the one failure
+    /// shape a windows lane must not have.
+    ///
+    /// The shared scene never overwrites — it saves to a name in a
+    /// per-pid directory that nobody has made — so this arm is not covered
+    /// by the leg and cannot be, the script being byte-frozen across five
+    /// platforms. It was driven by hand on the VM instead
+    /// (scratchpad/save-winui.md §5).
+    fn confirm_save(&self, save: bool) {
+        // The picker's loop, verbatim in shape: press, then wait for the
+        // dialog to GO, because a press that lands before the dialog is
+        // interactive is swallowed with no error anywhere.
+        for _ in 0..40 {
+            let Some(dialog) = live_dialog() else { return };
+            let id = if save { ID_OK } else { ID_CANCEL };
+            if let Some(button) = dialog_control(dialog, id, "Button") {
+                unsafe { PostMessageW(button, BM_CLICK, 0, 0) };
+            }
+            for _ in 0..10 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if save {
+                    answer_overwrite_prompt(dialog);
+                }
+                if !file_dialog_is_up() {
+                    return;
+                }
+            }
+        }
     }
 
     fn choose_file(&self, name: Option<&str>) {

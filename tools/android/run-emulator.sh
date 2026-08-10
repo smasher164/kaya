@@ -932,6 +932,27 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity filedialog \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script filedialog)'"
+    # The save scene: the round trip an editor walks — open, save back,
+    # save as, reopen (docs/save-plan.md D5). Still a DEPTH slice while
+    # the bindings fan out, so rust only.
+    #
+    # ACTION_CREATE_DOCUMENT, which is DocumentsUI once more: the same
+    # separate APK the filedialog leg needs the accessibility service
+    # for, in its CREATE mode. The service tells the two apart by the
+    # node the create mode inflates (android:id/container_save) rather
+    # than by remembering which intent kaya launched, so the leg above
+    # and this one prove the discrimination in BOTH directions — the
+    # open picker must not read as a save panel for `expect_file_dialog`
+    # to pass, and the save panel must not read as a picker for
+    # `expect_save_dialog` to.
+    #
+    # THIS IS ALSO THE ONLY LEG ON THIS PLATFORM THAT WRITES THROUGH A
+    # PICKED HANDLE. `openFileDescriptor(uri, "wt")` has been reachable
+    # since the picker landed and nothing has ever driven it.
+    run_apk save-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity save \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script save)'"
     # The nav scene: navigation is phone-native — the system back
     # gesture (the BackHandler dispatch) is the affordance, and
     # intercept_back answers with pop_entry.

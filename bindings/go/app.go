@@ -1709,6 +1709,100 @@ func (r FileDialogRef) Show() uint64 {
 	return r.id
 }
 
+// SaveFile asks the platform WHERE TO SAVE. The picker's twin: the same
+// chain, the same one id space, the same one-live-dialog-per-process
+// rule, and the answer arriving once at OnResult (docs/save-plan.md D2).
+//
+//	tx.SaveFile("notes").OnResult(func(tx *kaya.Tx, file *kaya.PickedFile) {
+//	    if file == nil { return } // the user cancelled
+//	    …
+//	}).Show()
+//
+// suggestedName is the name the dialog OPENS with, and it rides the
+// constructor rather than the chain because a save dialog with an empty
+// name box is one no platform lets the user complete. Every platform
+// takes it and none guarantees it: the user renames it, and Android may
+// append an extension matching the mime type — so READ THE NAME YOU GOT.
+//
+// WHAT COMES BACK OPENS EMPTY. A save destination may not exist yet
+// (macOS, GTK and Windows answer with a name for a file nobody has made,
+// measured), so the handle's Open CREATES: FileModeWrite succeeds and
+// yields an empty file on every platform, which is the one behaviour a
+// guest writes against (docs/save-plan.md D1).
+func (tx *Tx) SaveFile(suggestedName string) SaveDialogRef {
+	tx.app.c.fileDialog++
+	return SaveDialogRef{tx: tx, id: tx.app.c.fileDialog, name: suggestedName}
+}
+
+// SaveDialogRef accumulates the one atomic SHOW_SAVE_DIALOG record;
+// nothing is sent until Show, exactly like the picker's chain.
+type SaveDialogRef struct {
+	tx       *Tx
+	id       uint64
+	window   uint64
+	name     string
+	filters  []string
+	onResult func(*Tx, *PickedFile)
+}
+
+// In targets an auxiliary window (0 = primary).
+func (r SaveDialogRef) In(window uint64) SaveDialogRef {
+	r.window = window
+	return r
+}
+
+// Filter adds one advisory (label, extensions) pair — extensions
+// space-separated, the picker's rule verbatim: a default view, never a
+// guarantee.
+//
+// AND IT IS NOT FREE ON A SAVE DIALOG the way it is on a picker: with an
+// allowed type set, NSSavePanel APPENDS the first extension to a name
+// that has none, so a filter changes the name the user gets rather than
+// only what they see (measured — scratchpad/save-probe-mac.md).
+func (r SaveDialogRef) Filter(label, extensions string) SaveDialogRef {
+	r.filters = append(r.filters, label, extensions)
+	return r
+}
+
+// OnResult binds the one-shot result handler to THIS request. The
+// registration retires with the answer; CANCEL IS A NIL FILE.
+//
+// One file or none, and the narrowing happens HERE rather than in the
+// guest: "exactly one locator or none" is a fact of the REQUEST — no
+// platform's save dialog names two destinations — and not something
+// every app should have to re-derive from the length of a list.
+func (r SaveDialogRef) OnResult(fn func(*Tx, *PickedFile)) SaveDialogRef {
+	r.onResult = fn
+	return r
+}
+
+// Show sends the request, returning its id; the one answer arrives at
+// the OnResult handler.
+func (r SaveDialogRef) Show() uint64 {
+	if r.onResult != nil {
+		// ONE TABLE FOR BOTH DIALOG KINDS, because there is one id space
+		// and one live slot: the result record is a file_dialog_result
+		// whichever dialog asked, so a second table would be two ways to
+		// answer the same id. The adapter is where the list becomes
+		// one-or-none.
+		fn := r.onResult
+		r.tx.app.fileDialogs[r.id] = func(tx *Tx, files []PickedFile) {
+			if len(files) == 0 {
+				fn(tx, nil)
+				return
+			}
+			file := files[0]
+			fn(tx, &file)
+		}
+	}
+	values := make([]any, 0, len(r.filters))
+	for _, f := range r.filters {
+		values = append(values, f)
+	}
+	r.tx.emit(TxShowSaveDialog(r.window, r.id, r.name, values))
+	return r.id
+}
+
 // --- The clipboard (DESIGN.md, Clipboard) --------------------------
 //
 // A clip is not a string: every host models it as ONE item available in

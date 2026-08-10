@@ -40,6 +40,11 @@ executable filedialog
   main-is: filedialog.hs
   build-depends: kaya-guests, directory, filepath, unix
 
+executable save
+  import: shared
+  main-is: save.hs
+  build-depends: kaya-guests, directory, filepath, unix
+
 executable clipboard
   import: shared
   main-is: clipboard.hs

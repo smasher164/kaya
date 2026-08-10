@@ -4565,6 +4565,103 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.clear_native_undo(id);
             }
         }
+        ApplyOp::PresentSaveDialog(spec) => {
+            // GNOME's own save panel, and it is the SAME OBJECT the picker
+            // builds — gtk::FileDialog asked to `save()` rather than
+            // `open()`. So everything around it is already the picker's
+            // and none of it is written twice: the one-live-dialog slot,
+            // the retire path, the FileDialogResult occurrence, the
+            // armed-directory rule, the advisory filters, and the
+            // DISMISSED-to-empty mapping that spells cancel. What differs
+            // on this backend is exactly two lines — the initial name, and
+            // the SOURCE the answer is registered as.
+            let parent = gtk_window(core, spec.window.0);
+            let title = format!("kaya save {}", spec.dialog.0);
+            let dialog = gtk4::FileDialog::builder()
+                .title(&title)
+                .modal(true)
+                .build();
+
+            // ADVISORY on every platform (DESIGN.md), the picker's rule
+            // unchanged: a default view, never a guarantee.
+            if !spec.filters.is_empty() {
+                let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
+                for (label, suffix) in &spec.filters {
+                    let filter = gtk4::FileFilter::new();
+                    filter.set_name(Some(label));
+                    filter.add_suffix(suffix);
+                    filters.append(&filter);
+                }
+                dialog.set_filters(Some(&filters));
+            }
+
+            // The name the panel OPENS with, in its name field, which is
+            // the one thing a user sees that a picker has not got. Also
+            // advisory: the user types over it, and the guest reads the
+            // name it GOT (protocol::SaveDialogSpec).
+            dialog.set_initial_name(Some(spec.suggested_name.as_str()));
+
+            // The armed directory, applied HERE for the picker's reason —
+            // this is the only moment a chooser reads it.
+            if let Some(dir) = core.pending_dialog_dir.borrow_mut().take() {
+                dialog.set_initial_folder(Some(&gtk4::gio::File::for_path(&dir)));
+            }
+
+            *core.live_file_dialog.borrow_mut() = Some(GtkLiveFileDialog {
+                title: title.clone(),
+            });
+            let live = core.live_file_dialog.clone();
+            let sink = core.occurrences.clone();
+            let dialog_id = spec.dialog.0;
+
+            dialog.save(
+                Some(&parent),
+                None::<&gtk4::gio::Cancellable>,
+                move |result| {
+                    *live.borrow_mut() = None;
+                    // A DESTINATION, NOT A PICKED FILE, and that is the
+                    // whole of docs/save-plan.md D1 on this backend. GTK
+                    // answers with a path to a file NOBODY HAS MADE
+                    // (measured: `exists=false` when the callback runs),
+                    // so registering the picker's `PathSource` here would
+                    // hand the guest a handle that refuses in every mode
+                    // with ENOENT — measured too, on this lane, before the
+                    // milestone existed. `SaveDestination` creates.
+                    let picked = result
+                        .ok()
+                        .and_then(|f| {
+                            let path = f.path().map(|p| p.to_string_lossy().into_owned())?;
+                            let name = f.basename().map(|p| p.to_string_lossy().into_owned())?;
+                            Some((name, path))
+                        })
+                        .map(|(name, path)| {
+                            let handle = crate::capi::picked_register(std::sync::Arc::new(
+                                crate::protocol::SaveDestination {
+                                    name: name.clone(),
+                                    path: path.clone(),
+                                },
+                            ));
+                            crate::protocol::PickedFile {
+                                handle,
+                                name,
+                                local_path: path,
+                            }
+                        })
+                        .into_iter()
+                        .collect::<Vec<_>>();
+                    // Cancel is the EMPTY ANSWER: GTK reports a dismissed
+                    // save panel as GTK_DIALOG_ERROR_DISMISSED, the same
+                    // error the open arm already maps to an empty list, so
+                    // `Ok(...)` above yields nothing and the guest sees
+                    // `Msg::Saved(None)`.
+                    crate::capi::file_dialog_retire(dialog_id);
+                    sink.send(Occurrence::FileDialogResult {
+                        dialog: crate::protocol::FileDialogId(dialog_id),
+                        files: picked,
+                    });
+                },
+            );
+        }
         ApplyOp::PresentFileDialog(spec) => {
             // GNOME's own picker: gtk::FileDialog (4.10+), presented on
             // the requesting window and answered exactly once through
@@ -7179,7 +7276,23 @@ impl crate::harness::Stage for GtkStage {
         //
         // NOT on the GTK main thread: this is a dbus round trip, and the
         // main loop is what has to keep answering it.
-        file_dialog_atspi(DialogOp::Read)
+        //
+        // A SAVE PANEL IS NOT A PICKER HERE, deliberately, and this is
+        // the mac arm's rule spelled for GTK: there one slot holds an
+        // NSSavePanel and two computed readers ask the TYPE, so neither
+        // can see the other's panel. On this toolkit there is no type to
+        // ask — `open()` and `save()` are two calls on ONE
+        // `gtk::FileDialog` — so the tree answers instead, and the two
+        // readers stay mutually exclusive all the same. It also makes the
+        // discriminator's own failure LOUD on legs that already run: if
+        // the name field were ever found on an open chooser, eight green
+        // filedialog legs would go red here rather than a save leg
+        // quietly typing into a picker.
+        let read = file_dialog_atspi(DialogOp::Read)?;
+        match read.save_name {
+            Some(_) => None,
+            None => Some((read.dir, read.rows)),
+        }
     }
 
     fn choose_file(&self, name: Option<&str>) {
@@ -7203,6 +7316,36 @@ impl crate::harness::Stage for GtkStage {
                 file_dialog_atspi(DialogOp::Press("Cancel"));
             }
         }
+    }
+
+    fn save_dialog_state(&self) -> Option<(String, String)> {
+        // The REAL save panel, over the same bus and the same walk as the
+        // picker — the two are one `gtk::FileDialog` here, so the reader
+        // tells them apart by what the tree carries (DialogRead).
+        //
+        // NO ROWS ARE REQUIRED, which the trait doc demands of every
+        // backend and which GTK gets for free: this panel does publish a
+        // browser, and nothing here looks at it. A reader that waited for
+        // rows would be writing macOS's collapsed-panel trap into a
+        // platform that does not have it.
+        let read = file_dialog_atspi(DialogOp::Read)?;
+        Some((read.dir, read.save_name?))
+    }
+
+    fn set_save_name(&self, name: &str) {
+        // set_text's tier: the field's whole contents replaced, the way a
+        // user renaming a suggested name leaves it. Whether it took is
+        // NOT assumed — expect_save_dialog reads the field back off the
+        // bus, and the scene asserts it before pressing Save.
+        file_dialog_atspi(DialogOp::SetName(name));
+    }
+
+    fn confirm_save(&self, save: bool) {
+        // The panel's OWN buttons, so its own completion runs and the
+        // answer travels the path a user's would. The accept button says
+        // "Save" here and "Open" on the picker — the one label that
+        // differs between two dialogs that are otherwise the same object.
+        file_dialog_atspi(DialogOp::Press(if save { "Save" } else { "Cancel" }));
     }
 
     /// The foreign writer: wl-copy (wayland) or xclip (x11), a child
@@ -7639,13 +7782,41 @@ fn atspi_rank(window: &gtk4::Window, target: &gtk4::Widget) -> Option<usize> {
 /// assumed — the probe and its findings are in docs/traps.md.
 #[cfg(all(feature = "harness", target_os = "linux"))]
 enum DialogOp<'a> {
-    /// The directory it is showing and the names its list contains.
+    /// The directory it is showing, the names its list contains, and the
+    /// text in its name field if it has one.
     Read,
     /// Select the row whose filename is this. A separate pass from the
     /// press, so the two do not depend on the tree's child order.
     Select(&'a str),
-    /// Press the button with this label ("Open" or "Cancel").
+    /// Press the button with this label ("Open", "Save" or "Cancel").
     Press(&'a str),
+    /// Type this into the SAVE panel's name field, over whatever is
+    /// there — the harness doing what a user's keyboard would, through
+    /// the same `EditableText` interface an assistive client uses.
+    SetName(&'a str),
+}
+
+/// One read of the live chooser, whichever kind it is.
+///
+/// THE TWO DIALOGS ARE ONE OBJECT ON THIS TOOLKIT — `gtk::FileDialog`
+/// with `open()` or `save()` called on it — so one walk answers both and
+/// the reader decides which it is looking at from what the tree carries,
+/// not from what this backend remembers asking for.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+struct DialogRead {
+    /// The current folder: the path bar's PRESSED toggle button. Both
+    /// panels publish it identically (measured on GTK 4.18).
+    dir: String,
+    /// One filename per data row. A save panel has a browser too, but
+    /// nothing asserts on it — see `save_dialog_state`'s "never require
+    /// rows".
+    rows: Vec<String>,
+    /// The text really in the name field — `Some` EXACTLY WHEN this
+    /// dialog has one, which is what makes it a save panel rather than a
+    /// picker. Measured: the save panel's tree is the open chooser's plus
+    /// one `role=text` node carrying `EditableText`; the open chooser
+    /// publishes no editable text at all.
+    save_name: Option<String>,
 }
 
 /// Read or drive the live GTK file chooser over AT-SPI.
@@ -7669,10 +7840,12 @@ enum DialogOp<'a> {
 ///   parent is the inner `list`; the header hangs off the `tree table`
 ///   directly.
 #[cfg(all(feature = "harness", target_os = "linux"))]
-fn file_dialog_atspi(op: DialogOp<'_>) -> Option<(String, Vec<String>)> {
+fn file_dialog_atspi(op: DialogOp<'_>) -> Option<DialogRead> {
     use atspi::proxy::accessible::AccessibleProxy;
     use atspi::proxy::action::ActionProxy;
+    use atspi::proxy::editable_text::EditableTextProxy;
     use atspi::proxy::selection::SelectionProxy;
+    use atspi::proxy::text::TextProxy;
 
     atspi::zbus::block_on(async move {
         let conn = atspi::connection::AccessibilityConnection::new()
@@ -7690,6 +7863,7 @@ fn file_dialog_atspi(op: DialogOp<'_>) -> Option<(String, Vec<String>)> {
         struct Found {
             dir: String,
             rows: Vec<String>,
+            save_name: Option<String>,
             acted: bool,
             in_dialog: bool,
         }
@@ -7727,6 +7901,65 @@ fn file_dialog_atspi(op: DialogOp<'_>) -> Option<(String, Vec<String>)> {
                 let file = name.split_whitespace().next().unwrap_or("").to_owned();
                 if !file.is_empty() {
                     out.rows.push(file.clone());
+                }
+            }
+
+            // THE SAVE PANEL'S ONE EXTRA CONTROL. Matched on the
+            // INTERFACE and not on the label: the node's accessible name
+            // is the "Name:" label beside it, which is a translated
+            // string, and a lane running under a different locale would
+            // then see no save panel at all and fail with "no save dialog
+            // is live" — a lie about the app, told by the reader. What
+            // never translates is that the field is editable text.
+            //
+            // THE COMBO IS EXCLUDED for the directory read's reason one
+            // control over: the filter drop-down is its own subtree, and
+            // a GtkDropDown's search entry is editable text too.
+            if in_dialog && role == atspi::Role::Text && !in_combo {
+                let editable = node
+                    .get_interfaces()
+                    .await
+                    .map(|set| set.contains(atspi::Interface::EditableText))
+                    .unwrap_or(false);
+                if editable {
+                    if let Ok(text) = TextProxy::builder(node.inner().connection())
+                        .destination(node.inner().destination().to_owned())
+                        .and_then(|b| b.path(node.inner().path().to_owned()))
+                    {
+                        if let Ok(text) = text.build().await {
+                            if let Ok(len) = text.character_count().await {
+                                out.save_name = text.get_text(0, len).await.ok();
+                            }
+                        }
+                    }
+                    if let DialogOp::SetName(want) = op {
+                        // The whole contents, not an insert: the panel
+                        // opens with the suggested name already in the
+                        // field, and a user renaming a file replaces it.
+                        if let Ok(editable) = EditableTextProxy::builder(node.inner().connection())
+                            .destination(node.inner().destination().to_owned())
+                            .and_then(|b| b.path(node.inner().path().to_owned()))
+                        {
+                            if let Ok(editable) = editable.build().await {
+                                out.acted =
+                                    editable.set_text_contents(want).await.unwrap_or(false);
+                                // Read back what the field now holds, so
+                                // one walk both types and reports — the
+                                // step's own assertion still re-reads it
+                                // from scratch.
+                                if let Ok(text) = TextProxy::builder(node.inner().connection())
+                                    .destination(node.inner().destination().to_owned())
+                                    .and_then(|b| b.path(node.inner().path().to_owned()))
+                                {
+                                    if let Ok(text) = text.build().await {
+                                        if let Ok(len) = text.character_count().await {
+                                            out.save_name = text.get_text(0, len).await.ok();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -7811,6 +8044,7 @@ fn file_dialog_atspi(op: DialogOp<'_>) -> Option<(String, Vec<String>)> {
         let mut found = Found {
             dir: String::new(),
             rows: Vec::new(),
+            save_name: None,
             acted: false,
             in_dialog: false,
         };
@@ -7832,9 +8066,14 @@ fn file_dialog_atspi(op: DialogOp<'_>) -> Option<(String, Vec<String>)> {
         if !found.in_dialog {
             return None;
         }
+        let read = DialogRead {
+            dir: found.dir,
+            rows: found.rows,
+            save_name: found.save_name,
+        };
         match op {
-            DialogOp::Read => Some((found.dir, found.rows)),
-            _ if found.acted => Some((found.dir, found.rows)),
+            DialogOp::Read => Some(read),
+            _ if found.acted => Some(read),
             _ => None,
         }
     })

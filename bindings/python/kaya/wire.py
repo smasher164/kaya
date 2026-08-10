@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xd8165a4995d2554f
+SPEC_HASH = 0xbfba1ee8ec9461cb
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -141,6 +141,7 @@ TX_UNDO_GROUP = 37
 TX_HIGHLIGHT_RANGES = 38
 TX_SELECT_RANGE = 39
 TX_REVEAL_RANGE = 40
+TX_SHOW_SAVE_DIALOG = 41
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -171,6 +172,7 @@ APPLY_CLEAR_UNDO = 27
 APPLY_HIGHLIGHT_RANGES = 28
 APPLY_SELECT_RANGE = 29
 APPLY_REVEAL_RANGE = 30
+APPLY_PRESENT_SAVE_DIALOG = 31
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -397,6 +399,10 @@ def tx_select_range(widget_id, start, stop):
 def tx_reveal_range(widget_id, start, stop):
     """Scroll the textarea so a range is inside the viewport (UTF-8 byte offsets, validated exactly as highlight_ranges is). A PURE EFFECT: it moves no state, the selection is untouched, and per docs/undo-plan.md A2 undo does not restore it — undo restores state, not where you were looking, which is why it is permitted inside an undo group and simply not inverted.  WHAT `inside the viewport` MEANS IS THE PLATFORM'S, not kaya's: each backend calls its own scroll-to-range (scrollRangeToVisible, ScrollIntoView, gtk_text_view_scroll_to_iter, bringIntoView), so how much context lands around the range is native behaviour. The observable kaya fixes is containment, which is the only thing every platform agrees on."""
     return record(TX_REVEAL_RANGE, struct.pack("<Q", widget_id) + struct.pack("<Q", start) + struct.pack("<Q", stop))
+
+def tx_show_save_dialog(window, dialog, suggested_name, filters):
+    """Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened."""
+    return record(TX_SHOW_SAVE_DIALOG, struct.pack("<Q", window) + struct.pack("<Q", dialog) + _enc.value(suggested_name) + _enc.values(filters))
 
 
 def tx_set_text(widget_id, text):

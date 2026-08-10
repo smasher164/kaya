@@ -158,6 +158,16 @@ pub struct KayaHostApi {
         *const *const std::os::raw::c_char,
         usize,
     ),
+    /// The save dialog's answer: ONE locator and its name, or NULL for
+    /// cancel. Its own entry rather than the picker's with a count of
+    /// one, because it is what makes the destination CREATABLE — the core
+    /// registers a source whose open creates, and that decision must not
+    /// be reachable from the picker's entry by accident.
+    pub emit_save_dialog_result: unsafe extern "C" fn(
+        u64,
+        *const std::os::raw::c_char,
+        *const std::os::raw::c_char,
+    ),
     /// Navigation lifecycle emits: entry_popped after the user's back
     /// affordance popped natively (the core's stack reconciles inside
     /// this call), back_requested when the top entry's intercept_back
@@ -274,6 +284,7 @@ pub(crate) fn run() -> i32 {
         emit_window_closed: crate::capi::kaya_emit_window_closed,
         emit_alert_result: crate::capi::kaya_emit_alert_result,
         emit_file_dialog_result: crate::capi::kaya_emit_file_dialog_result,
+        emit_save_dialog_result: crate::capi::kaya_emit_save_dialog_result,
         emit_entry_popped: crate::capi::kaya_emit_entry_popped,
         emit_back_requested: crate::capi::kaya_emit_back_requested,
         emit_section_selected: crate::capi::kaya_emit_section_selected,

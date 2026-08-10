@@ -123,6 +123,17 @@ in docs/deferred.md.
    without it the 22 harness tests silently vanish (194 -> 172) rather
    than failing. GTK and WinUI builds need it too — mac/iOS do not,
    since the SwiftUI interpreter carries its own harness.
+   IT RUNS WHERE YOU TYPE IT, which is why the windows lane now runs the
+   core's unit tests ON THE GUEST as well (tools/deploy-win.sh's
+   unit-tests phase, filtered to `capi::picked_tests`): the Windows half
+   of the core — the HANDLE arms of protocol.rs's
+   raw_handle/file_from_raw — is code no unix run compiles, and the one
+   test of the redemption path had `#[cfg(all(test, unix))]` on it for
+   four milestones. The phase refuses unless the number that passed
+   equals the number of `#[test]`s the module declares, because a filter
+   that matches nothing exits 0 saying "0 passed". The rest of the suite
+   is 309/312 on that guest; the 3 are POSIX assumptions in harness
+   tests, and fixing them is what widens the filter.
 2. Fast gates. `tools/gates.sh` runs ALL of them and is the only thing
    that should. It builds libkaya and the SwiftUI interpreter FIRST — a
    gate cannot verify an artifact the run has not built yet, and one
@@ -213,6 +224,21 @@ in docs/deferred.md.
    spec hash pinned against bindings/c/kaya_wire.h, the
    byte-compared-verdict rule, the vtable rule, and the
    stamped-observation rule),
+   `tools/check-file-modes.sh` (the file-mode NUMBERS agree with the
+   spec's wherever they are written down. `kaya_open_picked` takes an
+   integer, crates/kaya/src/spec.rs decides what it means, and five
+   hand-written sites decode it: protocol.rs's `picked_mode_code` sends
+   it on, the SwiftUI interpreter picks POSIX flags out of bare literals
+   (`case 1: flags = O_WRONLY | O_CREAT | O_TRUNC`), and the C# and
+   Python bindings pick a FileAccess and an fdopen spelling the same
+   way. Renumber the enum and every GENERATED surface moves while those
+   literals stay: the guest asks to READ, the backend opens
+   O_WRONLY|O_TRUNC, and the file the user picked is emptied with no
+   error anywhere. The clause it replaces lived in check-steps and could
+   not have caught that — it hard-coded 0/1/2 in the gate. The census is
+   the half that survives a new site: every file that redeems a picked
+   file is in one of two tables, and the pass-through table's claim is
+   itself checked, by refusing any bare mode number in those files),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
    only this cross-check sees the combination. A DEPTH STUB IS A CALL,

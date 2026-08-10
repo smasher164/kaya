@@ -39,6 +39,92 @@ own the state (see the undo note in this file).
   entries. Editor prerequisites remaining after this: undo/redo,
   dirty-state window titles, find.
 
+- **Saving a file** — IN FLIGHT 2026-08-09. The design is ratified and
+  written down: docs/save-plan.md D1-D5, off five probe reports. One new
+  request record (`show_save_dialog { window, dialog, suggested_name,
+  filters }`) answering on the PICKER'S result grammar with one locator,
+  and one decision with semantics in it: a save result registers a source
+  whose open CREATES, so "open the destination for write" yields an empty
+  file on all five platforms — Android and iOS hand back a document that
+  exists, macOS/GTK/Windows hand back a name for a file nobody has made
+  (measured; macOS does not truncate on Replace either). A fourth
+  `FILE_MODE_CREATE` is the named rejection: creation belongs to the
+  destination the dialog promised, not to the caller's intent. DEPTH
+  LANDED: spec + the core's `SaveDestination` + the Rust surface
+  (`tx.save_file(name)`, `msgs.on_saved`) + the SwiftUI mac arm + the
+  `save` scene. What is still open:
+  - ~~**DEPTH STUB: save on swiftui/ios**~~ — LANDED 2026-08-09.
+    `UIDocumentPickerViewController(forExporting:asCopy:)`, whose every
+    initializer takes a URL that ALREADY EXISTS, so the backend stages a
+    ZERO-BYTE file carrying the suggested name and exports that — the
+    emptiness is D1 itself, since the export copies what it is given and
+    that is what an untouched destination would read back. The answer
+    arrives through the picker's own `didPickDocumentsAt` delegate, so
+    there is no new result path; the destination is retained as an
+    ordinary picked URL and redeemed through `kaya_swiftui_open_picked`.
+    D4's text entry landed as four simdrive verbs
+    (`savestate`/`savename`/`savepress`/`savecancel`): the name is set
+    and READ BACK over accessibility, and `savepress` matches the
+    navigation strip's `Save` EXACTLY because `press Save` falsely
+    succeeds on this sheet — it matches the static text "Save as" by
+    containment and the sheet stays up. `save-swiftui` runs in
+    tools/ios/run-sim.sh.
+  - ~~**DEPTH STUB: save on gtk**~~ — LANDED 2026-08-09.
+    `gtk::FileDialog` asked to `save()` rather than `open()`, so the live
+    slot, the retire path, the result occurrence, the armed directory and
+    the DISMISSED-to-empty cancel are all the picker's already; the two
+    differences are `set_initial_name` and registering the answer as
+    `protocol::SaveDestination` rather than `PathSource`. The three
+    `Stage` methods read and drive the real panel over the AT-SPI walk
+    the picker already uses, telling the two dialogs apart by the
+    `EditableText` name field the save panel alone publishes.
+    `save-rust` runs on both protocols in tools/linux/run-suites.sh.
+  - **DEPTH STUB: save on winui** — `IFileSaveDialog` (NOT
+    `FileSavePicker`, whose start location is an enum and which needs an
+    owner HWND unpackaged), driven through the UIA machinery deploy-win
+    already has. The windows runner wires no `save` legs meanwhile.
+  - **DEPTH STUB: save on compose** — `ACTION_CREATE_DOCUMENT`, which
+    hands back a content locator to a document that ALREADY EXISTS, so
+    the core's create is a no-op there and the uniform behaviour is free.
+  - **The seven other bindings** — the save request and its result in
+    Python, Go, C#, Java, Swift, OCaml, Haskell, plus the C floor's
+    explicit spelling. check-sugar-surface and check-verbs hold this
+    open.
+  - **Java's picked handle is read-only in every mode, on every
+    platform** (`bindings/java/dev/kaya/KayaApp.java:581-589` returns a
+    `FileInputStream` for write and read-write alike). A Java app cannot
+    write to a picked file anywhere — found by the save probes, fixed in
+    this milestone's breadth per docs/save-plan.md D3.
+  - **The Swift interpreter matches file-mode NUMBERS as bare literals**
+    (`swift/KayaSwiftUI.swift`, the iOS opener) while Rust pins them by
+    test, with nothing checking the two agree. D3 wants a gate, watched
+    failing.
+  - **The save-over-an-existing-file path is undriven.** macOS answers a
+    Save onto an existing name with a SECOND, UNNAMED `AXSheet` whose
+    buttons carry stable identifiers (`action-button-1` = Replace,
+    `action-button-2` = Cancel) and localized titles; the completion does
+    not fire until one is pressed. The shared scene cannot drive it,
+    because Android's `ACTION_CREATE_DOCUMENT` and iOS's export never
+    prompt at all — they rename to `name (1)` — so a `file_save replace`
+    step would be unsatisfiable on two of five platforms. If it is ever
+    wanted it is a mac/linux/windows-only leg, not a line in
+    `save.steps`. Measurements: scratchpad/save-probe-mac.md.
+  - **`filters` on a save request is exercised at the wire level only.**
+    The `save` scene sends none, deliberately: with `allowedContentTypes`
+    set, NSSavePanel appends the first allowed extension to a name that
+    has none and publishes the STEM in its name field when the user's
+    Finder preference hides extensions — a machine-wide setting deciding
+    a byte-frozen assertion. A scene that wants filters must name files
+    whose extension is already in the filter.
+  - **THE THREE SAVE `Stage` METHODS CARRY DEFAULT BODIES**
+    (`save_dialog_state`, `set_save_name`, `confirm_save` in
+    crates/kaya/src/harness.rs). Every other observation there is
+    no-default so a backend that forgets fails to COMPILE;
+    these panic instead, only because the slice landed depth-first and
+    gtk.rs/winui/mod.rs are the breadth arms' files. When all four
+    backends implement them, DELETE the bodies and end the signatures
+    with `;` — tools/lib/stage-coverage.py then holds them like the rest.
+
 - **Dirty state** — IN FLIGHT 2026-08-06. The design is ratified and
   written down: docs/dirty-plan.md D1-D6, off five probe reports. One
   `dirty` bool beside `title` and `veto_close`; the app declares state
@@ -1099,6 +1185,25 @@ the a11y scene and the full matrix behind it — and a before/after read
 count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
+
+- **A GUARD THAT ABORTS THE PROCESS IS THE WRONG SHAPE, and this is the
+  second instance.** Measured 2026-08-10 on mac: under an environmental
+  slowdown the file picker missed the step budget, the scene proceeded
+  and requested a second dialog, and the one-dialog-per-process guard
+  (crates/kaya/src/capi.rs:1732) panicked in a non-unwinding context —
+  so the leg died with `fatal runtime error: failed to initiate panic`
+  and no verdict list, rather than reporting the steps that failed. The
+  Windows IME-refusal abort (recorded above, 2026-08-09) is the same
+  class from a different direction.
+  The rule worth adopting: a guard that catches an APP MISUSE should
+  redden the leg with its sentence intact; only a genuinely
+  unrecoverable state should abort. Both instances converted a legible
+  failure into a bare exit code, and in both the surviving message named
+  a cause three removes from the real one. Fix candidates: make these
+  panics unwind-safe at the FFI boundary so the harness can collect
+  them, or have the harness treat an abort as a leg failure carrying
+  the last steps it saw.
+
 
 - **DEFECT (rare, Windows) — the IME refusal path can ABORT the
   process.** Measured 2026-08-09 in the ranges scene on WinUI: the

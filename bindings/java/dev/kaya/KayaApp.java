@@ -567,12 +567,19 @@ public final class KayaApp {
 
     public record PickedFile(long handle, String name, String localPath) {
         /**
-         * Redeem the handle for a real stream, plus whether it seeks.
+         * Redeem the handle for real streams, plus whether it seeks.
+         *
+         * THE MODE DECIDES WHAT YOU GET, and it is the mode you pass
+         * here: {@link KayaWire#FILE_MODE_READ} answers with a reading
+         * half only, {@link KayaWire#FILE_MODE_WRITE} with a writing
+         * half only (and the file is already truncated — the core's
+         * open did it), {@link KayaWire#FILE_MODE_READ_WRITE} with
+         * both.
          *
          * BLOCKS, and may block for a long time — a cloud provider can
          * download the file first — so call it from a thread you chose
          * and post the result back. kaya is not in the data path: what
-         * comes back is an ordinary FileInputStream.
+         * comes back are ordinary java.io streams.
          *
          * Seekable RIDES THE OPEN rather than the pick because that is
          * the only place the answer exists: an Android provider may
@@ -581,12 +588,134 @@ public final class KayaApp {
         public Opened open(int mode) throws java.io.IOException {
             int[] seekable = new int[1];
             java.io.FileDescriptor fd = KayaRing.openPicked(handle, mode, seekable);
-            return new Opened(new java.io.FileInputStream(fd), seekable[0] != 0);
+            return new Opened(fd, mode, seekable[0] != 0);
         }
     }
 
-    /** An opened picked file: the stream, and whether it seeks. */
-    public record Opened(java.io.FileInputStream stream, boolean seekable) {}
+    /**
+     * An opened picked file: the halves THE MODE PERMITS, and whether
+     * it seeks.
+     *
+     * <p>THE DEFECT THIS SHAPE EXISTS TO PREVENT (docs/save-plan.md D3,
+     * measured 2026-08-09): this used to be a record holding one
+     * {@code FileInputStream}, built the same way whatever mode was
+     * asked for. The mode still reached the core and still decided the
+     * OS handle's access, so the descriptor was writable — and the
+     * binding wrapped it in a reading stream anyway. Every Java app on
+     * every platform got "Bad file descriptor" the moment it tried to
+     * write to a file the user picked, and no scene, leg or test asked
+     * for a mode other than read, so nothing said so for four
+     * milestones.
+     *
+     * <p>JAVA IS THE ONE LANGUAGE THAT NEEDS TWO OBJECTS HERE, and this
+     * is the whole of the carve-out (DESIGN.md, Binding conventions —
+     * the idiom decides the spelling, never the semantics). Every other
+     * binding hands back ONE duplex object whose permitted operations
+     * follow the mode: {@code std::fs::File}, {@code FileHandle},
+     * {@code FileStream} with a {@code FileAccess}, {@code os.fdopen}
+     * with "rb"/"wb"/"r+b", GHC's {@code Handle}, {@code os.File},
+     * {@code Unix.file_descr}. Java's stream types are unidirectional
+     * and no public API wraps a descriptor in a duplex object at all
+     * ({@code RandomAccessFile} takes a path, and a channel from either
+     * stream carries that stream's one direction), so read-write hands
+     * back both halves OVER ONE DESCRIPTOR — MEASURED to share one file
+     * offset, which is what makes them a faithful stand-in: read three
+     * bytes then write, and the write lands at three, exactly as the
+     * duplex object would.
+     *
+     * <p>The half the mode does not permit is ABSENT, and asking for it
+     * throws with the mode named rather than handing over a stream
+     * whose every call fails at the descriptor.
+     */
+    public static final class Opened implements java.io.Closeable {
+        private final java.io.InputStream in;
+        private final java.io.OutputStream out;
+        private final boolean seekable;
+        private final int mode;
+
+        Opened(java.io.FileDescriptor fd, int mode, boolean seekable) {
+            this.mode = mode;
+            this.seekable = seekable;
+            switch (mode) {
+                case KayaWire.FILE_MODE_READ -> {
+                    this.in = new java.io.FileInputStream(fd);
+                    this.out = null;
+                }
+                case KayaWire.FILE_MODE_WRITE -> {
+                    this.in = null;
+                    this.out = new java.io.FileOutputStream(fd);
+                }
+                case KayaWire.FILE_MODE_READ_WRITE -> {
+                    // Both over the SAME descriptor: one file offset,
+                    // and closing either closes it once (the JDK's
+                    // FileDescriptor tracks its parents).
+                    this.in = new java.io.FileInputStream(fd);
+                    this.out = new java.io.FileOutputStream(fd);
+                }
+                default -> throw new IllegalArgumentException(
+                        "kaya: " + mode + " is not a file mode — pass "
+                        + "KayaWire.FILE_MODE_READ, FILE_MODE_WRITE or "
+                        + "FILE_MODE_READ_WRITE");
+            }
+        }
+
+        /** The reading half — absent when the mode was write-only. */
+        public java.io.InputStream stream() {
+            if (in == null) {
+                throw new IllegalStateException(
+                        "kaya: this file was opened with "
+                        + "KayaWire.FILE_MODE_WRITE, which has no reading half"
+                        + " — open it again with FILE_MODE_READ to read what "
+                        + "you wrote, or with FILE_MODE_READ_WRITE to do both "
+                        + "through one handle");
+            }
+            return in;
+        }
+
+        /** The writing half — absent when the mode was read-only.
+         *
+         * <p>FILE_MODE_WRITE ARRIVES TRUNCATED: the core's open did it,
+         * on a picked file and on a save destination alike, so the first
+         * byte written is the file's first byte. FILE_MODE_READ_WRITE
+         * does not truncate, and shares its offset with
+         * {@link #stream()}. */
+        public java.io.OutputStream sink() {
+            if (out == null) {
+                throw new IllegalStateException(
+                        "kaya: this file was opened with "
+                        + "KayaWire.FILE_MODE_READ, which has no writing half"
+                        + " — open it again with FILE_MODE_WRITE (which "
+                        + "truncates) or FILE_MODE_READ_WRITE to write through "
+                        + "it");
+            }
+            return out;
+        }
+
+        /** Whether the handle supports random access. */
+        public boolean seekable() {
+            return seekable;
+        }
+
+        /** The mode this was opened with — one of KayaWire's three. */
+        public int mode() {
+            return mode;
+        }
+
+        /** Close the descriptor, whichever halves are open. Closing one
+         * half closes it for both; this closes what there is, once. */
+        @Override
+        public void close() throws java.io.IOException {
+            try {
+                if (in != null) {
+                    in.close();
+                }
+            } finally {
+                if (out != null) {
+                    out.close();
+                }
+            }
+        }
+    }
 
     /** Accumulates the one atomic SHOW_FILE_DIALOG record; nothing is
      * sent until show (a request has a send moment). */
@@ -634,6 +763,66 @@ public final class KayaApp {
             }
             tx.emit(KayaWire.txShowFileDialog(
                     window, id, multiple ? 1 : 0, filters.toArray()));
+            return id;
+        }
+    }
+
+    /** Accumulates the one atomic SHOW_SAVE_DIALOG record; nothing is
+     * sent until show, the picker chain's shape exactly.
+     *
+     * <p>ONE ID SPACE AND ONE TABLE with the picker, because that is
+     * what the wire says: the answer comes back as a file_dialog_result
+     * and one dialog of either kind is live per process. The narrowing
+     * to at-most-one file happens HERE rather than in every app —
+     * "exactly one locator or none" is a fact of the request, not
+     * something a guest should re-derive from a list length. */
+    public static final class SaveDialogRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+        private final String suggestedName;
+        private long window;
+        private final java.util.List<Object> filters = new java.util.ArrayList<>();
+        private BiConsumer<Tx, PickedFile> onResult;
+
+        SaveDialogRef(Tx tx, KayaApp app, long id, String suggestedName) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+            this.suggestedName = suggestedName;
+        }
+
+        /** Target an auxiliary window (0 = primary). */
+        public SaveDialogRef in(long window) {
+            this.window = window;
+            return this;
+        }
+
+        /** One advisory (label, space-separated extensions) pair — the
+         * picker's rule verbatim: a default view, never a guarantee. */
+        public SaveDialogRef filter(String label, String extensions) {
+            filters.add(label);
+            filters.add(extensions);
+            return this;
+        }
+
+        /** Bind the one-shot result handler to THIS request. CANCEL IS
+         * null — the empty answer the picker spells as an empty list,
+         * narrowed to the one destination this request can have. */
+        public SaveDialogRef onResult(BiConsumer<Tx, PickedFile> handler) {
+            this.onResult = handler;
+            return this;
+        }
+
+        /** Send the request, returning its id. */
+        public long show() {
+            if (onResult != null) {
+                BiConsumer<Tx, PickedFile> handler = onResult;
+                app.fileDialogs.put(id, (t, files) ->
+                        handler.accept(t, files.isEmpty() ? null : files.get(0)));
+            }
+            tx.emit(KayaWire.txShowSaveDialog(
+                    window, id, suggestedName, filters.toArray()));
             return id;
         }
     }
@@ -2977,6 +3166,32 @@ public final class KayaApp {
             return new FileDialogRef(this, KayaApp.this, ++nextFileDialog, false);
         }
 
+        /**
+         * Ask the platform WHERE TO SAVE — the picker's twin, on the
+         * same request/result grammar, out of the same one-live-dialog
+         * slot (docs/save-plan.md D2):
+         * tx.saveFile("notes").onResult((tx, file) -> { … }).show().
+         * CANCEL IS null, and the id retires with the answer.
+         *
+         * <p>The suggested name is the one the dialog OPENS with, and
+         * every platform treats it the way it treats a filter: it takes
+         * it and guarantees nothing. The user renames it; Android may
+         * append an extension matching the mime type. READ THE NAME YOU
+         * GOT — and on the phones read the file through the handle,
+         * since localPath is empty there.
+         *
+         * <p>WHAT YOU GET BACK OPENS EMPTY. A save destination may not
+         * exist yet (macOS, GTK and Windows answer with a name for a
+         * file nobody has made — measured), so the handle's open
+         * CREATES: opening it for {@link KayaWire#FILE_MODE_WRITE}
+         * succeeds and yields an empty file on every platform
+         * (docs/save-plan.md D1).
+         */
+        public SaveDialogRef saveFile(String suggestedName) {
+            return new SaveDialogRef(
+                    this, KayaApp.this, ++nextFileDialog, suggestedName);
+        }
+
         // --- The clipboard (DESIGN.md, Clipboard) ------------------
         //
         // A clip is not a string: every host models it as ONE item
@@ -3892,6 +4107,13 @@ public final class KayaApp {
                 // One-shot like the alert, and the id retires with it.
                 // EMPTY IS CANCEL — no platform can confirm an empty
                 // selection, so there is no sentinel to invent.
+                //
+                // A SAVE DIALOG ANSWERS HERE TOO, through the same table
+                // and the same id space (docs/save-plan.md D2): its
+                // handler was wrapped at show() to take the one
+                // destination out of the list, so cancel reaches a save
+                // handler as null by the same route it reaches a picker
+                // handler as an empty list. One retire, one live slot.
                 BiConsumer<Tx, java.util.List<PickedFile>> handler =
                         fileDialogs.remove(occ.id);
                 if (handler != null) {

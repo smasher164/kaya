@@ -1535,19 +1535,34 @@ let show_alert ?(window = 0L) ?(title = "") ?(message = "")
 
 (* The alert_choice cancel sentinel, for handlers: the wire u32
    0xFFFFFFFF as an OCaml int32 (-1l). Deliberately not an index. *)
+
+(* The filters encoding, written ONCE because two requests carry it:
+   alternating label and space-separated extensions. The picker and the
+   save dialog share the wire's shape, so they share the code that
+   builds it — a second copy is how the two drift apart on the day one
+   of them starts validating. *)
+let filter_values filters =
+  List.concat_map
+    (fun (label, exts) -> [ Kaya_wire.Str label; Kaya_wire.Str exts ])
+    filters
+
+(* Both dialogs draw their id from ONE counter, because the platforms
+   allow ONE live dialog per process whichever kind it is: a save
+   request that numbered itself separately could collide with a picker's
+   id in the result table. *)
+let next_dialog app =
+  app.next_file_dialog <- Int64.add app.next_file_dialog 1L;
+  app.next_file_dialog
+
 let pick ?(window = 0L) ?(filters = []) ~multiple ?on_result () =
   let tx = the_tx () in
   let app = tx.app in
-  app.next_file_dialog <- Int64.add app.next_file_dialog 1L;
-  let id = app.next_file_dialog in
+  let id = next_dialog app in
   Option.iter (fun f -> Hashtbl.replace app.file_dialog_handlers id f) on_result;
-  let values =
-    List.concat_map
-      (fun (label, exts) -> [ Kaya_wire.Str label; Kaya_wire.Str exts ])
-      filters
-  in
   emit tx
-    (Kaya_wire.tx_show_file_dialog window id (if multiple then 1 else 0) values);
+    (Kaya_wire.tx_show_file_dialog window id
+       (if multiple then 1 else 0)
+       (filter_values filters));
   id
 
 (* Ask the platform for files. THE PICK, NOT THE OPEN — the result
@@ -1569,6 +1584,55 @@ let pick_files ?(window = 0L) ?(filters = []) ?on_result () =
    asks the platform for one, so the handler receives zero or one. *)
 let pick_file ?(window = 0L) ?(filters = []) ?on_result () =
   pick ~window ~filters ~multiple:false ?on_result ()
+
+(* Ask the platform WHERE TO SAVE. The picker's twin, and deliberately
+   the same grammar (docs/save-plan.md D2): the id comes from the same
+   counter and so from the same one-live-dialog-per-process slot, the
+   answer arrives as the picker's own result, and the registration
+   retires with it.
+
+   [suggested_name] is the name the dialog OPENS with, and it rides as a
+   plain argument rather than an optional one — a save dialog with an
+   empty name box is one the platform will not let the user complete.
+   Every platform TAKES it and none guarantees it: the user renames it,
+   and Android appends an extension matching the mime type at creation.
+   So read the name you GOT — or, better, do not read a name at all and
+   read the bytes.
+
+   [filters] is the picker's advisory list, unchanged in meaning. Beware
+   on macOS: with allowed content types set, NSSavePanel appends the
+   first allowed extension to a name that has none.
+
+   [on_result] fires exactly once with [Some destination] or [None].
+   CANCEL IS [None], and the narrowing from the wire's list happens
+   HERE, not in the guest: "exactly one locator or none" is a fact of
+   the request — no platform's save dialog names two destinations — and
+   a guest should not have to re-derive it from a list length.
+
+   WHAT YOU GET BACK OPENS EMPTY, on every platform (docs/save-plan.md
+   D1). A destination need not exist yet: macOS, GTK and Windows answer
+   with a name for a file nobody has made, and macOS does not truncate
+   even when the user picks Replace, while Android and iOS hand back a
+   document that already exists. The core absorbs that — the handle
+   opens with CREATE — so [file_mode_write] on a fresh destination
+   succeeds and yields an empty file everywhere, and the guest writes
+   against the one behaviour. It is NOT a fourth file mode: creation is
+   a property of the destination the dialog promised, never of the
+   caller's intent. *)
+let save_file ?(window = 0L) ?(filters = []) ?on_result suggested_name =
+  let tx = the_tx () in
+  let app = tx.app in
+  let id = next_dialog app in
+  Option.iter
+    (fun f ->
+      Hashtbl.replace app.file_dialog_handlers id (fun files ->
+          f (match files with [] -> None | destination :: _ -> Some destination)))
+    on_result;
+  emit tx
+    (Kaya_wire.tx_show_save_dialog window id
+       (Kaya_wire.Str suggested_name)
+       (filter_values filters));
+  id
 
 (* --- The clipboard (DESIGN.md, Clipboard) ---------------------------
 

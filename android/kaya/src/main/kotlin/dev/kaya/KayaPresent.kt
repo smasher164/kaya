@@ -71,6 +71,29 @@ object KayaPresent {
     )
 
     /**
+     * The SAVE dialog's one answer: the `content://` URI of the document
+     * `ACTION_CREATE_DOCUMENT` made, and its display name. NULL IS
+     * CANCEL — the picker spells the same thing as an empty array,
+     * because it may answer with many and this may not.
+     *
+     * ITS OWN ENTRY RATHER THAN [emitFileDialogResult] WITH A LIST OF
+     * ONE, and not for tidiness: the core decides what a handle IS from
+     * which entry it arrives on. A save destination opens with create,
+     * so that mac/linux/windows can open a file their panel only NAMED;
+     * a picked file must not, or "save" quietly becomes "clobber"
+     * (docs/save-plan.md D1). Android's two sources happen to coincide —
+     * a created document exists, so the picker's `UriSource` would
+     * behave identically today — and answering on the picker's entry
+     * would therefore be a mistake that works, which is the kind that
+     * survives. kaya_emit_save_dialog_result's JNI spelling.
+     */
+    @JvmStatic external fun emitSaveDialogResult(
+        dialog: Long,
+        uri: String?,
+        name: String?,
+    )
+
+    /**
      * The privileged read's one answer, FLATTENED — the representation
      * crosses as scalars rather than as a struct, the way
      * [emitFileDialogResult] flattens the picker's answer, because a

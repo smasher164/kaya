@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xd8165a4995d2554f;
+    public const ulong SpecHash = 0xbfba1ee8ec9461cb;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -142,6 +142,7 @@ static class KayaWire
     public const ushort TxKindHighlightRanges = 38;
     public const ushort TxKindSelectRange = 39;
     public const ushort TxKindRevealRange = 40;
+    public const ushort TxKindShowSaveDialog = 41;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -172,6 +173,7 @@ static class KayaWire
     public const ushort ApplyKindHighlightRanges = 28;
     public const ushort ApplyKindSelectRange = 29;
     public const ushort ApplyKindRevealRange = 30;
+    public const ushort ApplyKindPresentSaveDialog = 31;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -650,6 +652,17 @@ static class KayaWire
         w.Write(start);
         w.Write(stop);
         return Finish(stream, w, TxKindRevealRange);
+    }
+
+    /// Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened.
+    public static byte[] TxShowSaveDialog(ulong window, ulong dialog, object suggestedName, object[] filters)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(dialog);
+        EncodeValue(w, suggestedName);
+        EncodeValues(w, filters);
+        return Finish(stream, w, TxKindShowSaveDialog);
     }
 
     /// set_property with a constant text value.

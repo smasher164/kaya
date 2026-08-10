@@ -80,6 +80,49 @@ class KayaHarnessAccessibility : AccessibilityService() {
         private const val BREADCRUMB_ID = "/breadcrumb_text"
 
         /**
+         * THE SAVE PANEL'S TWO NODES, and the one that tells the two
+         * dialogs apart.
+         *
+         * `ACTION_CREATE_DOCUMENT` is DocumentsUI too — the same
+         * package, the same breadcrumb, the same file list — so
+         * "DocumentsUI is up" does NOT mean "the open picker is up",
+         * and the readers below must not see each other's panel.
+         * Getting that wrong does not produce a wrong answer, it
+         * produces a HANG: a picker read that could see a save panel
+         * polls five seconds for a list that is never coming, and
+         * `file_save`'s postcondition reads a null state as "the press
+         * landed".
+         *
+         * THE DISCRIMINATOR IS THE NAME FIELD, because it is the only
+         * thing the create mode actually adds. `container_save` looks
+         * like the obvious answer and is NOT one: MEASURED on both
+         * panels, phone and tablet (scratchpad/open-panel-phone.xml vs
+         * save-panel-phone.xml, identical id sets), it is in the SHARED
+         * layout and is published EMPTY by the browse mode — a
+         * discriminator that says "save" about every picker. Keying on
+         * it turned every `expect_file_dialog` on this platform red.
+         *
+         * The name field is also what the two save verbs work on, so
+         * this asks one question rather than two that could disagree: a
+         * save panel with nothing to type into is not one this harness
+         * could drive anyway.
+         *
+         * THE NAME FIELD AND EVERY ROW SHARE ONE ID — both are
+         * `android:id/title` (measured: `text="decoy"` and
+         * `text="draft"` carry the id the name box does). So the id
+         * alone cannot name the field, and a reader keyed on it reads
+         * the FIRST ROW's basename as the name the user typed. Only one
+         * of them is EDITABLE, which is the property that makes it the
+         * name field rather than a naming coincidence.
+         *
+         * SUFFIXES, like ROW_ID and BREADCRUMB_ID above, because
+         * DocumentsUI ships under two package names and its own ids
+         * carry whichever one this device has.
+         */
+        private const val SAVE_NAME_ID = "/title"
+        private const val SAVE_BUTTON_ID = "/button1"
+
+        /**
          * How many backs a dismissal may take, and how long each one is
          * given to land. Three sufficed from the depth the scene aims
          * at; the ceiling is the trail's length plus room, not a guess
@@ -109,14 +152,127 @@ class KayaHarnessAccessibility : AccessibilityService() {
      * <dir>) and only the tail names where the list actually is.
      */
     fun pickerState(): Pair<String, List<String>>? {
+        val nodes = dialogNodes(save = false) ?: return null
+        return Pair(breadcrumb(nodes), rows(nodes).map { it.first })
+    }
+
+    /**
+     * What the live SAVE panel is REALLY showing: the directory it is
+     * in, and the name in its name field. Null when no save panel is up.
+     *
+     * THE NAME HALF IS THE WHOLE POINT. A backend that ignored the name
+     * it was told saves under the SUGGESTED name, and every assertion
+     * downstream — the bytes, the reopen, the round trip — passes on the
+     * wrong file. Nothing else in the scene can see that.
+     *
+     * THE ROWS ARE NOT READ HERE, and the reason is the mac arm's rather
+     * than this platform's: a save dialog need not publish a file
+     * browser at all, so a reader that required rows would be writing a
+     * cross-platform verb against one platform's chrome. DocumentsUI
+     * happens to list files in CREATE mode (measured), and this reader
+     * still does not look.
+     */
+    fun saveState(): Pair<String, String>? {
+        val nodes = dialogNodes(save = true) ?: return null
+        val name = nameField(nodes)?.text?.toString() ?: return null
+        return Pair(breadcrumb(nodes), name)
+    }
+
+    /**
+     * Type a name into the live save panel's name field — the harness
+     * doing what a user's keyboard would, at set_text's tier.
+     *
+     * ACTION_SET_TEXT and not a synthesized key stream: measured to
+     * return true and to read back as the typed value, and the URI the
+     * panel then answered with carried that name
+     * (scratchpad/save-probe-android.md, log-B2). False when no save
+     * panel is up or the field refused, which the caller reports —
+     * silence here would let the leg save under the SUGGESTED name with
+     * every byte assertion still passing.
+     */
+    fun setSaveName(name: String): Boolean {
+        val field = dialogNodes(save = true)?.let { nameField(it) } ?: return false
+        val args = android.os.Bundle()
+        args.putCharSequence(
+            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+            name,
+        )
+        return field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    /**
+     * Press the live save panel's own SAVE button — the same control a
+     * user works, so DocumentsUI's own create-and-answer runs and
+     * nothing is synthesized. False when no save panel is up or the
+     * button refused.
+     */
+    fun confirmSave(): Boolean {
+        val nodes = dialogNodes(save = true) ?: return false
+        val button = nodes.firstOrNull {
+            it.viewIdResourceName?.endsWith(SAVE_BUTTON_ID) == true
+        } ?: return false
+        return button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+
+    /**
+     * WHAT DOCUMENTSUI IS SHOWING, for a failure to say out loud: the
+     * distinct view ids in its tree, shortest form, sorted.
+     *
+     * A read that finds no save panel is otherwise indistinguishable
+     * from a save panel that never presented, and the two want opposite
+     * fixes. This arm cost a build cycle to exactly that: the reader
+     * was keyed on the wrong package's `container_save` and reported
+     * "no save dialog live" about a panel that was up, on screen and
+     * correct.
+     */
+    fun dialogShape(): List<String> {
+        val pkg = pickerPackage() ?: return emptyList()
+        return nodesIn(pkg)
+            .mapNotNull { node ->
+                node.viewIdResourceName?.substringAfterLast('/')?.let {
+                    // EDITABLE IS MARKED because it is the whole
+                    // discrimination: a shape with no editable `title`
+                    // is a browse picker, whatever else is in it.
+                    if (node.isEditable) "$it(editable)" else it
+                }
+            }
+            .distinct()
+            .sorted()
+    }
+
+    /**
+     * DocumentsUI's nodes when it is showing the dialog KIND asked for,
+     * null otherwise — the one place the discrimination happens, so the
+     * two readers cannot answer differently about the same screen.
+     */
+    private fun dialogNodes(save: Boolean): List<AccessibilityNodeInfo>? {
         val pkg = pickerPackage() ?: return null
         val nodes = nodesIn(pkg)
-        val where = nodes.filter { it.viewIdResourceName?.endsWith(BREADCRUMB_ID) == true }
+        return if ((nameField(nodes) != null) == save) nodes else null
+    }
+
+    /**
+     * The save panel's name box: the one EDITABLE `title` in the tree.
+     * Every row's basename carries the same id (measured), and only
+     * this one takes text — so the editable flag is what names it, and
+     * it is the same property that makes it the field a user types the
+     * file's name into.
+     */
+    private fun nameField(nodes: List<AccessibilityNodeInfo>): AccessibilityNodeInfo? =
+        nodes.firstOrNull {
+            it.viewIdResourceName?.endsWith(SAVE_NAME_ID) == true && it.isEditable
+        }
+
+    /**
+     * The directory this tree is in, off the LAST breadcrumb: DocumentsUI
+     * shows the whole trail (volume / Documents / <dir>) and only the
+     * tail names where the list actually is. Both dialogs publish it.
+     */
+    private fun breadcrumb(nodes: List<AccessibilityNodeInfo>): String =
+        nodes.filter { it.viewIdResourceName?.endsWith(BREADCRUMB_ID) == true }
             .mapNotNull { it.text?.toString() }
             .lastOrNull()
             ?: ""
-        return Pair(where, rows(nodes).map { it.first })
-    }
 
     /**
      * Choose the named row, for real: the platform's own click on the
@@ -129,8 +285,15 @@ class KayaHarnessAccessibility : AccessibilityService() {
      * anyway is how a scene silently picks the wrong file.
      */
     fun choose(name: String): Boolean {
-        val pkg = pickerPackage() ?: return false
-        val row = rows(nodesIn(pkg)).firstOrNull { it.first == name }?.second ?: return false
+        // THE OPEN PICKER'S ROWS ONLY. The save panel lists files too
+        // (measured), and clicking one there NAVIGATES OR RENAMES rather
+        // than answering the request — a click that lands, returns true,
+        // and leaves the dialog up.
+        val row = dialogNodes(save = false)
+            ?.let { rows(it) }
+            ?.firstOrNull { it.first == name }
+            ?.second
+            ?: return false
         return row.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }
 
@@ -143,6 +306,12 @@ class KayaHarnessAccessibility : AccessibilityService() {
      * one taken at the root dismisses. Measured at three from the depth
      * the scene aims at. So this is bounded and its proof is the picker
      * being GONE, never the action's return value.
+     *
+     * KIND-AGNOSTIC ON PURPOSE, unlike [choose] and [saveState]: back is
+     * the cancel affordance of BOTH dialogs (measured at three backs and
+     * a null result Intent for the save panel too), and "gone" is the
+     * same proof either way. A second copy of this keyed on the kind
+     * would be two answers to one question.
      *
      * MUST NOT RUN ON THE MAIN THREAD. getWindows() is refreshed on this
      * service's main looper, which is the app's, so a caller that blocks

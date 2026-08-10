@@ -165,6 +165,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_file_dialog_result as *mut _,
             },
             NativeMethod {
+                name: "emitSaveDialogResult".into(),
+                sig: "(JLjava/lang/String;Ljava/lang/String;)V".into(),
+                fn_ptr: present_emit_save_dialog_result as *mut _,
+            },
+            NativeMethod {
                 name: "emitClipboardResult".into(),
                 sig: "(JILjava/lang/String;[B[Ljava/lang/String;[Ljava/lang/String;)V"
                     .into(),
@@ -553,6 +558,48 @@ extern "system" fn present_emit_file_dialog_result(
             uri_ptrs.as_ptr(),
             name_ptrs.as_ptr(),
             cstrings.len(),
+        )
+    };
+}
+
+/// KayaPresent.emitSaveDialogResult: the save dialog's one answer.
+///
+/// ONE LOCATOR, NOT AN ARRAY, and a NULL one is cancel — the C entry's
+/// shape, kept all the way out to Kotlin so no layer here can hand back
+/// two destinations. `kaya_emit_save_dialog_result` is what makes the
+/// result a SAVE destination rather than a picked file
+/// (docs/save-plan.md D1), so the Compose backend answers on it even
+/// though this platform's two sources coincide: a created document
+/// exists, so the picker's entry would behave identically today and
+/// would be wrong the first time it stopped.
+extern "system" fn present_emit_save_dialog_result(
+    mut env: JNIEnv,
+    _class: JClass,
+    dialog: jlong,
+    uri: JString,
+    name: JString,
+) {
+    // A JNI null object is the cancel, and it reaches the C entry as a
+    // null pointer rather than as an empty string: "" is a locator the
+    // core would try to open.
+    let read = |env: &mut JNIEnv, s: &JString| -> Option<std::ffi::CString> {
+        if s.is_null() {
+            return None;
+        }
+        let text: String = env.get_string(s).ok()?.into();
+        std::ffi::CString::new(text).ok()
+    };
+    let locator = read(&mut env, &uri);
+    let display = read(&mut env, &name);
+    // The C entry borrows both pointers for the length of the call, so
+    // the CStrings outlive it here by construction.
+    unsafe {
+        crate::capi::kaya_emit_save_dialog_result(
+            dialog as u64,
+            locator
+                .as_ref()
+                .map_or(std::ptr::null(), |c| c.as_ptr()),
+            display.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
         )
     };
 }

@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges save"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -611,7 +611,7 @@ build_c() {
     # very assignment to say so — every name here must have a leg below.
     # SCENES is a command-line override, so the Makefile keeps one list
     # and the linux suite keeps building all of them.
-    make -C guests/c SCENES="undo dirty ranges" TARGET_DIR="$ROOT/target/debug" \
+    make -C guests/c SCENES="undo dirty ranges save" TARGET_DIR="$ROOT/target/debug" \
         OUT="$ROOT/target/c-guests"
 }
 
@@ -929,6 +929,61 @@ if [ -n "$panel_modes_gap" ]; then
     status=1
 fi
 panel_mode_restore || status=1
+
+# The save scene: the round trip an editor walks — open, save back, save
+# as, reopen — and the two things nothing else drives (docs/save-plan.md
+# D5). It runs REAL NSSavePanel chrome over accessibility, so it needs
+# the same logged-in GUI session the picker legs do.
+#
+# NO PANEL VIEW MODE IS SET FOR IT, and that is measured rather than an
+# omission: a save panel's COLLAPSED form publishes no file browser at
+# all, its collapsed/expanded state is a DIFFERENT machine-wide
+# preference (NSNavPanelExpandedStateForSaveMode) from the open panel's
+# view mode, and the reader deliberately never looks for rows. Setting a
+# mode here would exercise nothing and would leave a preference behind
+# for the legs above.
+KAYA_SELFTEST_SCRIPT="$(scene_script save)"
+export KAYA_SELFTEST_SCRIPT
+drain
+# EACH SAVE LEG ALONE BETWEEN DRAINS, and the reason is the panel, not
+# the scene: macOS remembers a save panel's last directory as a USER
+# PREFERENCE shared by every process, so nine guests opening panels in
+# one pool trample it — measured 2026-08-10, a leg asserting its own
+# kaya-save-<pid> directory was shown a SIBLING leg's. Same rule as the
+# clipboard legs below, for the same reason: one shared piece of session
+# state per lane.
+run save-rust-swiftui env KAYA_SELFTEST=save target/debug/examples/save
+# Java's leg rides the same script, and it is the only one that also
+# proves a BINDING fix: until this milestone dev.kaya.KayaApp wrapped
+# every mode's descriptor in a FileInputStream, so no Java app could
+# write to a picked file on any platform (docs/save-plan.md D3). The
+# save-back step is the first Java in the tree that writes through a
+# picked handle — with the old binding it never reaches the file.
+drain
+run save-java-swiftui env KAYA_SELFTEST=save KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+drain
+run save-python-swiftui env KAYA_SELFTEST=save python3 guests/python/save.py
+drain
+run save-go-swiftui env KAYA_SELFTEST=save target/go-guests/kaya-go
+drain
+run save-swift-swiftui env KAYA_SELFTEST=save target/swift-guests/save
+drain
+run save-haskell-swiftui env KAYA_SELFTEST=save "$(hs_bin save)"
+drain
+run save-csharp-swiftui env KAYA_SELFTEST=save KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+drain
+run save-ocaml-swiftui env KAYA_SELFTEST=save KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/save.exe
+# The C floor's save guest, which waits on no sugar: it decodes
+# `file_dialog_result` by hand and tells the two dialogs apart by the id
+# it minted, because on the wire the picker's answer and the save
+# panel's ARE one record (docs/save-plan.md D2). It is the tier where
+# the redeem-a-handle-then-write sequence is legible.
+drain
+run save-c-swiftui env KAYA_SELFTEST=save target/c-guests/save
+drain
 
 # The clipboard scene: one clip in several representations, and the
 # privileged read. Still a DEPTH slice while the bindings fan out, and

@@ -653,7 +653,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xd8165a4995d2554fuL
+    private const val SPEC_HASH: ULong = 0xbfba1ee8ec9461cbuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -667,6 +667,15 @@ object KayaCompose {
     private const val APPLY_DESTROY_WINDOW = 10
     private const val APPLY_PRESENT_ALERT = 11
     private const val APPLY_PRESENT_FILE_DIALOG = 24
+
+    /**
+     * The SAVE dialog's request (docs/save-plan.md D2). A SECOND REQUEST
+     * AND THE SAME ANSWER: it resolves on the picker's own
+     * file_dialog_result, shares its id space and its one-live-dialog
+     * slot, so this constant is the only new number the breadth arms
+     * carry.
+     */
+    private const val APPLY_PRESENT_SAVE_DIALOG = 31
 
     /** The clipboard pair: a copy going out, and the privileged read
      * asking for one back. */
@@ -1294,6 +1303,31 @@ object KayaCompose {
                         }
                     }
                     kayaPresentFileDialog(dialog, multiple, extensions)
+                }
+                APPLY_PRESENT_SAVE_DIALOG -> {
+                    // A STR AND THEN A LIST, which is a body shape no
+                    // other apply record has: the suggested name is a
+                    // Value (tag, length, bytes, self-padded to 8) and
+                    // the filter pairs follow, so the count below is
+                    // read from wherever the NAME ended rather than from
+                    // a fixed offset. A decoder that assumed the
+                    // picker's fixed header would read the name's
+                    // padding as the count and build a filter list of
+                    // garbage length.
+                    b.long // window: 0, the one surface on this host
+                    val saveDialog = b.long
+                    val suggested = readString(b)
+                    val saveFilterValues = b.int
+                    b.int // pad
+                    val saveExtensions = mutableListOf<String>()
+                    repeat(saveFilterValues / 2) {
+                        readString(b) // the label, an affordance an intent has nowhere to put
+                        readString(b).split(" ").forEach { ext ->
+                            val trimmed = ext.trim('.')
+                            if (trimmed.isNotEmpty()) saveExtensions.add(trimmed)
+                        }
+                    }
+                    kayaPresentSaveDialog(saveDialog, suggested, saveExtensions)
                 }
                 APPLY_PRESENT_ALERT -> {
                     // The platform's REAL modal dialog (M3
@@ -2002,6 +2036,36 @@ object KayaCompose {
     private fun kayaFileDialogState(): Pair<String, List<String>>? =
         KayaHarnessAccessibility.live?.pickerState()
 
+    /// What the live SAVE panel is really showing: its directory and the
+    /// name in its name field, null when none is up. The picker's reader
+    /// one dialog over — and the service is what keeps the two from
+    /// seeing each other's panel, since DocumentsUI serves both.
+    private fun kayaSaveDialogState(): Pair<String, String>? =
+        KayaHarnessAccessibility.live?.saveState()
+
+    /// The save panel's state, WAITED FOR. `expect_save_dialog` gets the
+    /// generic 5s retry like every other expect, but the two ACTIONS do
+    /// not — and typing into a panel that has not presented yet does
+    /// nothing at all, after which the leg saves under the SUGGESTED name
+    /// with every byte assertion downstream still green. So the wait
+    /// lives here, where both actions reach it.
+    ///
+    /// Bounded by the picker's own gone-wait constants rather than a new
+    /// pair: this is the same DocumentsUI hand-off, from the other side.
+    private fun kayaAwaitSaveDialogState(): Pair<String, String>? {
+        for (i in 0 until SAVE_PANEL_TRIES) {
+            kayaSaveDialogState()?.let { return it }
+            Thread.sleep(SAVE_PANEL_SETTLE_MS)
+        }
+        return kayaSaveDialogState()
+    }
+
+    /// How long a save panel is given to present, and how long each look
+    /// costs. DocumentsUI is another app being started, so this is a
+    /// process launch and not a frame.
+    private const val SAVE_PANEL_TRIES = 25
+    private const val SAVE_PANEL_SETTLE_MS = 200L
+
     /// The directory THE GUEST WILL USE — and on Android that is NOT the
     /// temp directory, which is the one thing this had to get right.
     ///
@@ -2186,26 +2250,130 @@ object KayaCompose {
             clip != null -> (0 until clip.itemCount).map { clip.getItemAt(it).uri }
             else -> emptyList()
         }
-        // The DISPLAY NAME, not the last URI segment: the segment is the
-        // provider's document id, which is a path fragment on the
-        // ExternalStorage provider and an opaque key on others.
-        val names = uris.map { uri ->
-            var name = ""
-            try {
-                activity.contentResolver.query(uri, null, null, null, null)?.use { c ->
-                    val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (c.moveToFirst() && i >= 0) name = c.getString(i) ?: ""
-                }
-            } catch (e: Exception) {
-                Log.w("kaya", "kaya: reading the picked name failed: $e")
-            }
-            name
-        }
+        val names = uris.map { displayName(activity, it) }
         KayaPresent.emitFileDialogResult(
             dialog,
             uris.map { it.toString() }.toTypedArray(),
             names.toTypedArray(),
         )
+    }
+
+    /// The DISPLAY NAME, not the last URI segment: the segment is the
+    /// provider's document id, which is a path fragment on the
+    /// ExternalStorage provider and an opaque key on others.
+    ///
+    /// A SAVED DOCUMENT NEEDS THIS MORE THAN A PICKED ONE DOES. SAF
+    /// appends an extension matching the request's mime type when it
+    /// creates the file, and it renames on collision — `picked.txt`
+    /// becomes `picked (1).txt` with no prompt (measured). So the name
+    /// the user typed and the name the document HAS are routinely
+    /// different, and only the provider knows which is which.
+    private fun displayName(activity: ComponentActivity, uri: Uri): String {
+        var name = ""
+        try {
+            activity.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (c.moveToFirst() && i >= 0) name = c.getString(i) ?: ""
+            }
+        } catch (e: Exception) {
+            Log.w("kaya", "kaya: reading the document's name failed: $e")
+        }
+        return name
+    }
+
+    /**
+     * Present the platform's REAL save dialog and answer exactly once.
+     *
+     * `ACTION_CREATE_DOCUMENT`, which is the picker's own hand-off to
+     * DocumentsUI with the mode flipped — the same registry, the same
+     * result path, the same accessibility service reading the same
+     * breadcrumb, and the same live slot, because one dialog per process
+     * is a rule about the USER's attention and not about a kind.
+     *
+     * IT ANSWERS WITH A DOCUMENT THAT ALREADY EXISTS, which is where
+     * this platform and the desktops disagree and where docs/save-plan.md
+     * D1 says the core absorbs it: DocumentsUI creates the file when SAVE
+     * is pressed, so the first `wt` open reports size 0 and the guest's
+     * write lands (measured, scratchpad/save-probe-android.md). mac,
+     * linux and windows hand back a name for a file nobody has made, and
+     * the core's `SaveDestination` creates it there. Nothing here needs
+     * to know that; the entry this answers on is what carries the
+     * difference.
+     *
+     * THE NAME IS A SUGGESTION AND THE PLATFORM MAY NOT KEEP IT — SAF
+     * appends an extension for the mime type and renames on collision
+     * rather than prompting. That is why the frozen scene asserts the
+     * BYTES a handle reads back and never a file's name
+     * (scratchpad/save-depth.md §8).
+     */
+    private fun kayaPresentSaveDialog(
+        dialog: Long,
+        suggestedName: String,
+        extensions: List<String>,
+    ) {
+        val activity = mountedActivity ?: error("kaya: a save dialog with no mounted activity")
+        check(kayaLivePickerDialog == null) {
+            "kaya: a second file dialog while $kayaLivePickerDialog is still up"
+        }
+        // ONE TYPE, NOT A LIST. The picker's EXTRA_MIME_TYPES filters what
+        // is SHOWN; a create request's type is what the document will BE,
+        // so a second one has nothing to mean. `*/*` when the guest named
+        // no filter, which is also the case the save scene sends: it maps
+        // to no extension, so SAF appends none.
+        val mimes = extensions.mapNotNull {
+            MimeTypeMap.getSingleton().getMimeTypeFromExtension(it.lowercase())
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType(mimes.firstOrNull() ?: "*/*")
+            .putExtra(Intent.EXTRA_TITLE, suggestedName)
+            // WRITE as well as read, exactly as the picker asks: a save
+            // destination the guest cannot write to is not a destination,
+            // and the grant is decided HERE — asking later is not
+            // possible.
+            .addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        kayaPendingPickerDirectory?.let {
+            intent.putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri(it))
+        }
+
+        kayaLivePickerDialog = dialog
+        kayaLivePickerLauncher = activity.activityResultRegistry.register(
+            "kaya-save-dialog-$dialog",
+            ActivityResultContracts.StartActivityForResult(),
+        ) { result ->
+            kayaLivePickerDialog = null
+            kayaLivePickerLauncher?.unregister()
+            kayaLivePickerLauncher = null
+            kayaAnswerSaveDialog(activity, dialog, result.data)
+        }
+        kayaLivePickerLauncher?.launch(intent)
+    }
+
+    /// The created document, or NOTHING for cancel — and nothing is a
+    /// null locator rather than an empty array, because the save entry
+    /// takes ONE locator. A cancelled panel arrives here with a null
+    /// Intent, the same shape the picker's cancel has.
+    ///
+    /// ANSWERED ON `emitSaveDialogResult` AND NOT THE PICKER'S ENTRY,
+    /// even though this platform's two sources happen to coincide: the
+    /// core decides what a destination IS from which entry it arrives on
+    /// (`register_saved` vs `register_picked`), so a backend that
+    /// answered a save request on the picker's entry would be asking for
+    /// the picker's semantics and getting away with it here by luck.
+    private fun kayaAnswerSaveDialog(
+        activity: ComponentActivity,
+        dialog: Long,
+        data: Intent?,
+    ) {
+        val uri = data?.data
+        if (uri == null) {
+            KayaPresent.emitSaveDialogResult(dialog, null, null)
+            return
+        }
+        KayaPresent.emitSaveDialogResult(dialog, uri.toString(), displayName(activity, uri))
     }
 
     /// The ExternalStorage provider's document uri for a directory under
@@ -3975,6 +4143,133 @@ object KayaCompose {
                                     )
                                 else -> observed.add("file dialog \"$wantDir\" $wantNames")
                             }
+                        }
+                    }
+                    "expect_save_dialog" -> {
+                        // The REAL save panel, read out of DocumentsUI's
+                        // own tree: the directory it is showing AND the
+                        // name in its name field. The name half is the
+                        // one that catches a backend which ignored the
+                        // name it was told — that saves under the
+                        // SUGGESTED name, where every byte assertion
+                        // downstream still passes and points at the
+                        // wrong file.
+                        val wantSaveDir = kayaExpandPath(parts.getOrNull(1) ?: "")
+                        val wantSaveName = parts.getOrNull(2) ?: ""
+                        if (wantSaveDir.contains("$")) {
+                            // The picker's guard, verbatim: an
+                            // unexpanded expectation is aimed correctly,
+                            // reads the right directory back, and fails
+                            // against a literal "$PID" — which reads as
+                            // a broken dialog rather than a broken
+                            // script.
+                            failures.add(
+                                "expect_save_dialog $wantSaveDir: unexpanded substitution — " +
+                                    "only \$TMP and \$PID exist",
+                            )
+                        } else if (wantSaveDir.isEmpty() || wantSaveName.isEmpty()) {
+                            failures.add("expect_save_dialog wants a directory and a name")
+                        } else {
+                            val saveState = kayaSaveDialogState()
+                            if (saveState == null) {
+                                // WHAT IS ON SCREEN INSTEAD, because "no
+                                // save dialog live" is the same sentence
+                                // for a panel that never presented and
+                                // for a reader that cannot see the one
+                                // that did — and those want opposite
+                                // fixes. Measured here: the reader was
+                                // keyed on the wrong package's
+                                // container id and said this about a
+                                // panel that was up and correct.
+                                failures.add(
+                                    "no save dialog live; DocumentsUI is showing " +
+                                        "${KayaHarnessAccessibility.live?.dialogShape()}"
+                                )
+                            } else {
+                                val (where, name) = saveState
+                                when {
+                                    !where.endsWith(wantSaveDir) ->
+                                        failures.add(
+                                            "save dialog showing \"$where\", " +
+                                                "wanted \"$wantSaveDir\""
+                                        )
+                                    name != wantSaveName ->
+                                        failures.add(
+                                            "save dialog names \"$name\", wanted \"$wantSaveName\""
+                                        )
+                                    else ->
+                                        observed.add(
+                                            "save dialog \"$wantSaveDir\" \"$wantSaveName\""
+                                        )
+                                }
+                            }
+                        }
+                    }
+                    "file_dialog_name" -> {
+                        // Silent like click — expect_save_dialog reads it
+                        // back. EXCEPT that the panel must BE there:
+                        // typing into one that has not presented yet does
+                        // nothing at all, and the leg then saves under
+                        // the suggested name with every downstream
+                        // assertion still green.
+                        val saveName = parts.getOrNull(1) ?: ""
+                        when {
+                            saveName.isEmpty() ->
+                                failures.add("file_dialog_name wants a file name")
+                            kayaAwaitSaveDialogState() == null ->
+                                failures.add("file_dialog_name $saveName: no save dialog is live")
+                            KayaHarnessAccessibility.live?.setSaveName(saveName) != true ->
+                                failures.add(
+                                    "file_dialog_name $saveName: the panel's name field " +
+                                        "refused the text"
+                                )
+                        }
+                    }
+                    "file_save" -> {
+                        // Press the panel's own SAVE, or dismiss it — the
+                        // same controls a user works, so DocumentsUI's
+                        // own create-and-answer runs and nothing is
+                        // synthesized. Silent; the observable is the
+                        // guest's reaction to the result.
+                        val saveArg = parts.getOrNull(1) ?: ""
+                        val svc = KayaHarnessAccessibility.live
+                        when {
+                            saveArg != "" && saveArg != "cancel" ->
+                                failures.add(
+                                    "file_save takes nothing or `cancel`, got $saveArg"
+                                )
+                            svc == null ->
+                                failures.add(
+                                    "file_save: no harness accessibility service — the " +
+                                        "runner did not enable it"
+                                )
+                            kayaAwaitSaveDialogState() == null ->
+                                failures.add("file_save: no save dialog is live")
+                            // CANCEL IS BACK on this platform, the same
+                            // affordance and the same bounded walk the
+                            // picker's cancel takes — there is no Cancel
+                            // button in either dialog.
+                            saveArg == "cancel" ->
+                                if (!svc.dismiss()) {
+                                    failures.add(
+                                        "file_save cancel: the panel would not dismiss; " +
+                                            "windows are ${svc.windowPackages()}"
+                                    )
+                                }
+                            !svc.confirmSave() ->
+                                failures.add("file_save: the panel's SAVE button refused the press")
+                            // AND THE PANEL MUST BE GONE — the picker's
+                            // postcondition and the same reason: a press
+                            // that lands before the panel is interactive
+                            // is swallowed with no error anywhere, and
+                            // the leg then fails three steps later on an
+                            // assertion about the GUEST.
+                            !svc.waitForPickerGone() ->
+                                failures.add(
+                                    "file_save: the panel is still up (naming " +
+                                        "\"${kayaSaveDialogState()?.second}\") — the press was " +
+                                        "swallowed, which the panel cannot tell you"
+                                )
                         }
                     }
                     "clipboard_seed" -> {

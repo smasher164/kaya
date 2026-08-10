@@ -161,6 +161,11 @@ GATES = [
      "worth nothing"),
     ("check-pins", ["tools/check-pins.sh"], True, ""),
     ("check-verbs", ["tools/check-verbs.sh"], True, ""),
+    # The file-mode numbers against the spec that owns them. Five
+    # hand-written sites decode the integer kaya_open_picked takes and
+    # nothing held them to the spec's numbering — the same class as
+    # check-verbs' private wire constants, one ABI over.
+    ("check-file-modes", ["tools/check-file-modes.sh"], True, ""),
     ("check-jni", ["tools/check-jni.sh"], True, ""),
     ("check-stubs", ["tools/check-stubs.sh"], True, ""),
     ("check-compose", ["tools/check-compose.sh"], True, ""),

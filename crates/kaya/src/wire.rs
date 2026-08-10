@@ -71,6 +71,12 @@ pub const TX_UNDO_GROUP: u16 = 37;
 pub const TX_HIGHLIGHT_RANGES: u16 = 38;
 pub const TX_SELECT_RANGE: u16 = 39;
 pub const TX_REVEAL_RANGE: u16 = 40;
+/// The save dialog's request (docs/save-plan.md D2). Its ANSWER is the
+/// picker's — a file_dialog_result carrying one file or none — because
+/// the two dialogs share one id space, one live slot and one result
+/// grammar; only the request differs, which is the only place they
+/// differ for a guest either.
+pub const TX_SHOW_SAVE_DIALOG: u16 = 41;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -108,6 +114,7 @@ pub const APPLY_CLEAR_UNDO: u16 = 27;
 pub const APPLY_HIGHLIGHT_RANGES: u16 = 28;
 pub const APPLY_SELECT_RANGE: u16 = 29;
 pub const APPLY_REVEAL_RANGE: u16 = 30;
+pub const APPLY_PRESENT_SAVE_DIALOG: u16 = 31;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -767,6 +774,35 @@ pub fn decode_transaction_with_blobs(
                 widget: WidgetId(r.u64()),
                 range: TextRange::new(r.u64(), r.u64()),
             },
+            TX_SHOW_SAVE_DIALOG => {
+                let window = WindowId(r.u64());
+                let dialog = crate::protocol::FileDialogId(r.u64());
+                let suggested_name = match r.value() {
+                    Value::Str(s) => s,
+                    other => panic!(
+                        "kaya: show_save_dialog suggested_name is {other:?}, wanted a string"
+                    ),
+                };
+                // The picker's filter encoding verbatim — pairs of label
+                // and extensions, read in twos.
+                let flat = r.record();
+                assert!(
+                    flat.len() % 2 == 0,
+                    "kaya: show_save_dialog carries {} filter values (pairs of \
+                     label and extensions, so an even count)",
+                    flat.len()
+                );
+                let filters = flat
+                    .chunks_exact(2)
+                    .map(|pair| (filter_str(&pair[0], "label"), filter_str(&pair[1], "extensions")))
+                    .collect();
+                TxOp::ShowSaveDialog(crate::protocol::SaveDialogSpec {
+                    window,
+                    dialog,
+                    suggested_name,
+                    filters,
+                })
+            }
             TX_SHOW_FILE_DIALOG => {
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
@@ -786,17 +822,7 @@ pub fn decode_transaction_with_blobs(
                 let filters = flat
                     .chunks_exact(2)
                     .map(|pair| {
-                        let label = match &pair[0] {
-                            Value::Str(v) => v.clone(),
-                            other => panic!("kaya: filter label is {other:?}, wanted a string"),
-                        };
-                        let exts = match &pair[1] {
-                            Value::Str(v) => v.clone(),
-                            other => {
-                                panic!("kaya: filter extensions are {other:?}, wanted a string")
-                            }
-                        };
-                        (label, exts)
+                        (filter_str(&pair[0], "label"), filter_str(&pair[1], "extensions"))
                     })
                     .collect();
                 TxOp::ShowFileDialog(crate::protocol::FileDialogSpec {
@@ -938,6 +964,16 @@ fn alert_str(v: Value, field: &str) -> String {
     match v {
         Value::Str(s) => s,
         other => panic!("kaya: show_alert {field} must be a Str value, got {other:?}"),
+    }
+}
+
+/// One half of a filter pair. BOTH DIALOGS READ IT — the picker and the
+/// save request carry the same advisory encoding, so the refusal for a
+/// non-Str filter is written once and cannot drift between them.
+fn filter_str(v: &Value, what: &str) -> String {
+    match v {
+        Value::Str(s) => s.clone(),
+        other => panic!("kaya: filter {what} is {other:?}, wanted a string"),
     }
 }
 
@@ -1653,6 +1689,19 @@ impl Writer {
                     }
                 })
             }
+            ApplyOp::PresentSaveDialog(spec) => {
+                self.record(APPLY_PRESENT_SAVE_DIALOG, |b, blobs| {
+                    b.extend_from_slice(&spec.window.0.to_le_bytes());
+                    b.extend_from_slice(&spec.dialog.0.to_le_bytes());
+                    write_value(b, &Value::Str(spec.suggested_name.clone()), blobs);
+                    b.extend_from_slice(&((spec.filters.len() * 2) as u32).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    for (label, exts) in &spec.filters {
+                        write_value(b, &Value::Str(label.clone()), blobs);
+                        write_value(b, &Value::Str(exts.clone()), blobs);
+                    }
+                })
+            }
             ApplyOp::Copy(clip) => self.record(APPLY_COPY, |b, blobs| {
                 write_clip_out(b, clip, blobs);
             }),
@@ -1973,6 +2022,19 @@ impl Writer {
                 // Filters ride as alternating Str values, label then
                 // extensions — the Values encoding read in pairs, the
                 // same grouping trick the result uses in threes.
+                let flat: Vec<Value> = spec
+                    .filters
+                    .iter()
+                    .flat_map(|(label, exts)| {
+                        [Value::Str(label.clone()), Value::Str(exts.clone())]
+                    })
+                    .collect();
+                write_values(b, &flat, blobs);
+            }),
+            TxOp::ShowSaveDialog(spec) => self.record(TX_SHOW_SAVE_DIALOG, |b, blobs| {
+                b.extend_from_slice(&spec.window.0.to_le_bytes());
+                b.extend_from_slice(&spec.dialog.0.to_le_bytes());
+                write_value(b, &Value::Str(spec.suggested_name.clone()), blobs);
                 let flat: Vec<Value> = spec
                     .filters
                     .iter()
@@ -2636,6 +2698,57 @@ mod tests {
                 key: Value::from("a"),
                 before: None,
             },
+        ];
+        let mut w = Writer::new();
+        for op in &ops {
+            w.tx_op(op);
+        }
+        let decoded = decode_transaction(&w.into_bytes());
+        assert_eq!(decoded.len(), ops.len());
+        for (a, b) in ops.iter().zip(decoded.iter()) {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
+
+    /// BOTH DIALOG REQUESTS, out and back, in one test — because the
+    /// thing that can break is the difference between them. The picker
+    /// carries a flag then a list; the save request carries a STR AND
+    /// THEN A LIST, which is a shape no other tx record has, and a
+    /// decoder that read the name's padding as the list's count would
+    /// produce a filter list of garbage length rather than an error.
+    ///
+    /// A SAVE REQUEST WITH NO FILTERS IS THE INTERESTING ONE and is
+    /// here deliberately: it is what the save scene sends, and it is the
+    /// case where the values list is empty, so a mis-sized name field
+    /// runs straight off the end of the record.
+    #[test]
+    fn dialog_requests_round_trip() {
+        use crate::protocol::{FileDialogId, FileDialogSpec, SaveDialogSpec};
+        let ops = vec![
+            TxOp::ShowFileDialog(FileDialogSpec {
+                window: WindowId(0),
+                dialog: FileDialogId(7),
+                multiple: true,
+                filters: vec![("Text".into(), "txt md".into())],
+            }),
+            TxOp::ShowSaveDialog(SaveDialogSpec {
+                window: WindowId(3),
+                dialog: FileDialogId(8),
+                suggested_name: "notes".into(),
+                filters: vec![],
+            }),
+            TxOp::ShowSaveDialog(SaveDialogSpec {
+                window: WindowId(0),
+                dialog: FileDialogId(9),
+                // A name whose length is not a multiple of 8, so the
+                // padding between the Str and the values count has to be
+                // right rather than accidentally right.
+                suggested_name: "a-rather-long-suggested-name.txt".into(),
+                filters: vec![
+                    ("Text".into(), "txt".into()),
+                    ("Markdown".into(), "md markdown".into()),
+                ],
+            }),
         ];
         let mut w = Writer::new();
         for op in &ops {

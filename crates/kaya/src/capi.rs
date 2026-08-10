@@ -222,6 +222,24 @@ const _: () = assert!(
         && KAYA_TX_REVEAL_RANGE == wire::TX_REVEAL_RANGE
 );
 
+/// Request the platform's save dialog over a live window (0 = primary).
+/// Body: { u64 window; u64 dialog; Str suggested_name; Values filters —
+/// the picker's alternating label/extensions pairs }.
+///
+/// THE PICKER'S GRAMMAR AND THE PICKER'S ANSWER: dialog ids come out of
+/// the same guest-chosen space, one dialog of either kind may be live per
+/// process, and the result arrives as a FILE_DIALOG_RESULT occurrence
+/// carrying one file (or none, for cancel) whose id retires there.
+///
+/// THE HANDLE IT ANSWERS WITH OPENS WITH CREATE (docs/save-plan.md D1):
+/// two platforms hand back a name for a file nobody has made and two hand
+/// back a document that exists, so the core makes both open the same way
+/// — succeed, and yield an empty file for FILE_MODE_WRITE. There is no
+/// FILE_MODE_CREATE and deliberately so: creation belongs to the
+/// destination the dialog promised, not to the caller's intent.
+pub const KAYA_TX_SHOW_SAVE_DIALOG: u16 = 41;
+const _: () = assert!(KAYA_TX_SHOW_SAVE_DIALOG == wire::TX_SHOW_SAVE_DIALOG);
+
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
 /// and assert agreement at load: a stale library and a fresh guest —
@@ -404,6 +422,12 @@ const _: () = assert!(
         && KAYA_APPLY_SELECT_RANGE == wire::APPLY_SELECT_RANGE
         && KAYA_APPLY_REVEAL_RANGE == wire::APPLY_REVEAL_RANGE
 );
+
+/// Present the platform's real save dialog (SHOW_SAVE_DIALOG, already
+/// validated by the core). Answered exactly once with
+/// kaya_emit_save_dialog_result: ONE locator, or a null one for cancel.
+pub const KAYA_APPLY_PRESENT_SAVE_DIALOG: u16 = 31;
+const _: () = assert!(KAYA_APPLY_PRESENT_SAVE_DIALOG == wire::APPLY_PRESENT_SAVE_DIALOG);
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
         && KAYA_APPLY_READ_CLIPBOARD == wire::APPLY_READ_CLIPBOARD
@@ -1440,11 +1464,19 @@ fn libc_einval() -> i32 {
     22
 }
 
-#[cfg(all(test, unix))]
+/// UNIX NO LONGER GATES THESE (docs/save-plan.md D3). The gate was
+/// `cfg(all(test, unix))`, so the one test of the redemption path had
+/// never run on Windows at all — on the platform whose handle is a
+/// HANDLE and not a descriptor, where `file_from_raw` takes the other
+/// arm and nothing had ever exercised it. Nothing in the body was ever
+/// POSIX-specific; the gate was a habit. What it cost is the shape worth
+/// remembering: the API's write half was untested everywhere and its
+/// Windows half unrun, while the tree read as covered.
+#[cfg(test)]
 mod picked_tests {
     use super::*;
-    use crate::protocol::PathSource;
-    use std::io::Read;
+    use crate::protocol::{PathSource, SaveDestination};
+    use std::io::{Read, Seek, Write};
 
     /// THE CENTRAL CLAIM OF THE FILE-DIALOG DESIGN, at unit level: a
     /// handle redeems for a REAL descriptor, and the caller reads it
@@ -1465,7 +1497,11 @@ mod picked_tests {
         let mut fd = -1i64;
         let mut seekable = 0u32;
         assert_eq!(kaya_open_picked(handle.0, crate::wire::FILE_MODE_READ, &mut fd, &mut seekable), 0);
-        assert!(fd >= 0);
+        // NOT `fd >= 0`: this ran on unix only until the save milestone,
+        // and a Windows HANDLE is a pointer value, not a small index —
+        // the one thing that is never a handle there is -1
+        // (INVALID_HANDLE_VALUE).
+        assert_ne!(fd, -1);
         assert_eq!(seekable, 1, "a regular file seeks");
 
         // The guest's own file API, from here on.
@@ -1482,9 +1518,168 @@ mod picked_tests {
             kaya_open_picked(handle.0, crate::wire::FILE_MODE_READ_WRITE, &mut fd2, &mut seekable),
             0
         );
-        assert!(fd2 >= 0);
-        drop(unsafe { crate::protocol::file_from_raw(fd2) });
+        assert_ne!(fd2, -1);
+        // AND THE WRITE HALF IS EXERCISED, which no test anywhere did
+        // until the save milestone (docs/save-plan.md D3): write mode was
+        // implemented on every platform and driven by nothing, so "it
+        // works" rested on reading the code. READ_WRITE is a positioned
+        // write and does NOT truncate — two bytes over the front, the
+        // tail intact.
+        {
+            let mut file = unsafe { crate::protocol::file_from_raw(fd2) };
+            file.write_all(b"RW").unwrap();
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"RWcked bytes");
 
+        // WRITE truncates, and that is what makes the two modes
+        // distinguishable ON DISK rather than by inspection — a source
+        // that did the same thing twice would pass a weaker check.
+        let mut fd3 = -1i64;
+        assert_eq!(
+            kaya_open_picked(handle.0, crate::wire::FILE_MODE_WRITE, &mut fd3, &mut seekable),
+            0
+        );
+        {
+            let mut file = unsafe { crate::protocol::file_from_raw(fd3) };
+            file.write_all(b"W").unwrap();
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"W");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// THE SAVE DECISION AT UNIT LEVEL (docs/save-plan.md D1): a save
+    /// dialog's destination opens even though NOTHING IS THERE, and
+    /// opening it for write yields an empty file.
+    ///
+    /// This is the whole difference between the two sources, and the
+    /// reason it is a source rather than a fourth file mode: the guest
+    /// asks for the same `Write` it would ask for on a picked file, and
+    /// the DESTINATION is what makes it create. A `FILE_MODE_CREATE`
+    /// would put that choice in the caller's hands, where "save" becomes
+    /// "clobber" one argument at a time.
+    #[test]
+    fn a_save_destination_creates_and_then_truncates() {
+        let dir = std::env::temp_dir().join(format!("kaya-save-unit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("chosen.txt");
+        // The state a real save panel leaves behind on macOS, GTK and
+        // Windows: a name, and no file (measured — the panel creates
+        // nothing, and does not truncate on Replace either).
+        assert!(!path.exists());
+
+        let handle = picked_register(std::sync::Arc::new(SaveDestination {
+            name: "chosen.txt".into(),
+            path: path.to_string_lossy().into_owned(),
+        }));
+
+        // A PICKED SOURCE FOR THE SAME PATH REFUSES, and that comparison
+        // is the test: without it this only says "opening a file works".
+        let picked = picked_register(std::sync::Arc::new(PathSource {
+            name: "chosen.txt".into(),
+            path: path.to_string_lossy().into_owned(),
+        }));
+        let mut fd = -1i64;
+        let mut seekable = 0u32;
+        assert_ne!(
+            kaya_open_picked(picked.0, crate::wire::FILE_MODE_WRITE, &mut fd, &mut seekable),
+            0,
+            "a picked file that does not exist must still fail — only a \
+             save destination creates"
+        );
+
+        assert_eq!(
+            kaya_open_picked(handle.0, crate::wire::FILE_MODE_WRITE, &mut fd, &mut seekable),
+            0,
+            "a save destination opens for write even though nothing is there"
+        );
+        assert_eq!(seekable, 1);
+        {
+            let mut file = unsafe { crate::protocol::file_from_raw(fd) };
+            // EMPTY AT THE START is the promise; the length is how a test
+            // can see it, since a fresh descriptor has nothing to read.
+            assert_eq!(file.metadata().unwrap().len(), 0);
+            file.write_all(b"a longer first save").unwrap();
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"a longer first save");
+
+        // TRUNCATE ON EVERY WRITE OPEN, not only the creating one: the
+        // second save of a document must not leave the tail of the first
+        // behind, which is the failure a shorter save produces and a
+        // longer one hides.
+        let mut fd2 = -1i64;
+        assert_eq!(
+            kaya_open_picked(handle.0, crate::wire::FILE_MODE_WRITE, &mut fd2, &mut seekable),
+            0
+        );
+        {
+            let mut file = unsafe { crate::protocol::file_from_raw(fd2) };
+            file.write_all(b"short").unwrap();
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"short");
+
+        // AND READING IT BACK DOES NOT DESTROY IT. The round trip the
+        // save scene walks — write, reopen, read — is only a round trip
+        // if Read leaves the bytes alone, so the create that every mode
+        // carries must not bring truncation with it.
+        let mut fd3 = -1i64;
+        assert_eq!(
+            kaya_open_picked(handle.0, crate::wire::FILE_MODE_READ, &mut fd3, &mut seekable),
+            0
+        );
+        let mut got = String::new();
+        unsafe { crate::protocol::file_from_raw(fd3) }
+            .read_to_string(&mut got)
+            .unwrap();
+        assert_eq!(got, "short");
+
+        // A DESTINATION IN A DIRECTORY THAT DOES NOT EXIST STILL FAILS,
+        // and cleanly: create makes a FILE, never a path. A dialog cannot
+        // hand back a name under a missing directory, so this is only
+        // here to say the error still reaches the guest unchanged.
+        let nowhere = picked_register(std::sync::Arc::new(SaveDestination {
+            name: "x".into(),
+            path: dir.join("no-such-dir").join("x").to_string_lossy().into_owned(),
+        }));
+        assert_ne!(
+            kaya_open_picked(nowhere.0, crate::wire::FILE_MODE_WRITE, &mut fd, &mut seekable),
+            0
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A SAVE DESTINATION READ BEFORE ANYTHING IS WRITTEN is the corner
+    /// where the platforms disagree loudest, and the one the uniform
+    /// statement has to cover: Android and iOS hand back a document that
+    /// EXISTS, so reading it answers empty; the three path platforms hand
+    /// back a name for nothing, where a plain read would be ENOENT. The
+    /// create every mode carries is what makes those one behaviour.
+    #[test]
+    fn reading_an_untouched_destination_answers_empty() {
+        let dir = std::env::temp_dir().join(format!("kaya-save-fresh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("fresh.txt");
+        let handle = picked_register(std::sync::Arc::new(SaveDestination {
+            name: "fresh.txt".into(),
+            path: path.to_string_lossy().into_owned(),
+        }));
+        let mut fd = -1i64;
+        let mut seekable = 0u32;
+        assert_eq!(
+            kaya_open_picked(handle.0, crate::wire::FILE_MODE_READ, &mut fd, &mut seekable),
+            0
+        );
+        let mut got = String::new();
+        let mut file = unsafe { crate::protocol::file_from_raw(fd) };
+        file.read_to_string(&mut got).unwrap();
+        assert_eq!(got, "");
+        // Read and ReadWrite coincide on a destination — creation costs
+        // write access on every OS kaya targets — and the honest way to
+        // say so is to write through the handle Read handed back.
+        file.rewind().unwrap();
+        file.write_all(b"x").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"x");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1733,6 +1928,100 @@ pub unsafe extern "C" fn kaya_emit_file_dialog_result(
         let _ = (dialog, locators, names, count);
         panic!(
             "kaya: kaya_emit_file_dialog_result is the interpreter platforms' \
+             entry — this host's backend answers on its own sink"
+        );
+    }
+}
+
+/// Register a save dialog's destination — THE ONE PLACE `create` COMES
+/// FROM, and the reason it is a separate entry from the picker's.
+///
+/// A picked file exists; a destination need not. The two platforms whose
+/// dialogs answer with a document (Android's ACTION_CREATE_DOCUMENT, iOS's
+/// export) already satisfy the rule, so they register the source they
+/// always did; the three that answer with a name for a file nobody has
+/// made register a `SaveDestination`, whose open creates. The guest sees
+/// docs/save-plan.md D1's one behaviour either way.
+///
+/// STRUCTURALLY, NOT BY A FLAG A BACKEND MIGHT FORGET: this entry takes
+/// ONE locator and is reached only from a save presentation, so a picked
+/// file cannot acquire creation and a destination cannot lose it.
+///
+/// # Safety
+/// `locator` and `name` must be valid NUL-terminated UTF-8 that outlives
+/// the call, or null (which is CANCEL).
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+unsafe fn register_saved(
+    locator: *const std::os::raw::c_char,
+    name: *const std::os::raw::c_char,
+) -> Vec<crate::protocol::PickedFile> {
+    if locator.is_null() {
+        // Cancel is the empty answer, exactly as the picker spells it —
+        // no platform can confirm an empty selection, so there is no
+        // sentinel to invent here either.
+        return Vec::new();
+    }
+    let read = |p: *const std::os::raw::c_char| -> String {
+        if p.is_null() {
+            return String::new();
+        }
+        unsafe { std::ffi::CStr::from_ptr(p) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    #[cfg(target_os = "android")]
+    let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
+        std::sync::Arc::new(crate::android::UriSource {
+            name: read(name),
+            uri: read(locator),
+        });
+    #[cfg(target_os = "ios")]
+    let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
+        std::sync::Arc::new(crate::swiftui_host::UrlSource {
+            name: read(name),
+            locator: read(locator),
+        });
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let source: std::sync::Arc<dyn crate::protocol::PickedSource> =
+        std::sync::Arc::new(crate::protocol::SaveDestination {
+            name: read(name),
+            path: read(locator),
+        });
+    let handle = picked_register(source.clone());
+    vec![crate::protocol::PickedFile {
+        handle,
+        name: crate::protocol::PickedSource::name(&*source).to_owned(),
+        local_path: crate::protocol::PickedSource::local_path(&*source).to_owned(),
+    }]
+}
+
+/// Presentation side: the save dialog's one answer, on the picker's
+/// result grammar (docs/save-plan.md D2) — the occurrence, the live slot
+/// and the retire gate are all the picker's; only the request differed.
+///
+/// ONE LOCATOR, NOT AN ARRAY, and that is the type doing the work: no
+/// platform's save dialog names two destinations, so a backend physically
+/// cannot hand back two. A NULL `locator` is cancel.
+///
+/// # Safety
+/// `locator` and `name` must be valid NUL-terminated UTF-8 outliving the
+/// call, or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_save_dialog_result(
+    dialog: u64,
+    locator: *const std::os::raw::c_char,
+    name: *const std::os::raw::c_char,
+) {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    {
+        let files = unsafe { register_saved(locator, name) };
+        file_dialog_resolved(dialog, files);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (dialog, locator, name);
+        panic!(
+            "kaya: kaya_emit_save_dialog_result is the interpreter platforms' \
              entry — this host's backend answers on its own sink"
         );
     }
@@ -2490,6 +2779,7 @@ mod tests {
             ("highlight_ranges", KAYA_TX_HIGHLIGHT_RANGES),
             ("select_range", KAYA_TX_SELECT_RANGE),
             ("reveal_range", KAYA_TX_REVEAL_RANGE),
+            ("show_save_dialog", KAYA_TX_SHOW_SAVE_DIALOG),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -2522,6 +2812,7 @@ mod tests {
             ("highlight_ranges", KAYA_APPLY_HIGHLIGHT_RANGES),
             ("select_range", KAYA_APPLY_SELECT_RANGE),
             ("reveal_range", KAYA_APPLY_REVEAL_RANGE),
+            ("present_save_dialog", KAYA_APPLY_PRESENT_SAVE_DIALOG),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

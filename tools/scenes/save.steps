@@ -1,0 +1,83 @@
+# The save scene: the ROUND TRIP, not the dialog (docs/save-plan.md D5).
+# Open a file, save back to it, save AS a new destination, then reopen
+# both and prove the bytes are where they belong.
+#
+# EVERY ASSERTION IS A READ-BACK OFF THE DISK. The guest never reports
+# what it hoped it wrote: each status is the file reopened through the
+# handle kaya gave it and read with the guest's own file API. A write
+# that returned success and landed nowhere is exactly the failure "save"
+# has, and only reopening can see it.
+#
+# THE FILES ARE THE GUEST'S OWN, written before anything is shown, at
+# <temp>/kaya-save-<pid>/. Guest and interpreter are the same process, so
+# they agree on that path with no runner involvement, and the pid keeps
+# parallel legs from colliding. The script names only BASENAMES, so one
+# file serves five lanes whose temp directories differ.
+#
+# NO EXTENSIONS ON ANY NAME, deliberately. A save panel publishes its
+# name field with the extension hidden when the user's Finder preference
+# says so, so `expect_save_dialog` would read the stem on one machine and
+# the whole name on another — a machine-wide setting deciding the lane's
+# colour, which the panel view modes already cost a day. A name with no
+# extension has no stem to differ from.
+expect label#0 "no file"
+
+# ARM THE DIRECTORY FIRST: a panel honors its initial location only AT
+# presentation, and otherwise restores wherever it was last — which is
+# how one run inherited a directory an unrelated binary left behind.
+file_dialog_goto $TMP/kaya-save-$PID
+click button#0
+
+# THE DECOY IS LOAD-BEARING: with one file in the directory a dialog
+# completes with it when nothing is selected, so `file_choose` would pass
+# on a backend that never selected anything. "decoy" sorts first, so that
+# backend gets the WRONG file and its five bytes fail the assertion below
+# too.
+expect_file_dialog kaya-save-$PID decoy draft
+file_choose draft
+expect label#0 "opened first draft"
+
+# SAVE-BACK, THE THING NOTHING HAS EVER DRIVEN. No dialog: the user
+# already chose this file, and DESIGN.md has claimed since the picker
+# landed that the handle they chose it with is writable. The claim rested
+# on reading the code until this line.
+click button#1
+expect label#0 "saved second draft"
+
+# CANCEL FIRST, and it is two assertions in one. The empty answer must
+# reach the guest as "no destination" — and the dialog id must RETIRE, or
+# the second show below trips the one-live-dialog-per-process guard and
+# the guest panics.
+file_dialog_goto $TMP/kaya-save-$PID
+click button#2
+expect_save_dialog kaya-save-$PID copy
+file_save cancel
+expect label#0 "save cancelled"
+
+# SAVE AS. The panel opens on the name the guest SUGGESTED, then the
+# harness types over it the way a user would — and the read-back is what
+# makes that mean anything: a backend that ignored the name would save
+# under "copy", where every byte assertion below still passes and points
+# at the wrong file.
+file_dialog_goto $TMP/kaya-save-$PID
+click button#2
+expect_save_dialog kaya-save-$PID copy
+file_dialog_name final
+expect_save_dialog kaya-save-$PID final
+file_save
+
+# THE DESTINATION DID NOT EXIST — a save panel answers with a name for a
+# file nobody has made. This line fails with "No such file or directory"
+# unless the core's save source creates it (docs/save-plan.md D1).
+expect label#0 "saved third draft"
+
+# BOTH FILES, REOPENED. The one that was opened still holds the
+# save-back; the destination holds the save-as. A save-as that wrote
+# through the ORIGINAL handle — the plausible bug, since the guest holds
+# two handles that look alike — passes every line above and fails here.
+click button#3
+expect label#0 "reopened second draft third draft"
+
+# One REAL-TREE read at the end: everything above reads kaya's own model,
+# and would pass for an arm that ran and drew nothing.
+expect_ax label#0 "label/reopened second draft third draft"

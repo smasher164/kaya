@@ -121,19 +121,19 @@ if [ "$MODE" = parallel ]; then
         # legitimately slower lane raises its number in the same commit
         # that makes it slower, which is the conversation worth forcing.
         case "$name" in
-            # 680 since 2026-08-07, raised in the commit that makes the
-            # lane slower, as this block asks. Since 540 was set the lane
-            # gained TWO SCENES (dirty and ranges, nine guests each: 232
-            # -> 258 legs) and FOUR GATES (check-gates, check-diagnostics,
-            # check-native-undo and the Go environment guard; the gate
-            # block is now 122s of the lane, measured). STANDALONE the
-            # lane is 432s — 122s gates + 8s guest builds + 302s legs,
-            # 258 legs, 0 failures, measured on the final tree. Under
-            # five-lane contention today it measured 502, 506, 518, 523
-            # and 547s; the last crossed 540 and forced this. 680 keeps
-            # the same ~1.25x headroom over the contended time that the
-            # other lanes' ceilings keep.
-            mac) budget=680 ;;
+            # 900 since 2026-08-10, raised in the commit that makes the
+            # lane slower, as this block asks. The save scene brought
+            # NINE legs that must run ALONE BETWEEN DRAINS: macOS keeps a
+            # save panel's last directory as a user preference shared by
+            # every process, so pooled guests trample each other (measured
+            # — a leg asserting its own kaya-save-<pid> directory was
+            # shown a sibling's). Serialising ~18s x 9 costs about 170s
+            # that used to overlap: the lane measured 610s pooled and
+            # 778s serialised, same 267 legs. 900 keeps the ~1.25x
+            # headroom the other lanes have (the earlier 678s reading,
+            # which this block previously declined to raise for, was an
+            # environmental window and is NOT the reason for this one).
+            mac) budget=900 ;;
             # 420 since 2026-08-07, raised in the commit that made the
             # lane slower, as this block asks. The text-ranges scene added
             # 16 legs (rust and the C floor, both protocols, plus the
@@ -157,14 +157,27 @@ if [ "$MODE" = parallel ]; then
             # standalone run is MINUS one second, which is the check that
             # says no work was added to every leg.
             windows) budget=480 ;;
-            # 420 since 2026-08-04, same protocol. The lane gained two
-            # measured warm-ups this day: picker_warm (the Files-app
-            # launch that stops the first picker after a boot opening at
-            # the container root, docs/traps.md) and clip_relay_check
-            # (the pasteboard-isolation proof, clipboard-plan.md §8
-            # finding 7). Measured on a quiet host, three consecutive
-            # matrices: 311s, 320s, 322s.
-            ios) budget=420 ;;
+            # 540 since 2026-08-10, raised in the commit that makes the
+            # lane slower, as this block asks. The save scene added a leg
+            # measured at 21s STANDALONE (the panel is typed into, so it
+            # is the slowest non-clipboard leg on this lane), taking the
+            # lane to 74 legs. Contended runs since: 401, 407, 409, 414,
+            # 416 and 446s against a 420 ceiling — one crossing and two
+            # within five seconds, which is a guard that fires on
+            # variance rather than on a change in kind. Standalone the
+            # lane is 294s (boot 7 + three build-and-leg phases), so the
+            # growth is contention amplifying real work, not work added
+            # to every leg. 540 restores the ~1.25x headroom the other
+            # lanes keep.
+            #
+            # MAC WAS DELIBERATELY NOT RAISED at the same time: it
+            # measured 678s against 680 once, but that run overlapped a
+            # ~20-minute window when every mac file-dialog leg failed for
+            # an environmental reason (proven by running two unrelated
+            # legs as controls); with the scene fully graduated it
+            # measures 610s at 267 legs. Raising a ceiling to fit an
+            # environmental anomaly is how a guard stops guarding.
+            ios) budget=540 ;;
             android) budget=250 ;;
             *) budget=0 ;;
         esac

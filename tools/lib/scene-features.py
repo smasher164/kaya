@@ -75,6 +75,14 @@ ROLE_FEATURE = {
 VERB_FEATURE = {
     "expect_clipboard": "clipboard",
     "clipboard_seed": "clipboard",
+    # The save dialog's three verbs. Keyed on the VERB and not on the
+    # scene name for the reason the module note gives: tools/scenes are
+    # shared verbatim, so the day an editor scene saves a document it
+    # demands this feature without being called `save`, and a backend
+    # still declaring depth_stub("save") must hold those legs off too.
+    "expect_save_dialog": "save",
+    "file_dialog_name": "save",
+    "file_save": "save",
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is

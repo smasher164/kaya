@@ -151,6 +151,15 @@
 
 #define TX_REVEAL_RANGE 40
 
+/**
+ * The save dialog's request (docs/save-plan.md D2). Its ANSWER is the
+ * picker's — a file_dialog_result carrying one file or none — because
+ * the two dialogs share one id space, one live slot and one result
+ * grammar; only the request differs, which is the only place they
+ * differ for a guest either.
+ */
+#define TX_SHOW_SAVE_DIALOG 41
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -219,6 +228,8 @@
 #define APPLY_SELECT_RANGE 29
 
 #define APPLY_REVEAL_RANGE 30
+
+#define APPLY_PRESENT_SAVE_DIALOG 31
 
 #define VALUE_BOOL 1
 
@@ -677,6 +688,25 @@
 #define KAYA_TX_REVEAL_RANGE 40
 
 /**
+ * Request the platform's save dialog over a live window (0 = primary).
+ * Body: { u64 window; u64 dialog; Str suggested_name; Values filters —
+ * the picker's alternating label/extensions pairs }.
+ *
+ * THE PICKER'S GRAMMAR AND THE PICKER'S ANSWER: dialog ids come out of
+ * the same guest-chosen space, one dialog of either kind may be live per
+ * process, and the result arrives as a FILE_DIALOG_RESULT occurrence
+ * carrying one file (or none, for cancel) whose id retires there.
+ *
+ * THE HANDLE IT ANSWERS WITH OPENS WITH CREATE (docs/save-plan.md D1):
+ * two platforms hand back a name for a file nobody has made and two hand
+ * back a document that exists, so the core makes both open the same way
+ * — succeed, and yield an empty file for FILE_MODE_WRITE. There is no
+ * FILE_MODE_CREATE and deliberately so: creation belongs to the
+ * destination the dialog promised, not to the caller's intent.
+ */
+#define KAYA_TX_SHOW_SAVE_DIALOG 41
+
+/**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
  * geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
@@ -811,6 +841,13 @@
 #define KAYA_APPLY_SELECT_RANGE 29
 
 #define KAYA_APPLY_REVEAL_RANGE 30
+
+/**
+ * Present the platform's real save dialog (SHOW_SAVE_DIALOG, already
+ * validated by the core). Answered exactly once with
+ * kaya_emit_save_dialog_result: ONE locator, or a null one for cancel.
+ */
+#define KAYA_APPLY_PRESENT_SAVE_DIALOG 31
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
@@ -1186,6 +1223,14 @@ typedef struct KayaHostApi {
    */
   void (*emit_file_dialog_result)(uint64_t, const char*const *, const char*const *, uintptr_t);
   /**
+   * The save dialog's answer: ONE locator and its name, or NULL for
+   * cancel. Its own entry rather than the picker's with a count of
+   * one, because it is what makes the destination CREATABLE — the core
+   * registers a source whose open creates, and that decision must not
+   * be reachable from the picker's entry by accident.
+   */
+  void (*emit_save_dialog_result)(uint64_t, const char*, const char*);
+  /**
    * Navigation lifecycle emits: entry_popped after the user's back
    * affordance popped natively (the core's stack reconciles inside
    * this call), back_requested when the top entry's intercept_back
@@ -1504,6 +1549,21 @@ void kaya_emit_file_dialog_result(uint64_t dialog,
                                   const char *const *locators,
                                   const char *const *names,
                                   uintptr_t count);
+
+/**
+ * Presentation side: the save dialog's one answer, on the picker's
+ * result grammar (docs/save-plan.md D2) — the occurrence, the live slot
+ * and the retire gate are all the picker's; only the request differed.
+ *
+ * ONE LOCATOR, NOT AN ARRAY, and that is the type doing the work: no
+ * platform's save dialog names two destinations, so a backend physically
+ * cannot hand back two. A NULL `locator` is cancel.
+ *
+ * # Safety
+ * `locator` and `name` must be valid NUL-terminated UTF-8 outliving the
+ * call, or null.
+ */
+void kaya_emit_save_dialog_result(uint64_t dialog, const char *locator, const char *name);
 
 /**
  * Presentation side: the privileged read's one answer. `rep` NULL, or

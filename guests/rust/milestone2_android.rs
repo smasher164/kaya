@@ -70,6 +70,8 @@ mod a11y;
 mod filedialog;
 #[path = "clipboard.rs"]
 mod clipboard;
+#[path = "save.rs"]
+mod save;
 
 #[path = "undo.rs"]
 mod undo;
@@ -122,6 +124,11 @@ fn app(ctx: kaya::AppCtx) {
         Ok("a11y") => a11y::app(ctx),
         Ok("filedialog") => filedialog::app(ctx),
         Ok("clipboard") => clipboard::app(ctx),
+        // The save scene: the round trip an editor walks. The dialog is
+        // ACTION_CREATE_DOCUMENT, which is DocumentsUI again — the same
+        // hand-off to another app the filedialog scene needs the
+        // accessibility service for, with the mode flipped.
+        Ok("save") => save::app(ctx),
         // The undo scene. THE ARM COMES WITH THE LEG, which this file's
         // own note below says the hard way: a leg wired without its arm
         // here runs the milestone-2 scene against the undo script and

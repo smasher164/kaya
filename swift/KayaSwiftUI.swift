@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xd8165a4995d2554f
+let kayaSpecHash: UInt64 = 0xbfba1ee8ec9461cb
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -58,6 +58,7 @@ private let applyClearUndo: UInt16 = 27
 private let applyHighlightRanges: UInt16 = 28
 private let applySelectRange: UInt16 = 29
 private let applyRevealRange: UInt16 = 30
+private let applyPresentSaveDialog: UInt16 = 31
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
@@ -1489,6 +1490,18 @@ func kayaExpandPath(_ path: String) -> String {
     private let kayaPanelOkId = "OKButton"
     private let kayaPanelCancelId = "CancelButton"
 
+    /// The SAVE panel, measured the same way (scratchpad/save-probe-mac.md).
+    /// Only the SHEET and the name field are new: `OKButton`,
+    /// `CancelButton` and `where popup` are the identical identifiers the
+    /// open panel publishes, so the press machinery, the
+    /// kAXErrorCannotComplete-is-not-a-failure rule and the "where" read
+    /// port over untouched.
+    private let kayaSavePanelSheetId = "save-panel"
+    /// The name field, and it is AX-SETTABLE — verified three ways in the
+    /// probe: the set returned err 0, the element read the name back, and
+    /// the URL the completion delivered carried it.
+    private let kayaSavePanelNameId = "saveAsNameTextField"
+
     /// THE FILE BROWSER HAS THREE SPELLINGS, ONE PER VIEW MODE, and
     /// which one you get is not the app's choice: it is the MACHINE-WIDE
     /// `NSGlobalDomain NSNavPanelFileListModeForOpenMode2` (1 columns,
@@ -1878,6 +1891,95 @@ func kayaExpandPath(_ path: String) -> String {
             AXUIElementPerformAction(ok, kAXPressAction as CFString)
         }
     }
+
+    /// What the live SAVE panel is really showing: its directory, and the
+    /// name in its name field. nil when no save panel is live.
+    ///
+    /// NO BROWSER IS REQUIRED, AND THAT IS THE MEASUREMENT. NSSavePanel's
+    /// COLLAPSED form is the default and publishes no ListView/IconView/
+    /// ColumnView at all — `kayaPanelBrowser` finds nothing there — and
+    /// whether a box is collapsed is decided by the machine-wide
+    /// `NSNavPanelExpandedStateForSaveMode`, which no gate reads. This is
+    /// the 2026-08-06 view-mode trap with a worse default: a reader
+    /// written on a box where somebody once expanded a save panel would
+    /// require rows and hang forever on a fresh machine. So the rows are
+    /// never read here, in either state.
+    func kayaSavePanelState() -> (String, String)? {
+        guard kayaLiveSavePanel != nil else { return nil }
+        let app = kayaPanelAxApp()
+        guard let sheet = kayaPanelFind(app, [kayaSavePanelSheetId]) else { return nil }
+        guard let field = kayaPanelFind(sheet, [kayaSavePanelNameId]),
+            let name = kayaAxCopy(field, kAXValueAttribute) as? String
+        else { return nil }
+        let where_ =
+            kayaPanelFind(sheet, [kayaPanelWhereId])
+            .flatMap { kayaAxCopy($0, kAXValueAttribute) as? String } ?? ""
+        return (where_, name)
+    }
+
+    /// The save panel's state, waited for — and the wait is NOT
+    /// decoration, it is the difference between a green leg and a red
+    /// one. MEASURED 2026-08-09, twice in one run and again with this
+    /// function's two extra property sets removed: the first
+    /// `DispatchQueue.main.sync` after the presentation is asked for
+    /// returns **8.7 SECONDS** later and still finds no sheet, and the
+    /// state settles one 20ms turn after that. `NSSavePanel` blocks the
+    /// main thread for that whole time, every time — it does not warm up
+    /// (both panels in the same process cost 8688ms and 8671ms), and the
+    /// cost is invariant to what this function configures, so it is the
+    /// panel service's and not kaya's. The same box presented an
+    /// `NSOpenPanel` in 6.5s cold and 0.93s warm, with WindowServer at
+    /// ~49% serving two VMs.
+    ///
+    /// So the loop below cannot be dropped in favour of the step's own
+    /// retry, which is the shape the open panel's reader uses: that
+    /// budget (5s) is SPENT INSIDE THE BLOCKED HOP, so by the time a nil
+    /// comes back the deadline is gone and the retry never takes a
+    /// second look — the same 2026-08-07 measurement that put the
+    /// content wait inside `kayaAwaitOpenPanelState`, here for the
+    /// PRESENCE of the sheet rather than the fill of a browser.
+    ///
+    /// It waits for the SHEET, never for rows — see kayaSavePanelState.
+    func kayaAwaitSavePanelState() -> (String, String)? {
+        var state = DispatchQueue.main.sync { kayaSavePanelState() }
+        for _ in 0..<kayaPanelFillTurns {
+            if state != nil { return state }
+            Thread.sleep(forTimeInterval: 0.02)
+            state = DispatchQueue.main.sync { kayaSavePanelState() }
+        }
+        return state
+    }
+
+    /// Type a name into the live save panel's name field.
+    ///
+    /// THROUGH THE ACCESSIBILITY VALUE, which is what a user's keyboard
+    /// reaches: the probe set it, read it back off the ELEMENT, saw
+    /// `nameFieldStringValue` agree, and then watched the completion
+    /// deliver a URL ending in that name. Setting the panel's property
+    /// directly would have proved only that Swift can assign a string.
+    func kayaSavePanelName(_ name: String) {
+        guard kayaLiveSavePanel != nil else { return }
+        let app = kayaPanelAxApp()
+        guard let sheet = kayaPanelFind(app, [kayaSavePanelSheetId]) else { return }
+        guard let field = kayaPanelFind(sheet, [kayaSavePanelNameId]) else { return }
+        AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, name as CFTypeRef)
+    }
+
+    /// Press the live save panel's own Save or Cancel — the same buttons
+    /// the open panel uses, and the same rule about their return codes:
+    /// a press that dismisses the panel tears the element down mid-round
+    /// trip and answers kAXErrorCannotComplete. The completion firing is
+    /// the proof; the caller checks the panel is gone and the scene
+    /// checks the bytes.
+    func kayaSavePanelDrive(save: Bool) {
+        guard kayaLiveSavePanel != nil else { return }
+        let app = kayaPanelAxApp()
+        guard let sheet = kayaPanelFind(app, [kayaSavePanelSheetId]) else { return }
+        let id = save ? kayaPanelOkId : kayaPanelCancelId
+        if let button = kayaPanelFind(sheet, [id]) {
+            AXUIElementPerformAction(button, kAXPressAction as CFString)
+        }
+    }
 #endif
 
 /// Present the platform's real file picker and answer exactly once.
@@ -1898,7 +2000,7 @@ func kayaPresentFileDialog(
 ) {
     #if os(macOS)
         let panel = NSOpenPanel()
-        kayaLiveOpenPanel = panel
+        kayaLivePanel = panel
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         // Armed by file_dialog_goto, applied HERE — the one moment the
@@ -1917,7 +2019,7 @@ func kayaPresentFileDialog(
             }
         }
         func answer(_ urls: [URL]) {
-            kayaLiveOpenPanel = nil
+            kayaLivePanel = nil
             // strdup because the C side reads the strings during the
             // call and nothing may outlive it; freed on the way out.
             let pathBufs: [UnsafeMutablePointer<CChar>?] = urls.map { strdup($0.path) }
@@ -1968,7 +2070,7 @@ func kayaPresentFileDialog(
         if let pending = kayaPendingPanelDirectory {
             panel.directoryURL = URL(fileURLWithPath: pending)
         }
-        let delegate = KayaPickerDelegate(dialog: dialog)
+        let delegate = KayaPickerDelegate(dialog: dialog, save: false)
         panel.delegate = delegate
         kayaLivePickerDelegate = delegate
         kayaLiveDocumentPicker = panel
@@ -1983,6 +2085,165 @@ func kayaPresentFileDialog(
             // Everything the harness does next assumes an interactive
             // picker, and "present returned" says nothing about that.
             kayaPickerNote("presented dialog=\(dialog)")
+        }
+    #endif
+}
+
+/// Present the platform's real SAVE dialog and answer exactly once.
+///
+/// macOS is `NSSavePanel`, which is the class `NSOpenPanel` already
+/// inherits from — so this is the picker's presentation with two lines
+/// removed (`canChooseFiles`, `allowsMultipleSelection`) and one added
+/// (the name). Same `beginSheetModal(for:)`, same directory arming, same
+/// advisory content types.
+///
+/// IT ANSWERS WITH ONE URL AND CREATES NOTHING (measured: `exists=false`
+/// after a clean Save, and pressing Replace leaves the old bytes intact).
+/// That is why the core registers the destination through
+/// `emit_save_dialog_result` — the only thing that will ever create the
+/// file on this platform is kaya's own open.
+func kayaPresentSaveDialog(
+    window: UInt64, dialog: UInt64, suggestedName: String, extensions: [String]
+) {
+    #if os(macOS)
+        let panel = NSSavePanel()
+        kayaLivePanel = panel
+        // Armed by file_dialog_goto and applied HERE — the one moment
+        // either panel honors it.
+        if let pending = kayaPendingPanelDirectory {
+            panel.directoryURL = URL(fileURLWithPath: pending)
+        }
+        panel.nameFieldStringValue = suggestedName
+        // THE EXTENSION STAYS VISIBLE, and the harness reads that field
+        // back byte for byte. Hiding it is the USER'S Finder preference
+        // ("show all filename extensions"), so the name the panel
+        // publishes would otherwise be the stem on one machine and the
+        // whole name on another — a machine-wide setting deciding a
+        // lane's colour, which is the trap the panel view modes already
+        // cost this project a day for.
+        panel.isExtensionHidden = false
+        panel.canCreateDirectories = true
+        if !extensions.isEmpty {
+            // ADVISORY, exactly as the picker's are.
+            panel.allowedContentTypes = extensions.compactMap {
+                UTType(filenameExtension: $0)
+            }
+        }
+        func answer(_ url: URL?) {
+            kayaLivePanel = nil
+            // ONE LOCATOR OR NONE — the C entry takes a single pointer,
+            // so cancel is a null one rather than a count of zero.
+            guard let url else {
+                KayaHost.api.emit_save_dialog_result(dialog, nil, nil)
+                return
+            }
+            // strdup because the C side reads the strings during the
+            // call and nothing may outlive it; freed on the way out.
+            let pathBuf = strdup(url.path)
+            let nameBuf = strdup(url.lastPathComponent)
+            defer {
+                free(pathBuf)
+                free(nameBuf)
+            }
+            KayaHost.api.emit_save_dialog_result(
+                dialog, pathBuf.map { UnsafePointer($0) }, nameBuf.map { UnsafePointer($0) })
+        }
+
+        if let host = kayaNSWindows[window] ?? NSApp.keyWindow {
+            panel.beginSheetModal(for: host) { response in
+                answer(response == .OK ? panel.url : nil)
+            }
+        } else {
+            panel.begin { response in
+                answer(response == .OK ? panel.url : nil)
+            }
+        }
+    #else
+        // iOS HAS NO "CREATE A FILE WITH THIS NAME" PICKER. Every export
+        // initializer in the SDK takes URLs THAT ALREADY EXIST locally
+        // (`initForExportingURLs:asCopy:`, measured against the header),
+        // so a destination is made by EXPORTING something rather than by
+        // naming nothing. That is the one shape difference between this
+        // arm and the desktops', and it is why the answer here is a
+        // document that exists — which the core absorbs by giving iOS the
+        // ordinary picked-file source rather than the create-and-truncate
+        // one (capi.rs `register_saved`, docs/save-plan.md D1).
+        //
+        // SO THE STAGED FILE IS ZERO BYTES, and that is D1 itself rather
+        // than tidiness: the export copies what it is given, so anything
+        // staged here is what an UNTOUCHED destination reads back as. A
+        // desktop destination reads empty because nothing made it yet; a
+        // byte staged here would make the same read answer differently on
+        // this platform, which is exactly the divergence the core exists
+        // to absorb.
+        //
+        // IT IS STAGED IN THE APP'S PRIVATE TMPDIR, not kayaTempDir():
+        // that is `Documents` here, which is the directory the picker
+        // BROWSES, and a staged file there would show up as a row in the
+        // very dialog that is about to name its copy. NSTemporaryDirectory
+        // is invisible to the providers, which is the whole reason the
+        // scene's own files cannot live there.
+        _ = (window, extensions)
+        let staging = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("kaya-save-export-\(dialog)")
+        let manager = FileManager.default
+        try? manager.removeItem(atPath: staging)
+        try? manager.createDirectory(
+            atPath: staging, withIntermediateDirectories: true)
+        // A nameless export would throw on the createFile below and
+        // present nothing at all; the panel's own placeholder is the
+        // honest stand-in, and the harness reads the field back anyway.
+        let stagedName = suggestedName.isEmpty ? "untitled" : suggestedName
+        let source = URL(
+            fileURLWithPath: (staging as NSString).appendingPathComponent(stagedName))
+        guard manager.createFile(atPath: source.path, contents: Data()) else {
+            kayaPickerNote("save dialog=\(dialog) could not stage \(source.path)")
+            KayaHost.api.emit_save_dialog_result(dialog, nil, nil)
+            return
+        }
+        let panel = UIDocumentPickerViewController(forExporting: [source], asCopy: true)
+        // THE EXTENSION STAYS VISIBLE for the reason the mac arm spells
+        // out: the harness reads this field back byte for byte, and a
+        // panel that hides a known extension would publish the stem on one
+        // machine and the whole name on another. The scene's names carry
+        // no extension, so this can only ever agree — which is the point
+        // of setting it rather than inheriting it.
+        panel.shouldShowFileExtensions = true
+        // ARMED BY file_dialog_goto AND MEASURED NOT TO TAKE, which is
+        // worth more written down than quietly relied on. The OPEN picker
+        // honours `directoryURL` here (that is why the property is read at
+        // presentation at all); the EXPORT sheet does not — it resumes
+        // wherever the Files browser last was, and that memory outlives
+        // the process. Measured 2026-08-09, twice: a save dialog aimed at
+        // `Documents` opened in the sub-directory this scene's OPEN picker
+        // had walked into, and a save dialog shown with NO prior picker
+        // opened in the PREVIOUS RUN's directory.
+        //
+        // So what `expect_save_dialog`'s directory half reads on this
+        // platform is the BROWSER's location, not this line — and the
+        // scene's own `file_choose` is what puts the browser there. The
+        // line stays because it is the documented initial location, it
+        // costs nothing, and it can only start helping; it does not stay
+        // because anything here depends on it.
+        if let pending = kayaPendingPanelDirectory {
+            panel.directoryURL = URL(fileURLWithPath: pending)
+        }
+        let delegate = KayaPickerDelegate(dialog: dialog, save: true)
+        panel.delegate = delegate
+        kayaLivePickerDelegate = delegate
+        kayaLiveDocumentPicker = panel
+        kayaLiveSaveStaging = staging
+        let scenes = UIApplication.shared.connectedScenes
+        let ws = scenes.compactMap { $0 as? UIWindowScene }.first
+        let host = ws?.windows.first?.rootViewController
+        kayaPickerNote(
+            "present save dialog=\(dialog) at \(kayaPendingPanelDirectory ?? "<none>") "
+                + "named \(stagedName) host=\(host.map { String(describing: type(of: $0)) } ?? "<none>")")
+        host?.present(panel, animated: false) {
+            // The completion is the presentation ACTUALLY finishing —
+            // "present returned" says nothing about that, and everything
+            // the harness does next assumes an interactive sheet.
+            kayaPickerNote("presented save dialog=\(dialog)")
         }
     #endif
 }
@@ -2075,6 +2336,52 @@ func kayaPresentFileDialog(
         return ok ? nil : (lines.first ?? "simdrive refused \(verb) without saying why")
     }
 
+    /// What the live SAVE dialog is really showing, read on the host: the
+    /// directory it is browsing, and the name in its "Save as" field. Nil
+    /// when no save sheet is up, which FAILS expect_save_dialog rather
+    /// than passing quietly.
+    ///
+    /// The export sheet is the picker's own remote view controller, so it
+    /// is as invisible in this process as the open picker is — the app can
+    /// see that it ASKED for one and nothing else. Both halves of the
+    /// answer therefore come from the host, and neither is this side's
+    /// copy of the request.
+    /// Nil state plus the sentence to report, because a refusal from the
+    /// host is the one thing a bare nil would throw away: a sheet
+    /// publishing two name fields, or a driver that cannot reach the
+    /// device at all, would read as "no save dialog live" and send the
+    /// next reader looking at the guest.
+    func kayaSimdriveSaveState() -> ((String, String)?, String) {
+        let (ok, lines) = KayaSimdrive.ask("savestate")
+        guard ok else {
+            return (nil, lines.first ?? "simdrive refused savestate without saying why")
+        }
+        guard lines.count >= 2, !lines[0].isEmpty, !lines[1].isEmpty else {
+            return (nil, "no save dialog live")
+        }
+        return ((lines[0], lines[1]), "")
+    }
+
+    /// Type a name into the live save dialog's name field. Nil on
+    /// success, the failure's sentence otherwise — the host refuses when
+    /// no save sheet is up and when the field does not read the name
+    /// back, so both guards live with the eyes rather than being
+    /// re-derived here from a state this process cannot see.
+    func kayaSimdriveSaveName(_ name: String) -> String? {
+        let (ok, lines) = KayaSimdrive.ask("savename \(name)")
+        return ok ? nil : (lines.first ?? "simdrive refused savename \(name) without saying why")
+    }
+
+    /// Press the live save dialog's own Save or Cancel. The host requires
+    /// the sheet to be gone afterwards, the same postcondition `choose`
+    /// carries and for the same reason: a tap that lands before the sheet
+    /// is interactive is swallowed with no error anywhere.
+    func kayaSimdriveSaveDrive(cancel: Bool) -> String? {
+        let verb = cancel ? "savecancel" : "savepress"
+        let (ok, lines) = KayaSimdrive.ask(verb)
+        return ok ? nil : (lines.first ?? "simdrive refused \(verb) without saying why")
+    }
+
     /// ONE LINE PER PICKER LIFECYCLE EVENT, on stderr, because this
     /// picker is the one piece of UI in this backend that NOBODY IN THIS
     /// PROCESS CAN SEE. It is a remote view controller: the harness reads
@@ -2096,6 +2403,11 @@ func kayaPresentFileDialog(
     var kayaLiveDocumentPicker: UIDocumentPickerViewController?
     var kayaLivePickerDelegate: KayaPickerDelegate?
 
+    /// Where the live SAVE dialog's zero-byte export was staged, so the
+    /// answer can delete it. Nil for an open picker, which stages
+    /// nothing. Cleared with the delegate, on the one path that answers.
+    var kayaLiveSaveStaging: String?
+
     /// The picked URLs, by the locator handed to the core.
     ///
     /// THE OBJECT IS THE CAPABILITY on this platform: the picked file's
@@ -2111,8 +2423,17 @@ func kayaPresentFileDialog(
 
     final class KayaPickerDelegate: NSObject, UIDocumentPickerDelegate {
         let dialog: UInt64
-        init(dialog: UInt64) {
+        /// WHICH DIALOG THIS IS, and it has to be carried rather than
+        /// asked: on macOS the two panels are two CLASSES and the readers
+        /// interrogate the type, but iOS presents both from the one
+        /// `UIDocumentPickerViewController` and there is nothing to ask.
+        /// It sits on the delegate — made at the single moment a picker is
+        /// presented, with no default — so the one place that can know is
+        /// the one place that must say.
+        let save: Bool
+        init(dialog: UInt64, save: Bool) {
             self.dialog = dialog
+            self.save = save
             super.init()
         }
 
@@ -2120,20 +2441,53 @@ func kayaPresentFileDialog(
             _ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]
         ) {
             kayaPickerNote(
-                "didPick dialog=\(dialog) \(urls.map { $0.lastPathComponent })")
+                "didPick dialog=\(dialog) save=\(save) \(urls.map { $0.lastPathComponent })")
             answer(urls)
         }
 
         /// Cancel is the EMPTY LIST, faithfully — no platform can
         /// confirm an empty selection, so there is no sentinel.
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            kayaPickerNote("cancelled dialog=\(dialog)")
+            kayaPickerNote("cancelled dialog=\(dialog) save=\(save)")
             answer([])
         }
 
         private func answer(_ urls: [URL]) {
             kayaLiveDocumentPicker = nil
             kayaLivePickerDelegate = nil
+            // The staged export has done its job the moment the platform
+            // has answered: it was a zero-byte carrier for a NAME, and the
+            // destination is a copy of it. Cleared here rather than at
+            // presentation-time of the next dialog, so a run leaves the
+            // container as it found it.
+            if let staging = kayaLiveSaveStaging {
+                kayaLiveSaveStaging = nil
+                try? FileManager.default.removeItem(atPath: staging)
+            }
+            if save {
+                // ONE LOCATOR OR NONE — the C entry takes a single
+                // pointer, so cancel is a null one rather than a count of
+                // zero, and this side cannot invent a second destination
+                // no save dialog can name.
+                guard let url = urls.first else {
+                    KayaHost.api.emit_save_dialog_result(dialog, nil, nil)
+                    kayaPickerNote("emitted save dialog=\(dialog) cancelled")
+                    return
+                }
+                let key = url.absoluteString
+                kayaPickedURLs[key] = url
+                let locatorBuf = strdup(key)
+                let nameBuf = strdup(url.lastPathComponent)
+                defer {
+                    free(locatorBuf)
+                    free(nameBuf)
+                }
+                KayaHost.api.emit_save_dialog_result(
+                    dialog, locatorBuf.map { UnsafePointer($0) },
+                    nameBuf.map { UnsafePointer($0) })
+                kayaPickerNote("emitted save dialog=\(dialog) \(url.lastPathComponent)")
+                return
+            }
             // The locator is the URL's own string, and the object is
             // retained beside it — handing the core a PATH would work in
             // the simulator, which enforces no sandbox, and fail on a
@@ -2285,9 +2639,28 @@ var kayaPendingPanelDirectory: String?
 var kayaTearingDown: Set<UInt64> = []
 #if os(macOS)
     var kayaLiveNSAlert: NSAlert?
-    /// The live picker, held so the harness verbs can read and drive
-    /// the REAL panel rather than a copy of the request.
-    var kayaLiveOpenPanel: NSOpenPanel?
+    /// The live panel of EITHER kind, held so the harness verbs can read
+    /// and drive the REAL thing rather than a copy of the request.
+    ///
+    /// ONE SLOT, TYPED AS THE SUPERCLASS, because `NSOpenPanel` IS an
+    /// `NSSavePanel` (measured, and it is the whole reason the save arm
+    /// is small): the presentation call, the sheet plumbing and the
+    /// directory arming are already shared, and one slot mirrors the
+    /// core's one-live-dialog-per-process rule instead of inventing a
+    /// second one that could disagree with it.
+    var kayaLivePanel: NSSavePanel?
+
+    /// The two readers each see ONLY their own kind, and they ask the
+    /// TYPE rather than a flag someone has to remember to set. A save
+    /// panel publishes no `open-panel` sheet and no file browser, so an
+    /// open-panel read that could see it would poll forever on a tree
+    /// that is never coming — and `file_choose`'s postcondition reads a
+    /// nil state as "the press landed", which would make that mistake
+    /// look like success.
+    var kayaLiveOpenPanel: NSOpenPanel? { kayaLivePanel as? NSOpenPanel }
+    var kayaLiveSavePanel: NSSavePanel? {
+        kayaLivePanel is NSOpenPanel ? nil : kayaLivePanel
+    }
     var kayaNSWindows: [UInt64: NSWindow] = [:]
     /// Parked waiters for window materialization, keyed by surface id
     /// (main-thread state like the registry): registration signals
@@ -2894,6 +3267,43 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     dialog: dialogId,
                     allowsMultiple: allowsMultiple,
                     extensions: extensions)
+            case applyPresentSaveDialog:
+                // The platform's REAL save dialog (NSSavePanel), answered
+                // exactly once through kaya_emit_save_dialog_result — one
+                // locator, or a null one for cancel.
+                //
+                // A STR THEN A LIST, which is a body shape no other apply
+                // record has: the name is a Value (tag, length, bytes
+                // padded to 8) and the filters follow as the picker's own
+                // pairs, so the walk below reads the name FIRST and takes
+                // the list's count from wherever the name ended.
+                let saveWindow = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let saveDialog = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                var sat = body + 16
+                func nextSaveStr() -> String {
+                    let len = Int(raw.loadUnaligned(fromByteOffset: sat + 4, as: UInt32.self))
+                    let bytes = raw[(sat + 8)..<(sat + 8 + len)]
+                    sat += 8 + len
+                    if sat % 8 != 0 { sat += 8 - sat % 8 }
+                    return String(decoding: bytes, as: UTF8.self)
+                }
+                let suggestedName = nextSaveStr()
+                let saveFilterCount = Int(
+                    raw.loadUnaligned(fromByteOffset: sat, as: UInt32.self))
+                sat += 8
+                var saveExtensions: [String] = []
+                for _ in 0..<(saveFilterCount / 2) {
+                    _ = nextSaveStr()  // the label, shown by the panel itself
+                    saveExtensions.append(contentsOf:
+                        nextSaveStr().split(separator: " ").map {
+                            String($0).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                        })
+                }
+                kayaPresentSaveDialog(
+                    window: saveWindow,
+                    dialog: saveDialog,
+                    suggestedName: suggestedName,
+                    extensions: saveExtensions)
             case applyPresentAlert:
                 // The platform's REAL modal dialog (NSAlert sheet /
                 // UIAlertController), answered exactly once through
@@ -5389,6 +5799,120 @@ private func kayaRunScript(_ script: String) {
                                 + "— the press was swallowed, which the panel cannot tell you")
                     }
                 #endif
+            case "expect_save_dialog":
+                // The REAL save panel, read over accessibility: the
+                // directory it is showing AND the name in its name
+                // field. The name half is the one that catches a
+                // backend which ignored the name it was told — that
+                // saves under the SUGGESTED name, where every byte
+                // assertion downstream still passes and points at the
+                // wrong file.
+                let wantSaveDir = parts.count > 1 ? kayaExpandPath(String(parts[1])) : ""
+                let wantSaveName = parts.count > 2 ? String(parts[2]) : ""
+                if wantSaveDir.contains("$") {
+                    // The picker's guard, verbatim: an unexpanded
+                    // expectation reads as a broken dialog.
+                    failures.append(
+                        "expect_save_dialog \(wantSaveDir): unexpanded substitution — "
+                            + "only $TMP and $PID exist")
+                } else if wantSaveDir.isEmpty || wantSaveName.isEmpty {
+                    failures.append("expect_save_dialog wants a directory and a name")
+                } else {
+                    #if os(macOS)
+                        let saveState = kayaAwaitSavePanelState()
+                        let saveWhy = "no save dialog live"
+                    #else
+                        // Read on the HOST, for the reason the open
+                        // picker's read is: the sheet belongs to another
+                        // process and publishes nothing here. Its refusal
+                        // travels with it — see kayaSimdriveSaveState.
+                        let (saveState, saveWhy) = kayaSimdriveSaveState()
+                    #endif
+                    if let (where_, name) = saveState {
+                        if !where_.hasSuffix(wantSaveDir) {
+                            failures.append(
+                                "save dialog showing \"\(where_)\", wanted \"\(wantSaveDir)\"")
+                        } else if name != wantSaveName {
+                            failures.append(
+                                "save dialog names \"\(name)\", wanted \"\(wantSaveName)\"")
+                        } else {
+                            observed.append("save dialog \"\(wantSaveDir)\" \"\(wantSaveName)\"")
+                        }
+                    } else {
+                        failures.append(saveWhy)
+                    }
+                }
+            case "file_dialog_name":
+                // Silent like click — expect_save_dialog reads it back.
+                // EXCEPT that the dialog must BE there: typing into a
+                // panel that has not presented yet does nothing at all,
+                // and the leg then saves under the suggested name with
+                // every downstream assertion still green.
+                let saveName = parts.count > 1 ? String(parts[1]) : ""
+                if saveName.isEmpty {
+                    failures.append("file_dialog_name wants a file name")
+                } else {
+                    #if os(macOS)
+                        if kayaAwaitSavePanelState() == nil {
+                            failures.append(
+                                "file_dialog_name \(saveName): no save dialog is live")
+                        } else {
+                            DispatchQueue.main.sync { kayaSavePanelName(saveName) }
+                        }
+                    #else
+                        // simdrive does the same refusal on the host — no
+                        // sheet, or a field that does not read the name
+                        // back — and names what it saw, so the check is
+                        // not repeated here: the failure text arrives
+                        // with the answer.
+                        if let why = kayaSimdriveSaveName(saveName) {
+                            failures.append("file_dialog_name \(saveName): \(why)")
+                        }
+                    #endif
+                }
+            case "file_save":
+                // Press the panel's own Save or Cancel, for real: its
+                // completion runs because its own button was pressed.
+                let saveArg = parts.count > 1 ? String(parts[1]) : ""
+                if saveArg != "" && saveArg != "cancel" {
+                    failures.append("file_save takes nothing or `cancel`, got \(saveArg)")
+                } else {
+                    #if os(macOS)
+                        if kayaAwaitSavePanelState() == nil {
+                            failures.append("file_save: no save dialog is live")
+                        } else {
+                            DispatchQueue.main.sync { kayaSavePanelDrive(save: saveArg != "cancel") }
+                            // AND THE PANEL MUST BE GONE — the picker's
+                            // postcondition and the same reason: a press
+                            // that lands before the panel is interactive
+                            // is swallowed with no error anywhere, and the
+                            // leg then fails three steps later on an
+                            // assertion about the GUEST.
+                            let savedBy = Date().addingTimeInterval(5)
+                            while Date() < savedBy {
+                                if DispatchQueue.main.sync(execute: { kayaSavePanelState() }) == nil {
+                                    break
+                                }
+                                Thread.sleep(forTimeInterval: 0.05)
+                            }
+                            if let still = DispatchQueue.main.sync(execute: { kayaSavePanelState() })
+                            {
+                                failures.append(
+                                    "file_save: the panel is still up (naming \"\(still.1)\") "
+                                        + "— the press was swallowed, which the panel cannot "
+                                        + "tell you")
+                            }
+                        }
+                    #else
+                        // The sheet's OWN Save/Cancel, pressed on the
+                        // host, with "the sheet is gone" asserted there
+                        // too — the same postcondition and the same
+                        // reason as file_choose's.
+                        if let why = kayaSimdriveSaveDrive(cancel: saveArg == "cancel") {
+                            failures.append("file_save \(saveArg): \(why)")
+                        }
+                    #endif
+                }
             case "expect_alert":
                 // The REAL presented dialog's title (NSAlert's
                 // messageText / the UIAlertController's title), never

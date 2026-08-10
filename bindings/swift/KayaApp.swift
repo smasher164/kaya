@@ -528,6 +528,24 @@ func kayaAcceptList(_ kinds: [String]) -> String {
     return kinds.joined(separator: " ")
 }
 
+/// Flatten a dialog's ADVISORY filters into the wire's alternating
+/// label/extensions run — a label, then its space-separated extensions,
+/// per pair.
+///
+/// ONE ENCODER FOR BOTH DIALOGS, deliberately. The picker and the save
+/// request carry the identical filter block, and the core validates it
+/// through one shared helper for the same reason: two copies of an
+/// alternating layout are two chances for one of them to write the pairs
+/// in the other order, which no type here would catch.
+func kayaFilterValues(_ filters: [(String, String)]) -> [KayaValue] {
+    var values: [KayaValue] = []
+    for (label, extensions) in filters {
+        values.append(.str(label))
+        values.append(.str(extensions))
+    }
+    return values
+}
+
 /// The UTF-8 BYTE OFFSET of a position in `text` — kaya's unit for
 /// every text range, and the one number Swift's `String.Index` will not
 /// hand you.
@@ -2596,12 +2614,43 @@ final class KayaAppTx {
     ) -> UInt64 {
         let id = app.allocFileDialog()
         if let onResult { app.onFileDialog(id, onResult) }
-        var values: [KayaValue] = []
-        for (label, extensions) in filters {
-            values.append(.str(label))
-            values.append(.str(extensions))
+        tx.showFileDialog(window, id, multiple ? 1 : 0, kayaFilterValues(filters))
+        return id
+    }
+
+    /// Ask the platform WHERE TO SAVE. The picker's twin: a request that
+    /// answers once with a capability, on the same grammar, out of the
+    /// same one-live-dialog slot — one dialog of either kind may be live
+    /// per process, and the next is shown from this one's handler.
+    ///
+    /// `suggestedName` is the name the dialog OPENS with, and every
+    /// platform treats it the way it treats a filter: it takes it, and
+    /// guarantees nothing. The user renames it; Android may append an
+    /// extension matching the mime type. READ THE NAME YOU GOT.
+    ///
+    /// WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist
+    /// yet (macOS, GTK and Windows answer with a name for a file nobody
+    /// has made — measured), so the handle's open CREATES: opening it
+    /// for `FILE_MODE_WRITE` succeeds and yields an empty file on every
+    /// platform, which is the one behaviour a guest writes against
+    /// (docs/save-plan.md D1).
+    ///
+    /// CANCEL IS `nil`. The narrowing from the wire's list is the
+    /// BINDING's, not the guest's: "one locator or none" is a fact of
+    /// the request, and no app should re-derive it from a length.
+    @discardableResult
+    func saveFile(
+        suggestedName: String, filters: [(String, String)] = [], window: UInt64 = 0,
+        onResult: ((KayaAppTx, KayaPickedFile?) throws -> Void)? = nil
+    ) -> UInt64 {
+        let id = app.allocFileDialog()
+        if let onResult {
+            // The save answer rides the picker's own result occurrence,
+            // so it lands in the picker's own one-shot table and retires
+            // there — one id space, one live slot, one retire gate.
+            app.onFileDialog(id) { tx, files in try onResult(tx, files.first) }
         }
-        tx.showFileDialog(window, id, multiple ? 1 : 0, values)
+        tx.showSaveDialog(window, id, .str(suggestedName), kayaFilterValues(filters))
         return id
     }
 

@@ -1762,9 +1762,19 @@ out="$(go_desktop_scenes guests/go/cmd/scenes.go \
     status=1
 }
 
-# THE iOS PICKER'S THREE SILENT WIRINGS. Each of these fails in a way
-# that looks like a backend bug rather than a harness one, which is what
+# THE iOS PICKER'S SILENT WIRINGS. Each of these fails in a way that
+# looks like a backend bug rather than a harness one, which is what
 # earns them a gate rather than a comment.
+#
+# A THIRD CLAUSE LIVED HERE and moved to tools/check-file-modes.sh
+# (2026-08-09, docs/save-plan.md D3). It asked whether
+# kaya_swiftui_open_picked maps case 0/1/2 to O_RDONLY/O_WRONLY/O_RDWR,
+# and it could not have caught the thing its own comment named: its
+# window ran to the end of a ten-thousand-line file, it tested that the
+# strings EXISTED rather than that they were PAIRED, and it hard-coded
+# 0/1/2 in the gate — so renumbering the spec's file_mode enum, the one
+# edit it was written for, left it green. The replacement reads the
+# numbers out of crates/kaya/src/spec.rs and pins five sites.
 ios_picker() {
     python3 -c '
 import pathlib
@@ -1794,19 +1804,6 @@ for key in ("UIFileSharingEnabled", "LSSupportsOpeningDocumentsInPlace"):
         bad.append(f"tools/ios/Info.plist.in is missing {key} — the picker could not browse "
                    f"the app own Documents and the filedialog leg would fail as though the "
                    f"backend were wrong")
-
-# 3. THE OPEN MODES MUST AGREE ACROSS THE ABI. protocol.rs::picked_mode_code
-#    names 0/1/2 and a Rust test pins it; the Swift side of that same ABI
-#    hardcodes the three cases, and nothing but this holds the two
-#    spellings together. Reordering FileMode would turn every guest Read
-#    into the backend Write, silently.
-swift = pathlib.Path("swift/KayaSwiftUI.swift").read_text()
-if "kaya_swiftui_open_picked" in swift:
-    for case, flag in (("case 0", "O_RDONLY"), ("case 1", "O_WRONLY"), ("case 2", "O_RDWR")):
-        window = swift[swift.index("kaya_swiftui_open_picked"):]
-        if case not in window or flag not in window:
-            bad.append(f"swift/KayaSwiftUI.swift open_picked does not map {case} to {flag} — "
-                       f"the mode numbers protocol.rs pins would not survive the ABI")
 
 for line in bad:
     print(line)

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xd8165a4995d2554f
+	SpecHash uint64 = 0xbfba1ee8ec9461cb
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -144,6 +144,7 @@ const (
 	txHighlightRanges = 38
 	txSelectRange = 39
 	txRevealRange = 40
+	txShowSaveDialog = 41
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -174,6 +175,7 @@ const (
 	applyHighlightRanges = 28
 	applySelectRange = 29
 	applyRevealRange = 30
+	applyPresentSaveDialog = 31
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -619,6 +621,16 @@ func TxRevealRange(widgetId uint64, start uint64, stop uint64) []byte {
 	b = binary.LittleEndian.AppendUint64(b, widgetId)
 	b = binary.LittleEndian.AppendUint64(b, start)
 	b = binary.LittleEndian.AppendUint64(b, stop)
+	return endRecord(b)
+}
+
+// TxShowSaveDialog: Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened.
+func TxShowSaveDialog(window uint64, dialog uint64, suggestedName any, filters []any) []byte {
+	b := beginRecord(txShowSaveDialog)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, dialog)
+	b = encodeValue(b, suggestedName)
+	b = encodeValues(b, filters)
 	return endRecord(b)
 }
 

@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xd8165a4995d2554fL
+let spec_hash = 0xbfba1ee8ec9461cbL
 
 let value_bool = 1
 let value_i64 = 2
@@ -145,6 +145,7 @@ let tx_kind_undo_group = 37
 let tx_kind_highlight_ranges = 38
 let tx_kind_select_range = 39
 let tx_kind_reveal_range = 40
+let tx_kind_show_save_dialog = 41
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -175,6 +176,7 @@ let apply_kind_clear_undo = 27
 let apply_kind_highlight_ranges = 28
 let apply_kind_select_range = 29
 let apply_kind_reveal_range = 30
+let apply_kind_present_save_dialog = 31
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -515,6 +517,14 @@ let tx_reveal_range widget_id start stop =
       Buffer.add_int64_le b widget_id;
       Buffer.add_int64_le b start;
       Buffer.add_int64_le b stop)
+
+(* Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened. *)
+let tx_show_save_dialog window dialog suggested_name filters =
+  finish tx_kind_show_save_dialog (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b dialog;
+      encode_value b suggested_name;
+      encode_values b filters)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =

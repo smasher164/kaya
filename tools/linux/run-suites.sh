@@ -38,7 +38,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges save"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -684,6 +684,31 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin filedialog)"
     run "$proto" filedialog-java env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # The save scene: the round trip an editor walks — open, save back to
+    # the picked handle, save AS a new destination, reopen both
+    # (docs/save-plan.md D5). GTK's save panel is the SAME
+    # `gtk::FileDialog` the picker legs above drive, with `save()` called
+    # on it, so it reads and drives over the same AT-SPI path and needs
+    # the same per-leg bus — every observation in this scene is a bus
+    # read, not just the closing expect_ax: the panel publishes no
+    # accessible ids at all, so the directory is the path bar's pressed
+    # toggle and the typed name is the `EditableText` field's contents.
+    #
+    # IN THE POOL, not alone between drains. The two scenes that take
+    # drains here inject REAL key events (undo, ranges) or own the one
+    # system clipboard; this one types through the accessibility bus,
+    # which is per-leg, and touches no session-wide state at all. Its
+    # files live under $TMPDIR/kaya-save-<pid>, so parallel legs cannot
+    # collide either.
+    run "$proto" save-rust env KAYA_SELFTEST=save \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/save"
+    # The C floor's save guest, which does not wait on the sugar sweep:
+    # the floor takes no sugar at all, so it was writable the day the
+    # wire record existed (the undo-c and dirty-c precedent). Through
+    # a11y-leg.sh like every other leg in this block, and for the same
+    # reason — every observation the script makes here is an AT-SPI read.
+    run "$proto" save-c env KAYA_SELFTEST=save \
+        tools/linux/a11y-leg.sh /tmp/c-guests/save
     run "$proto" background-python env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/background.py
     run "$proto" background-go env KAYA_SELFTEST=background \

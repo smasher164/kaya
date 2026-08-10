@@ -83,6 +83,7 @@ module KayaApp
     openPicked,
     pickFiles,
     pickFile,
+    saveFile,
     clearWidget,
     focusWidget,
     highlightRanges,
@@ -221,6 +222,7 @@ import Data.ByteString.Builder (Builder)
 import Data.Int (Int64)
 import Data.IORef
 import Data.List (elemIndex)
+import Data.Maybe (listToMaybe)
 import GHC.Records (HasField)
 import GHC.TypeLits (KnownSymbol, symbolVal)
 import qualified Data.Map.Strict as Map
@@ -1462,9 +1464,51 @@ pick multiple filters handler = do
         0
         n
         (if multiple then 1 else 0)
-        (concatMap (\(label, exts) -> [W.VStr label, W.VStr exts]) filters)
+        (filterValues filters)
     )
 
+-- | Ask the platform WHERE TO SAVE — the picker's twin, on the same
+-- request\/result grammar and out of the same one-live-dialog slot. The
+-- handler fires exactly once and retires with its answer.
+--
+-- CANCEL IS 'Nothing', and a destination is 'Just'. The picker's list
+-- narrows to a 'Maybe' HERE rather than in the guest, because "one
+-- locator or none" is a fact of the REQUEST — a save names one place —
+-- and not something every app should re-derive from a length.
+--
+-- The first argument is the name the dialog OPENS with, and every
+-- platform treats it the way it treats a filter: it takes it and
+-- guarantees nothing. The user renames it; Android's SAF may append an
+-- extension matching the mime type. Read the name you GOT
+-- ('pickedName'), never the one you asked for.
+--
+-- WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist yet —
+-- macOS, GTK and Windows answer with a name for a file nobody has made
+-- (measured), while Android and iOS hand back a document that already
+-- does — so the handle's open CREATES: 'openPicked' with 'fileModeWrite'
+-- succeeds and yields an empty file on every platform, which is the one
+-- behaviour a guest writes against (docs\/save-plan.md D1). 'pickedLocalPath'
+-- is empty on both phones exactly as it is for a picked file; read the
+-- destination back through the HANDLE.
+saveFile :: String -> [(String, String)] -> (Maybe PickedFile -> IO ()) -> Build ()
+saveFile suggested filters handler = do
+  -- THE PICKER'S COUNTER AND THE PICKER'S TABLE, deliberately. The core
+  -- has one dialog id space, one live slot and one retire gate, and the
+  -- answer rides `file_dialog_result` unchanged — so a save that minted
+  -- ids of its own could collide with a pick on the very guard that
+  -- makes one-dialog-per-process meaningful.
+  n <- Build $ \s ->
+    let c = bCounters s
+        next = cFileDialog c + 1
+     in (next, s {bCounters = c {cFileDialog = next}})
+  pendB (PFileDialog n (handler . listToMaybe))
+  emitB (W.txShowSaveDialog 0 n (W.VStr suggested) (filterValues filters))
+
+-- (label, space-separated extensions) pairs, flattened the way the wire
+-- carries them. Shared by the two requests so the picker and the save
+-- dialog cannot drift on how a filter is spelled.
+filterValues :: [(String, String)] -> [W.Value]
+filterValues = concatMap (\(label, exts) -> [W.VStr label, W.VStr exts])
 
 mount :: Widget -> Build ()
 mount (Widget n) = emitB (W.txMount 0 n)

@@ -145,6 +145,12 @@ GATES = {
     "check-diagnostics": ["crates", "swift", "android", "bindings",
                           "guests", "cmd"],
     "check-verbs": ["crates", "bindings", "swift", "android"],
+    # The spec's file_mode numbering against every site that writes a
+    # mode number down, plus a CENSUS over four source roots — so a new
+    # file that redeems a picked file is an input by its arrival, not
+    # only by its contents. crates/ carries the spec and the core;
+    # bindings/, swift/ and android/ carry the sites and the census.
+    "check-file-modes": ["crates", "bindings", "swift", "android"],
     # The two Go source roots the environment rule covers, and nothing
     # else: the gate parses bindings/go and guests/go and reads no built
     # artifact. bindings/ and guests/ whole rather than their go/

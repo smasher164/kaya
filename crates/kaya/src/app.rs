@@ -1451,6 +1451,35 @@ impl<'a> Tx<'a> {
         r
     }
 
+    /// Ask the platform WHERE TO SAVE. The picker's twin: a request that
+    /// answers once with a capability, on the same grammar, out of the
+    /// same one-live-dialog slot — [`Messages::on_saved`] binds the
+    /// handler, and cancel arrives as `None`.
+    ///
+    /// `suggested_name` is the name the dialog OPENS with, and every
+    /// platform treats it the way it treats a filter: it takes it, and
+    /// guarantees nothing. The user renames it; Android may append an
+    /// extension matching the mime type. Read the name you GOT.
+    ///
+    /// WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist
+    /// yet (macOS, GTK and Windows answer with a name for a file nobody
+    /// has made — measured), so the handle's open CREATES: opening it for
+    /// [`FileMode::Write`] succeeds and yields an empty file on every
+    /// platform, which is the one behaviour a guest writes against
+    /// (docs/save-plan.md D1).
+    pub fn save_file(&mut self, suggested_name: impl Into<String>) -> SaveDialogRef<'_, 'a> {
+        let dialog = self.ctx.alloc_file_dialog();
+        SaveDialogRef {
+            tx: self,
+            spec: crate::protocol::SaveDialogSpec {
+                window: DEFAULT_WINDOW,
+                dialog,
+                suggested_name: suggested_name.into(),
+                filters: Vec::new(),
+            },
+        }
+    }
+
     /// Set a property on any window ([`set_window`] targets the
     /// primary).
     pub fn set_window_prop(&mut self, window: WindowId, prop: WindowProp, value: impl Into<Value>) {
@@ -2956,6 +2985,21 @@ impl<M> Messages<M> {
         self.dialogs.borrow_mut().insert(dialog.0, Box::new(f));
     }
 
+    /// Bind the one-shot result handler to a save-dialog request. CANCEL
+    /// IS `None`, and a destination is `Some` — the list the picker
+    /// returns is narrowed here rather than in the guest, because the
+    /// wire's "one locator or none" is a fact of the request and not
+    /// something every app should re-derive from a length.
+    pub fn on_saved(
+        &self,
+        dialog: crate::protocol::FileDialogId,
+        f: impl Fn(Option<crate::protocol::PickedFile>) -> M + 'static,
+    ) {
+        self.dialogs
+            .borrow_mut()
+            .insert(dialog.0, Box::new(move |files| f(files.into_iter().next())));
+    }
+
     /// Content arriving at this widget because the USER pasted — the
     /// path an editor actually takes, and the one that costs nothing.
     ///
@@ -3173,6 +3217,38 @@ impl FileDialogRef<'_, '_> {
     pub fn show(self) -> crate::protocol::FileDialogId {
         let id = self.spec.dialog;
         self.tx.ops.push(TxOp::ShowFileDialog(self.spec));
+        id
+    }
+}
+
+/// A save-dialog request under construction — the picker chain's shape,
+/// terminated by `show`. The suggested name is not optional and rides the
+/// constructor: a save dialog with no name in its box is one the platform
+/// will not let the user complete.
+pub struct SaveDialogRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    spec: crate::protocol::SaveDialogSpec,
+}
+
+impl SaveDialogRef<'_, '_> {
+    /// Present over this window instead of the primary.
+    pub fn in_window(mut self, window: WindowId) -> Self {
+        self.spec.window = window;
+        self
+    }
+
+    /// Add an ADVISORY filter: a label and its extensions, the picker's
+    /// rule verbatim — a default view, never a guarantee.
+    pub fn filter(mut self, label: impl Into<String>, extensions: impl Into<String>) -> Self {
+        self.spec.filters.push((label.into(), extensions.into()));
+        self
+    }
+
+    /// Send the request, returning its id — the handle
+    /// [`Messages::on_saved`] binds the one-shot result handler to.
+    pub fn show(self) -> crate::protocol::FileDialogId {
+        let id = self.spec.dialog;
+        self.tx.ops.push(TxOp::ShowSaveDialog(self.spec));
         id
     }
 }

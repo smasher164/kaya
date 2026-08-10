@@ -365,6 +365,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::DestroyWindow { .. } => UndoVerdict::Refused("destroy_window"),
         TxOp::ShowAlert(_) => UndoVerdict::Refused("show_alert"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
+        TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
         TxOp::Copy(_) => UndoVerdict::Refused("copy"),
         TxOp::ReadClipboard { .. } => UndoVerdict::Refused("read_clipboard"),
         TxOp::PushEntry { .. } => UndoVerdict::Refused("push_entry"),
@@ -1508,6 +1509,39 @@ impl Scene {
                     // singleton.
                     crate::capi::file_dialog_shown(spec.dialog);
                     out.push(ApplyOp::PresentFileDialog(spec));
+                }
+                TxOp::ShowSaveDialog(spec) => {
+                    assert!(
+                        spec.window == crate::protocol::DEFAULT_WINDOW
+                            || self.windows.contains(&spec.window),
+                        "kaya: show_save_dialog over unknown window {:?} — \
+                         create_window first (0 is the primary)",
+                        spec.window
+                    );
+                    for (label, _) in &spec.filters {
+                        assert!(
+                            !label.is_empty(),
+                            "kaya: show_save_dialog carries a filter with an \
+                             empty label — the label is what the dialog shows"
+                        );
+                    }
+                    // A SAVE DIALOG IS FOR NAMING A FILE, so an empty
+                    // suggested name is an author who filled no field
+                    // rather than a request for no name: every platform
+                    // opens with SOMETHING in that box, and the one that
+                    // does not (an empty NSSavePanel name field) disables
+                    // its own Save button — a dialog nobody can complete.
+                    assert!(
+                        !spec.suggested_name.is_empty(),
+                        "kaya: show_save_dialog has an empty suggested_name — \
+                         name the file the dialog opens with (tx.save_file(\"notes.txt\"))"
+                    );
+                    // THE PICKER'S LIVE SLOT, not a second one: one dialog
+                    // of either kind per process, so a guest that shows a
+                    // save panel over a live picker is refused here rather
+                    // than presenting two modals a platform cannot stack.
+                    crate::capi::file_dialog_shown(spec.dialog);
+                    out.push(ApplyOp::PresentSaveDialog(spec));
                 }
                 TxOp::Copy(clip) => {
                     // AN EMPTY CLIP IS A MISTAKE, not a way to clear:

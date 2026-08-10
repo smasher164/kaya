@@ -1402,19 +1402,71 @@ def pick_file(filters=(), on_result=None, window=0):
     return _pick(False, filters, on_result, window)
 
 
-def _pick(multiple, filters, on_result, window):
+def save_file(suggested_name, filters=(), on_result=None, window=0):
+    """Ask the platform WHERE TO SAVE. The picker's twin: a request that
+    answers once with a capability, on the same grammar, out of the same
+    one-live-dialog slot — so a save dialog and an open dialog cannot be
+    up at the same time, and the next one is shown from this one's
+    handler.
+
+    `suggested_name` is the name the dialog OPENS with, and it is not
+    optional: a save dialog with an empty name box is one the platform
+    will not let the user complete. Every platform treats it the way it
+    treats a filter — it takes it, and guarantees nothing. The user
+    renames it, and Android may append an extension matching the mime
+    type, so READ THE NAME YOU GOT (`file.name`) rather than the one you
+    asked for.
+
+    on_result(file) fires exactly once and the registration retires with
+    it. CANCEL IS `None`, and a destination is a single PickedFile — the
+    narrowing from the floor's list happens here rather than in your
+    handler, because "one locator or none" is a fact of the request (no
+    platform's save dialog names two destinations) and not something
+    every app should re-derive from a length.
+
+    WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist yet
+    — macOS, GTK and Windows answer with a name for a file nobody has
+    made, and macOS does not even truncate when the user presses Replace
+    — so the handle's open CREATES: opening it for FILE_MODE_WRITE
+    succeeds and yields an empty file on every platform, which is the
+    one behaviour to write against (docs/save-plan.md D1). Android and
+    iOS hand back a document that already exists; the core absorbs the
+    difference, and there is deliberately no fourth file mode asking for
+    it.
+
+    `filters` is the picker's advisory encoding, unchanged."""
+    app = _app
+    dialog_id = app._next("file_dialog")
+    if on_result is not None:
+        def one(files, _handler=on_result):
+            _handler(files[0] if files else None)
+        app._file_dialog_handlers[dialog_id] = one
+    _records().append(wire.tx_show_save_dialog(
+        int(window), dialog_id, str(suggested_name), _filters(filters)))
+    return dialog_id
+
+
+def _filters(filters):
+    """The advisory filter encoding BOTH dialogs share: alternating
+    label and space-separated extensions. One function for the picker
+    and the save request so the two cannot drift on what a filter is —
+    the core keeps them together the same way (`filter_str`, wire.rs)."""
     flat = []
     for label, exts in filters:
         if not isinstance(exts, str):
             exts = " ".join(exts)
         flat.append(str(label))
         flat.append(exts)
+    return flat
+
+
+def _pick(multiple, filters, on_result, window):
     app = _app
     dialog_id = app._next("file_dialog")
     if on_result is not None:
         app._file_dialog_handlers[dialog_id] = on_result
     _records().append(wire.tx_show_file_dialog(
-        int(window), dialog_id, 1 if multiple else 0, flat))
+        int(window), dialog_id, 1 if multiple else 0, _filters(filters)))
     return dialog_id
 
 

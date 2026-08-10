@@ -419,6 +419,11 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> undone = new();
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> redone = new();
     internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
+    // BOTH DIALOG KINDS LIVE HERE. A save request answers on the picker's
+    // grammar out of the picker's id space (docs/save-plan.md D2), so it
+    // registers in this table with the narrowing to "one or none" already
+    // applied at Tx.SaveFile — one live slot, one retire, and no way for
+    // a result to reach the other kind's handler.
     internal readonly Dictionary<ulong, Action<Tx, List<PickedFile>>> fileDialogs = new();
     // Clipboard reads share the alert's request/result grammar and so
     // its table shape: one-shot, keyed by request id.
@@ -860,7 +865,9 @@ sealed class KayaApp
             {
                 // One-shot like the alert, and the id retires with it.
                 // EMPTY IS CANCEL — no platform can confirm an empty
-                // selection, so there is no sentinel to invent.
+                // selection, so there is no sentinel to invent, and a
+                // save dialog's cancel is the same empty answer (it
+                // reaches the guest as null, narrowed at SaveFile).
                 if (fileDialogs.Remove(id, out var fn))
                 {
                     var files = payload as List<PickedFile> ?? new List<PickedFile>();
@@ -2075,15 +2082,73 @@ sealed class Tx
         ulong id = ++App.nextFileDialog;
         if (onResult != null)
             App.fileDialogs[id] = onResult;
+        Records.Add(KayaWire.TxShowFileDialog(
+            window, id, multiple ? 1u : 0u, FilterValues(filters)));
+        return id;
+    }
+
+    /// Ask the platform WHERE TO SAVE. The picker's twin: a request that
+    /// answers once with a capability, on the same grammar, out of the
+    /// same one-live-dialog slot (docs/save-plan.md D2).
+    ///
+    /// `suggestedName` is the name the dialog OPENS with, and every
+    /// platform treats it the way it treats a filter: it takes it, and
+    /// guarantees nothing. The user renames it; Android may append an
+    /// extension matching the mime type. Read the name you GOT.
+    ///
+    /// CANCEL IS null AND A DESTINATION IS A VALUE — the list the picker
+    /// returns is narrowed HERE rather than in every guest, because "one
+    /// locator or none" is a fact of the request and not something an app
+    /// should re-derive from a length.
+    ///
+    /// onResult fires exactly once and the registration retires with it.
+    /// One dialog may be live per process WHICHEVER KIND IT IS, so a save
+    /// and a pick cannot overlap; show the next from the handler.
+    ///
+    /// WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist
+    /// yet (macOS, GTK and Windows answer with a name for a file nobody
+    /// has made — measured), so the handle's Open CREATES: opening it for
+    /// KayaWire.FileModeWrite succeeds and yields an empty file on every
+    /// platform, which is the one behaviour a guest writes against
+    /// (docs/save-plan.md D1).
+    public ulong SaveFile(
+        string suggestedName,
+        (string Label, string Extensions)[]? filters = null,
+        Action<Tx, PickedFile?>? onResult = null,
+        ulong window = 0)
+    {
+        // ONE ID SPACE AND ONE TABLE, shared with the picker rather than
+        // parallel to it: the core keeps ONE live-dialog slot whichever
+        // kind is up, and the answer arrives as the same
+        // file_dialog_result. A second counter would mint an id the
+        // picker had already used and route a result to the wrong
+        // handler; a second table would need a second retire.
+        ulong id = ++App.nextFileDialog;
+        if (onResult != null)
+            // The narrowing lives at the REGISTRATION, so the dispatch
+            // loop's one-shot removal serves both kinds unchanged and
+            // there is no second place to forget to retire.
+            App.fileDialogs[id] = (tx, files) =>
+                onResult(tx, files.Count == 0 ? (PickedFile?)null : files[0]);
+        Records.Add(KayaWire.TxShowSaveDialog(
+            window, id, suggestedName, FilterValues(filters)));
+        return id;
+    }
+
+    /// The advisory filters' wire shape, shared by both dialog kinds:
+    /// alternating Str values, a label then its space-separated
+    /// extensions. One encoder because the core validates one encoding —
+    /// a save request that spelled its filters differently would be
+    /// refused at apply for a reason the guest never wrote.
+    static object[] FilterValues((string Label, string Extensions)[]? filters)
+    {
         var values = new List<object>();
         foreach (var f in filters ?? Array.Empty<(string, string)>())
         {
             values.Add(f.Label);
             values.Add(f.Extensions);
         }
-        Records.Add(KayaWire.TxShowFileDialog(
-            window, id, multiple ? 1u : 0u, values.ToArray()));
-        return id;
+        return values.ToArray();
     }
 
     // --- The clipboard (DESIGN.md, Clipboard) ----------------------

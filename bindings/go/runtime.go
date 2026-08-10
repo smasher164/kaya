@@ -313,6 +313,14 @@ type PickedFile struct {
 // place the answer exists: an Android provider may hand back a pipe,
 // and nothing short of opening reveals it. Go's io/fs.File is satisfied
 // either way; only io.Seeker depends on this.
+//
+// A SAVE DESTINATION OPENS EMPTY, whichever mode you ask for: a handle
+// from Tx.SaveFile creates the file the dialog named, because macOS, GTK
+// and Windows answer with a name for a file nobody has made while
+// Android and iOS answer with one that exists (docs/save-plan.md D1).
+// The create is the DESTINATION's property, never the mode's — a handle
+// from Tx.PickFiles never creates anything, so FileModeWrite on a file
+// the user merely opened cannot conjure a new one.
 func (f PickedFile) Open(mode uint32) (file *os.File, seekable bool, err error) {
 	var raw C.int64_t
 	var seeks C.uint32_t

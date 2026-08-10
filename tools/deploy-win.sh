@@ -106,6 +106,9 @@ for arg in "$@"; do
         # sugar spelling in the other seven bindings
         # (docs/ranges-plan.md §2's fan-out).
         ranges_rust) SUITE="$arg" ;;
+        # Likewise, until `save_file` has a sugar spelling in the other
+        # seven bindings (docs/save-plan.md §2's fan-out).
+        save_rust) SUITE="$arg" ;;
         # These two were wired as legs without arms here, so a single
         # leg could not be re-run in isolation — the one-leg-repeatedly
         # loop is the only practical way to characterise a rare flake.
@@ -223,7 +226,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges save"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -231,6 +234,11 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # SCENES (whose per-language surfaces glob for a11y.py, a11y.go, ... and
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
+#
+# `save` is here while the language sweep lands: the scene, the spec
+# record and the Rust guest exist, the other seven guests are the breadth
+# arms' (docs/save-plan.md §2). It leaves for SCENES the day the eighth
+# lands, exactly as filedialog did.
 DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
 
 SCENE_EXES=()
@@ -773,6 +781,130 @@ verify_deployed() {
 }
 verify_deployed
 timing deploy
+
+# THE CORE'S UNIT TESTS, EXECUTED ON WINDOWS — where they never had been.
+#
+# Rung 1 of the ladder is `cargo test -p kaya`, and it runs on the
+# machine you type it on: mac, or linux in the container. The Windows
+# half of the core therefore had no unit coverage at all, and the one
+# test of the handle-redemption path said so in its own attribute —
+# `#[cfg(all(test, unix))]`, docs/save-plan.md D3's third defect. Taking
+# the gate off is half the fix: a test no lane runs is a test nobody
+# runs. So this phase builds the lib test binary for
+# aarch64-pc-windows-msvc, ships it, and runs it on the guest.
+#
+# WHAT IT REACHES THAT NO OTHER LANE CAN. On Windows the redeemed handle
+# is a Win32 HANDLE and not a descriptor, so protocol.rs's `raw_handle`
+# and `file_from_raw` take their OTHER arm — code no unix run compiles,
+# let alone executes — and a save destination's create-and-truncate goes
+# through a different syscall underneath `OpenOptions`. Proven by
+# construction on 2026-08-09: breaking the windows arm of `raw_handle`
+# alone turned this phase red while `cargo test` on mac stayed green.
+#
+# THE COUNT COMES OUT OF THE SOURCE. A filter that matches nothing exits
+# 0 with "0 passed" — the same shape as the sweep that ran 1 of 24 gates
+# and printed a clean run (tools/gates.sh) — so the number of `#[test]`s
+# in the module is read from capi.rs and the run must report exactly that
+# many passed. Renaming the module fails this phase rather than emptying
+# it.
+#
+# SCOPED TO capi::picked_tests, and the scope is measured rather than
+# timid: the whole lib suite on this guest is 309 passed / 3 failed
+# today, and all three failures are POSIX assumptions in HARNESS tests
+# (`expand_path("$TMPDIR/x")` against a backslash join, twice, and a
+# clipboard seed naming `/nope/kaya-missing.txt`) rather than anything
+# about Windows in the core. Widening this filter to the whole suite is
+# one edit the day those three are fixed, and it is the widening to make.
+unit_tests_on_windows() {
+    echo "== unit tests on the guest (aarch64-pc-windows-msvc) =="
+    local want exe out rc built json
+    want=$(python3 - "$ROOT/crates/kaya/src/capi.rs" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+m = re.search(r"(?m)^mod picked_tests \{", text)
+if not m:
+    sys.exit("deploy-win: crates/kaya/src/capi.rs has no `mod picked_tests` — "
+             "the module this lane runs on the guest moved or was renamed, and "
+             "a filter that matches nothing would report a clean run")
+end = text.index("\n}", m.end())
+count = text.count("#[test]", m.end(), end)
+if count < 1:
+    sys.exit("deploy-win: `mod picked_tests` declares no #[test] at all")
+print(count)
+PY
+    ) || exit 1
+    json="$ROOT/target/win-unit-tests.json"
+    built=0
+    (cd "$ROOT" && cargo xwin test --locked --features harness --release \
+        --target aarch64-pc-windows-msvc -p kaya --lib --no-run \
+        --message-format=json >"$json") || built=$?
+    if [ "$built" -ne 0 ]; then
+        echo "deploy-win: the unit test binary would not build for windows." >&2
+        echo "  This is the ONLY thing that compiles crates/kaya's tests for" >&2
+        echo "  this target — tools/check-targets.sh checks --lib alone — so a" >&2
+        echo "  test that only compiles on unix fails HERE and nowhere else." >&2
+        exit 1
+    fi
+    exe=$(python3 - "$json" <<'PY'
+import json
+import pathlib
+import sys
+
+for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+    try:
+        m = json.loads(line)
+    except ValueError:
+        continue
+    if (m.get("reason") == "compiler-artifact" and m.get("executable")
+            and m.get("profile", {}).get("test")):
+        print(m["executable"])
+        break
+else:
+    sys.exit("deploy-win: cargo built no test executable — the --no-run build "
+             "reported nothing to run")
+PY
+    ) || exit 1
+    rm -f "$json"
+    scp -q "$exe" "$HOST:C:/kaya/kaya-unittests.exe"
+    rc=0
+    out=$(run_ssh 'cmd /c "cd /d C:\kaya && kaya-unittests.exe capi::picked_tests --test-threads=1"' 2>&1) || rc=$?
+    # The binary goes whatever the verdict is: it is a transient of this
+    # phase, not a deployed artifact, and one left behind would be the
+    # next run's stale exe waiting for a build that failed.
+    run_ssh 'cmd /c "del C:\kaya\kaya-unittests.exe 2>nul & exit /b 0"' || true
+    echo "$out"
+    if [ "$rc" -ne 0 ]; then
+        echo "deploy-win: the core's unit tests FAILED on the guest (rc=$rc)." >&2
+        echo "  These are the same tests rung 1 runs on mac; a failure here and" >&2
+        echo "  not there is Windows-only code — the HANDLE arms of" >&2
+        echo "  protocol.rs's raw_handle/file_from_raw, or an OpenOptions" >&2
+        echo "  combination that means something else on this OS." >&2
+        exit 1
+    fi
+    local passed
+    passed=$(printf '%s' "$out" | python3 -c '
+import re
+import sys
+
+m = re.search(r"(\d+) passed", sys.stdin.read())
+print(m.group(1) if m else -1)')
+    if [ "$passed" != "$want" ]; then
+        echo "deploy-win: the guest ran $passed of the $want tests in" >&2
+        echo "  capi::picked_tests. A filter that selects nothing exits 0 with" >&2
+        echo "  \"0 passed\", so the count is what makes this phase mean" >&2
+        echo "  something — fix the filter or the module name, do not lower" >&2
+        echo "  the count." >&2
+        exit 1
+    fi
+    echo "deploy-win: $passed/$want unit tests passed on the guest" \
+        "(capi::picked_tests — the file-handle redemption, including the WRITE" \
+        "half and a save destination's create-and-truncate)"
+}
+unit_tests_on_windows
+timing unit-tests
 
 # Recording mode (KAYA_RECORD=1): a WGC capturer (tools/guest/
 # record-win, built on the VM) films kaya windows for the whole run,
@@ -1439,6 +1571,23 @@ case "$SUITE" in
         run_suite filedialog_csharp
         drain_suites
         run_suite filedialog_java
+        drain_suites
+        # The save scene: the round trip an editor walks — open, save
+        # back, save as, reopen (docs/save-plan.md D5). Rust-only until
+        # the sugar sweep gives the other guests a `save_file` spelling,
+        # which is why it sits in DEPTH_SCENES.
+        #
+        # SERIAL, BETWEEN DRAINS, and it is the filedialog rule rather
+        # than a second one: the Shell's save dialog is the same OS-GLOBAL
+        # modal chrome, found the same way — `live_dialog` walks the
+        # DESKTOP for a visible `#32770` and takes the first. With a
+        # picker up beside it, `file_dialog_name` types into whichever the
+        # walk reached first and both legs fail, which reads as a backend
+        # bug rather than a scheduling one. The same measurement that put
+        # the filedialog legs here (2026-07-31) covers this leg; it needs
+        # no separate one, because it is the same window class on the same
+        # desktop.
+        run_suite save_rust
         drain_suites
         run_suite background_rust
         run_suite background_python

@@ -1085,7 +1085,7 @@ $extra"
     # — a watcher outliving its leg would answer the NEXT one's requests
     # against a dead app.
     local watcher_pid=""
-    if [ "$scene" = filedialog ] || [ "$scene" = clipboard ]; then
+    if [ "$scene" = filedialog ] || [ "$scene" = clipboard ] || [ "$scene" = save ]; then
         local data_container
         data_container=$(xcrun simctl get_app_container "$udid" "$bundle_id" data)
         simdrive_watch "$udid" "$bundle_id" "$data_container/Documents" &
@@ -1557,6 +1557,29 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on filedialog-swiftui "$APP" dev.kaya.filedialogswiftui \
         filedialog-swiftui filedialog filedialog
+
+    # The save scene: the ROUND TRIP an editor walks (docs/save-plan.md
+    # D5) — open, save back through the picked handle, save AS a new
+    # destination, reopen both. THE SECOND LEG WITH EYES ON THE HOST, and
+    # the one that made the driver grow HANDS. iOS's save dialog is
+    # `UIDocumentPickerViewController(forExporting:)`, another remote view
+    # controller, and the point of a save dialog is TYPING A NAME — which
+    # simdrive could not do at all (D4). It has four verbs for it now
+    # (savestate/savename/savepress/savecancel), and `savepress` exists
+    # rather than reusing `press` because `press Save` FALSELY SUCCEEDS on
+    # this sheet: it matches the static text "Save as" by containment,
+    # reports a press, and the sheet stays up.
+    #
+    # THE PLATFORM ANSWERS WITH A DOCUMENT THAT EXISTS here, unlike the
+    # three desktops — the export copies a ZERO-BYTE file the backend
+    # stages for the name — so this leg is the one that watches D1's
+    # "opening a destination yields an empty file" hold on the side the
+    # core does NOT create.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example save
+    APP=$(make_bundle savers-swiftui dev.kaya.saveswiftui "$TARGET_DIR/examples/save")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on save-swiftui "$APP" dev.kaya.saveswiftui \
+        save-swiftui save save
 
     # The clipboard scene. THE SECOND LEG WITH HELP FROM THE HOST, for a
     # different reason than the picker's: iOS cannot spawn a child
