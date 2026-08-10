@@ -1382,7 +1382,8 @@ fi
 # composition is identical to Swift's and that is the point — Go owns
 # `main` (`-buildmode=exe`), pins it to thread 0 with
 # runtime.LockOSThread in the guest's init, and hands that thread to
-# kaya_run, which never returns (guests/go/*/main.go; the host contract's
+# kaya_run, which never returns (guests/go/cmd/main_desktop.go — `!android`
+# reaches iOS, which is the point of that tag; the host contract's
 # C1). No gomobile is involved anywhere: `go build` reaches ios/arm64
 # directly, with no extra tool and no extra pin (docs/go-mobile-plan.md
 # D1). The only thing the binding needed was its #cgo lines, because
@@ -1422,51 +1423,33 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # CGO_CFLAGS/CGO_LDFLAGS because cgo uses CC to LINK as well as to
     # compile, and -isysroot has to reach both halves.
     IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
-    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y clipboard"
-    # Pooled like the swift and mac-lane builds: the links are
-    # independent, and serial they would be this suite's critical path.
-    mkdir -p "$BUNDLES/.golog"
-    go_pids=()
-    go_names=()
-    for entry in $IOS_GO_SCENES; do
-        (
-            guest="${entry%%:*}"
-            src="${entry##*:}"
-            log="$BUNDLES/.golog/$guest.log"
-            CGO_ENABLED=1 GOOS=ios GOARCH=arm64 CC="$IOS_GO_CC" \
-                go build -o "$BUNDLES/${guest}go-bin" "dev.kaya/guests/go/$src" \
-                >"$log" 2>&1 || exit 1
-            # AND THE BINARY MUST CARRY THE MARKER ITSELF, which is this
-            # lane's cheapest test that the bundle is SELF-CONTAINED. The
-            # id lives in libkaya.a, so it is in this executable only if
-            # the archive really was linked into it. Point the #cgo line
-            # back at `-L… -lkaya` and ld64 prefers the .dylib sitting in
-            # the same directory (mobilepkg-contract.md §1.2, the defect
-            # the swift leg still has): the guest then names an absolute
-            # build-machine path to a library outside its own bundle, runs
-            # anyway because the Simulator shares the host filesystem, and
-            # tells nobody. This is the line that notices, at build time,
-            # naming the guest.
-            "$ROOT/tools/build-id.sh" --verify "$BUNDLES/${guest}go-bin" >>"$log" 2>&1
-        ) &
-        go_pids+=($!)
-        go_names+=("${entry%%:*}")
-    done
-    go_status=0
-    i=0
-    for pid in "${go_pids[@]}"; do
-        if ! wait "$pid"; then
-            echo "go guest build FAILED: ${go_names[$i]}" >&2
-            cat "$BUNDLES/.golog/${go_names[$i]}.log" >&2
-            go_status=1
-        fi
-        i=$((i + 1))
-    done
-    rm -rf "$BUNDLES/.golog"
-    [ "$go_status" = 0 ] || exit 1
-    for entry in $IOS_GO_SCENES; do
-        guest="${entry%%:*}"
-        APP=$(make_bundle "${guest}go" "dev.kaya.${guest}go" "$BUNDLES/${guest}go-bin")
+    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y clipboard"
+    # ONE CROSS-BUILD FOR THE WHOLE SUITE. guests/go/cmd is the guest
+    # tree's only main package: it imports every scene library and picks
+    # one from KAYA_SELFTEST, which each leg below already passes as its
+    # own name. The bundles still differ — one per scene, each with its
+    # own bundle id, because a leg is launched by bundle id — but they
+    # all carry a copy of this executable, so `listdetail` needs no
+    # `listdetail:split` source mapping any more: the name goes in the
+    # environment and the guest's table answers it.
+    #
+    # It used to be 24 pooled cross-links, the pool worth writing down
+    # because serial they were this suite's critical path.
+    CGO_ENABLED=1 GOOS=ios GOARCH=arm64 CC="$IOS_GO_CC" \
+        go build -o "$BUNDLES/go-bin" dev.kaya/guests/go/cmd || exit 1
+    # AND THE BINARY MUST CARRY THE MARKER ITSELF, which is this lane's
+    # cheapest test that the bundles are SELF-CONTAINED. The id lives in
+    # libkaya.a, so it is in this executable only if the archive really
+    # was linked into it. Point the #cgo line back at `-L… -lkaya` and
+    # ld64 prefers the .dylib sitting in the same directory
+    # (mobilepkg-contract.md §1.2, the defect the swift leg still has):
+    # the guest then names an absolute build-machine path to a library
+    # outside its own bundle, runs anyway because the Simulator shares
+    # the host filesystem, and tells nobody. This is the line that
+    # notices, at build time, before a single bundle is assembled.
+    "$ROOT/tools/build-id.sh" --verify "$BUNDLES/go-bin" || exit 1
+    for guest in $IOS_GO_SCENES; do
+        APP=$(make_bundle "${guest}go" "dev.kaya.${guest}go" "$BUNDLES/go-bin")
         cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
         if [ "$guest" = milestone2 ]; then
             queue_leg run_swiftui_on go "$APP" dev.kaya.milestone2go go 1 milestone2

@@ -13,7 +13,7 @@ rem in XamlControlsResources, so `go run` (which launches from a temp
 rem build directory) fail-fasts at the first layout pass. Never `go run`
 rem for a WinUI leg — docs/traps.md, "WinUI resource resolution is
 rem anchored to the PROCESS exe's directory".
-go build -o C:\kaya\todos_go.exe dev.kaya/guests/go/todos > C:\kaya\out_todos_go.txt 2>&1
+go build -o C:\kaya\todos_go.exe dev.kaya/guests/go/cmd > C:\kaya\out_todos_go.txt 2>&1
 if errorlevel 1 goto done
 todos_go.exe >> C:\kaya\out_todos_go.txt 2>&1
 :done

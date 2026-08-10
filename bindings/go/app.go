@@ -23,6 +23,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Typed handles over the id spaces.
@@ -3037,6 +3038,11 @@ func (a *App) OnToggleNode(n Node, fn func(*Tx, []any, bool)) {
 //
 // A guest never calls this directly on a platform where Run works.
 func (a *App) Serve() {
+	// The one fact Android's attach cannot learn any other way: this
+	// guest reached its dispatch loop. Nothing reads it on the desktops
+	// — bindings/go/android.go's app goroutine is the only reader, and
+	// it uses it to tell "the app ended" from "the app never started".
+	served.Store(true)
 	for {
 		// Posted work first, then the ring, then park. Draining at
 		// the TOP is what makes a wake sufficient: whatever reason
@@ -3206,17 +3212,75 @@ func (a *App) Serve() {
 	}
 }
 
-// Run enters the core on the calling goroutine's thread (which must be
-// the process main thread; use runtime.LockOSThread in an init
-// function), dispatching occurrences on a second goroutine. Returns the
-// exit code.
+// served records that some App reached its dispatch loop. Package-level
+// rather than per-App because its reader is the Android attach entry,
+// which holds no App: the guest builds one on the app thread and kaya
+// never sees it. Written from Serve, read from the app goroutine after
+// the guest's entry returns — different goroutines on the desktops, so
+// atomic rather than a plain bool.
+var served atomic.Bool
+
+// Run gives kaya the calling goroutine and RETURNS WHEN THE APP IS OVER,
+// on every platform, with the app's exit code. A guest's last line is
+//
+//	os.Exit(build().Run())
+//
+// and that line is the same on mac, linux, windows, iOS and Android.
+//
+// THE ONE CALL MEANING TWO THINGS IS THE WART THIS AVOIDS. Gio's
+// app.Main states the alternative outright — "On most platforms Main
+// blocks forever, for Android and iOS it returns immediately to give
+// control of the main thread back to the system" (gioui.org/app/app.go)
+// — so a Gio app's `main` ends after one statement on a phone and never
+// ends on a desktop, and every line an author writes after that call is
+// live on one host and dead on the other. kaya has no such line: what
+// differs per platform is WHICH THREAD kaya was given, never whether
+// this call comes back.
+//
+// WHAT DIFFERS UNDERNEATH, and it is only who owns the process entry:
+//
+//   - Desktops and iOS: the guest owns the process main thread and lends
+//     it to the core. Run dispatches on a second goroutine and hands the
+//     caller's thread to kaya_run, which is the platform event loop.
+//   - Android: the OS owns the entry (Zygote forks the process,
+//     ActivityThread owns the Looper) and kaya_run is a hard panic
+//     there (crates/kaya/src/capi.rs:815-818). The calling goroutine is
+//     already the app thread — the attach entry started it, locked, and
+//     gave the UI thread back to the Looper — so Run dispatches on it
+//     rather than making a second one, and comes back when the core
+//     shuts down. The exit code is 0: there is no process for the guest
+//     to hand a status to.
+//
+// runtime.GOOS IS A CONSTANT, so exactly one of those arms survives
+// compilation while BOTH are type-checked by every `go build` on every
+// platform — the same reason bindings/go/android.go carries no build tag.
 func (a *App) Run() int {
+	return a.runWith(hostedEntry, a.Serve, Run)
+}
+
+// runWith is Run's body with its two blocking halves injected, so the
+// contract above can be TESTED rather than asserted in a comment: a test
+// on any host can drive the hosted arm and prove that it does not come
+// back while serve is running (app_test.go's TestRunBlocks*).
+//
+// `hosted` means the OS owns the process entry and handed kaya a thread,
+// which is Android and nothing else today.
+func (a *App) runWith(hosted bool, serve func(), enterCore func() int) int {
+	if hosted {
+		// SERVE ON THE CALLING GOROUTINE — not `go serve()`. This is the
+		// clause that makes Run blocking here, and it is load-bearing
+		// twice over: the caller is the locked OS thread the attach
+		// entry made for exactly this, and the occurrence ring has one
+		// consumer.
+		serve()
+		return 0
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		a.Serve()
+		serve()
 	}()
-	code := Run()
+	code := enterCore()
 	<-done
 	return code
 }

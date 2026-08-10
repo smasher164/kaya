@@ -281,19 +281,22 @@ fi
 # 2. The scan sees the defect in a GUEST, which is the other root and
 #    the one the trap actually lands in.
 #
-#    THE FILE MOVED, 2026-08-07, and the way it moved is worth keeping:
-#    this used to plant over `os.Exit(` in guests/go/milestone2/main.go,
-#    and the Android composition split that guest into a scene body and
-#    two platform tails — so os.Exit went to main_desktop.go, the
-#    substitution count came back ZERO, and the gate refused to vouch for
-#    itself instead of passing. That is the clause working. The token has
-#    to sit in a file that IMPORTS os (the scanner resolves the import's
-#    local name and ignores a bare `os` bound to nothing), which is
-#    exactly what main_desktop.go is: the tail that owns main and exits.
-n=$(doctor guests/go/milestone2/main_desktop.go 'os.Exit(' 'os.Getenv(' "$T/s2.go")
-echo "check-go-env: self-test 2 planted $n defect(s) in guests/go/milestone2/main_desktop.go"
+#    THE FILE MOVED TWICE, and the way it moved the first time is worth
+#    keeping: this used to plant over `os.Exit(` in
+#    guests/go/milestone2/main.go, and the Android composition split that
+#    guest into a scene body and two platform tails — so os.Exit went to
+#    main_desktop.go, the substitution count came back ZERO, and the gate
+#    refused to vouch for itself instead of passing. That is the clause
+#    working. (The second move was the collapse to one entry package:
+#    guests/go/cmd/main_desktop.go is the same tail, now the only one.)
+#    The token has to sit in a file that IMPORTS os (the scanner resolves
+#    the import's local name and ignores a bare `os` bound to nothing),
+#    which is exactly what main_desktop.go is: the tail that owns main,
+#    selects the scene and exits.
+n=$(doctor guests/go/cmd/main_desktop.go 'os.Exit(' 'os.Getenv(' "$T/s2.go")
+echo "check-go-env: self-test 2 planted $n defect(s) in guests/go/cmd/main_desktop.go"
 if [ "${n:-0}" -lt 1 ]; then
-    echo "check-go-env: SELF-TEST FAIL — nothing to plant in guests/go/milestone2/main_desktop.go." >&2
+    echo "check-go-env: SELF-TEST FAIL — nothing to plant in guests/go/cmd/main_desktop.go." >&2
     status=1
 elif scan -file "$T/s2.go" >/dev/null 2>&1; then
     echo "check-go-env: SELF-TEST FAIL — the scan passed a guest that calls os.Getenv." >&2
@@ -314,16 +317,16 @@ fi
 #    Keyed on `package main` — the one token every Go file has exactly
 #    one of — so a rewrite of the imports or the selector cannot quietly
 #    empty it.
-n=$(doctor guests/go/milestone2/main_android.go 'package main' \
+n=$(doctor guests/go/cmd/main_android.go 'package main' \
     $'package main\n\nimport osprobe "os"\n\nvar _ = osprobe.Getenv("KAYA_SELFTEST")' \
     "$T/s2b.go")
-echo "check-go-env: self-test 2b planted $n defect(s) in guests/go/milestone2/main_android.go (//go:build android)"
+echo "check-go-env: self-test 2b planted $n defect(s) in guests/go/cmd/main_android.go (//go:build android)"
 if [ "${n:-0}" -ne 1 ]; then
     echo "check-go-env: SELF-TEST FAIL — expected exactly one 'package main' in" \
-        "guests/go/milestone2/main_android.go, planted $n." >&2
+        "guests/go/cmd/main_android.go, planted $n." >&2
     status=1
-elif ! grep -q '^//go:build android' guests/go/milestone2/main_android.go; then
-    echo "check-go-env: SELF-TEST FAIL — guests/go/milestone2/main_android.go no" \
+elif ! grep -q '^//go:build android' guests/go/cmd/main_android.go; then
+    echo "check-go-env: SELF-TEST FAIL — guests/go/cmd/main_android.go no" \
         "longer carries //go:build android, so clause 2b proves nothing about" \
         "constrained files. Point it at the Android arm of a Go guest." >&2
     status=1

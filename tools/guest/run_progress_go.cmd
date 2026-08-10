@@ -8,7 +8,7 @@ set CC=aarch64-w64-mingw32-clang
 set KAYA_SELFTEST=progress
 rem Build INTO C:\kaya: the exe must sit beside resources.pri for
 rem ms-appx (XamlControlsResources) to resolve — the adjacency probe.
-go build -o C:\kaya\progress_go.exe dev.kaya/guests/go/progress > C:\kaya\out_progress_go.txt 2>&1
+go build -o C:\kaya\progress_go.exe dev.kaya/guests/go/cmd > C:\kaya\out_progress_go.txt 2>&1
 if errorlevel 1 goto done
 progress_go.exe >> C:\kaya\out_progress_go.txt 2>&1
 :done

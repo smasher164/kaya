@@ -434,23 +434,19 @@ hs_bin() { (cd guests/haskell && cabal list-bin "$1" -v0); }
 # and let the legs exec the outputs.
 CS_GUEST="/tmp/cs/bin/Debug/net10.0/kaya-guests.dll"
 build_go() {
+    # ONE BINARY FOR EVERY SCENE, the mac runner's shape: guests/go/cmd
+    # is the guest tree's only main package, it imports all 31 scene
+    # libraries, and it picks one from KAYA_SELFTEST — which every Go
+    # leg below already passes.
+    #
+    # This used to be a link per scene, and it was the one tier where a
+    # landed guest could still have nothing to run (every other
+    # language's build here is a whole-directory sweep — dune, cabal,
+    # javac's wildcard, dotnet's glob — and picks a new guest up for
+    # free). A scene with no Go body now has no import and no table key
+    # in guests/go/cmd/scenes.go, so this line neither sweeps nor skips.
     mkdir -p /tmp/go-guests
-    local guest
-    # DEPTH_SCENES TOO, the validate-mac convention: a depth slice's
-    # guests arrive one language at a time, and Go's has to be BUILT
-    # before its leg can run — every other language's build here is a
-    # whole-directory sweep (dune, cabal, javac's wildcard, dotnet's
-    # glob) and picks a new guest up for free, so Go was the one tier
-    # where a landed guest could still have nothing to run.
-    # ...and the directory test is what decides, the mac runner's exact
-    # shape: a depth scene whose Go guest has not landed yet is SKIPPED,
-    # not a build failure. Without it this loop was the one place where
-    # putting a scene in DEPTH_SCENES broke the whole lane before a
-    # single leg ran.
-    for guest in $SCENES $DEPTH_SCENES; do
-        [ -d "guests/go/$guest" ] || continue
-        go build -o "/tmp/go-guests/$guest" "dev.kaya/guests/go/$guest" || return 1
-    done
+    go build -o /tmp/go-guests/kaya-go dev.kaya/guests/go/cmd || return 1
 }
 run_build go build_go
 
@@ -463,7 +459,7 @@ for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
     run "$proto" c /tmp/c-guests/milestone2
     run "$proto" python env KAYA_LIB="$LIB" python3 guests/python/milestone2.py
-    run "$proto" go /tmp/go-guests/milestone2
+    run "$proto" go /tmp/go-guests/kaya-go
     run "$proto" csharp env KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
     run "$proto" ocaml env KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/milestone2.exe
     run "$proto" haskell "$(hs_bin milestone2)"
@@ -474,7 +470,7 @@ for proto in x11 wayland; do
     run "$proto" entry-c env KAYA_SELFTEST=entry /tmp/c-guests/entry
     run "$proto" entry-python env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
         python3 guests/python/entry.py
-    run "$proto" entry-go env KAYA_SELFTEST=entry /tmp/go-guests/entry
+    run "$proto" entry-go env KAYA_SELFTEST=entry /tmp/go-guests/kaya-go
     run "$proto" entry-csharp env KAYA_SELFTEST=entry KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" entry-ocaml env KAYA_SELFTEST=entry KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/entry.exe
@@ -487,7 +483,7 @@ for proto in x11 wayland; do
     run "$proto" gallery-c env KAYA_SELFTEST=gallery /tmp/c-guests/gallery
     run "$proto" gallery-python env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
         python3 guests/python/gallery.py
-    run "$proto" gallery-go env KAYA_SELFTEST=gallery /tmp/go-guests/gallery
+    run "$proto" gallery-go env KAYA_SELFTEST=gallery /tmp/go-guests/kaya-go
     run "$proto" gallery-csharp env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" gallery-ocaml env KAYA_SELFTEST=gallery KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/gallery.exe
@@ -500,7 +496,7 @@ for proto in x11 wayland; do
     run "$proto" todos-c env KAYA_SELFTEST=todos /tmp/c-guests/todos
     run "$proto" todos-python env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
         python3 guests/python/todos.py
-    run "$proto" todos-go env KAYA_SELFTEST=todos /tmp/go-guests/todos
+    run "$proto" todos-go env KAYA_SELFTEST=todos /tmp/go-guests/kaya-go
     run "$proto" todos-csharp env KAYA_SELFTEST=todos KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" todos-ocaml env KAYA_SELFTEST=todos KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/todos.exe
@@ -513,7 +509,7 @@ for proto in x11 wayland; do
     run "$proto" reorder-c env KAYA_SELFTEST=reorder /tmp/c-guests/reorder
     run "$proto" reorder-python env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
         python3 guests/python/reorder.py
-    run "$proto" reorder-go env KAYA_SELFTEST=reorder /tmp/go-guests/reorder
+    run "$proto" reorder-go env KAYA_SELFTEST=reorder /tmp/go-guests/kaya-go
     run "$proto" reorder-csharp env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" reorder-ocaml env KAYA_SELFTEST=reorder KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/reorder.exe
@@ -526,7 +522,7 @@ for proto in x11 wayland; do
     run "$proto" feed-c env KAYA_SELFTEST=feed /tmp/c-guests/feed
     run "$proto" feed-python env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
         python3 guests/python/feed.py
-    run "$proto" feed-go env KAYA_SELFTEST=feed /tmp/go-guests/feed
+    run "$proto" feed-go env KAYA_SELFTEST=feed /tmp/go-guests/kaya-go
     run "$proto" feed-csharp env KAYA_SELFTEST=feed KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" feed-ocaml env KAYA_SELFTEST=feed KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/feed.exe
@@ -541,7 +537,7 @@ for proto in x11 wayland; do
     run "$proto" grow-rust env KAYA_SELFTEST=grow "$CARGO_TARGET_DIR/debug/examples/grow"
     run "$proto" grow-python env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
         python3 guests/python/grow.py
-    run "$proto" grow-go env KAYA_SELFTEST=grow /tmp/go-guests/grow
+    run "$proto" grow-go env KAYA_SELFTEST=grow /tmp/go-guests/kaya-go
     run "$proto" grow-csharp env KAYA_SELFTEST=grow KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" grow-ocaml env KAYA_SELFTEST=grow KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/grow.exe
@@ -553,7 +549,7 @@ for proto in x11 wayland; do
     run "$proto" align-rust env KAYA_SELFTEST=align "$CARGO_TARGET_DIR/debug/examples/align"
     run "$proto" align-python env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
         python3 guests/python/align.py
-    run "$proto" align-go env KAYA_SELFTEST=align /tmp/go-guests/align
+    run "$proto" align-go env KAYA_SELFTEST=align /tmp/go-guests/kaya-go
     run "$proto" align-csharp env KAYA_SELFTEST=align KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" align-ocaml env KAYA_SELFTEST=align KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/align.exe
@@ -567,7 +563,7 @@ for proto in x11 wayland; do
     run "$proto" window-rust env KAYA_SELFTEST=window "$CARGO_TARGET_DIR/debug/examples/window"
     run "$proto" window-python env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
         python3 guests/python/window.py
-    run "$proto" window-go env KAYA_SELFTEST=window /tmp/go-guests/window
+    run "$proto" window-go env KAYA_SELFTEST=window /tmp/go-guests/kaya-go
     run "$proto" window-csharp env KAYA_SELFTEST=window KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" window-ocaml env KAYA_SELFTEST=window KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/window.exe
@@ -579,7 +575,7 @@ for proto in x11 wayland; do
     run "$proto" panels-rust env KAYA_SELFTEST=panels "$CARGO_TARGET_DIR/debug/examples/panels"
     run "$proto" panels-python env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
         python3 guests/python/panels.py
-    run "$proto" panels-go env KAYA_SELFTEST=panels /tmp/go-guests/panels
+    run "$proto" panels-go env KAYA_SELFTEST=panels /tmp/go-guests/kaya-go
     run "$proto" panels-csharp env KAYA_SELFTEST=panels KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" panels-ocaml env KAYA_SELFTEST=panels KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/panels.exe
@@ -613,7 +609,7 @@ for proto in x11 wayland; do
     run "$proto" dirty-python env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/dirty.py
     run "$proto" dirty-go env KAYA_SELFTEST=dirty \
-        tools/linux/a11y-leg.sh /tmp/go-guests/dirty
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" dirty-csharp env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
     run "$proto" dirty-ocaml env KAYA_SELFTEST=dirty KAYA_LIB="$LIB" \
@@ -637,7 +633,7 @@ for proto in x11 wayland; do
     run "$proto" stall-rust env KAYA_SELFTEST=stall "$CARGO_TARGET_DIR/debug/examples/stall"
     run "$proto" stall-python env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
         python3 guests/python/stall.py
-    run "$proto" stall-go env KAYA_SELFTEST=stall /tmp/go-guests/stall
+    run "$proto" stall-go env KAYA_SELFTEST=stall /tmp/go-guests/kaya-go
     run "$proto" stall-csharp env KAYA_SELFTEST=stall KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" stall-ocaml env KAYA_SELFTEST=stall KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/stall.exe
@@ -647,7 +643,7 @@ for proto in x11 wayland; do
     run "$proto" confirm-rust env KAYA_SELFTEST=confirm "$CARGO_TARGET_DIR/debug/examples/confirm"
     run "$proto" confirm-python env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
         python3 guests/python/confirm.py
-    run "$proto" confirm-go env KAYA_SELFTEST=confirm /tmp/go-guests/confirm
+    run "$proto" confirm-go env KAYA_SELFTEST=confirm /tmp/go-guests/kaya-go
     run "$proto" confirm-csharp env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" confirm-ocaml env KAYA_SELFTEST=confirm KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/confirm.exe
@@ -679,7 +675,7 @@ for proto in x11 wayland; do
     run "$proto" filedialog-python env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/filedialog.py
     run "$proto" filedialog-go env KAYA_SELFTEST=filedialog \
-        tools/linux/a11y-leg.sh /tmp/go-guests/filedialog
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" filedialog-csharp env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
     run "$proto" filedialog-ocaml env KAYA_SELFTEST=filedialog KAYA_LIB="$LIB" \
@@ -691,7 +687,7 @@ for proto in x11 wayland; do
     run "$proto" background-python env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/background.py
     run "$proto" background-go env KAYA_SELFTEST=background \
-        tools/linux/a11y-leg.sh /tmp/go-guests/background
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" background-csharp env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
     run "$proto" background-ocaml env KAYA_SELFTEST=background KAYA_LIB="$LIB" \
@@ -720,7 +716,7 @@ for proto in x11 wayland; do
     run "$proto" split-python env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/split.py
     run "$proto" split-go env KAYA_SELFTEST=split \
-        tools/linux/a11y-leg.sh /tmp/go-guests/split
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" split-csharp env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
     run "$proto" split-ocaml env KAYA_SELFTEST=split KAYA_LIB="$LIB" \
@@ -739,7 +735,7 @@ for proto in x11 wayland; do
     run "$proto" listdetail-python env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/split.py
     run "$proto" listdetail-go env KAYA_SELFTEST=listdetail \
-        tools/linux/a11y-leg.sh /tmp/go-guests/split
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" listdetail-csharp env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
     run "$proto" listdetail-ocaml env KAYA_SELFTEST=listdetail KAYA_LIB="$LIB" \
@@ -750,7 +746,7 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     run "$proto" nav-python env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         python3 guests/python/nav.py
-    run "$proto" nav-go env KAYA_SELFTEST=nav /tmp/go-guests/nav
+    run "$proto" nav-go env KAYA_SELFTEST=nav /tmp/go-guests/kaya-go
     run "$proto" nav-csharp env KAYA_SELFTEST=nav KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" nav-ocaml env KAYA_SELFTEST=nav KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/nav.exe
@@ -763,7 +759,7 @@ for proto in x11 wayland; do
     run "$proto" scroll-rust env KAYA_SELFTEST=scroll "$CARGO_TARGET_DIR/debug/examples/scroll"
     run "$proto" scroll-python env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         python3 guests/python/scroll.py
-    run "$proto" scroll-go env KAYA_SELFTEST=scroll /tmp/go-guests/scroll
+    run "$proto" scroll-go env KAYA_SELFTEST=scroll /tmp/go-guests/kaya-go
     run "$proto" scroll-csharp env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" scroll-ocaml env KAYA_SELFTEST=scroll KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/scroll.exe
@@ -783,7 +779,7 @@ for proto in x11 wayland; do
     run "$proto" a11y-python env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/a11y.py
     run "$proto" a11y-go env KAYA_SELFTEST=a11y \
-        tools/linux/a11y-leg.sh /tmp/go-guests/a11y
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" a11y-csharp env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
     run "$proto" a11y-ocaml env KAYA_SELFTEST=a11y KAYA_LIB="$LIB" \
@@ -797,7 +793,7 @@ for proto in x11 wayland; do
     run "$proto" progress-rust env KAYA_SELFTEST=progress "$CARGO_TARGET_DIR/debug/examples/progress"
     run "$proto" progress-python env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
         python3 guests/python/progress.py
-    run "$proto" progress-go env KAYA_SELFTEST=progress /tmp/go-guests/progress
+    run "$proto" progress-go env KAYA_SELFTEST=progress /tmp/go-guests/kaya-go
     run "$proto" progress-csharp env KAYA_SELFTEST=progress KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" progress-ocaml env KAYA_SELFTEST=progress KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/progress.exe
@@ -810,7 +806,7 @@ for proto in x11 wayland; do
     run "$proto" select-rust env KAYA_SELFTEST=select "$CARGO_TARGET_DIR/debug/examples/select"
     run "$proto" select-python env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
         python3 guests/python/select.py
-    run "$proto" select-go env KAYA_SELFTEST=select /tmp/go-guests/select
+    run "$proto" select-go env KAYA_SELFTEST=select /tmp/go-guests/kaya-go
     run "$proto" select-csharp env KAYA_SELFTEST=select KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" select-ocaml env KAYA_SELFTEST=select KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/select.exe
@@ -822,7 +818,7 @@ for proto in x11 wayland; do
     run "$proto" radio-rust env KAYA_SELFTEST=radio "$CARGO_TARGET_DIR/debug/examples/radio"
     run "$proto" radio-python env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
         python3 guests/python/radio.py
-    run "$proto" radio-go env KAYA_SELFTEST=radio /tmp/go-guests/radio
+    run "$proto" radio-go env KAYA_SELFTEST=radio /tmp/go-guests/kaya-go
     run "$proto" radio-csharp env KAYA_SELFTEST=radio KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" radio-ocaml env KAYA_SELFTEST=radio KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/radio.exe
@@ -834,7 +830,7 @@ for proto in x11 wayland; do
     run "$proto" grid-rust env KAYA_SELFTEST=grid "$CARGO_TARGET_DIR/debug/examples/grid"
     run "$proto" grid-python env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
         python3 guests/python/grid.py
-    run "$proto" grid-go env KAYA_SELFTEST=grid /tmp/go-guests/grid
+    run "$proto" grid-go env KAYA_SELFTEST=grid /tmp/go-guests/kaya-go
     run "$proto" grid-csharp env KAYA_SELFTEST=grid KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" grid-ocaml env KAYA_SELFTEST=grid KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/grid.exe
@@ -845,7 +841,7 @@ for proto in x11 wayland; do
     run "$proto" textarea-rust env KAYA_SELFTEST=textarea "$CARGO_TARGET_DIR/debug/examples/textarea"
     run "$proto" textarea-python env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
         python3 guests/python/textarea.py
-    run "$proto" textarea-go env KAYA_SELFTEST=textarea /tmp/go-guests/textarea
+    run "$proto" textarea-go env KAYA_SELFTEST=textarea /tmp/go-guests/kaya-go
     run "$proto" textarea-csharp env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" textarea-ocaml env KAYA_SELFTEST=textarea KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/textarea.exe
@@ -857,7 +853,7 @@ for proto in x11 wayland; do
     run "$proto" sections-rust env KAYA_SELFTEST=sections "$CARGO_TARGET_DIR/debug/examples/sections"
     run "$proto" sections-python env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
         python3 guests/python/sections.py
-    run "$proto" sections-go env KAYA_SELFTEST=sections /tmp/go-guests/sections
+    run "$proto" sections-go env KAYA_SELFTEST=sections /tmp/go-guests/kaya-go
     run "$proto" sections-csharp env KAYA_SELFTEST=sections KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" sections-ocaml env KAYA_SELFTEST=sections KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/sections.exe
@@ -875,7 +871,7 @@ for proto in x11 wayland; do
     run "$proto" menus-c env KAYA_SELFTEST=menus /tmp/c-guests/menus
     run "$proto" menus-python env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
         python3 guests/python/menus.py
-    run "$proto" menus-go env KAYA_SELFTEST=menus /tmp/go-guests/menus
+    run "$proto" menus-go env KAYA_SELFTEST=menus /tmp/go-guests/kaya-go
     run "$proto" menus-csharp env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" menus-ocaml env KAYA_SELFTEST=menus KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/menus.exe
@@ -892,7 +888,7 @@ for proto in x11 wayland; do
     run "$proto" commands-c env KAYA_SELFTEST=commands /tmp/c-guests/commands
     run "$proto" commands-python env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
         python3 guests/python/commands.py
-    run "$proto" commands-go env KAYA_SELFTEST=commands /tmp/go-guests/commands
+    run "$proto" commands-go env KAYA_SELFTEST=commands /tmp/go-guests/kaya-go
     run "$proto" commands-csharp env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" commands-ocaml env KAYA_SELFTEST=commands KAYA_LIB="$LIB" \
@@ -906,7 +902,7 @@ for proto in x11 wayland; do
     run "$proto" layout-rust env KAYA_SELFTEST=layout "$CARGO_TARGET_DIR/debug/examples/layout"
     run "$proto" layout-python env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
         python3 guests/python/layout.py
-    run "$proto" layout-go env KAYA_SELFTEST=layout /tmp/go-guests/layout
+    run "$proto" layout-go env KAYA_SELFTEST=layout /tmp/go-guests/kaya-go
     run "$proto" layout-csharp env KAYA_SELFTEST=layout KAYA_LIB="$LIB" \
         dotnet exec "$CS_GUEST"
     run "$proto" layout-ocaml env KAYA_SELFTEST=layout KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/layout.exe
@@ -933,7 +929,7 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh python3 guests/python/clipboard.py
     drain
     run "$proto" clipboard-go env KAYA_SELFTEST=clipboard \
-        tools/linux/a11y-leg.sh /tmp/go-guests/clipboard
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     drain
     run "$proto" clipboard-csharp env KAYA_SELFTEST=clipboard KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
@@ -992,7 +988,7 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh python3 guests/python/ranges.py
     drain
     run "$proto" ranges-go env KAYA_SELFTEST=ranges \
-        tools/linux/a11y-leg.sh /tmp/go-guests/ranges
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     drain
     run "$proto" ranges-csharp env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"

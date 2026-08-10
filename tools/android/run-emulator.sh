@@ -774,8 +774,8 @@ EOF
 #      succeeded? No — but the COPY into jniLibs is what gradle
 #      packages, so the build lands in target/ and the copy is what gets
 #      checked, the same order the cargo-ndk steps below use.
-kaya_go_build() { # scene lib-name jnilibs-dir
-    local scene="$1" lib="$2" jnilibs="$3"
+kaya_go_build() { # lib-name jnilibs-dir
+    local lib="$1" jnilibs="$2"
     local module="$ROOT/android/milestone2go/build.gradle.kts"
     local api ndkbin out
     api="$(python3 - "$module" <<'PY'
@@ -814,13 +814,18 @@ PY
     # rides CC and the #cgo android line in bindings/go/runtime.go
     # carries -L…/aarch64-linux-android/debug -lkaya. That directory is
     # filled by the cargo ndk build at the callsite, above this.
+    # guests/go/cmd IS THE WHOLE GUEST: one main package importing every
+    # scene library, one .so, and the leg names its scene in
+    # KAYA_SELFTEST. `-buildmode=c-shared` allows exactly one main
+    # package per library, so the alternative was a library per scene in
+    # one APK — 2.6 MB each (docs/go-mobile-plan.md D3 step 3).
     CGO_ENABLED=1 GOOS=android GOARCH=arm64 \
         CC="$ndkbin/aarch64-linux-android$api-clang" \
         go build -buildmode=c-shared \
-        -o "$ROOT/target/go-android/lib$lib.so" "dev.kaya/guests/go/$scene"
+        -o "$ROOT/target/go-android/lib$lib.so" dev.kaya/guests/go/cmd
     local build_rc=$?
     if [ "$build_rc" -ne 0 ]; then
-        echo "run-emulator: the Go guest for $scene did not cross-build" >&2
+        echo "run-emulator: the Go guest did not cross-build" >&2
         return 1
     fi
     cp "$ROOT/target/go-android/lib$lib.so" "$jnilibs/" || return 1
@@ -1297,15 +1302,57 @@ fi
 # a Go function, so the guest's own .so is asked to start the thread
 # (KayaGo.attach -> bindings/go/android.go). docs/go-mobile-plan.md D1.
 #
-# ONE SCENE, DELIBERATELY, and this is the half that has to be said out
-# loud because nothing enforces it: check-steps' wired() keys on scene x
-# runner and never on language, so a Go suite that stalled here would
-# leave every gate green. `milestone2` is D3 step 2's whole scope — one
-# scene green end to end before any fan-out — because the other 31 need
-# the scene-library split (D3 step 3), which turns each guest's `main`
-# into a callable and touches the desktop lanes' invocation shape. The
-# subset is argued in the plan, and any future divergence from "all of
-# them" has to be written down right here.
+# THE SCENE LIST IS THE JVM SUITE'S, ENTRY FOR ENTRY AND IN ITS ORDER,
+# and that is the whole justification for the set. The JVM suite is the
+# sibling GUEST-LANGUAGE suite on this host: same libkaya.so in jniLibs,
+# same Compose interpreter as the backend, same direct occurrence ring as
+# the transport, same one-APK-many-scenes selector. The one structural
+# difference is the one named above — who starts the guest thread — and
+# every leg alike exercises it. Running the same scenes in the same order
+# is what makes the two suites comparable leg for leg, and comparing them
+# is how uniform binding semantics is checked at all (invariant 1).
+# D3 step 2 shipped `milestone2` alone because the other 31 needed the
+# scene-library split (step 3); that landed, so this is step 4.
+#
+# NOT WIDER: filedialog, dirty and ranges run on this runner from the
+# RUST guest only — MainActivity.kt has no arm for filedialog or dirty at
+# all — and each carries host-specific harness plumbing that the rust leg
+# owns (an accessibility service driving DocumentsUI; a scene_script_cut
+# plus an appended expect_title claim; an IME switch inside a drain
+# bracket). A Go leg on any of them would make Go the first NON-RUST
+# guest there, which is a sweep of that scene across guest languages, not
+# this depth slice. window/panels/split are desktop-only by design.
+#
+# NOT NARROWER, and this is the half that has to be said out loud because
+# nothing enforces it: check-steps' wired() keys on scene x runner and
+# never on language, so a Go suite that stalled at six scenes would leave
+# every gate green. Mirroring a sibling list is what keeps the choice
+# auditable, and any future divergence has to be written down right here.
+#
+# THE ONE DIVERGENCE TODAY IS `clipboard`, and it is a MEASURED gap in
+# two files rather than a judgement about the scene. It was wired, run,
+# and WATCHED FAILING before it was taken back out, which is why this
+# names a defect instead of a suspicion:
+#
+#   panic: failed to make the scene's directory:
+#          mkdir /data/local/tmp/kaya-clip-3565: permission denied
+#
+# guests/go/clipboard's sceneRoot still answers os.TempDir() off
+# iOS. os.TempDir() reads $TMPDIR, which under the JNI attach is EMPTY
+# (tools/check-go-env.sh's whole subject), so Go falls back to its
+# android default /data/local/tmp — a directory the app cannot write —
+# while the interpreter expands $TMP to the shared Documents collection.
+# Guest and interpreter disagree about the path, which is the SAME defect
+# Clipboard.java's own comment records hitting on the JVM guest's first
+# android run. The spelling that fixes it is that guest's:
+# EXTERNAL_STORAGE (or /sdcard) + "/Documents", reached through kaya.Env
+# rather than os.Getenv. Behind it sits a second blocker this run never
+# got far enough to hit: milestone2go's manifest carries no
+# `<queries><package android:name="dev.kaya.cliphelper" />`, which
+# milestone2 and milestone2kt both do, and without it an explicit
+# broadcast to the helper is filtered out with no error anywhere.
+# Restore this leg with those two fixes; both files are outside the arm
+# that wired these legs.
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
@@ -1323,7 +1370,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # archive linked in, and tools/ios/run-sim.sh verifies it for that
     # reason.) What can go stale here is libkaya and the interpreter, and
     # both are verified — above and below.
-    kaya_go_build milestone2 milestone2go "$JNILIBS" || exit 1
+    kaya_go_build milestone2go "$JNILIBS" || exit 1
     kaya_write_compose_marker
     (cd android && gradle --console=plain -q :milestone2go:assembleDebug) || exit 1
     "$ROOT/tools/build-id.sh" --verify --component compose \
@@ -1333,6 +1380,113 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity 1 \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script milestone2)'"
+    run_apk a11y-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity a11y \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script a11y)'"
+    run_apk entry-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity entry \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script entry)'"
+    run_apk gallery-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity gallery \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script gallery)'"
+    run_apk todos-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity todos \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script todos)'"
+    run_apk reorder-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity reorder \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script reorder)'"
+    run_apk feed-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity feed \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script feed)'"
+    # The layout contract through the Go binding: grow asserted as
+    # shares and root-fills, layout observed (see the jvm legs).
+    run_apk grow-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity grow \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script grow)'"
+    run_apk align-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity align \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script align)'"
+    run_apk layout-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity layout \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script layout)'"
+    # The stall diagnostic through the Go binding. The watchdog is
+    # core-side, so this is the one scene whose guest carries no
+    # runtime.LockOSThread init -- and it needs none here, because
+    # bindings/go/android.go locks the thread it hands to the app.
+    run_apk stall-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity stall \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script stall)'"
+    run_apk confirm-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity confirm \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script confirm)'"
+    run_apk nav-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity nav \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script nav)'"
+    run_apk scroll-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity scroll \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script scroll)'"
+    run_apk progress-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity progress \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script progress)'"
+    run_apk select-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity select \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script select)'"
+    run_apk radio-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity radio \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script radio)'"
+    run_apk grid-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity grid \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script grid)'"
+    run_apk textarea-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity textarea \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script textarea)'"
+    run_apk sections-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity sections \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script sections)'"
+    # The menus scene through the Go binding: this host carries the same
+    # dispatchKeyShortcutEvent override, so the chord reaches the catalog
+    # identically in all three languages.
+    run_apk menus-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity menus \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
+    # The listdetail scene through the Go binding: guests/go/split
+    # under the `listdetail` key, the same one app behind both scripts
+    # the other two hosts use. `split` itself is desktop-only.
+    run_apk listdetail-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity listdetail \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script listdetail)'"
+    run_apk commands-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity commands \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script commands)'"
+    # The undo scene through the Go binding: ONE history over two tiers,
+    # and the `type` verb is what fills the native one (see the compose
+    # leg).
+    run_apk undo-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity undo \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script undo)'"
     drain
     timing legs-go
 fi

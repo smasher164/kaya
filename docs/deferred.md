@@ -1100,6 +1100,41 @@ count, so the saving is measured rather than assumed.
 
 ## Testing / infrastructure
 
+- **DEFECT (rare, Windows) — the IME refusal path can ABORT the
+  process.** Measured 2026-08-09 in the ranges scene on WinUI: the
+  scene starts a composition, asks for a selection, and the core
+  CORRECTLY refuses it (`select_range refused: ime_composition`, the
+  ratified D4 rule) — and then the NEXT apply op into the RichEditBox
+  fails with `HRESULT(0x8000FFFF) "Catastrophic failure"`, which
+  panics at crates/kaya/src/winui/mod.rs:830 inside a function that
+  cannot unwind, so the process aborts (exit 0xC0000409) rather than
+  failing the leg. Frequency: 1 abort in 5 observed runs of that leg
+  (2 passes before, 2 passes on demand after). Not caused by the Go
+  work — that milestone touches no Rust and no WinUI, and the leg
+  passed on this lane before and after.
+  The refusal is right; what follows it is not safe. Two things to
+  establish when this is picked up: whether the refusal leaves the
+  rich edit control in a state the next op cannot survive (and if so,
+  the refusal should restore it), and whether ANY apply failure on
+  that path should abort — an op that fails should redden a leg, not
+  kill the process, and the non-unwinding panic is what converts one
+  into the other.
+
+
+- **stall-compose is timing-sensitive and fails ~1 run in 11** (measured
+  2026-08-07: 10 passes, 1 failure, then 2 more passes on demand; the
+  failure arrived the same run the android lane grew 55 -> 77 legs with
+  the Go suite). The scene deliberately makes the app thread fall
+  behind and asserts the stall watchdog notices; when the emulator has
+  a fast pass the thread KEEPS UP and the leg fails saying exactly
+  that. So the leg is a race against the machine rather than a check of
+  the code, and it can also PASS for the wrong reason — a genuinely
+  broken watchdog would look identical to a slow pass. Worth reshaping
+  so the stall is forced rather than hoped for (make the guest block
+  deterministically, or assert the watchdog's report rather than its
+  timing), which would also make the failure legible.
+
+
 - **The Swift iOS bundle is not self-contained** (measured 2026-08-07
   while landing Go on iOS, by a negative test aimed at something else).
   The Go arm proved that linking `-L … -lkaya` instead of naming the
@@ -1110,7 +1145,7 @@ count, so the saving is measured rather than assumed.
   path as the Go arm does; the cheap guard already exists — a
   `build-id.sh --verify` per built binary, since the id only reaches
   the executable if the archive was really linked in.
-- **guests/go/filedialog/main.go computes its scene directory from a
+- **guests/go/filedialog/filedialog.go computes its scene directory from a
   bare `os.TempDir()`** — the same defect the Go clipboard guest had on
   iOS, where the harness expands `$TMP` to the app's Documents rather
   than a private container (Rust and Swift both carve this out). It

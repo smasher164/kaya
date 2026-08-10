@@ -609,12 +609,17 @@ fi
 # matrix came back with `no required module provides package
 # dev.kaya/guests/go/split` on linux and a failed scp on windows. Loud,
 # but a whole matrix run to learn it. This makes it a two-second answer.
+#
+# The Go build no longer derives from SCENES — there is one binary for
+# every scene (guests/go/cmd) — but the taskkill list and the python
+# scp still do, and the per-language guest files below are the thing
+# this clause is really about.
 sweep_guests() {
     python3 - <<'PY'
 import pathlib, re, sys
 
 LANGS = [
-    ("go", "guests/go/{s}/main.go"),
+    ("go", "guests/go/{s}/{s}.go"),
     ("python", "guests/python/{s}.py"),
     ("csharp", "guests/csharp/{S}Scene.cs"),
     ("swift", "guests/swift/{s}.swift"),
@@ -1520,37 +1525,239 @@ out="$(picker_ios tools/ios/run-sim.sh)" || {
 # The guest now panics on an unknown name, which turns a silent wrong
 # scene into a loud one; this makes it a two-second answer instead of an
 # emulator boot.
-android_scenes() {
-    local runner="$1" guest="$2"
+# THREE APKs NOW, EACH WITH ITS OWN SELECTOR, so the pair is an
+# argument rather than a constant. The rust APK was the only one this
+# clause could see until the Go scene-library split
+# (docs/go-mobile-plan.md D3 step 3) turned the Go guest's one arm into
+# a table of every scene: from then on a Go leg can name a scene the
+# table lacks, which is exactly the failure above, and it would cost an
+# emulator boot to learn it.
+#
+# THE EMPTY-SELECTION ARM IS THE ANTI-VACUITY CLAUSE, and it is the
+# reason this is not three copies of a pattern nobody checks: if the
+# activity regex stops matching the runner — a module renamed, a launch
+# line respelled — `selected` is empty, `missing` is empty, and the
+# clause PASSES having compared nothing. That is the shape of every
+# gate that quietly stopped working.
+android_scenes() { # runner guest activity-regex arm-regex [exempt...]
+    local runner="$1" guest="$2" activity="$3" arm="$4"
+    shift 4
     python3 -c '
 import re
 import sys
 
-runner, guest = sys.argv[1], sys.argv[2]
-selected = set(re.findall(r"dev\.kaya\.milestone2/\.MainActivity ([a-z0-9]+)",
-                          open(runner).read()))
-armed = set(re.findall(r"Ok\(\"([a-z0-9]+)\"\)", open(guest).read()))
-missing = sorted(selected - armed)
+runner, guest, activity, arm = sys.argv[1:5]
+exempt = set(sys.argv[5:])
+selected = set(re.findall(activity + r" ([a-z0-9]+)", open(runner).read()))
+armed = set(re.findall(arm, open(guest).read(), re.M))
+if not selected:
+    print(f"{runner} launches no scene through {activity} — the activity "
+          f"pattern matched nothing, so this clause compared nothing")
+    sys.exit(1)
+missing = sorted(selected - armed - exempt)
 for name in missing:
     print(f"{runner} selects scene {name!r}, which {guest} has no arm for")
 sys.exit(1 if missing else 0)
-' "$runner" "$guest"
+' "$runner" "$guest" "$activity" "$arm" "$@"
 }
 
-# The guard guards itself, both directions: a selector with no arm must
-# fail, and the real pair must pass.
+# The guard guards itself, in every direction that can go wrong: an
+# unarmed selector must fail, an activity pattern that matches nothing
+# must fail, and each ARM SHAPE gets its own negative — a `match` arm
+# and a map key are different text, and a negative test written against
+# one proves nothing about the other. The accept direction is the three
+# real pairs below.
 sample="$(mktemp -d)"
 echo 'dev.kaya.milestone2/.MainActivity ghostscene' >"$sample/runner.sh"
 echo 'Ok("entry") => entry::app(ctx),' >"$sample/guest.rs"
-if android_scenes "$sample/runner.sh" "$sample/guest.rs" >/dev/null; then
+if android_scenes "$sample/runner.sh" "$sample/guest.rs" \
+        'dev\.kaya\.milestone2/\.MainActivity' 'Ok\("([a-z0-9]+)"\)' >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (an unarmed android selector passed)" >&2
+    rm -rf "$sample"
+    exit 1
+fi
+if android_scenes "$sample/runner.sh" "$sample/guest.rs" \
+        'dev\.kaya\.nosuchmodule/\.MainActivity' 'Ok\("([a-z0-9]+)"\)' >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (an activity pattern matching NOTHING" \
+        "passed — the clause compared nothing and said OK)" >&2
+    rm -rf "$sample"
+    exit 1
+fi
+printf 'dev.kaya.milestone2go/.MainActivity ghostscene\n' >"$sample/runner-go.sh"
+printf 'var scenes = map[string]func() *kaya.App{\n\t"entry": entry.App,\n}\n' \
+    >"$sample/guest.go"
+if android_scenes "$sample/runner-go.sh" "$sample/guest.go" \
+        'dev\.kaya\.milestone2go/\.MainActivity' '^\t"([a-z0-9]+)":' >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (an unarmed GO scene table passed — the" \
+        "map-key pattern is not reading the table)" >&2
     rm -rf "$sample"
     exit 1
 fi
 rm -rf "$sample"
 
-out="$(android_scenes tools/android/run-emulator.sh guests/rust/milestone2_android.rs)" || {
+out="$(android_scenes tools/android/run-emulator.sh guests/rust/milestone2_android.rs \
+    'dev\.kaya\.milestone2/\.MainActivity' 'Ok\("([a-z0-9]+)"\)')" || {
     echo "check-steps: an android leg selects a scene the APK's guest cannot run:" >&2
+    echo "$out" >&2
+    status=1
+}
+
+# The JVM APK, whose blind spot is older than the Go one and worse in
+# kind: its selector ends in `else -> Milestone2::app`, so an unarmed
+# name does not die, it SILENTLY RUNS MILESTONE2 — the defect this whole
+# clause is named for. "1" is exempt because it IS that default arm,
+# reached deliberately and verified rather than assumed (the same
+# carve-out sweep_guests states above).
+out="$(android_scenes tools/android/run-emulator.sh \
+    android/milestone2kt/src/main/kotlin/dev/kaya/milestone2kt/MainActivity.kt \
+    'dev\.kaya\.milestone2kt/\.MainActivity' '"([a-z0-9]+)" ->' 1)" || {
+    echo "check-steps: an android JVM leg selects a scene MainActivity.kt has no" \
+        "arm for — it would run milestone2 instead, silently:" >&2
+    echo "$out" >&2
+    status=1
+}
+
+# The Go APK. Its arms are a map literal, one key per line, which is why
+# the table in that file is a table and not a switch. THE SAME TABLE
+# SERVES THE DESKTOPS since the guests collapsed into one binary, and
+# the clause below reads it from the other three runners.
+out="$(android_scenes tools/android/run-emulator.sh guests/go/cmd/scenes.go \
+    'dev\.kaya\.milestone2go/\.MainActivity' '^\t"([a-z0-9]+)":')" || {
+    echo "check-steps: an android Go leg selects a scene the Go guest does not" \
+        "carry (guests/go/cmd/scenes.go's table):" >&2
+    echo "$out" >&2
+    status=1
+}
+
+# AND EVERY DESKTOP GO LEG, against the same table, for a failure that
+# only became possible when the guests collapsed into one binary. Each
+# scene used to own a `main` that ran that scene and ignored
+# KAYA_SELFTEST, so the leg's PATH decided what ran and a wrong name in
+# the environment changed nothing. Now the name is the only thing that
+# decides, on mac, linux and windows alike: a name the table lacks
+# panics — after a build, a launch and a window, on three lanes instead
+# of one emulator.
+#
+# THE THREE RUNNERS SPELL THE SELECTION DIFFERENTLY, so each gets its
+# own pattern rather than a shared one that would quietly fit none of
+# them: mac and linux put `KAYA_SELFTEST=<scene>` on the leg line (which
+# is often continued, so continuations are joined first) beside
+# go-guests/kaya-go; windows sets it in tools/guest/run_<leg>_go.cmd,
+# beside the build of dev.kaya/guests/go/cmd.
+#
+# AND THE DEFAULT IS A NAME LIKE ANY OTHER. The bare `run go-swiftui …`
+# leg passes nothing of its own, so main_desktop.go falls back to
+# `defaultScene` — which has to be a key in this table, or the one leg
+# with no name in it dies where nothing else can.
+#
+# THE EMPTY-SELECTION ARM IS THE ANTI-VACUITY CLAUSE, the android
+# clause's rule and for the same reason: a pattern that stops matching
+# its runner compares nothing and PASSES.
+go_desktop_scenes() { # table runner-or-cmd-dir...
+    python3 -c '
+import pathlib
+import re
+import sys
+
+table, runners = sys.argv[1], sys.argv[2:]
+text = pathlib.Path(table).read_text()
+armed = set(re.findall(r"^\t\"([a-z0-9]+)\":", text, re.M))
+bad = []
+if not armed:
+    bad.append(f"{table}: no scene table here — the map-key pattern matched "
+               f"nothing, so this clause compared nothing")
+default = re.search(r"^const defaultScene = \"([a-z0-9]+)\"", text, re.M)
+if not default:
+    bad.append(f"{table}: no `const defaultScene` — the desktop tail falls "
+               f"back to it when KAYA_SELFTEST is empty, and this clause "
+               f"cannot check a name it cannot find")
+elif armed and default.group(1) not in armed:
+    bad.append(f"{table}: defaultScene is {default.group(1)!r}, which the "
+               f"table has no key for — the bare Go leg would panic")
+for runner in runners:
+    path = pathlib.Path(runner)
+    if path.is_dir():
+        files = sorted(path.glob("*_go.cmd"))
+        selected = set()
+        for f in files:
+            src = f.read_text()
+            if "dev.kaya/guests/go/cmd" not in src:
+                bad.append(f"{f}: a go launcher that does not build "
+                           f"dev.kaya/guests/go/cmd")
+                continue
+            names = re.findall(r"set KAYA_SELFTEST=([A-Za-z0-9]+)", src)
+            if not names:
+                bad.append(f"{f}: builds the Go guest and sets no "
+                           f"KAYA_SELFTEST, so it runs whatever the default is")
+            selected.update(names)
+    else:
+        src = path.read_text().replace("\\\n", " ")
+        selected = set(re.findall(
+            r"KAYA_SELFTEST=([a-z0-9]+)[^\n]*go-guests/kaya-go", src))
+    if not selected:
+        bad.append(f"{runner}: names no Go scene — the selection pattern "
+                   f"matched nothing, so this clause compared nothing")
+        continue
+    for name in sorted(selected - armed):
+        bad.append(f"{runner} runs the Go guest with KAYA_SELFTEST={name}, "
+                   f"which {table} has no key for")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$@"
+}
+
+# Watched failing in every direction it can go wrong: an unarmed name, a
+# pattern that matches nothing, a default that is not a scene, and the
+# windows spelling — which is a different pattern over different files
+# and proves nothing about the shell one.
+sample="$(mktemp -d)"
+printf 'var scenes = map[string]func() *kaya.App{\n\t"entry": entry.App,\n}\nconst defaultScene = "entry"\n' \
+    >"$sample/table.go"
+printf 'run ghost-go env KAYA_SELFTEST=ghost target/go-guests/kaya-go\n' \
+    >"$sample/runner.sh"
+printf 'run entry-go env KAYA_SELFTEST=entry target/go-guests/kaya-go\n' \
+    >"$sample/runner-ok.sh"
+printf 'run rust env target/debug/examples/milestone2\n' >"$sample/runner-none.sh"
+printf 'var scenes = map[string]func() *kaya.App{\n\t"entry": entry.App,\n}\nconst defaultScene = "nope"\n' \
+    >"$sample/table-bad.go"
+mkdir -p "$sample/guest"
+printf 'set KAYA_SELFTEST=ghost\ngo build -o C:\\kaya\\ghost_go.exe dev.kaya/guests/go/cmd\n' \
+    >"$sample/guest/run_ghost_go.cmd"
+if go_desktop_scenes "$sample/table.go" "$sample/runner.sh" >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a desktop Go leg naming a scene the table" \
+        "lacks passed)" >&2
+    rm -rf "$sample"
+    exit 1
+fi
+if go_desktop_scenes "$sample/table.go" "$sample/runner-none.sh" >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a runner selecting NO go scene passed — the" \
+        "clause compared nothing and said OK)" >&2
+    rm -rf "$sample"
+    exit 1
+fi
+if go_desktop_scenes "$sample/table-bad.go" "$sample/runner-ok.sh" >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a defaultScene with no key in the table" \
+        "passed — the bare Go leg is the one that would die)" >&2
+    rm -rf "$sample"
+    exit 1
+fi
+if go_desktop_scenes "$sample/table.go" "$sample/guest" >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a windows launcher naming a scene the table" \
+        "lacks passed — the .cmd pattern is not reading the launchers)" >&2
+    rm -rf "$sample"
+    exit 1
+fi
+if ! go_desktop_scenes "$sample/table.go" "$sample/runner-ok.sh" >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a leg naming an armed scene was refused)" >&2
+    rm -rf "$sample"
+    exit 1
+fi
+rm -rf "$sample"
+
+out="$(go_desktop_scenes guests/go/cmd/scenes.go \
+    tools/validate-mac.sh tools/linux/run-suites.sh tools/guest)" || {
+    echo "check-steps: a desktop Go leg selects a scene the one Go binary does" \
+        "not carry (guests/go/cmd/scenes.go's table):" >&2
     echo "$out" >&2
     status=1
 }

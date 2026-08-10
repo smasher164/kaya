@@ -79,6 +79,72 @@ green, then the scene-library split, then the leg fan-out. The split is
 the long pole because it touches the desktop lanes' invocation shape
 and invariant 6's byte-identical strings.
 
+### D5 — the entry point: one main.go for an app, a registration for a library
+
+Ratified 2026-08-09, after reading how Gio and gomobile solve it
+(scratchpad/goentry-gio.md §1, goentry-fyne.md §1) and measuring the
+mechanism under the toolchain kaya pins.
+
+**An app author writes ONE main.go, with no build tags and no second
+entry point**, ending in the same line on all five platforms:
+
+```go
+func main() { os.Exit(build().Run()) }
+```
+
+The mechanism is Gio's: `-buildmode=c-shared` keeps `main.main` in the
+library and never calls it, so the binding reaches into the app's
+package for it with a bodyless declaration and a `//go:linkname`
+(`bindings/go/mainmain_android.go`), and the JNI attach starts it on the
+locked OS thread it already made. Nothing else about the Android story
+changes — the Kotlin shell, the Compose interpreter, the ring, the
+`kaya.Env` rule and the D2 guard are all untouched.
+
+**kaya refuses Gio's wart.** `app.Main` "blocks forever" on the desktops
+and "returns immediately" on Android and iOS, so one call means two
+things and every line after it is live on one host and dead on another.
+`App.Run` BLOCKS ON EVERY PLATFORM and answers the exit code. What
+differs underneath is only who owned the process entry: off Android it
+dispatches on a second goroutine and hands the caller's thread to
+`kaya_run`; on Android the caller IS the app thread, so it dispatches
+there and comes back when the core shuts down (exit code 0 — there is no
+process to hand a status to). The arms are selected by
+`runtime.GOOS == "android"` as a CONSTANT, so both are type-checked
+everywhere and one is compiled. Pinned by tests, not by comment:
+`bindings/go/entry_test.go`.
+
+**Two shapes, because one of them has to exist.** `-buildmode=c-shared`
+allows exactly one main package per `.so`, so one library has exactly
+one `main.main` — and kaya's validation artifact is one library carrying
+thirty-one scenes. That artifact registers its entry with
+`kaya.AndroidMain` from an `init()` (`guests/go/cmd/main_android.go`); an
+ordinary app does not, and gets the linkname. Attach prefers a
+registration when both are present, because the registration is a
+statement and `main.main` is what every main package has whether it
+means anything or not.
+
+**The consequence for the test suite, stated plainly**: the matrix
+exercises the REGISTRATION path and cannot exercise the other one.
+`tools/check-targets.sh`'s go-android clause is what covers the
+linkname — it cross-builds a single-main fixture as `-buildmode=c-shared`
+on every gate sweep and asserts the attach entry still references the
+app's own main.
+
+**`runtime.LockOSThread` moved into the binding** so that a guest's
+main.go carries no platform knowledge: an `init()` under
+`!hostedEntry` claims the process main thread on the four platforms that
+have one, and the Android app thread is locked by the attach entry
+instead — a package init there runs on a goroutine that exits when
+initialization ends, and would take the thread with it.
+
+**A Go panic on Android reached nobody**, measured the same day: the
+runtime writes to fd 2 and exits, an app process has no stderr, and the
+whole logcat of a crash was one line saying the process died. Every wall
+the Go binding has on this platform is a panic — including D2's
+empty-environment guard — so `bindings/go/logcat_android.go` recovers on
+kaya's two Android goroutines, writes the message and stack to logcat
+under the tag the lane already reads, and re-raises.
+
 ### D4 — what "done" means
 
 Go legs on the iOS and Android lanes running the same shared scene

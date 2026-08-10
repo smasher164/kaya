@@ -108,7 +108,18 @@ GATES = {
     # is that naming too much costs a re-run nobody notices while naming
     # too little hands back a PASS about a file that changed.
     "check-gates": ["CLAUDE.md", "AGENTS.md"],
-    "check-targets": ["crates", "Cargo.toml", "Cargo.lock", ".cargo"],
+    # bindings/ joined this set when the gate grew its go-android clause.
+    # That clause cross-builds a single-main fixture against
+    # bindings/go — the only thing anywhere that compiles
+    # bindings/go/mainmain_android.go or resolves its
+    # `//go:linkname mainMain main.main` — so a key blind to bindings/
+    # would hand back a stale PASS for exactly the edit that breaks
+    # every Go app shipping one main.go. go.mod is named for the same
+    # reason: the fixture is a separate module that resolves dev.kaya
+    # through a filesystem replace, so the module's own declaration is
+    # an input to the build the gate performs.
+    "check-targets": ["crates", "Cargo.toml", "Cargo.lock", ".cargo",
+                      "bindings", "go.mod"],
     # guests/ joined this set when the gate grew its SCENE-TIER clause
     # (the example scenes must USE the sugar, not only the bindings
     # OFFER it): the clause reads guests/*/entry.*, so a key blind to

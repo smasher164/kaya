@@ -1,6 +1,7 @@
 // Android's attach surface for a Go guest: the JNI entry a shim
-// Activity calls on the UI thread, and the registration that names what
-// it boots.
+// Activity calls on the UI thread, and the two ways it learns what to
+// boot — a registration (AndroidMain) or the app's own `main`, pulled
+// out of the app's package by mainmain_android.go.
 //
 // THE HOSTING IS INVERTED HERE and that is the only reason this file
 // exists. On the desktops and iOS the guest owns main and lends it to
@@ -75,6 +76,14 @@
 // `go build` of every Go guest on every platform type-checks it, which
 // is the most basic thing anyone does here. The cost is one dead
 // exported symbol in the desktop and iOS binaries.
+//
+// The ONE thing that could not stay untagged is the `//go:linkname
+// mainMain main.main` pull, because untagged it would make every
+// consumer of this binding on every platform need a `main.main` at link
+// time. It lives in mainmain_android.go behind a `guestMain()` whose
+// `!android` twin answers nil, so the CALL SITE below is still compiled
+// everywhere and the tagged file is compiled by tools/check-targets.sh
+// on every gate sweep rather than only by the Android lane.
 package kaya
 
 /*
@@ -105,7 +114,11 @@ var (
 )
 
 // AndroidMain names the function kaya boots when the shim Activity
-// attaches. Call it from an init() in the guest's main package:
+// attaches, FOR THE ONE SHAPE THAT NEEDS TO SAY IT — a library that
+// carries several apps. An ordinary app does not call this and does not
+// write an Android-specific file at all; see "THE TWO SHAPES" below.
+//
+// Call it from an init() in the guest's main package:
 //
 //	func init() { kaya.AndroidMain(app) }
 //	func main() {}  // never called: -buildmode=c-shared has no entry
@@ -114,18 +127,73 @@ var (
 // -buildmode=c-shared` requires exactly one main package and then never
 // calls its main — the only callable symbols are the cgo //export ones
 // — so a guest that did its registration in main would register
-// nothing and attach would find no app.
+// nothing.
 //
 // `app` runs on the app thread and does exactly what a desktop guest's
 // main does minus the process exit: build the scene, register the
-// handlers, and end in App.Serve(). It is the same function shape the
-// JVM guest hands `new Thread(...)` (guests/java/.../Milestone2.java's
+// handlers, and end in App.Run(). It is the same function shape the JVM
+// guest hands `new Thread(...)` (guests/java/.../Milestone2.java's
 // `static void app()`, ending in app.dispatchLoop()).
+//
+// # THE TWO SHAPES
+//
+// An Android guest reaches kaya one of two ways, and attach prefers the
+// first when both are present:
+//
+//  1. REGISTRATION — this function. For a library that hosts MORE THAN
+//     ONE app: `-buildmode=c-shared` allows exactly one main package per
+//     .so, so one library has exactly one `main.main` and it cannot be
+//     thirty-one scenes. kaya's own validation artifact is that library
+//     (guests/go/cmd), which is why the test suite uses this path and an
+//     app does not.
+//
+//  2. THE APP'S OWN main — nothing to call, nothing to write. kaya pulls
+//     `main.main` out of the app's package with `//go:linkname`
+//     (mainmain_android.go) and runs it on the app thread. THIS IS WHAT
+//     AN APP AUTHOR USES: one main.go, no build tags, no second entry
+//     point, the same file that builds for mac, linux, windows and iOS:
+//
+//     package main
+//
+//     import "os"
+//
+//     func main() { os.Exit(build().Run()) }
+//
+//     App.Run blocks on every platform including this one (see its
+//     doc), so that line is the whole contract and it does not change
+//     shape per host.
+//
+// REGISTRATION WINS WHEN BOTH ARE PRESENT, because a guest that called
+// AndroidMain said something specific about which function is the app,
+// while `main.main` is what every main package has whether it means
+// anything or not — guests/go/cmd's is `func main() {}`.
 func AndroidMain(app func()) {
 	if app == nil {
 		panic("kaya: AndroidMain was handed a nil app")
 	}
 	androidApp = app
+}
+
+// androidEntry answers which function is the app, and whether it came
+// from the app's own `main` rather than a registration. A REGISTRATION
+// WINS: a guest that called AndroidMain said something specific about
+// which function is the app, while `main.main` is what every main
+// package has whether it means anything or not — guests/go/cmd's is
+// `func main() {}` beside its init's AndroidMain call, and if the order
+// were the other way round the whole validation APK would boot an empty
+// function.
+//
+// Its own function, taking both sources as arguments, so that the rule
+// is testable on a host where neither exists: attach cannot be called
+// off Android, and guestMain answers nil there, so an inline `if` would
+// be a rule nothing could ever check (app_test.go's
+// TestAndroidEntryPrefersARegistration).
+func androidEntry(registered func(), fromMainMain func() func()) (app func(), fromMain bool) {
+	if registered != nil {
+		return registered, false
+	}
+	app = fromMainMain()
+	return app, app != nil
 }
 
 // Java_dev_kaya_KayaGo_attach is Android's entry, called by the shim
@@ -155,10 +223,22 @@ func Java_dev_kaya_KayaGo_attach(env, class, activity unsafe.Pointer) int32 {
 	// the same thing (`let _ = &activity;`): the arguments are part of
 	// the contract even where this tier has no use for them.
 	_, _, _ = env, class, activity
-	if androidApp == nil {
-		panic("kaya: no app registered — a Go guest for Android calls " +
-			"kaya.AndroidMain(app) from an init(), because -buildmode=c-shared " +
-			"never calls main")
+	// EVERY WALL BELOW IS A PANIC, AND A GO PANIC ON ANDROID IS SILENT
+	// unless something writes it to the log first — measured, with the
+	// numbers, in logcat_android.go. This defer is what makes the three
+	// walls in this function say anything at all on the one platform
+	// where they are the only diagnosis anybody gets.
+	defer androidReport()
+	app, fromMain := androidEntry(androidApp, guestMain)
+	if app == nil {
+		// Only reachable in a build where guestMain has no linkname to
+		// answer with — which today means a build that is not for
+		// Android, and nothing outside an Android app can call this.
+		// Kept because android.go is untagged and app() must not be nil.
+		panic("kaya: no app to start — an Android guest either registers one " +
+			"with kaya.AndroidMain(app) from an init() (a library carrying " +
+			"several apps) or lets kaya run its own main (an ordinary app, " +
+			"one main.go, no build tags)")
 	}
 	if androidAttached {
 		// A SECOND GUEST WOULD BE SILENT AND WRONG: it would build the
@@ -180,16 +260,54 @@ func Java_dev_kaya_KayaGo_attach(env, class, activity unsafe.Pointer) int32 {
 	// constants with nothing to say about it.
 	checkSpec()
 	androidAttached = true
-	app := androidApp
 	go func() {
+		// The app thread's own panic route to the log. It carries more
+		// than kaya's walls: everything the GUEST does — Build, every
+		// handler, every scene — runs on this goroutine, so this is
+		// where a Go app's own panic becomes something a developer can
+		// read rather than a process that vanished.
+		defer androidReport()
 		// The app thread is a REAL OS THREAD, locked for the same reason
 		// every other language's is: it parks inside a C call
 		// (kaya_wait_occurrences -> a pthread condvar) and the ring is
 		// single-consumer. Locking also keeps any later JNI work on one
 		// thread rather than scattering AttachCurrentThread across the
 		// runtime's Ms.
+		//
+		// This is the ONLY LockOSThread on this host. The desktops get
+		// theirs from the binding's init (runtime.go), which is skipped
+		// here on purpose: an init runs while System.loadLibrary is
+		// still executing, on a thread the Go runtime made for itself,
+		// and the goroutine it would lock is the library's main
+		// goroutine — which exits the moment package initialization
+		// finishes, taking the locked thread with it.
 		runtime.LockOSThread()
 		app()
+		// THE ENTRY CAME BACK. On the desktops that is the process
+		// ending and the exit code says so; here nothing is watching,
+		// the Activity is still up, and the screen simply stays empty —
+		// so kaya says it instead of letting Android say nothing.
+		//
+		// The distinction that makes this worth a panic rather than a
+		// log: an app that SERVED and then returned had a life and
+		// ended it (a quit command), which is ordinary. An app that
+		// returned WITHOUT EVER SERVING never started — the shape that
+		// produces it is `func main() {}`, which is exactly what a main
+		// package looks like when its author expected something else to
+		// be the entry.
+		if !served.Load() {
+			shape := "kaya ran the app's own main (main.main) and it returned " +
+				"without serving"
+			if !fromMain {
+				shape = "the function given to kaya.AndroidMain returned without " +
+					"serving"
+			}
+			panic("kaya: " + shape + " — an Android guest ends in App.Run(), " +
+				"which blocks here exactly as it does on every other platform. " +
+				"A library that carries several apps registers one with " +
+				"kaya.AndroidMain from an init(); an ordinary app writes one " +
+				"main.go and lets kaya find its main.")
+		}
 	}()
 	return presentGuest
 }

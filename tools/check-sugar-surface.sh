@@ -928,10 +928,19 @@ scene_facts=(
 )
 
 # <scene> <language> <the guest this clause reads>
+#
+# THE GO ROWS NAME <scene>/<scene>.go, which is the scene ITSELF: one
+# directory per scene, package named for it, App() handing back a built
+# app. They briefly named guests/go/scenes/<scene>/ instead, and before
+# that guests/go/<scene>/main.go — which for a while was a six-line
+# desktop tail with no construction in it at all, so a row left pointing
+# there would have read a file that cannot spell the floor and passed
+# for the emptiest possible reason. The tails all live in
+# guests/go/cmd now and no scene row may name that directory.
 scene_guests=(
     entry rust guests/rust/entry.rs
     entry python guests/python/entry.py
-    entry go guests/go/entry/main.go
+    entry go guests/go/entry/entry.go
     entry csharp guests/csharp/EntryScene.cs
     entry java guests/java/dev/kaya/milestone2kt/Entry.java
     entry swift guests/swift/entry.swift
@@ -940,7 +949,7 @@ scene_guests=(
 
     milestone2 rust guests/rust/milestone2.rs
     milestone2 python guests/python/milestone2.py
-    milestone2 go guests/go/milestone2/main.go
+    milestone2 go guests/go/milestone2/milestone2.go
     milestone2 csharp guests/csharp/Milestone2Scene.cs
     milestone2 java guests/java/dev/kaya/milestone2kt/Milestone2.java
     milestone2 swift guests/swift/milestone2.swift

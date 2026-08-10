@@ -498,12 +498,26 @@ case "$fglock" in
         ;;
 esac
 
-for guest in $SCENES; do
-    run_ssh "cmd /c if not exist C:\\kaya\\guests\\go\\$guest mkdir C:\\kaya\\guests\\go\\$guest"
-    # The whole package, not just main.go: guests with generated sum
-    # surfaces (kaya-gen) carry a checked-in *_kaya.go beside it.
-    scp -q "$ROOT/guests/go/$guest/"*.go "$HOST:C:/kaya/guests/go/$guest/"
-done
+# WIPED AND RECREATED, NOT COPIED OVER, which is the cs and python
+# dirs' rule below and now this one's. scp writes the files it is given
+# and DELETES NOTHING, so a source file that leaves the repo lives on
+# in C:\kaya forever — and Go compiles a directory, not a file list, so
+# one leftover is a compile error in a package that is correct in the
+# tree. MEASURED 2026-08-07 on the live VM: after the scene-library
+# split moved todo_kaya.go out of guests/go/todos, the VM's stale copy
+# made the build fail with `guests\go\todos\todo_kaya.go: undefined:
+# Todo` — a message that names a file the repo no longer has there.
+#
+# ONE RECURSIVE COPY OF THE WHOLE GO TREE, not a loop over SCENES. The
+# guests are ONE PROGRAM now: guests/go/cmd is the only main package,
+# it imports all 31 scene libraries, and every .cmd launcher builds
+# `dev.kaya/guests/go/cmd`. So a leg needs every scene present, not the
+# one it names — a per-scene loop would ship exactly the scenes this
+# lane runs and fail on the rest with "no required module provides
+# package dev.kaya/guests/go/<scene>". A scene added later needs no
+# edit here at all. 204 KB, 38 files.
+run_ssh 'cmd /c "if exist C:\kaya\guests\go rmdir /s /q C:\kaya\guests\go & mkdir C:\kaya\guests\go"'
+scp -q -r "$ROOT"/guests/go/* "$HOST:C:/kaya/guests/go/"
 
 if [ "$PROVISION" = 1 ]; then
     echo "== provisioning Windows App Runtime (one-time) =="

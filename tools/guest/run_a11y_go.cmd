@@ -8,7 +8,7 @@ set CC=aarch64-w64-mingw32-clang
 set KAYA_SELFTEST=a11y
 rem Build INTO C:\kaya: the exe must sit beside resources.pri for
 rem ms-appx (XamlControlsResources) to resolve — the adjacency probe.
-go build -o C:\kaya\a11y_go.exe dev.kaya/guests/go/a11y > C:\kaya\out_a11y_go.txt 2>&1
+go build -o C:\kaya\a11y_go.exe dev.kaya/guests/go/cmd > C:\kaya\out_a11y_go.txt 2>&1
 if errorlevel 1 goto done
 a11y_go.exe >> C:\kaya\out_a11y_go.txt 2>&1
 :done

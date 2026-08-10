@@ -8,7 +8,7 @@ set CC=aarch64-w64-mingw32-clang
 set KAYA_SELFTEST=clipboard
 rem Build INTO C:\kaya: the exe must sit beside resources.pri for
 rem ms-appx (XamlControlsResources) to resolve — the adjacency probe.
-go build -o C:\kaya\clipboard_go.exe dev.kaya/guests/go/clipboard > C:\kaya\out_clipboard_go.txt 2>&1
+go build -o C:\kaya\clipboard_go.exe dev.kaya/guests/go/cmd > C:\kaya\out_clipboard_go.txt 2>&1
 if errorlevel 1 goto done
 clipboard_go.exe >> C:\kaya\out_clipboard_go.txt 2>&1
 :done

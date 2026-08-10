@@ -60,9 +60,51 @@ import "C"
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sync/atomic"
 	"unsafe"
 )
+
+// hostedEntry is true where the OPERATING SYSTEM owns the process entry
+// and hands kaya a thread, rather than the guest owning main and lending
+// it. Android and nothing else: Zygote forks the process, ActivityThread
+// owns the Looper, and kaya_run is a hard panic there
+// (crates/kaya/src/capi.rs:815-818).
+//
+// A CONSTANT, NOT A VARIABLE, and that is what makes the two arms it
+// selects free: runtime.GOOS is itself a constant, so the compiler keeps
+// one arm and drops the other, while the type checker sees both on every
+// platform. Every place this appears would otherwise be a build-tagged
+// file pair that only one lane ever compiles — the hole
+// bindings/go/android.go's header refuses to open.
+const hostedEntry = runtime.GOOS == "android"
+
+// THE APP THREAD IS CLAIMED BY THE BINDING, NOT BY THE GUEST, so that a
+// guest's main.go carries no platform knowledge and no build tags.
+//
+// The core must own the process main thread on every host where there is
+// one — a UI framework's event loop is not portable off thread 0 on
+// macOS or Windows — and Go will migrate a goroutine between Ms unless
+// it is told not to. Package initialization runs on the main goroutine
+// in dependency order, so this init runs BEFORE any of the guest's, and
+// before main: the earliest moment the lock can be taken.
+//
+// NOT ON ANDROID, and the exception is not symmetry-breaking so much as
+// the same rule applied to a host with no process entry to claim. Go's
+// package inits there run while System.loadLibrary is still executing,
+// on a thread the Go runtime made for itself, and the goroutine running
+// them is the library's main goroutine — which exits as soon as
+// initialization finishes (runtime.main returns early under
+// `isarchive || islibrary` instead of calling main.main). A goroutine
+// that exits while holding an OS thread takes the thread with it. The
+// app thread there is made and locked by the attach entry instead
+// (bindings/go/android.go), which is the thread that will actually park
+// inside the core.
+func init() {
+	if !hostedEntry {
+		runtime.LockOSThread()
+	}
+}
 
 var ring C.KayaRingInfo
 
@@ -116,9 +158,6 @@ func LookupEnv(name string) (string, bool) {
 	return C.GoString(value), true
 }
 
-// Run enters the core on the calling thread (which must be the process
-// main thread; use runtime.LockOSThread in an init function). Returns
-// the exit code when the app ends.
 // The stale-artifact guard, run once before the core takes the thread:
 // this binding was generated from one spec revision; the loaded library
 // must speak the same one.
@@ -130,6 +169,16 @@ func checkSpec() {
 	}
 }
 
+// Run enters the core on the calling thread and returns the exit code
+// when the app ends. THE THREAD MUST BE THE PROCESS MAIN THREAD, which
+// the binding's init above arranges on every host that has one.
+//
+// A GUEST CALLS App.Run, NOT THIS. This is the desktop half of App.Run's
+// body and it is exported only because the occurrence loop and the core
+// loop are separable — App.Run runs one on each. Calling it directly on
+// Android panics inside the core, naming the reason ("Android owns the
+// process entry; attach from an Activity instead of kaya_run"), which is
+// the right answer to a call that should not have been written.
 func Run() int {
 	checkSpec()
 	return int(C.kaya_run())
