@@ -3996,8 +3996,25 @@ object KayaCompose {
                         kayaAwaitQuiet()
                         val answered = kayaBatches
                         val ok = onUi(activity) {
-                            target(parts[1], "button", KayaSceneModel.buttons)
-                                ?.also { KayaPresent.emitClicked(it.tag) } != null
+                            // A click on a TEXT KIND focuses it — what a
+                            // native tap does to a field, and the only
+                            // way a scene can put focus on a STAMPED
+                            // copy (no instance-addressed focus command
+                            // exists for a guest to call). Routed
+                            // through focusedId exactly as the wire's
+                            // COMMAND_FOCUS arm is: the model drives
+                            // the FocusRequester in this interpreter,
+                            // and a direct requestFocus here would
+                            // fight it.
+                            val text = target(parts[1], "entry", KayaSceneModel.entryWidgets)
+                                ?: target(parts[1], "textarea", KayaSceneModel.textareas)
+                            if (text != null) {
+                                KayaSceneModel.focusedId = text.id
+                                true
+                            } else {
+                                target(parts[1], "button", KayaSceneModel.buttons)
+                                    ?.also { KayaPresent.emitClicked(it.tag) } != null
+                            }
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
                         else kayaAwaitAnswer(answered)

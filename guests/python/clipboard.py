@@ -156,6 +156,17 @@ def pasted(clip):
             status.set(f"pasted {other!r}")
 
 
+def row_pasted(key, clip):
+    # THE COPY'S OWN KEY RIDES IN FRONT of the payload — "r1" here, the
+    # shape every node handler receives — and printing it is the proof
+    # the paste dispatched as an INSTANCE occurrence and not a live one.
+    match clip:
+        case kaya.Representation.Text(text):
+            row_status.set(f"row {key} pasted {text}")
+        case other:
+            row_status.set(f"row {key} pasted {other!r}")
+
+
 with app.window(title="clipboard"):
     # THE GESTURE LAYER'S DECLARATION, and an app writes nothing else
     # for it: the Paste command lowers to the platform's own, acts on
@@ -169,6 +180,7 @@ with app.window(title="clipboard"):
         kaya.item("Paste", role=kaya.ROLE_PASTE)
 
     status = kaya.signal("ready")
+    row_status = kaya.signal("")
     with kaya.column():
         kaya.label(bind=status).a11y_id("status")          # label#0
         kaya.button("copy", on_click=copy_rich)            # button#0
@@ -192,5 +204,19 @@ with app.window(title="clipboard"):
         # the field's ordinary change path reports it — which is what a
         # plain text editor gets for free.
         plain = kaya.entry().a11y_id("plain")              # entry#1
+
+        # A STAMPED paste target: the same two-door contract one tier
+        # down. The accept list comes from the TEMPLATE — the prop no
+        # binding could spell before docs/tpl-props-plan.md P1 — and the
+        # paste arrives as an INSTANCE occurrence carrying the copy's own
+        # key, which is what row_status prints. This is the branch no
+        # backend had ever fired: the registrar existed in seven bindings
+        # and the dispatch in all of them, but a paste only reaches a
+        # widget that declared an accept list, and no stamped copy could.
+        kaya.label(bind=row_status).a11y_id("row-status")  # label#1
+        rows = kaya.collection()
+        for row in rows:
+            kaya.entry().accepts(kaya.ACCEPT_TEXT).on_paste(row_pasted)
+        rows.insert("r1", "")                              # entry#2
 
 sys.exit(app.run())

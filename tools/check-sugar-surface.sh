@@ -295,6 +295,102 @@ check ocaml   bindings/ocaml/kaya_app.ml \
 check haskell bindings/haskell/KayaApp.hs \
     "scalar element" "^element :: KField String"
 
+# THE TEMPLATE-NODE PROPS, in all eight (docs/tpl-props-plan.md P1/P2):
+# the a11y pair + hint (source-taking), accepts (const — a prototype
+# fact), and the node paste registrar. Every pattern is RECEIVER-KEYED
+# on the template handle type, and that is the lesson this block was
+# born holding: the first draft of the grow clause below matched OCaml's
+# LIVE set_grow and went vacuous, proven by perturbation — a
+# bare-method-name pattern is satisfied by the live twin every time.
+# Swift's fan-out agent hit the same shape independently (its N2
+# negative). Python's clause is a separate AST reader
+# (tools/checks/py-node-props.py) because its zones share one surface
+# and a file-scoped grep stayed green through the whole defect.
+check rust    crates/kaya/src/app.rs \
+    "template a11y id"    "pub fn a11y_id\(&mut self, node: TemplateNodeId"
+check rust    crates/kaya/src/app.rs \
+    "template a11y label" "pub fn a11y_label\(&mut self, node: TemplateNodeId"
+check rust    crates/kaya/src/app.rs \
+    "template a11y hint"  "pub fn a11y_hint\(&mut self, node: TemplateNodeId"
+check rust    crates/kaya/src/app.rs \
+    "template accepts"    "pub fn accepts\(&mut self, node: TemplateNodeId"
+check rust    crates/kaya/src/app.rs \
+    "node paste registrar" "pub fn on_paste_node\("
+check go      bindings/go/app.go \
+    "template a11y id"    "func \(t \*Tpl\) SetA11yID\("
+check go      bindings/go/app.go \
+    "template a11y id (sourced)" "func \(t \*Tpl\) BindA11yID\["
+check go      bindings/go/app.go \
+    "template a11y label" "func \(t \*Tpl\) SetA11yLabel\("
+check go      bindings/go/app.go \
+    "template a11y label (sourced)" "func \(t \*Tpl\) BindA11yLabel\["
+check go      bindings/go/app.go \
+    "template a11y hint"  "func \(t \*Tpl\) SetA11yHint\("
+check go      bindings/go/app.go \
+    "template accepts"    "func \(t \*Tpl\) SetAccepts\("
+check csharp  bindings/csharp/KayaApp.cs \
+    "template a11y id"    "public void SetA11yId\(Node n, Field<string>"
+check csharp  bindings/csharp/KayaApp.cs \
+    "template a11y label" "public void SetA11yLabel\(Node n, Field<string>"
+check csharp  bindings/csharp/KayaApp.cs \
+    "template a11y hint"  "public void SetA11yHint\(Node n, Field<string>"
+check csharp  bindings/csharp/KayaApp.cs \
+    "template accepts"    "public void SetAccepts\(Node"
+check csharp  bindings/csharp/KayaApp.cs \
+    "node paste registrar" "public void OnPaste\(Node"
+check java    bindings/java/dev/kaya/KayaApp.java \
+    "template a11y id"    "public void setA11yId\(Node"
+check java    bindings/java/dev/kaya/KayaApp.java \
+    "template a11y label" "public void setA11yLabel\(Node"
+check java    bindings/java/dev/kaya/KayaApp.java \
+    "template a11y hint"  "public void setA11yHint\(Node"
+check java    bindings/java/dev/kaya/KayaApp.java \
+    "template accepts"    "public void setAccepts\(Node"
+check swift   bindings/swift/KayaApp.swift \
+    "template a11y id"    "func setA11yId\(_ n: KayaNodeHandle"
+check swift   bindings/swift/KayaApp.swift \
+    "template a11y label" "func setA11yLabel\(_ n: KayaNodeHandle"
+check swift   bindings/swift/KayaApp.swift \
+    "template a11y hint"  "func setA11yHint\(_ n: KayaNodeHandle"
+check swift   bindings/swift/KayaApp.swift \
+    "template accepts"    "func setAccepts\(_ n: KayaNodeHandle"
+check ocaml   bindings/ocaml/kaya_app.ml \
+    "template a11y id"    "let set_a11y_id \(Node id\)"
+check ocaml   bindings/ocaml/kaya_app.ml \
+    "template a11y label" "let set_a11y_label \(Node id\)"
+check ocaml   bindings/ocaml/kaya_app.ml \
+    "template a11y hint"  "let set_a11y_hint \(Node id\)"
+check ocaml   bindings/ocaml/kaya_app.ml \
+    "template accepts"    "let set_accepts \(Node id\)"
+check ocaml   bindings/ocaml/kaya_app.ml \
+    "template a11y label (sourced)" "let bind_a11y_label_field "
+check ocaml   bindings/ocaml/kaya_app.ml \
+    "template each"       "^  let each c body \(\) ="
+check ocaml   bindings/ocaml/kaya_app.ml \
+    "node paste registrar" "^let on_paste_node "
+check haskell bindings/haskell/KayaApp.hs \
+    "template a11y id"    "TplA11yId ::"
+check haskell bindings/haskell/KayaApp.hs \
+    "template a11y label" "TplA11yLabel ::"
+check haskell bindings/haskell/KayaApp.hs \
+    "template a11y hint"  "TplA11yHint ::"
+check haskell bindings/haskell/KayaApp.hs \
+    "template accepts"    "TplAccepts ::"
+check haskell bindings/haskell/KayaApp.hs \
+    "node paste registrar" "^onPasteNode ::"
+
+# Python's five, by CLASS STRUCTURE rather than grep — the reader walks
+# `class Node` and its bases with `ast` and requires each prop method
+# reachable. Its negative was watched by the fan-out (rename on the
+# base -> exit 1 naming the prop; unhook the base -> exit 1 naming all
+# five).
+tpl_props_py=$(python3 tools/checks/py-node-props.py bindings/python/kaya/__init__.py 2>&1)
+tpl_props_py_rc=$?
+if [ "$tpl_props_py_rc" -ne 0 ]; then
+    echo "check-sugar-surface: $tpl_props_py"
+    status=1
+fi
+
 # A TEMPLATE NODE'S GROW WEIGHT, in all eight.
 #
 # The template zone carries exactly one prop, and this clause is why it
@@ -310,9 +406,11 @@ check haskell bindings/haskell/KayaApp.hs \
 # a defensible reading of a plan that ledgered template-node props as
 # out of scope. One rule, eight spellings, checked (invariant 1).
 #
-# The REST of the template-node props — the a11y pair, spacing, align,
-# accepts — stay unreachable on a node and stay ledgered. If they land,
-# they land as a sweep like this one and not one binding at a time.
+# The rest of the template-node props landed exactly as this comment
+# once demanded — as a sweep, not one binding at a time: the a11y trio,
+# accepts and the paste registrar are the clause block ABOVE this one
+# (docs/tpl-props-plan.md P1/P2). Spacing and align remain floor-only on
+# template containers, in every binding alike.
 check rust    crates/kaya/src/app.rs \
     "template grow" "pub fn set\(&mut self, node: TemplateNodeId"
 check python  bindings/python/kaya/__init__.py \
@@ -325,8 +423,13 @@ check java    bindings/java/dev/kaya/KayaApp.java \
     "template grow" "public void setGrow\(Node"
 check swift   bindings/swift/KayaApp.swift \
     "template grow" "func setGrow\(_ n: KayaNodeHandle"
+# RECEIVER-KEYED, unlike the first draft of this line: `let set_grow `
+# also matched the LIVE set_grow (Widget id) at kaya_app.ml:631, so the
+# template setter could be deleted and this clause stayed green —
+# proven by perturbation during the props survey (2026-08-10). The Node
+# pattern is the part that makes it a claim about the template zone.
 check ocaml   bindings/ocaml/kaya_app.ml \
-    "template grow" "let set_grow "
+    "template grow" "let set_grow \\(Node id\\)"
 check haskell bindings/haskell/KayaApp.hs \
     "template grow" "setGrow[A-Za-z]* ::"
 
@@ -1302,8 +1405,19 @@ scene_rules=(
 
     "*" go "widget-kind construction" '\.Widget\(' \
         '        column := tx.Widget(kaya.KindColumn)'
-    "*" go "the SetText prop write" '\.SetText\(' \
-        '        tx.SetText(add, "add")'
+    # THE SetText/setText/set_text ROWS ARE GONE, RETIRED BY RENAME, and
+    # the mechanism is worth the note: in six languages the template
+    # PROP WRITE and the set_text WIDGET VERB (which check_range_verb
+    # REQUIRES as sugar) shared one name, so no pattern could fail the
+    # floor use without failing the verb — the receiver's TYPE decides
+    # and no regex sees a type. The props pass gave those six Rust's
+    # split instead: the template write is hidden (Go/C#/Java/Swift:
+    # unexported/private — the wall is now the compiler) or renamed
+    # (Haskell setTextProp, OCaml Tpl.Floor.*), and the renamed
+    # spellings are swept repo-wide by tools/guest-floor.py. A row here
+    # would either never fire (the hidden ones) or fire on the verb
+    # (the one thing it must not), so the rows are gone rather than
+    # weakened (docs/tpl-props-plan.md F3).
     "*" go "the generic BindText" '\.BindText\(' \
         '        tx.BindText(statusLabel, status)'
     "*" go "the ForEach combinator" '\.ForEach\(' \
@@ -1315,8 +1429,6 @@ scene_rules=(
 
     "*" csharp "widget-kind construction" '\.Widget\(' \
         '            var column = tx.Widget(KayaWire.KindColumn);'
-    "*" csharp "the SetText prop write" '\.SetText\(' \
-        '            tx.SetText(add, "add");'
     "*" csharp "the generic BindText" '\.BindText\(' \
         '            tx.BindText(statusLabel, status);'
     "*" csharp "the ForEach combinator" '\.ForEach\(' \
@@ -1328,8 +1440,6 @@ scene_rules=(
 
     "*" java "widget-kind construction" '\.widget\(' \
         '            KayaApp.Widget column = tx.widget(KayaWire.KIND_COLUMN);'
-    "*" java "the setText prop write" '\.setText\(' \
-        '            tx.setText(add, "add");'
     "*" java "the generic bindText" '\.bindText\(' \
         '            tx.bindText(statusLabel, status);'
     "*" java "the forEach combinator" '\.forEach\(' \
@@ -1341,8 +1451,6 @@ scene_rules=(
 
     "*" swift "widget-kind construction" '\.widget\(' \
         '    let column = tx.widget(UInt32(KAYA_KIND_COLUMN))'
-    "*" swift "the setText prop write" '\.setText\(' \
-        '    tx.setText(add, "add")'
     "*" swift "the generic bindText" '\.bindText\(' \
         '    tx.bindText(statusLabel, status)'
     "*" swift "the forEach combinator" '\.forEach\(' \
@@ -1361,8 +1469,6 @@ scene_rules=(
 
     "*" ocaml "widget-kind construction" '(^|[^A-Za-z_])widget kind_' \
         '       let column = widget kind_column in'
-    "*" ocaml "the set_text prop write" '(^|[^A-Za-z_])set_text[[:space:]]' \
-        '       set_text add "add";'
     "*" ocaml "the generic bind_text" '(^|[^A-Za-z_])bind_text[[:space:]]' \
         '       bind_text status_label status;'
     "*" ocaml "the add_child chain" '(^|[^A-Za-z_])add_child[[:space:]]' \

@@ -46,22 +46,22 @@ let () =
           carries the handles the registration below names (the
           per-group items collection, the remove button); [w group_list]
           slots the live For into the root's child list. The inner For
-          is spelled the same way for a different reason: the template
-          zone has no [each], so a nested For cannot sit in a child
-          list and needs [w item_list] to get there. *)
+          is spelled the same way for the same reason, now that it is
+          the only reason left: it hands back the stamped remove button
+          that [on_click_node] registers against. A nested For whose
+          body keeps nothing is [Tpl.each] and sits in a child list
+          directly — guests/ocaml/menus.ml does that. *)
        let group_list, (items, remove_button) =
          for_each groups (fun () ->
              Tpl.(
                let items = collection () in
                (* A group of a scalar collection IS its name, so the
-                  label binds to the element itself — no field to
-                  name. *)
-               let name = label () in
-               bind_text_element name;
+                  label binds to [element], the scalar collection's own
+                  token — no field name to give. *)
+               let name = label ~bind_field:element () in
                let item_list, (_cell, remove_button) =
                  for_each items (fun () ->
-                     let text = label () in
-                     bind_text_element text;
+                     let text = label ~bind_field:element () in
                      (* The stamped copies are what the script clicks
                         (button#last, the most recent stamp). *)
                      let remove_button = button ~text:"remove" () in

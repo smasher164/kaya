@@ -16,6 +16,7 @@ static class Program
         switch (System.Environment.GetEnvironmentVariable("KAYA_SELFTEST"))
         {
             case "a11y": A11yScene.Run(); break;
+            case "a11yrows": A11yrowsScene.Run(); break;
             case "entry": EntryScene.Run(); break;
             case "gallery": GalleryScene.Run(); break;
             case "todos": TodosScene.Run(); break;

@@ -62,6 +62,25 @@ func (r todoRow) Checkbox(f kaya.Field[bool], onToggle func(*kaya.Tx, int64, boo
 	return r.c.Checkbox(r.t, f, onToggle)
 }
 
+// The template props: the const flavors write through the recorder,
+// the sourced ones through the typed collection, as the constructors
+// above do.
+func (r todoRow) SetGrow(n kaya.Node, weight float64) { r.t.SetGrow(n, weight) }
+
+func (r todoRow) SetA11yID(n kaya.Node, id string) { r.t.SetA11yID(n, id) }
+
+func (r todoRow) A11yID(n kaya.Node, f kaya.Field[string]) { r.c.A11yID(r.t, n, f) }
+
+func (r todoRow) SetA11yLabel(n kaya.Node, label string) { r.t.SetA11yLabel(n, label) }
+
+func (r todoRow) A11yLabel(n kaya.Node, f kaya.Field[string]) { r.c.A11yLabel(r.t, n, f) }
+
+func (r todoRow) SetA11yHint(n kaya.Node, hint string) { r.t.SetA11yHint(n, hint) }
+
+func (r todoRow) A11yHint(n kaya.Node, f kaya.Field[string]) { r.c.A11yHint(r.t, n, f) }
+
+func (r todoRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
+
 // TodoRows traces the record template as a for statement: the loop
 // body runs once, authoring the blueprint, and the close is
 // structural — range-over-func regains control even on break. The

@@ -2058,53 +2058,52 @@ Cheap when it comes: the note needs the focused node's accept list, the
 board's type list, and the changeCount the backend last wrote — all
 three already exist in every backend's clipboard arm.
 
-## Template-node props: grow, the a11y pair, accepts, on_paste
+## SOLVED: template-node props (was "grow, the a11y pair, accepts, on_paste")
 
-Raised 2026-08-10 by the template-zone sugar pass
-(docs/sugar-pass-plan.md), which brought the zone's CONSTRUCTORS to
-parity with the live zone and deliberately stopped there. What a
-template node still cannot carry, in most bindings, is the PROPS: a
-stamped widget cannot be given a grow weight, an accessibility id or
-label, an accept list, or a paste hook.
+Raised 2026-08-10 by the sugar pass; CLOSED 2026-08-11 by the props
+slice (docs/tpl-props-plan.md). A template node now carries the a11y
+trio (source-taking — a stamped row announces its OWN name), a const
+accept list, grow, and a working paste hook, in all eight bindings,
+gated receiver-keyed in check-sugar-surface with negatives watched.
 
-The a11y pair is the one that will bite first. `Prop::A11yId` and
-`Prop::A11yLabel` are the two universal props — the scene admits them on
-every kind, containers included, precisely so a harness can address
-anything (crates/kaya/src/scene.rs:546). A stamped row is exactly the
-thing a harness most wants to address by name, and it is the thing that
-cannot be named. Every a11y scene today builds its subjects live, which
-is why the accessibility milestone's 719 legs never noticed.
+What the closure taught, kept here because the entry predicted wrong:
+the paste hook was not "unreachable for want of a registrar" — seven of
+eight bindings HAD the registrar and the dispatch, and the hook still
+could never fire, because every backend gates the paste occurrence on
+the focused widget's accept list and no template node could declare
+one. A silent REGISTRAR, not a silent drop. The keystone was `accepts`.
+The a11yrows scene (stamped a11y read from the real tree) and the
+clipboard scene's stamped paste target are the legs that watched both
+arms fire for the first time.
 
-Not urgent and not free: the props take a source in a template the same
-way the constructors do (a constant, a signal, or the row's own field),
-so this is the same shape of work one layer over, in eight languages.
-The census in tools/tpl-surfaces.py is where the sweep would go.
+Still open from the entry, deliberately: spacing and align stay
+floor-only on template containers, uniformly, in every binding alike.
 
-## A guest that spells a widget at the FLOOR fails no gate unless its scene is in the tables
+## SOLVED: the floor tier is repo-wide (was "a guest at the FLOOR fails no gate unless its scene is in the tables")
 
-Raised 2026-08-10, same pass. check-sugar-surface's scene tier can fail a
-guest for using the widget-kind floor, and it is good at it — the floor
-rules are per language, each watched firing against a doctored copy of
-the real guest. It only ever reads the scenes in its `scene_guests`
-table, which is `entry` and `milestone2`, the two carve-out scenes.
+Raised 2026-08-10; CLOSED 2026-08-11. tools/guest-floor.py now carries
+the whole per-language floor vocabulary over every sugar guest:
+absolute patterns for every spelling with no legitimate use, a
+paren-balanced >=2-argument scan that tells kaya's For (collection
+first) from every stdlib forEach (body alone), Swift's trailing-closure
+distinction, the labelled-argument boundary that keeps OCaml's sugar
+out of its floor family, and generated files exempt by their own
+marker. Every rule carries a fire line and a quiet line run through the
+real engine on every invocation.
 
-So the undo scene taught the floor in seven languages for five
-milestones, the text editor's find bar shipped at the floor, and
-`guests/haskell/textarea.hs` builds its ENTIRE scene at the floor while
-`textareaOn` sits unused in the binding — none of it visible to a gate.
+The "floor IN A SCENE THAT HAS SUGAR FOR IT" distinction the entry
+called a real piece of design dissolved instead of being built: the one
+irreducibly contextual family (SetText, the verb/floor name collision
+in six languages) was retired by giving those six Rust's two-name split
+— the template prop write is hidden or renamed, so the verb keeps its
+name and the floor spelling became sweepable or unspeakable. The
+receiver's type was the discriminator no regex could see, so the type
+system was made to hold the wall instead.
 
-The narrow fix landed with this pass (no sugar guest may call the
-widget-kind floor at all, now that both zones have full sugar). What is
-DEFERRED is the general shape: the scene tier's per-language floor
-vocabulary — `add_child` chains, `Prop::` writes, `bind_element` by
-index, the raw `for_each` combinator — still applies only to two scenes,
-and those spellings are just as much the floor in every other scene. The
-obstacle is that the rules were written FOR those two: the editor
-legitimately calls `SetText` to put a document in front of the user,
-which the "*" go row reads as a floor prop write. Widening the tier means
-separating "this spelling is the floor" from "this spelling is the floor
-IN A SCENE THAT HAS SUGAR FOR IT", which is a real piece of design and
-not a table edit.
+The census that drove it: 44 patterns x 284 guest files = 36 hits — 11
+floor (all converted), 21 legitimate, 4 sugar gaps (each closed:
+Tpl.each in OCaml and Haskell, Haskell's live bound slider, the
+scalar-element token). Sweep result today: zero hits, zero exemptions.
 
 ## SOLVED: the rust guests cost ~11s to START (macOS walked their build directory)
 
@@ -2185,3 +2184,39 @@ slow, which is why the per-language table at the top of this entry read
 as a language story and was not one. When a whole lane is slow, the
 shape to look for is a shared serialising service, not a per-language
 trait.
+
+## Live-zone a11y props take only constants — except in Python
+
+Opened 2026-08-11 by the props slice, which noticed it while landing the
+TEMPLATE zone's sourced a11y: Python's shared handle base gives its LIVE
+widgets signal-sourced a11y (one surface serves both zones there), while
+the other seven bindings' live `a11y_label` takes a constant string
+only. So the eight disagree — and the direction of the disagreement is
+odd on its face: a STAMPED copy's label can follow a signal in all
+eight, a LIVE widget's can in one.
+
+A dynamic live label is real accessibility (a play/pause button's
+spoken name flips with its state), so the likely resolution is widening
+the seven, as a sweep with a gate clause — never one binding at a time
+(the template-grow lesson, written where that clause lives). Python is
+left wide meanwhile: narrowing it would need an artificial wall in the
+one binding whose design makes the uniform width free.
+
+## tools/tpl-surfaces.py sees constructors, not props — three follow-ups
+
+Opened 2026-08-11. The census's zone readers match constructor
+signatures, so the props slice's surfaces are held by check-sugar-surface
+clauses and per-binding tests instead. Three specific gaps the fan-out
+reports named:
+
+- **Go**: the reader's pattern sees neither a digit in a method name
+  (`SetA11yID`) nor a generic method (`BindA11yID[`). The surface
+  pairing lives in bindings/go/tplzone_test.go meanwhile; the two
+  should agree or one should go.
+- **Java**: `Tpl` and `RowSurface` want the level-holding clause Rust's
+  Tpl/Row pair has — a prop on one and not the other is reachable
+  through `tx.forEach` and not `for (var row : ...)`.
+- **C#**: the generated `<Rec>Row` façade wants the same; a tested
+  implementation was offered at the fan-out
+  (scratchpad/csprobe/facade-parity.py, watched failing against HEAD's
+  11 missing forwards including a year-old SetGrow drift).

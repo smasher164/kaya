@@ -134,7 +134,7 @@ static class AbortCheck
         // reads stay legal, pinned below.
         app.Build(tx =>
         {
-            tx.ForEach(todos, t =>
+            tx.Each(todos, t =>
             {
                 bool threw = false;
                 try { tx.Items(todos); }

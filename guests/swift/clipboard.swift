@@ -87,6 +87,7 @@ FileManager.default.createFile(
     contents: Data("pasted bytes".utf8))
 
 var status: KayaSignal!
+var rowStatus: KayaSignal!
 var rich: KayaWidget!
 var plain: KayaWidget!
 
@@ -107,6 +108,7 @@ app.build { tx in
     tx.window(title: "clipboard", menus: [edit])
 
     status = tx.signal(.str("ready"))
+    rowStatus = tx.signal(.str(""))
 
     func answered(_ tx: KayaAppTx, _ clip: KayaRepresentation?) throws {
         switch clip {
@@ -223,6 +225,38 @@ app.build { tx in
         // plain text editor gets for free.
         plain = tx.entry()  // entry#1
         tx.setA11yId(plain, "plain")
+
+        // THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy. The
+        // accept list is declared on the TEMPLATE, and that declaration
+        // is what turns the node hook on at all: every backend hands the
+        // gesture to the platform's own insertion when the focused
+        // widget's accept list is empty, so before a template could
+        // carry one this handler registered, dispatched and could never
+        // fire (docs/tpl-props-plan.md §1 — kaya's quietest defect
+        // class, a branch nobody has seen fire). The copy's own key
+        // arrives with the payload, and that is what tells an instance
+        // paste from a live one.
+        //
+        // The row's value is empty because nothing displays it: the
+        // stamped entry is UNCONTROLLED like its live siblings, and
+        // staying empty through the paste is the assertion.
+        tx.setA11yId(tx.label(bind: rowStatus), "row-status")  // label#1
+        let notes = tx.collection()
+        tx.each(notes) { t in
+            let note = t.entry()  // entry#2, one stamped copy
+            t.setAccepts(note, [KayaAppTx.acceptText])
+            tx.onPaste(note) { inner, keys, clip in
+                // The path is the copy's own — [.str("r1")] here — and
+                // the dispatch only routes a NON-EMPTY one to a node
+                // handler, so the first key is there by construction.
+                if case .text(let text) = clip, case .str(let key) = keys[0] {
+                    inner.write(rowStatus, .str("row \(key) pasted \(text)"))
+                    return
+                }
+                inner.write(rowStatus, .str("row \(keys[0]) pasted \(clip)"))
+            }
+        }
+        tx.insert(notes, .str("r1"), .str(""))
     }
     tx.mount(root)
 }

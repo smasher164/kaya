@@ -122,3 +122,31 @@ expect entry#0 ""
 # model or the clipboard, and would pass for an arm that ran and drew
 # nothing.
 expect_ax entry#1 "field/pasted by hand"
+
+# ---- a STAMPED paste target ---------------------------------------
+#
+# The same two-door contract, one tier down: this entry is a COPY,
+# stamped from a collection row's template, and its accept list came
+# from the TEMPLATE (`accepts` on the node — the prop no binding could
+# spell until docs/tpl-props-plan.md P1). These steps are the first
+# time any backend's instance-paste arm has EVER fired: the registrar
+# existed in seven bindings and the dispatch in all of them, but a
+# paste is only delivered to a widget that declared an accept list,
+# and no stamped copy could — the hook was a silent registrar, kaya's
+# quietest defect class (a branch nobody has seen fire is a guess,
+# invariant 3). label#1 is the app's hook output, prefixed with the
+# copy's OWN KEY: the payload every node handler receives and the
+# proof the paste was delivered as an INSTANCE occurrence, not a live
+# one.
+# `click entry#2` is the first time any scene clicks a non-button, and
+# that is deliberate: clicking a field to focus it is the universal
+# gesture, a stamped copy has no live handle a guest could focus
+# programmatically (instance-addressed commands do not exist in the
+# protocol), and Stage::click is a NATIVE click on any target by
+# contract — a backend that can only click buttons fails here instead
+# of shipping that assumption.
+click entry#2
+expect_focused entry#2
+menu_activate "Edit>Paste"
+expect label#1 "row r1 pasted pasted by hand"
+expect entry#2 ""

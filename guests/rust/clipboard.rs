@@ -113,6 +113,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         FocusRich,
         FocusPlain,
         Pasted(kaya::Representation),
+        RowPasted(kaya::Path, kaya::Representation),
     }
 
     // The files the outside process will seed from, written before
@@ -123,7 +124,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     std::fs::write(dir.join("pasted.txt"), b"pasted bytes").expect("failed to write the file");
 
     let msgs = kaya::Messages::<Msg>::new();
-    let (status, rich_field, plain_field) = ctx.apply(|tx| {
+    let (status, row_status, rich_field, plain_field) = ctx.apply(|tx| {
         // THE GESTURE LAYER'S DECLARATION, and an app writes nothing
         // else for it: the Paste command lowers to the platform's own,
         // acts on whatever is focused, and works out its own enablement
@@ -137,6 +138,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             m.item("Paste").role(kaya::MenuRole::Paste).id();
         });
         let status = tx.signal("ready");
+        let row_status = tx.signal("");
         let mut rich_field = None;
         let mut plain_field = None;
         let root = tx
@@ -171,10 +173,29 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 // happens and the field's ordinary change path reports
                 // it — which is what a plain text editor gets for free.
                 plain_field = Some(tx.entry().a11y_id("plain").id()); // entry#1
+
+                // A STAMPED paste target: the same two-door contract
+                // one tier down. The accept list comes from the
+                // TEMPLATE — the prop no binding could spell before
+                // docs/tpl-props-plan.md P1 — and its paste arrives as
+                // an INSTANCE occurrence carrying the copy's own key,
+                // which is what row_status prints. This is the branch
+                // no backend had ever fired: the registrar existed, the
+                // dispatch existed, and no stamped copy could declare
+                // what it accepts, so the hook waited forever (the
+                // silent-registrar class).
+                tx.label(row_status).a11y_id("row-status"); // label#1
+                let rows = tx.collection::<String>();
+                for mut r in rows.rows(tx) {
+                    let field = r.entry(); // entry#2 once r1 stamps
+                    r.accepts(field, &[kaya::Accepts::Text]);
+                    msgs.on_paste_node(field, |path, clip| Msg::RowPasted(path, clip));
+                }
+                tx.insert(&rows, "r1", "");
             })
             .id();
         tx.mount(root);
-        (status, rich_field.unwrap(), plain_field.unwrap())
+        (status, row_status, rich_field.unwrap(), plain_field.unwrap())
     });
 
     while let Some(msg) = msgs.next(&ctx) {
@@ -222,6 +243,19 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::Pasted(other) => {
                 ctx.apply(|tx| tx.write(status, format!("pasted {other:?}")));
+            }
+            // The copy's own key rides the payload — [Str("r1")] here —
+            // and printing it is the proof the paste dispatched as an
+            // instance occurrence rather than a live one.
+            Msg::RowPasted(path, kaya::Representation::Text(text)) => {
+                let key = match path.first() {
+                    Some(kaya::Value::Str(k)) => k.clone(),
+                    other => format!("{other:?}"),
+                };
+                ctx.apply(|tx| tx.write(row_status, format!("row {key} pasted {text}")));
+            }
+            Msg::RowPasted(path, other) => {
+                ctx.apply(|tx| tx.write(row_status, format!("row {path:?} pasted {other:?}")));
             }
             Msg::Answer(clip) => match clip {
                 // EMPTY IS THE UNIVERSAL NO, and the guest does not try

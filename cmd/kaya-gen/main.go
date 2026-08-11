@@ -379,6 +379,32 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("\treturn r.c.Checkbox(r.t, f, onToggle)")
 	w("}")
 	w("")
+	// THE PROPS, on the same surface as the constructors that hand out
+	// the nodes they take. Without them this surface — the one a record
+	// guest actually writes — could give a stamped copy no a11y name and
+	// no accept list, and reaching `r.t` around it is a private field,
+	// not a tier. The split follows the constructors above: a constant
+	// goes straight to the recorder, a source goes through the typed
+	// collection, which is the surface that knows T.
+	w("// The template props: the const flavors write through the recorder,")
+	w("// the sourced ones through the typed collection, as the constructors")
+	w("// above do.")
+	w("func (r %sRow) SetGrow(n kaya.Node, weight float64) { r.t.SetGrow(n, weight) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetA11yID(n kaya.Node, id string) { r.t.SetA11yID(n, id) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) A11yID(n kaya.Node, f kaya.Field[string]) { r.c.A11yID(r.t, n, f) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetA11yLabel(n kaya.Node, label string) { r.t.SetA11yLabel(n, label) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) A11yLabel(n kaya.Node, f kaya.Field[string]) { r.c.A11yLabel(r.t, n, f) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetA11yHint(n kaya.Node, hint string) { r.t.SetA11yHint(n, hint) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) A11yHint(n kaya.Node, f kaya.Field[string]) { r.c.A11yHint(r.t, n, f) }", lowerFirst(name))
+	w("")
+	w("func (r %sRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }", lowerFirst(name))
+	w("")
 	w("// %sRows traces the record template as a for statement: the loop", name)
 	w("// body runs once, authoring the blueprint, and the close is")
 	w("// structural — range-over-func regains control even on break. The")

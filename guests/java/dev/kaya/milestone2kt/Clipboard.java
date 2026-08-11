@@ -129,6 +129,14 @@ final class Clipboard {
             edit.item("Paste").role(KayaApp.ROLE_PASTE);
 
             KayaApp.Signal<String> status = tx.signal("ready");
+            // The stamped paste target's own status line, and the
+            // one-row collection it reports for. Declared beside status
+            // rather than inside the column body because the seeding
+            // insert below runs AFTER the mount (Reorder.java's shape),
+            // and a local declared inside the lambda could not be
+            // reached from there.
+            KayaApp.Signal<String> rowStatus = tx.signal("");
+            KayaApp.Collection notes = tx.collection();
 
             tx.mount(tx.column(() -> {
                 tx.label(status).a11yId("status"); // label#0
@@ -187,7 +195,39 @@ final class Clipboard {
                 // happens and the field's ordinary change path reports
                 // it — which is what a plain text editor gets for free.
                 fields[1] = tx.entry().a11yId("plain"); // entry#1
+
+                // THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy.
+                // The accept list is declared on the TEMPLATE, and that
+                // declaration is what turns the node hook on: every
+                // backend hands the gesture to the platform when the
+                // focused widget's accept list is empty, so before a
+                // template could carry one this handler was registered,
+                // dispatched, and unable to fire — the silent-registrar
+                // class (docs/tpl-props-plan.md §1). The copy's own key
+                // arrives with the payload, which is what tells an
+                // INSTANCE paste from a live one.
+                //
+                // The row's value is empty because nothing displays it:
+                // the stamped entry is UNCONTROLLED like its live
+                // siblings, and staying empty through the paste is the
+                // assertion.
+                tx.label(rowStatus).a11yId("row-status"); // label#1
+                for (var row : notes.rows()) {
+                    KayaApp.Node note = row.entry(); // entry#2, one stamped copy
+                    row.setAccepts(note, KayaApp.ACCEPT_TEXT);
+                    app.onPaste(note, (t, keys, clip) -> {
+                        if (clip instanceof KayaApp.Representation.Text text) {
+                            t.write(rowStatus,
+                                    "row " + keys.get(0) + " pasted " + text.value());
+                            return;
+                        }
+                        t.write(rowStatus, "row " + keys.get(0) + " pasted " + clip);
+                    });
+                }
             }));
+            // Seeded after the mount, Reorder.java's shape: the copy
+            // stamps from a template that is already closed.
+            tx.insert(notes, "r1", "");
         });
 
         app.dispatchLoop();

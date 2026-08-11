@@ -375,3 +375,48 @@ func (sc SumCase[K, V]) onValue(n Node, onChange func(*Tx, K, float64)) {
 		onChange(tx, keys[0].(K), v)
 	})
 }
+
+// The arm's PROPS, forwarded one at a time like its constructors and
+// for the same reason: the *Tpl behind this surface is unexported, so
+// an arm that cannot spell a prop here cannot spell it at all — not at
+// the floor, not by reaching past its own refinement. Grow was in
+// exactly that state until this pass: it had been the template zone's
+// one prop for a milestone and three of the five surfaces had it.
+//
+// The pair is the base surface's (Set for the constant, Bind for the
+// source) with the arm's refinement substituted, as every constructor
+// here does: the source is ALWAYS the field selector, since a constant
+// where the arm expects a field would throw the match away.
+
+// SetGrow weights this arm's node within its stamped row or column.
+func (sc SumCase[K, V]) SetGrow(n Node, weight float64) { sc.t.SetGrow(n, weight) }
+
+// SetA11yID gives every stamped copy of this arm the same identifier.
+func (sc SumCase[K, V]) SetA11yID(n Node, id string) { sc.t.SetA11yID(n, id) }
+
+// BindA11yID takes the identifier from the field the selector names.
+func (sc SumCase[K, V]) BindA11yID(n Node, sel func(*V) *string) {
+	sc.t.BindA11yID(n, FieldBy(sel))
+}
+
+// SetA11yLabel gives every stamped copy of this arm the same spoken
+// name — the arm's own noun, where the row's is the bound flavor.
+func (sc SumCase[K, V]) SetA11yLabel(n Node, label string) { sc.t.SetA11yLabel(n, label) }
+
+// BindA11yLabel speaks the field the selector names, per copy.
+func (sc SumCase[K, V]) BindA11yLabel(n Node, sel func(*V) *string) {
+	sc.t.BindA11yLabel(n, FieldBy(sel))
+}
+
+// SetA11yHint says what activating a copy does; activation kinds only
+// (Tpl.SetA11yHint).
+func (sc SumCase[K, V]) SetA11yHint(n Node, hint string) { sc.t.SetA11yHint(n, hint) }
+
+// BindA11yHint takes the hint from the field the selector names.
+func (sc SumCase[K, V]) BindA11yHint(n Node, sel func(*V) *string) {
+	sc.t.BindA11yHint(n, FieldBy(sel))
+}
+
+// SetAccepts declares what a copy of this arm takes from a paste; const
+// only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
+func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }

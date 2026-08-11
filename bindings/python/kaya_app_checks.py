@@ -1074,5 +1074,213 @@ with app_src.window():
                 == {"prop": kaya.wire.PROP_SOURCE, "level": 0, "field": 0},
             )
 
+# TEMPLATE-NODE PROPS (docs/tpl-props-plan.md §1). The a11y trio,
+# `accepts` and `on_paste` sit on the `_Handle` base both handle classes
+# share, so the same call names a live widget and a stamped copy — which
+# is the whole of what this binding had to build, the wire encoders and
+# the core's template declare arm having admitted these all along.
+#
+# WHAT MAKES IT WORTH CHECKING RATHER THAN READING: the surface is
+# `hasattr`-shaped, so a reader cannot tell a method that reaches the
+# wire from one that reaches the wrong id or the wrong source. Each
+# clause below decodes the queued record instead — and the paste clause
+# reads the TABLE the handler landed in, because a paste handler filed
+# under a widget id is one that never fires for a row.
+
+
+def _const_str_prop(fn, prop):
+    """The string a const prop write put on the wire, or None if that
+    prop reached it any other way (or not at all)."""
+    before = len(kaya._tx)
+    try:
+        fn()
+    except Exception as exc:
+        print(f"       (raised {type(exc).__name__}: {exc})")
+        _rewind(before)
+        return None
+    queued = kaya._tx[before:]
+    _rewind(before)
+    for rec in queued:
+        if _rec_kind(rec) != kaya.wire.TX_SET_PROPERTY:
+            continue
+        if int.from_bytes(rec[16:20], "little") != prop:
+            continue
+        if int.from_bytes(rec[20:24], "little") != kaya.wire.SOURCE_CONST:
+            return None
+        if int.from_bytes(rec[24:28], "little") != kaya.wire.VALUE_STR:
+            return None
+        n = int.from_bytes(rec[28:32], "little")
+        return rec[32:32 + n].decode()
+    return None
+
+
+def _signal_prop(fn, prop):
+    """The signal id a signal-bound prop write named, or None.
+
+    Catches for `_elem_bind`'s reason: a missing method raises, and an
+    uncaught AttributeError would end the run at the first bad arm — no
+    verdict on the clauses beside it, and a reader reading a traceback
+    instead of a name."""
+    before = len(kaya._tx)
+    try:
+        fn()
+    except Exception as exc:
+        print(f"       (raised {type(exc).__name__}: {exc})")
+        _rewind(before)
+        return None
+    queued = kaya._tx[before:]
+    _rewind(before)
+    for rec in queued:
+        if _rec_kind(rec) != kaya.wire.TX_SET_PROPERTY:
+            continue
+        if int.from_bytes(rec[16:20], "little") != prop:
+            continue
+        if int.from_bytes(rec[20:24], "little") != kaya.wire.SOURCE_SIGNAL:
+            return None
+        return int.from_bytes(rec[24:32], "little")
+    return None
+
+
+app_tpl = kaya.App()
+with app_tpl.window():
+    rows5 = kaya.collection(Row3)
+    feed5 = kaya.collection(Note3 | Shot3)
+    name5 = kaya.signal("Row")
+    live5 = kaya.entry()
+    check(
+        "the live zone still writes a constant a11y id",
+        _const_str_prop(lambda: live5.a11y_id("search"), kaya.wire.PROP_A11Y_ID)
+        == "search",
+    )
+    # AND A LIVE SIGNAL SOURCE BINDS RATHER THAN COERCING, which is the
+    # one place this binding now reaches further than the other seven
+    # (their live a11y setters take a string). Not an accident and not
+    # free: the alternative to a total `_prop_source` is the coercion it
+    # replaced, which wrote a Signal's repr onto the widget and said
+    # nothing. Pinned here so the choice is visible to whoever narrows
+    # or widens it.
+    live_sig5 = kaya.signal("Search")
+    check(
+        "a live a11y label follows a Signal instead of coercing it",
+        _signal_prop(lambda: live5.a11y_label(live_sig5),
+                     kaya.wire.PROP_A11Y_LABEL) == live_sig5.id,
+    )
+    with kaya.column():
+        with kaya.for_each(rows5) as row5:
+            check(
+                "a constructor inside a For hands back a Node",
+                isinstance(kaya.entry(), kaya.Node),
+            )
+            # THE ROW'S OWN FIELD IS THE POINT: fourteen copies of one
+            # node share one node id, so a constant label makes fourteen
+            # checkboxes that all announce the same thing.
+            for what, fn, prop, index in (
+                ("a11y_label", lambda: kaya.entry().a11y_label(row5.title),
+                 kaya.wire.PROP_A11Y_LABEL, 0),
+                ("a11y_id", lambda: kaya.entry().a11y_id(row5.title),
+                 kaya.wire.PROP_A11Y_ID, 0),
+                ("a11y_hint", lambda: kaya.checkbox().a11y_hint(row5.title),
+                 kaya.wire.PROP_A11Y_HINT, 0),
+            ):
+                check(
+                    f"a template node's {what} binds the row's own field",
+                    _elem_bind(fn) == {"prop": prop, "level": 0, "field": index},
+                )
+            check(
+                "and a Signal source reaches the wire as a signal bind",
+                _signal_prop(lambda: kaya.entry().a11y_label(name5),
+                             kaya.wire.PROP_A11Y_LABEL) == name5.id,
+            )
+            check(
+                "and a plain string is still a constant",
+                _const_str_prop(lambda: kaya.entry().a11y_id("note"),
+                                kaya.wire.PROP_A11Y_ID) == "note",
+            )
+            # THE CONST ARM COERCES, which is why the source arms come
+            # first in `_prop_source`: `str(row.title)` succeeds, writes
+            # "<kaya.FieldRef object at 0x...>" onto every copy, and a
+            # screen reader reads it out. Same wall as the constructors'
+            # const-only arguments above.
+            for what, fn, prop in (
+                ("a11y_id", lambda: kaya.entry().a11y_id(row5),
+                 kaya.wire.PROP_A11Y_ID),
+                ("a11y_label", lambda: kaya.entry().a11y_label(row5),
+                 kaya.wire.PROP_A11Y_LABEL),
+                ("a11y_hint", lambda: kaya.checkbox().a11y_hint(row5),
+                 kaya.wire.PROP_A11Y_HINT),
+            ):
+                check(
+                    f"{what} never writes a constant from a tracer",
+                    _never_const_from_a_tracer(fn, prop),
+                )
+
+            # ACCEPTS IS CONST-ONLY AND SAYS SO. An accept list describes
+            # the prototype — what this control can receive — not the
+            # row; the wire could carry a per-row one, and the platform
+            # registration it drives (Android's receive-content mime set)
+            # makes that unassertable by any scene.
+            check(
+                "a template node's accepts joins the kinds it was handed",
+                _const_str_prop(
+                    lambda: kaya.entry().accepts(kaya.ACCEPT_TEXT,
+                                                 kaya.ACCEPT_FILES),
+                    kaya.wire.PROP_ACCEPTS) == "text files",
+            )
+            for what, source in (("a field", row5.title), ("the element", row5),
+                                 ("a Signal", name5)):
+                before_acc = len(kaya._tx)
+                try:
+                    kaya.entry().accepts(source)
+                    ok = False
+                except Exception as exc:
+                    # A TypeError NAMING WHAT IT GOT, like label(bind=)'s
+                    # floor arm — and the exception TYPE is half the
+                    # clause, because without the refusal these coerce
+                    # into `_accept_list`, whose ValueError quotes the
+                    # repr and so happens to contain the type's name
+                    # too. A true sentence about the wrong problem: it
+                    # blames a space in a format id.
+                    ok = (isinstance(exc, TypeError)
+                          and type(source).__name__ in str(exc))
+                _rewind(before_acc)
+                check(f"accepts refuses {what} as a per-row source", ok)
+
+            # THE PASTE REGISTRAR. Python needed no dispatch arm — the
+            # loop branches on whether the record carried a key path, not
+            # on the occurrence kind — but nothing public could put an
+            # entry in the node table until `on_paste` moved to the base.
+            node5 = kaya.entry()
+            try:
+                node5.accepts(kaya.ACCEPT_TEXT).on_paste(lambda key, clip: None)
+            except Exception as exc:  # a finding, not a crash (_elem_bind)
+                print(f"       (raised {type(exc).__name__}: {exc})")
+            check(
+                "a template node's paste handler lands in the node table",
+                (kaya.wire.OCC_PASTED, node5.id) in app_tpl._node_handlers,
+            )
+            check(
+                "and not in the widget table",
+                (kaya.wire.OCC_PASTED, node5.id) not in app_tpl._widget_handlers,
+            )
+
+        with kaya.for_each(feed5) as cases5:
+            with cases5.case(Note3) as note5:
+                check(
+                    "a case arm's field reaches a template prop",
+                    _elem_bind(lambda: kaya.entry().a11y_label(note5.text))
+                    == {"prop": kaya.wire.PROP_A11Y_LABEL, "level": 0,
+                        "field": 0},
+                )
+                before5 = len(kaya._tx)
+                try:
+                    kaya.entry().a11y_label(note5)
+                    check("a11y_label refuses the case element itself", False)
+                except TypeError as exc:
+                    check(
+                        "a11y_label refuses the case element itself",
+                        type(note5).__name__ in str(exc),
+                    )
+                _rewind(before5)
+
 sys.exit(1 if failures else 0)
 

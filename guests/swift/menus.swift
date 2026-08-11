@@ -93,7 +93,12 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
             ])
 
         // Remove's activation names BOTH keys (group, then item).
-        tx.forEach(groups) { g -> Void in
+        //
+        // `each` and not `forEach`: neither For hands anything back —
+        // the inner collection escapes by assignment to `itemsOut`, not
+        // through R — and a For whose result you drop is what `each` is
+        // (docs/tpl-props-plan.md §2 F2).
+        tx.each(groups) { g in
             let items = g.collection()
             itemsOut = items
             // The For is declared INSIDE the column it belongs to and
@@ -102,7 +107,7 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
             // DISCARDS its expressions — the rows were never attached
             // (the milestone2 graduation's orphan class, 2026-08-05).
             _ = g.column {
-                g.forEach(items) { r -> Void in
+                g.each(items) { r in
                     // label#2 once g2/a stamps. `.element` is the scalar
                     // collection's own token — its element IS the value,
                     // so there is no field name to give — and it lowers
@@ -110,9 +115,9 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
                     // spell at the widget-kind floor.
                     let row = r.label(KayaField<String>.element)
                     r.contextMenu(row, catalog)
-                }.0
+                }
             }
-        }.0
+        }
     }
     tx.mount(root)
     return (groups, itemsOut)

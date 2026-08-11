@@ -86,18 +86,34 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_menu_item(rename, Msg::Rename);
 
                 // Remove's activation names BOTH keys (group, then item).
-                let (_, items) = tx.for_each(&groups, |t| {
-                    let (_, items) = t.column(|t| {
-                        let items = t.collection::<Task>();
-                        t.for_each(&items, |t| {
-                            let row = t.label(Task::title()); // label#2 once g2/a stamps
-                            t.context_menu(row, catalog);
-                        });
-                        items
+                //
+                // The TRACING tier, not the for_each combinator this
+                // block used to spell: `rows` is the construction sugar
+                // (DESIGN.md, "the strongest of all") and the combinator
+                // was the floor it left. The body's result gets out
+                // through the slot idiom milestone2.rs already models —
+                // each trace yields exactly one row, so the slot is
+                // filled exactly once.
+                // The catalog rides a slot for the same reason items
+                // does: it is consumed by its one attach, the trace
+                // records once, and the compiler cannot see that a
+                // trace loop's body runs exactly once.
+                let mut items = None;
+                let mut catalog = Some(catalog);
+                for mut group in groups.rows(tx) {
+                    group.column(|t| {
+                        let per_group = t.collection::<Task>();
+                        for mut item in per_group.rows(t) {
+                            let row = item.label(Task::title()); // label#2 once g2/a stamps
+                            item.context_menu(
+                                row,
+                                catalog.take().expect("the item trace yields one row"),
+                            );
+                        }
+                        items = Some(per_group);
                     });
-                    items
-                });
-                items
+                }
+                items.expect("the group trace yields one row")
             })
             .into_parts();
         tx.mount(root);

@@ -3867,6 +3867,40 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         return nil
     }
 
+    /// Every element carrying the identifier, not just the first — the
+    /// count is what lets an ambiguous id be REFUSED rather than
+    /// guessed at. `kayaAxFind` returning the first match was measured
+    /// lying (2026-08-11): two stamped copies shared a const template
+    /// a11y id, `expect_ax entry#2` resolved through the id, and the
+    /// verb reported the FIRST copy's label as the second's — a
+    /// diagnostic printing something it never measured. A sentence that
+    /// cannot discriminate two causes must say so instead
+    /// (tools/check-diagnostics.sh's rule, one verb over).
+    private func kayaAxFindAll(
+        _ element: AXUIElement, _ identifier: String, _ depth: Int = 0,
+        _ out: inout [AXUIElement]
+    ) {
+        if depth > 64 || out.count > 8 { return }
+        if let ident = kayaAxCopy(element, kAXIdentifierAttribute) as? String,
+            ident == identifier,
+            // DEDUPLICATED BY ELEMENT IDENTITY, and the walk itself is
+            // why: the tree reaches one element down more than one path
+            // (kAXWindows and kAXChildren overlap two levels apart,
+            // where kayaAxKids' per-parent dedup cannot see it), so an
+            // undeduplicated count reported EVERY identifier in the
+            // scene as ambiguous — measured on the first run of the
+            // refusal, 19 of 19 unique ids "shared by 2 elements". The
+            // old first-match find had silently tolerated the double
+            // visit for as long as it existed.
+            !out.contains(where: { CFEqual($0, element) })
+        {
+            out.append(element)
+        }
+        for child in kayaAxKids(element) {
+            kayaAxFindAll(child, identifier, depth + 1, &out)
+        }
+    }
+
     private func kayaAxKids(_ element: AXUIElement) -> [AXUIElement] {
         let children = kayaAxCopy(element, kAXChildrenAttribute) as? [AXUIElement] ?? []
         let windows = kayaAxCopy(element, kAXWindowsAttribute) as? [AXUIElement] ?? []
@@ -3971,7 +4005,20 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
                 Data("KAYA_AX_TRACE: trusted=\(AXIsProcessTrusted())\n".utf8))
             kayaAxDump(app)
         }
-        guard let hit = kayaAxFind(app, identifier) else { return nil }
+        var matches: [AXUIElement] = []
+        kayaAxFindAll(app, identifier, 0, &matches)
+        guard let hit = matches.first else { return nil }
+        // AN AMBIGUOUS IDENTIFIER IS REFUSED, NOT RESOLVED. This read
+        // addresses the tree BY IDENTIFIER, so with two elements
+        // carrying the same id it can only guess — and it used to guess
+        // the first, which read the wrong element's label under a
+        // correct-looking sentence. The refusal names what was
+        // measured: the count and the id, nothing more.
+        if matches.count > 1 {
+            return "<ambiguous: \(matches.count) elements share id '\(identifier)' — "
+                + "expect_ax addresses the tree by identifier and cannot tell "
+                + "them apart; give each element its own id>"
+        }
         let role = kayaAxRole(kayaAxCopy(hit, kAXRoleAttribute) as? String)
         // A control's spoken name is its DESCRIPTION when one was
         // authored and its TITLE when the control derived it from its
@@ -5016,6 +5063,24 @@ private func kayaRunScript(_ script: String) {
                 Thread.sleep(forTimeInterval: Double(parts[1])! / 1000)
             case "click":
                 let ok = DispatchQueue.main.sync { () -> Bool in
+                    // A click on a TEXT KIND focuses it — what a native
+                    // click does to a field, and the only way a scene
+                    // can put focus on a STAMPED copy: a stamped entry
+                    // has no live handle a guest could focus
+                    // programmatically (instance-addressed commands do
+                    // not exist in the protocol), so the clipboard
+                    // scene's stamped paste target clicks the field the
+                    // way a user would. Routed through the model's
+                    // focusedId exactly as the wire's focus command is
+                    // (the commandFocus arm): the model drives the
+                    // first responder in this interpreter, and a direct
+                    // makeFirstResponder here would fight it.
+                    if let node = kayaTarget(parts[1], "entry", kayaScene.entryWidgets)
+                        ?? kayaTarget(parts[1], "textarea", kayaScene.textareas)
+                    {
+                        kayaScene.focusedId = node.id
+                        return true
+                    }
                     guard let node = kayaTarget(parts[1], "button", kayaScene.buttons) else {
                         return false
                     }

@@ -38,7 +38,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges save"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -623,6 +623,29 @@ for proto in x11 wayland; do
     # wire constant existed (the undo-c precedent).
     run "$proto" dirty-c env KAYA_SELFTEST=dirty \
         tools/linux/a11y-leg.sh /tmp/c-guests/dirty
+
+    # THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3), the
+    # a11y scene's sibling: two entries stamped from one template, each
+    # named by its own row, read from the REAL tree. On this backend the
+    # read is ordinal-by-role (GTK publishes no settable AX identifier),
+    # which is exactly why the scene asserts entries and no containers.
+    # Graduated 2026-08-11 with wave 2's guests.
+    run "$proto" a11yrows-rust env KAYA_SELFTEST=a11yrows \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/a11yrows"
+    run "$proto" a11yrows-python env KAYA_SELFTEST=a11yrows KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/a11yrows.py
+    run "$proto" a11yrows-go env KAYA_SELFTEST=a11yrows \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" a11yrows-csharp env KAYA_SELFTEST=a11yrows KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" a11yrows-ocaml env KAYA_SELFTEST=a11yrows KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/a11yrows.exe
+    run "$proto" a11yrows-haskell env KAYA_SELFTEST=a11yrows \
+        tools/linux/a11y-leg.sh "$(hs_bin a11yrows)"
+    run "$proto" a11yrows-java env KAYA_SELFTEST=a11yrows KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    run "$proto" a11yrows-c env KAYA_SELFTEST=a11yrows \
+        tools/linux/a11y-leg.sh /tmp/c-guests/a11yrows
     # The confirm scene: the modal-alert grammar (gtk::AlertDialog),
     # all three answer paths through the REAL dialog button.
     # The stall diagnostic (crates/kaya/src/stall.rs): the one scene

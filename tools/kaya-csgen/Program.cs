@@ -248,7 +248,8 @@ static class Program
         b.AppendLine("/// zone named six, and the scene that wanted a per-row entry could");
         b.AppendLine("/// not use either, so it opened the For itself and reached for the");
         b.AppendLine("/// widget-kind floor (docs/sugar-pass-plan.md S4b).");
-        b.AppendLine("/// Add here whatever is added to Tpl.");
+        b.AppendLine("/// Add here whatever is added to Tpl: the prop setters below are");
+        b.AppendLine("/// forwarded for the same reason the constructors are.");
         b.AppendLine("/// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild,");
         b.AppendLine("/// Collection/ForEach/When, ContextMenu — stays off deliberately: a");
         b.AppendLine("/// row surface hands out sugar, and its Tpl is private so the floor");
@@ -291,6 +292,25 @@ static class Program
                 var head = string.Join(", ", pars[..^1]);
                 b.AppendLine($"    public Node {name}({head}{(head.Length > 0 ? "," : "")}");
                 b.AppendLine($"        {pars[^1]}) =>");
+                b.AppendLine($"        t.{name}({args});");
+            }
+            b.AppendLine();
+        }
+
+        // A PROP SETTER forwards the same way but returns nothing, and
+        // it is the BODY that overflows rather than a parameter (the
+        // name is spelled twice), so the wrap is the hand-written Tpl's:
+        // the signature keeps its parameters and the call moves down.
+        void Set(string name, string[] pars, string args)
+        {
+            var one = $"    public void {name}({string.Join(", ", pars)}) => t.{name}({args});";
+            if (one.Length <= 84)
+            {
+                b.AppendLine(one);
+            }
+            else
+            {
+                b.AppendLine($"    public void {name}({string.Join(", ", pars)}) =>");
                 b.AppendLine($"        t.{name}({args});");
             }
             b.AppendLine();
@@ -342,6 +362,23 @@ static class Program
         Fwd("Scroll", ["System.Action body"], "body");
         Fwd("Grid", ["int columns", "System.Action body"], "columns, body");
         Fwd("Spacer", [], "");
+        // THE PROP SETTERS, for the reason the constructors are here: a
+        // prop reachable through tx.Each and not through `foreach (var
+        // row in c.Rows())` is the same difference no guest should have
+        // to know about. Grow shipped without a forwarder for a
+        // milestone, which is how a "the forwarders are the ZONE" list
+        // becomes a selection again (docs/tpl-props-plan.md P1).
+        Set("SetGrow", ["Node n", "double weight"], "n, weight");
+        Set("SetA11yId", ["Node n", "string id"], "n, id");
+        Set("SetA11yId", ["Node n", "Signal s"], "n, s");
+        Set("SetA11yId", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
+        Set("SetA11yLabel", ["Node n", "string label"], "n, label");
+        Set("SetA11yLabel", ["Node n", "Signal s"], "n, s");
+        Set("SetA11yLabel", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
+        Set("SetA11yHint", ["Node n", "string hint"], "n, hint");
+        Set("SetA11yHint", ["Node n", "Signal s"], "n, s");
+        Set("SetA11yHint", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
+        Set("SetAccepts", ["Node n", "params string[] kinds"], "n, kinds");
         // Fwd leaves a trailing blank line; the class brace closes on it.
         b.Length -= System.Environment.NewLine.Length;
         b.AppendLine("}");

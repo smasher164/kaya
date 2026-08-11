@@ -80,19 +80,28 @@ let () =
            (fun () ->
              Tpl.(
                let items = collection () in
-               let item_list, () =
-                 for_each items
-                   (fun () ->
-                     (* label#2 once g2/a stamps. [element] is the
-                        scalar collection's own token — its element IS
-                        the value, so there is no field name to give —
-                        and it lowers to the same bind_element this line
-                        used to spell at the widget-kind floor. *)
-                     let row = label ~bind_field:element () in
-                     context_menu row catalog)
+               let _ =
+                 column
+                   [
+                     (* THE INNER FOR AS A CHILD. Its body keeps no
+                        handle — the Remove handler hangs off the
+                        catalog, not off a stamped node — so [each]
+                        drops the result and the partial application
+                        slots into this list like any constructor. The
+                        [w item_list] line it replaces was there
+                        because this zone had no [each] until now. *)
+                     each items (fun () ->
+                         (* label#2 once g2/a stamps. [element] is the
+                            scalar collection's own token — its element
+                            IS the value, so there is no field name to
+                            give — and it lowers to the same
+                            bind_element this line used to spell at the
+                            widget-kind floor. *)
+                         let row = label ~bind_field:element () in
+                         context_menu row catalog);
+                   ]
                    ()
                in
-               let _ = column [ w item_list ] () in
                items))
            ()
        in

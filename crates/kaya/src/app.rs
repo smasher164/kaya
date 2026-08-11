@@ -1615,7 +1615,7 @@ impl<'a> Tx<'a> {
 
     /// WHAT THIS WIDGET ACCEPTS FROM A PASTE: the closed kinds by name
     /// (`text`, `html`, `image`, `files`) and any custom format ids,
-    /// space separated. [`WidgetRef::accepts`] is the chained spelling
+    /// space separated. [`Widget::accepts`] is the chained spelling
     /// and takes the kinds as values.
     ///
     /// ONE DECLARATION, THREE JOBS. It drives whether the standard
@@ -2767,6 +2767,33 @@ impl<'b> Row<'_, 'b> {
     pub fn image(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
         self.tpl().image(src)
     }
+
+    pub fn a11y_id(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.tpl().a11y_id(node, src)
+    }
+
+    pub fn a11y_label(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.tpl().a11y_label(node, src)
+    }
+
+    pub fn a11y_hint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.tpl().a11y_hint(node, src)
+    }
+
+    pub fn accepts(&mut self, node: TemplateNodeId, kinds: &[crate::Accepts<'_>]) {
+        self.tpl().accepts(node, kinds)
+    }
+
+    // Forwarded because a ROW TRACE legitimately anchors context menus:
+    // the menus scene's item rows carry one, and before this forward the
+    // guest was forced back to the for_each combinator for the whole
+    // nesting just to reach it. context_menu left tpl-surfaces.py's
+    // NOT_FORWARDED set in the same change, so the pair is now HELD
+    // level rather than merely level; context_attach (the raw
+    // item-id/node floor) stays excluded.
+    pub fn context_menu<R>(&mut self, node: TemplateNodeId, catalog: ContextCatalog<R>) -> R {
+        self.tpl().context_menu(node, catalog)
+    }
 }
 
 impl Drop for Row<'_, '_> {
@@ -2950,6 +2977,36 @@ impl<M> Messages<M> {
             Box::new(move |occ| match occ {
                 Occurrence::InstanceValueChanged { path, value, .. } => {
                     Some(f(path.clone(), *value))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// A stamped copy's paste, with the copy's key path — the node
+    /// flavor of [`Self::on_paste`], and the LAST of the instance
+    /// registrars to exist. The dispatch arm was always there
+    /// (`InstancePasted` reaches the node table like every other
+    /// Instance* occurrence), but no method could put a handler in it:
+    /// Rust was the one binding of eight without this registrar, while
+    /// the other seven had the registrar and no way to spell `accepts`
+    /// on a template node — so the hook was dead in all eight, each
+    /// half-built from the opposite end (docs/tpl-props-plan.md §1).
+    ///
+    /// Fires only for copies whose TEMPLATE declared what it accepts
+    /// (`Tpl::accepts`) — without a declaration the platform's own
+    /// insertion happens and the instance change handler reports it,
+    /// exactly as live.
+    pub fn on_paste_node(
+        &self,
+        n: TemplateNodeId,
+        f: impl Fn(Path, crate::protocol::Representation) -> M + 'static,
+    ) {
+        self.nodes.borrow_mut().insert(
+            n.0,
+            Box::new(move |occ| match occ {
+                Occurrence::InstancePasted { path, clip, .. } => {
+                    Some(f(path.clone(), clip.clone()))
                 }
                 _ => None,
             }),
@@ -4917,6 +4974,53 @@ impl Tpl<'_, '_> {
         n
     }
 
+    /// A stamped copy's accessibility IDENTIFIER, from any addressable
+    /// source. A CONST gives every copy the same key, which is legal —
+    /// nothing in the core deduplicates ids — but know what it costs:
+    /// the harness's MODEL resolution addresses by kind#index and never
+    /// notices, while `expect_ax`, the one verb that goes through the
+    /// authored id into the platform's real tree, REFUSES a duplicated
+    /// id rather than guessing among the elements that carry it
+    /// (measured guessing wrong first, 2026-08-11). Copies automation
+    /// must tell apart want a sourced id — the row's own field.
+    pub fn a11y_id(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::A11yId, src.into().inner);
+    }
+
+    /// A stamped copy's SPOKEN accessibility label, from any
+    /// addressable source — and the row's own field is the whole point:
+    /// a list row announcing its own name to assistive tech is the
+    /// assertion no a11y leg had ever made of a stamped widget
+    /// (docs/tpl-props-plan.md P3).
+    pub fn a11y_label(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::A11yLabel, src.into().inner);
+    }
+
+    /// What activating a stamped copy does. The root admits this on the
+    /// activation kinds alone (button, checkbox, select, radio) and a
+    /// misuse dies at DECLARE time in the root's own words, before a
+    /// single row stamps — which is why there is no type-level wall
+    /// here (crates/kaya/src/scene.rs, check_prop's A11yHint arm).
+    pub fn a11y_hint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::A11yHint, src.into().inner);
+    }
+
+    /// What every stamped copy accepts from a paste. CONST ONLY, unlike
+    /// the sourced props above, because an accept list describes the
+    /// PROTOTYPE: what a control can take is a fact about the control,
+    /// not about the row's data.
+    ///
+    /// THIS SETTER IS THE PASTE HOOK'S KEYSTONE. Every backend gates
+    /// the paste occurrence on the focused widget's accept list and
+    /// falls back to the platform's own insertion when it is empty —
+    /// so before this existed, `on_paste_node` registered a handler
+    /// that could never fire, in every binding, silently
+    /// (docs/tpl-props-plan.md §1).
+    pub fn accepts(&mut self, node: TemplateNodeId, kinds: &[crate::Accepts<'_>]) {
+        let list: Vec<&str> = kinds.iter().map(|k| k.token()).collect();
+        self.set(node, Prop::Accepts, list.join(" ").as_str());
+    }
+
     fn apply_source(&mut self, node: TemplateNodeId, prop: Prop, src: SourceInner) {
         let value = match src {
             SourceInner::Const(v) => PropValue::Const(v),
@@ -5837,28 +5941,46 @@ mod tests {
         // predate this pass and ride along, so the sweep is every
         // value-bearing constructor in the zone rather than the new ones.
         let (_list, nodes) = tx.for_each(&rows, |t| {
+            // The PROP setters join the sweep the same way (the props
+            // slice, docs/tpl-props-plan.md P1): each is handed the
+            // row's own field and must emit the Element binding. A
+            // setter that took the argument and dropped it is exactly
+            // Python's D3, and "the constructor exists" checks cannot
+            // see it.
+            let e = t.entry();
+            t.a11y_id(e, text);
+            t.a11y_label(e, text);
+            let b = t.button(text);
+            t.a11y_hint(b, text);
             vec![
-                ("label", t.label(text)),
-                ("checkbox", t.checkbox(Field::<BoolKind>::new(0))),
-                ("button", t.button(text)),
-                ("entry_bound", t.entry_bound(text)),
-                ("textarea_bound", t.textarea_bound(text)),
-                ("progress", t.progress(num)),
-                ("slider", t.slider(0.0, 1.0, num)),
-                ("select", t.select(&["a", "b"], num)),
-                ("radio", t.radio(&["a", "b"], num)),
+                ("label", t.label(text), Prop::Text),
+                ("checkbox", t.checkbox(Field::<BoolKind>::new(0)), Prop::Checked),
+                ("button", b, Prop::Text),
+                ("entry_bound", t.entry_bound(text), Prop::Text),
+                ("textarea_bound", t.textarea_bound(text), Prop::Text),
+                ("progress", t.progress(num), Prop::Value),
+                ("slider", t.slider(0.0, 1.0, num), Prop::Value),
+                ("select", t.select(&["a", "b"], num), Prop::Value),
+                ("radio", t.radio(&["a", "b"], num), Prop::Value),
+                ("a11y_id", e, Prop::A11yId),
+                ("a11y_label", e, Prop::A11yLabel),
+                ("a11y_hint", b, Prop::A11yHint),
             ]
         });
 
-        for (what, node) in &nodes {
+        for (what, node, want) in &nodes {
+            // Matched per (node, PROP), not per node: two sourced props
+            // on one node would otherwise vouch for each other, and a
+            // setter that dropped its argument would hide behind its
+            // sibling's Element bind.
             let bound = tx.ops.iter().any(|op| {
                 matches!(
                     op,
                     TxOp::SetProperty {
                         widget,
+                        prop,
                         value: PropValue::Element { level: 0, field: 0 },
-                        ..
-                    } if widget.0 == node.0
+                    } if widget.0 == node.0 && prop == want
                 )
             });
             assert!(
@@ -5875,7 +5997,7 @@ mod tests {
         // template body that returned early would leave one.
         assert_eq!(
             nodes.len(),
-            9,
+            12,
             "kaya: the source-arm sweep walked {} constructors, not the 9 the \
              zone has — a constructor added without a row here is one this test \
              cannot speak for",

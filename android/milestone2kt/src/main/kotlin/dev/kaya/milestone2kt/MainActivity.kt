@@ -35,6 +35,14 @@ class MainActivity : ComponentActivity() {
         KayaCompose.mount(this)
         val scene = when (System.getenv("KAYA_SELFTEST")) {
             "a11y" -> A11y::app
+            // Same rule as undo and ranges below: the JVM guest for the
+            // stamped-accessibility scene is language-complete, and
+            // whether a leg RUNS it is the Compose arm's question
+            // (tools/check-stubs.sh reads the backend, not this
+            // selector). Registered so the leg has a scene to select the
+            // moment that arm lands, rather than silently running
+            // milestone2 against the a11yrows script.
+            "a11yrows" -> A11yRows::app
             "entry" -> Entry::app
             "gallery" -> Gallery::app
             "todos" -> Todos::app

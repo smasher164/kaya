@@ -2115,6 +2115,15 @@ func (a *App) OnPaste(w Widget, fn func(*Tx, Representation)) {
 // handler also receives the stamped copy's keys, outermost first. A
 // paste onto a stamped row is the same event as a paste onto a live
 // one, exactly as a click is.
+//
+// FIRES ONLY FOR COPIES WHOSE TEMPLATE DECLARED WHAT IT ACCEPTS
+// (Tpl.SetAccepts), like the live hook — and until that setter existed
+// this registrar could never fire at all: it was written with the
+// clipboard milestone, dispatched from the day it landed, and had no
+// declaration anywhere in the template zone to switch it on
+// (docs/tpl-props-plan.md §1). A copy that declares nothing gets the
+// platform's own insertion and reports it through the ordinary change
+// path.
 func (a *App) OnPasteNode(n Node, fn func(*Tx, []any, Representation)) {
 	a.nodePastes[n.id] = fn
 }
@@ -2715,7 +2724,17 @@ func (t *Tpl) Widget(kind uint32) Node {
 	return n
 }
 
-func (t *Tpl) SetText(n Node, text string) {
+// setText is the template zone's FLOOR prop write, and it is
+// unexported for that reason: it and the live verb Tx.SetText were both
+// spelled SetText, so no reader — and no regex, which sees no receiver
+// type — could tell the tier a call belonged to. The floor gate has to
+// tell them apart (a guest's tx.SetText puts a document in front of the
+// user; a guest's t.SetText WAS the tier the sugar replaced), and Rust
+// never had the problem because its two live under two names (`set` and
+// `set_text`). Nothing outside this package called it, so hiding it is
+// the split: a guest reaching for it now fails to compile
+// (docs/tpl-props-plan.md F3).
+func (t *Tpl) setText(n Node, text string) {
 	t.tx.emit(TxSetText(n.id, text))
 }
 
@@ -2728,21 +2747,124 @@ func (t *Tpl) BindTextElement(n Node, level uint32) {
 // SetGrow weights a template node within its stamped row or column —
 // the template twin of Tx.SetGrow, spelled as a method rather than a
 // chain because a Node is a plain id and has no transaction to chain
-// from.
+// from. EVERY PROP BELOW FOLLOWS THAT SENTENCE: same semantics as the
+// live zone, a different spelling, which is what invariant 1 allows.
 //
-// THE ONE PROP THE TEMPLATE ZONE CARRIES, and it is here because
-// Scroll needs it: an unconstrained viewport hugs its content and
-// nothing ever overflows, so a template scroll without a grow weight
-// is a scroll that cannot scroll. Rust's Tpl has always been able to
-// spell this through its generic set(node, prop, value), so shipping
-// the scroll constructor without it would have opened a divergence in
-// the same pass that closed one (invariant 1).
+// It was the FIRST prop the template zone carried, and it is here
+// because Scroll needs it: an unconstrained viewport hugs its content
+// and nothing ever overflows, so a template scroll without a grow
+// weight is a scroll that cannot scroll. Rust's Tpl has always been
+// able to spell this through its generic set(node, prop, value), so
+// shipping the scroll constructor without it would have opened a
+// divergence in the same pass that closed one (invariant 1).
 //
-// The rest of the template-node props — the a11y pair, spacing, align,
-// accepts — stay unreachable on a Node and stay ledgered
-// (docs/deferred.md). That gap predates this pass.
+// Spacing and align stay unreachable on a Node and stay ledgered
+// (docs/deferred.md); Go has no generic template floor to reach them
+// through, unlike Rust.
 func (t *Tpl) SetGrow(n Node, weight float64) {
 	t.tx.emit(TxSetGrow(n.id, weight))
+}
+
+// SetA11yID gives every stamped copy THE SAME accessibility identifier
+// — the template twin of Tx.SetA11yID, universal like it (every kind
+// carries one, containers included).
+//
+// A CONSTANT IS OFTEN THE WRONG HALF HERE, and this is the one prop
+// where that is worth saying: an identifier is an automation KEY, so N
+// copies sharing one leave a harness with N indistinguishable targets
+// and no way to name a row. Nothing in the core deduplicates them and
+// the harness addresses by kind#index rather than by id, so duplicates
+// are legal and sometimes right — a one-row collection, a When body —
+// but BindA11yID over the row's own field is what a list wants.
+func (t *Tpl) SetA11yID(n Node, id string) {
+	t.tx.emit(TxSetA11yId(n.id, id))
+}
+
+// BindA11yID sources each stamped copy's identifier from a VARYING
+// source: a signal every copy follows, or a field of the row the copy
+// was stamped for. The field is what gives a stamped row an addressable
+// name — the thing an a11y scene could not do before this pass, since
+// its 719 legs all built their subjects live.
+func (t *Tpl) BindA11yID[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	t.applyStrProp(n, src, TxBindA11yId, TxBindA11yIdElement)
+}
+
+// SetA11yLabel gives every stamped copy the same SPOKEN name — the
+// template twin of Tx.SetA11yLabel, and the same override contract:
+// unset keeps whatever the platform derives from the control's own
+// content, so a button whose caption already reads well needs nothing.
+func (t *Tpl) SetA11yLabel(n Node, label string) {
+	t.tx.emit(TxSetA11yLabel(n.id, label))
+}
+
+// BindA11yLabel sources each stamped copy's spoken name from a varying
+// source. THE ROW'S OWN FIELD IS THE CASE THIS SLICE EXISTS FOR:
+//
+//	for row := range todos.Rows(tx) {
+//		row.Row(func() {
+//			row.Label(row.Value())
+//			done := row.Checkbox(false)
+//			row.BindA11yLabel(done, row.Value()) // "Milk", not "checkbox"
+//		})
+//	}
+//
+// A checkbox beside a label announces nothing an assistive client can
+// tell from its neighbours; bound to the row's own text it announces
+// the row. The binding is live rather than a one-shot seed — a later
+// UpdateField on that field re-speaks the copy.
+func (t *Tpl) BindA11yLabel[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	t.applyStrProp(n, src, TxBindA11yLabel, TxBindA11yLabelElement)
+}
+
+// SetA11yHint sets what ACTIVATING each stamped copy does — a verb
+// phrase, spoken as written by VoiceOver and prefixed "double tap to"
+// by TalkBack.
+//
+// ACTIVATION KINDS ONLY: button, checkbox, select and radio. There is
+// no wall here and deliberately none: a Node is a bare id and carries
+// no kind, and this binding keeping its own kind table to check against
+// would be the root's list written a second time, which is the defect
+// that let the live and stamped tag lists drift for four milestones.
+// The root rejects a hint on any other kind at DECLARE time, naming the
+// kind and the prop, before a single row stamps — the same failure the
+// live path gives, in the same words.
+func (t *Tpl) SetA11yHint(n Node, hint string) {
+	t.tx.emit(TxSetA11yHint(n.id, hint))
+}
+
+// BindA11yHint sources the hint per copy — "delete Milk" rather than
+// "delete", which is the row-aware half of the same contract.
+// Activation kinds only; see SetA11yHint.
+func (t *Tpl) BindA11yHint[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	t.applyStrProp(n, src, TxBindA11yHint, TxBindA11yHintElement)
+}
+
+// SetAccepts declares what each stamped copy takes from a paste — the
+// closed kinds by name (AcceptText, AcceptHtml, AcceptImage,
+// AcceptFiles) plus any custom format ids. The template twin of
+// Tx.SetAccepts; entry and textarea only, checked at the root.
+//
+// CONST ONLY, unlike the three props above. An accept list is the
+// CONTROL's contract with the clipboard — what this widget is, not what
+// this row holds — so it describes the prototype, and the prototype is
+// one shape for every copy. The wire could carry a sourced one and
+// nothing would want it: a list whose rows accept different things is a
+// list of two different controls, which this zone already spells as a
+// sum collection's arms or a When.
+//
+// THIS IS THE DECLARATION THAT TURNS App.OnPasteNode ON. Every backend
+// gates the paste occurrence on the focused widget's accept list and
+// hands the gesture to the platform when it is empty, so until this
+// existed the node paste handler was registered, dispatched, and unable
+// to fire — in every binding, silently (docs/tpl-props-plan.md §1).
+func (t *Tpl) SetAccepts(n Node, kinds ...string) {
+	t.tx.emit(TxSetAccepts(n.id, acceptList(kinds)))
 }
 
 // LabelText creates a label with constant text in the blueprint: the
@@ -2752,7 +2874,7 @@ func (t *Tpl) SetGrow(n Node, weight float64) {
 // blueprint's variable text comes from the element it is stamped for.
 func (t *Tpl) LabelText(text string) Node {
 	n := t.Widget(KindLabel)
-	t.SetText(n, text)
+	t.setText(n, text)
 	return n
 }
 
@@ -2790,10 +2912,11 @@ func (t *Tpl) LabelBound[S interface {
 // template `button` take a caption and nothing else. Go's template
 // zone reached this constructor 2026-08-05, with the milestone2
 // graduation; until then a stamped button had to be spelled at the
-// floor (Widget(KindButton) + SetText), which is what that scene did.
+// floor (Widget(KindButton) + the prop write), which is what that
+// scene did.
 func (t *Tpl) Button(text string) Node {
 	n := t.Widget(KindButton)
-	t.SetText(n, text)
+	t.setText(n, text)
 	return n
 }
 
@@ -2876,10 +2999,10 @@ func (t *Tpl) TextareaBound[S interface {
 //
 // THE SOURCE IS THE CHECKED BIT, NOT THE CAPTION, where the live
 // Tx.Checkbox takes text and a handler. That is the zone's split, not
-// Go's: a prototype's caption is one string for every copy (Tpl.SetText
-// writes it) while its checked state is exactly the per-row datum, and
-// Rust's Tpl.checkbox and RecordCollection.Checkbox already spelled it
-// this way.
+// Go's: a prototype's caption is one string for every copy (the
+// constructor writes it) while its checked state is exactly the per-row
+// datum, and Rust's Tpl.checkbox and RecordCollection.Checkbox already
+// spelled it this way.
 func (t *Tpl) Checkbox(checked bool) Node {
 	n := t.Widget(KindCheckbox)
 	t.tx.emit(TxSetChecked(n.id, checked))
@@ -3049,12 +3172,12 @@ func (t *Tpl) Column(body func()) Node {
 // blueprint, per stamped copy: the template twin of Tx.Scroll.
 //
 // The live zone says to chain .Grow(1) so the enclosing track
-// constrains it; a Node has no chain and no prop surface at all, so a
-// stamped viewport keeps its content's natural size. That is the
-// template-node prop gap, ledgered rather than worked around here
-// (docs/sugar-pass-plan.md §2) — and the "exactly one child" rule is
-// checked on the live AddChild arm only, so nothing rejects a second
-// child in a blueprint today either. Neither is promised above.
+// constrains it; a Node has no chain, so the template spelling is
+// t.SetGrow(n, 1) beside the constructor — and a stamped viewport
+// WITHOUT one keeps its content's natural size and cannot scroll. The
+// "exactly one child" rule is still checked on the live AddChild arm
+// only, so nothing rejects a second child in a blueprint; that one is
+// not promised above.
 func (t *Tpl) Scroll(body func()) Node {
 	return t.containerOf(KindScroll, body)
 }
@@ -3108,7 +3231,7 @@ func (t *Tpl) choiceOf(kind uint32, options []string) Node {
 	t.tx.app.parents = append(t.tx.app.parents, n.id)
 	for _, option := range options {
 		o := t.Widget(KindLabel)
-		t.SetText(o, option)
+		t.setText(o, option)
 	}
 	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
 	return n
@@ -3167,6 +3290,26 @@ func (t *Tpl) applyBlob[S interface {
 		t.tx.emit(TxBindSource(n.id, v.id))
 	case Field[[]byte]:
 		t.BindSourceField(n, 0, v)
+	}
+}
+
+// applyStrProp is the same lowering for the STRING PROPS — the a11y
+// trio — which differ from each other in their two wire ops and in
+// nothing else, so the ops arrive as arguments and the union is spelled
+// once rather than once per prop. The four above cannot share that
+// shape: their arms end in a named BindXField whose signature carries
+// the value type, which is the type they exist to discriminate.
+func (t *Tpl) applyStrProp[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S,
+	bindSignal func(uint64, uint64) []byte,
+	bindElement func(uint64, uint32, uint32) []byte,
+) {
+	switch v := any(src).(type) {
+	case Signal[string]:
+		t.tx.emit(bindSignal(n.id, v.id))
+	case Field[string]:
+		t.tx.emit(bindElement(n.id, 0, v.index))
 	}
 }
 

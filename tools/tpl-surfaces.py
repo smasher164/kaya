@@ -52,7 +52,10 @@ DEFAULT_KINDS = (
 NOT_FORWARDED = {
     "widget", "set", "bind", "bind_element", "bind_field", "add_child",
     "case_arm", "collection", "for_each", "for_each_sum", "when",
-    "context_menu", "context_attach",
+    # context_menu is NOT here, deliberately: a row trace legitimately
+    # anchors one (the menus scene's item rows), so both surfaces must
+    # offer it. context_attach — the raw item-id/node floor — stays.
+    "context_attach",
 }
 
 

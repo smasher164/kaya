@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges save"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES.
@@ -661,7 +661,7 @@ build_c() {
     # very assignment to say so — every name here must have a leg below.
     # SCENES is a command-line override, so the Makefile keeps one list
     # and the linux suite keeps building all of them.
-    make -C guests/c SCENES="undo dirty ranges save" TARGET_DIR="$ROOT/target/debug" \
+    make -C guests/c SCENES="undo dirty ranges save a11yrows" TARGET_DIR="$ROOT/target/debug" \
         OUT="$ROOT/target/c-guests"
 }
 
@@ -1059,6 +1059,31 @@ KAYA_SELFTEST_SCRIPT="$(scene_script editor)"
 export KAYA_SELFTEST_SCRIPT
 drain
 run editor-go-swiftui env KAYA_SELFTEST=editor target/go-guests/kaya-go
+drain
+
+# THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3): two
+# entries stamped from one template, each carrying its own row's a11y
+# identity, read back from the platform's real tree — the assertion the
+# a11y milestone's 719 legs never made. A SEPARATE scene because the
+# a11y scene asserts containers ordinally and a For's column would
+# shift `column#0` per language (the steps file carries the full
+# reasoning). Graduated 2026-08-11 with wave 2's guests: all eight
+# bindings plus the C floor, which spells the template props as the
+# generated setters (its usual relationship to sugar).
+KAYA_SELFTEST_SCRIPT="$(scene_script a11yrows)"
+export KAYA_SELFTEST_SCRIPT
+run a11yrows-rust-swiftui env KAYA_SELFTEST=a11yrows "$RUST_GUESTS"/a11yrows
+run a11yrows-python-swiftui env KAYA_SELFTEST=a11yrows python3 guests/python/a11yrows.py
+run a11yrows-go-swiftui env KAYA_SELFTEST=a11yrows target/go-guests/kaya-go
+run a11yrows-csharp-swiftui env KAYA_SELFTEST=a11yrows KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run a11yrows-ocaml-swiftui env KAYA_SELFTEST=a11yrows KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/a11yrows.exe
+run a11yrows-haskell-swiftui env KAYA_SELFTEST=a11yrows "$(hs_bin a11yrows)"
+run a11yrows-swift-swiftui env KAYA_SELFTEST=a11yrows target/swift-guests/a11yrows
+run a11yrows-java-swiftui env KAYA_SELFTEST=a11yrows KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+run a11yrows-c-swiftui env KAYA_SELFTEST=a11yrows target/c-guests/a11yrows
 drain
 
 # The clipboard scene: one clip in several representations, and the

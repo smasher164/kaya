@@ -2748,6 +2748,13 @@ final class KayaAppTx {
     /// copy's key path, outermost first. One record kind, the path
     /// deciding — exactly as a click on a stamped row is one record
     /// with a click on a live widget.
+    ///
+    /// AND ONLY FIRES FOR A COPY WHOSE TEMPLATE DECLARED WHAT IT TAKES
+    /// (`KayaTpl.setAccepts`), which is the same rule the live overload
+    /// above states and was the reason this one was dead: until that
+    /// setter existed, registering here compiled and waited forever,
+    /// because every backend hands a paste to the platform's own
+    /// insertion when the target's accept list is empty.
     func onPaste(
         _ n: KayaNodeHandle,
         _ handler: @escaping (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void
@@ -3208,7 +3215,20 @@ final class KayaTpl {
         return n
     }
 
-    func setText(_ n: KayaNodeHandle, _ text: String) {
+    /// The raw Text write on a node — PRIVATE, and that is the point.
+    ///
+    /// The live zone's `setText` is a WIDGET VERB the sugar sweep
+    /// requires of every binding (tools/check-sugar-surface.sh's
+    /// check_range_verb); this one is the floor spelling of a prop, and
+    /// the only thing telling the two apart is the receiver's type,
+    /// which no floor sweep can see. Rust never had the problem — it
+    /// spells the floor `Tpl::set` and the verb `set_text`. Hiding is
+    /// the sharper half of that split here: every caller is a
+    /// constructor in this same class, no guest and no generated file
+    /// has ever named it, so the floor spelling simply stops existing
+    /// rather than moving to a name someone could still reach for
+    /// (docs/tpl-props-plan.md F3).
+    private func setText(_ n: KayaNodeHandle, _ text: String) {
         tx.tx.setText(n.id, text)
     }
 
@@ -3221,19 +3241,110 @@ final class KayaTpl {
     /// Weight a template node within its stamped row or column — the
     /// template twin of `KayaAppTx.setGrow`.
     ///
-    /// THE ONE PROP THE TEMPLATE ZONE CARRIES, and it is here because
-    /// `scroll` needs it: an unconstrained viewport hugs its content and
-    /// nothing overflows, so a template scroll without a grow weight is
-    /// a scroll that cannot scroll. Rust's `Tpl` has always been able to
-    /// spell this through its generic `set(node, prop, value)`, so
-    /// shipping the scroll constructor without it would have opened a
-    /// divergence in the same pass that closed one (invariant 1).
+    /// It arrived a pass ahead of the a11y props below because `scroll`
+    /// needs it: an unconstrained viewport hugs its content and nothing
+    /// overflows, so a template scroll without a grow weight is a scroll
+    /// that cannot scroll. Rust's `Tpl` has always been able to spell
+    /// this through its generic `set(node, prop, value)`, so shipping
+    /// the scroll constructor without it would have opened a divergence
+    /// in the same pass that closed one (invariant 1).
     ///
-    /// The rest of the template-node props — the a11y pair, spacing,
-    /// align, `accepts` — stay unreachable on a node and stay ledgered
-    /// (docs/deferred.md). That gap predates this pass.
+    /// Spacing and align are what a node still cannot carry here. They
+    /// are the container props, they have no Swift spelling in this zone
+    /// at all — not even on `row`/`column`/`grid` — and they stay
+    /// ledgered (docs/deferred.md).
     func setGrow(_ n: KayaNodeHandle, _ weight: Double) {
         tx.tx.setGrow(n.id, weight)
+    }
+
+    /// A stamped copy's accessibility IDENTIFIER — the template twin of
+    /// `KayaAppTx.setA11yId`, and universal in this zone exactly as it
+    /// is in that one: the template declare arm runs the same
+    /// `check_prop` the live path does, and A11yId is admitted on every
+    /// kind (crates/kaya/src/scene.rs).
+    ///
+    /// The argument's type picks the source, as it does for `label`. A
+    /// String gives EVERY copy the same key, which is legal and often
+    /// right — nothing in the core deduplicates ids and the harness
+    /// addresses by kind#index, never by id — while the row's own field
+    /// is the spelling when automation has to tell two copies apart.
+    func setA11yId(_ n: KayaNodeHandle, _ id: String) {
+        tx.tx.setA11yId(n.id, id)
+    }
+
+    func setA11yId(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindA11yId(n.id, s.id)
+    }
+
+    func setA11yId(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindA11yIdElement(n.id, level: level, field: f.index)
+    }
+
+    /// What an assistive client SPEAKS for a stamped copy — the template
+    /// twin of `KayaAppTx.setA11yLabel`. Leave it unset to keep whatever
+    /// the platform derives from the copy's own content.
+    ///
+    /// THE ROW'S OWN FIELD IS THE CASE THIS EXISTS FOR: it is the only
+    /// one of the three sources that makes two copies say different
+    /// things, so a list whose rows each announce their own name is one
+    /// line. A String is right for a per-cell role ("delete") and wrong
+    /// for a per-row identity; a signal makes every copy say the same
+    /// changing thing.
+    func setA11yLabel(_ n: KayaNodeHandle, _ label: String) {
+        tx.tx.setA11yLabel(n.id, label)
+    }
+
+    func setA11yLabel(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindA11yLabel(n.id, s.id)
+    }
+
+    func setA11yLabel(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindA11yLabelElement(n.id, level: level, field: f.index)
+    }
+
+    /// What ACTIVATING a stamped copy does — the template twin of
+    /// `KayaAppTx.setA11yHint`. Write a VERB PHRASE.
+    ///
+    /// Activation kinds only (button, checkbox, select, radio), and the
+    /// restriction is the ROOT'S rather than this type's: a hint on a
+    /// template label dies in `check_prop` at DECLARE time, before a
+    /// single row stamps, in the same sentence the live zone gets.
+    /// Walling it off in the type here — a kind parameter on
+    /// `KayaNodeHandle` — would be the two zones diverging on one prop,
+    /// which is the thing invariant 1 forbids.
+    func setA11yHint(_ n: KayaNodeHandle, _ hint: String) {
+        tx.tx.setA11yHint(n.id, hint)
+    }
+
+    func setA11yHint(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindA11yHint(n.id, s.id)
+    }
+
+    func setA11yHint(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
+        tx.tx.bindA11yHintElement(n.id, level: level, field: f.index)
+    }
+
+    /// Declare what a stamped copy takes from a paste — the template
+    /// twin of `KayaAppTx.setAccepts`. Entry and textarea only; the root
+    /// rejects it elsewhere, at declaration rather than per stamp.
+    ///
+    /// THIS IS WHAT MAKES A STAMPED PASTE HAPPEN AT ALL. Every backend
+    /// gates the paste occurrence on the focused widget's accept list
+    /// and falls back to the platform's own insertion when it is empty
+    /// (swift/KayaSwiftUI.swift, `node.accepts.isEmpty`), so until this
+    /// existed `onPaste(_ n: KayaNodeHandle, …)` registered a handler
+    /// that compiled, registered and could never fire — silently, and in
+    /// seven of the eight bindings (docs/tpl-props-plan.md §1).
+    ///
+    /// CONST ONLY, and that is parity rather than a cut: an accept list
+    /// says what the PROTOTYPE can take, which is structure, and
+    /// structure belongs to the blueprint — the rule the slider's
+    /// min/max and the select's options already follow. No zone in any
+    /// binding offers a dynamic spelling; on Android the list IS the
+    /// native registration, so a per-row one would be a per-copy native
+    /// registration.
+    func setAccepts(_ n: KayaNodeHandle, _ kinds: [String]) {
+        tx.tx.setAccepts(n.id, kayaAcceptList(kinds))
     }
 
     /// Bind a label's text to one field of the element; KayaField<String>
@@ -3645,9 +3756,8 @@ final class KayaTpl {
 
     /// A spacer: PURE SUGAR for an empty grown column — it consumes the
     /// leftover main-axis space between its siblings in every stamped
-    /// copy. No new vocabulary reaches a backend, which is why it can
-    /// write Grow here while the rest of the template-node props are
-    /// still ledgered.
+    /// copy. No new vocabulary reaches a backend: it writes the Grow a
+    /// caller could write itself with `setGrow`.
     func spacer() -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_COLUMN))
         tx.tx.setGrow(n.id, 1.0)

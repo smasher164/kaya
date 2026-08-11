@@ -52,10 +52,7 @@ main = kayaMain $ \app -> do
       column
         [ row [checkboxOn "urgent" onUrgent, labelBound status],
           row
-            [ do
-                w <- sliderOn 0 1 0.5 onVolume
-                bindValue w pos
-                return w,
+            [ sliderBoundOn 0 1 pos onVolume,
               labelBound volume,
               buttonOn "quarter" onQuarter
             ],

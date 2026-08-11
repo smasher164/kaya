@@ -79,7 +79,7 @@ main = kayaMain $ \app -> do
   BS.writeFile (dir </> "pixel.png") pixelPng
   writeFile (dir </> "pasted.txt") "pasted bytes"
 
-  (status, rich) <- buildTx app $ do
+  (status, rich, rowStatus, note) <- buildTx app $ do
     -- THE GESTURE LAYER'S DECLARATION, and an app writes nothing else
     -- for it: the Paste command lowers to the platform's own, acts on
     -- whatever is focused, and works out its own enablement. kaya has
@@ -100,6 +100,7 @@ main = kayaMain $ \app -> do
           ]
       ]
     status <- signal (VStr "ready")
+    rowStatus <- signal (VStr "")
 
     -- THE FIELDS ARE BUILT FIRST so the focus buttons can close over
     -- them: Build is a PURE state monad, so there is no IORef trick
@@ -117,6 +118,30 @@ main = kayaMain $ \app -> do
     -- field's ordinary change path reports it — which is what a plain
     -- text editor gets for free.
     plain <- entryOn (const (return ())) [A11yId "plain"]
+
+    -- THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy. The accept
+    -- list is declared on the TEMPLATE, and that declaration is what
+    -- turns the node hook on: every backend hands the gesture to the
+    -- platform when the focused widget's accept list is empty, so until
+    -- a template could carry one, 'onPasteNode' registered a handler
+    -- that was dispatched to and could never fire — in seven bindings,
+    -- silently (docs/tpl-props-plan.md §1). This is the leg that fires
+    -- it.
+    --
+    -- The For keeps its result, the milestone2 rule: a central
+    -- registration needs a handle to name, so 'forEach' hands the
+    -- body's node back and 'each' — which drops it — is the wrong
+    -- combinator here.
+    --
+    -- The row's value is empty and nothing displays it. The stamped
+    -- entry is uncontrolled like its live siblings ('entry', not
+    -- 'entryBound'), and staying empty through the paste is the
+    -- assertion: kaya delivered the content to the hook INSTEAD of
+    -- letting the platform insert it.
+    notes <- collection
+    (noteList, note) <-
+      forEach notes $
+        withTplAttrs [TplAccepts [acceptText]] entry
 
     let readWith kinds = buildTx app (readClipboard kinds (reader app status))
 
@@ -150,10 +175,16 @@ main = kayaMain $ \app -> do
           buttonOn "focus rich" (buildTx app (focusWidget rich)) [], -- button#5
           buttonOn "focus plain" (buildTx app (focusWidget plain)) [], -- button#6
           pure rich, -- entry#0
-          pure plain -- entry#1
+          pure plain, -- entry#1
+          labelBound rowStatus [A11yId "row-status"], -- label#1
+          pure noteList
         ]
     mount root
-    return (status, rich)
+    -- The one row, stamped after every live widget is created — so its
+    -- copy of the template entry is entry#2, wherever the For's own
+    -- column landed in the registry.
+    insert notes (VStr "r1") (VStr "")
+    return (status, rich, rowStatus, note)
 
   -- Registered in IO after the build, the way onChange is: the handler
   -- is not part of the scene's records.
@@ -163,6 +194,19 @@ main = kayaMain $ \app -> do
     -- prompt for this one.
     RText text -> buildTx app (writeSignal status (VStr ("pasted " ++ text)))
     _ -> buildTx app (writeSignal status (VStr "pasted other"))
+
+  -- The stamped copy's paste, registered the same way against the node
+  -- the template handed out. ONE record kind, the key path deciding:
+  -- the copy's own key arrives WITH the payload, and printing it is
+  -- what tells an instance occurrence from a live one.
+  onPasteNode app note $ \keys clip ->
+    let key = case keys of
+          VStr k : _ -> k
+          other -> show other
+     in case clip of
+          RText text ->
+            buildTx app (writeSignal rowStatus (VStr ("row " ++ key ++ " pasted " ++ text)))
+          _ -> buildTx app (writeSignal rowStatus (VStr ("row " ++ key ++ " pasted other")))
 
 -- The privileged read's one answer. A pasted FILE goes all the way to
 -- its bytes, off the app thread, because openPicked blocks — and a

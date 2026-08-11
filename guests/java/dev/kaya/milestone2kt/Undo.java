@@ -240,14 +240,14 @@ final class Undo {
                 // script rather than hidden in a handler.
                 tx.button("focus", t -> t.focus(field[0])); // button#2
                 tx.button("remove", t -> remove(t, status, keys, todos)); // button#3
-                // THE TEMPLATE HANDLE ITSELF, not the generated typed
-                // row: this scene's subject is the ledger, and the
-                // handle is the shortest way to the two nodes it wants.
-                // The generated row would spell the same two calls —
-                // every constructor here is inherited from the one
-                // forwarding list (KayaApp.RowSurface) — and Todos and
-                // Reorder are the scenes that exercise it.
-                tx.forEach(todos.handle, tpl -> {
+                // THE GENERATED each, which wraps the same forEach over
+                // the same handle — record-identical, just the sugar
+                // tier. This block used to reach for the raw combinator
+                // under a comment calling the handle "the shortest way";
+                // the floor sweep reads that as what it is, a floor
+                // call in a sugar guest, and invariant 5 carries no
+                // shortest-way carve-out.
+                UndoTodoKaya.each(tx, todos, tpl -> {
                     tpl.row(() -> {
                         tpl.label(UndoTodoKaya.TITLE);
                         // THE ROW'S OWN FIELD, and the reason this scene

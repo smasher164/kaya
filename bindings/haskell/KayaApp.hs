@@ -10,6 +10,16 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+-- THE GADT APPLIERS' TOTALITY, AS A BUILD ERROR AND NOT A COMMENT.
+-- 'applyAttr' and 'applyTplAttr' turn a closed prop GADT into wire
+-- records one constructor at a time, and a prop added to either GADT
+-- without its arm is a prop that compiles, ships, and silently does
+-- nothing at the one call site that matters. -Wincomplete-patterns is
+-- NOT in GHC's default set and this package sets no -Wall, so the
+-- match was total by habit alone until 2026-08-10; the module was
+-- already clean under it (0 warnings), so the wall costs nothing and
+-- stands where everyone walks — `cabal build`.
+{-# OPTIONS_GHC -Werror=incomplete-patterns #-}
 
 -- kaya's idiomatic surface for Haskell: the structural core, and the
 -- monad-sugar experiment the roster promised — scene declaration as a
@@ -119,6 +129,7 @@ module KayaApp
     highlightRanges,
     selectRange,
     revealRange,
+    setText,
     bindText,
     bindChecked,
     bindValue,
@@ -172,6 +183,7 @@ module KayaApp
     labelBound,
     checkboxOn,
     sliderOn,
+    sliderBoundOn,
     selectOn,
     radioOn,
     spacer,
@@ -180,10 +192,18 @@ module KayaApp
     -- The TEMPLATE zone's own surface: one constructor per widget kind,
     -- each returning 'Tpl Node'. See the naming rule in the module
     -- header — the result type is this zone's only scope.
-    TplTextSource (..),
+    -- The Str class exports no method, unlike its three siblings: its
+    -- method takes the prop's emitter table, which is binding
+    -- machinery, and 'bindTextSource' is the one call a guest could
+    -- want. The class name still travels — a guest writing its own
+    -- signature over a source needs to name the constraint.
+    TplStrSource,
+    bindTextSource,
     TplBoolSource (..),
     TplNumberSource (..),
     TplImageSource (..),
+    TplAttr (..),
+    withTplAttrs,
     label,
     checkbox,
     image,
@@ -677,13 +697,24 @@ bracketTpl alloc opener forCid (Tpl body) s0 =
 class Monad m => Declare m where
   type El m
   widget :: Word32 -> m (El m)
-  setText :: El m -> String -> m ()
+  -- | Write Prop::Text on this element, in whichever zone — THE FLOOR
+  -- SPELLING, and named apart from the 'setText' VERB below since
+  -- 2026-08-10 for a reason that is not cosmetic. The verb is sugar
+  -- (check-sugar-surface requires it of all eight bindings); a text
+  -- write on a template NODE is floor, because the template zone's
+  -- text has a source-taking spelling ('label', 'entryBound', ...) and
+  -- this one throws that away. One name could not be both: the
+  -- RECEIVER'S TYPE decides which it is, and no regex sees a type
+  -- (docs/tpl-props-plan.md F3). Rust never had the problem — it keeps
+  -- @Tx::set@ and @Tx::set_text@ apart — and this is the same split.
+  setTextProp :: El m -> String -> m ()
   setChecked :: El m -> Bool -> m ()
   -- | This element's flex weight within its row\/column: 0 is natural
   -- size, positive weights divide the container's leftover main-axis
-  -- space in proportion (see Prop::Grow in the core). The dynamic path;
-  -- the 'Grow' attr is the declarative spelling, and stays live-only
-  -- because an attr list in template position has no instance.
+  -- space in proportion (see Prop::Grow in the core). The dynamic path
+  -- in both zones; the declarative spelling is the 'Grow' attr live and
+  -- 'TplGrow' in a template, two GADTs because an attr LIST in template
+  -- position has no instance (see 'withTplAttrs' for why it cannot).
   --
   -- ON 'Declare' RATHER THAN BUILD, since 2026-08-10: it used to be
   -- Build-only, held there because no language had template grow. Rust's
@@ -716,7 +747,7 @@ instance Declare Build where
     n <- allocW
     emitB (W.txCreateWidget n kind)
     return (Widget n)
-  setText (Widget n) text = emitB (W.txSetText n text)
+  setTextProp (Widget n) text = emitB (W.txSetText n text)
   setChecked (Widget n) checked = emitB (W.txSetChecked n checked)
   setGrow (Widget n) weight = emitB (W.txSetGrow n weight)
   setColumns (Widget n) columns = emitB (W.txSetColumns n (fromIntegral columns))
@@ -745,7 +776,7 @@ instance Declare Tpl where
     n <- allocN
     emitT (W.txCreateWidget n kind)
     return (Node n)
-  setText (Node n) text = emitT (W.txSetText n text)
+  setTextProp (Node n) text = emitT (W.txSetText n text)
   setChecked (Node n) checked = emitT (W.txSetChecked n checked)
   setGrow (Node n) weight = emitT (W.txSetGrow n weight)
   setColumns (Node n) columns = emitT (W.txSetColumns n (fromIntegral columns))
@@ -1673,6 +1704,17 @@ revealRange :: Widget -> (Int, Int) -> Build ()
 revealRange (Widget n) (start, stop) =
   emitB (W.txRevealRange n (fromIntegral start) (fromIntegral stop))
 
+-- | Write a live widget's text: seed an editor's document, re-caption a
+-- label. LIVE WIDGETS ONLY, which is the whole point of this signature
+-- — the same write on a template Node is the floor spelling
+-- 'setTextProp', because a stamped copy's text has a source-taking
+-- constructor ('label', 'entryBound') and a raw write throws the row
+-- away. One name for both would put a sugar verb and a floor write
+-- under one spelling that no sweep could tell apart, since the receiver
+-- is what decides (docs\/tpl-props-plan.md F3).
+setText :: Widget -> String -> Build ()
+setText = setTextProp
+
 bindText :: Widget -> Signal -> Build ()
 bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
 
@@ -1795,8 +1837,10 @@ withAttrs attrs act = do
 -- even when its argument is not — an empty attr or children list. The
 -- equality-constrained general heads are what make that selection fire
 -- before the element types are known, and then push them top-down into
--- the lists. An attr list in template position has no instance:
--- template-zone props do not exist, and the compiler says so.
+-- the lists. An 'Attr' list in template position has no instance, and
+-- the compiler says so — template props are a GADT of their own,
+-- attached by 'withTplAttrs', because they take SOURCES where these
+-- take values.
 --
 -- LIVE-ONLY SINCE 2026-08-10. There used to be a third instance, at
 -- `Tpl b`, so `row [nodes]` built a template row too. It worked, and
@@ -1977,7 +2021,7 @@ instance (a ~ Attr 'LeafW, r ~ Build Widget) => BothZones ([a] -> r) where
 captionedButton :: (Declare m) => String -> m (El m)
 captionedButton text = do
   w <- widget W.kindButton
-  setText w text
+  setTextProp w text
   return w
 
 button :: (BothZones r) => String -> r
@@ -2052,6 +2096,28 @@ sliderOn lo hi value handler = leafish $ do
   emitB (W.txSetMin n lo)
   emitB (W.txSetMax n hi)
   emitB (W.txSetValue n value)
+  pendB (PValue n handler)
+  return w
+
+-- | A slider whose POSITION follows a float signal, with its change
+-- handler co-located: 'sliderOn' with the value bound instead of
+-- constant. That is the programmatic write path — 'writeSignal' fans
+-- out to the control, and a property write never echoes an occurrence,
+-- so a handler's own writes cannot loop back at it.
+--
+-- BOTH SUFFIXES BECAUSE IT IS BOTH. @Bound@ is this file's mark for a
+-- value that comes from a source ('labelBound', 'imageBound') and @On@
+-- for a handler at the constructor, and a live slider always has one —
+-- it is uncontrolled, so the app hears every move or hears nothing.
+-- The floor it replaces is @sliderOn@ followed by 'bindValue', which is
+-- what guests\/haskell\/gallery.hs spelled while the other seven
+-- bindings all had this arm.
+sliderBoundOn :: (LeafArgs r) => Double -> Double -> Signal -> (Double -> IO ()) -> r
+sliderBoundOn lo hi sig handler = leafish $ do
+  w@(Widget n) <- widget W.kindSlider
+  emitB (W.txSetMin n lo)
+  emitB (W.txSetMax n hi)
+  bindValue w sig
   pendB (PValue n handler)
   return w
 
@@ -2131,21 +2197,55 @@ imageBound sig = leafish $ do
 pendT :: Pending -> Tpl ()
 pendT pending = Tpl $ \s -> ((), s {bPending = pending : bPending s})
 
--- | What a template Str prop can bind to — a label's text, a button's
--- caption, an entry's or textarea's opening text. Named for the prop's
--- VALUE TYPE and not for the label, since 2026-08-10: it was
--- 'bindLabelSource' while a label was the only kind that used it.
-class TplTextSource s where
-  bindTextSource :: Node -> s -> Tpl ()
+-- One Str prop's three generated emitters, travelling together: the
+-- const form, the signal form, the element form.
+--
+-- THE PROP IS AN ARGUMENT AND NOT A CLASS, since 2026-08-10, because
+-- Str is the value type with FOUR props — a widget's text, its
+-- accessibility id, its spoken label, its activation hint — and the
+-- three source flavours are the same three for every one of them. A
+-- class per prop is twelve one-line instance bodies that can drift
+-- apart; this is four tables that cannot, and a fifth Str prop costs a
+-- table and no instances at all. (Prop::Min and Prop::Max are the same
+-- shape one value type over, if a per-row slider range ever finds an
+-- artifact that wants it.)
+data StrProp = StrProp
+  { strConst :: Word64 -> String -> Builder,
+    strSignal :: Word64 -> Word64 -> Builder,
+    strElement :: Word64 -> Word32 -> Word32 -> Builder
+  }
 
-instance TplTextSource String where
-  bindTextSource (Node n) text = emitT (W.txSetText n text)
+textProp, a11yIdProp, a11yLabelProp, a11yHintProp :: StrProp
+textProp = StrProp W.txSetText W.txBindText W.txBindTextElement
+a11yIdProp = StrProp W.txSetA11yId W.txBindA11yId W.txBindA11yIdElement
+a11yLabelProp = StrProp W.txSetA11yLabel W.txBindA11yLabel W.txBindA11yLabelElement
+a11yHintProp = StrProp W.txSetA11yHint W.txBindA11yHint W.txBindA11yHintElement
 
-instance TplTextSource Signal where
-  bindTextSource (Node n) (Signal s) = emitT (W.txBindText n s)
+-- | What a template Str prop can bind to: a constant, a signal, or the
+-- ROW'S OWN field. Named for the prop's VALUE TYPE — the wire's
+-- @ValueType::Str@ — which is what the name has always claimed to be:
+-- it was 'TplTextSource' while text was the zone's only Str prop, and
+-- 'bindLabelSource' before that, while a label was the only kind that
+-- used it.
+class TplStrSource s where
+  bindStrSource :: StrProp -> Node -> s -> Tpl ()
 
-instance TplTextSource (KField String) where
-  bindTextSource n fd = bindTextField n 0 fd
+instance TplStrSource String where
+  bindStrSource p (Node n) text = emitT (strConst p n text)
+
+instance TplStrSource Signal where
+  bindStrSource p (Node n) (Signal s) = emitT (strSignal p n s)
+
+-- The LEVEL IS 0, as it is in the four bind*Field binders: reaching
+-- past the innermost For has no sugar spelling in this binding.
+instance TplStrSource (KField String) where
+  bindStrSource p (Node n) (KField i) = emitT (strElement p n 0 i)
+
+-- | The text prop's binder — a label's text, a button's caption, an
+-- entry's or textarea's opening text — which every text-carrying
+-- constructor in this zone goes through.
+bindTextSource :: TplStrSource s => Node -> s -> Tpl ()
+bindTextSource = bindStrSource textProp
 
 -- | What a template checkbox's state can bind to.
 class TplBoolSource s where
@@ -2201,7 +2301,113 @@ instance TplNumberSource Signal where
 instance TplNumberSource (KField Double) where
   bindValueSource n fd = bindValueField n 0 fd
 
-label :: TplTextSource s => s -> Tpl Node
+-- | Props on a TEMPLATE node — the live 'Attr' one zone down, attached
+-- by 'withTplAttrs'.
+--
+-- WHERE 'Attr' TAKES A VALUE, THIS TAKES A SOURCE. That is why the two
+-- are not one GADT: a stamp makes N copies and each copy's prop can
+-- come from its own row, which is the same argument that gives this
+-- zone 'label' against the live 'labelText'. Grow and accepts are the
+-- exceptions and each says why on itself. The constraint rides IN the
+-- constructor so one list can mix flavours — a const id beside a
+-- field-sourced label is the call this zone exists for.
+--
+-- NO WIDGET-CLASS INDEX, unlike 'Attr', and the absence is the honest
+-- half. The live index bites because an attr list is an ARITY of a
+-- constructor whose class is known (@row [Spacing 12] [...]@ pins
+-- @Attr 'BoxW@ before the children are read). Props here attach through
+-- a COMBINATOR over @Tpl Node@, and 'Node' names no widget class, so an
+-- index would unify with whatever the list happened to hold and reject
+-- nothing. A phantom that cannot fire is worse than none: it reads as a
+-- wall. The root is the wall — a hint on a row dies in @check_prop@ at
+-- declare time, before a single row stamps, naming what it refused.
+--
+-- THE NAMES CARRY A PREFIX because they must: one flat module cannot
+-- declare 'A11yId' twice, and a data constructor — unlike 'button' —
+-- cannot pick its zone off its result type. 'Tpl' is this zone's
+-- convention for its type-level names ('TplStrSource' and siblings).
+data TplAttr where
+  -- | This stamped element's flex weight within its row\/column. A
+  -- CONSTANT and not a source: grow describes the prototype's share of
+  -- its track, and every copy of one blueprint divides its parent the
+  -- same way. ('setGrow' on 'Declare' writes the same prop as a
+  -- statement, and reaches this zone too.)
+  TplGrow :: Double -> TplAttr
+  -- | This stamped copy's accessibility IDENTIFIER — the authored key
+  -- automation addresses it by, never spoken.
+  --
+  -- A CONSTANT GIVES EVERY COPY THE SAME KEY, which is legal and often
+  -- what you want: nothing in the core deduplicates ids, and the
+  -- harness addresses by kind#index rather than by id, so a const id
+  -- names the ROLE ("row-note") while the per-copy identity comes from
+  -- the row — a field source here, or the label below.
+  TplA11yId :: TplStrSource s => s -> TplAttr
+  -- | What an assistive client SPEAKS for this stamped copy. THE
+  -- ROW-FIELD CASE IS WHY THIS PROP EXISTS: @TplA11yLabel (field
+  -- \@"title" \@Task)@ makes every row announce its own name, which no
+  -- live spelling can say, because a live widget has no row to read.
+  TplA11yLabel :: TplStrSource s => s -> TplAttr
+  -- | What ACTIVATING this stamped copy does — a verb phrase, as in the
+  -- live 'A11yHint'. ACTIVATION KINDS ONLY (button, checkbox, select,
+  -- radio); the refusal is the ROOT'S, at declare time before a row
+  -- stamps and naming the kind it refused. There is no type-level wall
+  -- here for the reason written above the GADT: a class-free 'Node' has
+  -- nothing for @Attr 'LeafW@'s trick to stand on.
+  TplA11yHint :: TplStrSource s => s -> TplAttr
+  -- | What this stamped copy takes from a paste — the closed kinds by
+  -- name ('acceptText' and friends) plus any custom format ids.
+  --
+  -- A CONSTANT LIST AND NOT A SOURCE, unlike the three above: an accept
+  -- list describes the PROTOTYPE — what this KIND of row takes — the
+  -- way a slider's range and a select's options do. The root agrees
+  -- mechanically as well as by design: the domain check (at least one
+  -- token, no token twice) runs on the const branch alone, so a
+  -- row-sourced list would reach four backends unchecked, and
+  -- 'acceptList' would lose its half of it too — the row's value
+  -- arrives already joined.
+  --
+  -- AND IT IS THE STAMPED PASTE HOOK'S KEYSTONE. Every backend gates
+  -- the paste occurrence on the focused widget's accept list and falls
+  -- back to the platform's own insertion when that list is empty, so
+  -- before this constructor existed 'onPasteNode' registered a handler
+  -- that could never fire — silently, in seven bindings
+  -- (docs\/tpl-props-plan.md §1).
+  TplAccepts :: [String] -> TplAttr
+
+applyTplAttr :: TplAttr -> Node -> Tpl ()
+applyTplAttr (TplGrow weight) n = setGrow n weight
+applyTplAttr (TplA11yId src) n = bindStrSource a11yIdProp n src
+applyTplAttr (TplA11yLabel src) n = bindStrSource a11yLabelProp n src
+applyTplAttr (TplA11yHint src) n = bindStrSource a11yHintProp n src
+applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
+
+-- The accept list on a template node: 'setAccepts' one zone down,
+-- through the same token vocabulary and the same 'acceptList' encoder,
+-- so a token with a space is refused at the same place in both zones.
+setNodeAccepts :: Node -> [String] -> Tpl ()
+setNodeAccepts (Node n) kinds = emitT (W.txSetAccepts n (acceptList kinds))
+
+-- | Props on a template node:
+--
+-- > withTplAttrs [TplA11yLabel (field @"title" @Task)]
+-- >   (entryBound (field @"title" @Task))
+--
+-- A COMBINATOR AND NOT AN EXTRA ARITY, for two measured reasons. The
+-- four leaves that stand in both zones dispatch through 'BothZones' on
+-- the head shape @[a] -> r@, and a second instance at that head is
+-- GHC-59692 "Duplicate instance declarations" — so an arity could never
+-- have reached a template 'button', 'entry' or 'textarea', and the prop
+-- would have had two spellings depending on which constructor carried
+-- it. And every constructor here keeps its @-> Tpl Node@ signature,
+-- which is what makes this zone ENUMERABLE (module header) and what
+-- tools\/tpl-surfaces.py reads.
+withTplAttrs :: [TplAttr] -> Tpl Node -> Tpl Node
+withTplAttrs attrs act = do
+  n <- act
+  mapM_ (`applyTplAttr` n) attrs
+  return n
+
+label :: TplStrSource s => s -> Tpl Node
 label src = do
   n <- widget W.kindLabel
   bindTextSource n src
@@ -2230,7 +2436,7 @@ image src = do
 --
 -- Handler-free like 'button', for the reason written there: a click on
 -- a copy names the copy, so the app registers once with 'onClickNode'.
-buttonBound :: TplTextSource s => s -> Tpl Node
+buttonBound :: TplStrSource s => s -> Tpl Node
 buttonBound src = do
   n <- widget W.kindButton
   bindTextSource n src
@@ -2246,7 +2452,7 @@ buttonBound src = do
 -- does NOT write back to — one that folds 'onChangeNode' into the same
 -- field re-writes what the user is typing. Not an occurrence loop, since
 -- a property write never echoes one (DESIGN.md), but the caret moves.
-entryBound :: TplTextSource s => s -> Tpl Node
+entryBound :: TplStrSource s => s -> Tpl Node
 entryBound src = do
   n <- widget W.kindEntry
   bindTextSource n src
@@ -2254,7 +2460,7 @@ entryBound src = do
 
 -- | A stamped textarea seeded from an addressable source;
 -- 'entryBound''s contract over the multi-line control.
-textareaBound :: TplTextSource s => s -> Tpl Node
+textareaBound :: TplStrSource s => s -> Tpl Node
 textareaBound src = do
   n <- widget W.kindTextarea
   bindTextSource n src
@@ -2272,11 +2478,14 @@ columnOf :: [Tpl Node] -> Tpl Node
 columnOf = containerOf W.kindColumn
 
 -- | A template scroll viewport over EXACTLY ONE child — the signature
--- says so, as the live 'scroll''s does (the scene enforces it too).
--- No attr list, so no 'Grow': template-zone props do not exist in any
--- binding yet, and an unconstrained viewport hugs its content. A
--- stamped scroll therefore wants an enclosing track that already
--- constrains it.
+-- says so, as the live 'scroll''s does (the scene enforces it too). No
+-- attr list, because this zone attaches props through 'withTplAttrs'
+-- rather than an arity: @withTplAttrs [TplGrow 1] (scrollOf child)@ is
+-- the weight, and an unconstrained viewport hugs its content, so a
+-- stamped scroll wants either that or an enclosing track that already
+-- constrains it. (The sentence here used to read "template-zone props
+-- do not exist in any binding yet"; 'setGrow' on 'Declare' falsified it
+-- the same day, and 'TplAttr' falsifies it again.)
 scrollOf :: Tpl Node -> Tpl Node
 scrollOf child = containerOf W.kindScroll [child]
 
@@ -2344,7 +2553,7 @@ choiceWith kind options src = do
   mapM_
     ( \optionText -> do
         o <- widget W.kindLabel
-        setText o optionText
+        setTextProp o optionText
         addChild n o
     )
     options
@@ -2353,7 +2562,16 @@ choiceWith kind options src = do
 
 -- | A For as a child: forEach whose body keeps no handles — the common
 -- case once handlers co-locate at their constructors.
-each :: Collection -> Tpl a -> Build Widget
+--
+-- IN EITHER ZONE since 2026-08-10, exactly as the 'forEach' underneath
+-- it has always been: the result type picks the monad, and the inner
+-- For is what a collection declared inside a template body needs
+-- (guests\/haskell\/menus.hs, one collection per group). It returned
+-- @Build Widget@ while nothing had asked for the nested one, so a
+-- template body that kept no handles had to spell the combinator and
+-- throw the @()@ away by hand — the floor 'each' exists to retire, one
+-- zone up from where it retired it.
+each :: Declare m => Collection -> Tpl a -> m (El m)
 each c body = fst <$> forEach c body
 
 -- Sums: the data declaration is the sum. KayaSum derives everything

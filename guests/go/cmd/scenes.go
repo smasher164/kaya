@@ -25,6 +25,7 @@ import (
 	kaya "dev.kaya/bindings/go"
 
 	"dev.kaya/guests/go/a11y"
+	"dev.kaya/guests/go/a11yrows"
 	"dev.kaya/guests/go/align"
 	"dev.kaya/guests/go/background"
 	"dev.kaya/guests/go/clipboard"
@@ -88,6 +89,7 @@ const defaultScene = "1"
 var scenes = map[string]func() *kaya.App{
 	"1":          milestone2.App,
 	"a11y":       a11y.App,
+	"a11yrows":   a11yrows.App,
 	"align":      align.App,
 	"background": background.App,
 	"clipboard":  clipboard.App,

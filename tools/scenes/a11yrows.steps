@@ -1,0 +1,32 @@
+# The STAMPED accessibility scene: the assertion the a11y milestone's
+# 719 legs never made. Every widget the a11y scene asserts is built
+# LIVE; the two entries here are COPIES, stamped from a collection row's
+# template, and their labels come from each row's OWN field (the
+# template's a11y_label is element-sourced). A list row announcing its
+# own name to assistive tech is the whole point of a sourced template
+# label, and until this scene nothing had ever read a stamped copy's
+# accessibility surface from the platform's real tree.
+#
+# ITS OWN SCENE, AND THE REASON IS SCENE SHAPE, NOT SIZE. A For
+# materializes as a COLUMN, harness registries are creation-order, and
+# container creation order differs by language (statement-shaped
+# construction is parent-first, expression trees are children-first —
+# guests/haskell/reorder.hs documents the rule). The a11y scene asserts
+# every container kind ORDINALLY, so a For added anywhere inside it
+# makes `column#0` name different widgets in different languages. This
+# scene asserts no container at all, so the For's column can land at
+# either end of the registry and every target below still means the
+# same thing everywhere.
+#
+# THE IDS ARE ELEMENT-SOURCED like the labels, and the first run is
+# why: expect_ax resolves its target to the node's authored identifier
+# and then searches the REAL tree by that identifier, so copies sharing
+# a const template id are indistinguishable to it — and the read now
+# REFUSES an ambiguous id with the measured count rather than answering
+# with whichever element it found first, which is exactly what it did
+# when these assertions were first run against a shared id (the first
+# copy's label came back as the second's, under a correct-looking
+# sentence). A shared const id remains LEGAL — nothing in the core
+# deduplicates — it is just not a thing this verb can read back.
+expect_ax entry#0 "field/First note"
+expect_ax entry#last "field/Second note"

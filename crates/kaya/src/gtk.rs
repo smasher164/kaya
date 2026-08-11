@@ -6516,8 +6516,26 @@ impl crate::harness::Stage for GtkStage {
         // serial the headless session never delivered on its own.
         Self::prime_if_clipboard_scene();
         Self::on_main(move |core| {
-            let i = crate::harness::resolve(t.index, core.buttons.len());
-            core.buttons[i].emit_clicked();
+            // A click on a TEXT KIND focuses it — what a native click
+            // does to a field, and the only way a scene can put focus
+            // on a STAMPED copy (no instance-addressed focus command
+            // exists for a guest to call). grab_focus lands on the
+            // entry's inner GtkText exactly as a pointer click would,
+            // which is why is_focused reads FOCUS_WITHIN.
+            match t.kind {
+                crate::harness::TargetKind::Entry => {
+                    let i = crate::harness::resolve(t.index, core.entries.len());
+                    core.entries[i].grab_focus();
+                }
+                crate::harness::TargetKind::Textarea => {
+                    let i = crate::harness::resolve(t.index, core.textareas.len());
+                    core.textareas[i].grab_focus();
+                }
+                _ => {
+                    let i = crate::harness::resolve(t.index, core.buttons.len());
+                    core.buttons[i].emit_clicked();
+                }
+            }
         });
     }
 

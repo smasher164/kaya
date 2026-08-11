@@ -104,7 +104,7 @@ main = kayaMain $ \app -> do
     -- keys (group, then item).
     (groupList, itemsColl) <- forEach groups $ do
       itemsColl <- collection
-      (itemList, ()) <- forEach itemsColl $ do
+      itemList <- each itemsColl $ do
         -- label#2 once g2/a stamps. `element` is the scalar
         -- collection's own token — its element IS the value, so there
         -- is no field name to give — and it lowers to the same

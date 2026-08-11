@@ -42,7 +42,8 @@ static class ItemKaya
 /// zone named six, and the scene that wanted a per-row entry could
 /// not use either, so it opened the For itself and reached for the
 /// widget-kind floor (docs/sugar-pass-plan.md S4b).
-/// Add here whatever is added to Tpl.
+/// Add here whatever is added to Tpl: the prop setters below are
+/// forwarded for the same reason the constructors are.
 /// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild,
 /// Collection/ForEach/When, ContextMenu — stays off deliberately: a
 /// row surface hands out sugar, and its Tpl is private so the floor
@@ -157,6 +158,31 @@ sealed class ItemRow
     public Node Grid(int columns, System.Action body) => t.Grid(columns, body);
 
     public Node Spacer() => t.Spacer();
+
+    public void SetGrow(Node n, double weight) => t.SetGrow(n, weight);
+
+    public void SetA11yId(Node n, string id) => t.SetA11yId(n, id);
+
+    public void SetA11yId(Node n, Signal s) => t.SetA11yId(n, s);
+
+    public void SetA11yId(Node n, Field<string> f, uint level = 0) =>
+        t.SetA11yId(n, f, level);
+
+    public void SetA11yLabel(Node n, string label) => t.SetA11yLabel(n, label);
+
+    public void SetA11yLabel(Node n, Signal s) => t.SetA11yLabel(n, s);
+
+    public void SetA11yLabel(Node n, Field<string> f, uint level = 0) =>
+        t.SetA11yLabel(n, f, level);
+
+    public void SetA11yHint(Node n, string hint) => t.SetA11yHint(n, hint);
+
+    public void SetA11yHint(Node n, Signal s) => t.SetA11yHint(n, s);
+
+    public void SetA11yHint(Node n, Field<string> f, uint level = 0) =>
+        t.SetA11yHint(n, f, level);
+
+    public void SetAccepts(Node n, params string[] kinds) => t.SetAccepts(n, kinds);
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

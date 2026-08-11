@@ -105,6 +105,8 @@ let () =
         ();
 
       let status = signal (Str "ready") in
+      let row_status = signal (Str "") in
+      let notes = collection () in
 
       let answered clip =
         match clip with
@@ -210,9 +212,47 @@ let () =
               plain := Some w;
               w)
             (* entry#1 *);
+            (* THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy. The
+               accept list is declared on the TEMPLATE, and that
+               declaration is what turns the node hook on: every backend
+               hands the gesture to the platform when the focused
+               widget's accept list is empty, so before a template node
+               could carry one this handler registered, dispatched and
+               could never fire (docs/tpl-props-plan.md §1). The copy's
+               OWN KEY arrives in front of the payload, and printing it
+               is what tells an instance paste from a live one.
+
+               The row's value is empty because nothing displays it: the
+               stamped entry is uncontrolled like its live siblings, and
+               staying empty through the paste is the assertion. *)
+            label ~a11y_id:"row-status" ~bind:row_status (* label#1 *);
+            each notes (fun () ->
+                Tpl.(
+                  let note = entry ~accepts:[ accept_text ] () in
+                  on_paste_node app note (fun keys clip ->
+                      let key =
+                        match keys with Str k :: _ -> k | _ -> "no key"
+                      in
+                      match clip with
+                      | Text text ->
+                          write row_status
+                            (Str (Printf.sprintf "row %s pasted %s" key text))
+                      | other ->
+                          write row_status
+                            (Str
+                               (Printf.sprintf "row %s pasted %s" key
+                                  (match other with
+                                  | Html _ -> "html"
+                                  | Image _ -> "image"
+                                  | Files _ -> "files"
+                                  | Custom _ -> "custom"
+                                  | Text _ -> "text"))));
+                  note))
+            (* entry#2 once r1 stamps *);
           ]
           ()
       in
-      mount root);
+      mount root;
+      insert notes (Str "r1") (Str ""));
 
   exit (run app)

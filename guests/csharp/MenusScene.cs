@@ -96,10 +96,10 @@ static class MenusScene
                     tx.Item("Rename", onActivate: t => t.Write(status, "renamed")));
 
                 // Remove's activation names BOTH keys (group, then item).
-                tx.ForEach(groups, g => g.Column(() =>
+                tx.Each(groups, g => g.Column(() =>
                 {
                     items = g.Collection();
-                    g.ForEach(items, r =>
+                    g.Each(items, r =>
                     {
                         var row = r.Label(KayaRecords.FieldAt<string>(0)); // label#2 once g2/a stamps
                         r.ContextMenu(row, catalog);

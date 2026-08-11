@@ -1036,6 +1036,16 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity commands \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script commands)'"
+    # The stamped-accessibility scene (docs/tpl-props-plan.md P3): two
+    # entries stamped from one template, each named by its own row, read
+    # from Compose's real semantics tree. The a11y scene's sibling,
+    # split out because a For's column shifts ordinal container targets
+    # per language. Graduated 2026-08-11; the go leg rides below like
+    # the a11y scene's.
+    run_apk a11yrows-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity a11yrows \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script a11yrows)'"
     # The clipboard scene: one clip in several representations, the
     # privileged read, the paste split, and Paste as a standard command.
     # The foreign process on the other side of every assertion is
@@ -1415,6 +1425,10 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity a11y \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script a11y)'"
+    run_apk a11yrows-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity a11yrows \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script a11yrows)'"
     run_apk entry-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity entry \

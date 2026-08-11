@@ -2252,96 +2252,215 @@ module Tpl = struct
      [build]), so plain [let] and [;] compose blueprints — the tpl
      reader retired with the outer decl reader (2026-07-22). *)
 
-  let widget kind =
-    let tx = the_tx () in
-    let id = alloc_node tx in
-    emit tx (Kaya_wire.tx_create_widget id kind);
-    Node id
+  (* --- THE FLOOR, IN A MODULE THAT SAYS SO -------------------------
+     Node allocation, the child link and one prop write per record: the
+     tier every constructor below is sugar over, and the tier no
+     example scene may spell (invariant 5).
 
-  (* --- The const setters ------------------------------------------
-     A template node's props travel the wire exactly as a widget's do —
-     only the id space differs — so these are the live setters with
-     [Node] destructured instead of [Widget], and the constructor of
-     the wrapper is what keeps a live setter off a blueprint and a
-     template setter off a widget. *)
+     WHY A MODULE AND NOT A NAME. The template write and a live WIDGET
+     VERB were the same word. [set_text editor doc] is how an app puts
+     a document in front of the user — a verb the surface sweep
+     REQUIRES of every binding — while [set_text n "add"] on a node is
+     the floor spelling of [~text], which no example may contain. The
+     receiver's type is the whole difference and no pattern over a
+     guest file sees a type, so the two were guarded together by a
+     contextual rule that could only ever be scoped to the two carve-out
+     scenes. The qualifier is what a pattern CAN see: the floor now
+     says [Floor.] at every callsite, in one word, everywhere
+     (docs/tpl-props-plan.md F3). *)
+  module Floor = struct
+    let widget kind =
+      let tx = the_tx () in
+      let id = alloc_node tx in
+      emit tx (Kaya_wire.tx_create_widget id kind);
+      Node id
 
-  let set_text (Node id) text = emit (the_tx ()) (Kaya_wire.tx_set_text id text)
-  let set_checked (Node id) checked = emit (the_tx ()) (Kaya_wire.tx_set_checked id checked)
-  let set_value (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_value id v)
-  let set_min (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_min id v)
-  let set_max (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_max id v)
-  let set_indeterminate (Node id) on =
-    emit (the_tx ()) (Kaya_wire.tx_set_indeterminate id on)
+    (* --- The const setters ------------------------------------------
+       A template node's props travel the wire exactly as a widget's do
+       — only the id space differs — so these are the live setters with
+       [Node] destructured instead of [Widget], and the constructor of
+       the wrapper is what keeps a live setter off a blueprint and a
+       template setter off a widget. *)
 
-  let set_columns (Node id) n =
-    emit (the_tx ()) (Kaya_wire.tx_set_columns id (float_of_int n))
+    let set_text (Node id) text = emit (the_tx ()) (Kaya_wire.tx_set_text id text)
 
-  let set_source (Node id) data =
-    emit (the_tx ()) (Kaya_wire.tx_set_source id (Kaya_runtime.register_blob data))
+    let set_checked (Node id) checked =
+      emit (the_tx ()) (Kaya_wire.tx_set_checked id checked)
 
-  (* [spacer]'s whole body, and the floor for the container props this
-     zone does not spell declaratively yet: [~grow], the a11y pair and
-     [~accepts] on a template node are ledgered rather than shipped
-     (docs/sugar-pass-plan.md §2), and Rust reaches them meanwhile
-     through its generic [Tpl::set]. This is that escape hatch, one
-     prop wide — enough to constrain a template [scroll]. *)
-  let set_grow (Node id) weight = emit (the_tx ()) (Kaya_wire.tx_set_grow id weight)
+    let set_value (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_value id v)
+    let set_min (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_min id v)
+    let set_max (Node id) v = emit (the_tx ()) (Kaya_wire.tx_set_max id v)
 
-  (* --- The signal leg ----------------------------------------------
-     The zone's second addressable source, and the one that was missing
-     here entirely: [Tpl] could take a constant or the row's own field
-     and had no way to say "every copy follows this signal". A signal is
-     app-wide, so every stamped copy reads the SAME value — that is the
-     point of it, not a limitation: one download's fraction on every
-     row's bar, one setting in every row's caption. The core carries it
-     on the template path like any other prop value, checking the
-     signal's current value against the prop at declaration
-     (crates/kaya/src/scene.rs:3590) and re-registering each stamped
-     copy in the binding table so a later [write] fans out to all of
-     them (crates/kaya/src/scene.rs:4328). *)
+    let set_indeterminate (Node id) on =
+      emit (the_tx ()) (Kaya_wire.tx_set_indeterminate id on)
 
-  let bind_text (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s)
-  let bind_checked (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_checked id s)
-  let bind_value (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_value id s)
-  let bind_source (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_source id s)
+    let set_columns (Node id) n =
+      emit (the_tx ()) (Kaya_wire.tx_set_columns id (float_of_int n))
 
-  (* --- The element leg ---------------------------------------------
-     The source only this zone has: the row's own data. [level] says how
-     many Fors up the element sits (0 = nearest). *)
+    let set_source (Node id) data =
+      emit (the_tx ()) (Kaya_wire.tx_set_source id (Kaya_runtime.register_blob data))
 
-  (* Bind text to the element of the enclosing For, [level] Fors up
-     (0 = nearest). *)
-  let bind_text_element ?(level = 0) (Node id) =
-    emit (the_tx ()) (Kaya_wire.tx_bind_text_element ~level id)
+    let set_grow (Node id) weight = emit (the_tx ()) (Kaya_wire.tx_set_grow id weight)
 
-  (* Bind a label's text to one field of the element; a (_, string)
-     field only — the phantom pins it at compile time. *)
-  let bind_text_field ?(level = 0) (Node id) (fd : (_, string) field) =
-    emit (the_tx ()) (Kaya_wire.tx_bind_text_element ~level ~field:fd.fd_index id)
+    (* --- What a stamped copy carries for assistive tech --------------
+       Grouped by PROP rather than by source, unlike everything else
+       here, because that is how they arrive: the three sources of ONE
+       prop are the choice the constructor's caller makes
+       ([~a11y_label] a constant, [~a11y_label_bind] a signal,
+       [~a11y_label_field] the copy's own field). The core admits all
+       three on the template path through the same [check_prop] the
+       live path runs, so nothing below is a template special case.
 
-  (* Bind a checkbox's state to one field of the element; a (_, bool)
-     field only. *)
-  let bind_checked_field ?(level = 0) (Node id) (fd : (_, bool) field) =
-    emit (the_tx ()) (Kaya_wire.tx_bind_checked_element ~level ~field:fd.fd_index id)
+       A DUPLICATE ID ACROSS COPIES IS LEGAL and often right: nothing
+       in the core deduplicates a11y ids and the harness addresses by
+       kind#index, never by id — so a constant names the ROLE every
+       copy plays and the row's own key field names the copy. *)
 
-  (* Bind a fraction, a slider position or a choice's selected index to
-     one field of the element. A (_, float) field, and a choice's index
-     is no exception: Prop::Value is F64 in the spec, and the scene
-     refuses a field whose schema column type differs from the prop's
-     (crates/kaya/src/scene.rs:3629), so an i64 field would typecheck
-     here and abort at declaration. The phantom moves that to compile
-     time. *)
-  let bind_value_field ?(level = 0) (Node id) (fd : (_, float) field) =
-    emit (the_tx ()) (Kaya_wire.tx_bind_value_element ~level ~field:fd.fd_index id)
+    let set_a11y_id (Node id) value =
+      emit (the_tx ()) (Kaya_wire.tx_set_a11y_id id value)
 
-  (* Bind an image's source to one field of the element; a (_, bytes)
-     field only — the phantom pins it at compile time. Per-entry
-     content: the core stamps each copy with its entry's blob. *)
-  let bind_source_field ?(level = 0) (Node id) (fd : (_, bytes) field) =
-    emit (the_tx ()) (Kaya_wire.tx_bind_source_element ~level ~field:fd.fd_index id)
+    let bind_a11y_id (Node id) (Signal s) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_id id s)
 
-  let add_child (Node parent) (Node child) =
-    emit (the_tx ()) (Kaya_wire.tx_add_child parent child)
+    (* A (_, string) field only: Prop::A11yId is Str in the spec and
+       the scene refuses a field whose schema column type differs from
+       the prop's, so the phantom moves that abort to compile time —
+       see [bind_value_field] for the same argument at length. *)
+    let bind_a11y_id_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_id_element ~level ~field:fd.fd_index id)
+
+    let set_a11y_label (Node id) value =
+      emit (the_tx ()) (Kaya_wire.tx_set_a11y_label id value)
+
+    let bind_a11y_label (Node id) (Signal s) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label id s)
+
+    (* THE SOURCE THIS SLICE EXISTS FOR: each stamped copy speaks its
+       OWN row's name to assistive tech. A (_, string) field only. *)
+    let bind_a11y_label_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label_element ~level ~field:fd.fd_index id)
+
+    (* ACTIVATION KINDS ONLY — button, checkbox, select, radio. The
+       restriction is not a type on this setter and cannot be: [node]
+       is not typed by kind, because a container's children are one
+       list and OCaml's lists are homogeneous (a phantom kind would
+       cost a wrapper at every child position). So the wall is the
+       constructors — [~a11y_hint] rides those four and no others —
+       and a hint reaching a template label dies at DECLARE time in the
+       root's own words, while the blueprint is being recorded and
+       before any row stamps. That is exactly the live zone's
+       arrangement, where [set_a11y_hint] is equally unrestricted. *)
+    let set_a11y_hint (Node id) value =
+      emit (the_tx ()) (Kaya_wire.tx_set_a11y_hint id value)
+
+    let bind_a11y_hint (Node id) (Signal s) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint id s)
+
+    let bind_a11y_hint_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint_element ~level ~field:fd.fd_index id)
+
+    (* The two universal props as they ride every constructor here, the
+       live [set_a11y]'s device: applied together, in one place, so a
+       new constructor cannot pick up [~grow] and quietly miss them.
+
+       [~a11y_level] is how many Fors up the FIELD source sits, and it
+       defaults to the constructor's own [~level] — so the ordinary
+       case says nothing and a nested one can still take its name from
+       an outer row. One shared [~level] would have been the trap: a
+       guest writing [~bind_field:x ~level:1 ~a11y_label_field:y] would
+       have moved the label's source out one For as well, silently. *)
+    let set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+        ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) n =
+      Option.iter (fun v -> set_a11y_id n v) a11y_id;
+      Option.iter (fun s -> bind_a11y_id n s) a11y_id_bind;
+      Option.iter (fun fd -> bind_a11y_id_field ~level:a11y_level n fd) a11y_id_field;
+      Option.iter (fun v -> set_a11y_label n v) a11y_label;
+      Option.iter (fun s -> bind_a11y_label n s) a11y_label_bind;
+      Option.iter (fun fd -> bind_a11y_label_field ~level:a11y_level n fd) a11y_label_field
+
+    (* What a stamped copy takes from a paste — and the prop that lets
+       a copy's paste hook fire at all. Every backend gates the paste
+       occurrence on the focused widget's ACCEPT LIST and falls back to
+       the platform's own insertion when it is empty, so until this
+       existed [on_paste_node] registered a handler and waited forever
+       (docs/tpl-props-plan.md §1).
+
+       CONST ONLY, unlike the props above, for two reasons. An accept
+       list describes the PROTOTYPE — what a control can take is a fact
+       about the control, not about the row — and [accept_list] is a
+       guard the binding can only run on a value it can see: it refuses
+       an empty token and one containing a space, because a custom
+       format id reaches the platform registry verbatim and the space
+       is the separator. A row's field is ordinary record data that no
+       binding can recognise as an accept list, so a per-row source
+       would ship "text my format" as two entries with nothing
+       complaining. Entry and textarea only; the root rejects it
+       elsewhere. *)
+    let set_accepts (Node id) kinds =
+      emit (the_tx ()) (Kaya_wire.tx_set_accepts id (accept_list kinds))
+
+    (* --- The signal leg ----------------------------------------------
+       The zone's second addressable source, and the one that was
+       missing here entirely: [Tpl] could take a constant or the row's
+       own field and had no way to say "every copy follows this
+       signal". A signal is app-wide, so every stamped copy reads the
+       SAME value — that is the point of it, not a limitation: one
+       download's fraction on every row's bar, one setting in every
+       row's caption. The core carries it on the template path like any
+       other prop value, checking the signal's current value against
+       the prop at declaration (crates/kaya/src/scene.rs:3590) and
+       re-registering each stamped copy in the binding table so a later
+       [write] fans out to all of them
+       (crates/kaya/src/scene.rs:4328). *)
+
+    let bind_text (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s)
+
+    let bind_checked (Node id) (Signal s) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_checked id s)
+
+    let bind_value (Node id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_value id s)
+
+    let bind_source (Node id) (Signal s) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_source id s)
+
+    (* --- The element leg ---------------------------------------------
+       The source only this zone has: the row's own data. [level] says
+       how many Fors up the element sits (0 = nearest). *)
+
+    (* Bind text to the element of the enclosing For, [level] Fors up
+       (0 = nearest). *)
+    let bind_text_element ?(level = 0) (Node id) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_text_element ~level id)
+
+    (* Bind a label's text to one field of the element; a (_, string)
+       field only — the phantom pins it at compile time. *)
+    let bind_text_field ?(level = 0) (Node id) (fd : (_, string) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_text_element ~level ~field:fd.fd_index id)
+
+    (* Bind a checkbox's state to one field of the element; a (_, bool)
+       field only. *)
+    let bind_checked_field ?(level = 0) (Node id) (fd : (_, bool) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_checked_element ~level ~field:fd.fd_index id)
+
+    (* Bind a fraction, a slider position or a choice's selected index
+       to one field of the element. A (_, float) field, and a choice's
+       index is no exception: Prop::Value is F64 in the spec, and the
+       scene refuses a field whose schema column type differs from the
+       prop's (crates/kaya/src/scene.rs:3629), so an i64 field would
+       typecheck here and abort at declaration. The phantom moves that
+       to compile time. *)
+    let bind_value_field ?(level = 0) (Node id) (fd : (_, float) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_value_element ~level ~field:fd.fd_index id)
+
+    (* Bind an image's source to one field of the element; a (_, bytes)
+       field only — the phantom pins it at compile time. Per-entry
+       content: the core stamps each copy with its entry's blob. *)
+    let bind_source_field ?(level = 0) (Node id) (fd : (_, bytes) field) =
+      emit (the_tx ()) (Kaya_wire.tx_bind_source_element ~level ~field:fd.fd_index id)
+
+    let add_child (Node parent) (Node child) =
+      emit (the_tx ()) (Kaya_wire.tx_add_child parent child)
+  end
 
   let collection () = collection ()
 
@@ -2354,7 +2473,18 @@ module Tpl = struct
     let result = in_tpl_scope tx.app body in
     tx.app.open_fors <- List.tl tx.app.open_fors;
     emit tx (Kaya_wire.tx_template_end ());
-      (Node id, result)
+    (Node id, result)
+
+  (* A nested For AS A CHILD: [for_each] with the body's result thrown
+     away, so the partial application is a [unit -> node] creator and
+     slots into a child list like any constructor. The outer zone's
+     [each] is the same one line over its own [for_each], and this zone
+     went without it for two milestones — guests/ocaml/milestone2.ml
+     apologised for the gap in a comment, and the workaround it named
+     ([w item_list] over a For realized on a line of its own) is the
+     shape a nested For had to take in every OCaml scene. Swift and C#
+     have [each] in both zones; this is invariant 1, one line wide. *)
+  let each c body () = fst (for_each c body ())
 
   let when_ (Signal sid) body () =
     let tx = the_tx () in
@@ -2385,22 +2515,48 @@ module Tpl = struct
            the copy's OWN field of the element — the source that exists
            only here.
 
+     A SECOND PROP NEEDS ITS OWN THREE NAMES, and takes them by prefix:
+     the constructor's primary prop owns the bare three above, so the
+     universal pair spells its sources [~a11y_label] (const),
+     [~a11y_label_bind] (a signal) and [~a11y_label_field] (the copy's
+     own field, at [~a11y_level], which defaults to [~level]). The
+     label from the row's own field is the point of the pair being here
+     at all: a list row that announces its own name to assistive tech.
+
+     [~a11y_hint] rides button, checkbox, select and radio, as it does
+     in the outer zone — the root admits it on the activation kinds
+     alone and rejects it elsewhere while the blueprint is being
+     recorded. [~accepts] rides entry and textarea, const only, and is
+     what makes a stamped copy a paste target at all
+     ([on_paste_node] below the module registers the handler).
+
      Arguments that describe the PROTOTYPE rather than the row stay
      plain constants: a slider's [~min]/[~max], a grid's [~columns], a
-     choice's option list. The stamp copies one shape and varies only
-     what sits inside it, so a per-row option COUNT is not expressible
-     and deliberately so (docs/sugar-pass-plan.md §S2, §2).
+     choice's option list, an [~accepts] list. The stamp copies one
+     shape and varies only what sits inside it, so a per-row option
+     COUNT is not expressible and deliberately so
+     (docs/sugar-pass-plan.md §S2, §2).
 
      Handlers are co-located here as in the outer zone, and receive the
      stamped copy's keys FIRST, outermost first — the keys ARE the noun.
      The [_node] registrars below the module are the same handlers,
      late-bound, for when the guest wants the node's handle first. *)
 
-  let button ?text ?bind ?bind_field ?(level = 0) ?on_click () =
-    let n = widget Kaya_wire.kind_button in
-    Option.iter (fun x -> set_text n x) text;
-    Option.iter (fun s -> bind_text n s) bind;
-    Option.iter (fun fd -> bind_text_field ~level n fd) bind_field;
+  let button ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_hint_field ?text ?bind ?bind_field ?(level = 0)
+      ?(a11y_level = level) ?on_click () =
+    let n = Floor.widget Kaya_wire.kind_button in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
+    Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
+      a11y_hint_field;
+    Option.iter (fun x -> Floor.set_text n x) text;
+    Option.iter (fun s -> Floor.bind_text n s) bind;
+    Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
     (match on_click with
     | Some handler ->
         let (Node id) = n in
@@ -2419,11 +2575,17 @@ module Tpl = struct
      copies are the core's. So a template textarea renders and edits
      like any other and has no decoration surface; that is a gap in the
      protocol's addressing, not in this constructor. *)
-  let textarea ?text ?bind ?bind_field ?(level = 0) ?on_change () =
-    let n = widget Kaya_wire.kind_textarea in
-    Option.iter (fun x -> set_text n x) text;
-    Option.iter (fun s -> bind_text n s) bind;
-    Option.iter (fun fd -> bind_text_field ~level n fd) bind_field;
+  let textarea ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?accepts ?text ?bind ?bind_field
+      ?(level = 0) ?(a11y_level = level) ?on_change () =
+    let n = Floor.widget Kaya_wire.kind_textarea in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
+    Option.iter (fun x -> Floor.set_text n x) text;
+    Option.iter (fun s -> Floor.bind_text n s) bind;
+    Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
     (match on_change with
     | Some handler ->
         let (Node id) = n in
@@ -2431,11 +2593,16 @@ module Tpl = struct
     | None -> ());
     n
 
-  let label ?text ?bind ?bind_field ?(level = 0) () =
-    let n = widget Kaya_wire.kind_label in
-    Option.iter (fun x -> set_text n x) text;
-    Option.iter (fun s -> bind_text n s) bind;
-    Option.iter (fun fd -> bind_text_field ~level n fd) bind_field;
+  let label ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?text ?bind ?bind_field ?(level = 0)
+      ?(a11y_level = level) () =
+    let n = Floor.widget Kaya_wire.kind_label in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun x -> Floor.set_text n x) text;
+    Option.iter (fun s -> Floor.bind_text n s) bind;
+    Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
     n
 
   (* A single-line text field per stamped copy. UNCONTROLLED exactly as
@@ -2458,12 +2625,27 @@ module Tpl = struct
      pushing the text it just typed back at the field it came from,
      which is a programmatic write into a focused entry — it spends the
      platform's native undo history where it changes anything. Bind for
-     display, fold for state; that is what uncontrolled means. *)
-  let entry ?text ?bind ?bind_field ?(level = 0) ?on_change () =
-    let n = widget Kaya_wire.kind_entry in
-    Option.iter (fun x -> set_text n x) text;
-    Option.iter (fun s -> bind_text n s) bind;
-    Option.iter (fun fd -> bind_text_field ~level n fd) bind_field;
+     display, fold for state; that is what uncontrolled means.
+
+     [~accepts] IS WHAT MAKES A COPY A PASTE TARGET. Declare it and a
+     paste into a stamped copy arrives at the handler registered by
+     [on_paste_node] with that copy's keys first; leave it out and the
+     platform's own insertion happens and the copy's ordinary change
+     path reports it, exactly as live. The handler stays a registrar
+     rather than a [~on_paste] label here because the live twin has no
+     such label either, and the two constructors carry the same
+     handlers by rule. *)
+  let entry ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?accepts ?text ?bind ?bind_field
+      ?(level = 0) ?(a11y_level = level) ?on_change () =
+    let n = Floor.widget Kaya_wire.kind_entry in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun kinds -> Floor.set_accepts n kinds) accepts;
+    Option.iter (fun x -> Floor.set_text n x) text;
+    Option.iter (fun s -> Floor.bind_text n s) bind;
+    Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
     (match on_change with
     | Some handler ->
         let (Node id) = n in
@@ -2483,12 +2665,17 @@ module Tpl = struct
      was asked for and win, since the later record is the one the
      backend applies. An unset fraction leaves the bar where the backend
      starts it, exactly as an unset [~text] leaves a label blank. *)
-  let progress ?value ?bind ?bind_field ?(level = 0) ?indeterminate () =
-    let n = widget Kaya_wire.kind_progress in
-    Option.iter (fun v -> set_value n v) value;
-    Option.iter (fun s -> bind_value n s) bind;
-    Option.iter (fun fd -> bind_value_field ~level n fd) bind_field;
-    Option.iter (fun i -> set_indeterminate n i) indeterminate;
+  let progress ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?value ?bind ?bind_field ?(level = 0)
+      ?(a11y_level = level) ?indeterminate () =
+    let n = Floor.widget Kaya_wire.kind_progress in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_value n v) value;
+    Option.iter (fun s -> Floor.bind_value n s) bind;
+    Option.iter (fun fd -> Floor.bind_value_field ~level n fd) bind_field;
+    Option.iter (fun i -> Floor.set_indeterminate n i) indeterminate;
     n
 
   (* A slider per stamped copy, over [~min]..[~max] at a position from
@@ -2504,14 +2691,18 @@ module Tpl = struct
      would read safer than it is. [bind_min_field]/[bind_max_field] do
      not exist for that reason; the position is what varies per row.
      It does not default, for [progress]'s reason. *)
-  let slider ?(min = 0.0) ?(max = 1.0) ?value ?bind ?bind_field ?(level = 0)
-      ?on_change () =
-    let n = widget Kaya_wire.kind_slider in
-    set_min n min;
-    set_max n max;
-    Option.iter (fun v -> set_value n v) value;
-    Option.iter (fun s -> bind_value n s) bind;
-    Option.iter (fun fd -> bind_value_field ~level n fd) bind_field;
+  let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?(min = 0.0) ?(max = 1.0) ?value ?bind
+      ?bind_field ?(level = 0) ?(a11y_level = level) ?on_change () =
+    let n = Floor.widget Kaya_wire.kind_slider in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Floor.set_min n min;
+    Floor.set_max n max;
+    Option.iter (fun v -> Floor.set_value n v) value;
+    Option.iter (fun s -> Floor.bind_value n s) bind;
+    Option.iter (fun fd -> Floor.bind_value_field ~level n fd) bind_field;
     (match on_change with
     | Some handler ->
         let (Node id) = n in
@@ -2535,17 +2726,27 @@ module Tpl = struct
      Uncontrolled like the slider: [~on_select] receives the copy's keys
      first and each USER pick's new 0-based index (programmatic writes
      never echo). *)
-  let select ?selected ?bind ?bind_field ?(level = 0) ?on_select options () =
-    let n = widget Kaya_wire.kind_select in
+  let select ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_hint_field ?selected ?bind ?bind_field ?(level = 0)
+      ?(a11y_level = level) ?on_select options () =
+    let n = Floor.widget Kaya_wire.kind_select in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
+    Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
+      a11y_hint_field;
     List.iter
       (fun option_text ->
-        let o = widget Kaya_wire.kind_label in
-        set_text o option_text;
-        add_child n o)
+        let o = Floor.widget Kaya_wire.kind_label in
+        Floor.set_text o option_text;
+        Floor.add_child n o)
       options;
-    Option.iter (fun i -> set_value n (float_of_int i)) selected;
-    Option.iter (fun s -> bind_value n s) bind;
-    Option.iter (fun fd -> bind_value_field ~level n fd) bind_field;
+    Option.iter (fun i -> Floor.set_value n (float_of_int i)) selected;
+    Option.iter (fun s -> Floor.bind_value n s) bind;
+    Option.iter (fun fd -> Floor.bind_value_field ~level n fd) bind_field;
     (match on_select with
     | Some handler ->
         let (Node id) = n in
@@ -2557,17 +2758,27 @@ module Tpl = struct
   (* A radio group per stamped copy — the choice contract ([select]) in
      its inline presentation: same option children, same 0-based index
      from the same three sources, same pick handler. *)
-  let radio ?selected ?bind ?bind_field ?(level = 0) ?on_select options () =
-    let n = widget Kaya_wire.kind_radio in
+  let radio ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_hint_field ?selected ?bind ?bind_field ?(level = 0)
+      ?(a11y_level = level) ?on_select options () =
+    let n = Floor.widget Kaya_wire.kind_radio in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
+    Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
+      a11y_hint_field;
     List.iter
       (fun option_text ->
-        let o = widget Kaya_wire.kind_label in
-        set_text o option_text;
-        add_child n o)
+        let o = Floor.widget Kaya_wire.kind_label in
+        Floor.set_text o option_text;
+        Floor.add_child n o)
       options;
-    Option.iter (fun i -> set_value n (float_of_int i)) selected;
-    Option.iter (fun s -> bind_value n s) bind;
-    Option.iter (fun fd -> bind_value_field ~level n fd) bind_field;
+    Option.iter (fun i -> Floor.set_value n (float_of_int i)) selected;
+    Option.iter (fun s -> Floor.bind_value n s) bind;
+    Option.iter (fun fd -> Floor.bind_value_field ~level n fd) bind_field;
     (match on_select with
     | Some handler ->
         let (Node id) = n in
@@ -2576,11 +2787,21 @@ module Tpl = struct
     | None -> ());
     n
 
-  let checkbox ?checked ?bind ?bind_field ?(level = 0) ?on_toggle () =
-    let n = widget Kaya_wire.kind_checkbox in
-    Option.iter (fun c -> set_checked n c) checked;
-    Option.iter (fun s -> bind_checked n s) bind;
-    Option.iter (fun fd -> bind_checked_field ~level n fd) bind_field;
+  let checkbox ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
+      ?a11y_hint_field ?checked ?bind ?bind_field ?(level = 0)
+      ?(a11y_level = level) ?on_toggle () =
+    let n = Floor.widget Kaya_wire.kind_checkbox in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
+    Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
+      a11y_hint_field;
+    Option.iter (fun c -> Floor.set_checked n c) checked;
+    Option.iter (fun s -> Floor.bind_checked n s) bind;
+    Option.iter (fun fd -> Floor.bind_checked_field ~level n fd) bind_field;
     (match on_toggle with
     | Some handler ->
         let (Node id) = n in
@@ -2593,19 +2814,28 @@ module Tpl = struct
      the next submit), [~bind] a Blob signal, [~bind_field] each row's
      own (_, bytes) field — the per-row picture that a list of anything
      with a thumbnail wants. *)
-  let image ?source ?bind ?bind_field ?(level = 0) () =
-    let n = widget Kaya_wire.kind_image in
-    Option.iter (fun data -> set_source n data) source;
-    Option.iter (fun s -> bind_source n s) bind;
-    Option.iter (fun fd -> bind_source_field ~level n fd) bind_field;
+  let image ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?source ?bind ?bind_field ?(level = 0)
+      ?(a11y_level = level) () =
+    let n = Floor.widget Kaya_wire.kind_image in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun data -> Floor.set_source n data) source;
+    Option.iter (fun s -> Floor.bind_source n s) bind;
+    Option.iter (fun fd -> Floor.bind_source_field ~level n fd) bind_field;
     n
 
   (* Containers, the outer-zone convention: children are partially
      applied creators ([unit -> node] thunks), realized left to
      right; [()] realizes, omitting it nominates a child. *)
-  let container kind children () =
-    let parent = widget kind in
-    List.iter (fun child -> add_child parent (child ())) children;
+  let container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) kind children () =
+    let parent = Floor.widget kind in
+    Option.iter (fun g -> Floor.set_grow parent g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level parent;
+    List.iter (fun child -> Floor.add_child parent (child ())) children;
     parent
 
   (* A grid per stamped copy, laid out row-major into [~columns]
@@ -2613,34 +2843,53 @@ module Tpl = struct
      (the thing nested rows cannot express). The column count describes
      the prototype, so it stays a required constant. The columns record
      lands BEFORE the add_childs, as in the live zone. *)
-  let grid ~columns children () =
-    let n = widget Kaya_wire.kind_grid in
-    set_columns n columns;
-    List.iter (fun child -> add_child n (child ())) children;
+  let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) children () =
+    let n = Floor.widget Kaya_wire.kind_grid in
+    Floor.set_columns n columns;
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    List.iter (fun child -> Floor.add_child n (child ())) children;
     n
 
   (* A spacer: PURE SUGAR for an empty grown column — it consumes the
      leftover main-axis space between its siblings, in every stamped
      copy. No new vocabulary reaches a backend. *)
   let spacer ?(grow = 1.0) () =
-    let n = widget Kaya_wire.kind_column in
-    set_grow n grow;
+    let n = Floor.widget Kaya_wire.kind_column in
+    Floor.set_grow n grow;
     n
 
-  let column children = container Kaya_wire.kind_column children
+  (* The three named containers forward the props ONE BY ONE, which the
+     partial application they used to be could not: an optional
+     argument in front of a positional one is erased the moment the
+     positional one is supplied, so [container kind_column] would have
+     defaulted every prop and swallowed the caller's. The live zone
+     forwards the same way and for the same reason. *)
+  let column ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_level children =
+    container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_level Kaya_wire.kind_column
+      children
 
   (* A vertical scroll viewport per stamped copy, over EXACTLY ONE
-     child. The live twin takes [~grow] and this does not, because the
-     template-node props are ledgered rather than shipped
-     (docs/sugar-pass-plan.md §2) — so constrain it with [set_grow] on
-     the returned node, or from the live container above it. An
+     child. Pass [~grow] so the enclosing track CONSTRAINS it — an
      unconstrained viewport hugs its content and nothing overflows.
      CAUTION: the scene enforces the one-child rule on the live path
      only (crates/kaya/src/scene.rs:1860); the template declare arm does
      not check it yet, so a second child here is accepted in silence
      until that gap closes. *)
-  let scroll children = container Kaya_wire.kind_scroll children
-  let row children = container Kaya_wire.kind_row children
+  let scroll ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_level children =
+    container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_level Kaya_wire.kind_scroll
+      children
+
+  let row ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_level children =
+    container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
+      ?a11y_label_bind ?a11y_label_field ?a11y_level Kaya_wire.kind_row children
 
   (* Attach a live-built context catalog ([context_catalog]) to a
      template node: every stamped copy shows the same catalog, and
@@ -2686,7 +2935,18 @@ let on_paste app (Widget id) (handler : representation -> unit) =
 (* A paste onto a stamped copy: the handler also receives the copy's key
    path, outermost first. One record kind, the path deciding — exactly
    as a click on a stamped row is one record with a click on a live
-   widget. *)
+   widget.
+
+   ONLY FIRES IF THE TEMPLATE DECLARED WHAT IT ACCEPTS
+   ([Tpl.entry ~accepts] / [Tpl.textarea ~accepts]), for the live rule's
+   reason one identity deeper: every backend gates the paste occurrence
+   on the focused widget's accept list and falls back to the platform's
+   own insertion when it is empty. This registrar and its dispatch arm
+   shipped a whole milestone before a node could carry that prop, so
+   the handler registered and waited — SILENTLY, since an undeclared
+   paste is not an error anywhere, it is the platform's own insertion
+   arriving through the copy's change handler instead
+   (docs/tpl-props-plan.md §1). *)
 let on_paste_node app (Node id)
     (handler : Kaya_wire.value list -> representation -> unit) =
   Hashtbl.replace app.node_pastes id handler

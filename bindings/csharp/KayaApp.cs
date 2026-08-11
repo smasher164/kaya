@@ -2605,7 +2605,18 @@ sealed class Tpl
         return n;
     }
 
-    public void SetText(Node n, string text) => tx.Records.Add(KayaWire.TxSetText(n.Id, text));
+    /// PRIVATE, and the visibility is the point: `SetText` is the LIVE
+    /// zone's verb (Tx.SetText, a dynamic write to a widget the app
+    /// already built, which every gate requires as sugar), while a
+    /// constant text on a template NODE is the floor under
+    /// Label/Button/Entry/Textarea. Both spellings read `.SetText(` and
+    /// only the receiver's TYPE tells them apart, which no sweep over a
+    /// guest can see — so the template one stops being spellable at all
+    /// and the compiler holds the line a regex could not (F3,
+    /// docs/tpl-props-plan.md). The zone's floor keeps Widget, the
+    /// Bind*Field binds and AddChild; a const text at the floor had no
+    /// caller outside this class and now has no name outside it either.
+    void SetText(Node n, string text) => tx.Records.Add(KayaWire.TxSetText(n.Id, text));
 
     /// Bind text to the element of the enclosing For, `level` Fors up
     /// (0 = nearest).
@@ -2647,6 +2658,90 @@ sealed class Tpl
     /// `Tpl::set(node, Prop::Grow, …)` keeps it.
     public void SetGrow(Node n, double weight) =>
         tx.Records.Add(KayaWire.TxSetGrow(n.Id, weight));
+
+    /// A stamped copy's accessibility IDENTIFIER: the stable authored
+    /// key assistive tooling and UI automation address it by, and which
+    /// is NEVER spoken. Universal, in both zones.
+    ///
+    /// A CONST OR SIGNAL GIVES EVERY COPY THE SAME KEY, which is legal
+    /// — nothing in the core deduplicates ids, and kaya's own harness
+    /// addresses by kind#index rather than by id, so no gate here
+    /// catches a collision — and sometimes right, when the row is
+    /// addressed as one thing. Source it from a field the row carries
+    /// when automation must tell the copies apart.
+    public void SetA11yId(Node n, string id) =>
+        tx.Records.Add(KayaWire.TxSetA11yId(n.Id, id));
+
+    public void SetA11yId(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindA11yId(n.Id, s.Id));
+
+    public void SetA11yId(Node n, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindA11yIdElement(n.Id, level, f.Index));
+
+    /// What an assistive client SPEAKS for a stamped copy. Universal,
+    /// and deliberately separate from the identifier — an automation key
+    /// is not a spoken name. Leave it unset to keep whatever the
+    /// platform derives from the control's own content.
+    ///
+    /// THE FIELD ARM IS THE CASE THIS ZONE EXISTS FOR: one label per
+    /// copy, the row announcing its own name —
+    ///
+    ///     tx.Each(people.Collection, t => {
+    ///         var avatar = t.Image(PersonKaya.Portrait);
+    ///         t.SetA11yLabel(avatar, PersonKaya.Name);
+    ///     });
+    ///
+    /// An image draws nothing a screen reader can read, so without this
+    /// the whole list speaks as N unlabelled images.
+    public void SetA11yLabel(Node n, string label) =>
+        tx.Records.Add(KayaWire.TxSetA11yLabel(n.Id, label));
+
+    public void SetA11yLabel(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindA11yLabel(n.Id, s.Id));
+
+    public void SetA11yLabel(Node n, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindA11yLabelElement(n.Id, level, f.Index));
+
+    /// What ACTIVATING a stamped copy does — write a verb phrase. The
+    /// field arm is a row of Delete buttons each naming what it deletes.
+    ///
+    /// ACTIVATION KINDS ONLY (button, checkbox, select, radio), and the
+    /// wall is the root's, not a type here: the template declare arm
+    /// runs the same check_prop the live path does, so a hint on a
+    /// template label dies at SUBMIT of the transaction that wrote it,
+    /// naming the kind and the prop, before a single row stamps. The
+    /// live Tx.SetA11yHint takes any widget for the same reason, and one
+    /// binding stricter than its own live zone would be a divergence
+    /// inside one language.
+    public void SetA11yHint(Node n, string hint) =>
+        tx.Records.Add(KayaWire.TxSetA11yHint(n.Id, hint));
+
+    public void SetA11yHint(Node n, Signal s) =>
+        tx.Records.Add(KayaWire.TxBindA11yHint(n.Id, s.Id));
+
+    public void SetA11yHint(Node n, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindA11yHintElement(n.Id, level, f.Index));
+
+    /// Declare what every stamped copy takes from a paste — the closed
+    /// kinds by name ("text", "html", "image", "files") plus any custom
+    /// format ids. Entry and textarea only; the root rejects it
+    /// elsewhere, at submit, like the hint above.
+    ///
+    /// WITHOUT THIS THE NODE PASTE HOOK NEVER FIRES. Every backend falls
+    /// back to the platform's own insertion when the focused control's
+    /// accept list is empty and emits no occurrence at all, so
+    /// Tx.OnPaste(Node, …) has been a registrar with no reachable
+    /// producer for as long as it has existed.
+    ///
+    /// CONSTANT ONLY, unlike the three props above, and that is not an
+    /// oversight: an accept list describes the PROTOTYPE'S ROLE — this
+    /// is a paste target and here is what it takes — which is one fact
+    /// for every copy, like a slider's min/max or a select's options. A
+    /// field arm would also have to hand the app kaya's own joined-list
+    /// encoding to store in its record, which is the thing Tx.AcceptList
+    /// exists to keep inside the binding.
+    public void SetAccepts(Node n, params string[] kinds) =>
+        tx.Records.Add(KayaWire.TxSetAccepts(n.Id, Tx.AcceptList(kinds)));
 
     // Construction sugar, template flavor: one name per widget, the
     // argument's type picks the addressable source (constant, signal,

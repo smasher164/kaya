@@ -66,6 +66,8 @@ mod menus;
 mod commands;
 #[path = "a11y.rs"]
 mod a11y;
+#[path = "a11yrows.rs"]
+mod a11yrows;
 #[path = "filedialog.rs"]
 mod filedialog;
 #[path = "clipboard.rs"]
@@ -122,6 +124,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("menus") => menus::app(ctx),
         Ok("commands") => commands::app(ctx),
         Ok("a11y") => a11y::app(ctx),
+        Ok("a11yrows") => a11yrows::app(ctx),
         Ok("filedialog") => filedialog::app(ctx),
         Ok("clipboard") => clipboard::app(ctx),
         // The save scene: the round trip an editor walks. The dialog is

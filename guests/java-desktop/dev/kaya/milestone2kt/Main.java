@@ -32,6 +32,9 @@ public final class Main {
             case "a11y":
                 app = A11y::app;
                 break;
+            case "a11yrows":
+                app = A11yRows::app;
+                break;
             case "entry":
                 app = Entry::app;
                 break;

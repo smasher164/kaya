@@ -54,9 +54,11 @@ let () =
              w add (* button#0 *);
              label ~bind:status (* label#0 *);
              (* One stamped label per entry, bound to the ELEMENT
-                itself: an entry of a scalar collection is the string,
-                so there is no field to name. *)
-             each todos (fun () -> Tpl.(bind_text_element (label ())));
+                itself: an entry of a scalar collection IS the string,
+                so [element] is the whole of the source and there is no
+                field name to give. It lowers to the same element bind
+                this line used to spell at the floor. *)
+             each todos (fun () -> Tpl.(label ~bind_field:element ()));
            ]
            ()
        in

@@ -8935,8 +8935,26 @@ impl crate::harness::Stage for WinUiStage {
     }
     fn click(&self, t: crate::harness::Target) {
         Self::on_ui(move |core| {
-            let i = crate::harness::resolve(t.index, core.buttons.len());
-            core.occurrences.send_click_tag(&core.buttons[i]);
+            // A click on a TEXT KIND focuses it — what a native click
+            // does to a field, and the only way a scene can put focus
+            // on a STAMPED copy (no instance-addressed focus command
+            // exists for a guest to call). Programmatic FocusState, the
+            // same one the wire's focus command uses (:8606), so
+            // is_focused's per-element read sees it.
+            match t.kind {
+                crate::harness::TargetKind::Entry => {
+                    let i = crate::harness::resolve(t.index, core.entries.len());
+                    let _ = core.entries[i].Focus(FocusState::Programmatic)?;
+                }
+                crate::harness::TargetKind::Textarea => {
+                    let i = crate::harness::resolve(t.index, core.textareas.len());
+                    let _ = core.textareas[i].Focus(FocusState::Programmatic)?;
+                }
+                _ => {
+                    let i = crate::harness::resolve(t.index, core.buttons.len());
+                    core.occurrences.send_click_tag(&core.buttons[i]);
+                }
+            }
             Ok(())
         });
     }

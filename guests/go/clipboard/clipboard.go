@@ -127,7 +127,7 @@ func App() *kaya.App {
 		panic("failed to write the file: " + err.Error())
 	}
 
-	var status kaya.Signal[string]
+	var status, rowStatus kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
 		win := tx.Window(0).Title("clipboard")
 
@@ -143,6 +143,7 @@ func App() *kaya.App {
 		edit.Item("Paste").Role(kaya.RolePaste)
 
 		status = tx.Signal("ready")
+		rowStatus = tx.Signal("")
 
 		// THE SAME SHAPE THE READ ANSWERS WITH, and free where the read
 		// is not: a gesture is its own authorisation, so no platform
@@ -200,7 +201,7 @@ func App() *kaya.App {
 		}
 
 		tx.Mount(tx.Column(func() {
-			tx.Label(status).A11yID("status") // label#0
+			tx.Label(status).A11yID("status")     // label#0
 			tx.Button("copy", func(tx *kaya.Tx) { // button#0
 				// ONE CLIP, FOUR REPRESENTATIONS. kaya derives none of
 				// them from any other: whether list bullets survive
@@ -252,6 +253,34 @@ func App() *kaya.App {
 			// and the field's ordinary change path reports it — which is
 			// what a plain text editor gets for free.
 			plain = tx.Entry(nil).A11yID("plain") // entry#1
+
+			// THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy. The
+			// accept list is declared on the TEMPLATE, which is the
+			// declaration that turns the node hook on: every backend
+			// hands the gesture to the platform when the focused
+			// widget's accept list is empty, so before a template could
+			// carry one this handler was registered, dispatched and
+			// unable to fire (docs/tpl-props-plan.md §1). The copy's own
+			// key arrives with the payload — that is what tells an
+			// instance paste from a live one.
+			//
+			// The row's value is empty because nothing displays it: the
+			// stamped entry is UNCONTROLLED like its live siblings, and
+			// staying empty through the paste is the assertion.
+			tx.Label(rowStatus).A11yID("row-status") // label#1
+			notes := tx.Collection()
+			for row := range notes.Rows(tx) {
+				note := row.Entry() // entry#2, one stamped copy
+				row.SetAccepts(note, kaya.AcceptText)
+				app.OnPasteNode(note, func(tx *kaya.Tx, keys []any, clip kaya.Representation) {
+					if text, ok := clip.(kaya.TextClip); ok {
+						tx.Write(rowStatus, "row "+keys[0].(string)+" pasted "+text.Text)
+						return
+					}
+					tx.Write(rowStatus, fmt.Sprintf("row %v pasted %v", keys[0], clip))
+				})
+			}
+			tx.Insert(notes, "r1", "")
 		}))
 	})
 

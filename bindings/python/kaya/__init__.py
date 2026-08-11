@@ -387,11 +387,185 @@ class _CollectionDerived(Signal):
                 derived._recompute()
 
 
-class Widget:
-    """A live widget: exactly one thing on screen."""
+def _prop_source(what, handle, value, const, signal, element):
+    """One prop write from whichever of the zone's three sources the
+    guest handed over: a constant, a Signal, or the enclosing For's
+    element — the element ITSELF for a scalar collection (its value is
+    the element: level, field 0), `row.field` for a record one.
+
+    THE SOURCE ARMS COME FIRST AND THE CONSTANT ARM LAST, because the
+    constant arm COERCES. `str(row.title)` succeeds and writes
+    "<kaya.FieldRef object at 0x109cd6a50>" onto every stamped copy,
+    with nothing raised, nothing on the wire to say a per-row binding
+    was meant, and a screen reader dutifully speaking it — the same
+    shape of failure `label(bind=...)` grew its floor arm for, and the
+    one `progress(value=el.pct)` shipped for months.
+    """
+    if isinstance(value, Signal):
+        return signal(handle.id, value.id)
+    if isinstance(value, FieldRef):
+        return element(handle.id, value._level(), value._index)
+    if isinstance(value, Element):
+        # A scalar collection's element IS the value: level, field 0.
+        # The same arm `label(bind=el)` takes.
+        return element(handle.id, value._level())
+    if isinstance(value, _CaseElement):
+        raise TypeError(
+            f"kaya: {what} takes a str, a Signal or one of the row's "
+            f"fields (row.title), not {type(value).__name__} — inside a "
+            "case arm project the field: .a11y_label(note.text)"
+        )
+    return const(handle.id, str(value))
+
+
+class _Handle:
+    """What carries props: a live widget, or a template node.
+
+    Python's transaction is ambient, so ONE set of constructors serves
+    both zones and `_alloc_widget_or_node` decides which handle comes
+    back. A PROP OBEYS THE SAME RULE, because a prop record names an id,
+    a prop and a source and nothing else: neither the wire nor the root
+    cares which zone the id came from, and the template declare arm runs
+    the very same `check_prop` the live one does
+    (crates/kaya/src/scene.rs). So these five live on the base both
+    handles share — a surface that cannot drift between the zones
+    because there is only one of it.
+
+    WHAT DIFFERS BY ZONE IS WHICH SOURCES ARE REACHABLE, NOT THE CALL.
+    A constant works anywhere; a Signal works anywhere (the core rebinds
+    on every write, live and stamped alike); the enclosing For's element
+    exists only inside a template, and it is the point — a stamp makes N
+    copies of one node, and a row that cannot say its own name is a row
+    an assistive client cannot tell from the thirteen beside it.
+
+    That leaves this surface WIDER LIVE than the other seven bindings,
+    whose live a11y setters take a string: `_prop_source` is total over
+    its argument, so the alternative is not a narrower surface but the
+    coercing one that shipped before it, writing a Signal's repr onto a
+    widget and saying nothing. The narrow live setters are the gap
+    (docs/tpl-props-plan.md F5's stance on Haskell's constant-only
+    slider), not this.
+    """
 
     def __init__(self, id):
         self.id = id
+
+    def a11y_id(self, ident):
+        """Set this widget's accessibility IDENTIFIER: a stable authored
+        key that assistive tooling and UI automation address it by, and
+        which is NEVER spoken. Universal — every kind carries one.
+
+        IN A TEMPLATE, TAKE IT FROM THE ROW (`row.slug`): the copies of
+        one node share a node id, so a constant names fourteen things at
+        once. That is legal — nothing in the core deduplicates ids, and
+        the harness addresses by kind#index — and it is the right answer
+        for a node with one copy; it is the wrong one when automation
+        has to tell the copies apart.
+
+        Returns the handle, so the props chain:
+        `kaya.entry().a11y_id("name").a11y_label("Full name")`."""
+        _records().append(_prop_source(
+            "a11y_id", self, ident, wire.tx_set_a11y_id,
+            wire.tx_bind_a11y_id, wire.tx_bind_a11y_id_element))
+        return self
+
+    def a11y_hint(self, hint):
+        """Set what ACTIVATING this widget does — the platforms' hint
+        (Apple defines it as the result of performing an action;
+        Android carries it as the click action's label). Write a VERB
+        PHRASE: VoiceOver speaks it as written, TalkBack prefixes
+        "double tap to". Activation kinds only (button, checkbox,
+        select, radio); the root rejects it elsewhere, in BOTH zones and
+        at the same moment — the template declare arm runs the same
+        check, so a hint on a template label dies when the blueprint is
+        declared, before a single row stamps. Returns the handle, so it
+        chains."""
+        _records().append(_prop_source(
+            "a11y_hint", self, hint, wire.tx_set_a11y_hint,
+            wire.tx_bind_a11y_hint, wire.tx_bind_a11y_hint_element))
+        return self
+
+    def a11y_label(self, label):
+        """Set this widget's accessibility LABEL: what an assistive
+        client speaks for it. Universal, and deliberately separate from
+        `a11y_id` — an automation key is not a spoken name. Leave it
+        unset to keep whatever the platform derives from the control's
+        own content; setting it OVERRIDES that, so a button whose
+        caption already reads well needs nothing here.
+
+        THE ROW'S OWN FIELD IS THE CASE THIS EXISTS FOR
+        (`kaya.checkbox(checked=todo.done).a11y_label(todo.title)`): a
+        list of identical checkboxes reads as "checkbox, checkbox,
+        checkbox" until each copy speaks its own row. Returns the
+        handle, so the two props chain."""
+        _records().append(_prop_source(
+            "a11y_label", self, label, wire.tx_set_a11y_label,
+            wire.tx_bind_a11y_label, wire.tx_bind_a11y_label_element))
+        return self
+
+    def accepts(self, *kinds):
+        """Declare what this widget takes from a paste — the closed
+        kinds by name ("text", "html", "image", "files") plus any custom
+        format ids.
+
+        ONE DECLARATION, THREE JOBS: it drives whether the Paste command
+        is live while this widget is focused, it filters what can reach
+        the paste hook, and on Android it IS the native registration
+        (setOnReceiveContentListener takes the mime types on the view).
+        Per-widget because whether Paste should be enabled is the
+        INTERSECTION of what the clipboard offers and what the FOCUSED
+        target takes — a search field wants plain text, a rich editor
+        also wants images.
+
+        DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
+        declares nothing gets the platform's own insertion and reports
+        it through the ordinary change path, which is why a plain text
+        editor writes none of this and has working cut, copy and paste.
+
+        CONSTANT IN A TEMPLATE, unlike the a11y props: an accept list
+        describes the PROTOTYPE — what this control can receive — and
+        not the row. Rows that genuinely take different things are
+        different VARIANTS, and each `cases.case(...)` arm declares its
+        own template body with its own constant list. Returns the
+        handle, so it chains with the a11y props.
+        """
+        for kind in kinds:
+            if isinstance(kind, (Signal, Element, _CaseElement, FieldRef)):
+                # The const-only rule, said out loud. Without this the
+                # kind coerces: `str(row.formats)` is a repr, the repr
+                # has spaces in it, and the guest gets `_accept_list`
+                # complaining about a space in a format id — a true
+                # sentence about the wrong problem.
+                raise TypeError(
+                    f"kaya: accepts takes constant kinds, not "
+                    f"{type(kind).__name__} — an accept list describes "
+                    "the control and not the row; rows that take "
+                    "different things are different variants, one "
+                    "cases.case(...) arm each"
+                )
+        _records().append(wire.tx_set_accepts(self.id, _accept_list(kinds)))
+        return self
+
+    def on_paste(self, fn):
+        """Take pasted content here: fn(clip) with the Representation
+        sum, or fn(*keys, clip) for a stamped copy — the copy's key path
+        first, exactly as on_change and on_click deliver it.
+
+        COSTS NOTHING ON ANY PLATFORM, unlike read_clipboard: a paste is
+        a user gesture, so it is its own authorisation — iOS raises no
+        prompt and the focus rules are satisfied by construction. ONLY
+        FIRES FOR A WIDGET THAT DECLARED WHAT IT `accepts`, in both
+        zones: every backend gates the occurrence on the focused
+        widget's accept list and falls back to the platform's own
+        insertion when it is empty, so a template node that registers
+        this and declares nothing waits forever. Returns the handle, so
+        it chains."""
+        _app._register(self, wire.OCC_PASTED, fn)
+        return self
+
+
+class Widget(_Handle):
+    """A live widget: exactly one thing on screen."""
 
     # One-shot commands: momentary verbs into widget-owned state,
     # riding the open transaction like any write — the insert and the
@@ -401,7 +575,12 @@ class Widget:
     # text_changed("") and the app's draft fold empties itself).
     # Commands live on Widget only — a Node is a blueprint, and a
     # blueprint has nothing to clear (the type-level arm of the scene's
-    # own template rejection).
+    # own template rejection). That is the whole of what this class adds
+    # over the base: the momentary verbs, and the three DYNAMIC prop
+    # setters below, whose documented job is changing a prop AFTER the
+    # build. A template is declared, never mutated, and its declarative
+    # spelling is the constructor kwarg — which already works in both
+    # zones.
 
     def clear(self):
         """Drop an entry's content now (the field stays authoritative)."""
@@ -527,73 +706,6 @@ class Widget:
         argument at construction; this is the dynamic path."""
         _records().append(wire.tx_set_spacing(self.id, float(gap)))
 
-    def a11y_id(self, ident):
-        """Set this widget's accessibility IDENTIFIER: a stable authored
-        key that assistive tooling and UI automation address it by, and
-        which is NEVER spoken. Universal — every kind carries one.
-
-        Returns the widget, so the two props chain:
-        `kaya.entry().a11y_id("name").a11y_label("Full name")`."""
-        _records().append(wire.tx_set_a11y_id(self.id, str(ident)))
-        return self
-
-    def a11y_hint(self, hint):
-        """Set what ACTIVATING this widget does — the platforms' hint
-        (Apple defines it as the result of performing an action;
-        Android carries it as the click action's label). Write a VERB
-        PHRASE: VoiceOver speaks it as written, TalkBack prefixes
-        "double tap to". Activation kinds only (button, checkbox,
-        select, radio); the root rejects it elsewhere. Returns the
-        widget, so it chains."""
-        _records().append(wire.tx_set_a11y_hint(self.id, str(hint)))
-        return self
-
-    def a11y_label(self, label):
-        """Set this widget's accessibility LABEL: what an assistive
-        client speaks for it. Universal, and deliberately separate from
-        `a11y_id` — an automation key is not a spoken name. Leave it
-        unset to keep whatever the platform derives from the control's
-        own content; setting it OVERRIDES that, so a button whose
-        caption already reads well needs nothing here. Returns the
-        widget, so the two props chain."""
-        _records().append(wire.tx_set_a11y_label(self.id, str(label)))
-        return self
-
-    def accepts(self, *kinds):
-        """Declare what this widget takes from a paste — the closed
-        kinds by name ("text", "html", "image", "files") plus any custom
-        format ids.
-
-        ONE DECLARATION, THREE JOBS: it drives whether the Paste command
-        is live while this widget is focused, it filters what can reach
-        the paste hook, and on Android it IS the native registration
-        (setOnReceiveContentListener takes the mime types on the view).
-        Per-widget because whether Paste should be enabled is the
-        INTERSECTION of what the clipboard offers and what the FOCUSED
-        target takes — a search field wants plain text, a rich editor
-        also wants images.
-
-        DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
-        declares nothing gets the platform's own insertion and reports
-        it through the ordinary change path, which is why a plain text
-        editor writes none of this and has working cut, copy and paste.
-        Returns the widget, so it chains with the a11y props.
-        """
-        _records().append(wire.tx_set_accepts(self.id, _accept_list(kinds)))
-        return self
-
-    def on_paste(self, fn):
-        """Take pasted content here: fn(clip) with the Representation
-        sum, or fn(*keys, clip) for a stamped copy.
-
-        COSTS NOTHING ON ANY PLATFORM, unlike read_clipboard: a paste is
-        a user gesture, so it is its own authorisation — iOS raises no
-        prompt and the focus rules are satisfied by construction. Only
-        fires for a widget that declared what it `accepts`. Returns the
-        widget, so it chains."""
-        _app._register(self, wire.OCC_PASTED, fn)
-        return self
-
     def context_menu(self):
         """The live-widget context anchor: `with target.context_menu():`
         declares the catalog — the same command vocabulary scoped to a
@@ -604,13 +716,15 @@ class Widget:
         return _MenuScope(("widget", self.id), shortcut_ok=False)
 
 
-class Node:
+class Node(_Handle):
     """A template node: a blueprint entry, stamped per collection entry.
-    Never on screen by itself; clicks on its copies arrive with the
-    copy's key path."""
+    Never on screen by itself; clicks and pastes on its copies arrive
+    with the copy's key path.
 
-    def __init__(self, id):
-        self.id = id
+    Its own class, not an alias, because `App._register` reads the
+    handle's type to decide which handler table a callback lands in —
+    the node table, keyed the same way and dispatched with the key path
+    in front."""
 
     def context_menu(self, catalog):
         """Attach a live-zone-built context catalog

@@ -230,7 +230,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y filedialog clipboard undo dirty ranges save"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -1543,6 +1543,18 @@ case "$SUITE" in
         # one failure that reads as somebody else's bug.
         drain_suites
         run_suite dirty_rust
+        drain_suites
+        # The stamped-accessibility scene: two entries stamped from one
+        # template, each named by its own row, read from UIA's real
+        # tree — the a11y scene's sibling, split out because a For's
+        # column shifts ordinal container targets per language.
+        # Graduated 2026-08-11 with wave 2's guests; this lane's
+        # language roster matches the a11y family's.
+        run_suite a11yrows_rust
+        run_suite a11yrows_python
+        run_suite a11yrows_go
+        run_suite a11yrows_csharp
+        run_suite a11yrows_java
         drain_suites
         # The ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one
         # (docs/ranges-plan.md D1), plus the two rules that make those

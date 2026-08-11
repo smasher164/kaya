@@ -80,6 +80,7 @@ static class ClipboardScene
         File.WriteAllText(Path.Combine(dir, "pasted.txt"), "pasted bytes");
 
         Signal status = default;
+        Signal rowStatus = default;
         Widget rich = default;
         Widget plain = default;
 
@@ -100,6 +101,7 @@ static class ClipboardScene
             tx.Window(title: "clipboard", menus: new[] { edit });
 
             status = tx.Signal("ready");
+            rowStatus = tx.Signal("");
 
             void Answered(Tx tx, Representation? clip)
             {
@@ -221,6 +223,35 @@ static class ClipboardScene
                 // it — which is what a plain text editor gets for free.
                 plain = tx.Entry(); // entry#1
                 tx.SetA11yId(plain, "plain");
+
+                // A STAMPED paste target: the same two-door contract one
+                // tier down. The accept list comes from the TEMPLATE, so
+                // the copy declares what it takes before it exists, and
+                // the paste arrives as an INSTANCE occurrence carrying
+                // the copy's own key — which is what rowStatus prints.
+                // Nothing could declare it until now, so this arm has
+                // never fired on any backend.
+                tx.SetA11yId(tx.Label(bind: rowStatus), "row-status"); // label#1
+                var rows = tx.Collection();
+                tx.Each(rows, t =>
+                {
+                    var field = t.Entry(); // entry#2 once r1 stamps
+                    t.SetAccepts(field, Tx.AcceptText);
+                    tx.OnPaste(field, (inner, keys, clip) =>
+                    {
+                        // The key rides the payload, outermost first,
+                        // and printing it is the proof this dispatched
+                        // as an instance occurrence and not a live one.
+                        string key = (string)keys[0];
+                        if (clip is Representation.Text t2)
+                        {
+                            inner.Write(rowStatus, $"row {key} pasted {t2.Value}");
+                            return;
+                        }
+                        inner.Write(rowStatus, $"row {key} pasted {clip}");
+                    });
+                });
+                tx.Insert(rows, "r1", "");
             }));
         });
 

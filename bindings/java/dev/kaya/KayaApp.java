@@ -2148,6 +2148,68 @@ public final class KayaApp {
             t.setGrow(n, weight);
         }
 
+        /** One of this row's nodes' accessibility identifier
+         * ({@link Tpl#setA11yId(Node, String)}). */
+        public void setA11yId(Node n, String id) {
+            t.setA11yId(n, id);
+        }
+
+        public void setA11yId(Node n, Signal<String> s) {
+            t.setA11yId(n, s);
+        }
+
+        public void setA11yId(Node n, KayaRecords.Field<String> f) {
+            t.setA11yId(n, f);
+        }
+
+        public void bindA11yIdField(Node n, int level, KayaRecords.Field<String> f) {
+            t.bindA11yIdField(n, level, f);
+        }
+
+        /** What an assistive client speaks for this row's copy of that
+         * node ({@link Tpl#setA11yLabel(Node, KayaRecords.Field)} is the
+         * overload this surface exists for: the row's own field). */
+        public void setA11yLabel(Node n, String label) {
+            t.setA11yLabel(n, label);
+        }
+
+        public void setA11yLabel(Node n, Signal<String> s) {
+            t.setA11yLabel(n, s);
+        }
+
+        public void setA11yLabel(Node n, KayaRecords.Field<String> f) {
+            t.setA11yLabel(n, f);
+        }
+
+        public void bindA11yLabelField(Node n, int level, KayaRecords.Field<String> f) {
+            t.bindA11yLabelField(n, level, f);
+        }
+
+        /** What activating this row's copy of that node does —
+         * activation kinds only ({@link Tpl#setA11yHint(Node, String)}). */
+        public void setA11yHint(Node n, String hint) {
+            t.setA11yHint(n, hint);
+        }
+
+        public void setA11yHint(Node n, Signal<String> s) {
+            t.setA11yHint(n, s);
+        }
+
+        public void setA11yHint(Node n, KayaRecords.Field<String> f) {
+            t.setA11yHint(n, f);
+        }
+
+        public void bindA11yHintField(Node n, int level, KayaRecords.Field<String> f) {
+            t.bindA11yHintField(n, level, f);
+        }
+
+        /** What this row's copy of that node takes from a paste, and the
+         * half {@link KayaApp#onPaste(Node, PasteHandler)} needs to fire
+         * at all ({@link Tpl#setAccepts}). */
+        public void setAccepts(Node n, String... kinds) {
+            t.setAccepts(n, kinds);
+        }
+
         /** A collection declared inside this row's template — the
          * nested-instance shape. */
         public Collection collection() {
@@ -3589,7 +3651,20 @@ public final class KayaApp {
             return n;
         }
 
-        public void setText(Node n, String text) {
+        // PRIVATE, AND THE ONLY PROP WRITE IN THIS ZONE THAT IS. Java
+        // spells the live TEXT VERB — Tx.setText(Widget, String), the
+        // "open a document into the editor" write every scene script
+        // reaches for — and this blueprint prop write with ONE name, and
+        // the sweep that keeps example guests off the explicit tier
+        // reads lines rather than types: `.setText(` cannot tell which
+        // receiver it found. Rust never had the problem, keeping the two
+        // as `set` and `set_text`. Hiding is the stronger half of that
+        // split: no guest can reach the floor spelling at all, so the
+        // compiler holds the rule where a regex would have had to, and
+        // nothing is lost — every kind that carries text is constructed
+        // with it (label, button, entry, textarea, and the option labels
+        // below).
+        private void setText(Node n, String text) {
             tx.emit(KayaWire.txSetText(n.id, text));
         }
 
@@ -3643,10 +3718,127 @@ public final class KayaApp {
          * <p>A Node carries no transaction, so there is no construction
          * chain to hang this on the way the live zone does; the setter
          * directly after construction is the spelling, as it is for
-         * {@link #setText}.
+         * every prop below.
          */
         public void setGrow(Node n, double weight) {
             tx.emit(KayaWire.txSetGrow(n.id, weight));
+        }
+
+        // THE ACCESSIBILITY PROPS, one setter per source. They take the
+        // node first for setGrow's reason — a Node holds no transaction,
+        // so there is no chain — and the ARGUMENT'S TYPE picks the
+        // source, the same trichotomy the constructors below use. The
+        // field overload is why this zone needs its own setters at all:
+        // a stamped row announcing its OWN name to assistive tech is
+        // something the live zone cannot spell, because a live widget
+        // has no row to read.
+        //
+        // A CONSTANT ID ON EVERY COPY IS LEGAL and often right: nothing
+        // in the core deduplicates a11y ids, and the harness addresses a
+        // copy by kind#index, never by id. Reach for the row's own key
+        // field only when something outside kaya must tell the copies
+        // apart.
+
+        /** A template node's accessibility identifier, one constant for
+         * every stamped copy — the blueprint twin of
+         * {@link Tx#setA11yId(Widget, String)}. */
+        public void setA11yId(Node n, String id) {
+            tx.emit(KayaWire.txSetA11yId(n.id, id));
+        }
+
+        /** An identifier every copy takes from one signal, moving when
+         * it does. */
+        public void setA11yId(Node n, Signal<String> s) {
+            tx.emit(KayaWire.txBindA11yId(n.id, s.id));
+        }
+
+        /** An identifier from the row's own field — a per-copy key for
+         * whatever addresses these rows from outside. */
+        public void setA11yId(Node n, KayaRecords.Field<String> f) {
+            bindA11yIdField(n, 0, f);
+        }
+
+        /** Bind a node's identifier to one field of the element,
+         * {@code level} Fors up (0 = nearest) — {@link #bindTextField}'s
+         * shape, one prop over, and the only way to read an OUTER row's
+         * field from a nested template. */
+        public void bindA11yIdField(Node n, int level, KayaRecords.Field<String> f) {
+            tx.emit(KayaWire.txBindA11yIdElement(n.id, level, f.index));
+        }
+
+        /** What an assistive client SPEAKS for every stamped copy — the
+         * blueprint twin of {@link Tx#setA11yLabel(Widget, String)}. */
+        public void setA11yLabel(Node n, String label) {
+            tx.emit(KayaWire.txSetA11yLabel(n.id, label));
+        }
+
+        public void setA11yLabel(Node n, Signal<String> s) {
+            tx.emit(KayaWire.txBindA11yLabel(n.id, s.id));
+        }
+
+        /** The row's own field as the spoken name: each copy announces
+         * itself. A label whose text already comes from the row usually
+         * wants the SAME field here — otherwise a screen reader is left
+         * inferring the name from the layout around it. */
+        public void setA11yLabel(Node n, KayaRecords.Field<String> f) {
+            bindA11yLabelField(n, 0, f);
+        }
+
+        public void bindA11yLabelField(Node n, int level, KayaRecords.Field<String> f) {
+            tx.emit(KayaWire.txBindA11yLabelElement(n.id, level, f.index));
+        }
+
+        /**
+         * What ACTIVATING a stamped copy does — a verb phrase, the
+         * blueprint twin of {@link Tx#setA11yHint(Widget, String)}.
+         *
+         * <p>THE ONE A11Y PROP THAT IS NOT UNIVERSAL: the root admits it
+         * on the activation kinds alone (button, checkbox, select,
+         * radio), because a label, an image or a container has no
+         * activation to describe. There is no type here to say so, in
+         * this zone or the live one — a hint on any other kind fails the
+         * BUILD in the root's own words, as the prototype is recorded
+         * and before a single row stamps, so the message names the
+         * guest's one declaration rather than one copy per row.
+         */
+        public void setA11yHint(Node n, String hint) {
+            tx.emit(KayaWire.txSetA11yHint(n.id, hint));
+        }
+
+        public void setA11yHint(Node n, Signal<String> s) {
+            tx.emit(KayaWire.txBindA11yHint(n.id, s.id));
+        }
+
+        public void setA11yHint(Node n, KayaRecords.Field<String> f) {
+            bindA11yHintField(n, 0, f);
+        }
+
+        public void bindA11yHintField(Node n, int level, KayaRecords.Field<String> f) {
+            tx.emit(KayaWire.txBindA11yHintElement(n.id, level, f.index));
+        }
+
+        /**
+         * Declare what every stamped copy takes from a paste — the
+         * closed kinds by name ({@link KayaApp#ACCEPT_TEXT} and friends)
+         * plus any custom format ids.
+         *
+         * <p>THE HALF {@link KayaApp#onPaste(Node, PasteHandler)} WAS
+         * MISSING. Every backend gates the paste occurrence on the
+         * focused widget's accept list and falls back to the platform's
+         * own insertion when it is empty, so before this setter existed
+         * a handler registered against a template node compiled,
+         * registered, and could never fire — no binding could put an
+         * accept list on a blueprint.
+         *
+         * <p>A CONSTANT, NOT A SOURCE, unlike the a11y props above: what
+         * a control can take is a fact about the PROTOTYPE, the way a
+         * slider's range and a select's options are, and every copy has
+         * it by construction. On Android it is also the native
+         * registration itself (the mime types on the view), which is a
+         * capability rather than row data.
+         */
+        public void setAccepts(Node n, String... kinds) {
+            tx.emit(KayaWire.txSetAccepts(n.id, acceptList(kinds)));
         }
 
         // The template flavor of the sugar: bindings take field

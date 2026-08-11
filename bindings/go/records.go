@@ -468,7 +468,7 @@ func (t *Tpl) applyRecordText[T any, S interface {
 	case Field[string]:
 		t.BindTextField(n, 0, v)
 	default:
-		t.SetText(n, reflect.ValueOf(v).String())
+		t.setText(n, reflect.ValueOf(v).String())
 	}
 }
 
@@ -515,6 +515,30 @@ func (t *Tpl) applyRecordBlob[T any, S interface {
 	default:
 		// ~[]byte, named byte-slice types included: register now.
 		t.tx.emit(TxSetSource(n.id, uint64(blobWire(v))))
+	}
+}
+
+// applyRecordStrProp is those same four arms for a string PROP rather
+// than a constructor's value: the three wire ops arrive as arguments,
+// because the a11y props differ from each other in nothing else. It is
+// Tpl.applyStrProp with the two arms this surface adds anywhere — the
+// projection, and the constant that must go LAST for ~string's sake.
+func (t *Tpl) applyRecordStrProp[T any, S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](n Node, src S,
+	set func(uint64, string) []byte,
+	bindSignal func(uint64, uint64) []byte,
+	bindElement func(uint64, uint32, uint32) []byte,
+) {
+	switch v := any(src).(type) {
+	case Signal[string]:
+		t.tx.emit(bindSignal(n.id, v.id))
+	case func(*T) *string:
+		t.tx.emit(bindElement(n.id, 0, FieldBy(v).index))
+	case Field[string]:
+		t.tx.emit(bindElement(n.id, 0, v.index))
+	default:
+		t.tx.emit(set(n.id, reflect.ValueOf(v).String()))
 	}
 }
 
@@ -705,4 +729,44 @@ func (c RecordCollection[K, T]) Image[S interface {
 	n := t.Widget(KindImage)
 	t.applyRecordBlob[T](n, src)
 	return n
+}
+
+// The typed template PROPS. They take the node the constructors handed
+// back, so they read as a second statement rather than as a chain —
+// Tpl.SetGrow's shape, for its reason (a Node is a plain id and has no
+// transaction to chain from). One union method per prop rather than the
+// base surface's Set/Bind pair, because the projection arm is what
+// makes this surface worth reaching for and a union already admits the
+// constant:
+//
+//	todos.A11yLabel(t, done, func(x *Todo) *string { return &x.Title })
+//
+// Accepts has no method here, and its absence is the design: it is
+// CONST ONLY (Tpl.SetAccepts says why), so this surface would add
+// nothing to it — a guest holding this collection holds the *Tpl too,
+// and spells it t.SetAccepts(n, kaya.AcceptText).
+
+// A11yID addresses each stamped copy from any addressable source; see
+// Tpl.SetA11yID on why a constant here is usually the wrong half.
+func (c RecordCollection[K, T]) A11yID[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, n Node, src S) {
+	t.applyRecordStrProp[T](n, src, TxSetA11yId, TxBindA11yId, TxBindA11yIdElement)
+}
+
+// A11yLabel speaks each stamped copy from any addressable source — the
+// row's own field being the case the prop exists for (Tpl.BindA11yLabel
+// has the example).
+func (c RecordCollection[K, T]) A11yLabel[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, n Node, src S) {
+	t.applyRecordStrProp[T](n, src, TxSetA11yLabel, TxBindA11yLabel, TxBindA11yLabelElement)
+}
+
+// A11yHint says what activating each stamped copy does — activation
+// kinds only, refused by the root at declare time (Tpl.SetA11yHint).
+func (c RecordCollection[K, T]) A11yHint[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, n Node, src S) {
+	t.applyRecordStrProp[T](n, src, TxSetA11yHint, TxBindA11yHint, TxBindA11yHintElement)
 }

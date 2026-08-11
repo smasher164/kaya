@@ -5098,6 +5098,8 @@ mod tests {
     /// AND THE POSITIVE HALF, so the two above are not passing because
     /// the arm refuses everything: the shapes the constructors actually
     /// emit must record without complaint.
+
+
     #[test]
     fn a_well_formed_template_scroll_and_choice_record() {
         let mut scene = Scene::new();
