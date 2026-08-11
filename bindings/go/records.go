@@ -416,23 +416,138 @@ func (t *Tpl) BindTextField(n Node, level uint32, f Field[string]) {
 	t.tx.emit(TxBindTextElement(n.id, level, f.index))
 }
 
-// Label creates a label bound to any addressable source: a constant,
-// a signal, a field projection, or a pre-resolved token — the
+// BindCheckedField binds a checkbox's state to one field of the
+// element; Field[bool] only.
+func (t *Tpl) BindCheckedField(n Node, level uint32, f Field[bool]) {
+	t.tx.emit(TxBindCheckedElement(n.id, level, f.index))
+}
+
+// BindValueField binds a slider's position, a progress bar's fraction
+// or a choice widget's selected index to one field of the element;
+// Field[float64] only. THE INDEX RIDES A float64 like every other
+// number on this property: the scene checks a bound field's wire type
+// against the property's exactly, and `value` is F64 there, so a
+// select's 0-based index is a float64 field and an int64 one dies at
+// startup. The constraint refuses it at compile time instead.
+func (t *Tpl) BindValueField(n Node, level uint32, f Field[float64]) {
+	t.tx.emit(TxBindValueElement(n.id, level, f.index))
+}
+
+// BindSourceField binds an image's source to one field of the element
+// of the enclosing For; Field[[]byte] only.
+func (t *Tpl) BindSourceField(n Node, level uint32, f Field[[]byte]) {
+	t.tx.emit(TxBindSourceElement(n.id, level, f.index))
+}
+
+// The record surface's four lowerings, one per wire value type: the
 // protocol's whole binding universe as one union-constrained argument
-// (a Go 1.27 generic method; the type switch discriminates).
-func (c RecordCollection[K, T]) Label[S interface {
+// (Go 1.27 generic methods; the type switch discriminates). They are
+// the *Tpl.apply* helpers plus the arm only a record type can offer —
+// the raw field PROJECTION, func(*T) *V, resolved once at declaration
+// by FieldBy.
+//
+// ARM ORDER IS FIXED and the CONSTANT ARM IS THE DEFAULT, in all four.
+// The constraint approximates (~string, not string), so a guest's named
+// type — `type Title string` — is admitted by the signature and matches
+// no `case string:`; before 2026-08-10 Label and Checkbox each had one,
+// and such a value fell past every arm to produce a widget with no text
+// and no error. That is this zone's own silent-drop failure class, so
+// the const arm goes last and catches whatever the bindings did not.
+// T appears only inside S's constraint, which is a union and so has no
+// core type: inference cannot reach it, and every caller spells it —
+// t.applyRecordText[T](n, src).
+
+func (t *Tpl) applyRecordText[T any, S interface {
 	~string | Signal[string] | func(*T) *string | Field[string]
-}](t *Tpl, src S) Node {
-	n := t.Widget(KindLabel)
+}](n Node, src S) {
 	switch v := any(src).(type) {
-	case string:
-		t.SetText(n, v)
 	case Signal[string]:
 		t.tx.emit(TxBindText(n.id, v.id))
 	case func(*T) *string:
 		t.BindTextField(n, 0, FieldBy(v))
 	case Field[string]:
 		t.BindTextField(n, 0, v)
+	default:
+		t.SetText(n, reflect.ValueOf(v).String())
+	}
+}
+
+func (t *Tpl) applyRecordChecked[T any, S interface {
+	~bool | Signal[bool] | func(*T) *bool | Field[bool]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[bool]:
+		t.tx.emit(TxBindChecked(n.id, v.id))
+	case func(*T) *bool:
+		t.BindCheckedField(n, 0, FieldBy(v))
+	case Field[bool]:
+		t.BindCheckedField(n, 0, v)
+	default:
+		t.tx.emit(TxSetChecked(n.id, reflect.ValueOf(v).Bool()))
+	}
+}
+
+func (t *Tpl) applyRecordValue[T any, S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[float64]:
+		t.tx.emit(TxBindValue(n.id, v.id))
+	case func(*T) *float64:
+		t.BindValueField(n, 0, FieldBy(v))
+	case Field[float64]:
+		t.BindValueField(n, 0, v)
+	default:
+		t.tx.emit(TxSetValue(n.id, reflect.ValueOf(v).Float()))
+	}
+}
+
+func (t *Tpl) applyRecordBlob[T any, S interface {
+	~[]byte | Signal[[]byte] | func(*T) *[]byte | Field[[]byte]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[[]byte]:
+		t.tx.emit(TxBindSource(n.id, v.id))
+	case func(*T) *[]byte:
+		t.BindSourceField(n, 0, FieldBy(v))
+	case Field[[]byte]:
+		t.BindSourceField(n, 0, v)
+	default:
+		// ~[]byte, named byte-slice types included: register now.
+		t.tx.emit(TxSetSource(n.id, uint64(blobWire(v))))
+	}
+}
+
+// The typed template constructors. Each takes the *Tpl as its first
+// argument rather than being a method on it, because the record type T
+// must come from THIS receiver for a field projection to resolve
+// against a schema; the plain *Tpl twins of all of these are on the
+// base surface (Tpl.LabelBound, Tpl.Slider, ...), and what these add is
+// exactly two things — the projection arm, and a handler whose key is
+// the receiver's K instead of an []any the guest has to cast.
+
+// Label creates a label bound to any addressable source: a constant, a
+// signal, a field projection, or a pre-resolved token.
+func (c RecordCollection[K, T]) Label[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, src S) Node {
+	n := t.Widget(KindLabel)
+	t.applyRecordText[T](n, src)
+	return n
+}
+
+// Button creates a button whose caption comes from any addressable
+// source, with its click handler (nil for none) — the per-row action
+// button, whose caption can name the row it acts on.
+func (c RecordCollection[K, T]) Button[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, src S, onClick func(*Tx, K)) Node {
+	n := t.Widget(KindButton)
+	t.applyRecordText[T](n, src)
+	if onClick != nil {
+		t.tx.app.OnClickNode(n, func(tx *Tx, keys []any) {
+			onClick(tx, keys[0].(K))
+		})
 	}
 	return n
 }
@@ -445,16 +560,7 @@ func (c RecordCollection[K, T]) Checkbox[S interface {
 	~bool | Signal[bool] | func(*T) *bool | Field[bool]
 }](t *Tpl, src S, onToggle func(*Tx, K, bool)) Node {
 	n := t.Widget(KindCheckbox)
-	switch v := any(src).(type) {
-	case bool:
-		t.tx.emit(TxSetChecked(n.id, v))
-	case Signal[bool]:
-		t.tx.emit(TxBindChecked(n.id, v.id))
-	case func(*T) *bool:
-		t.BindCheckedField(n, 0, FieldBy(v))
-	case Field[bool]:
-		t.BindCheckedField(n, 0, v)
-	}
+	t.applyRecordChecked[T](n, src)
 	if onToggle != nil {
 		t.tx.app.OnToggleNode(n, func(tx *Tx, keys []any, checked bool) {
 			onToggle(tx, keys[0].(K), checked)
@@ -463,10 +569,130 @@ func (c RecordCollection[K, T]) Checkbox[S interface {
 	return n
 }
 
-// BindCheckedField binds a checkbox's state to one field of the
-// element; Field[bool] only.
-func (t *Tpl) BindCheckedField(n Node, level uint32, f Field[bool]) {
-	t.tx.emit(TxBindCheckedElement(n.id, level, f.index))
+// Entry creates an EMPTY text field with its change handler (nil for
+// none): Tpl.Entry's uncontrolled contract with the key already cast.
+// EntryBound seeds each copy from its row instead.
+func (c RecordCollection[K, T]) Entry(t *Tpl, onChange func(*Tx, K, string)) Node {
+	n := t.Widget(KindEntry)
+	c.onChangeOf(t, n, onChange)
+	return n
+}
+
+// EntryBound creates a text field whose INITIAL text comes from any
+// addressable source, with its change handler (nil for none). The seed
+// is one write per stamped copy and the copy owns its text afterwards
+// (Tpl.EntryBound has the whole contract, including what a later
+// UpdateField on the same field does to it).
+func (c RecordCollection[K, T]) EntryBound[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, src S, onChange func(*Tx, K, string)) Node {
+	n := t.Widget(KindEntry)
+	t.applyRecordText[T](n, src)
+	c.onChangeOf(t, n, onChange)
+	return n
+}
+
+// Textarea creates an empty multi-line editor with its change handler
+// (nil for none) — Entry's contract over the platform's real
+// multi-line control.
+func (c RecordCollection[K, T]) Textarea(t *Tpl, onChange func(*Tx, K, string)) Node {
+	n := t.Widget(KindTextarea)
+	c.onChangeOf(t, n, onChange)
+	return n
+}
+
+// TextareaBound seeds each copy's editor from any addressable source —
+// EntryBound's reasoning, one kind over.
+func (c RecordCollection[K, T]) TextareaBound[S interface {
+	~string | Signal[string] | func(*T) *string | Field[string]
+}](t *Tpl, src S, onChange func(*Tx, K, string)) Node {
+	n := t.Widget(KindTextarea)
+	t.applyRecordText[T](n, src)
+	c.onChangeOf(t, n, onChange)
+	return n
+}
+
+// onChangeOf is the text-edit registration the four text constructors
+// share: the copy's keys arrive as an []any and the receiver's K names
+// the depth-1 one, which is the cast this surface exists to make once.
+func (c RecordCollection[K, T]) onChangeOf(t *Tpl, n Node, onChange func(*Tx, K, string)) {
+	if onChange == nil {
+		return
+	}
+	t.tx.app.OnChangeNode(n, func(tx *Tx, keys []any, text string) {
+		onChange(tx, keys[0].(K), text)
+	})
+}
+
+// Progress creates a progress bar bound to any addressable source:
+// display-only, like Label and Image, and the per-row fraction is the
+// reading a list of them is for. 0..=1, domain-checked at the root.
+func (c RecordCollection[K, T]) Progress[S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, src S) Node {
+	n := t.Widget(KindProgress)
+	t.applyRecordValue[T](n, src)
+	return n
+}
+
+// Slider creates a slider over min..max whose POSITION comes from any
+// addressable source, with its change handler (nil for none). The
+// range describes the prototype and stays constant; see Tpl.Slider.
+func (c RecordCollection[K, T]) Slider[S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, min, max float64, src S, onChange func(*Tx, K, float64)) Node {
+	n := t.Widget(KindSlider)
+	t.tx.emit(TxSetMin(n.id, min))
+	t.tx.emit(TxSetMax(n.id, max))
+	t.applyRecordValue[T](n, src)
+	c.onValueOf(t, n, onChange)
+	return n
+}
+
+// Select creates a dropdown over fixed options whose SELECTED INDEX
+// comes from any addressable source, with its pick handler (nil for
+// none): onSelect receives each USER pick's new 0-based index for the
+// copy K names (programmatic writes never echo). The option list stays
+// constant — see Tpl.Select for why it cannot be otherwise — and the
+// index rides a float64 field; see Tpl.BindValueField.
+func (c RecordCollection[K, T]) Select[S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, options []string, src S, onSelect func(*Tx, K, int)) Node {
+	return c.choice(t, KindSelect, options, src, onSelect)
+}
+
+// Radio is Select's inline presentation: same option children, same
+// F64-sourced 0-based index, same pick handler.
+func (c RecordCollection[K, T]) Radio[S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, options []string, src S, onSelect func(*Tx, K, int)) Node {
+	return c.choice(t, KindRadio, options, src, onSelect)
+}
+
+// choice is the shared body of the two choice constructors: the option
+// children, then the sourced index, then the pick handler with its
+// float64 narrowed to the index it always was.
+func (c RecordCollection[K, T]) choice[S interface {
+	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
+}](t *Tpl, kind uint32, options []string, src S, onSelect func(*Tx, K, int)) Node {
+	n := t.choiceOf(kind, options)
+	t.applyRecordValue[T](n, src)
+	if onSelect != nil {
+		c.onValueOf(t, n, func(tx *Tx, key K, v float64) { onSelect(tx, key, int(v)) })
+	}
+	return n
+}
+
+// onValueOf is the value-change registration the slider and the two
+// choice constructors share — App.OnValueChangedNode with the depth-1
+// key cast, the node twin the dispatch loop gained in this same pass.
+func (c RecordCollection[K, T]) onValueOf(t *Tpl, n Node, onChange func(*Tx, K, float64)) {
+	if onChange == nil {
+		return
+	}
+	t.tx.app.OnValueChangedNode(n, func(tx *Tx, keys []any, v float64) {
+		onChange(tx, keys[0].(K), v)
+	})
 }
 
 // Image creates an image bound to any addressable source: encoded
@@ -477,22 +703,6 @@ func (c RecordCollection[K, T]) Image[S interface {
 	~[]byte | Signal[[]byte] | func(*T) *[]byte | Field[[]byte]
 }](t *Tpl, src S) Node {
 	n := t.Widget(KindImage)
-	switch v := any(src).(type) {
-	case Signal[[]byte]:
-		t.tx.emit(TxBindSource(n.id, v.id))
-	case func(*T) *[]byte:
-		t.BindSourceField(n, 0, FieldBy(v))
-	case Field[[]byte]:
-		t.BindSourceField(n, 0, v)
-	default:
-		// ~[]byte, named byte-slice types included: register now.
-		t.tx.emit(TxSetSource(n.id, uint64(blobWire(v))))
-	}
+	t.applyRecordBlob[T](n, src)
 	return n
-}
-
-// BindSourceField binds an image's source to one field of the element
-// of the enclosing For; Field[[]byte] only.
-func (t *Tpl) BindSourceField(n Node, level uint32, f Field[[]byte]) {
-	t.tx.emit(TxBindSourceElement(n.id, level, f.index))
 }

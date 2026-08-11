@@ -126,6 +126,7 @@ type App struct {
 	nodeChanges    map[uint64]func(*Tx, []any, string)
 	widgetToggles  map[uint64]func(*Tx, bool)
 	widgetValues   map[uint64]func(*Tx, float64)
+	nodeValues     map[uint64]func(*Tx, []any, float64)
 	// Window lifecycle: one handler each, receiving the window id.
 	closeRequested map[uint64]func(*Tx)
 	windowClosed   map[uint64]func(*Tx)
@@ -215,6 +216,7 @@ func NewApp() *App {
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
 		widgetToggles:  make(map[uint64]func(*Tx, bool)),
 		widgetValues:   make(map[uint64]func(*Tx, float64)),
+		nodeValues:     make(map[uint64]func(*Tx, []any, float64)),
 		nodeToggles:    make(map[uint64]func(*Tx, []any, bool)),
 		menuActivated:     make(map[uint64]func(*Tx)),
 		menuActivatedNode: make(map[uint64]func(*Tx, []any)),
@@ -2723,6 +2725,26 @@ func (t *Tpl) BindTextElement(n Node, level uint32) {
 	t.tx.emit(TxBindTextElement(n.id, level, 0))
 }
 
+// SetGrow weights a template node within its stamped row or column —
+// the template twin of Tx.SetGrow, spelled as a method rather than a
+// chain because a Node is a plain id and has no transaction to chain
+// from.
+//
+// THE ONE PROP THE TEMPLATE ZONE CARRIES, and it is here because
+// Scroll needs it: an unconstrained viewport hugs its content and
+// nothing ever overflows, so a template scroll without a grow weight
+// is a scroll that cannot scroll. Rust's Tpl has always been able to
+// spell this through its generic set(node, prop, value), so shipping
+// the scroll constructor without it would have opened a divergence in
+// the same pass that closed one (invariant 1).
+//
+// The rest of the template-node props — the a11y pair, spacing, align,
+// accepts — stay unreachable on a Node and stay ledgered
+// (docs/deferred.md). That gap predates this pass.
+func (t *Tpl) SetGrow(n Node, weight float64) {
+	t.tx.emit(TxSetGrow(n.id, weight))
+}
+
 // LabelText creates a label with constant text in the blueprint: the
 // template twin of Tx.LabelText, and the same two records at either
 // depth. The bound flavors are the element ones — Row.Label over the
@@ -2731,6 +2753,27 @@ func (t *Tpl) BindTextElement(n Node, level uint32) {
 func (t *Tpl) LabelText(text string) Node {
 	n := t.Widget(KindLabel)
 	t.SetText(n, text)
+	return n
+}
+
+// LabelBound creates a label whose text comes from a VARYING source —
+// a signal every stamped copy follows, or a field of the row the copy
+// was stamped for. The const flavor is LabelText, and the split is this
+// file's own (SetText/BindText, Tx.Image/Tx.ImageSignal,
+// Tx.Slider/Tx.SliderBound): Go has no implicit conversion, so a single
+// argument covering constants and bindings alike would have to be a
+// type parameter, and a constructor whose name says which half it
+// carries reads better than one that admits both and switches.
+//
+// The BASE surface takes no field PROJECTION, only a resolved token:
+// a projection is func(*T) *string and *Tpl knows no T. The typed
+// surfaces do — RecordCollection.Label and the SumCase arms — and that
+// is the whole of what they add here.
+func (t *Tpl) LabelBound[S interface {
+	Signal[string] | Field[string]
+}](src S) Node {
+	n := t.Widget(KindLabel)
+	t.applyText(n, src)
 	return n
 }
 
@@ -2754,6 +2797,245 @@ func (t *Tpl) Button(text string) Node {
 	return n
 }
 
+// ButtonBound creates a button whose CAPTION comes from a varying
+// source — LabelBound's contract on the clickable kind, for the row
+// whose button says what it will do to that row. Clicks still register
+// centrally against the node (App.OnClickNode); see Tpl.Button for why
+// no handler belongs in a template constructor.
+func (t *Tpl) ButtonBound[S interface {
+	Signal[string] | Field[string]
+}](src S) Node {
+	n := t.Widget(KindButton)
+	t.applyText(n, src)
+	return n
+}
+
+// Entry creates an empty text field in the blueprint: the template twin
+// of Tx.Entry, and UNCONTROLLED the same way — every stamped copy
+// starts empty and owns its own text from the first keystroke, which is
+// why this takes nothing at all. EntryBound is the flavor that seeds
+// each copy from its row.
+//
+// IT TAKES NO HANDLER, for Tpl.Button's reason: a stamped copy's edits
+// name WHICH copy by key path, so the app registers once against the
+// node (App.OnChangeNode, which hands the handler that copy's keys).
+//
+// THIS IS THE CONSTRUCTOR THE WHOLE PASS STARTED FROM. The undo scene's
+// per-row note and the text editor's find bar are both a text field
+// inside a collection, and both were spelled at the widget-kind floor —
+// `row.Widget(kaya.KindEntry)` — because the template zone had sugar
+// for three kinds where the live zone had fourteen. The comment beside
+// the undo scene's line explained that as a property of unbound fields
+// ("there is no source to bind"), which was the wrong lesson: it was a
+// hole in the zone (docs/sugar-pass-plan.md).
+func (t *Tpl) Entry() Node {
+	return t.Widget(KindEntry)
+}
+
+// EntryBound creates a text field whose INITIAL text comes from a
+// varying source. The uncontrolled contract is unchanged — this is one
+// write per stamped copy, not a leash: the copy owns its text
+// afterwards, exactly as Tx.SetText does in the live zone. A field
+// source is what makes it worth having, an editable list pre-filled
+// from its own rows; the live zone has no twin, because a live widget
+// has no row to read.
+//
+// The copy's edits do NOT flow back to the field. A later UpdateField
+// on that row WILL overwrite what the user typed, because the seed is
+// recorded as a real element binding — the same rule in all eight
+// bindings, and the reason the unbound Entry above is the one the two
+// shipped scenes want.
+func (t *Tpl) EntryBound[S interface {
+	Signal[string] | Field[string]
+}](src S) Node {
+	n := t.Widget(KindEntry)
+	t.applyText(n, src)
+	return n
+}
+
+// Textarea creates an empty multi-line editor in the blueprint: the
+// template twin of Tx.Textarea, with Tpl.Entry's uncontrolled contract
+// over the platform's real multi-line control.
+func (t *Tpl) Textarea() Node {
+	return t.Widget(KindTextarea)
+}
+
+// TextareaBound seeds each stamped copy's editor from a varying source
+// — Tpl.EntryBound's reasoning, one kind over.
+func (t *Tpl) TextareaBound[S interface {
+	Signal[string] | Field[string]
+}](src S) Node {
+	n := t.Widget(KindTextarea)
+	t.applyText(n, src)
+	return n
+}
+
+// Checkbox creates a checkbox at a constant checked state in the
+// blueprint. CheckboxBound is the flavor that reads the row's own bit,
+// which is what a list of anything completable wants.
+//
+// THE SOURCE IS THE CHECKED BIT, NOT THE CAPTION, where the live
+// Tx.Checkbox takes text and a handler. That is the zone's split, not
+// Go's: a prototype's caption is one string for every copy (Tpl.SetText
+// writes it) while its checked state is exactly the per-row datum, and
+// Rust's Tpl.checkbox and RecordCollection.Checkbox already spelled it
+// this way.
+func (t *Tpl) Checkbox(checked bool) Node {
+	n := t.Widget(KindCheckbox)
+	t.tx.emit(TxSetChecked(n.id, checked))
+	return n
+}
+
+// CheckboxBound creates a checkbox whose state comes from a varying
+// source. Toggles register against the node (App.OnToggleNode); the
+// typed surfaces co-locate the handler because they can type its key.
+func (t *Tpl) CheckboxBound[S interface {
+	Signal[bool] | Field[bool]
+}](src S) Node {
+	n := t.Widget(KindCheckbox)
+	t.applyChecked(n, src)
+	return n
+}
+
+// Progress creates a progress bar at a constant fraction in the
+// blueprint: display-only, like Label and Image. value is the
+// determinate fraction (0..=1, domain-checked at the root);
+// ProgressBound reads the row's own, and ProgressIndeterminate is the
+// activity mode.
+func (t *Tpl) Progress(value float64) Node {
+	n := t.Widget(KindProgress)
+	t.tx.emit(TxSetValue(n.id, value))
+	return n
+}
+
+// ProgressBound creates a progress bar whose fraction comes from a
+// varying source — the per-row case this zone exists for, one bar per
+// row showing that row's own progress.
+func (t *Tpl) ProgressBound[S interface {
+	Signal[float64] | Field[float64]
+}](src S) Node {
+	n := t.Widget(KindProgress)
+	t.applyValue(n, src)
+	return n
+}
+
+// ProgressIndeterminate creates a progress bar in the platform's
+// activity mode: no fraction, so nothing to source. A statement rather
+// than the live zone's .Indeterminate() chain, because a Node carries
+// no transaction and so has no chain (template-node props are
+// ledgered, docs/sugar-pass-plan.md §2).
+func (t *Tpl) ProgressIndeterminate() Node {
+	n := t.Widget(KindProgress)
+	t.tx.emit(TxSetIndeterminate(n.id, true))
+	return n
+}
+
+// Slider creates a slider over min..max at a constant position in the
+// blueprint. THE RANGE DESCRIBES THE PROTOTYPE and stays a constant —
+// every stamped copy measures the same scale, and only the position is
+// per-row (SliderBound). The wire can bind min and max per element too;
+// nothing asks for a list whose rows are measured differently.
+//
+// IT TAKES NO HANDLER, for Tpl.Button's reason: a stamped copy's moves
+// name WHICH copy by key path, so the app registers once against the
+// node (App.OnValueChangedNode).
+func (t *Tpl) Slider(min, max, value float64) Node {
+	n := t.Widget(KindSlider)
+	t.tx.emit(TxSetMin(n.id, min))
+	t.tx.emit(TxSetMax(n.id, max))
+	t.tx.emit(TxSetValue(n.id, value))
+	return n
+}
+
+// SliderBound creates a slider over min..max whose POSITION comes from
+// a varying source — the row's own number, which is the reading a list
+// of sliders is for.
+func (t *Tpl) SliderBound[S interface {
+	Signal[float64] | Field[float64]
+}](min, max float64, src S) Node {
+	n := t.Widget(KindSlider)
+	t.tx.emit(TxSetMin(n.id, min))
+	t.tx.emit(TxSetMax(n.id, max))
+	t.applyValue(n, src)
+	return n
+}
+
+// Select creates a dropdown over fixed options in the blueprint — each
+// option becomes a label child, the same construction as Tx.Select — at
+// selected, the initial 0-based index. SelectBound sources the index
+// per row; picks register against the node (App.OnValueChangedNode).
+//
+// THE OPTION LIST CANNOT VARY PER ROW, and that is the protocol's
+// limit rather than this surface's: a choice widget's options are its
+// label CHILDREN, a blueprint's children are fixed at declaration, and
+// the one construct that varies a child count per copy is a nested For
+// — whose container is a Column, which the scene's "labels only" rule
+// rejects inside a choice widget. The selected INDEX is the part that
+// varies, and it does (docs/sugar-pass-plan.md §2).
+func (t *Tpl) Select(options []string, selected int) Node {
+	n := t.choiceOf(KindSelect, options)
+	t.tx.emit(TxSetValue(n.id, float64(selected)))
+	return n
+}
+
+// SelectBound creates a dropdown whose selected index comes from a
+// varying source.
+//
+// THE INDEX RIDES A float64 like every numeric slot, so a record field
+// backing one is declared float64 and not int64: the scene checks the
+// field's wire type against the property's at declaration, exactly, and
+// `value` is F64 there. The constraint says so at compile time rather
+// than letting the app die at startup.
+func (t *Tpl) SelectBound[S interface {
+	Signal[float64] | Field[float64]
+}](options []string, src S) Node {
+	n := t.choiceOf(KindSelect, options)
+	t.applyValue(n, src)
+	return n
+}
+
+// Radio creates a radio group over fixed options in the blueprint — the
+// choice contract (see Tpl.Select) in its inline presentation: same
+// option children, same 0-based selected index.
+func (t *Tpl) Radio(options []string, selected int) Node {
+	n := t.choiceOf(KindRadio, options)
+	t.tx.emit(TxSetValue(n.id, float64(selected)))
+	return n
+}
+
+// RadioBound is Tpl.SelectBound's inline presentation: same option
+// children, same F64-sourced 0-based index.
+func (t *Tpl) RadioBound[S interface {
+	Signal[float64] | Field[float64]
+}](options []string, src S) Node {
+	n := t.choiceOf(KindRadio, options)
+	t.applyValue(n, src)
+	return n
+}
+
+// Image creates an image displaying constant encoded bytes in the
+// blueprint: one registration at declaration, and every stamped copy
+// shows it. ImageBound reads a blob signal or the row's own blob field
+// — a per-row picture, which is what a list of anything with a
+// thumbnail wants.
+func (t *Tpl) Image(source []byte) Node {
+	n := t.Widget(KindImage)
+	t.tx.emit(TxSetSource(n.id, uint64(blobWire(source))))
+	return n
+}
+
+// ImageBound creates an image whose bytes come from a varying source.
+// A blob signal re-registers its bytes on every write (see Tx.Write); a
+// blob FIELD is the per-row case — the record schema admits ValueBlob,
+// so a thumbnail column is an ordinary field.
+func (t *Tpl) ImageBound[S interface {
+	Signal[[]byte] | Field[[]byte]
+}](src S) Node {
+	n := t.Widget(KindImage)
+	t.applyBlob(n, src)
+	return n
+}
+
 // The template flavor of the containers.
 func (t *Tpl) Row(body func()) Node {
 	return t.containerOf(KindRow, body)
@@ -2761,6 +3043,50 @@ func (t *Tpl) Row(body func()) Node {
 
 func (t *Tpl) Column(body func()) Node {
 	return t.containerOf(KindColumn, body)
+}
+
+// Scroll is a vertical scroll viewport over exactly one child in the
+// blueprint, per stamped copy: the template twin of Tx.Scroll.
+//
+// The live zone says to chain .Grow(1) so the enclosing track
+// constrains it; a Node has no chain and no prop surface at all, so a
+// stamped viewport keeps its content's natural size. That is the
+// template-node prop gap, ledgered rather than worked around here
+// (docs/sugar-pass-plan.md §2) — and the "exactly one child" rule is
+// checked on the live AddChild arm only, so nothing rejects a second
+// child in a blueprint today either. Neither is promised above.
+func (t *Tpl) Scroll(body func()) Node {
+	return t.containerOf(KindScroll, body)
+}
+
+// Grid creates a grid laying each stamped copy's children row-major
+// into columns columns — each column at its NATURAL width, aligned
+// across rows: the template twin of Tx.Grid. THE COLUMN COUNT
+// DESCRIBES THE PROTOTYPE, so it is a constant and not a source: a
+// shape that varied per copy would not be one grid.
+func (t *Tpl) Grid(columns int, body func()) Node {
+	parent := t.Widget(KindGrid)
+	// The columns write lands BEFORE the body opens, as it does in the
+	// live twin: the body's constructors parent into this node, and a
+	// property of the container written after its children is a
+	// different record order for no reason.
+	t.tx.emit(TxSetColumns(parent.id, float64(columns)))
+	t.tx.app.parents = append(t.tx.app.parents, parent.id)
+	if body != nil {
+		body()
+	}
+	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
+	return parent
+}
+
+// Spacer is PURE SUGAR for an empty grown column in the blueprint: it
+// consumes the leftover main-axis space between its siblings (the grow
+// contract; no new vocabulary reaches a backend). The template twin of
+// Tx.Spacer, which spells the same two records as a chain.
+func (t *Tpl) Spacer() Node {
+	n := t.Widget(KindColumn)
+	t.tx.emit(TxSetGrow(n.id, 1))
+	return n
 }
 
 func (t *Tpl) containerOf(kind uint32, body func()) Node {
@@ -2771,6 +3097,77 @@ func (t *Tpl) containerOf(kind uint32, body func()) Node {
 	}
 	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
 	return parent
+}
+
+// choiceOf builds a choice widget's option children — the shared half
+// of Select and Radio, which differ only in kind and in where their
+// index comes from. The caller writes the index AFTER this returns, so
+// the const and sourced flavors share one construction.
+func (t *Tpl) choiceOf(kind uint32, options []string) Node {
+	n := t.Widget(kind)
+	t.tx.app.parents = append(t.tx.app.parents, n.id)
+	for _, option := range options {
+		o := t.Widget(KindLabel)
+		t.SetText(o, option)
+	}
+	t.tx.app.parents = t.tx.app.parents[:len(t.tx.app.parents)-1]
+	return n
+}
+
+// The four lowerings the *Bound constructors share, one per wire value
+// type. Each is the base surface's half of the template zone's source
+// universe: a signal every copy follows, or a field of the row the copy
+// was stamped for. The third arm — a raw field PROJECTION — needs the
+// record type and so lives on RecordCollection and SumCase; the
+// constant arm is the constructor these sit beside.
+//
+// Written as generic methods (Go 1.27) so the admissible sources are
+// spelled ONCE per value type rather than once per constructor: the
+// union in each constraint is the arm list, and a caller's own type
+// parameter satisfies it by carrying the same one.
+
+func (t *Tpl) applyText[S interface {
+	Signal[string] | Field[string]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[string]:
+		t.tx.emit(TxBindText(n.id, v.id))
+	case Field[string]:
+		t.BindTextField(n, 0, v)
+	}
+}
+
+func (t *Tpl) applyChecked[S interface {
+	Signal[bool] | Field[bool]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[bool]:
+		t.tx.emit(TxBindChecked(n.id, v.id))
+	case Field[bool]:
+		t.BindCheckedField(n, 0, v)
+	}
+}
+
+func (t *Tpl) applyValue[S interface {
+	Signal[float64] | Field[float64]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[float64]:
+		t.tx.emit(TxBindValue(n.id, v.id))
+	case Field[float64]:
+		t.BindValueField(n, 0, v)
+	}
+}
+
+func (t *Tpl) applyBlob[S interface {
+	Signal[[]byte] | Field[[]byte]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[[]byte]:
+		t.tx.emit(TxBindSource(n.id, v.id))
+	case Field[[]byte]:
+		t.BindSourceField(n, 0, v)
+	}
 }
 
 func (t *Tpl) AddChild(parent, child Node) {
@@ -3099,6 +3496,24 @@ func (a *App) OnValueChanged(w Widget, fn func(*Tx, float64)) {
 	a.widgetValues[w.id] = fn
 }
 
+// OnValueChangedNode registers a value handler for a template slider,
+// select or radio group; the handler also receives the stamped copy's
+// keys, outermost first.
+//
+// THIS WAS THE MISSING THIRD PAIR. The dispatch below splits clicks,
+// text edits and toggles into a live arm and a template-node arm, and
+// until 2026-08-10 value changes had only the live one — so a stamped
+// slider's move matched no case at all and was dropped with no error
+// anywhere, in a binding with no way to register for it either. The
+// core has always emitted it (Occurrence::InstanceValueChanged,
+// crates/kaya/src/protocol.rs) and Rust has always routed it
+// (App::on_value_node); nothing was wrong below the binding. Nobody saw
+// it because no scene puts a slider in a template — because until this
+// pass there was no template slider to put there.
+func (a *App) OnValueChangedNode(n Node, fn func(*Tx, []any, float64)) {
+	a.nodeValues[n.id] = fn
+}
+
 // OnToggle registers a handler for a live checkbox's toggles: the box
 // owns its checked bit and reports each flip here; the app folds it
 // into its own state.
@@ -3187,6 +3602,10 @@ func (a *App) Serve() {
 		case kind == occValueChanged && len(keys) == 0:
 			if fn := a.widgetValues[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, value) })
+			}
+		case kind == occValueChanged:
+			if fn := a.nodeValues[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, value) })
 			}
 		case kind == occCloseRequested:
 			if fn := a.closeRequested[id]; fn != nil {

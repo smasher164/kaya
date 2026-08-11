@@ -329,10 +329,13 @@ public final class KayaProcessor extends AbstractProcessor {
         w(b, "        return KayaRecords.rowTrace(c, t -> new Row(t, c));");
         w(b, "    }");
         w(b, "");
-        w(b, "    /** The row surface: the template handle plus one token per");
-        w(b, "     * wire field, and the constructors that consume them. */");
-        w(b, "    static final class Row {");
-        w(b, "        private final KayaApp.Tpl t;");
+        w(b, "    /** The row surface: one token per wire field, plus the typed");
+        w(b, "     * handler routes. Every CONSTRUCTOR is inherited —");
+        w(b, "     * KayaApp.RowSurface forwards the whole template zone once, so");
+        w(b, "     * this generator emits what only it knows (the tokens, and the");
+        w(b, "     * key type a depth-1 handler is given) and never a list of");
+        w(b, "     * widget kinds that could fall behind the zone. */");
+        w(b, "    static final class Row extends KayaApp.RowSurface {");
         w(b, "        private final KayaRecords.Collection<%s, %s> c;", key, recRef);
         for (WireField f : fields) {
             w(b, "        final KayaRecords.Field<%s> %s = %s;",
@@ -340,29 +343,17 @@ public final class KayaProcessor extends AbstractProcessor {
         }
         w(b, "");
         w(b, "        Row(KayaApp.Tpl t, KayaRecords.Collection<%s, %s> c) {", key, recRef);
-        w(b, "            this.t = t;");
+        w(b, "            super(t);");
         w(b, "            this.c = c;");
         w(b, "        }");
         w(b, "");
-        w(b, "        KayaApp.Node label(KayaRecords.Field<String> f) {");
-        w(b, "            return c.label(t, f);");
-        w(b, "        }");
-        w(b, "");
-        w(b, "        KayaApp.Node image(KayaRecords.Field<byte[]> f) {");
-        w(b, "            return c.image(t, f);");
-        w(b, "        }");
-        w(b, "");
+        w(b, "        /** A checkbox on this field with its toggle handler");
+        w(b, "         * co-located, the key typed as this collection's own — the");
+        w(b, "         * inherited checkbox(field) is the same widget with the");
+        w(b, "         * handler registered separately, against the node. */");
         w(b, "        KayaApp.Node checkbox(KayaRecords.Field<Boolean> f,");
         w(b, "                KayaRecords.Collection.ToggleHandler<%s> onToggle) {", key);
-        w(b, "            return c.checkbox(t, f, onToggle);");
-        w(b, "        }");
-        w(b, "");
-        w(b, "        KayaApp.Node row(Runnable body) {");
-        w(b, "            return t.row(body);");
-        w(b, "        }");
-        w(b, "");
-        w(b, "        KayaApp.Node column(Runnable body) {");
-        w(b, "            return t.column(body);");
+        w(b, "            return c.checkbox(tpl(), f, onToggle);");
         w(b, "        }");
         w(b, "    }");
         w(b, "");

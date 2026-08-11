@@ -48,6 +48,15 @@ pub struct StrKind;
 pub struct BoolKind;
 pub struct I64Kind;
 pub struct F64Kind;
+/// The blob marker, so a record field of encoded bytes can address a
+/// template image the way a Str field addresses a label. Added late:
+/// Swift, C# and Java all shipped a per-row image
+/// (`image(_ f: KayaField<Data>)`, bindings/swift/KayaApp.swift:3278)
+/// while Rust could not spell one, because this marker was the only
+/// piece missing — `ValueType::Blob` has always existed. A capability
+/// three bindings have and a fourth cannot express is divergence, not a
+/// carve-out (invariant 1).
+pub struct BlobKind;
 impl ValueKind for StrKind {
     const TYPE: ValueType = ValueType::Str;
 }
@@ -60,6 +69,9 @@ impl ValueKind for I64Kind {
 impl ValueKind for F64Kind {
     const TYPE: ValueType = ValueType::F64;
 }
+impl ValueKind for BlobKind {
+    const TYPE: ValueType = ValueType::Blob;
+}
 
 /// A first-class typed projection: one field of a record type, by
 /// position. Exists because two sites have no record instance in hand —
@@ -69,6 +81,24 @@ pub struct Field<K> {
     pub index: u32,
     _kind: PhantomData<K>,
 }
+
+// A field token is a u32 and a marker, so it copies. Written by hand
+// rather than derived because `#[derive(Copy)]` would demand `K: Copy`
+// of the marker types, which are unit structs with no derives of their
+// own — the standard PhantomData workaround.
+//
+// IT IS NOT A NICETY. Without it, binding one row field to two widgets
+// in the same template — `let name = row.name(); t.label(name);
+// t.entry_bound(name);` — fails to compile with a moved-value error,
+// which is a plain thing for an example to want and would have read as
+// "the template sugar cannot do that".
+impl<K> Clone for Field<K> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<K> Copy for Field<K> {}
 
 /// One of the addressable sources a template property binds to: a
 /// constant, a signal, or a field of the enclosing For's element —
@@ -96,6 +126,30 @@ impl From<&str> for TplSource<StrKind> {
 impl From<bool> for TplSource<BoolKind> {
     fn from(b: bool) -> Self {
         TplSource { inner: SourceInner::Const(Value::Bool(b)), _kind: PhantomData }
+    }
+}
+
+/// The numeric constants, so a template's slider, progress bar or
+/// choice index can be a literal where it does not vary per row —
+/// `t.progress(0.5)` beside `t.progress(row.pct)`.
+impl From<f64> for TplSource<F64Kind> {
+    fn from(n: f64) -> Self {
+        TplSource { inner: SourceInner::Const(Value::F64(n)), _kind: PhantomData }
+    }
+}
+
+impl From<i64> for TplSource<I64Kind> {
+    fn from(n: i64) -> Self {
+        TplSource { inner: SourceInner::Const(Value::I64(n)), _kind: PhantomData }
+    }
+}
+
+/// Encoded image bytes as a constant source. The owning conversions
+/// only — `&[u8]` would need a lifetime the source outlives, and the
+/// blob channel wants an Arc anyway.
+impl<T: Into<crate::protocol::Blob>> From<T> for TplSource<BlobKind> {
+    fn from(bytes: T) -> Self {
+        TplSource { inner: SourceInner::Const(Value::Blob(bytes.into())), _kind: PhantomData }
     }
 }
 
@@ -2614,6 +2668,84 @@ impl<'b> Row<'_, 'b> {
     pub fn column<R>(&mut self, body: impl FnOnce(&mut Tpl<'_, 'b>) -> R) -> (TemplateNodeId, R) {
         self.tpl().column(body)
     }
+
+    // THE REST OF THE ZONE, forwarded. Row is the for-STATEMENT façade
+    // over the same template — a second surface onto one zone — so a
+    // constructor that exists on Tpl and not here is reachable through
+    // `for row in rows` and not through `for_each`, or the other way
+    // about, which is a difference no guest should have to know. The
+    // pair is held level by check-sugar-surface's Row clause rather than
+    // by whoever remembers this block exists; six of these were already
+    // the whole surface when ten kinds were missing from it.
+
+    pub fn entry(&mut self) -> TemplateNodeId {
+        self.tpl().entry()
+    }
+
+    pub fn entry_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        self.tpl().entry_bound(src)
+    }
+
+    pub fn textarea(&mut self) -> TemplateNodeId {
+        self.tpl().textarea()
+    }
+
+    pub fn textarea_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        self.tpl().textarea_bound(src)
+    }
+
+    pub fn scroll<R>(&mut self, body: impl FnOnce(&mut Tpl<'_, 'b>) -> R) -> (TemplateNodeId, R) {
+        self.tpl().scroll(body)
+    }
+
+    pub fn grid<R>(
+        &mut self,
+        columns: usize,
+        body: impl FnOnce(&mut Tpl<'_, 'b>) -> R,
+    ) -> (TemplateNodeId, R) {
+        self.tpl().grid(columns, body)
+    }
+
+    pub fn spacer(&mut self) -> TemplateNodeId {
+        self.tpl().spacer()
+    }
+
+    pub fn progress(&mut self, src: impl Into<TplSource<F64Kind>>) -> TemplateNodeId {
+        self.tpl().progress(src)
+    }
+
+    pub fn progress_indeterminate(&mut self) -> TemplateNodeId {
+        self.tpl().progress_indeterminate()
+    }
+
+    pub fn slider(
+        &mut self,
+        min: f64,
+        max: f64,
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        self.tpl().slider(min, max, src)
+    }
+
+    pub fn select(
+        &mut self,
+        options: &[&str],
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        self.tpl().select(options, src)
+    }
+
+    pub fn radio(
+        &mut self,
+        options: &[&str],
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        self.tpl().radio(options, src)
+    }
+
+    pub fn image(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
+        self.tpl().image(src)
+    }
 }
 
 impl Drop for Row<'_, '_> {
@@ -4617,6 +4749,153 @@ impl Tpl<'_, '_> {
         n
     }
 
+    /// A single-line text field per stamped copy. UNCONTROLLED, which
+    /// is why this takes nothing: the copy owns its text, edits arrive
+    /// as `InstanceTextChanged` naming this node and the copy's key
+    /// path, and the app folds them into its own state. Use
+    /// [`Self::entry_bound`] when each copy should START from its row's
+    /// own data.
+    pub fn entry(&mut self) -> TemplateNodeId {
+        self.widget(WidgetKind::Entry)
+    }
+
+    /// An entry whose INITIAL text comes from any addressable source —
+    /// a constant, a signal, or the row's own field. The uncontrolled
+    /// contract is unchanged: this seeds the copy, the user owns it
+    /// afterwards. (The live zone has no twin for this because a live
+    /// widget has no row to read.)
+    pub fn entry_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Entry);
+        self.apply_source(n, Prop::Text, src.into().inner);
+        n
+    }
+
+    /// A multi-line editor per stamped copy — the entry's contract over
+    /// the platform's real multi-line control.
+    pub fn textarea(&mut self) -> TemplateNodeId {
+        self.widget(WidgetKind::Textarea)
+    }
+
+    /// A textarea seeded from any addressable source; [`Self::entry_bound`]'s
+    /// reasoning, one kind over.
+    pub fn textarea_bound(&mut self, src: impl Into<TplSource<StrKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Textarea);
+        self.apply_source(n, Prop::Text, src.into().inner);
+        n
+    }
+
+    /// A vertical scroll viewport over exactly one child, per copy.
+    pub fn scroll<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> (TemplateNodeId, R) {
+        self.container_of(WidgetKind::Scroll, body)
+    }
+
+    /// A grid laying each copy's children row-major into `columns`
+    /// columns. The column count describes the PROTOTYPE, so it is a
+    /// constant rather than a source — every stamped copy has the same
+    /// shape, and only the values inside it vary.
+    pub fn grid<R>(
+        &mut self,
+        columns: usize,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> (TemplateNodeId, R) {
+        let (node, out) = self.container_of(WidgetKind::Grid, body);
+        self.set(node, Prop::Columns, columns as f64);
+        (node, out)
+    }
+
+    /// A spacer: an empty grown column, the same pure sugar the live
+    /// zone spells (no new vocabulary reaches a backend).
+    pub fn spacer(&mut self) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Column);
+        self.set(n, Prop::Grow, 1.0);
+        n
+    }
+
+    /// A progress bar whose fraction comes from any addressable source —
+    /// the per-row case this zone exists for (`t.progress(row.done)`).
+    pub fn progress(&mut self, src: impl Into<TplSource<F64Kind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Progress);
+        self.apply_source(n, Prop::Value, src.into().inner);
+        n
+    }
+
+    /// A progress bar in the platform's activity mode: no fraction, so
+    /// nothing to source.
+    pub fn progress_indeterminate(&mut self) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Progress);
+        self.set(n, Prop::Indeterminate, true);
+        n
+    }
+
+    /// A slider over `min..max` whose POSITION comes from a source. The
+    /// range describes the prototype and is constant; the position is
+    /// the part that varies per row. Moves arrive as
+    /// `InstanceValueChanged` naming this node and the copy's key path.
+    pub fn slider(
+        &mut self,
+        min: f64,
+        max: f64,
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Slider);
+        self.set(n, Prop::Min, min);
+        self.set(n, Prop::Max, max);
+        self.apply_source(n, Prop::Value, src.into().inner);
+        n
+    }
+
+    /// A dropdown over its options, with the SELECTED INDEX from a
+    /// source. The options are label children of the prototype, so
+    /// every copy offers the same list and only the choice varies —
+    /// a per-row option list would need a collection inside the choice
+    /// widget, which the scene rejects (labels only, deliberately;
+    /// docs/sugar-pass-plan.md §2).
+    pub fn select(
+        &mut self,
+        options: &[&str],
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        self.choice(WidgetKind::Select, options, src.into().inner)
+    }
+
+    /// A radio group: [`Self::select`]'s contract in its inline
+    /// presentation — same option children, same index semantics.
+    pub fn radio(
+        &mut self,
+        options: &[&str],
+        src: impl Into<TplSource<F64Kind>>,
+    ) -> TemplateNodeId {
+        self.choice(WidgetKind::Radio, options, src.into().inner)
+    }
+
+    fn choice(
+        &mut self,
+        kind: WidgetKind,
+        options: &[&str],
+        src: SourceInner,
+    ) -> TemplateNodeId {
+        let n = self.widget(kind);
+        self.tx.parents.push(n.0);
+        for option in options {
+            let label = self.widget(WidgetKind::Label);
+            self.set(label, Prop::Text, *option);
+        }
+        self.tx.parents.pop();
+        self.apply_source(n, Prop::Value, src);
+        n
+    }
+
+    /// An image from any addressable source, INCLUDING the row's own
+    /// blob field — each copy showing its own picture, which is what a
+    /// list of anything with a thumbnail wants. Swift, C# and Java had
+    /// shipped this and Rust could not spell it, for want of
+    /// [`BlobKind`] alone (docs/sugar-pass-plan.md S4).
+    pub fn image(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Image);
+        self.apply_source(n, Prop::Source, src.into().inner);
+        n
+    }
+
     fn apply_source(&mut self, node: TemplateNodeId, prop: Prop, src: SourceInner) {
         let value = match src {
             SourceInner::Const(v) => PropValue::Const(v),
@@ -5501,6 +5780,86 @@ mod tests {
         let mut tx = ctx.begin();
         let c = tx.collection::<String>();
         let _ = tx.for_each(&c.at("g1"), |_| ());
+    }
+
+    /// EVERY TEMPLATE CONSTRUCTOR'S ELEMENT-SOURCE ARM IS REACHABLE —
+    /// not merely declared.
+    ///
+    /// The distinction is the whole lesson of the sugar pass. Python
+    /// shipped `progress(value=<element field>)` for months with the
+    /// FieldRef accessors misspelled (`._field` where the type has
+    /// `._index`), so the constructor existed, every "does it exist"
+    /// check passed, and calling it raised AttributeError. Nothing
+    /// noticed because no guest bound a progress bar to a row
+    /// (docs/sugar-pass-plan.md D3).
+    ///
+    /// So this walks the value-bearing constructors, hands each one a
+    /// FIELD of the row's element, and requires the op that comes out to
+    /// be `PropValue::Element` naming that field — the arm a constant or
+    /// a signal would never reach.
+    #[test]
+    fn every_template_source_arm_binds_the_row_s_own_field() {
+        use crate::protocol::{PropValue, TxOp};
+        use super::{BoolKind, F64Kind, Field, StrKind};
+
+        let (occ_tx, occ_rx) = mpsc::channel();
+        let (tx_tx, _tx_rx) = mpsc::channel();
+        drop(occ_tx);
+        let ctx = AppCtx::new(occ_rx, tx_tx, no_wake());
+        let mut tx = ctx.begin();
+
+        let rows = tx.collection::<String>();
+        let text: Field<StrKind> = Field::new(0);
+        let num: Field<F64Kind> = Field::new(0);
+        // One node per source-taking constructor, each fed the row's
+        // own field. `label`, `checkbox` and `button` are the three that
+        // predate this pass and ride along, so the sweep is every
+        // value-bearing constructor in the zone rather than the new ones.
+        let (_list, nodes) = tx.for_each(&rows, |t| {
+            vec![
+                ("label", t.label(text)),
+                ("checkbox", t.checkbox(Field::<BoolKind>::new(0))),
+                ("button", t.button(text)),
+                ("entry_bound", t.entry_bound(text)),
+                ("textarea_bound", t.textarea_bound(text)),
+                ("progress", t.progress(num)),
+                ("slider", t.slider(0.0, 1.0, num)),
+                ("select", t.select(&["a", "b"], num)),
+                ("radio", t.radio(&["a", "b"], num)),
+            ]
+        });
+
+        for (what, node) in &nodes {
+            let bound = tx.ops.iter().any(|op| {
+                matches!(
+                    op,
+                    TxOp::SetProperty {
+                        widget,
+                        value: PropValue::Element { level: 0, field: 0 },
+                        ..
+                    } if widget.0 == node.0
+                )
+            });
+            assert!(
+                bound,
+                "kaya: the template `{what}` constructor accepted a field of the \
+                 row's element and emitted no Element binding for it — the source \
+                 arm is declared but not reachable, which is exactly the shape \
+                 that shipped in Python for months and passed every check that \
+                 only asked whether the constructor exists"
+            );
+        }
+
+        // ANTI-VACUITY: a loop over an empty list asserts nothing, and a
+        // template body that returned early would leave one.
+        assert_eq!(
+            nodes.len(),
+            9,
+            "kaya: the source-arm sweep walked {} constructors, not the 9 the \
+             zone has — a constructor added without a row here is one this test \
+             cannot speak for",
+            nodes.len()
+        );
     }
 
     // --- Menus ----------------------------------------------------------

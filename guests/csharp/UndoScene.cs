@@ -284,36 +284,44 @@ static class UndoScene
                 // field's are, one identity deeper, and the ledger banks
                 // them the same way now that the payload can name them.
                 //
-                // NOT todos.Rows(), and the reason is a gap rather than a
-                // preference: the generated row surface (TodoKaya.cs,
-                // DO NOT EDIT) exposes Label/Image/Checkbox/Row/Column
-                // and keeps its Tpl private, so the template tier's
-                // widget-kind floor is out of reach through it. The floor
-                // is the sanctioned spelling for a row's entry in every
-                // language — the template tier has no `entry` sugar,
-                // there being no source to bind — so this scene opens the
-                // For itself and keeps the generated field token, which
-                // is what the row surface was buying.
-                tx.Each(todos.Collection, t => t.Row(() =>
+                // The tracing tier, as todos.cs and reorder.cs spell it.
+                // This scene used to open the For by hand and reach for
+                // t.Widget(KayaWire.KindEntry) instead, because the
+                // template zone had no entry to call and the generated
+                // row surface keeps its Tpl private — so the floor, the
+                // C guests' tier, was the only way a row could hold a
+                // text field. Both halves of that are gone.
+                //
+                // Entry() TAKES NOTHING, and that is the constructor
+                // rather than a shortcoming: an entry is uncontrolled,
+                // so the stamped copy owns its text and there is nothing
+                // to seed it from. Entry(row.Title) is the overload that
+                // seeds one, and this row wants a blank note beside the
+                // title, not a second copy of it.
+                foreach (var row in todos.Rows())
                 {
-                    t.Label(TodoKaya.Title);
-                    var note = t.Widget(KayaWire.KindEntry);
-                    // The row's edit, folded exactly as the payload's
-                    // restore of the same field will be — one rule, two
-                    // arrival paths, so the script's assertion cannot
-                    // pass through a second spelling of "what a note is".
-                    // The handler already holds a transaction and names
-                    // no group, so this write is not a step of its own.
-                    app.OnChange(note, (t2, path, text) =>
+                    row.Row(() =>
                     {
-                        long key = RowKey(path);
-                        if (text.Length == 0)
-                            rowNotes.Remove(key);
-                        else
-                            rowNotes[key] = text;
-                        t2.Write(notes, NoteList(rowNotes));
+                        row.Label(row.Title);
+                        var note = row.Entry();
+                        // The row's edit, folded exactly as the payload's
+                        // restore of the same field will be — one rule,
+                        // two arrival paths, so the script's assertion
+                        // cannot pass through a second spelling of "what
+                        // a note is". The handler already holds a
+                        // transaction and names no group, so this write
+                        // is not a step of its own.
+                        app.OnChange(note, (t2, path, text) =>
+                        {
+                            long key = RowKey(path);
+                            if (text.Length == 0)
+                                rowNotes.Remove(key);
+                            else
+                                rowNotes[key] = text;
+                            t2.Write(notes, NoteList(rowNotes));
+                        });
                     });
-                }));
+                }
             });
             // THE SCENE TYPES WITH REAL KEYSTROKES, so something has to
             // be holding focus when it does — and focus is the routing

@@ -194,12 +194,43 @@ type SumCase[K Key, V any] struct {
 	info *recordInfo
 }
 
+// The arm's construction vocabulary. IT IS THE WHOLE OF ONE, because an
+// arm body holds a SumCase and nothing else — the *Tpl behind it is
+// unexported, deliberately, so an arm cannot reach past its own
+// refinement. That makes this surface the one place where a missing
+// constructor is not a matter of ergonomics: before 2026-08-10 a sum
+// arm could build a label, a checkbox and two containers, and there was
+// no spelling for an entry inside one at any tier, floor included.
+//
+// Every constructor here is its *Tpl twin with the arm's refinement
+// substituted for the source: where the base surface takes a signal or
+// a resolved token, this one takes the FIELD SELECTOR, resolved against
+// constructor V's own schema — that is what an arm is for, and a
+// constant there would throw the match away. Structure and captions,
+// which name the prototype rather than the row, stay plain values and
+// pass straight through. Handlers are co-located because the receiver's
+// K types the stamped copy's key.
+
 // Row is the template container sugar, on the arm's own recorder:
 // the body's constructors parent into it ambiently.
 func (sc SumCase[K, V]) Row(body func()) Node { return sc.t.Row(body) }
 
 // Column likewise.
 func (sc SumCase[K, V]) Column(body func()) Node { return sc.t.Column(body) }
+
+// Scroll is the arm's viewport over exactly one child; see Tpl.Scroll.
+func (sc SumCase[K, V]) Scroll(body func()) Node { return sc.t.Scroll(body) }
+
+// Grid lays the arm's children row-major into columns columns; the
+// count describes the prototype, so it is constant (see Tpl.Grid).
+func (sc SumCase[K, V]) Grid(columns int, body func()) Node { return sc.t.Grid(columns, body) }
+
+// Spacer is the empty grown column between an arm's siblings.
+func (sc SumCase[K, V]) Spacer() Node { return sc.t.Spacer() }
+
+// LabelText is a label with constant text — the arm's chrome, the
+// caption that says which constructor this is.
+func (sc SumCase[K, V]) LabelText(text string) Node { return sc.t.LabelText(text) }
 
 // Label bound to the field the selector names.
 func (sc SumCase[K, V]) Label(sel func(*V) *string) Node {
@@ -219,4 +250,128 @@ func (sc SumCase[K, V]) Checkbox(sel func(*V) *bool, onToggle func(*Tx, K, bool)
 		})
 	}
 	return n
+}
+
+// Button with a constant caption and its click handler co-located.
+func (sc SumCase[K, V]) Button(text string, onClick func(*Tx, K)) Node {
+	n := sc.t.Button(text)
+	sc.onClick(n, onClick)
+	return n
+}
+
+// ButtonBound is Button with the caption from the field the selector
+// names — the row's own noun on the button that acts on it.
+func (sc SumCase[K, V]) ButtonBound(sel func(*V) *string, onClick func(*Tx, K)) Node {
+	n := sc.t.Widget(KindButton)
+	sc.t.BindTextField(n, 0, FieldBy(sel))
+	sc.onClick(n, onClick)
+	return n
+}
+
+func (sc SumCase[K, V]) onClick(n Node, onClick func(*Tx, K)) {
+	if onClick == nil {
+		return
+	}
+	sc.t.tx.app.OnClickNode(n, func(tx *Tx, keys []any) { onClick(tx, keys[0].(K)) })
+}
+
+// Entry is an EMPTY text field with its change handler co-located:
+// uncontrolled, so every stamped copy of this arm starts empty and owns
+// its text (Tpl.Entry has the contract). EntryBound seeds from a field.
+func (sc SumCase[K, V]) Entry(onChange func(*Tx, K, string)) Node {
+	n := sc.t.Widget(KindEntry)
+	sc.onChange(n, onChange)
+	return n
+}
+
+// EntryBound seeds each copy's field from the field the selector names;
+// the copy owns its text afterwards (see Tpl.EntryBound).
+func (sc SumCase[K, V]) EntryBound(sel func(*V) *string, onChange func(*Tx, K, string)) Node {
+	n := sc.t.Widget(KindEntry)
+	sc.t.BindTextField(n, 0, FieldBy(sel))
+	sc.onChange(n, onChange)
+	return n
+}
+
+// Textarea is Entry's contract over the multi-line control.
+func (sc SumCase[K, V]) Textarea(onChange func(*Tx, K, string)) Node {
+	n := sc.t.Widget(KindTextarea)
+	sc.onChange(n, onChange)
+	return n
+}
+
+// TextareaBound is EntryBound one kind over.
+func (sc SumCase[K, V]) TextareaBound(sel func(*V) *string, onChange func(*Tx, K, string)) Node {
+	n := sc.t.Widget(KindTextarea)
+	sc.t.BindTextField(n, 0, FieldBy(sel))
+	sc.onChange(n, onChange)
+	return n
+}
+
+func (sc SumCase[K, V]) onChange(n Node, onChange func(*Tx, K, string)) {
+	if onChange == nil {
+		return
+	}
+	sc.t.tx.app.OnChangeNode(n, func(tx *Tx, keys []any, text string) {
+		onChange(tx, keys[0].(K), text)
+	})
+}
+
+// Image bound to the blob field the selector names — the arm's own
+// picture, one per stamped copy.
+func (sc SumCase[K, V]) Image(sel func(*V) *[]byte) Node {
+	n := sc.t.Widget(KindImage)
+	sc.t.BindSourceField(n, 0, FieldBy(sel))
+	return n
+}
+
+// Progress bound to the fraction field the selector names: display-only
+// (0..=1, domain-checked at the root).
+func (sc SumCase[K, V]) Progress(sel func(*V) *float64) Node {
+	n := sc.t.Widget(KindProgress)
+	sc.t.BindValueField(n, 0, FieldBy(sel))
+	return n
+}
+
+// Slider over min..max whose position is the field the selector names,
+// with its change handler co-located. The range describes the prototype
+// and stays constant; see Tpl.Slider.
+func (sc SumCase[K, V]) Slider(min, max float64, sel func(*V) *float64, onChange func(*Tx, K, float64)) Node {
+	n := sc.t.Widget(KindSlider)
+	sc.t.tx.emit(TxSetMin(n.id, min))
+	sc.t.tx.emit(TxSetMax(n.id, max))
+	sc.t.BindValueField(n, 0, FieldBy(sel))
+	sc.onValue(n, onChange)
+	return n
+}
+
+// Select over fixed options whose 0-based index is the field the
+// selector names, with its pick handler co-located. The option list
+// stays constant (Tpl.Select says why it cannot be otherwise) and the
+// index field is float64 (Tpl.BindValueField says why).
+func (sc SumCase[K, V]) Select(options []string, sel func(*V) *float64, onSelect func(*Tx, K, int)) Node {
+	return sc.choice(KindSelect, options, sel, onSelect)
+}
+
+// Radio is Select's inline presentation: same children, same index.
+func (sc SumCase[K, V]) Radio(options []string, sel func(*V) *float64, onSelect func(*Tx, K, int)) Node {
+	return sc.choice(KindRadio, options, sel, onSelect)
+}
+
+func (sc SumCase[K, V]) choice(kind uint32, options []string, sel func(*V) *float64, onSelect func(*Tx, K, int)) Node {
+	n := sc.t.choiceOf(kind, options)
+	sc.t.BindValueField(n, 0, FieldBy(sel))
+	if onSelect != nil {
+		sc.onValue(n, func(tx *Tx, key K, v float64) { onSelect(tx, key, int(v)) })
+	}
+	return n
+}
+
+func (sc SumCase[K, V]) onValue(n Node, onChange func(*Tx, K, float64)) {
+	if onChange == nil {
+		return
+	}
+	sc.t.tx.app.OnValueChangedNode(n, func(tx *Tx, keys []any, v float64) {
+		onChange(tx, keys[0].(K), v)
+	})
 }

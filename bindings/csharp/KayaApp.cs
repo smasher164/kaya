@@ -406,6 +406,7 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx, bool>> widgetToggles = new();
     readonly Dictionary<ulong, Action<Tx, double>> widgetValues = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, bool>> nodeToggles = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, double>> nodeValues = new();
     // Window lifecycle: one handler each, receiving the window id.
     internal readonly Dictionary<ulong, Action<Tx>> closeRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> entryPopped = new();
@@ -706,6 +707,20 @@ sealed class KayaApp
     public void OnToggle(Node n, Action<Tx, List<object>, bool> handler) =>
         nodeToggles[n.Id] = handler;
 
+    /// A template slider's or choice widget's change handler; it also
+    /// receives the stamped copy's keys, outermost first.
+    ///
+    /// The core has always emitted this one (InstanceValueChanged,
+    /// crates/kaya/src/protocol.rs) and until the template zone grew a
+    /// slider there was no way to reach it, so C# had the live
+    /// registrar, the live dispatch arm, and neither of the node
+    /// halves — a stamped copy's move matched no case in DispatchLoop
+    /// and was dropped with nothing said. Its three siblings (click,
+    /// text, toggle) each had both arms all along, which is what made
+    /// the hole invisible.
+    public void OnValueChanged(Node n, Action<Tx, List<object>, double> handler) =>
+        nodeValues[n.Id] = handler;
+
     /// One handler dispatch: an exception crosses the Build boundary
     /// (which rolled the mirrors back and dropped the records), is
     /// logged, and the loop moves to the next occurrence — the uniform
@@ -818,6 +833,11 @@ sealed class KayaApp
             {
                 if (widgetValues.TryGetValue(id, out var fn))
                     Dispatch(tx => fn(tx, payload is double d ? d : 0.0));
+            }
+            else if (kind == KayaWire.OccKindValueChanged)
+            {
+                if (nodeValues.TryGetValue(id, out var fn))
+                    Dispatch(tx => fn(tx, keys, payload is double d ? d : 0.0));
             }
             else if (kind == KayaWire.OccKindCloseRequested)
             {
@@ -2607,6 +2627,27 @@ sealed class Tpl
     public void BindSourceField(Node n, uint level, Field<byte[]> f) =>
         tx.Records.Add(KayaWire.TxBindSourceElement(n.Id, level, f.Index));
 
+    /// Bind a slider's, progress bar's or choice widget's value to one
+    /// field of the element; Field&lt;double&gt; only. A choice's 0-based
+    /// index is carried by a `double` record field for the same reason:
+    /// `value` is an F64 prop and the root compares a bound field's
+    /// declared type against the prop's exactly, so a Field&lt;long&gt;
+    /// there is rejected at declaration however integral the index is.
+    public void BindValueField(Node n, uint level, Field<double> f) =>
+        tx.Records.Add(KayaWire.TxBindValueElement(n.Id, level, f.Index));
+
+    /// A template node's flex weight within its enclosing row or
+    /// column — kind-agnostic, as the live Tx.SetGrow is.
+    ///
+    /// It is a floor setter and not a `grow:` argument on every
+    /// constructor because a TEMPLATE constructor's arguments are its
+    /// sources: the thing that differs per stamped copy. Grow describes
+    /// the prototype and is one value for every copy, so it is set on
+    /// the node like any other prop — which is also where Rust's
+    /// `Tpl::set(node, Prop::Grow, …)` keeps it.
+    public void SetGrow(Node n, double weight) =>
+        tx.Records.Add(KayaWire.TxSetGrow(n.Id, weight));
+
     // Construction sugar, template flavor: one name per widget, the
     // argument's type picks the addressable source (constant, signal,
     // or element field); handlers receive the stamped copy's keys
@@ -2681,9 +2722,275 @@ sealed class Tpl
         return n;
     }
 
+    /// A single-line text field in the blueprint, one copy per stamped
+    /// row. UNCONTROLLED, which is why the default overload takes no
+    /// source: the copy owns its text, each edit arrives at onChange
+    /// with that copy's keys, outermost first, and the app folds it
+    /// into its own state — there is no read-back, by doctrine. This is
+    /// the overload a per-row note field wants (guests/csharp/UndoScene.cs).
+    ///
+    /// The three below SEED the copy instead, which is what an editable
+    /// list pre-filled from its rows wants: the Field arm shows the
+    /// row's own stored text on the first stamp and re-shows it when an
+    /// undo restores that field. Seeding does not make the entry
+    /// controlled — a later write to the source pushes into every copy
+    /// quietly, replacing what the user typed, so seed from a field the
+    /// app writes on commit and not on keystroke.
+    public Node Entry(Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Widget(KayaWire.KindEntry);
+        if (onChange != null) tx.App.OnChange(n, onChange);
+        return n;
+    }
+
+    public Node Entry(string text, Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Entry(onChange);
+        SetText(n, text);
+        return n;
+    }
+
+    public Node Entry(Signal text, Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Entry(onChange);
+        tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
+        return n;
+    }
+
+    public Node Entry(Field<string> text, Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Entry(onChange);
+        BindTextField(n, 0, text);
+        return n;
+    }
+
+    /// A multi-line editor in the blueprint: Entry's contract over the
+    /// platform's real multi-line control, with the same four arms for
+    /// the same reason.
+    public Node Textarea(Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Widget(KayaWire.KindTextarea);
+        if (onChange != null) tx.App.OnChange(n, onChange);
+        return n;
+    }
+
+    public Node Textarea(string text, Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Textarea(onChange);
+        SetText(n, text);
+        return n;
+    }
+
+    public Node Textarea(Signal text, Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Textarea(onChange);
+        tx.Records.Add(KayaWire.TxBindText(n.Id, text.Id));
+        return n;
+    }
+
+    public Node Textarea(Field<string> text, Action<Tx, List<object>, string> onChange = null)
+    {
+        var n = Textarea(onChange);
+        BindTextField(n, 0, text);
+        return n;
+    }
+
+    /// A progress bar in the blueprint: display-only, like Label and
+    /// Image. The fraction (0..=1, domain-checked at the root) comes
+    /// from any addressable source — and the element arm is the case
+    /// this zone exists for, one bar per row showing that row's own
+    /// number.
+    public Node Progress(double value)
+    {
+        var n = Widget(KayaWire.KindProgress);
+        tx.Records.Add(KayaWire.TxSetValue(n.Id, value));
+        return n;
+    }
+
+    public Node Progress(Signal value)
+    {
+        var n = Widget(KayaWire.KindProgress);
+        tx.Records.Add(KayaWire.TxBindValue(n.Id, value.Id));
+        return n;
+    }
+
+    public Node Progress(Field<double> value)
+    {
+        var n = Widget(KayaWire.KindProgress);
+        BindValueField(n, 0, value);
+        return n;
+    }
+
+    /// A progress bar in the platform's activity mode: no fraction, so
+    /// nothing to source, which is why it is its own constructor rather
+    /// than a flag on the three above.
+    public Node ProgressIndeterminate()
+    {
+        var n = Widget(KayaWire.KindProgress);
+        tx.Records.Add(KayaWire.TxSetIndeterminate(n.Id, true));
+        return n;
+    }
+
+    /// A slider over min..max in the blueprint, its POSITION from any
+    /// addressable source and its change handler co-located: moves on a
+    /// stamped copy arrive at onChange with that copy's keys, outermost
+    /// first, and the new position — the entry's uncontrolled contract,
+    /// with a double.
+    ///
+    /// THE RANGE IS CONSTANT AND THE POSITION IS THE SOURCE. min and
+    /// max describe the prototype, so every copy shares them; the
+    /// position is the part a row owns, which is what the Field arm
+    /// binds.
+    public Node Slider(double min, double max, double value,
+        Action<Tx, List<object>, double> onChange = null)
+    {
+        var n = SliderOf(min, max, onChange);
+        tx.Records.Add(KayaWire.TxSetValue(n.Id, value));
+        return n;
+    }
+
+    public Node Slider(double min, double max, Signal value,
+        Action<Tx, List<object>, double> onChange = null)
+    {
+        var n = SliderOf(min, max, onChange);
+        tx.Records.Add(KayaWire.TxBindValue(n.Id, value.Id));
+        return n;
+    }
+
+    public Node Slider(double min, double max, Field<double> value,
+        Action<Tx, List<object>, double> onChange = null)
+    {
+        var n = SliderOf(min, max, onChange);
+        BindValueField(n, 0, value);
+        return n;
+    }
+
+    Node SliderOf(double min, double max, Action<Tx, List<object>, double> onChange)
+    {
+        var n = Widget(KayaWire.KindSlider);
+        tx.Records.Add(KayaWire.TxSetMin(n.Id, min));
+        tx.Records.Add(KayaWire.TxSetMax(n.Id, max));
+        if (onChange != null) tx.App.OnValueChanged(n, onChange);
+        return n;
+    }
+
+    /// A dropdown select in the blueprint — each option becomes a label
+    /// child (labels only) — with the SELECTED INDEX from any
+    /// addressable source and the pick handler co-located: onSelect
+    /// receives the stamped copy's keys, outermost first, and each USER
+    /// pick's new 0-based index (programmatic writes never echo) — the
+    /// slider's uncontrolled contract.
+    ///
+    /// THE OPTIONS ARE PER-TEMPLATE, NOT PER-ROW. Each option is a
+    /// label child of the prototype and the prototype is stamped
+    /// verbatim, so a per-copy option LIST would be a per-copy
+    /// blueprint; what varies per copy is which option is selected,
+    /// which is exactly what the source binds
+    /// (docs/sugar-pass-plan.md §2).
+    public Node Select(string[] options, int selected,
+        Action<Tx, List<object>, int> onSelect = null) =>
+        Choice(KayaWire.KindSelect, options, selected, onSelect);
+
+    public Node Select(string[] options, Signal selected,
+        Action<Tx, List<object>, int> onSelect = null) =>
+        Choice(KayaWire.KindSelect, options, selected, onSelect);
+
+    public Node Select(string[] options, Field<double> selected,
+        Action<Tx, List<object>, int> onSelect = null) =>
+        Choice(KayaWire.KindSelect, options, selected, onSelect);
+
+    /// A radio group in the blueprint: the choice contract (see Select)
+    /// in its inline presentation — same option children, same 0-based
+    /// index semantics, same pick handler carrying the copy's keys.
+    public Node Radio(string[] options, int selected,
+        Action<Tx, List<object>, int> onSelect = null) =>
+        Choice(KayaWire.KindRadio, options, selected, onSelect);
+
+    public Node Radio(string[] options, Signal selected,
+        Action<Tx, List<object>, int> onSelect = null) =>
+        Choice(KayaWire.KindRadio, options, selected, onSelect);
+
+    public Node Radio(string[] options, Field<double> selected,
+        Action<Tx, List<object>, int> onSelect = null) =>
+        Choice(KayaWire.KindRadio, options, selected, onSelect);
+
+    Node Choice(uint kind, string[] options, int selected,
+        Action<Tx, List<object>, int> onSelect)
+    {
+        var n = ChoiceOf(kind, options, onSelect);
+        tx.Records.Add(KayaWire.TxSetValue(n.Id, selected));
+        return n;
+    }
+
+    Node Choice(uint kind, string[] options, Signal selected,
+        Action<Tx, List<object>, int> onSelect)
+    {
+        var n = ChoiceOf(kind, options, onSelect);
+        tx.Records.Add(KayaWire.TxBindValue(n.Id, selected.Id));
+        return n;
+    }
+
+    Node Choice(uint kind, string[] options, Field<double> selected,
+        Action<Tx, List<object>, int> onSelect)
+    {
+        var n = ChoiceOf(kind, options, onSelect);
+        BindValueField(n, 0, selected);
+        return n;
+    }
+
+    /// The option children and the handler — everything a choice widget
+    /// has before its selected index, which is the one part the three
+    /// arms above differ in.
+    Node ChoiceOf(uint kind, string[] options, Action<Tx, List<object>, int> onSelect)
+    {
+        var n = Widget(kind);
+        tx.App.Parents.Add(n.Id);
+        foreach (var option in options)
+        {
+            var o = Widget(KayaWire.KindLabel);
+            SetText(o, option);
+        }
+        tx.App.Parents.RemoveAt(tx.App.Parents.Count - 1);
+        if (onSelect != null)
+            tx.App.OnValueChanged(n, (t2, keys, v) => onSelect(t2, keys, (int)v));
+        return n;
+    }
+
     public Node Column(Action body) => ContainerOf(KayaWire.KindColumn, body);
 
     public Node Row(Action body) => ContainerOf(KayaWire.KindRow, body);
+
+    /// A vertical scroll viewport over EXACTLY ONE child (declare it in
+    /// the body), per stamped copy. SetGrow it so the enclosing track
+    /// CONSTRAINS it — an unconstrained viewport hugs its content and
+    /// nothing overflows. The live zone spells that as a `grow:`
+    /// argument; here it is a floor call, because a template
+    /// constructor's arguments are its per-row sources.
+    public Node Scroll(Action body) => ContainerOf(KayaWire.KindScroll, body);
+
+    /// A grid laying each stamped copy's children out row-major into
+    /// `columns` columns — each column takes its NATURAL width, aligned
+    /// across rows (the thing nested rows cannot express).
+    ///
+    /// The column count describes the PROTOTYPE, so it is a constant
+    /// and not a source: every copy has the same shape, and only the
+    /// values inside it vary.
+    public Node Grid(int columns, Action body)
+    {
+        var n = ContainerOf(KayaWire.KindGrid, body);
+        tx.Records.Add(KayaWire.TxSetColumns(n.Id, columns));
+        return n;
+    }
+
+    /// A spacer: PURE SUGAR for an empty grown column — it consumes the
+    /// leftover main-axis space between its siblings, in every stamped
+    /// copy. No new vocabulary reaches a backend.
+    public Node Spacer()
+    {
+        var n = Widget(KayaWire.KindColumn);
+        SetGrow(n, 1.0);
+        return n;
+    }
 
     Node ContainerOf(uint kind, Action body)
     {

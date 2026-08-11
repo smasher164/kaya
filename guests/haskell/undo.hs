@@ -57,7 +57,7 @@ import Data.Proxy (Proxy (..))
 import GHC.Generics (Generic)
 
 import KayaApp
-import KayaWire (Value (..), kindEntry)
+import KayaWire (Value (..))
 
 -- The record is the schema.
 data Todo = Todo {title :: String} deriving (Generic)
@@ -295,9 +295,11 @@ main = kayaMain $ \app -> do
     -- THE ROW'S OWN FIELD, and the reason this scene grew: a copy's
     -- text edits are the same occurrence a live field's are, one
     -- identity deeper, and the ledger banks them the same way now that
-    -- the payload can name them. The template tier has no `entry` sugar
-    -- — there is no source to bind — so the widget-kind floor is the
-    -- spelling in every language.
+    -- the payload can name them. 'entry' with nothing to bind, because
+    -- the field is UNCONTROLLED: the copy owns its text from the first
+    -- keystroke, and this scene's whole point is that the app folds
+    -- those edits into its own state. ('entryBound' is the sibling that
+    -- seeds each copy from its row.)
     --
     -- 'forEach' rather than 'each' because the change handler is
     -- registered centrally against the NODE, exactly as a stamped
@@ -305,8 +307,8 @@ main = kayaMain $ \app -> do
     -- hand a handler to, so the node escapes the template and 'pure'
     -- slots it into the row where it stands.
     (todoRows, noteNode) <- forEach (recordHandle todos) $ do
-      note <- widget kindEntry
-      _ <- row [label (field @"title" @Todo), pure note]
+      note <- entry
+      _ <- rowOf [label (field @"title" @Todo), pure note]
       return note
 
     root <-

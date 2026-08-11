@@ -33,7 +33,21 @@ static class TodoKaya
 }
 
 /// <summary>The row surface: the template handle plus one token per
-/// wire field, and the constructors that consume them.</summary>
+/// wire field, and the template zone's whole vocabulary aimed at them.
+///
+/// The forwarders below are the ZONE and not a selection from it. A
+/// constructor Tpl has and this does not is reachable through tx.Each
+/// and not through `foreach (var row in c.Rows())`, which is a
+/// difference no guest should have to know about, and the shape this
+/// list drifts into: it named five constructors by hand while the
+/// zone named six, and the scene that wanted a per-row entry could
+/// not use either, so it opened the For itself and reached for the
+/// widget-kind floor (docs/sugar-pass-plan.md S4b).
+/// Add here whatever is added to Tpl.
+/// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild,
+/// Collection/ForEach/When, ContextMenu — stays off deliberately: a
+/// row surface hands out sugar, and its Tpl is private so the floor
+/// is reached by opening the For yourself.</summary>
 sealed class TodoRow
 {
     readonly Tpl t;
@@ -42,7 +56,17 @@ sealed class TodoRow
 
     internal TodoRow(Tpl t) => this.t = t;
 
+    public Node Label(string text) => t.Label(text);
+
+    public Node Label(Signal s) => t.Label(s);
+
     public Node Label(Field<string> f) => t.Label(f);
+
+    public Node Button(string text) => t.Button(text);
+
+    public Node Image(byte[] source) => t.Image(source);
+
+    public Node Image(Signal s) => t.Image(s);
 
     public Node Image(Field<byte[]> f) => t.Image(f);
 
@@ -50,9 +74,91 @@ sealed class TodoRow
         System.Action<Tx, System.Collections.Generic.List<object>, bool> onToggle = null) =>
         t.Checkbox(f, onToggle);
 
+    public Node Entry(
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Entry(onChange);
+
+    public Node Entry(string text,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Entry(text, onChange);
+
+    public Node Entry(Signal text,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Entry(text, onChange);
+
+    public Node Entry(Field<string> text,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Entry(text, onChange);
+
+    public Node Textarea(
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Textarea(onChange);
+
+    public Node Textarea(string text,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Textarea(text, onChange);
+
+    public Node Textarea(Signal text,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Textarea(text, onChange);
+
+    public Node Textarea(Field<string> text,
+        System.Action<Tx, System.Collections.Generic.List<object>, string> onChange = null) =>
+        t.Textarea(text, onChange);
+
+    public Node Progress(double value) => t.Progress(value);
+
+    public Node Progress(Signal value) => t.Progress(value);
+
+    public Node Progress(Field<double> value) => t.Progress(value);
+
+    public Node ProgressIndeterminate() => t.ProgressIndeterminate();
+
+    public Node Slider(double min, double max, double value,
+        System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null) =>
+        t.Slider(min, max, value, onChange);
+
+    public Node Slider(double min, double max, Signal value,
+        System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null) =>
+        t.Slider(min, max, value, onChange);
+
+    public Node Slider(double min, double max, Field<double> value,
+        System.Action<Tx, System.Collections.Generic.List<object>, double> onChange = null) =>
+        t.Slider(min, max, value, onChange);
+
+    public Node Select(string[] options, int selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        t.Select(options, selected, onSelect);
+
+    public Node Select(string[] options, Signal selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        t.Select(options, selected, onSelect);
+
+    public Node Select(string[] options, Field<double> selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        t.Select(options, selected, onSelect);
+
+    public Node Radio(string[] options, int selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        t.Radio(options, selected, onSelect);
+
+    public Node Radio(string[] options, Signal selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        t.Radio(options, selected, onSelect);
+
+    public Node Radio(string[] options, Field<double> selected,
+        System.Action<Tx, System.Collections.Generic.List<object>, int> onSelect = null) =>
+        t.Radio(options, selected, onSelect);
+
     public Node Row(System.Action body) => t.Row(body);
 
     public Node Column(System.Action body) => t.Column(body);
+
+    public Node Scroll(System.Action body) => t.Scroll(body);
+
+    public Node Grid(int columns, System.Action body) => t.Grid(columns, body);
+
+    public Node Spacer() => t.Spacer();
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

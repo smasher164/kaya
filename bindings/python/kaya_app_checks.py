@@ -866,5 +866,213 @@ try:
 finally:
     kaya.runtime.submit = _real_submit5
 
+# EVERY ELEMENT-SOURCE ARM LOWERS TO SOURCE_ELEMENT, decoded from the
+# bytes rather than asked about.
+#
+# THE DEFECT THIS EXISTS FOR (docs/sugar-pass-plan.md D3): `progress`
+# spelled the FieldRef accessors `value._level, value._field` where the
+# type has `._level()` and `._index` — one callsite out of five, wrong
+# in both halves. So `kaya.progress(value=row.pct)` inside a for_each
+# raised AttributeError, and had it got past that it would have packed a
+# bound method into struct.pack. It shipped for months because no guest
+# binds a progress bar to a row, and because every check kaya had asked
+# whether the CONSTRUCTOR EXISTS. It does. It always did.
+#
+# So this check decodes the queued record and insists on the prop, the
+# source kind, the level and the FIELD INDEX. A constructor that takes
+# the argument and drops it, or binds the wrong field, fails here — the
+# arm has to be reachable, not merely declared.
+@dataclass
+class Row3:
+    title: str
+    done: bool
+    pct: float
+    pic: bytes
+
+
+@dataclass
+class Note3:
+    text: str
+
+
+@dataclass
+class Shot3:
+    pic: bytes
+
+
+def _rewind(before):
+    """Drop whatever the call under test queued. A constructor emits its
+    create_widget before it reaches the argument that raises, so without
+    this the next clause reads the abandoned node's records as its own."""
+    del kaya._tx[before:]
+
+
+def _elem_bind(fn):
+    """Queue one element-bound constructor; decode what reached the wire,
+    or None if no element bind did.
+
+    A RAISING ARM IS A FINDING, NOT A CRASH. The defect above raised
+    rather than mis-encoding, and an uncaught AttributeError here would
+    end the run at the first bad arm — no verdict on the four beside it,
+    and a reader reading a traceback instead of a name. So the exception
+    is caught, printed, and answered as a failed clause."""
+    before = len(kaya._tx)
+    try:
+        fn()
+    except Exception as exc:
+        print(f"       (raised {type(exc).__name__}: {exc})")
+        _rewind(before)
+        return None
+    for rec in kaya._tx[before:]:
+        if _rec_kind(rec) != kaya.wire.TX_SET_PROPERTY:
+            continue
+        src = int.from_bytes(rec[20:24], "little")
+        if src != kaya.wire.SOURCE_ELEMENT:
+            continue
+        return {
+            "prop": int.from_bytes(rec[16:20], "little"),
+            "level": int.from_bytes(rec[24:28], "little"),
+            "field": int.from_bytes(rec[28:32], "little"),
+        }
+    return None
+
+
+def _never_const_from_a_tracer(fn, prop):
+    """True when handing a tracer to `prop` either raised or bound the
+    element — anything but a CONSTANT.
+
+    This is the sentence that survives the open question. Whether an
+    argument grows an element arm is undecided (the source-width table
+    in the survey: `slider(min=)`, `select(selected=)`, `grow=` and the
+    rest are const-only today, and widening them sweeps eight bindings).
+    What is decided is that a per-row source must never quietly become
+    one value for every row: `progress(indeterminate=el)` wrote a
+    constant True and said nothing, because an object with no
+    `__bool__` is true, until the element grew the truth-value wall its
+    fields already had."""
+    before = len(kaya._tx)
+    try:
+        fn()
+    except Exception:
+        _rewind(before)
+        return True
+    queued = kaya._tx[before:]
+    _rewind(before)
+    return not any(
+        _rec_kind(r) == kaya.wire.TX_SET_PROPERTY
+        and int.from_bytes(r[16:20], "little") == prop
+        and int.from_bytes(r[20:24], "little") == kaya.wire.SOURCE_CONST
+        for r in queued
+    )
+
+
+app_src = kaya.App()
+with app_src.window():
+    rows3 = kaya.collection(Row3)
+    groups3 = kaya.collection(Row3)
+    feed3 = kaya.collection(Note3 | Shot3)
+    with kaya.for_each(rows3) as el:
+        for what, fn, prop, index in (
+            ("label", lambda: kaya.label(bind=el.title), kaya.wire.PROP_TEXT, 0),
+            ("checkbox", lambda: kaya.checkbox(checked=el.done),
+             kaya.wire.PROP_CHECKED, 1),
+            ("slider", lambda: kaya.slider(value=el.pct), kaya.wire.PROP_VALUE, 2),
+            ("progress", lambda: kaya.progress(value=el.pct),
+             kaya.wire.PROP_VALUE, 2),
+            ("image", lambda: kaya.image(source=el.pic), kaya.wire.PROP_SOURCE, 3),
+        ):
+            got = _elem_bind(fn)
+            check(
+                f"{what} binds the row's own field, and binds the right one",
+                got == {"prop": prop, "level": 0, "field": index},
+            )
+
+        # The const-only arms, handed the same tracer. Each of these
+        # coerces — float(), int(), bool(), the UTF-8 wall — and a
+        # coercion that SUCCEEDS is the silent failure this file exists
+        # for. None of them may write a constant from a tracer.
+        for what, fn, prop in (
+            ("entry text", lambda: kaya.entry(text=el.title),
+             kaya.wire.PROP_TEXT),
+            ("button text", lambda: kaya.button(text=el.title),
+             kaya.wire.PROP_TEXT),
+            ("textarea text", lambda: kaya.textarea(text=el.title),
+             kaya.wire.PROP_TEXT),
+            ("checkbox text", lambda: kaya.checkbox(text=el.title),
+             kaya.wire.PROP_TEXT),
+            ("select index", lambda: kaya.select(["a", "b"], selected=el.pct),
+             kaya.wire.PROP_VALUE),
+            ("radio index", lambda: kaya.radio(["a", "b"], selected=el.pct),
+             kaya.wire.PROP_VALUE),
+            ("slider min", lambda: kaya.slider(min=el.pct), kaya.wire.PROP_MIN),
+            ("slider max", lambda: kaya.slider(max=el.pct), kaya.wire.PROP_MAX),
+            ("progress indeterminate",
+             lambda: kaya.progress(indeterminate=el.done),
+             kaya.wire.PROP_INDETERMINATE),
+            ("progress indeterminate, the bare element",
+             lambda: kaya.progress(indeterminate=el),
+             kaya.wire.PROP_INDETERMINATE),
+            ("grid columns", lambda: kaya.grid(el.pct), kaya.wire.PROP_COLUMNS),
+            ("grow", lambda: kaya.label("x", grow=el.pct), kaya.wire.PROP_GROW),
+            ("spacing", lambda: kaya.column(spacing=el.pct),
+             kaya.wire.PROP_SPACING),
+            ("align", lambda: kaya.column(align=el.pct), kaya.wire.PROP_ALIGN),
+        ):
+            check(
+                f"{what} never writes a constant from a tracer",
+                _never_const_from_a_tracer(fn, prop),
+            )
+
+    # THE LEVEL IS COMPUTED, NOT ASSUMED, and every clause above would
+    # pass with it hard-coded to 0 — which is the other half of the
+    # defect, since `value._level` (the bound method, unparenthesized)
+    # is exactly what a struct.pack of a hard-coded shape would have
+    # hidden. `FieldRef._level()` counts the open Fors, so the OUTER
+    # element read from inside an inner For is one level up.
+    with kaya.for_each(groups3) as group3:
+        with kaya.for_each(rows3) as item3:
+            check(
+                "a field of the enclosing For's element binds one level up",
+                _elem_bind(lambda: kaya.checkbox(checked=group3.done))
+                == {"prop": kaya.wire.PROP_CHECKED, "level": 1, "field": 1},
+            )
+            check(
+                "and the innermost element stays at level 0",
+                _elem_bind(lambda: kaya.checkbox(checked=item3.done))
+                == {"prop": kaya.wire.PROP_CHECKED, "level": 0, "field": 1},
+            )
+
+    # `bind=` is the one source argument Python cannot type, and it had
+    # no floor: a value that was not a Signal, an Element or a FieldRef
+    # fell out of the ladder and bound NOTHING. The reachable spelling
+    # is a sum's case arm, whose refined proxy is not an `Element` — so
+    # `kaya.label(bind=note)` declared a blank label and said nothing,
+    # which is the failure class the seven typed bindings get from their
+    # compilers.
+    with kaya.for_each(feed3) as cases3:
+        with cases3.case(Note3) as note3:
+            check(
+                "a case arm's field binds like any other element field",
+                _elem_bind(lambda: kaya.label(bind=note3.text))
+                == {"prop": kaya.wire.PROP_TEXT, "level": 0, "field": 0},
+            )
+            try:
+                kaya.label(bind=note3)
+                check("label(bind=) refuses a source it cannot bind", False)
+            except TypeError as exc:
+                # The message NAMES WHAT IT GOT: a reader who wrote
+                # `bind=note` has to be told that the case element is not
+                # the thing to bind, not merely that something was wrong.
+                check(
+                    "label(bind=) refuses a source it cannot bind",
+                    type(note3).__name__ in str(exc),
+                )
+        with cases3.case(Shot3) as shot3:
+            check(
+                "a case arm's blob field binds too",
+                _elem_bind(lambda: kaya.image(source=shot3.pic))
+                == {"prop": kaya.wire.PROP_SOURCE, "level": 0, "field": 0},
+            )
+
 sys.exit(1 if failures else 0)
 

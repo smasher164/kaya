@@ -765,6 +765,7 @@ final class KayaApp {
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
     private var widgetToggles: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
     private var widgetValues: [UInt64: (KayaAppTx, Double) throws -> Void] = [:]
+    private var nodeValues: [UInt64: (KayaAppTx, [KayaValue], Double) throws -> Void] = [:]
     // Window lifecycle: one handler each, receiving the window id.
     private var closeRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var entryPopped: [UInt64: (KayaAppTx) throws -> Void] = [:]
@@ -1183,6 +1184,26 @@ final class KayaApp {
         widgetValues[w.id] = handler
     }
 
+    /// A template slider's or choice widget's change handler; it also
+    /// receives the stamped copy's keys, outermost first — the
+    /// `onToggle(_ n:_:)` shape, one payload over.
+    ///
+    /// This registrar and its dispatch arm arrived together with the
+    /// template `slider`/`select`/`radio` constructors, and the reason
+    /// is worth keeping: the core has ALWAYS emitted
+    /// `Occurrence::InstanceValueChanged` for a stamped copy, and until
+    /// now nothing here read it. The dispatch switch had a keyed arm for
+    /// clicks, for text edits, for toggles and for pastes, and only the
+    /// keyless one for value changes, so a stamped slider's move matched
+    /// no case and fell out of `default: break` — dropped in silence,
+    /// which is the failure class no scene can see. Nothing had reached
+    /// it only because there was no constructor to build such a slider.
+    func onValueChanged(
+        _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], Double) throws -> Void
+    ) {
+        nodeValues[n.id] = handler
+    }
+
     /// Register a toggle handler for a template checkbox; it also
     /// receives the stamped copy's keys, outermost first.
     func onToggle(
@@ -1438,6 +1459,10 @@ final class KayaApp {
             case (UInt16(KAYA_OCCURRENCE_VALUE_CHANGED), true):
                 if let handler = widgetValues[id] {
                     dispatch { try build { tx in try handler(tx, value) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_VALUE_CHANGED), false):
+                if let handler = nodeValues[id] {
+                    dispatch { try build { tx in try handler(tx, keys, value) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_CLOSE_REQUESTED), _):
                 if let handler = closeRequested[id] {
@@ -3193,6 +3218,24 @@ final class KayaTpl {
         tx.tx.bindTextElement(n.id, level: level)
     }
 
+    /// Weight a template node within its stamped row or column — the
+    /// template twin of `KayaAppTx.setGrow`.
+    ///
+    /// THE ONE PROP THE TEMPLATE ZONE CARRIES, and it is here because
+    /// `scroll` needs it: an unconstrained viewport hugs its content and
+    /// nothing overflows, so a template scroll without a grow weight is
+    /// a scroll that cannot scroll. Rust's `Tpl` has always been able to
+    /// spell this through its generic `set(node, prop, value)`, so
+    /// shipping the scroll constructor without it would have opened a
+    /// divergence in the same pass that closed one (invariant 1).
+    ///
+    /// The rest of the template-node props — the a11y pair, spacing,
+    /// align, `accepts` — stay unreachable on a node and stay ledgered
+    /// (docs/deferred.md). That gap predates this pass.
+    func setGrow(_ n: KayaNodeHandle, _ weight: Double) {
+        tx.tx.setGrow(n.id, weight)
+    }
+
     /// Bind a label's text to one field of the element; KayaField<String>
     /// only — the token pins the type at compile time.
     func bindTextField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {
@@ -3209,6 +3252,15 @@ final class KayaTpl {
     /// KayaField<Data> only — the token pins the type at compile time.
     func bindSourceField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Data>) {
         tx.tx.bindSourceElement(n.id, level: level, field: f.index)
+    }
+
+    /// Bind a numeric value to one field of the element;
+    /// KayaField<Double> only. ONE binder serves three kinds because
+    /// they share one prop on the wire: a progress bar's fraction, a
+    /// slider's position and a choice widget's selected index are all
+    /// Prop::Value, and the index rides as an f64 like the rest.
+    func bindValueField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Double>) {
+        tx.tx.bindValueElement(n.id, level: level, field: f.index)
     }
 
     // Construction sugar, template flavor: one name per widget, the
@@ -3260,6 +3312,286 @@ final class KayaTpl {
         return n
     }
 
+    /// A single-line text field per stamped copy. UNCONTROLLED, which
+    /// is why the primary form takes no source at all: the copy owns
+    /// its text, each edit arrives naming this node AND the copy's key
+    /// path, and the app folds it into its own state. That is the live
+    /// zone's `entry(onChange:)` with the keys threaded through, and it
+    /// is what a per-row note field or a one-row find bar actually
+    /// wants — the reason this constructor exists.
+    func entry(
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange)
+    }
+
+    /// An entry seeded from an addressable source: the argument's type
+    /// picks it, as it does for `label`.
+    ///
+    /// HOW LONG THE SOURCE LASTS DIFFERS BY SOURCE, and the difference
+    /// is the protocol's rather than this binding's. A String is one
+    /// write at declaration, so every copy starts there and the user
+    /// owns it from the first keystroke. A signal or a field stays
+    /// LIVE: the stamper records the binding, so a later write to that
+    /// signal — or to that field of that row — replaces whatever the
+    /// user has typed into the copy. There is no "seed once from the
+    /// row and then let go" arm on the wire (PropValue is Const,
+    /// Signal or Element and nothing else), so binding a row's field
+    /// here means the row keeps writing.
+    func entry(
+        _ text: String,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange)
+        setText(n, text)
+        return n
+    }
+
+    func entry(
+        _ s: KayaSignal,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange)
+        tx.tx.bindText(n.id, s.id)
+        return n
+    }
+
+    func entry(
+        _ f: KayaField<String>,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_ENTRY), onChange)
+        bindTextField(n, f)
+        return n
+    }
+
+    /// A multi-line editor per stamped copy: the entry's uncontrolled
+    /// contract over the platform's real multi-line control, and the
+    /// same four spellings for the same reasons.
+    func textarea(
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+    }
+
+    func textarea(
+        _ text: String,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+        setText(n, text)
+        return n
+    }
+
+    func textarea(
+        _ s: KayaSignal,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+        tx.tx.bindText(n.id, s.id)
+        return n
+    }
+
+    func textarea(
+        _ f: KayaField<String>,
+        onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = textFieldOf(UInt32(KAYA_KIND_TEXTAREA), onChange)
+        bindTextField(n, f)
+        return n
+    }
+
+    /// The unsourced half of both text kinds: the widget and its
+    /// handler. Registering the handler emits no wire op, so the source
+    /// each caller applies afterwards still lands immediately after the
+    /// create — the live zone's op order, unchanged.
+    private func textFieldOf(
+        _ kind: UInt32, _ onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)?
+    ) -> KayaNodeHandle {
+        let n = widget(kind)
+        if let onChange { tx.app.onChange(n, onChange) }
+        return n
+    }
+
+    /// A progress bar whose fraction comes from an addressable source —
+    /// `t.progress(row.done)` is the per-row case this zone exists for.
+    /// Display-only, like label and image; the root re-checks the 0...1
+    /// domain for every stamped copy.
+    func progress(_ value: Double) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_PROGRESS))
+        tx.tx.setValue(n.id, value)
+        return n
+    }
+
+    func progress(_ s: KayaSignal) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_PROGRESS))
+        tx.tx.bindValue(n.id, s.id)
+        return n
+    }
+
+    func progress(_ f: KayaField<Double>) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_PROGRESS))
+        bindValueField(n, f)
+        return n
+    }
+
+    /// A progress bar in the platform's activity mode. Its own
+    /// constructor rather than the live zone's `indeterminate:` flag:
+    /// here the fraction argument is what picks the source overload,
+    /// and an activity bar has no fraction to source.
+    func progressIndeterminate() -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_PROGRESS))
+        tx.tx.setIndeterminate(n.id, true)
+        return n
+    }
+
+    /// A slider over min...max in the blueprint, its change handler
+    /// co-located.
+    ///
+    /// THE RANGE DESCRIBES THE PROTOTYPE and so stays a pair of plain
+    /// constants — every stamped copy runs between the same two ends.
+    /// The POSITION is the part that varies per row, so it takes a
+    /// source. The bar owns that position and reports each move with
+    /// the copy's key path and the new value: the entry's uncontrolled
+    /// contract, one identity deeper. A move where the position came
+    /// from the row's own field does NOT write the field back — the
+    /// handler decides whether the model follows.
+    func slider(
+        min: Double = 0.0, max: Double = 1.0, value: Double,
+        onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = sliderOf(min, max, onChange)
+        tx.tx.setValue(n.id, value)
+        return n
+    }
+
+    func slider(
+        min: Double = 0.0, max: Double = 1.0, value s: KayaSignal,
+        onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = sliderOf(min, max, onChange)
+        tx.tx.bindValue(n.id, s.id)
+        return n
+    }
+
+    func slider(
+        min: Double = 0.0, max: Double = 1.0, value f: KayaField<Double>,
+        onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = sliderOf(min, max, onChange)
+        bindValueField(n, f)
+        return n
+    }
+
+    private func sliderOf(
+        _ min: Double, _ max: Double,
+        _ onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)?
+    ) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_SLIDER))
+        tx.tx.setMin(n.id, min)
+        tx.tx.setMax(n.id, max)
+        if let onChange { tx.app.onValueChanged(n, onChange) }
+        return n
+    }
+
+    /// A dropdown in the blueprint: the option list is the
+    /// BLUEPRINT'S, the choice is the row's.
+    ///
+    /// `selected` is the 0-based index and takes a source, so each copy
+    /// can open on its own row's choice; `onSelect` receives the copy's
+    /// key path and each USER pick's new index (programmatic writes
+    /// never echo). The options cannot vary per row and that is
+    /// deliberate rather than missing — see `choiceOf` below.
+    func select(
+        _ options: [String], selected: Int = 0,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_SELECT), options, onSelect)
+        tx.tx.setValue(n.id, Double(selected))
+        return n
+    }
+
+    func select(
+        _ options: [String], selected s: KayaSignal,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_SELECT), options, onSelect)
+        tx.tx.bindValue(n.id, s.id)
+        return n
+    }
+
+    func select(
+        _ options: [String], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_SELECT), options, onSelect)
+        bindValueField(n, f)
+        return n
+    }
+
+    /// A radio group in the blueprint: `select`'s contract in its
+    /// inline presentation — same option children, same 0-based index,
+    /// same pick handler carrying the copy's keys.
+    func radio(
+        _ options: [String], selected: Int = 0,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_RADIO), options, onSelect)
+        tx.tx.setValue(n.id, Double(selected))
+        return n
+    }
+
+    func radio(
+        _ options: [String], selected s: KayaSignal,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_RADIO), options, onSelect)
+        tx.tx.bindValue(n.id, s.id)
+        return n
+    }
+
+    func radio(
+        _ options: [String], selected f: KayaField<Double>,
+        onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
+    ) -> KayaNodeHandle {
+        let n = choiceOf(UInt32(KAYA_KIND_RADIO), options, onSelect)
+        bindValueField(n, f)
+        return n
+    }
+
+    /// Both choice kinds, minus the index: the widget, its options and
+    /// its handler.
+    ///
+    /// The options are LABEL CHILDREN of the prototype, exactly as in
+    /// the live zone, so they are declared into their own template
+    /// frame and parented here. That is also why every stamped copy
+    /// offers the same list: children are structure, and structure
+    /// belongs to the blueprint. A per-row option list would need a
+    /// collection inside the choice widget, and the scene rejects that
+    /// (labels only, deliberately — docs/sugar-pass-plan.md §2). Only
+    /// the selected index can be the row's.
+    ///
+    /// The pick arrives as a Double because the index rides Prop::Value
+    /// like every other number; the wrapper narrows it once, here,
+    /// rather than in three handlers.
+    private func choiceOf(
+        _ kind: UInt32, _ options: [String],
+        _ onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)?
+    ) -> KayaNodeHandle {
+        let n = widget(kind)
+        tx.app.childFrames.append(KayaApp.KayaFrame(template: true))
+        for option in options {
+            let o = widget(UInt32(KAYA_KIND_LABEL))
+            setText(o, option)
+        }
+        let ids = tx.app.childFrames.removeLast().ids
+        for id in ids { tx.tx.addChild(n.id, id) }
+        if let onSelect {
+            tx.app.onValueChanged(n) { tx, keys, v in try onSelect(tx, keys, Int(v)) }
+        }
+        return n
+    }
+
     /// An image with constant encoded bytes: every stamped copy shows
     /// the same picture — one registration copy into core memory, the
     /// handle consumed by the next submit.
@@ -3287,6 +3619,39 @@ final class KayaTpl {
 
     func column(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         nodeContainerOf(UInt32(KAYA_KIND_COLUMN), children)
+    }
+
+    /// A vertical scroll viewport over EXACTLY ONE child, per stamped
+    /// copy (declare it in the builder).
+    func scroll(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        nodeContainerOf(UInt32(KAYA_KIND_SCROLL), children)
+    }
+
+    /// A grid laying each copy's children out row-major into `columns`
+    /// columns — each column takes its NATURAL width, aligned across
+    /// rows (the thing nested rows cannot express).
+    ///
+    /// The column count describes the PROTOTYPE, so it is a plain
+    /// constant rather than a source: every stamped copy has the same
+    /// shape and only the values inside it vary. The count is written
+    /// after the children rather than before, which the tree cannot
+    /// see — the parent is created first either way, and creation order
+    /// is what the observation names.
+    func grid(columns: Int, @KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        let n = nodeContainerOf(UInt32(KAYA_KIND_GRID), children)
+        tx.tx.setColumns(n.id, Double(columns))
+        return n
+    }
+
+    /// A spacer: PURE SUGAR for an empty grown column — it consumes the
+    /// leftover main-axis space between its siblings in every stamped
+    /// copy. No new vocabulary reaches a backend, which is why it can
+    /// write Grow here while the rest of the template-node props are
+    /// still ledgered.
+    func spacer() -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_COLUMN))
+        tx.tx.setGrow(n.id, 1.0)
+        return n
     }
 
     private func nodeContainerOf(_ kind: UInt32, _ children: () -> Void) -> KayaNodeHandle {

@@ -1253,17 +1253,14 @@ impl Scene {
                     assert!(!clash, "kaya: widget id {id:?} already exists");
                     created.push(id);
                     // Interactive widgets carry their identity tag:
-                    // buttons emit it on click, entries on edit.
-                    let tag = match kind {
-                        WidgetKind::Button
-                        | WidgetKind::Entry
-                        | WidgetKind::Textarea
-                        | WidgetKind::Checkbox
-                        | WidgetKind::Slider
-                        | WidgetKind::Select
-                        | WidgetKind::Radio => Self::button_tag(id.0, &vec![]),
-                        _ => None,
-                    };
+                    // buttons emit it on click, entries on edit. The
+                    // predicate is shared with the STAMPING site below,
+                    // which is the whole point — see
+                    // WidgetKind::carries_tag.
+                    let tag = kind
+                        .carries_tag()
+                        .then(|| Self::button_tag(id.0, &vec![]))
+                        .flatten();
                     out.push(ApplyOp::Create { id, kind, tag });
                 }
                 TxOp::SetProperty {
@@ -3665,7 +3662,50 @@ impl Scene {
                     "kaya: template node {} already has a parent",
                     child.0
                 );
+                // THE STRUCTURAL RULES THE LIVE PATH ENFORCES, ENFORCED
+                // HERE TOO. A scroll takes exactly one child and a
+                // choice's children are its options, and both were
+                // checked only on the live `AddChild`
+                // (crates/kaya/src/scene.rs, the `TxOp::AddChild` arm
+                // outside a template). Recording a template ran none of
+                // them, so a malformed prototype recorded clean,
+                // declared clean, and reached four backends as a shape
+                // none of them has a reading for.
+                //
+                // It was unreachable through sugar until 2026-08-10 for
+                // the same reason D1 was: no binding had a template
+                // constructor for scroll, select or radio, so only the
+                // widget-kind floor could build one. The sugar pass
+                // shipped those constructors, which is exactly when a
+                // rule enforced on one path and not the other stops
+                // being theoretical (docs/sugar-pass-plan.md).
+                //
+                // Checked at RECORD time, not at stamp: the prototype is
+                // wrong once, and a message about the guest's own
+                // declaration beats the same message repeated per row.
+                let parent_kind = self.template_nodes[&parent.0];
+                let child_kind = self.template_nodes[&child.0];
+                if parent_kind == WidgetKind::Scroll {
+                    let already = top.current.ops.iter().any(|op| {
+                        matches!(op, TplOp::AddChild { parent: p, .. } if *p == parent.0)
+                    });
+                    assert!(
+                        !already,
+                        "kaya: template scroll {} already holds its one child — a \
+                         scroll viewport takes exactly one (wrap the content in a \
+                         column)",
+                        parent.0
+                    );
+                }
+                if is_choice(parent_kind) {
+                    assert!(
+                        child_kind == WidgetKind::Label,
+                        "kaya: a template {parent_kind:?}'s children are its options \
+                         — labels only, got {child_kind:?}"
+                    );
+                }
                 top.current.childed.push(child.0);
+                let top = scopes.last_mut().unwrap();
                 top.current.ops.push(TplOp::AddChild {
                     parent: parent.0,
                     child: child.0,
@@ -4308,13 +4348,12 @@ impl Scene {
                     let id = self.alloc_internal();
                     node_map.insert(*node, id);
                     stamp.widgets.push(id);
-                    let tag = match kind {
-                        WidgetKind::Button
-                        | WidgetKind::Entry
-                        | WidgetKind::Checkbox
-                        | WidgetKind::Slider => Self::button_tag(*node, copy_path),
-                        _ => None,
-                    };
+                    // The same predicate the live create reads. These two
+                    // sites are the pair that had drifted.
+                    let tag = kind
+                        .carries_tag()
+                        .then(|| Self::button_tag(*node, copy_path))
+                        .flatten();
                     out.push(ApplyOp::Create {
                         id,
                         kind: *kind,
@@ -4945,6 +4984,142 @@ mod tests {
             op,
             ApplyOp::SetProp { value, .. } if *value == v("Work")
         )));
+    }
+
+    /// A STAMPED COPY IS TAGGED EXACTLY WHERE A LIVE WIDGET IS, and the
+    /// two `button_tag` callsites are twelve hundred lines apart. They
+    /// were the same fact written twice and had already drifted:
+    /// Textarea, Select and Radio were tagged live and untagged when
+    /// stamped, which is the one shape that reaches a backend as a
+    /// choice between a panic and a silence. GTK and WinUI unwrap the
+    /// tag for exactly those three (`tag.expect("selects carry a tag")`,
+    /// gtk.rs:3897 and winui/mod.rs:6008), so a stamped select aborted
+    /// the process there; the SwiftUI interpreter reads a zero-length
+    /// tag without complaint, so on mac and iOS the control appeared and
+    /// never reported. Nothing could see it, because no BINDING had a
+    /// template constructor for those kinds — only the raw floor did
+    /// (docs/sugar-pass-plan.md D1).
+    ///
+    /// EXHAUSTIVE OVER THE KIND ENUM, deliberately: it compares the two
+    /// paths for every variant rather than checking a list, so a kind
+    /// added later cannot diverge without this failing. `carries_tag` is
+    /// what makes them one fact; this is what proves it stayed one.
+    #[test]
+    fn a_stamped_copy_is_tagged_exactly_where_a_live_one_is() {
+        for kind in WidgetKind::ALL {
+            // The live half: create one, read its Create op's tag.
+            let mut scene = Scene::new();
+            let live = scene.apply(vec![
+                TxOp::CreateWidget { id: WidgetId(1), kind },
+                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            ]);
+            let live_tagged = creates(&live)
+                .into_iter()
+                .find(|(k, _)| *k == kind)
+                .map(|(_, tagged)| tagged)
+                .unwrap_or_else(|| panic!("kaya: no live Create for {kind:?}"));
+
+            // The stamped half: the same kind as a template node, one
+            // row inserted, read the stamped copy's Create op.
+            let mut scene = Scene::new();
+            scene.apply(vec![
+                TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+                TxOp::CreateCollection {
+                    id: CollectionId(1),
+                    variants: vec![vec![ValueType::Str]],
+                },
+                TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+                TxOp::CreateWidget { id: WidgetId(10), kind },
+                TxOp::TemplateEnd,
+                TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            ]);
+            let stamped = scene.apply(vec![insert(1, vec![], "k", "row")]);
+            let stamped_tagged = creates(&stamped)
+                .into_iter()
+                .find(|(k, _)| *k == kind)
+                .map(|(_, tagged)| tagged)
+                .unwrap_or_else(|| panic!("kaya: no stamped Create for {kind:?}"));
+
+            assert_eq!(
+                live_tagged, stamped_tagged,
+                "kaya: {kind:?} is tagged {live_tagged} live and {stamped_tagged} \
+                 when stamped — the two button_tag callsites disagree, so a \
+                 stamped {kind:?} either aborts a backend that unwraps the tag \
+                 or reports to nobody. Both sites read carries_tag()."
+            );
+        }
+    }
+
+    /// A template scroll takes exactly one child, like a live one.
+    ///
+    /// This rule and the choice rule below lived on the live `AddChild`
+    /// arm only. Recording a template ran neither, so a two-child
+    /// scroll prototype recorded clean and reached the backends as a
+    /// shape none of them reads. Unreachable through sugar until the
+    /// template zone gained a `scroll` constructor, which is precisely
+    /// when a rule enforced on one path and not the other stops being
+    /// theoretical (docs/sugar-pass-plan.md).
+    #[test]
+    #[should_panic(expected = "already holds its one child")]
+    fn a_template_scroll_refuses_a_second_child() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Scroll },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Label },
+            TxOp::CreateWidget { id: WidgetId(12), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(12) },
+        ]);
+    }
+
+    /// A template choice's children are its options: labels only.
+    #[test]
+    #[should_panic(expected = "children are its options")]
+    fn a_template_select_refuses_a_non_label_option() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 1, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Select },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Button },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+        ]);
+    }
+
+    /// AND THE POSITIVE HALF, so the two above are not passing because
+    /// the arm refuses everything: the shapes the constructors actually
+    /// emit must record without complaint.
+    #[test]
+    fn a_well_formed_template_scroll_and_choice_record() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str]],
+            },
+            TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Scroll },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Column },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+            TxOp::CreateWidget { id: WidgetId(12), kind: WidgetKind::Select },
+            TxOp::CreateWidget { id: WidgetId(13), kind: WidgetKind::Label },
+            TxOp::CreateWidget { id: WidgetId(14), kind: WidgetKind::Label },
+            TxOp::AddChild { parent: WidgetId(12), child: WidgetId(13) },
+            TxOp::AddChild { parent: WidgetId(12), child: WidgetId(14) },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
     }
 
     #[test]

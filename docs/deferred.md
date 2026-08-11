@@ -2057,3 +2057,51 @@ The verdicts, one per backend (invariant 2):
 Cheap when it comes: the note needs the focused node's accept list, the
 board's type list, and the changeCount the backend last wrote — all
 three already exist in every backend's clipboard arm.
+
+## Template-node props: grow, the a11y pair, accepts, on_paste
+
+Raised 2026-08-10 by the template-zone sugar pass
+(docs/sugar-pass-plan.md), which brought the zone's CONSTRUCTORS to
+parity with the live zone and deliberately stopped there. What a
+template node still cannot carry, in most bindings, is the PROPS: a
+stamped widget cannot be given a grow weight, an accessibility id or
+label, an accept list, or a paste hook.
+
+The a11y pair is the one that will bite first. `Prop::A11yId` and
+`Prop::A11yLabel` are the two universal props — the scene admits them on
+every kind, containers included, precisely so a harness can address
+anything (crates/kaya/src/scene.rs:546). A stamped row is exactly the
+thing a harness most wants to address by name, and it is the thing that
+cannot be named. Every a11y scene today builds its subjects live, which
+is why the accessibility milestone's 719 legs never noticed.
+
+Not urgent and not free: the props take a source in a template the same
+way the constructors do (a constant, a signal, or the row's own field),
+so this is the same shape of work one layer over, in eight languages.
+The census in tools/tpl-surfaces.py is where the sweep would go.
+
+## A guest that spells a widget at the FLOOR fails no gate unless its scene is in the tables
+
+Raised 2026-08-10, same pass. check-sugar-surface's scene tier can fail a
+guest for using the widget-kind floor, and it is good at it — the floor
+rules are per language, each watched firing against a doctored copy of
+the real guest. It only ever reads the scenes in its `scene_guests`
+table, which is `entry` and `milestone2`, the two carve-out scenes.
+
+So the undo scene taught the floor in seven languages for five
+milestones, the text editor's find bar shipped at the floor, and
+`guests/haskell/textarea.hs` builds its ENTIRE scene at the floor while
+`textareaOn` sits unused in the binding — none of it visible to a gate.
+
+The narrow fix landed with this pass (no sugar guest may call the
+widget-kind floor at all, now that both zones have full sugar). What is
+DEFERRED is the general shape: the scene tier's per-language floor
+vocabulary — `add_child` chains, `Prop::` writes, `bind_element` by
+index, the raw `for_each` combinator — still applies only to two scenes,
+and those spellings are just as much the floor in every other scene. The
+obstacle is that the rules were written FOR those two: the editor
+legitimately calls `SetText` to put a document in front of the user,
+which the "*" go row reads as a floor prop write. Widening the tier means
+separating "this spelling is the floor" from "this spelling is the floor
+IN A SCENE THAT HAS SUGAR FOR IT", which is a real piece of design and
+not a table edit.

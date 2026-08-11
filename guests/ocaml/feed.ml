@@ -64,7 +64,7 @@ let () =
                Tpl.(
                  row
                    [
-                     checkbox ~checked_field:post_todo_done_ ~on_toggle;
+                     checkbox ~bind_field:post_todo_done_ ~on_toggle;
                      label ~bind_field:post_todo_title;
                    ]
                    ()));

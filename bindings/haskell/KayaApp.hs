@@ -5,9 +5,11 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- kaya's idiomatic surface for Haskell: the structural core, and the
 -- monad-sugar experiment the roster promised — scene declaration as a
@@ -20,6 +22,33 @@
 -- class, whose associated element type keeps the two id spaces from
 -- ever mixing — addChild across zones is a type error, which is the
 -- design's "declaring is not instantiating" made compiler-checked.
+--
+-- HOW THE TWO ZONES SHARE ONE NAMESPACE. Every other binding gives the
+-- template zone a scope of its own — rust's `impl Tpl`, ocaml's
+-- `module Tpl`, swift's `KayaTpl` — so `Tpl.row` and `row` can be the
+-- same word. This module cannot: KayaApp is one flat namespace, and a
+-- second module would be a second FILE. So the RESULT TYPE is this
+-- zone's scope, and the rule that follows from that is:
+--
+--   * A constructor that is IDENTICAL in both zones keeps one name and
+--     picks its zone off the result type ('BothZones': button, entry,
+--     textarea, progressIndeterminate; 'Declare' directly: spacer).
+--   * A constructor that takes a SOURCE — the whole reason the zones
+--     differ, since a stamp makes N copies and each copy's value can
+--     come from its own row — is template-only, and takes the plain
+--     kind name where the live zone has not already taken it (label,
+--     checkbox, image, slider, select, radio) or `<kind>Bound` where it
+--     has (buttonBound, entryBound, textareaBound, progressBound).
+--   * A container takes NODES rather than widgets, so it cannot share
+--     a name at all: rowOf, columnOf, scrollOf, gridOf against the live
+--     row, column, scroll, grid.
+--
+-- The payoff is that the zone is ENUMERABLE — `grep '-> Tpl Node'` is
+-- its whole surface, which is what tools/tpl-surfaces.py reads and what
+-- a reader gets for free. row and column used to dispatch on the result
+-- type like button; they were real, they worked, and neither the census
+-- nor a reader could see them, so they became rowOf/columnOf and the
+-- old spelling now fails with a TypeError that names the new one.
 --
 -- Dispatch: handlers register per button; the app loop routes each
 -- click, handing template-node handlers the stamped copy's key path.
@@ -53,6 +82,7 @@ module KayaApp
     onToggle,
     onToggleNode,
     onValueChanged,
+    onValueChangedNode,
     signal,
     writeSignal,
     at,
@@ -93,7 +123,6 @@ module KayaApp
     bindChecked,
     bindValue,
     bindSource,
-    setGrow,
     setSpacing,
     setAlign,
     setA11yId,
@@ -104,10 +133,11 @@ module KayaApp
     WClass (..),
     RowCol,
     LeafArgs,
-    ButtonArgs,
+    BothZones,
     row,
     column,
     scroll,
+    grid,
     progress,
     progressIndeterminate,
     bindTextElement,
@@ -130,11 +160,13 @@ module KayaApp
     recordItems,
     bindTextField,
     bindCheckedField,
+    bindValueField,
     bindSourceField,
     button,
     buttonOn,
     entry,
     entryOn,
+    textarea,
     textareaOn,
     labelText,
     labelBound,
@@ -142,16 +174,30 @@ module KayaApp
     sliderOn,
     selectOn,
     radioOn,
-    gridOf,
     spacer,
     imageBytes,
     imageBound,
+    -- The TEMPLATE zone's own surface: one constructor per widget kind,
+    -- each returning 'Tpl Node'. See the naming rule in the module
+    -- header — the result type is this zone's only scope.
     TplTextSource (..),
     TplBoolSource (..),
+    TplNumberSource (..),
     TplImageSource (..),
     label,
     checkbox,
     image,
+    rowOf,
+    columnOf,
+    scrollOf,
+    gridOf,
+    buttonBound,
+    entryBound,
+    textareaBound,
+    progressBound,
+    slider,
+    select,
+    radio,
     each,
     KayaSum (..),
     SumCollection,
@@ -224,7 +270,7 @@ import Data.IORef
 import Data.List (elemIndex)
 import Data.Maybe (listToMaybe)
 import GHC.Records (HasField)
-import GHC.TypeLits (KnownSymbol, symbolVal)
+import GHC.TypeLits (ErrorMessage (..), KnownSymbol, TypeError, symbolVal)
 import qualified Data.Map.Strict as Map
 import qualified Data.List as List
 import Data.Proxy (Proxy (..))
@@ -633,6 +679,28 @@ class Monad m => Declare m where
   widget :: Word32 -> m (El m)
   setText :: El m -> String -> m ()
   setChecked :: El m -> Bool -> m ()
+  -- | This element's flex weight within its row\/column: 0 is natural
+  -- size, positive weights divide the container's leftover main-axis
+  -- space in proportion (see Prop::Grow in the core). The dynamic path;
+  -- the 'Grow' attr is the declarative spelling, and stays live-only
+  -- because an attr list in template position has no instance.
+  --
+  -- ON 'Declare' RATHER THAN BUILD, since 2026-08-10: it used to be
+  -- Build-only, held there because no language had template grow. Rust's
+  -- template zone has it now — @Tpl::spacer@ sets Prop::Grow through the
+  -- general @Tpl::set@ floor, and the root runs the same @check_prop@ on
+  -- both paths — so holding it back here would be the divergence rather
+  -- than the caution. 'spacer' is the reason it matters: a spacer IS an
+  -- empty grown column, so a template spacer is a template grow.
+  setGrow :: El m -> Double -> m ()
+  -- | A grid's column count: its children lay out row-major into this
+  -- many columns. Describes the PROTOTYPE, so it is a constant in both
+  -- zones — every stamped copy of a grid has the same shape, and only
+  -- the values inside it vary.
+  setColumns :: El m -> Int -> m ()
+  -- | Put a progress bar in the platform's activity mode: no fraction,
+  -- so nothing to source.
+  setIndeterminate :: El m -> Bool -> m ()
   addChild :: El m -> El m -> m ()
   collection :: m Collection
   -- | A For over a collection: the do-block declares the template;
@@ -650,6 +718,9 @@ instance Declare Build where
     return (Widget n)
   setText (Widget n) text = emitB (W.txSetText n text)
   setChecked (Widget n) checked = emitB (W.txSetChecked n checked)
+  setGrow (Widget n) weight = emitB (W.txSetGrow n weight)
+  setColumns (Widget n) columns = emitB (W.txSetColumns n (fromIntegral columns))
+  setIndeterminate (Widget n) on = emitB (W.txSetIndeterminate n on)
   addChild (Widget p) (Widget child) = emitB (W.txAddChild p child)
   collection = Build $ \s ->
     let c = bCounters s
@@ -676,6 +747,9 @@ instance Declare Tpl where
     return (Node n)
   setText (Node n) text = emitT (W.txSetText n text)
   setChecked (Node n) checked = emitT (W.txSetChecked n checked)
+  setGrow (Node n) weight = emitT (W.txSetGrow n weight)
+  setColumns (Node n) columns = emitT (W.txSetColumns n (fromIntegral columns))
+  setIndeterminate (Node n) on = emitT (W.txSetIndeterminate n on)
   addChild (Node p) (Node child) = emitT (W.txAddChild p child)
   collection = Tpl $ \s ->
     let c = bCounters s
@@ -1602,15 +1676,6 @@ revealRange (Widget n) (start, stop) =
 bindText :: Widget -> Signal -> Build ()
 bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
 
--- | Set a widget's flex weight within its row\/column: 0 is natural
--- size, positive weights divide the container's leftover main-axis
--- space in proportion (see Prop::Grow in the core). The dynamic path;
--- 'grow' is the declarative spelling. Build-only on purpose: no
--- language has template grow yet, so it stays off 'Declare' until all
--- of them do.
-setGrow :: Widget -> Double -> Build ()
-setGrow (Widget w) weight = emitB (W.txSetGrow w weight)
-
 -- | A container's inter-child gap (main axis, DIP; the normalized
 -- default is 8). Containers only — held by 'BoxCfg' here and by the
 -- scene core everywhere. 'setSpacing' is the dynamic path.
@@ -1723,24 +1788,45 @@ withAttrs attrs act = do
   mapM_ (`applyAttr` w) attrs
   return w
 
--- One name, both arities, both zones — the lucid Term idiom over the
--- GADT: `row [kids]`, `row [Grow 2, Spacing 12] [kids]`, and the
--- template zone's `row [nodes]` all dispatch on the RESULT type,
--- which is always constructor-known (a do-bind pins the zone monad,
--- application to a second list pins the function shape) even when
--- its argument is not — a discarded template bind, an empty attr or
--- children list. The equality-constrained general heads are what
--- make that selection fire before the element types are known, and
--- then push them top-down into the lists. An attr list in template
--- position has no instance: template-zone props do not exist, and
--- the compiler says so.
+-- One name, both arities — the lucid Term idiom over the GADT:
+-- `row [kids]` and `row [Grow 2, Spacing 12] [kids]` dispatch on the
+-- RESULT type, which is always constructor-known (a do-bind pins the
+-- zone monad, application to a second list pins the function shape)
+-- even when its argument is not — an empty attr or children list. The
+-- equality-constrained general heads are what make that selection fire
+-- before the element types are known, and then push them top-down into
+-- the lists. An attr list in template position has no instance:
+-- template-zone props do not exist, and the compiler says so.
+--
+-- LIVE-ONLY SINCE 2026-08-10. There used to be a third instance, at
+-- `Tpl b`, so `row [nodes]` built a template row too. It worked, and
+-- neither tools/tpl-surfaces.py nor a reader scanning this file could
+-- see it: a signature reading `(RowCol a r) => [a] -> r` names no zone.
+-- One flat module means the result type IS this zone's scope (module
+-- header), so the template containers are their own monomorphic names
+-- and the old spelling now fails saying which.
 class RowCol a r where
   rowish :: Word32 -> [a] -> r
 
 instance (a ~ Build Widget, b ~ Widget) => RowCol a (Build b) where
   rowish = containerOf
 
-instance (a ~ Tpl Node, b ~ Node) => RowCol a (Tpl b) where
+-- The wall where someone walks into it: `row [...]` inside a forEach
+-- body is the natural thing to write, and "No instance for RowCol" is
+-- not an answer. GHC prints this instead, and the instance body is
+-- unreachable because selecting it IS the error.
+instance
+  ( TypeError
+      ( 'Text "kaya: a template row is `rowOf` and a template column is `columnOf`."
+          ':$$: 'Text "row/column build in the LIVE zone (Build Widget); the template"
+          ':$$: 'Text "zone's containers take Nodes, so they carry their own names."
+          ':$$: 'Text "    forEach items $ do { … ; _ <- rowOf [label element, pure b] ; … }"
+      ),
+    a ~ Tpl Node,
+    b ~ Node
+  ) =>
+  RowCol a (Tpl b)
+  where
   rowish = containerOf
 
 instance (a ~ Attr 'BoxW, k ~ Build Widget, r ~ Build Widget) => RowCol a ([k] -> r) where
@@ -1763,20 +1849,34 @@ scroll attrs child = withAttrs attrs (containerOf W.kindScroll [child])
 -- each column takes its NATURAL width, aligned across rows (the
 -- thing nested rows cannot express). The columns record lands before
 -- the addChilds (backends re-flow either way).
-gridOf :: Int -> [Build Widget] -> Build Widget
-gridOf columns children = do
+--
+-- Named @gridOf@ until 2026-08-10, when the template zone needed that
+-- name: the live containers are now @row@\/@column@\/@scroll@\/@grid@
+-- and the template ones @rowOf@\/@columnOf@\/@scrollOf@\/@gridOf@,
+-- which also puts this one's live spelling where every other binding
+-- already had it (@tx.grid@, @Tx.Grid@).
+grid :: Int -> [Build Widget] -> Build Widget
+grid = gridWith
+
+-- One declaration, whichever zone hosts it — 'containerOf' with a
+-- column count, so the two zone names below are the same three records
+-- from their own id space.
+gridWith :: (Declare m) => Int -> [m (El m)] -> m (El m)
+gridWith columns children = do
   handles <- sequence children
-  parent@(Widget n) <- widget W.kindGrid
-  emitB (W.txSetColumns n (fromIntegral columns))
+  parent <- widget W.kindGrid
+  setColumns parent columns
   mapM_ (addChild parent) handles
   return parent
 
 -- | A spacer: PURE SUGAR for an empty grown column — it consumes the
--- leftover main-axis space between its siblings.
-spacer :: Build Widget
+-- leftover main-axis space between its siblings. In EITHER zone, since
+-- it takes nothing that could come from a row: 'Declare' alone picks
+-- the zone, no dispatcher class needed.
+spacer :: (Declare m) => m (El m)
 spacer = do
-  w@(Widget n) <- widget W.kindColumn
-  emitB (W.txSetGrow n 1.0)
+  w <- widget W.kindColumn
+  setGrow w 1.0
   return w
 
 -- The leaf half of the same idiom: every leaf constructor's result is
@@ -1833,31 +1933,44 @@ buttonOn text handler = leafish $ do
 -- spell "leaf, no handler" — the one hole of its kind among the eight
 -- bindings (python's handler kwarg is optional, go takes nil).
 --
--- 'button' IS THE ONE LEAF THAT STANDS IN BOTH ZONES, so it dispatches
--- on its result type through a class of its own rather than through
--- 'LeafArgs' — the idiom 'row' and 'column' already use for the same
--- reason. A template's button is a blueprint entry stamped once per
--- element, and a click on a copy names that copy by key path, so it
--- CANNOT take the live zone's @IO ()@ handler at the constructor: the
--- app registers one handler centrally with 'onClickNode' and reads the
--- keys off the occurrence (guests/haskell/milestone2.hs). That is why
--- there is no template 'buttonOn' beside it — the live zone's @IO ()@
--- has nowhere to put the keys, so the overload could only be the wrong
--- one. The other bindings carry the same handler-free constructor in
--- their template zones (swift's @KayaTpl.button@, java's
--- @Tpl.button@); this zone reached it 2026-08-05, with the milestone2
--- graduation.
-class ButtonArgs r where
-  buttonish :: String -> r
+-- THE LEAVES THAT STAND IN BOTH ZONES dispatch on their result type
+-- through a class of their own rather than through 'LeafArgs' — the
+-- idiom 'row' and 'column' use in the live zone for the same reason.
+-- The body is written ONCE, over 'Declare', and the instance picks
+-- which zone's id space and record list it lands in; that is what the
+-- rank-2 argument is for. The live arm keeps its attr-list arity, the
+-- template arm has none.
+--
+-- WHICH LEAVES QUALIFY: exactly the ones whose arguments are the same
+-- in both zones — a constant caption, or nothing at all. A template's
+-- button is a blueprint entry stamped once per element, and a click on
+-- a copy names that copy by key path, so it CANNOT take the live zone's
+-- @IO ()@ handler at the constructor: the app registers one handler
+-- centrally with 'onClickNode' and reads the keys off the occurrence
+-- (guests/haskell/milestone2.hs). That is why there is no template
+-- 'buttonOn' beside it — the live zone's @IO ()@ has nowhere to put the
+-- keys, so the overload could only be the wrong one. The same argument
+-- retires 'entryOn' and 'textareaOn' from the template zone, where
+-- 'onChangeNode' is the spelling. The other bindings carry the same
+-- handler-free constructors in their template zones (swift's
+-- @KayaTpl.button@, java's @Tpl.button@); button reached this zone
+-- 2026-08-05 with the milestone2 graduation, entry and textarea
+-- 2026-08-10 with the rest of the template surface.
+--
+-- A leaf whose value can come from the ROW is NOT here: it takes a
+-- source, the live zone has nothing to source from, and the two
+-- signatures have nothing in common. Those are the @Bound@ names below.
+class BothZones r where
+  bothish :: (forall m. Declare m => m (El m)) -> r
 
-instance (b ~ Widget) => ButtonArgs (Build b) where
-  buttonish = captionedButton
+instance (b ~ Widget) => BothZones (Build b) where
+  bothish act = act
 
-instance (b ~ Node) => ButtonArgs (Tpl b) where
-  buttonish = captionedButton
+instance (b ~ Node) => BothZones (Tpl b) where
+  bothish act = act
 
-instance (a ~ Attr 'LeafW, r ~ Build Widget) => ButtonArgs ([a] -> r) where
-  buttonish text attrs = withAttrs attrs (captionedButton text)
+instance (a ~ Attr 'LeafW, r ~ Build Widget) => BothZones ([a] -> r) where
+  bothish act attrs = withAttrs attrs act
 
 -- One declaration, whichever zone hosts it: the same two records at
 -- both depths, from that zone's own id space.
@@ -1867,17 +1980,33 @@ captionedButton text = do
   setText w text
   return w
 
-button :: (ButtonArgs r) => String -> r
-button = buttonish
+button :: (BothZones r) => String -> r
+button text = bothish (captionedButton text)
 
-entry :: (LeafArgs r) => r
-entry = leafish (widget W.kindEntry)
+-- | An uncontrolled single-line field, in either zone. Handler-free by
+-- construction: the field owns its text and reports each edit, live
+-- through 'onChange' (or co-located with 'entryOn'), stamped through
+-- 'onChangeNode' with the copy's key path. A template copy that should
+-- OPEN holding the row's own text is 'entryBound'.
+entry :: (BothZones r) => r
+entry = bothish (widget W.kindEntry)
 
 entryOn :: (LeafArgs r) => (String -> IO ()) -> r
 entryOn handler = leafish $ do
   w@(Widget n) <- widget W.kindEntry
   pendB (PChange n handler)
   return w
+
+-- | A multi-line editor, in either zone: the entry's uncontrolled
+-- contract over the platform's real multi-line control.
+--
+-- The LIVE half of this arrived with the template pass. Until
+-- 2026-08-10 the only spelling here was 'textareaOn', so a Haskell
+-- scene that wanted a textarea and no handler passed a no-op one
+-- (guests/haskell/grow.hs says so out loud) — the same hole the entry
+-- graduation closed for 'entry' on 2026-08-05, one kind over.
+textarea :: (BothZones r) => r
+textarea = bothish (widget W.kindTextarea)
 
 -- | A labeled checkbox with its toggle handler co-located.
 -- | A multi-line text editor with its change handler co-located:
@@ -1905,13 +2034,15 @@ progress fraction = leafish $ do
   emitB (W.txSetValue n fraction)
   return w
 
--- | A progress bar in the platform's activity mode (no fraction).
-progressIndeterminate :: (LeafArgs r) => r
-progressIndeterminate = leafish $ do
-  w <- widget W.kindProgress
-  let (Widget n) = w
-  emitB (W.txSetIndeterminate n True)
-  return w
+-- | A progress bar in the platform's activity mode (no fraction), in
+-- either zone — with no fraction there is nothing to source, so this is
+-- one of the constructors whose two zones take the same nothing.
+progressIndeterminate :: (BothZones r) => r
+progressIndeterminate =
+  bothish $ do
+    w <- widget W.kindProgress
+    setIndeterminate w True
+    return w
 
 -- | A slider over min..max at value, with its change handler
 -- co-located.
@@ -2000,18 +2131,21 @@ imageBound sig = leafish $ do
 pendT :: Pending -> Tpl ()
 pendT pending = Tpl $ \s -> ((), s {bPending = pending : bPending s})
 
--- | What a template label's text can bind to.
+-- | What a template Str prop can bind to — a label's text, a button's
+-- caption, an entry's or textarea's opening text. Named for the prop's
+-- VALUE TYPE and not for the label, since 2026-08-10: it was
+-- 'bindLabelSource' while a label was the only kind that used it.
 class TplTextSource s where
-  bindLabelSource :: Node -> s -> Tpl ()
+  bindTextSource :: Node -> s -> Tpl ()
 
 instance TplTextSource String where
-  bindLabelSource (Node n) text = emitT (W.txSetText n text)
+  bindTextSource (Node n) text = emitT (W.txSetText n text)
 
 instance TplTextSource Signal where
-  bindLabelSource (Node n) (Signal s) = emitT (W.txBindText n s)
+  bindTextSource (Node n) (Signal s) = emitT (W.txBindText n s)
 
 instance TplTextSource (KField String) where
-  bindLabelSource n fd = bindTextField n 0 fd
+  bindTextSource n fd = bindTextField n 0 fd
 
 -- | What a template checkbox's state can bind to.
 class TplBoolSource s where
@@ -2041,10 +2175,36 @@ instance TplImageSource Signal where
 instance TplImageSource (KField BS.ByteString) where
   bindImageSource n fd = bindSourceField n 0 fd
 
+-- | What a template F64 prop can bind to: a progress bar's fraction, a
+-- slider's position, a choice's selected index. The 'KField' instance
+-- is Double-ONLY, because Prop::Value is an F64 slot — an I64 field
+-- here is a type error rather than a scene panic, which is the same
+-- fact 'bindCheckedField' states one prop over.
+--
+-- A NUMERIC LITERAL NEEDS ITS TYPE SAID OUT LOUD in this one class:
+-- @progressBound (0.5 :: Double)@, not @progressBound 0.5@. The
+-- constraint set is @(Fractional s, TplNumberSource s)@ and Haskell's
+-- defaulting rules only fire when every class in it is a standard one,
+-- so GHC reports an ambiguous type variable instead of picking Double.
+-- The other three source classes never meet a literal, so this is the
+-- only place it shows. It is a papercut on the CONSTANT case, which is
+-- the case a template zone exists least for.
+class TplNumberSource s where
+  bindValueSource :: Node -> s -> Tpl ()
+
+instance TplNumberSource Double where
+  bindValueSource (Node n) x = emitT (W.txSetValue n x)
+
+instance TplNumberSource Signal where
+  bindValueSource (Node n) (Signal s) = emitT (W.txBindValue n s)
+
+instance TplNumberSource (KField Double) where
+  bindValueSource n fd = bindValueField n 0 fd
+
 label :: TplTextSource s => s -> Tpl Node
 label src = do
   n <- widget W.kindLabel
-  bindLabelSource n src
+  bindTextSource n src
   return n
 
 checkbox :: TplBoolSource s => s -> ([W.Value] -> Bool -> IO ()) -> Tpl Node
@@ -2060,6 +2220,135 @@ image :: TplImageSource s => s -> Tpl Node
 image src = do
   n <- widget W.kindImage
   bindImageSource n src
+  return n
+
+-- | A stamped button whose caption comes from an addressable source —
+-- a signal, or the ROW'S OWN field, which is the thing @button "text"@
+-- cannot say and the thing a list of named actions wants ("Delete
+-- <title>"). Constant captions stay on 'button', which spells the same
+-- widget in both zones.
+--
+-- Handler-free like 'button', for the reason written there: a click on
+-- a copy names the copy, so the app registers once with 'onClickNode'.
+buttonBound :: TplTextSource s => s -> Tpl Node
+buttonBound src = do
+  n <- widget W.kindButton
+  bindTextSource n src
+  return n
+
+-- | A stamped entry SEEDED from an addressable source: the copy opens
+-- holding the row's own text. (The live zone has no twin, because a
+-- live widget has no row to read.)
+--
+-- STILL UNCONTROLLED, which is why this is a separate name and not an
+-- optional argument on 'entry': the field owns its text from the first
+-- keystroke, and the source keeps writing. Seed from a field the app
+-- does NOT write back to — one that folds 'onChangeNode' into the same
+-- field re-writes what the user is typing. Not an occurrence loop, since
+-- a property write never echoes one (DESIGN.md), but the caret moves.
+entryBound :: TplTextSource s => s -> Tpl Node
+entryBound src = do
+  n <- widget W.kindEntry
+  bindTextSource n src
+  return n
+
+-- | A stamped textarea seeded from an addressable source;
+-- 'entryBound''s contract over the multi-line control.
+textareaBound :: TplTextSource s => s -> Tpl Node
+textareaBound src = do
+  n <- widget W.kindTextarea
+  bindTextSource n src
+  return n
+
+-- | A template row: the live 'row' one zone down, taking NODES. It is
+-- its own name because the element type is the difference — see the
+-- naming rule in the module header, and the TypeError on `row` in a
+-- template body, which says this.
+rowOf :: [Tpl Node] -> Tpl Node
+rowOf = containerOf W.kindRow
+
+-- | A template column.
+columnOf :: [Tpl Node] -> Tpl Node
+columnOf = containerOf W.kindColumn
+
+-- | A template scroll viewport over EXACTLY ONE child — the signature
+-- says so, as the live 'scroll''s does (the scene enforces it too).
+-- No attr list, so no 'Grow': template-zone props do not exist in any
+-- binding yet, and an unconstrained viewport hugs its content. A
+-- stamped scroll therefore wants an enclosing track that already
+-- constrains it.
+scrollOf :: Tpl Node -> Tpl Node
+scrollOf child = containerOf W.kindScroll [child]
+
+-- | A template grid, laying each stamped copy's children row-major into
+-- @columns@ columns. The count describes the PROTOTYPE and so stays a
+-- constant: every copy of a grid has the same shape, and only the
+-- values inside it vary.
+gridOf :: Int -> [Tpl Node] -> Tpl Node
+gridOf = gridWith
+
+-- | A stamped progress bar whose fraction follows an addressable
+-- source — the per-row case this zone exists for,
+-- @progressBound (field \@"done" \@Task)@. Display-only, like label and
+-- image. 'progressIndeterminate' is the activity mode, in either zone.
+progressBound :: TplNumberSource s => s -> Tpl Node
+progressBound src = do
+  n <- widget W.kindProgress
+  bindValueSource n src
+  return n
+
+-- | A stamped slider over @lo@..@hi@ whose POSITION comes from a
+-- source. The range describes the prototype and is constant; the
+-- position is the part that varies per row. A per-row range IS
+-- expressible on the wire (Prop::Min and Prop::Max take an element
+-- source) and has no artifact asking for it, so it waits for one.
+--
+-- Handler-free like the template 'button': a copy's move arrives naming
+-- the copy, so the app registers once with 'onValueChangedNode'.
+slider :: TplNumberSource s => Double -> Double -> s -> Tpl Node
+slider lo hi src = do
+  n@(Node i) <- widget W.kindSlider
+  emitT (W.txSetMin i lo)
+  emitT (W.txSetMax i hi)
+  bindValueSource n src
+  return n
+
+-- | A stamped dropdown over fixed options — each option becomes a label
+-- child — with the SELECTED 0-based index from a source. Handler-free:
+-- a copy's pick arrives naming the copy, so the app registers once with
+-- 'onValueChangedNode' and reads the new index off the occurrence
+-- (programmatic writes never echo) — the slider's uncontrolled contract.
+--
+-- THE OPTION LIST IS THE BLUEPRINT'S, not the row's. A template is one
+-- shape stamped N times, so every copy shows the same options and only
+-- the choice varies. The COUNT cannot vary at all: a per-row list would
+-- need a collection inside the choice widget, and a For's container is a
+-- Column, which a select rejects as a non-label child
+-- (docs/sugar-pass-plan.md §2).
+select :: TplNumberSource s => [String] -> s -> Tpl Node
+select = choiceWith W.kindSelect
+
+-- | A stamped radio group: 'select''s contract in its inline
+-- presentation — same option children, same index, same registrar.
+radio :: TplNumberSource s => [String] -> s -> Tpl Node
+radio = choiceWith W.kindRadio
+
+-- The options are built CHILDREN-FIRST — declare the label, set its
+-- text, then addChild — because that is the order the backends already
+-- accommodate for this binding: gtk.rs reads an option's text at the
+-- AddChild, and a text set afterwards would arrive too late (caught live
+-- on linux 2026-07-22, when every ocaml/haskell row read "").
+choiceWith :: TplNumberSource s => Word32 -> [String] -> s -> Tpl Node
+choiceWith kind options src = do
+  n <- widget kind
+  mapM_
+    ( \optionText -> do
+        o <- widget W.kindLabel
+        setText o optionText
+        addChild n o
+    )
+    options
+  bindValueSource n src
   return n
 
 -- | A For as a child: forEach whose body keeps no handles — the common
@@ -2526,6 +2815,13 @@ bindTextField (Node n) level (KField i) = emitT (W.txBindTextElement n level i)
 bindCheckedField :: Node -> Word32 -> KField Bool -> Tpl ()
 bindCheckedField (Node n) level (KField i) = emitT (W.txBindCheckedElement n level i)
 
+-- | Bind an F64 prop — a progress fraction, a slider position, a
+-- choice's index — to one field of the element; KField Double only,
+-- because the slot is F64 and an I64 field would be a scene error at
+-- declaration rather than a compile error here.
+bindValueField :: Node -> Word32 -> KField Double -> Tpl ()
+bindValueField (Node n) level (KField i) = emitT (W.txBindValueElement n level i)
+
 -- | Bind an image's source to one Blob field of the element; KField
 -- ByteString only.
 bindSourceField :: Node -> Word32 -> KField BS.ByteString -> Tpl ()
@@ -2554,6 +2850,12 @@ data App = App
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
     appNodeToggles :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
     appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ())),
+    -- The node twin of the line above, added 2026-08-10 with the
+    -- template slider, select and radio. The core has always emitted
+    -- Occurrence::InstanceValueChanged; without this table the dispatch
+    -- loop had a live arm and no instance arm, so a stamped control's
+    -- move matched nothing and was dropped with no error anywhere.
+    appNodeValues :: IORef (Map.Map Word64 ([W.Value] -> Double -> IO ())),
     -- Per-window lifecycle handlers, keyed by window id — handlers
     -- scope to the thing that creates them.
     appCloseRequested :: IORef (Map.Map Word64 (IO ())),
@@ -2851,6 +3153,20 @@ onToggleNode :: App -> Node -> ([W.Value] -> Bool -> IO ()) -> IO ()
 onToggleNode app (Node n) handler =
   modifyIORef' (appNodeToggles app) (Map.insert n handler)
 
+-- | Register a change handler for a template slider, select or radio;
+-- it also receives the stamped copy's keys, outermost first. A choice
+-- reports its new 0-based index as the Double, which is the same value
+-- the live 'onValueChanged' hands a 'selectOn' handler before it rounds.
+--
+-- CENTRAL, NOT CO-LOCATED, like 'onClickNode' and unlike the template
+-- 'checkbox': the three constructors that produce these occurrences
+-- ('slider', 'select', 'radio') take a source and no handler, because
+-- one blueprint is stamped N times and the handler has to be able to
+-- tell the copies apart.
+onValueChangedNode :: App -> Node -> ([W.Value] -> Double -> IO ()) -> IO ()
+onValueChangedNode app (Node n) handler =
+  modifyIORef' (appNodeValues app) (Map.insert n handler)
+
 -- | Turn the decoder's kind-and-parts into the sum, or Nothing.
 --
 -- EMPTY IS THE UNIVERSAL NO: Nothing covers a denied prompt on iOS, an
@@ -2880,41 +3196,50 @@ representationOf (Just cv)
 -- | A fresh app: zeroed id counters, an empty model, empty dispatch
 -- tables. kayaMain starts from one; headless checks use it directly,
 -- without ever entering the core.
+--
+-- EVERY LINE NAMES ITS FIELD, because this chain is POSITIONAL and
+-- most of the fields are @IORef (Map …)@ filled with the same
+-- polymorphic @Map.empty@: a new table inserted one line off would
+-- typecheck and silently swap two dispatch tables. The two @newIORef 0@
+-- lines are the only positions the compiler pins on its own, which is
+-- why the comments carry the rest. (Learned adding appNodeValues,
+-- 2026-08-10.)
 newApp :: IO App
 newApp =
   App
-    <$> newMVar []
-    <*> newIORef (Counters 0 0 0 0 0 0 0 0)
-    <*> newIORef (Map.empty, Map.empty)
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef 0
+    <$> newMVar [] -- appPosted
+    <*> newIORef (Counters 0 0 0 0 0 0 0 0) -- appCounters
+    <*> newIORef (Map.empty, Map.empty) -- appModel
+    <*> newIORef Map.empty -- appFresh
+    <*> newIORef Map.empty -- appDerived
+    <*> newIORef Map.empty -- appWidgetHandlers
+    <*> newIORef Map.empty -- appNodeHandlers
+    <*> newIORef Map.empty -- appWidgetChanges
+    <*> newIORef Map.empty -- appNodeChanges
+    <*> newIORef Map.empty -- appWidgetToggles
+    <*> newIORef Map.empty -- appNodeToggles
+    <*> newIORef Map.empty -- appWidgetValues
+    <*> newIORef Map.empty -- appNodeValues
+    <*> newIORef Map.empty -- appCloseRequested
+    <*> newIORef Map.empty -- appWindowClosed
+    <*> newIORef Map.empty -- appEntryPopped
+    <*> newIORef Map.empty -- appSectionSelected
+    <*> newIORef Map.empty -- appBackRequested
+    <*> newIORef Map.empty -- appAlertHandlers
+    <*> newIORef 0 -- appNextAlert
     <*> newIORef Map.empty -- appUndone
     <*> newIORef Map.empty -- appRedone
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef 0
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
+    <*> newIORef Map.empty -- appFileDialogHandlers
+    <*> newIORef Map.empty -- appClipboardReads
+    <*> newIORef 0 -- appNextClipboardRead
+    <*> newIORef Map.empty -- appWidgetPastes
+    <*> newIORef Map.empty -- appNodePastes
+    <*> newIORef Map.empty -- appMenuActivated
+    <*> newIORef Map.empty -- appMenuActivatedNode
+    <*> newIORef Map.empty -- appMenuToggled
+    <*> newIORef Map.empty -- appMenuToggledNode
+    <*> newIORef Map.empty -- appMenuSelected
+    <*> newIORef Map.empty -- appMenuSelectedNode
 
 -- | Set up (build the scene, register handlers) and run: occurrences
 -- dispatch on the app thread while the core owns the calling thread,
@@ -3015,7 +3340,9 @@ dispatchLoop app = do
             [] -> do
               handlers <- readIORef (appWidgetValues app)
               dispatch (mapM_ ($ v) (Map.lookup ident handlers))
-            _ -> return ()
+            _ -> do
+              handlers <- readIORef (appNodeValues app)
+              dispatch (mapM_ (\h -> h keys v) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindCloseRequested -> do
           handlers <- readIORef (appCloseRequested app)

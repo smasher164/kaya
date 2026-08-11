@@ -10,7 +10,7 @@ main = kayaMain $ \app -> do
     root <-
       column
         []
-        [ gridOf 2
+        [ grid 2
             [ labelText "Name:", -- label#0
               labelText "Ada Lovelace", -- label#1
               labelText "Role:", -- label#2

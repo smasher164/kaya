@@ -772,7 +772,7 @@ func App() *kaya.App {
 			findRows = tx.Collection()
 			for row := range findRows.Rows(tx) {
 				row.Row(func() {
-					query = row.Widget(kaya.KindEntry) // entry#0
+					query = row.Entry() // entry#0
 					prev = row.Button("prev")          // button#0
 					next = row.Button("next")          // button#1
 					// DISMISS IS AN AFFORDANCE, because it cannot be a

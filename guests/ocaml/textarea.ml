@@ -16,22 +16,35 @@ let () =
        let lines = signal (Str "0 lines") in
        window ~title:"textarea" ();
 
-       let column = widget kind_column in
-       let editor = widget kind_textarea in
-       let lines_label = widget kind_label in
-       bind_text lines_label lines;
-       let clear_btn = widget kind_button in
-       set_text clear_btn "clear";
+       (* THE EDITOR REALIZES HERE because the clear button's handler
+          needs its handle; [w editor] slots the existing widget into the
+          child list, where the column merely attaches it (the todos
+          scene's idiom).
 
-       add_child column editor;
-       add_child column lines_label;
-       add_child column clear_btn;
-       mount column;
-
-       on_change app editor (fun text -> write lines (Str (count text)));
-       on_click app clear_btn (fun () ->
-           clear editor;
-           focus editor);
+          This scene used to be built entirely at the widget-kind floor —
+          [widget kind_column], [add_child], [set_text] — while every
+          constructor it needed sat in the binding unused. Nothing caught
+          it: check-sugar-surface's floor rules read only the two
+          carve-out scenes, so a guest outside that table could teach the
+          floor indefinitely (docs/deferred.md). Invariant 5 says the
+          example scenes use each language's sugar tier and only the C
+          guests keep the explicit floor. *)
+       let editor =
+         textarea ~on_change:(fun text -> write lines (Str (count text))) ()
+       in
+       let root =
+         column
+           [
+             w editor;
+             label ~bind:lines;
+             button ~text:"clear"
+               ~on_click:(fun () ->
+                 clear editor;
+                 focus editor);
+           ]
+           ()
+       in
+       mount root;
        (lines, editor))
   in
   ignore lines;

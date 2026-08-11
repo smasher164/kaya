@@ -2293,6 +2293,127 @@ mod tests {
     }
 
     /// PROPS and the "prop" enum stay in lockstep: same names, same
+    /// A BACKEND MAY ONLY UNWRAP A TAG THE CORE PROMISES TO SET.
+    ///
+    /// The sibling test in scene.rs holds the two core paths in
+    /// agreement with each other, which is not the same as holding them
+    /// in agreement with the BACKENDS: flip `carries_tag` to false for a
+    /// kind and both paths would still agree, on None, while
+    /// `tag.expect("selects carry a tag")` aborts the process on GTK and
+    /// WinUI. That is the failure D1 actually shipped, one layer down,
+    /// and it is invisible from mac — gtk.rs is cfg'd out here, so no
+    /// build a mac session runs ever compiles the line.
+    ///
+    /// `include_str!` reads the text regardless of cfg, so this runs on
+    /// every platform, in rung 1, in the suite every lane already runs
+    /// (CLAUDE.md: put the wall where someone walks into it). Each
+    /// `expect` sentence names its kind in plain words, which is what
+    /// makes the pairing readable rather than a comment nobody updates.
+    #[test]
+    fn backends_only_unwrap_tags_the_core_sets() {
+        let sources: &[(&str, &str)] = &[
+            ("gtk.rs", include_str!("gtk.rs")),
+            ("winui/mod.rs", include_str!("winui/mod.rs")),
+        ];
+        // "textareas carry a tag" -> Textarea. The sentence is the
+        // backend author's own, so the match is on the kind's name
+        // rather than on a list this test would have to carry.
+        let mut seen = 0usize;
+        for (file, src) in sources {
+            for (i, line) in src.lines().enumerate() {
+                let Some(rest) = line.split("expect(\"").nth(1) else {
+                    continue;
+                };
+                let Some(sentence) = rest.split('"').next() else {
+                    continue;
+                };
+                if !sentence.contains("carry a tag") {
+                    continue;
+                }
+                seen += 1;
+                // The sentences are English, so the noun is plural:
+                // "entries carry a tag", "radio groups carry a tag".
+                // Match the leading noun against each kind's spellings
+                // rather than making the backends write "entrys".
+                let noun = sentence.split_whitespace().next().unwrap_or("");
+                let named = WidgetKind::ALL.iter().find(|k| {
+                    let base = format!("{k:?}").to_lowercase();
+                    let plural_y = base
+                        .strip_suffix('y')
+                        .map(|stem| format!("{stem}ies"))
+                        .unwrap_or_default();
+                    noun == base
+                        || noun == format!("{base}s")
+                        || noun == format!("{base}es")
+                        || (!plural_y.is_empty() && noun == plural_y)
+                });
+                let kind = named.unwrap_or_else(|| {
+                    panic!(
+                        "kaya: {file}:{} unwraps a tag with the sentence {sentence:?}, \
+                         which names no widget kind. A tag `expect` says which kind \
+                         it speaks for so this pairing can read it.",
+                        i + 1
+                    )
+                });
+                assert!(
+                    kind.carries_tag(),
+                    "kaya: {file}:{} unwraps the identity tag for {kind:?}, but \
+                     WidgetKind::carries_tag says {kind:?} carries none — the core \
+                     sends None and this line aborts the process on that backend. \
+                     Either the kind reports (add it to carries_tag) or this \
+                     backend must handle the absent tag.",
+                    i + 1
+                );
+            }
+        }
+        // ANTI-VACUITY. A pairing that finds nothing passes for the
+        // wrong reason, and this one reads source text through a
+        // substring — exactly the shape that rots into "always green"
+        // when a backend rewords its expects (docs/traps.md).
+        assert!(
+            seen >= 6,
+            "kaya: found only {seen} tag `expect`s across the two backends that \
+             have them — this pairing has stopped seeing the lines it exists to \
+             check, so it can no longer fail"
+        );
+    }
+
+    /// `WidgetKind::ALL` IS THE SPEC'S KIND LIST, one entry per variant.
+    /// The sweeps that must not miss a kind walk ALL rather than repeat
+    /// a list — the live-vs-stamped tag agreement is the first of them
+    /// (scene.rs, `a_stamped_copy_is_tagged_exactly_where_a_live_one_is`)
+    /// — so a kind added to the spec and NOT added to ALL would join the
+    /// wire vocabulary while silently sitting outside every one of them.
+    /// The spec is the root (invariant 7); this is the line that makes
+    /// ALL follow it instead of drifting behind it.
+    #[test]
+    fn all_widget_kinds_are_the_spec_s_kinds() {
+        let kind_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "kind")
+            .expect("spec has a kind enum");
+        assert_eq!(
+            WidgetKind::ALL.len(),
+            kind_enum.variants.len(),
+            "kaya: the spec declares {} widget kinds and WidgetKind::ALL lists {} \
+             — a kind added to the spec must join ALL, or every sweep that walks \
+             ALL skips it silently",
+            kind_enum.variants.len(),
+            WidgetKind::ALL.len()
+        );
+        // Same order, so the pairing below is the spec's own and not a
+        // coincidence of two lists that happen to be the same length.
+        for (kind, (name, _)) in WidgetKind::ALL.iter().zip(kind_enum.variants) {
+            let spelled = format!("{kind:?}").to_lowercase();
+            assert_eq!(
+                &spelled, name,
+                "kaya: WidgetKind::ALL is out of order with the spec's kind enum \
+                 ({spelled} sits where {name} is declared)"
+            );
+        }
+    }
+
     /// ids, same order — the enum feeds constants, PROPS feeds the
     /// typed setter generation.
     #[test]

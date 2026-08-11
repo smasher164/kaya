@@ -61,9 +61,9 @@ main = kayaMain $ \app -> do
         -- registration has a handle to name; 'pure' slots it into the
         -- column where it stands.
         removeButton <- button "remove"
-        _ <- column [label element, pure removeButton]
+        _ <- columnOf [label element, pure removeButton]
         return removeButton
-      _ <- column [label element, pure itemList]
+      _ <- columnOf [label element, pure itemList]
       return (items, removeButton)
 
     let onStep = do

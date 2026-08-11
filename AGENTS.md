@@ -177,11 +177,30 @@ in docs/deferred.md.
    backend's Stage impl names every required trait method: a trait method
    missed in gtk.rs alone used to survive every fast gate and die in the
    matrix),
-   `tools/check-sugar-surface.sh` (every widget kind has a live-zone
-   constructor in all 8 bindings, AND every window prop has a sugar
-   spelling in all 8 — the generic floor spells a prop without the
-   sugar noticing, which is how Python shipped unable to declare
-   `list_detail` at all),
+   `tools/check-sugar-surface.sh` (every widget kind has a constructor
+   in all 8 bindings IN BOTH CONSTRUCTION ZONES, AND every window prop
+   has a sugar spelling in all 8 — the generic floor spells a prop
+   without the sugar noticing, which is how Python shipped unable to
+   declare `list_detail` at all.
+   THE SECOND ZONE JOINED 2026-08-10 and is the half that had never been
+   checked: the LIVE zone is what an app builds in its build closure,
+   the TEMPLATE zone is the prototype inside a collection stamped once
+   per row, and they are different surfaces handing out different
+   handles. The template zone had 3 kinds where the live zone had 14, so
+   kaya's own text editor spelled its find bar's text field
+   `row.Widget(kaya.KindEntry)` and the undo scene did the same in seven
+   languages — the floor, which is the C guests' tier and not an app's.
+   That sweep is `tools/tpl-surfaces.py`, a python census rather than
+   seven more greps, and the reason is forced: three bindings namespace
+   the template zone by SCOPE rather than by name (Rust's `Tpl` methods
+   are `pub fn entry` exactly like `Tx`'s; OCaml's live in `module Tpl =
+   struct`), so a line-oriented pattern would be satisfied by the LIVE
+   constructor and report a zone it never read. It also holds a zone's
+   several surfaces level with each other — Rust's `Row` is a second
+   façade onto `Tpl` and forwarded six methods while ten kinds were
+   missing — and it REFUSES A VERDICT from a reader that found
+   implausibly few constructors, because a census that reads nothing
+   agrees with everything),
    `tools/check-universal-props.sh` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm

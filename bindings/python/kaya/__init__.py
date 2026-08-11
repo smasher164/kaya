@@ -232,6 +232,26 @@ def _guard_mirror_read(what):
         )
 
 
+def _no_truth_value(what):
+    """The lax.cond wall, element edition: a tracer is a reference into
+    the blueprint, not a value. A template body runs ONCE, so a branch
+    taken on the row's data freezes one row's answer into every stamped
+    copy.
+
+    ON THE ELEMENT AS WELL AS ITS FIELDS, because the constant arms
+    COERCE: `progress(indeterminate=el)` matched no source arm and fell
+    through to `bool(el)`, and an object with no `__bool__` is true — a
+    permanently spinning bar on every row, with nothing raised and
+    nothing on the wire to say the binding was meant to be per-row.
+    """
+    raise RuntimeError(
+        f"kaya: {what} has no truth value — bind it "
+        "(checkbox(checked=el.field)) or, for per-constructor branches, "
+        "declare a sum and its case arms; handlers read the model "
+        "(get()/items()), never the tracer"
+    )
+
+
 class Signal:
     def __init__(self, id, initial=None):
         self.id = id
@@ -621,6 +641,9 @@ class Element:
     def _level(self):
         return len(_for_stack) - 1 - self._for_index
 
+    def __bool__(self):
+        _no_truth_value("an element")
+
     def __getattr__(self, name):
         if name.startswith("_"):
             raise AttributeError(name)
@@ -677,6 +700,9 @@ class _CaseElement:
     def _level(self):
         return len(_for_stack) - 1 - self._for_index
 
+    def __bool__(self):
+        _no_truth_value("an element")
+
     def __getattr__(self, name):
         if name.startswith("_"):
             raise AttributeError(name)
@@ -700,14 +726,7 @@ class FieldRef:
         return self._element._level()
 
     def __bool__(self):
-        # The lax.cond wall, element edition: a field projection is a
-        # blueprint reference, not a value.
-        raise RuntimeError(
-            "kaya: an element's field has no truth value — bind it "
-            "(checkbox(checked=el.field)) or, for per-constructor "
-            "branches, declare a sum and its case arms; handlers read "
-            "the model (get()/items()), never the tracer"
-        )
+        _no_truth_value("an element's field")
 
 
 class _BoundCollection:
@@ -2334,8 +2353,10 @@ def progress(value=None, indeterminate=None, grow=None):
         if isinstance(value, Signal):
             _records().append(wire.tx_bind_value(handle.id, value.id))
         elif isinstance(value, FieldRef):
-            _records().append(wire.tx_bind_value_element(
-                handle.id, value._level, value._field))
+            _records().append(
+                wire.tx_bind_value_element(handle.id, value._level(),
+                                           value._index)
+            )
         else:
             _records().append(wire.tx_set_value(handle.id, float(value)))
     if indeterminate is not None:
@@ -2459,6 +2480,19 @@ def label(text=None, bind=None, grow=None):
     elif isinstance(bind, FieldRef):
         _records().append(
             wire.tx_bind_text_element(handle.id, bind._level(), bind._index)
+        )
+    elif bind is not None:
+        # The ladder needs a floor. The other seven bindings type this
+        # argument, so a source they do not recognize fails to compile;
+        # Python's equivalent of not compiling is raising here, and
+        # without this arm the call bound NOTHING and said nothing —
+        # `kaya.label(bind=el)` inside a `cases.case(...)` arm hands over
+        # the refined proxy, which is not an `Element`, so it declared a
+        # blank label and the row's text simply never appeared.
+        raise TypeError(
+            f"kaya: label bind takes a Signal, the enclosing For's element, "
+            f"or one of its fields (el.title), not {type(bind).__name__} — "
+            "inside a case arm project the field: kaya.label(bind=note.text)"
         )
     _set_grow(handle, grow)
     return handle

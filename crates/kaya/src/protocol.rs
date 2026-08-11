@@ -883,6 +883,86 @@ pub enum WidgetKind {
     Scroll,
 }
 
+impl WidgetKind {
+    /// Every kind, for the sweeps that must not miss one — the tag
+    /// agreement between the live and stamped paths is checked by
+    /// walking this rather than by repeating a list, so a kind added
+    /// later joins the sweep instead of quietly sitting outside it.
+    /// Pinned to the spec's own `kind` enum by
+    /// `spec::tests::all_widget_kinds_are_the_spec_s_kinds`: the spec is
+    /// the root, so a variant added there must appear here or that test
+    /// fails (invariant 7).
+    ///
+    /// `pub(crate)`, not `pub`: a `pub` associated const makes cbindgen
+    /// treat `WidgetKind` as a type the C ABI exports, and it emitted
+    /// `typedef struct WidgetKind WidgetKind;` into the public header —
+    /// an opaque handle to a Rust enum that no C caller can do anything
+    /// with. The stale-header gate caught it on the first build. Guests
+    /// still name the enum's variants; nothing outside this crate needs
+    /// to walk them.
+    ///
+    /// `cfg(test)` because the sweeps that walk it ARE tests — the
+    /// live-vs-stamped tag agreement and the backend tag pairing. A
+    /// shipped app has no reason to enumerate the kinds, and carrying it
+    /// unconditionally is a dead_code warning that trains the next
+    /// reader to ignore dead_code warnings.
+    #[cfg(test)]
+    pub(crate) const ALL: [WidgetKind; 14] = [
+        WidgetKind::Column,
+        WidgetKind::Button,
+        WidgetKind::Label,
+        WidgetKind::Entry,
+        WidgetKind::Row,
+        WidgetKind::Checkbox,
+        WidgetKind::Slider,
+        WidgetKind::Image,
+        WidgetKind::Scroll,
+        WidgetKind::Progress,
+        WidgetKind::Select,
+        WidgetKind::Radio,
+        WidgetKind::Grid,
+        WidgetKind::Textarea,
+    ];
+
+    /// Whether a widget of this kind carries an identity tag — the
+    /// pre-encoded occurrence body a backend emits verbatim when the
+    /// control reports. THE INTERACTIVE KINDS DO; the display and
+    /// container kinds have nothing to report.
+    ///
+    /// This predicate exists because it used to be a `match` written
+    /// twice, twelve hundred lines apart in scene.rs — once for a live
+    /// widget and once for a stamped copy — and the two had drifted:
+    /// Textarea, Select and Radio were tagged live and untagged when
+    /// stamped. GTK and WinUI unwrap the tag for exactly those three, so
+    /// a stamped select aborted the process there and reported to nobody
+    /// on the SwiftUI interpreter, which reads a zero-length tag without
+    /// complaint. Nothing caught it because no binding had a template
+    /// constructor for those kinds — only the raw floor could reach it
+    /// (docs/sugar-pass-plan.md D1). One predicate, both callsites.
+    pub(crate) fn carries_tag(self) -> bool {
+        match self {
+            WidgetKind::Button
+            | WidgetKind::Entry
+            | WidgetKind::Textarea
+            | WidgetKind::Checkbox
+            | WidgetKind::Slider
+            | WidgetKind::Select
+            | WidgetKind::Radio => true,
+            // Exhaustive on purpose — no wildcard. A kind added to the
+            // spec lands here as a compile error, which is the moment to
+            // decide whether it reports, rather than defaulting to
+            // "silent" and finding out on a backend.
+            WidgetKind::Column
+            | WidgetKind::Row
+            | WidgetKind::Label
+            | WidgetKind::Image
+            | WidgetKind::Scroll
+            | WidgetKind::Progress
+            | WidgetKind::Grid => false,
+        }
+    }
+}
+
 /// The menu item vocabulary (spec enum "menu_kind"; DESIGN.md, Menus).
 /// `menu` and `radio_group` are the grouping nodes; the rest are
 /// leaves. One vocabulary, two anchors (the window bar and a

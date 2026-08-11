@@ -69,7 +69,7 @@ main = kayaMain $ \app -> do
                 pure (),
               sumArm (PTodo (Todo "" False)) $ do
                 _ <-
-                  row
+                  rowOf
                     [ checkbox (field @"done" @Todo) onToggle,
                       label (field @"title" @Todo)
                     ]

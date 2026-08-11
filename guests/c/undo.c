@@ -196,12 +196,24 @@ static void build_scene(void) {
      * them the same way now that the payload can NAME them. It is
      * created after the title, so the row reads title-then-field.
      *
-     * NOTHING BINDS IT, which is why the sugar languages spell it with
-     * the widget-kind floor here too (`t.widget(WidgetKind::Entry)`,
-     * `Tpl.Widget(KindEntry)`): the template tier's sugar takes a SOURCE
-     * for the text, and an unbound field has none. Down here that
-     * distinction does not exist — every widget in this file is a
-     * create_widget — which is the floor's usual relationship to sugar. */
+     * NOTHING BINDS IT, and this comment used to explain that the sugar
+     * languages therefore spelled it with the widget-kind floor here too
+     * — the template tier's sugar took a SOURCE for the text, and an
+     * unbound field had none. That was true when it was written and it
+     * was the wrong lesson to draw: what it described was a HOLE in the
+     * template zone, not a property of unbound fields. The zone had
+     * constructors for three kinds where the live zone had fourteen, so
+     * every guest that wanted an entry inside a collection reached for
+     * the floor and this file recorded the workaround as the rule. The
+     * text editor's find bar did the same thing months later, and the
+     * question "don't we have entry sugar?" is what finally read this
+     * paragraph back (docs/sugar-pass-plan.md).
+     *
+     * The sugar languages now spell it `t.entry()` — the unbound form,
+     * which is exactly this case — and seed a copy from its row with
+     * `entry_bound(src)` when they want that instead. Down here neither
+     * distinction exists: every widget in this file is a create_widget,
+     * which is the floor's usual relationship to sugar. */
     kaya_tx_create_widget(&tx, N_NOTE, KAYA_KIND_ENTRY);
     kaya_tx_add_child(&tx, N_ROW, N_NOTE);
     kaya_tx_template_end(&tx);

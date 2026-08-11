@@ -3,7 +3,6 @@ package dev.kaya.milestone2kt;
 import dev.kaya.KayaApp;
 import dev.kaya.KayaGen;
 import dev.kaya.KayaRecords;
-import dev.kaya.KayaWire;
 
 /**
  * The undo scene from the JVM: two tiers, one Edit menu, and one ledger
@@ -242,13 +241,12 @@ final class Undo {
                 tx.button("focus", t -> t.focus(field[0])); // button#2
                 tx.button("remove", t -> remove(t, status, keys, todos)); // button#3
                 // THE TEMPLATE HANDLE ITSELF, not the generated typed
-                // row: the row now holds a field, and the template tier
-                // has label/checkbox/button sugar and no `entry` in ANY
-                // binding — there is no source to bind an uncontrolled
-                // field to — so the widget-kind floor is the spelling
-                // everywhere, and in Java it lives on the Tpl. The
-                // title stays on the typed field token, which is the
-                // same call the generated row would have made.
+                // row: this scene's subject is the ledger, and the
+                // handle is the shortest way to the two nodes it wants.
+                // The generated row would spell the same two calls —
+                // every constructor here is inherited from the one
+                // forwarding list (KayaApp.RowSurface) — and Todos and
+                // Reorder are the scenes that exercise it.
                 tx.forEach(todos.handle, tpl -> {
                     tpl.row(() -> {
                         tpl.label(UndoTodoKaya.TITLE);
@@ -256,8 +254,12 @@ final class Undo {
                         // grew: a copy's text edits are the same
                         // occurrence a live field's are, one identity
                         // deeper, and the ledger banks them the same way
-                        // now that the payload can name them.
-                        KayaApp.Node note = tpl.widget(KayaWire.KIND_ENTRY);
+                        // now that the payload can name them. UNBOUND,
+                        // which is the arm this wants: the copy owns its
+                        // text and the app folds it — the seeded
+                        // entry(field) overload would re-push into the
+                        // field being typed in.
+                        KayaApp.Node note = tpl.entry();
                         // ITS OWN TRANSACTION, and not an undoable one:
                         // the handler was handed the transaction, and
                         // nothing in it names a group — the field's own

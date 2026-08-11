@@ -238,7 +238,21 @@ static class Program
         b.AppendLine("}");
         b.AppendLine();
         b.AppendLine("/// <summary>The row surface: the template handle plus one token per");
-        b.AppendLine("/// wire field, and the constructors that consume them.</summary>");
+        b.AppendLine("/// wire field, and the template zone's whole vocabulary aimed at them.");
+        b.AppendLine("///");
+        b.AppendLine("/// The forwarders below are the ZONE and not a selection from it. A");
+        b.AppendLine("/// constructor Tpl has and this does not is reachable through tx.Each");
+        b.AppendLine("/// and not through `foreach (var row in c.Rows())`, which is a");
+        b.AppendLine("/// difference no guest should have to know about, and the shape this");
+        b.AppendLine("/// list drifts into: it named five constructors by hand while the");
+        b.AppendLine("/// zone named six, and the scene that wanted a per-row entry could");
+        b.AppendLine("/// not use either, so it opened the For itself and reached for the");
+        b.AppendLine("/// widget-kind floor (docs/sugar-pass-plan.md S4b).");
+        b.AppendLine("/// Add here whatever is added to Tpl.");
+        b.AppendLine("/// The zone's PLUMBING — Widget, the Bind*Field setters, AddChild,");
+        b.AppendLine("/// Collection/ForEach/When, ContextMenu — stays off deliberately: a");
+        b.AppendLine("/// row surface hands out sugar, and its Tpl is private so the floor");
+        b.AppendLine("/// is reached by opening the For yourself.</summary>");
         b.AppendLine($"sealed class {rec}Row");
         b.AppendLine("{");
         b.AppendLine("    readonly Tpl t;");
@@ -249,17 +263,87 @@ static class Program
         b.AppendLine();
         b.AppendLine($"    internal {rec}Row(Tpl t) => this.t = t;");
         b.AppendLine();
-        b.AppendLine($"    public Node Label(Field<string> f) => t.Label(f);");
-        b.AppendLine();
-        b.AppendLine($"    public Node Image(Field<byte[]> f) => t.Image(f);");
-        b.AppendLine();
-        b.AppendLine($"    public Node Checkbox(Field<bool> f,");
-        b.AppendLine("        System.Action<Tx, System.Collections.Generic.List<object>, bool> onToggle = null) =>");
-        b.AppendLine("        t.Checkbox(f, onToggle);");
-        b.AppendLine();
-        b.AppendLine("    public Node Row(System.Action body) => t.Row(body);");
-        b.AppendLine();
-        b.AppendLine("    public Node Column(System.Action body) => t.Column(body);");
+        // The handler delegates, spelled once. A TEMPLATE handler carries
+        // the stamped copy's key path; that is the whole difference from
+        // the live zone's shape, and forwarding the live one here would
+        // hand a guest a handler that cannot say which copy fired.
+        const string keys = "System.Collections.Generic.List<object>";
+        var onText = $"System.Action<Tx, {keys}, string>";
+        var onToggle = $"System.Action<Tx, {keys}, bool>";
+        var onValue = $"System.Action<Tx, {keys}, double>";
+        var onSelect = $"System.Action<Tx, {keys}, int>";
+
+        // One forwarder, wrapped the way the hand-written Tpl wraps: a
+        // trailing handler parameter goes on its own line rather than
+        // running past the margin.
+        void Fwd(string name, string[] pars, string args)
+        {
+            var one = $"    public Node {name}({string.Join(", ", pars)}) => t.{name}({args});";
+            if (one.Length <= 84)
+            {
+                b.AppendLine(one);
+            }
+            else
+            {
+                // The handler is the parameter that overflows, so it is
+                // the one that moves; a lone handler leaves the open
+                // paren by itself rather than a dangling comma.
+                var head = string.Join(", ", pars[..^1]);
+                b.AppendLine($"    public Node {name}({head}{(head.Length > 0 ? "," : "")}");
+                b.AppendLine($"        {pars[^1]}) =>");
+                b.AppendLine($"        t.{name}({args});");
+            }
+            b.AppendLine();
+        }
+
+        Fwd("Label", ["string text"], "text");
+        Fwd("Label", ["Signal s"], "s");
+        Fwd("Label", ["Field<string> f"], "f");
+        Fwd("Button", ["string text"], "text");
+        Fwd("Image", ["byte[] source"], "source");
+        Fwd("Image", ["Signal s"], "s");
+        Fwd("Image", ["Field<byte[]> f"], "f");
+        Fwd("Checkbox", ["Field<bool> f", $"{onToggle} onToggle = null"], "f, onToggle");
+        Fwd("Entry", [$"{onText} onChange = null"], "onChange");
+        Fwd("Entry", ["string text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Entry", ["Signal text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Entry", ["Field<string> text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Textarea", [$"{onText} onChange = null"], "onChange");
+        Fwd("Textarea", ["string text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Textarea", ["Signal text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Textarea", ["Field<string> text", $"{onText} onChange = null"], "text, onChange");
+        Fwd("Progress", ["double value"], "value");
+        Fwd("Progress", ["Signal value"], "value");
+        Fwd("Progress", ["Field<double> value"], "value");
+        Fwd("ProgressIndeterminate", [], "");
+        Fwd("Slider", ["double min", "double max", "double value", $"{onValue} onChange = null"],
+            "min, max, value, onChange");
+        Fwd("Slider", ["double min", "double max", "Signal value", $"{onValue} onChange = null"],
+            "min, max, value, onChange");
+        Fwd("Slider",
+            ["double min", "double max", "Field<double> value", $"{onValue} onChange = null"],
+            "min, max, value, onChange");
+        Fwd("Select", ["string[] options", "int selected", $"{onSelect} onSelect = null"],
+            "options, selected, onSelect");
+        Fwd("Select", ["string[] options", "Signal selected", $"{onSelect} onSelect = null"],
+            "options, selected, onSelect");
+        Fwd("Select",
+            ["string[] options", "Field<double> selected", $"{onSelect} onSelect = null"],
+            "options, selected, onSelect");
+        Fwd("Radio", ["string[] options", "int selected", $"{onSelect} onSelect = null"],
+            "options, selected, onSelect");
+        Fwd("Radio", ["string[] options", "Signal selected", $"{onSelect} onSelect = null"],
+            "options, selected, onSelect");
+        Fwd("Radio",
+            ["string[] options", "Field<double> selected", $"{onSelect} onSelect = null"],
+            "options, selected, onSelect");
+        Fwd("Row", ["System.Action body"], "body");
+        Fwd("Column", ["System.Action body"], "body");
+        Fwd("Scroll", ["System.Action body"], "body");
+        Fwd("Grid", ["int columns", "System.Action body"], "columns, body");
+        Fwd("Spacer", [], "");
+        // Fwd leaves a trailing blank line; the class brace closes on it.
+        b.Length -= System.Environment.NewLine.Length;
         b.AppendLine("}");
         b.AppendLine();
         b.AppendLine("/// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,");

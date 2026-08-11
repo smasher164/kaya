@@ -313,14 +313,16 @@ let () =
                          grew: a copy's text edits are the same
                          occurrence a live field's are, one identity
                          deeper, and the ledger banks them the same way
-                         now that the payload can name them. The
-                         template tier has no [entry] sugar — there is
-                         no source to bind — so the widget-kind floor is
-                         the spelling here, in every language. *)
-                      (fun () ->
-                        let note = widget kind_entry in
-                        on_change_node app note on_note;
-                        note);
+                         now that the payload can name them.
+                         UNBOUND ON PURPOSE. [entry] takes an optional
+                         source and this one names none, so each copy
+                         starts blank and owns its text — the
+                         uncontrolled contract, which is what the note
+                         wants: [on_note] folds each edit into the
+                         guest's own map, and a bound field would push
+                         that same text back at the widget it came
+                         from. *)
+                      entry ~on_change:on_note;
                     ]
                     ()));
           ]

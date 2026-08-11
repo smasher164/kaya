@@ -281,15 +281,16 @@ app.build { tx in
                 // copy's text edits are the same occurrence a live
                 // field's are, one identity deeper, and the ledger banks
                 // them the same way now that the payload can name them.
-                // The template tier has no `entry` sugar — there is no
-                // source to bind — so the widget-kind floor is the
-                // spelling here, in every language.
-                let note = row.t.widget(UInt32(KAYA_KIND_ENTRY))
-                // Registered against the TEMPLATE NODE, so each edit
+                // The UNSOURCED entry, which is the template tier's
+                // primary form: the copy owns its text, so there is
+                // nothing to bind and every copy starts empty.
+                //
+                // The handler co-locates at the constructor and still
+                // registers against the TEMPLATE NODE, so each edit
                 // arrives with the stamped copy's keys: the same
                 // (node, path) pair the undo payload names it by, which
                 // is what lets one rule fold both arrival paths.
-                app.onChange(note) { tx, path, text in
+                row.t.entry { tx, path, text in
                     let key = rowKey(path)
                     if text.isEmpty {
                         rowNotes.removeValue(forKey: key)

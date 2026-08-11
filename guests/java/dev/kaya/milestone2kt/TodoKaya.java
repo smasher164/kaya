@@ -60,38 +60,29 @@ final class TodoKaya {
         return KayaRecords.rowTrace(c, t -> new Row(t, c));
     }
 
-    /** The row surface: the template handle plus one token per
-     * wire field, and the constructors that consume them. */
-    static final class Row {
-        private final KayaApp.Tpl t;
+    /** The row surface: one token per wire field, plus the typed
+     * handler routes. Every CONSTRUCTOR is inherited —
+     * KayaApp.RowSurface forwards the whole template zone once, so
+     * this generator emits what only it knows (the tokens, and the
+     * key type a depth-1 handler is given) and never a list of
+     * widget kinds that could fall behind the zone. */
+    static final class Row extends KayaApp.RowSurface {
         private final KayaRecords.Collection<Long, Todos.Todo> c;
         final KayaRecords.Field<String> title = TITLE;
         final KayaRecords.Field<Boolean> done = DONE;
 
         Row(KayaApp.Tpl t, KayaRecords.Collection<Long, Todos.Todo> c) {
-            this.t = t;
+            super(t);
             this.c = c;
         }
 
-        KayaApp.Node label(KayaRecords.Field<String> f) {
-            return c.label(t, f);
-        }
-
-        KayaApp.Node image(KayaRecords.Field<byte[]> f) {
-            return c.image(t, f);
-        }
-
+        /** A checkbox on this field with its toggle handler
+         * co-located, the key typed as this collection's own — the
+         * inherited checkbox(field) is the same widget with the
+         * handler registered separately, against the node. */
         KayaApp.Node checkbox(KayaRecords.Field<Boolean> f,
                 KayaRecords.Collection.ToggleHandler<Long> onToggle) {
-            return c.checkbox(t, f, onToggle);
-        }
-
-        KayaApp.Node row(Runnable body) {
-            return t.row(body);
-        }
-
-        KayaApp.Node column(Runnable body) {
-            return t.column(body);
+            return c.checkbox(tpl(), f, onToggle);
         }
     }
 

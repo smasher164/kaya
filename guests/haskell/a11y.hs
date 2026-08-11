@@ -58,11 +58,11 @@ main = kayaMain $ \app -> do
             [A11yId "size", A11yLabel "Size"],
           -- Containers are GROUPS to an assistive client, and naming
           -- one is how an app declares it a group.
-          -- gridOf takes no attr list (the one container constructor
+          -- grid takes no attr list (the one container constructor
           -- that does not), so its props ride the Build monad — the
           -- same shape the gallery scene uses for bindValue.
           ( do
-              cells <- gridOf 2 [labelText "Name", labelText "Ada"]
+              cells <- grid 2 [labelText "Name", labelText "Ada"]
               setA11yId cells "cells"
               setA11yLabel cells "Cells"
               return cells

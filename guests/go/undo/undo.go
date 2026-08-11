@@ -302,11 +302,18 @@ func App() *kaya.App {
 					// grew: a copy's text edits are the same occurrence
 					// a live field's are, one identity deeper, and the
 					// ledger banks them the same way now that the
-					// payload can name them. The template tier has no
-					// Entry sugar — there is no source to bind — so the
-					// widget-kind floor is the spelling here, in every
-					// language.
-					note = row.Widget(kaya.KindEntry)
+					// payload can name them.
+					//
+					// NOTHING BINDS IT, and this line used to be
+					// `row.Widget(kaya.KindEntry)` — the widget-kind
+					// floor — under a comment saying the template tier
+					// had no Entry sugar because there was no source to
+					// bind. That was a hole in the template zone rather
+					// than a fact about unbound fields, and the
+					// unbound Entry is now the constructor for exactly
+					// this case (docs/sugar-pass-plan.md); EntryBound
+					// is the one that seeds a copy from its row.
+					note = row.Entry()
 				})
 			}
 		})

@@ -120,7 +120,7 @@ main = kayaMain $ \app -> do
           buttonOn "Add" onAdd,
           labelBound itemsLeft,
           each (recordHandle todos) $
-            row
+            rowOf
               [ checkbox (field @"done" @Todo) onToggle,
                 label (field @"title" @Todo)
               ]

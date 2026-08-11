@@ -151,6 +151,216 @@ for kind in $kinds; do
     check_kind "$kind"
 done
 
+# --- THE TEMPLATE ZONE, the same sweep one zone over ----------------
+#
+# kaya has TWO construction zones and this file only ever checked one.
+# The live zone is what an app builds in its build closure; the TEMPLATE
+# zone is the prototype inside a collection, stamped once per row. They
+# are different surfaces handing out different handles (Rust's zone
+# yields TemplateNodeId where the live one yields Widget), so a
+# constructor in one is not a constructor in the other — and until
+# 2026-08-10 the template zone had three kinds where the live zone had
+# fourteen.
+#
+# WHAT THAT COST, and why this is not tidiness: kaya's own text editor
+# spells its find bar's text field `row.Widget(kaya.KindEntry)`, passing
+# a wire constant as a runtime value, because there was no `entry` to
+# call. The undo scene does the same in seven languages. The floor is
+# the C guests' tier (invariant 5), not an app's.
+#
+# THE SWEEP IS PYTHON, NOT SEVEN MORE `check` LINES, and that is forced
+# rather than chosen: three bindings namespace the template zone by
+# SCOPE rather than by name. Rust's `Tpl` methods are `pub fn entry`
+# exactly like `Tx`'s and OCaml's live in `module Tpl = struct`, so a
+# line-oriented pattern cannot tell which block a line sits in — it
+# would be satisfied by the LIVE constructor and report a zone it never
+# read. tools/tpl-surfaces.py locates each zone by its real structure,
+# reads the constructors from inside it, and REFUSES A VERDICT from a
+# reader that found implausibly few (a census that reads nothing agrees
+# with everything). It also holds Rust's two surfaces level with each
+# other: `Tpl` is the zone, `Row` is the for-statement façade that
+# forwards by hand, and it forwarded six methods while ten kinds were
+# missing.
+#
+# Kinds come from the generated wire file, same as the live sweep, so
+# the list tracks the spec by construction.
+tpl_kinds=$(echo "$kinds" | tr '\n' ',')
+tpl_out=$(python3 tools/tpl-surfaces.py --kinds "${tpl_kinds%,}" 2>&1)
+tpl_rc=$?
+if [ "$tpl_rc" -ne 0 ]; then
+    echo "$tpl_out"
+    status=1
+fi
+
+# ITS NEGATIVE TEST, in both directions.
+#
+# (a) A KIND THAT EXISTS NOWHERE must be reported missing by every zone
+#     reader, or the readers have rotted into a census that can only
+#     pass.
+tpl_fake=$(python3 tools/tpl-surfaces.py --kinds kayafakewidget 2>&1 \
+    | grep -c "no TEMPLATE-zone constructor")
+if [ "$tpl_fake" -ne 7 ]; then
+    echo "check-sugar-surface: template self-test failed ($tpl_fake/7 zone" \
+        "readers reported a kind that exists nowhere as missing)" >&2
+    exit 1
+fi
+unset tpl_fake
+
+# (b) AND A KIND EVERY BINDING HAS must be reported by none. Seven
+#     readers keyed on block headers are exactly the shape that goes
+#     vacuous when a binding renames its template type, and a reader
+#     that finds nothing is indistinguishable from a zone with nothing
+#     missing. `label` is in every template zone, so a complaint about
+#     it means a reader has stopped reading.
+tpl_real=$(python3 tools/tpl-surfaces.py --kinds label 2>&1 \
+    | grep -c "no TEMPLATE-zone constructor")
+if [ "$tpl_real" -ne 0 ]; then
+    echo "check-sugar-surface: template self-test failed ($tpl_real zone readers" \
+        "could not find 'label', which every template zone has — those readers" \
+        "have stopped matching the files they read and can no longer fail)" >&2
+    exit 1
+fi
+unset tpl_real
+
+# (c) AND RUST'S TWO-SURFACE CLAUSE IS WATCHED, by deleting one forward
+#     from a copy of the real file. The perturbation count is printed
+#     and checked: a substitution that did not apply is a FAILED test,
+#     not a passed one (invariant 3).
+tpl_row_probe=$(python3 - <<'PROBE'
+import os, subprocess, sys, shutil, tempfile
+src = open('crates/kaya/src/app.rs').read()
+victim = """    pub fn entry(&mut self) -> TemplateNodeId {
+        self.tpl().entry()
+    }
+
+"""
+n = src.count(victim)
+if n != 1:
+    print(f"SELFTEST-BROKEN: perturbation matched {n} times, expected 1")
+    sys.exit(0)
+root = tempfile.mkdtemp()
+os.makedirs(f"{root}/crates/kaya/src", exist_ok=True)
+for rel in ("bindings", "tools"):
+    os.symlink(os.path.abspath(rel), f"{root}/{rel}")
+open(f"{root}/crates/kaya/src/app.rs", "w").write(src.replace(victim, ""))
+out = subprocess.run([sys.executable, 'tools/tpl-surfaces.py', root],
+                     capture_output=True, text=True)
+shutil.rmtree(root)
+hit = "does not forward: entry" in out.stdout
+print(f"applied=1 rc={out.returncode} named_entry={hit}")
+PROBE
+)
+case "$tpl_row_probe" in
+    "applied=1 rc=1 named_entry=True") ;;
+    *)
+        echo "check-sugar-surface: SELF-TEST FAIL (deleting Row's 'entry' forward" \
+            "was not caught by tools/tpl-surfaces.py: $tpl_row_probe)" >&2
+        exit 1
+        ;;
+esac
+unset tpl_row_probe
+
+# A TEMPLATE NODE'S GROW WEIGHT, in all eight.
+#
+# The template zone carries exactly one prop, and this clause is why it
+# is exactly one. `scroll` needs it — an unconstrained viewport hugs its
+# content and nothing ever overflows, so a template scroll without a
+# grow weight is a scroll that cannot scroll — and Rust's `Tpl` could
+# always spell it through the generic `set(node, prop, value)`, so a
+# binding shipping the scroll constructor WITHOUT grow is a divergence
+# opened by the same pass that closed one.
+#
+# It is written down because the fan-out drifted on it in real time:
+# five bindings shipped a template grow and two did not, each side with
+# a defensible reading of a plan that ledgered template-node props as
+# out of scope. One rule, eight spellings, checked (invariant 1).
+#
+# The REST of the template-node props — the a11y pair, spacing, align,
+# accepts — stay unreachable on a node and stay ledgered. If they land,
+# they land as a sweep like this one and not one binding at a time.
+check rust    crates/kaya/src/app.rs \
+    "template grow" "pub fn set\(&mut self, node: TemplateNodeId"
+check python  bindings/python/kaya/__init__.py \
+    "template grow" "def _set_grow\("
+check go      bindings/go/app.go \
+    "template grow" "func \(t \*Tpl\) SetGrow\("
+check csharp  bindings/csharp/KayaApp.cs \
+    "template grow" "public void SetGrow\(Node"
+check java    bindings/java/dev/kaya/KayaApp.java \
+    "template grow" "public void setGrow\(Node"
+check swift   bindings/swift/KayaApp.swift \
+    "template grow" "func setGrow\(_ n: KayaNodeHandle"
+check ocaml   bindings/ocaml/kaya_app.ml \
+    "template grow" "let set_grow "
+check haskell bindings/haskell/KayaApp.hs \
+    "template grow" "setGrow[A-Za-z]* ::"
+
+# --- AND THE OTHER DIRECTION: WHAT THE EXAMPLES USE ------------------
+#
+# Everything above is about what a BINDING OFFERS. This is invariant 5:
+# all example scenes use each language's sugar tier, and only the C
+# guests keep the explicit floor, deliberately, as the floor's
+# documentation.
+#
+# The scene tier at the end of this file already fails a guest for using
+# the floor, and it is good at it — per-language spellings, each watched
+# firing against a doctored copy of the real guest. It reads only the
+# scenes in its `scene_guests` table, which is `entry` and `milestone2`,
+# the two carve-out scenes. So a guest outside that table could teach
+# the floor indefinitely, and several did: the undo scene built its
+# per-row text field with `widget(KIND_ENTRY)` in seven languages for
+# five milestones, the text editor shipped its find bar the same way,
+# and guests/haskell/textarea.hs built its ENTIRE scene at the floor
+# while every constructor it needed sat unused in the binding.
+#
+# The first two had an excuse and it is now gone — the template zone had
+# no constructor for those kinds. So the rule is one sentence with no
+# per-scene table to forget to add to: a sugar guest does not name a
+# widget kind. tools/guest-floor.py sweeps every guest outside guests/c,
+# strips comments FIRST (the converted guests all explain the old floor
+# spelling in a comment above the new call, so a sweep that reads
+# comments reports every file it just fixed — measured while writing
+# it), and carries its exemptions with reasons the way gates.sh does.
+floor_out=$(python3 tools/guest-floor.py 2>&1)
+floor_rc=$?
+if [ "$floor_rc" -ne 0 ]; then
+    echo "$floor_out"
+    status=1
+fi
+
+# ITS NEGATIVE TEST: put a floor call back into the guest whose one line
+# started the whole sugar pass, and require the sweep to name it. The
+# substitution count is printed and checked — an unchanged file is a
+# failed test, not a passed one.
+floor_probe=$(python3 - <<'PROBE'
+import os, shutil, subprocess, sys, tempfile
+p = 'guests/go/editor/editor.go'
+src = open(p).read()
+old, new = "query = row.Entry()", "query = row.Widget(kaya.KindEntry)"
+n = src.count(old)
+if n != 1:
+    print(f"SELFTEST-BROKEN: perturbation matched {n} times, expected 1")
+    sys.exit(0)
+root = tempfile.mkdtemp()
+shutil.copytree('guests', f"{root}/guests")
+open(f"{root}/{p}", "w").write(src.replace(old, new))
+r = subprocess.run([sys.executable, 'tools/guest-floor.py', root],
+                   capture_output=True, text=True)
+shutil.rmtree(root)
+print(f"applied=1 rc={r.returncode} named={'editor.go' in r.stdout}")
+PROBE
+)
+case "$floor_probe" in
+    "applied=1 rc=1 named=True") ;;
+    *)
+        echo "check-sugar-surface: SELF-TEST FAIL (a widget-kind floor call put" \
+            "back into the editor guest was not caught by tools/guest-floor.py:" \
+            "$floor_probe)" >&2
+        exit 1
+        ;;
+esac
+unset floor_probe
+
 # The grow prop's layer-3 spelling, per language idiom (a kwarg, a
 # named setter, a combinator — decided 2026-07-20, see the ledger).
 # Props are not kinds, so the constructor loop above cannot see them;

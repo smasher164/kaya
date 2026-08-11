@@ -200,11 +200,20 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         // grew: a copy's text edits are the same
                         // occurrence a live field's are, one identity
                         // deeper, and the ledger banks them the same way
-                        // now that the payload can name them (the
-                        // template tier has no `entry` sugar — there is
-                        // no source to bind — so the widget-kind floor
-                        // is the spelling in every language).
-                        let note = t.widget(kaya::WidgetKind::Entry);
+                        // now that the payload can name them.
+                        //
+                        // NOTHING BINDS IT, and this line used to read
+                        // `t.widget(kaya::WidgetKind::Entry)` under a
+                        // comment explaining that the template tier had
+                        // no `entry` sugar because there was no source
+                        // to bind. That described a HOLE in the template
+                        // zone, not a fact about unbound fields — the
+                        // zone had three constructors where the live one
+                        // had fourteen — and the unbound `entry` is the
+                        // constructor for exactly this case now.
+                        // `entry_bound(src)` is the one that seeds a
+                        // copy from its own row (docs/sugar-pass-plan.md).
+                        let note = t.entry();
                         msgs.on_change_node(note, Msg::Note);
                     });
                 }

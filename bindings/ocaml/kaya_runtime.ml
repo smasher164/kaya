@@ -181,9 +181,11 @@ let register_blob data =
    Some (kind, id, keys, payload, clip, undo): keys are [] when the id
    is a widget id, else the id is a template node id and the keys are
    the stamped copy's key path, outermost first; payload is Some for
-   text_changed (a Str) and toggled (a Bool); undo is the raw body of
-   an undone/redone record — the one payload with no slot of its own
-   (see the scan below). *)
+   text_changed (a Str), toggled (a Bool) and value_changed (an F64),
+   plus the two menu kinds that carry the same three
+   ([Kaya_wire.parse_occurrence] decides, and it is generated); undo is
+   the raw body of an undone/redone record — the one payload with no
+   slot of its own (see the scan below). *)
 (* Read the next occurrence if one is ready, WITHOUT blocking; None
    means the ring is empty right now.
 

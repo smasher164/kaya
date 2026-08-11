@@ -108,7 +108,7 @@ main = kayaMain $ \app -> do
         row <- widget kindLabel -- label#2 once g2/a stamps
         bindTextElement row 0
         nodeContextMenu row catalog
-      _ <- column [pure itemList]
+      _ <- columnOf [pure itemList]
       return itemsColl
 
     targetText <- signal (VStr "rename target")

@@ -120,6 +120,7 @@ public final class KayaApp {
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Boolean>> widgetToggles = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, Double>> widgetValues = new HashMap<>();
+    private final Map<Long, ValueHandler> nodeValues = new HashMap<>();
     // Window lifecycle: one handler each, receiving the window id.
     final java.util.Map<Long, Consumer<Tx>> closeRequested = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> entryPopped = new java.util.HashMap<>();
@@ -195,6 +196,15 @@ public final class KayaApp {
      * then the box's new state. */
     public interface ToggleHandler {
         void accept(Tx tx, List<Object> keys, boolean checked);
+    }
+
+    /** A template slider's or choice widget's change handler: the
+     * stamped copy's keys, then the new value — a choice widget's being
+     * its 0-based option index, widened, because the wire carries every
+     * Value as an F64 and a template constructor takes no handler to
+     * narrow it inside. */
+    public interface ValueHandler {
+        void accept(Tx tx, List<Object> keys, double value);
     }
 
     /** A node-anchored radio group's pick handler: the stamped copy's
@@ -1938,34 +1948,125 @@ public final class KayaApp {
     }
 
     /**
-     * The scalar-collection row surface a rows() trace yields: the
-     * template vocabulary plus the element's own token — a scalar
-     * collection has exactly one field, the element itself, and
-     * value() is that token (the record twin mints one token per
-     * record component).
+     * The for-STATEMENT façade over the template zone: everything
+     * {@link Tpl} constructs, on the surface a {@code for (var row : …)}
+     * body holds. Subclasses add the row's TOKENS and nothing else —
+     * {@link Row} the scalar element's, the generated
+     * {@code <Type>Kaya.Row} one per record component.
+     *
+     * <p>ONE FORWARDING LIST, WHICH IS THE POINT. The zone had three
+     * surfaces in Java and each hand-listed its own subset: Tpl had
+     * label/button/checkbox/image, this façade had label/button and no
+     * image, the generated one had image/checkbox and no button. A
+     * constructor on one and not another is reachable through
+     * {@code tx.forEach} and not through {@code for (var row : …)},
+     * which is a difference no guest should have to know about, and
+     * three lists cannot be held level by anyone remembering to. So
+     * the forwards live here once and both façades inherit them; the
+     * annotation processor emits tokens and typed handlers, never a
+     * constructor list.
+     *
+     * <p>Handlers register the way they do everywhere in this zone —
+     * {@code app.onClick(node, (tx, keys) -> …)} and its siblings —
+     * because a stamped copy's event names the copy: the keys ARE the
+     * noun.
      */
-    public static final class Row {
+    public abstract static class RowSurface {
         private final Tpl t;
 
-        Row(Tpl t) {
+        // Protected, not package-private: the generated row surfaces
+        // extend this from the GUEST's package.
+        protected RowSurface(Tpl t) {
             this.t = t;
         }
 
-        /** The element's token: what a stamped copy's bindings read. */
-        public KayaRecords.Field<String> value() {
-            return KayaRecords.fieldAt(0);
+        /** The blueprint this row records into, for the generated
+         * subclass's typed routes. A method rather than a protected
+         * field: a record component named {@code tpl} would SHADOW the
+         * field and change what the generated code means, while a field
+         * and a method of one name coexist. */
+        protected final Tpl tpl() {
+            return t;
         }
 
-        /** A label bound to the element's token. */
+        public Node label(String text) {
+            return t.label(text);
+        }
+
+        public Node label(Signal<String> s) {
+            return t.label(s);
+        }
+
         public Node label(KayaRecords.Field<String> f) {
             return t.label(f);
         }
 
-        /** A button in this row, captioned: every stamped copy shows
-         * it, and a click on one names that copy's key path (register
-         * with {@code app.onClick(node, (tx, keys) -> …)}). */
         public Node button(String text) {
             return t.button(text);
+        }
+
+        public Node button(Signal<String> s) {
+            return t.button(s);
+        }
+
+        public Node button(KayaRecords.Field<String> f) {
+            return t.button(f);
+        }
+
+        public Node checkbox(boolean checked) {
+            return t.checkbox(checked);
+        }
+
+        public Node checkbox(Signal<Boolean> s) {
+            return t.checkbox(s);
+        }
+
+        public Node checkbox(KayaRecords.Field<Boolean> f) {
+            return t.checkbox(f);
+        }
+
+        public Node image(byte[] source) {
+            return t.image(source);
+        }
+
+        public Node image(Signal<byte[]> s) {
+            return t.image(s);
+        }
+
+        public Node image(KayaRecords.Field<byte[]> f) {
+            return t.image(f);
+        }
+
+        public Node entry() {
+            return t.entry();
+        }
+
+        public Node entry(String text) {
+            return t.entry(text);
+        }
+
+        public Node entry(Signal<String> s) {
+            return t.entry(s);
+        }
+
+        public Node entry(KayaRecords.Field<String> f) {
+            return t.entry(f);
+        }
+
+        public Node textarea() {
+            return t.textarea();
+        }
+
+        public Node textarea(String text) {
+            return t.textarea(text);
+        }
+
+        public Node textarea(Signal<String> s) {
+            return t.textarea(s);
+        }
+
+        public Node textarea(KayaRecords.Field<String> f) {
+            return t.textarea(f);
         }
 
         public Node row(Runnable body) {
@@ -1974,6 +2075,77 @@ public final class KayaApp {
 
         public Node column(Runnable body) {
             return t.column(body);
+        }
+
+        public Node scroll(Runnable body) {
+            return t.scroll(body);
+        }
+
+        public Node grid(int columns, Runnable body) {
+            return t.grid(columns, body);
+        }
+
+        public Node spacer() {
+            return t.spacer();
+        }
+
+        public Node progress(double value) {
+            return t.progress(value);
+        }
+
+        public Node progress(Signal<Double> s) {
+            return t.progress(s);
+        }
+
+        public Node progress(KayaRecords.Field<Double> f) {
+            return t.progress(f);
+        }
+
+        public Node progressIndeterminate() {
+            return t.progressIndeterminate();
+        }
+
+        public Node slider(double min, double max, double value) {
+            return t.slider(min, max, value);
+        }
+
+        public Node slider(double min, double max, Signal<Double> value) {
+            return t.slider(min, max, value);
+        }
+
+        public Node slider(double min, double max, KayaRecords.Field<Double> value) {
+            return t.slider(min, max, value);
+        }
+
+        public Node select(String[] options, int selected) {
+            return t.select(options, selected);
+        }
+
+        public Node select(String[] options, Signal<Double> selected) {
+            return t.select(options, selected);
+        }
+
+        public Node select(String[] options, KayaRecords.Field<Double> selected) {
+            return t.select(options, selected);
+        }
+
+        public Node radio(String[] options, int selected) {
+            return t.radio(options, selected);
+        }
+
+        public Node radio(String[] options, Signal<Double> selected) {
+            return t.radio(options, selected);
+        }
+
+        public Node radio(String[] options, KayaRecords.Field<Double> selected) {
+            return t.radio(options, selected);
+        }
+
+        /** One of this row's nodes' flex weight — a Node carries no
+         * transaction, so a setter after construction is the spelling
+         * rather than a chain ({@link Tpl#setGrow}). */
+        public void setGrow(Node n, double weight) {
+            t.setGrow(n, weight);
         }
 
         /** A collection declared inside this row's template — the
@@ -1987,6 +2159,24 @@ public final class KayaApp {
          * key path. */
         public void contextMenu(Node n, ContextCatalog catalog) {
             t.contextMenu(n, catalog);
+        }
+    }
+
+    /**
+     * The scalar-collection row surface a rows() trace yields: the
+     * template vocabulary plus the element's own token — a scalar
+     * collection has exactly one field, the element itself, and
+     * value() is that token (the record twin mints one token per
+     * record component).
+     */
+    public static final class Row extends RowSurface {
+        Row(Tpl t) {
+            super(t);
+        }
+
+        /** The element's token: what a stamped copy's bindings read. */
+        public KayaRecords.Field<String> value() {
+            return KayaRecords.fieldAt(0);
         }
     }
 
@@ -3429,6 +3619,36 @@ public final class KayaApp {
             tx.emit(KayaWire.txBindSourceElement(n.id, level, f.index));
         }
 
+        /**
+         * Bind a slider's position, a progress bar's fraction or a
+         * choice widget's selected index to one field of the element.
+         *
+         * <p>A {@code Double} token and only ever a Double one: Value is
+         * an F64 property in the spec, a record component declared
+         * {@code long} mints an I64 field, and the root refuses the
+         * pairing by name at declaration. A row that holds an option
+         * INDEX therefore declares that component {@code double} — the
+         * wart is the core's prop typing, not Java's.
+         */
+        public void bindValueField(Node n, int level, KayaRecords.Field<Double> f) {
+            tx.emit(KayaWire.txBindValueElement(n.id, level, f.index));
+        }
+
+        /**
+         * A template node's flex weight within its row/column — the
+         * blueprint twin of {@link Tx#setGrow(Widget, double)}, and the
+         * half {@link #scroll} needs: a viewport nothing constrains hugs
+         * its content and never overflows.
+         *
+         * <p>A Node carries no transaction, so there is no construction
+         * chain to hang this on the way the live zone does; the setter
+         * directly after construction is the spelling, as it is for
+         * {@link #setText}.
+         */
+        public void setGrow(Node n, double weight) {
+            tx.emit(KayaWire.txSetGrow(n.id, weight));
+        }
+
         // The template flavor of the sugar: bindings take field
         // tokens, containers take their body.
         public Node row(Runnable body) {
@@ -3437,6 +3657,46 @@ public final class KayaApp {
 
         public Node column(Runnable body) {
             return containerOf(KayaWire.KIND_COLUMN, body);
+        }
+
+        /** A vertical scroll viewport over EXACTLY ONE child, per
+         * stamped copy (declare it in the body; the scene rejects a
+         * second). Weight it with {@link #setGrow} for the reason
+         * {@link Tx#scroll} states — a Node has no chain to put the
+         * .grow(1) on. */
+        public Node scroll(Runnable body) {
+            return containerOf(KayaWire.KIND_SCROLL, body);
+        }
+
+        /**
+         * A grid laying each copy's children out row-major into
+         * {@code columns} columns — the template twin of
+         * {@link Tx#grid(int, Runnable)}.
+         *
+         * <p>The count describes the PROTOTYPE, so it is a constant and
+         * not a source: every stamped copy has the same shape and only
+         * the values inside it vary. Alignment is per copy — a grid in a
+         * template does not line its columns up ACROSS copies, since
+         * each copy stamps a grid of its own.
+         */
+        public Node grid(int columns, Runnable body) {
+            Node parent = widget(KayaWire.KIND_GRID);
+            tx.emit(KayaWire.txSetColumns(parent.id, columns));
+            parents.add(parent.id);
+            if (body != null) {
+                body.run();
+            }
+            parents.remove(parents.size() - 1);
+            return parent;
+        }
+
+        /** A spacer: the live zone's PURE SUGAR for an empty grown
+         * column, one copy per stamp, eating the leftover main-axis
+         * space between that copy's siblings. */
+        public Node spacer() {
+            Node n = widget(KayaWire.KIND_COLUMN);
+            tx.emit(KayaWire.txSetGrow(n.id, 1.0));
+            return n;
         }
 
         private Node containerOf(int kind, Runnable body) {
@@ -3451,6 +3711,12 @@ public final class KayaApp {
 
         // One name per widget; the argument's type picks the
         // addressable source (constant, signal, or element field).
+        // That trichotomy IS the reason this zone has its own
+        // constructors: a stamp makes N copies, and each copy's value
+        // can come from its own row. Arguments that describe the
+        // PROTOTYPE instead — a slider's range, a grid's column count,
+        // a choice widget's options — stay plain constants, because
+        // every copy has them.
         public Node label(String text) {
             Node n = widget(KayaWire.KIND_LABEL);
             setText(n, text);
@@ -3484,6 +3750,20 @@ public final class KayaApp {
         public Node button(String text) {
             Node n = widget(KayaWire.KIND_BUTTON);
             setText(n, text);
+            return n;
+        }
+
+        public Node button(Signal<String> s) {
+            Node n = widget(KayaWire.KIND_BUTTON);
+            tx.emit(KayaWire.txBindText(n.id, s.id));
+            return n;
+        }
+
+        /** A button captioned from the row's own field — the "delete
+         * <that row's title>" shape, which only this zone can spell. */
+        public Node button(KayaRecords.Field<String> f) {
+            Node n = widget(KayaWire.KIND_BUTTON);
+            bindTextField(n, 0, f);
             return n;
         }
 
@@ -3533,11 +3813,256 @@ public final class KayaApp {
             KayaApp.this.onToggle(n, handler);
         }
 
-        /** A checkbox bound to one field; register its handler with
-         * app.onToggle. */
+        /** A checkbox in the blueprint; register its handler with
+         * app.onToggle, which hands it the stamped copy's keys. */
+        public Node checkbox(boolean checked) {
+            Node n = widget(KayaWire.KIND_CHECKBOX);
+            tx.emit(KayaWire.txSetChecked(n.id, checked));
+            return n;
+        }
+
+        public Node checkbox(Signal<Boolean> s) {
+            Node n = widget(KayaWire.KIND_CHECKBOX);
+            tx.emit(KayaWire.txBindChecked(n.id, s.id));
+            return n;
+        }
+
+        /** A checkbox bound to one field of the element — each copy
+         * showing its own row's state. */
         public Node checkbox(KayaRecords.Field<Boolean> f) {
             Node n = widget(KayaWire.KIND_CHECKBOX);
             bindCheckedField(n, 0, f);
+            return n;
+        }
+
+        /**
+         * A single-line text field per stamped copy, EMPTY — which is
+         * why this takes nothing. The field is uncontrolled: each copy
+         * owns its own text, edits arrive as a change on this node
+         * carrying the copy's keys ({@code app.onChange(node, (tx, keys,
+         * text) -> …)}), and the app folds them into its own state.
+         *
+         * <p>This is the arm a per-row note or a find bar wants; the
+         * overloads below SEED a copy instead.
+         */
+        public Node entry() {
+            return widget(KayaWire.KIND_ENTRY);
+        }
+
+        /**
+         * An entry whose INITIAL text is one constant, the same in
+         * every stamped copy.
+         *
+         * <p>ONE WRITE PER COPY, NOT A BINDING — the rule
+         * {@link Tx#setText(Widget, String)} states. The seed is written
+         * as the copy is stamped and the user owns the text from that
+         * moment; nothing pushes into it again.
+         */
+        public Node entry(String text) {
+            Node n = widget(KayaWire.KIND_ENTRY);
+            setText(n, text);
+            return n;
+        }
+
+        public Node entry(Signal<String> s) {
+            Node n = widget(KayaWire.KIND_ENTRY);
+            tx.emit(KayaWire.txBindText(n.id, s.id));
+            return n;
+        }
+
+        /**
+         * An entry seeded from the row's own field: an editable list
+         * that starts filled in, which the live zone has no way to
+         * spell (a live widget has no row to read).
+         *
+         * <p>MIND THE FOLD. Unlike a label's, this binding stays live:
+         * a later {@code update_field} on that component re-pushes the
+         * text into the copy. A handler that folds each keystroke back
+         * into the same field it seeded from therefore rewrites the
+         * field the user is typing in — spending its native undo
+         * history and dropping any ranges declared over it — so fold
+         * elsewhere, or seed with {@link #entry()} and keep the text in
+         * the app's own state.
+         */
+        public Node entry(KayaRecords.Field<String> f) {
+            Node n = widget(KayaWire.KIND_ENTRY);
+            bindTextField(n, 0, f);
+            return n;
+        }
+
+        /** A multi-line editor per stamped copy: the entry's
+         * uncontrolled contract over the platform's real multi-line
+         * control, empty and owned by the copy. */
+        public Node textarea() {
+            return widget(KayaWire.KIND_TEXTAREA);
+        }
+
+        /** A textarea seeded with one constant — {@link #entry(String)}'s
+         * one-write rule, one kind over. */
+        public Node textarea(String text) {
+            Node n = widget(KayaWire.KIND_TEXTAREA);
+            setText(n, text);
+            return n;
+        }
+
+        public Node textarea(Signal<String> s) {
+            Node n = widget(KayaWire.KIND_TEXTAREA);
+            tx.emit(KayaWire.txBindText(n.id, s.id));
+            return n;
+        }
+
+        /** A textarea seeded from the row's own field, with
+         * {@link #entry(KayaRecords.Field)}'s fold warning in full. */
+        public Node textarea(KayaRecords.Field<String> f) {
+            Node n = widget(KayaWire.KIND_TEXTAREA);
+            bindTextField(n, 0, f);
+            return n;
+        }
+
+        /** A progress bar in the blueprint at a constant fraction
+         * (0..=1, domain-checked at the root): display-only, like label
+         * and image, so nothing here reports. */
+        public Node progress(double value) {
+            Node n = widget(KayaWire.KIND_PROGRESS);
+            tx.emit(KayaWire.txSetValue(n.id, value));
+            return n;
+        }
+
+        public Node progress(Signal<Double> s) {
+            Node n = widget(KayaWire.KIND_PROGRESS);
+            tx.emit(KayaWire.txBindValue(n.id, s.id));
+            return n;
+        }
+
+        /** A progress bar showing the row's OWN fraction — the per-row
+         * case this zone exists for. */
+        public Node progress(KayaRecords.Field<Double> f) {
+            Node n = widget(KayaWire.KIND_PROGRESS);
+            bindValueField(n, 0, f);
+            return n;
+        }
+
+        /** A progress bar in the platform's activity mode: no fraction,
+         * so nothing to source. */
+        public Node progressIndeterminate() {
+            Node n = widget(KayaWire.KIND_PROGRESS);
+            tx.emit(KayaWire.txSetIndeterminate(n.id, true));
+            return n;
+        }
+
+        /**
+         * A slider over {@code min..max} at a constant position: the
+         * range describes the prototype and is the same in every stamped
+         * copy; the position is the part a source can vary.
+         *
+         * <p>Its handler is registered against the template node
+         * ({@code app.onValueChanged(node, (tx, keys, value) -> …)})
+         * because a stamped copy's move names the copy — the keys ARE
+         * the noun. There is no handler-carrying overload for the same
+         * reason {@link #button(String)} has none.
+         */
+        public Node slider(double min, double max, double value) {
+            Node n = sliderOver(min, max);
+            tx.emit(KayaWire.txSetValue(n.id, value));
+            return n;
+        }
+
+        public Node slider(double min, double max, Signal<Double> value) {
+            Node n = sliderOver(min, max);
+            tx.emit(KayaWire.txBindValue(n.id, value.id));
+            return n;
+        }
+
+        /** A slider sitting where the row's own field says. */
+        public Node slider(double min, double max, KayaRecords.Field<Double> value) {
+            Node n = sliderOver(min, max);
+            bindValueField(n, 0, value);
+            return n;
+        }
+
+        // The slider's shared head: the range every copy has, before
+        // the overload applies whatever source carries the position.
+        private Node sliderOver(double min, double max) {
+            Node n = widget(KayaWire.KIND_SLIDER);
+            tx.emit(KayaWire.txSetMin(n.id, min));
+            tx.emit(KayaWire.txSetMax(n.id, max));
+            return n;
+        }
+
+        /**
+         * A dropdown select over fixed options — each option becomes a
+         * label child — at {@code selected}, the initial 0-based index,
+         * the same in every stamped copy.
+         *
+         * <p>THE OPTIONS ARE THE PROTOTYPE'S. They are children of the
+         * blueprint node, so every copy offers the same list and only
+         * the choice varies; a per-row option list would need a
+         * collection inside the choice widget, which the scene rejects
+         * (labels only, deliberately).
+         *
+         * <p>Its pick handler is registered against the template node
+         * ({@code app.onValueChanged(node, (tx, keys, index) -> …)}) and
+         * receives each USER pick's new index — programmatic writes
+         * never echo, the slider's uncontrolled contract. The index
+         * arrives as a {@code double} and the app narrows it: the live
+         * {@link Tx#select} narrows inside the constructor by wrapping
+         * the handler it was handed, and a template constructor is
+         * handed none.
+         */
+        public Node select(String[] options, int selected) {
+            Node n = choice(KayaWire.KIND_SELECT, options);
+            tx.emit(KayaWire.txSetValue(n.id, selected));
+            return n;
+        }
+
+        public Node select(String[] options, Signal<Double> selected) {
+            Node n = choice(KayaWire.KIND_SELECT, options);
+            tx.emit(KayaWire.txBindValue(n.id, selected.id));
+            return n;
+        }
+
+        /** A select remembering each row's OWN pick; the field is a
+         * Double component, per {@link #bindValueField}. */
+        public Node select(String[] options, KayaRecords.Field<Double> selected) {
+            Node n = choice(KayaWire.KIND_SELECT, options);
+            bindValueField(n, 0, selected);
+            return n;
+        }
+
+        /** A radio group over fixed options — the choice contract (see
+         * {@link #select(String[], int)}) in its inline presentation:
+         * same option children, same 0-based index, same handler
+         * registration. */
+        public Node radio(String[] options, int selected) {
+            Node n = choice(KayaWire.KIND_RADIO, options);
+            tx.emit(KayaWire.txSetValue(n.id, selected));
+            return n;
+        }
+
+        public Node radio(String[] options, Signal<Double> selected) {
+            Node n = choice(KayaWire.KIND_RADIO, options);
+            tx.emit(KayaWire.txBindValue(n.id, selected.id));
+            return n;
+        }
+
+        public Node radio(String[] options, KayaRecords.Field<Double> selected) {
+            Node n = choice(KayaWire.KIND_RADIO, options);
+            bindValueField(n, 0, selected);
+            return n;
+        }
+
+        // The choice kinds' shared head: the option labels, parented
+        // through the same ambient stack the live zone's select uses.
+        // The index is left to the caller's overload so each source
+        // keeps its own type all the way to the wire.
+        private Node choice(int kind, String[] options) {
+            Node n = widget(kind);
+            parents.add(n.id);
+            for (String option : options) {
+                Node o = widget(KayaWire.KIND_LABEL);
+                setText(o, option);
+            }
+            parents.remove(parents.size() - 1);
             return n;
         }
 
@@ -3856,6 +4381,20 @@ public final class KayaApp {
         nodeToggles.put(n.id, handler);
     }
 
+    /**
+     * Register a change handler for a template slider, select or radio
+     * group; it also receives the stamped copy's keys, outermost first.
+     *
+     * <p>The core has always sent this — a stamped copy's move arrives
+     * as a value change carrying the copy's identity tag — and until
+     * this table existed the dispatch loop had a live arm and no node
+     * arm, so the occurrence matched nothing and was dropped in
+     * silence.
+     */
+    public void onValueChanged(Node n, ValueHandler handler) {
+        nodeValues.put(n.id, handler);
+    }
+
     // The ring consumer: Unsafe absolute loads plus explicit fences,
     // bound once as MethodHandles and invoked through invokeExact so the
     // per-record path stays free of boxing and reflection. Raw addresses
@@ -4059,6 +4598,13 @@ public final class KayaApp {
                 if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, (Double) occ.payload);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_VALUE_CHANGED) {
+                ValueHandler handler = nodeValues.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, (Double) occ.payload);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_CLOSE_REQUESTED) {
