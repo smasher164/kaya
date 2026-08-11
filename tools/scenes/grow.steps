@@ -7,16 +7,16 @@
 # tools/check-steps.sh).
 #
 # Every child of both containers is a grower, so each split is exactly
-# weight/Sigma-weight: 1,1,2 divide the column 25/25/50 and the row's
+# weight/Sigma-weight: 1,2,1 divide the column 25/50/25 and the row's
 # 1,3 divide its width 25/75, whatever a label or a button happens to
 # measure there. Shares and never sizes — a size is a platform metric
 # and could not be compared byte-for-byte at all.
 #
 # The shares are kept clear of every platform's minimum control size
-# (GTK's 34pt button height is the binding one; the 540x330 desktop
-# window with its 16pt root inset leaves the smallest column track
-# ~63pt), or the scene would measure the minimums rather than the
-# contract.
+# (the textarea's declared 96pt floor is the binding one, GTK's 34pt
+# button height next; the 540x330 desktop window with its 16pt root
+# inset leaves column tracks of ~63/126/63), or the scene would measure
+# the minimums rather than the contract.
 #
 # root-fills before the shares: a share is a percentage of the
 # children's SUM, which is total-invariant — a mounted root hugging its
@@ -39,9 +39,21 @@
 # window made 200pt of slack visible; expect_fills is the gate that
 # sees it structurally: the children (plus the normalized 8-unit gaps)
 # must span the container's content box on the main axis.
+#
+# expect_fills on a WIDGET is the other half of the same contract, and
+# the half a share cannot state: three of the four backends read a
+# share off the TRACK (SwiftUI's cell frame, WinUI's RowDefinition,
+# Compose's weighted cell) — on purpose, since a control that hugs
+# inside its track is platform flavor no byte-compared assertion could
+# carry — so a widget with a HARD-CODED size splits its container
+# exactly right and renders wrong. A textarea is the widget it rides
+# on because a fixed natural box is exactly that shape: 240x96 frozen
+# in the SwiftUI frame and in WinUI's Height gave an editor asking for
+# a full-window buffer a small box, with every line below still green.
 expect label#0 "grow probe"
 expect_root_fills
 expect_fills column#0
 expect_fills row#0
-expect_shares column#0 "25,25,50"
+expect_fills textarea#0
+expect_shares column#0 "25,50,25"
 expect_shares row#0 "25,75"

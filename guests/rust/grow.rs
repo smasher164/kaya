@@ -21,6 +21,20 @@
 //!
 //! The row asserts the HORIZONTAL contract — before it existed, a
 //! backend that grew only columns would have passed the whole matrix.
+//!
+//! And the textarea asserts the OTHER HALF OF THE SAME CONTRACT: that
+//! the widget which was handed a track actually takes it. A share is
+//! read off the TRACK on three of the four backends (SwiftUI's cell
+//! frame, WinUI's RowDefinition, Compose's weighted cell) — deliberately,
+//! since a control that hugs inside its track is platform flavor a
+//! byte-compared assertion could never carry — so a widget with a
+//! HARD-CODED size splits its container exactly right and renders wrong.
+//! It shipped twice that way: a slider capped at 200pt drew a 1:3 row as
+//! 38/62, and a textarea frozen at 240x96 gave an editor asking for a
+//! full-window buffer a small box on macOS, iOS and Windows at once,
+//! with every share assertion green. `expect_fills textarea#0` is the
+//! observation that sees it; the textarea is the widget it rides on
+//! because a fixed natural size is exactly the shape that hides there.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     // No event vocabulary: this scene registers no handlers, so the
@@ -31,7 +45,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let one = tx.signal("one");
 
         let root = tx.column(|tx| {
-            // Column weights 1, 1, 2 — a 25/25/50 split, none of them
+            // Column weights 1, 2, 1 — a 25/50/25 split, none of them
             // equal to an even division of three, so an implementation
             // that splits equally (the boolean expand-flag behaviour
             // most toolkits default to) fails here rather than passing
@@ -41,16 +55,25 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             // minimums, or the scene measures the minimums instead of
             // the contract: the window is 540x330 on the desktops and
             // the root insets 16, so the column's ~250pt divide
-            // ~63/63/125 — the 63pt button track clearing GTK's 34pt
-            // minimum button height with room to spare.
+            // ~63/126/63. The BINDING minimum is now the textarea's
+            // declared 96pt floor (240x96 on every backend — GTK's
+            // size request, WinUI's MinHeight, the SwiftUI frame), and
+            // its 126pt track clears it by 30; the row's 63pt track
+            // clears GTK's 34pt minimum button height by 29.
             tx.label(probe).grow(1.0); // label#0
-            tx.button("quarter").grow(1.0);
+            // THE WIDGET THAT MUST TAKE ITS TRACK, and the weight that
+            // makes room for it. A textarea's natural size is a FIXED
+            // BOX on every backend, which is the shape that ignores a
+            // track without anything noticing: expect_fills reads what
+            // it drew, expect_shares reads what it was given, and only
+            // the pair can tell them apart.
+            tx.textarea().grow(2.0); // textarea#0
             // The horizontal contract: one row whose children split
-            // its WIDTH 1:3. Its own weight (2) makes it a grower like
-            // its siblings, keeping the column pure. Width tracks are
-            // roomy — 25/75 of ~496pt (508 minus the 12-unit gap set
-            // below) is 124 and 372 — because height was the scarce
-            // axis, not width.
+            // its WIDTH 1:3. Its own weight makes it a grower like its
+            // siblings, keeping the column pure. Width tracks are roomy
+            // — 25/75 of ~496pt (508 minus the 12-unit gap set below)
+            // is 124 and 372 — because height was the scarce axis, not
+            // width.
             // The spacing prop's conformance exercise rides the chain:
             // a non-default gap on the asserted row, so expect_fills
             // (children + gaps span the content box) fails on any
@@ -60,7 +83,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.label(one).grow(1.0); // label#1
                 tx.button("three").grow(3.0);
             })
-            .grow(2.0)
+            .grow(1.0)
             .spacing(12.0);
         })
         .id();
@@ -68,8 +91,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     });
 
     // No handlers: the controls exist for their sizes, not their
-    // events. The loop blocks on recv, keeping the app alive until the
-    // harness finishes observing and sends Shutdown.
+    // events — the textarea included, which is why it is declared
+    // without one. The loop blocks on recv, keeping the app alive until
+    // the harness finishes observing and sends Shutdown.
     while msgs.next(&ctx).is_some() {}
 }
 

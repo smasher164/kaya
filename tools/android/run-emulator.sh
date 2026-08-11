@@ -1344,6 +1344,16 @@ fi
 # guest there, which is a sweep of that scene across guest languages, not
 # this depth slice. window/panels/split are desktop-only by design.
 #
+# AND `editor` IS THE ONE ENTRY THIS LIST HAS THAT THE JVM SUITE DOES
+# NOT, which the paragraph above requires be written down right here. It
+# is not a divergence in coverage: the text editor (docs/editor-plan.md)
+# is a GO app and there is no rust or jvm guest for it, by design rather
+# than by sequencing — the plan chose Go so a BINDING's awkward corners
+# would show. Its leg block sits at the end of this suite with the
+# reasoning; it is the first Go leg here to drive ACTION_CREATE_DOCUMENT
+# and the range reads, which is what makes it worth its own block rather
+# than a name in a list.
+#
 # NOT NARROWER, and this is the half that has to be said out loud because
 # nothing enforces it: check-steps' wired() keys on scene x runner and
 # never on language, so a Go suite that stalled at six scenes would leave
@@ -1508,6 +1518,47 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity undo \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script undo)'"
+    # THE TEXT EDITOR — kaya's forcing artifact (docs/editor-plan.md), and
+    # the only script on this lane that drives an APP rather than a
+    # feature: launch to an empty buffer, type, save-as, open, edit, undo,
+    # save, and find with a regex.
+    #
+    # THE ONE SCENE HERE WITH NO RUST SIBLING, and that is the design
+    # rather than the sequencing: the plan chose Go so a BINDING's awkward
+    # corners would show, and an editor in Rust would be kaya testing
+    # itself. The paragraph above says a Go leg on filedialog/dirty/ranges
+    # would make Go the first non-rust guest on a rust-only scene; this is
+    # not that case, because there is no rust guest for it to go first
+    # ahead of. It rides the same milestone2go APK every leg above does.
+    #
+    # BOTH PICKERS, so it needs this lane's accessibility service in both
+    # of its modes — ACTION_OPEN_DOCUMENT for File>Open… and
+    # ACTION_CREATE_DOCUMENT for File>Save As…. run_apk_on arms the
+    # service per leg, so this costs nothing extra here; what it does mean
+    # is that this leg proves the same both-directions discrimination the
+    # filedialog and save legs prove between them, in ONE script.
+    #
+    # AND THE SCENE'S FILES ARE FOUND, which is the trap the go clipboard
+    # leg is still parked on: guests/go/editor's scene_root answers
+    # EXTERNAL_STORAGE + "/Documents" through kaya.Env — never
+    # os.TempDir(), which is empty under the JNI attach and falls back to
+    # /data/local/tmp, a directory the app cannot write
+    # (tools/check-go-env.sh). It agrees with KayaCompose's kayaTempDir
+    # without either side consulting the runner.
+    #
+    # THE CUT IS THE CHROME CLOSE, the `dirty` leg's cut for the `dirty`
+    # leg's reason: the scene's last stretch drives `close_window`, which
+    # a phone has not got. `expect_dirty` is the keep verb, and the editor
+    # asserts both of its spellings — false and true — before the cut, so
+    # the prefix still watches the mark go up on a keystroke, down on a
+    # save, down on an UNDO, and up again on a programmatic write. What
+    # the cut takes is the window's own unsaved-work door; the File>New
+    # door is inside the prefix, so the alert composition still runs here.
+    editor_script="$(scene_script_cut editor close_window expect_dirty)" || exit 1
+    run_apk editor-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity editor \
+        --es KAYA_SELFTEST_SCRIPT "'${editor_script}'"
     drain
     timing legs-go
 fi

@@ -1027,6 +1027,35 @@ for proto in x11 wayland; do
     run "$proto" ranges-java env KAYA_SELFTEST=ranges KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     drain
+    # THE TEXT EDITOR — kaya's forcing artifact (docs/editor-plan.md),
+    # and the only script on this lane that drives an APP rather than a
+    # feature: launch to an empty buffer, type, save-as, open, edit,
+    # undo, save, find with a regex, and the unsaved-work warning on
+    # close.
+    #
+    # GO ALONE, and not as a sweep waiting to happen: the plan chose Go
+    # deliberately — an editor in Rust would be kaya testing itself, and
+    # every awkward corner of a BINDING would stay invisible — so there
+    # is no rust example, and `editor` is in neither SCENES nor
+    # DEPTH_SCENES (both derive a `cargo build --example` this app does
+    # not want). The Go guest is one binary carrying every scene, so the
+    # leg needs nothing but its name.
+    #
+    # THROUGH a11y-leg.sh, because almost every read this script makes is
+    # an AT-SPI read here: GTK's picker and save panel publish no
+    # accessible ids at all (the directory is the path bar's pressed
+    # toggle, the typed name is the EditableText field's contents), the
+    # dirty mark is the header bar's bullet, and the three range reads
+    # are tag runs, the selection, and the viewport geometry the
+    # textarea's GtkScrolledWindow made observable.
+    #
+    # ALONE BETWEEN DRAINS, the undo and ranges rule for the same
+    # measured reason: `type` delivers REAL key events, and on wayland
+    # the injector is a virtual keyboard whose seat makes keyboard focus
+    # exclusive across the compositor the pooled legs share.
+    run "$proto" editor-go env KAYA_SELFTEST=editor \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    drain
 done
 drain
 timing legs

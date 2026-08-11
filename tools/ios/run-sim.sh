@@ -1073,8 +1073,8 @@ PY
     fi
     [ -n "$extra" ] && script="$script
 $extra"
-    # THE HARNESS'S EYES AND HANDS OUTSIDE THIS APP, for the two scenes
-    # that need them, for two different reasons. iOS's document picker is
+    # THE HARNESS'S EYES AND HANDS OUTSIDE THIS APP, for the scenes that
+    # need them, for two different reasons. iOS's document picker is
     # a remote view controller whose UI belongs to another process and
     # which publishes nothing in-process, so its verbs are answered on
     # the HOST by tools/ios/simdrive. The clipboard's foreign seed and
@@ -1084,8 +1084,14 @@ $extra"
     # data container (docs/traps.md). Started per leg and killed with it
     # — a watcher outliving its leg would answer the NEXT one's requests
     # against a dead app.
+    #
+    # `editor` joins the picker half: it opens BOTH pickers (Open… and
+    # Save As…), so it needs the same eyes and the same hands the save
+    # leg does — including the typing verbs, since the point of its save
+    # panel is naming a file that does not exist yet.
     local watcher_pid=""
-    if [ "$scene" = filedialog ] || [ "$scene" = clipboard ] || [ "$scene" = save ]; then
+    if [ "$scene" = filedialog ] || [ "$scene" = clipboard ] || [ "$scene" = save ] \
+        || [ "$scene" = editor ]; then
         local data_container
         data_container=$(xcrun simctl get_app_container "$udid" "$bundle_id" data)
         simdrive_watch "$udid" "$bundle_id" "$data_container/Documents" &
@@ -1404,6 +1410,15 @@ fi
 # at the top of this file). A Go leg on any of those would make Go the
 # first NON-RUST guest there, which is a sweep, not this depth slice.
 #
+# AND `editor` IS THE ONE DIVERGENCE FROM THE SWIFT LIST, which the
+# paragraph above requires be written down right here. It is a Go app and
+# there is no Swift guest to mirror — the plan chose Go so a BINDING's
+# awkward corners would show, and an editor in Rust would be kaya testing
+# itself (docs/editor-plan.md), so no `editor.swift` is coming. It rides
+# its own leg block below rather than $IOS_GO_SCENES because it needs two
+# things the loop cannot pass: the simdrive watcher (it opens both
+# pickers) and the phone-expressible cut.
+#
 # NOT NARROWER, and this is the half that has to be said out loud
 # because nothing enforces it: check-steps' wired() keys on scene x
 # runner and never on language, so a Go suite that stalled at six scenes
@@ -1457,6 +1472,39 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
             queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest"
         fi
     done
+    # THE TEXT EDITOR — kaya's forcing artifact (docs/editor-plan.md), and
+    # the only script on this lane that drives an APP rather than a
+    # feature: launch to an empty buffer, type, save-as, open, edit, undo,
+    # save, and find with a regex.
+    #
+    # OFF THE LOOP ABOVE, for two things the loop cannot pass. First, the
+    # simdrive watcher: this scene opens BOTH pickers, so run_swiftui_on
+    # has to give it the same eyes and hands the save leg gets (the arm at
+    # the top of that function names `editor` for exactly this). Second,
+    # THE PHONE-EXPRESSIBLE CUT — the ninth and tenth arguments — because
+    # the scene's last stretch hangs off a CHROME CLOSE:
+    #
+    #   close_window window#0 → the app's veto → its own alert
+    #
+    # and iOS has no chrome close to drive, which is why the whole close
+    # grammar in the interpreter sits inside `#if os(macOS)`. Same cut and
+    # same reason as the `dirty` leg below, and the guard in
+    # run_swiftui_on holds it honest in both directions: cutting at a verb
+    # the scene no longer has is a stale cut and fails, and the cut may
+    # not take an `expect_dirty` with it. It does not: the editor asserts
+    # BOTH `expect_dirty false` and `expect_dirty true` before the close,
+    # eight times between them, so the prefix still watches the mark go up
+    # on a keystroke, come down on a save, come down on an UNDO, and go up
+    # again on a programmatic write.
+    #
+    # WHAT THE CUT DOES TAKE, said out loud: the two unsaved-work refusals
+    # and the closing `expect_ax`. The first door (File>New) is inside the
+    # prefix, so the alert composition itself is still exercised here —
+    # what this lane does not run is the SECOND door, the window's own.
+    APP=$(make_bundle editorgo dev.kaya.editorgo "$BUNDLES/go-bin")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on editor-go "$APP" dev.kaya.editorgo editor-go editor editor \
+        '' close_window expect_dirty
     drain
     timing go-build+legs
 fi

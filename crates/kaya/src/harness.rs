@@ -725,6 +725,32 @@ pub trait Stage: Send + 'static {
     /// default, like child_shares: a backend that forgets it must
     /// fail to compile rather than pass the consumption leg vacuously.
     fn container_fills(&self, target: Target) -> String;
+    /// Whether a WIDGET spans the track its flex container assigned it,
+    /// along that container's main axis: the empty string when it does
+    /// (within two device units, and an overflow is not a leftover —
+    /// what a widget wider than its track should do is the overflow
+    /// policy DESIGN still defers), otherwise a short platform-flavored
+    /// description of the drawn extent and the track, which only ever
+    /// appears in failure text and is never compared across platforms.
+    /// The observation expect_fills verifies on a widget target.
+    ///
+    /// THE HALF OF THE GROW CONTRACT SHARES CANNOT SEE, and the reason
+    /// this is a separate observation rather than a case of
+    /// `child_shares`: three of the four backends read the TRACK there
+    /// (SwiftUI's KayaFlex frame, WinUI's RowDefinition, Compose's
+    /// weighted cell), deliberately — the layout rect is what the grow
+    /// arithmetic decides, and a control that hugs inside it is
+    /// platform flavor a byte-compared assertion could never carry. So
+    /// a widget that draws at a HARD SIZE inside a correct track splits
+    /// its container exactly right and renders wrong, silently. It has
+    /// happened twice: the slider capped at 200pt rendered a 1:3 row as
+    /// 38/62 with expect_shares passing, and the textarea's
+    /// `.frame(width: 240, height: 96)` gave an editor asking for a
+    /// full-window buffer a small box on two backends at once.
+    ///
+    /// No default, like child_shares: a backend that forgets it must
+    /// fail to compile rather than pass the grow leg vacuously.
+    fn widget_fills(&self, target: Target) -> String;
     /// The container's cross-axis placement, CLASSIFIED from geometry
     /// after forcing pending layout: one of "start", "center", "end",
     /// "stretch", or "baseline" when the corresponding coincidence
@@ -2644,22 +2670,33 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 }
             }
             Step::ExpectFills(t) => {
-                if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
-                    Some(Err(format!("{t:?} is not a container target")))
-                } else {
-                    // Empty means the children span the content box;
-                    // the pass observation is the byte-identical
-                    // "column#0 fills" every backend and interpreter
-                    // emits.
-                    Some(poll(|| {
-                        let slack = stage.container_fills(*t);
-                        if slack.is_empty() {
-                            Ok(format!("{} fills", target_spec(t)))
-                        } else {
-                            Err(format!("{} leaves leftover ({slack})", target_spec(t)))
-                        }
-                    }))
-                }
+                // ONE VERB, TWO SUBJECTS, one idea: nothing the layout
+                // handed out is left unconsumed. A CONTAINER's children
+                // must span its content box; a WIDGET must span the
+                // track its container gave it. The two are separate
+                // observations because they are separate blind spots —
+                // a container that pools leftover beside its children
+                // and a widget that draws at a hard size inside a
+                // correct track both keep every share exactly right.
+                //
+                // The pass observation is the byte-identical
+                // "column#0 fills" / "textarea#0 fills" every backend
+                // and interpreter emits.
+                let container = matches!(t.kind, TargetKind::Column | TargetKind::Row);
+                Some(poll(|| {
+                    let slack = if container {
+                        stage.container_fills(*t)
+                    } else {
+                        stage.widget_fills(*t)
+                    };
+                    if slack.is_empty() {
+                        Ok(format!("{} fills", target_spec(t)))
+                    } else if container {
+                        Err(format!("{} leaves leftover ({slack})", target_spec(t)))
+                    } else {
+                        Err(format!("{} is short of its track ({slack})", target_spec(t)))
+                    }
+                }))
             }
             Step::ExpectAligned(t, want) => {
                 if !matches!(t.kind, TargetKind::Column | TargetKind::Row) {
@@ -2852,7 +2889,35 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
         };
         match outcome {
             Some(Ok(o)) => observed.push(o),
-            Some(Err(e)) => failures.push(e),
+            Some(Err(e)) => {
+                // PRINTED THE MOMENT IT IS FINAL, not saved for the
+                // verdict — the third copy of a rule KayaSwiftUI.swift
+                // already states and this one never got.
+                //
+                // The verdict below is the ONLY place `failures` is
+                // ever named, and it needs the run to reach the end.
+                // A scene that fails and then ABORTS — the
+                // one-alert-per-process guard, a panic in a later
+                // handler — takes the whole list with it, and the log
+                // shows a crash with no reason: every failed step
+                // looks like a step that merely took 15 seconds
+                // (POLL_DEADLINE), because a failing `poll` returns
+                // only when the deadline runs out.
+                //
+                // Measured 2026-08-10: the editor scene's first linux
+                // run failed six assertions on x11 and two on wayland,
+                // then aborted on the alert guard. Nothing in the log
+                // said so. Diagnosing it meant noticing that six steps
+                // took EXACTLY 15.0s.
+                //
+                // On the same line-buffered writer as the step trace,
+                // so it lands beside the step it belongs to and
+                // survives an abort as well as a kill.
+                if let Some((log, _)) = log {
+                    log(&format!("KAYA_HARNESS: step-failed {e}"));
+                }
+                failures.push(e);
+            }
             None => {}
         }
     }
@@ -3413,6 +3478,18 @@ mod tests {
         fn container_fills(&self, _: Target) -> String {
             String::new()
         }
+        /// Index 0 is the mock's FILLING widget and every other index is
+        /// short of its track, so one stage walks both answers of the
+        /// verb — the window_dirty precedent. A fixed empty string would
+        /// make the negative half of the test pass for the same reason
+        /// the positive half does.
+        fn widget_fills(&self, t: Target) -> String {
+            if t.index == 0 {
+                String::new()
+            } else {
+                "draws 96pt of a 126pt track".into()
+            }
+        }
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
@@ -3624,6 +3701,9 @@ mod tests {
             fn container_fills(&self, _: Target) -> String {
                 "children span 92pt of 298pt".into()
             }
+            fn widget_fills(&self, _: Target) -> String {
+                "draws 96pt of a 126pt track".into()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -3717,18 +3797,6 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 0, "{verdict}");
         assert_eq!(verdict, "KAYA_SELFTEST: OK (column#0 fills)");
-        // A non-container target is the false-verdict class: resolving
-        // label#0 against a container registry would read a different
-        // widget. Rejected loudly, exactly like the other container
-        // verbs.
-        let (tx, rx) = std::sync::mpsc::channel();
-        run(
-            parse("expect_fills label#0").unwrap(),
-            MockStage { seen: &SEEN, verdict: tx },
-        );
-        let (code, verdict) = rx.recv().unwrap();
-        assert_eq!(code, 1);
-        assert!(verdict.contains("not a container target"), "{verdict}");
         // Slack fails loudly: the whole point of the verb is that
         // ratio-at-minimum cannot pass it.
         struct Pooler(Sender<(i32, String)>);
@@ -3799,6 +3867,9 @@ mod tests {
             }
             fn container_fills(&self, _: Target) -> String {
                 "children span 92pt of 298pt".into()
+            }
+            fn widget_fills(&self, _: Target) -> String {
+                "draws 96pt of a 126pt track".into()
             }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
@@ -3872,6 +3943,44 @@ mod tests {
         assert_eq!(code, 1);
         assert!(verdict.contains("row#0 leaves leftover"), "{verdict}");
         assert!(verdict.contains("92pt of 298pt"), "{verdict}");
+    }
+
+    /// expect_fills on a WIDGET target reads widget_fills — the other
+    /// half of the grow contract, and the one shares cannot see.
+    ///
+    /// THE ROUTING IS THE TEST. Both observations answer "is anything
+    /// left unconsumed" and both spell their pass the same way, so a
+    /// widget arm wired to `container_fills` would look right in the
+    /// verdict and read the wrong geometry: the mock's containers all
+    /// fill, so the textarea's hard 96pt inside a 126pt track would
+    /// come back as "textarea#0 fills" forever. The mock answers by
+    /// INDEX (0 fills, anything else is short), which is what makes the
+    /// two halves below fail for different reasons rather than for the
+    /// same one.
+    #[test]
+    fn expect_fills_reads_a_widget_against_its_track() {
+        let steps = parse("expect_fills textarea#0").unwrap();
+        assert_eq!(
+            steps[0],
+            Step::ExpectFills(Target { kind: TargetKind::Textarea, index: 0 })
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (textarea#0 fills)");
+        // A widget short of its track fails loudly, and says so in the
+        // widget's own words rather than the container's ("leaves
+        // leftover" would name the wrong subject).
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_fills textarea#1").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(verdict.contains("textarea#1 is short of its track"), "{verdict}");
+        assert!(verdict.contains("96pt of a 126pt track"), "{verdict}");
     }
 
     /// expect_aligned takes a container target and a mode, counts as

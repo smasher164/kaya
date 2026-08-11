@@ -109,6 +109,10 @@ for arg in "$@"; do
         # Likewise, until `save_file` has a sugar spelling in the other
         # seven bindings (docs/save-plan.md §2's fan-out).
         save_rust) SUITE="$arg" ;;
+        # THE TEXT EDITOR is Go and only Go, by design rather than by
+        # sequencing: an editor in Rust would be kaya testing itself
+        # (docs/editor-plan.md). There is no editor_rust to add later.
+        editor_go) SUITE="$arg" ;;
         # These two were wired as legs without arms here, so a single
         # leg could not be re-run in isolation — the one-leg-repeatedly
         # loop is the only practical way to characterise a rare flake.
@@ -240,6 +244,21 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # arms' (docs/save-plan.md §2). It leaves for SCENES the day the eighth
 # lands, exactly as filedialog did.
 DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
+# GO-ONLY SCENES: a guest that exists in Go and only Go BY DESIGN rather
+# than by sequencing — an editor written in Rust would be kaya testing
+# itself (docs/editor-plan.md), so there is no editor_rust to add later.
+# Such a scene can join neither list above: SCENES' per-language surfaces
+# glob for editor.py / editor.cs / editor.java and would fail loudly and
+# correctly, and DEPTH_SCENES builds and ships a RUST example.
+#
+# What it must still join is the TASKKILL SWEEP, which is the one
+# mechanical surface that does not care what language a guest is in: a
+# leg that aborts leaves editor_go.exe holding kaya.dll, and the next
+# deploy's copy then fails under `set -e` — or worse, a fresh suite runs
+# beside the zombie. The editor's first three runs on this lane all ended
+# in an abort, which is exactly when the sweep is the only thing between
+# a failed leg and a failed LANE.
+GO_ONLY_SCENES="editor"
 
 SCENE_EXES=()
 SCENE_PYS=()
@@ -556,7 +575,7 @@ kill_guests() {
     # <scene>_go.exe (the pri-adjacency arrangement), and the C# legs
     # run the kaya-guests.exe apphost — both held kaya.dll through a
     # deploy once (2026-07-22).
-    kill_list=$(for s in $SCENES $DEPTH_SCENES; do printf 'taskkill /f /im %s.exe 2>nul & taskkill /f /im %s_go.exe 2>nul & ' "$s" "$s"; done)
+    kill_list=$(for s in $SCENES $DEPTH_SCENES $GO_ONLY_SCENES; do printf 'taskkill /f /im %s.exe 2>nul & taskkill /f /im %s_go.exe 2>nul & ' "$s" "$s"; done)
     run_ssh "cmd /c \"${kill_list}taskkill /f /im python.exe 2>nul & taskkill /f /im go.exe 2>nul & taskkill /f /im dotnet.exe 2>nul & taskkill /f /im kaya-guests.exe 2>nul & taskkill /f /im java.exe 2>nul & taskkill /f /im cdb.exe 2>nul & exit /b 0\"" || true
 }
 # Is the guest stuck in the state taskkill CANNOT clear? The signature
@@ -1588,6 +1607,27 @@ case "$SUITE" in
         # no separate one, because it is the same window class on the same
         # desktop.
         run_suite save_rust
+        drain_suites
+        # THE TEXT EDITOR — kaya's forcing artifact (docs/editor-plan.md),
+        # and the only script on this lane that drives an APP rather than
+        # a feature: launch to an empty buffer, type, save-as, open,
+        # edit, undo, save, find with a regex, and the unsaved-work
+        # warning on close.
+        #
+        # GO ALONE, and no rust leg is coming: the plan chose Go so that
+        # a BINDING's awkward corners would show. `editor` is therefore
+        # in neither SCENES nor DEPTH_SCENES — both of those derive a
+        # cross-built rust example this app does not have — and the leg
+        # runs from its own checked-in launcher, which builds
+        # dev.kaya/guests/go/cmd on the VM like every other Go leg.
+        #
+        # SERIAL, BETWEEN DRAINS, and it needs BOTH of the reasons this
+        # file already gives. The Shell's open and save dialogs are
+        # OS-GLOBAL modal chrome found by walking the DESKTOP for a
+        # visible `#32770`, so a second dialog anywhere takes the typing;
+        # and `type` injects OS-global keystrokes, which land wherever
+        # the foreground is rather than where this leg is.
+        run_suite editor_go
         drain_suites
         run_suite background_rust
         run_suite background_python

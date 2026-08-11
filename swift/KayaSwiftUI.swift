@@ -4691,7 +4691,20 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
             let low = content.offset(from: document.location, to: viewport.location)
             let high = content.offset(from: document.location, to: viewport.endLocation)
             let laidOut = range.location >= low && NSMaxRange(range) <= high
-            return laidOut && segments.allSatisfy { view.bounds.intersects($0) }
+            // THE TWO RECTANGLES ARE IN DIFFERENT SPACES, and the
+            // difference is `textContainerInset`. A segment frame is the
+            // TEXT CONTAINER's coordinate; `bounds` is the VIEW's, and on
+            // this control they differ by 8pt at the top — measured on the
+            // editor's document, whose container height (1298) and
+            // contentSize (1314) differ by exactly the two insets.
+            // Compared directly, a range sitting up to 8pt BELOW the fold
+            // reads as visible, which is this verb passing for glyphs
+            // nobody can see. The viewport moves into the segments' space
+            // rather than the other way round, so both sides of the
+            // comparison are rectangles the text system itself produced.
+            let visible = view.bounds.offsetBy(
+                dx: -view.textContainerInset.left, dy: -view.textContainerInset.top)
+            return laidOut && segments.allSatisfy { visible.intersects($0) }
         }
     }
 
@@ -6065,14 +6078,38 @@ private func kayaRunScript(_ script: String) {
                     failures.append("\(parts[1]) aligns \"\(other)\", wanted \"\(want)\"")
                 }
             case "expect_fills":
-                // The container's children span its content box — the
+                // ONE VERB, TWO SUBJECTS (harness.rs Step::ExpectFills).
+                //
+                // A CONTAINER's children span its content box — the
                 // leftover-consumption half of the grow contract, which
                 // shares (total-invariant) and root_fills (root-level
                 // only) can never see. Span = the tracks KayaFlex
                 // actually assigned plus the 8-unit gaps, against the
-                // container's own rendered extent; the pass observation
-                // matches harness.rs byte-for-byte.
+                // container's own rendered extent.
+                //
+                // A WIDGET spans the track KayaFlex assigned IT, on its
+                // container's main axis — the half shares cannot see
+                // either, and for the opposite reason: kayaMainExtents
+                // is the TRACK, deliberately, so a control drawing at a
+                // hard 240x96 inside a correct 126pt slot splits the
+                // column exactly right and renders a small box. An
+                // OVERFLOW is not a leftover (a control larger than its
+                // track is the overflow policy DESIGN defers), so the
+                // test is one-sided.
+                //
+                // The pass observation matches harness.rs byte-for-byte
+                // in both cases.
+                let isContainer = parts[1].hasPrefix("row") || parts[1].hasPrefix("column")
                 let slack = DispatchQueue.main.sync { () -> String? in
+                    guard isContainer else {
+                        guard let widget = kayaAnyTarget(parts[1]) else { return nil }
+                        guard let track = kayaMainExtents[widget.id], track > 0 else {
+                            return "no track recorded — not a flex child"
+                        }
+                        let drawn = kayaDrawnExtents[widget.id] ?? 0
+                        if drawn >= track - 2 { return "" }
+                        return "draws \(Int(drawn.rounded()))pt of a \(Int(track.rounded()))pt track"
+                    }
                     let isRow = parts[1].hasPrefix("row")
                     guard
                         let container = kayaTarget(
@@ -6092,7 +6129,10 @@ private func kayaRunScript(_ script: String) {
                 case ""?:
                     observed.append("\(parts[1]) fills")
                 case let s?:
-                    failures.append("\(parts[1]) leaves leftover (\(s))")
+                    failures.append(
+                        isContainer
+                            ? "\(parts[1]) leaves leftover (\(s))"
+                            : "\(parts[1]) is short of its track (\(s))")
                 case nil:
                     failures.append("no such target \(parts[1])")
                 }
@@ -6775,9 +6815,24 @@ var kayaContainerCross: [UInt64: Double] = [:]
 var kayaCrossRects: [UInt64: (Double, Double)] = [:]
 var kayaBaselineOffsets: [UInt64: Double] = [:]
 
+/// The main-axis extent each flex child DREW at, by node id — what
+/// `expect_fills` compares against that child's track on a widget
+/// target.
+///
+/// THE TRACK'S SIBLING, AND DELIBERATELY NOT THE SAME NUMBER.
+/// `kayaMainExtents` is the layout rect the grow arithmetic decided;
+/// this is the box the control actually took inside it, and the gap
+/// between them is where a widget with a hard-coded size hides: it
+/// splits its container exactly right (expect_shares reads the track,
+/// correctly) and renders at 96pt in a 126pt slot. Same reader, same
+/// geometry-only discipline as the cross rects — it rides the CHILD
+/// inside the cell, so a speculative layout pass cannot write it.
+var kayaDrawnExtents: [UInt64: Double] = [:]
+
 /// Records one child's cross rect in the enclosing container's named
-/// space (the reader rides the CHILD, inside the track frame, so it
-/// sees the aligned box, not the track).
+/// space, and the main-axis extent it drew at (the reader rides the
+/// CHILD, inside the track frame, so it sees the aligned box, not the
+/// track).
 private struct KayaCellReader: View {
     let id: UInt64
     let parent: UInt64
@@ -6797,6 +6852,7 @@ private struct KayaCellReader: View {
             vertical
             ? (Double(frame.minX), Double(frame.width))
             : (Double(frame.minY), Double(frame.height))
+        kayaDrawnExtents[id] = Double(vertical ? frame.height : frame.width)
     }
 }
 
@@ -7027,6 +7083,25 @@ struct KayaRender: View {
     let node: KayaNode
     /// The mounted root fills its window; nested containers do not.
     var isRoot = false
+    /// The MAIN AXIS of the flex container this node is a child of —
+    /// true inside a column, false inside a row — and nil wherever grow
+    /// has no meaning: a grid cell, a scroll's content, the mounted
+    /// root, and the stock VStack/HStack path (which is taken only when
+    /// no child carries a weight at all).
+    ///
+    /// A widget whose natural size is a FIXED FRAME needs this to
+    /// honour grow: a grower's extent is the track KayaFlex assigned on
+    /// this axis, and the widget can only release the right dimension
+    /// if it knows which one that is. Releasing both would fill the
+    /// CROSS axis too, which is align's business and not grow's — GTK
+    /// gives a grown textarea its natural 240 across a start-aligned
+    /// column, and this backend must not disagree.
+    var flexVertical: Bool? = nil
+    /// Whether that container aligns its children `stretch` — the CROSS
+    /// axis's half of the same question `flexVertical` answers for the
+    /// main one. Only the widgets whose natural size is a fixed frame
+    /// need it; everything else already fills what it is proposed.
+    var flexStretch = false
 
     var body: some View {
         // The widget/node anchor: a context catalog attached to this
@@ -7079,7 +7154,9 @@ struct KayaRender: View {
                             // KayaTrackReader). The inner frame is the stretch
                             // box; every other mode places in KayaCell.
                             KayaCell(vertical: true, align: node.align) {
-                                KayaRender(node: child)
+                                KayaRender(
+                                    node: child, flexVertical: true,
+                                    flexStretch: node.align == alignStretch)
                                     .background(
                                         KayaCellReader(id: child.id, parent: node.id, vertical: true)
                                     )
@@ -7090,11 +7167,14 @@ struct KayaRender: View {
                 } else {
                     VStack(alignment: kayaColumnAlignment(node.align), spacing: node.spacing) {
                         ForEach(node.children) { child in
-                            KayaRender(node: child)
-                                .background(
-                                    KayaCellReader(id: child.id, parent: node.id, vertical: true)
-                                )
-                                .frame(maxWidth: node.align == alignStretch ? .infinity : nil)
+                            KayaRender(
+                                node: child, flexVertical: true,
+                                flexStretch: node.align == alignStretch
+                            )
+                            .background(
+                                KayaCellReader(id: child.id, parent: node.id, vertical: true)
+                            )
+                            .frame(maxWidth: node.align == alignStretch ? .infinity : nil)
                         }
                     }
                 }
@@ -7137,7 +7217,9 @@ struct KayaRender: View {
                     KayaFlex(vertical: false, spacing: node.spacing, nodes: node.children, fillCross: isRoot) {
                         ForEach(node.children) { child in
                             KayaCell(vertical: false, align: node.align) {
-                                KayaRender(node: child)
+                                KayaRender(
+                                    node: child, flexVertical: false,
+                                    flexStretch: node.align == alignStretch)
                                     .background(
                                         KayaCellReader(id: child.id, parent: node.id, vertical: false)
                                     )
@@ -7148,11 +7230,14 @@ struct KayaRender: View {
                 } else {
                     HStack(alignment: kayaRowAlignment(node.align), spacing: node.spacing) {
                         ForEach(node.children) { child in
-                            KayaRender(node: child)
-                                .background(
-                                    KayaCellReader(id: child.id, parent: node.id, vertical: false)
-                                )
-                                .frame(maxHeight: node.align == alignStretch ? .infinity : nil)
+                            KayaRender(
+                                node: child, flexVertical: false,
+                                flexStretch: node.align == alignStretch
+                            )
+                            .background(
+                                KayaCellReader(id: child.id, parent: node.id, vertical: false)
+                            )
+                            .frame(maxHeight: node.align == alignStretch ? .infinity : nil)
                         }
                     }
                 }
@@ -7212,7 +7297,7 @@ struct KayaRender: View {
         case kindEntry:
             KayaEntry(node: node)
         case kindTextarea:
-            KayaTextarea(node: node)
+            KayaTextarea(node: node, flexVertical: flexVertical, flexStretch: flexStretch)
         case kindSelect:
             // The dressed floor: SwiftUI's own Picker in its menu
             // presentation — the platform dropdown. The node's label
@@ -10122,6 +10207,49 @@ struct KayaEntry: View {
     }
 }
 
+/// THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES IT —
+/// stated once for both platform halves, because 240x96 is one size
+/// with two spellings and drift between them would be invisible until a
+/// device suite ran.
+///
+/// A FLOOR, NOT A FIXED FRAME. The other desktop backends already say
+/// so: GTK's `set_size_request(240, 96)` is a minimum its flex manager
+/// stretches from, and WinUI's MinWidth is one too. `.frame(width: 240,
+/// height: 96)` was not — it refused the track KayaFlex assigned, so an
+/// editor asking for a full-window buffer with grow(1) got a small box
+/// on macOS AND iOS, while every share assertion passed: expect_shares
+/// reads the TRACK, which was right all along. The sibling widgets in
+/// this file already spell the release (`node.grow > 0 ? .infinity :
+/// 200` on the slider and the progress bar, added after a capped
+/// slider rendered a 1:3 row as 38/62); the textarea is the same
+/// sentence with a floor under it.
+///
+/// TWO AXES, TWO OWNERS, AND NEITHER REACHES FOR THE OTHER'S. `grow`
+/// divides the container's MAIN axis, so a weight releases that one;
+/// `align` places on the CROSS axis, so `stretch` releases that one.
+/// Which dimension each is follows `flexVertical`. A textarea outside a
+/// flex container (a grid cell, a scroll's content) has no track to fill
+/// and keeps the floor as its size.
+///
+/// THE CROSS HALF WAS THE SECOND HALF OF THE SAME DEFECT, found the same
+/// way (2026-08-10): with the main axis released, an editor asking for a
+/// full-window buffer got a full-HEIGHT column 240pt wide, because
+/// `maxWidth: 240` refused the cell a stretch-aligned column proposed.
+/// The other three backends never had it — GTK's set_size_request and
+/// WinUI's MinWidth are minima their FILL/Stretch alignment grows from —
+/// so this was macOS and iOS disagreeing with three platforms about what
+/// `align: stretch` means, which `expect_aligned` reads directly.
+extension View {
+    func kayaTextareaFrame(grow: Double, flexVertical: Bool?, stretch: Bool) -> some View {
+        let grows = grow > 0
+        let fillsWidth = (grows && flexVertical == false) || (stretch && flexVertical == true)
+        let fillsHeight = (grows && flexVertical == true) || (stretch && flexVertical == false)
+        return frame(
+            minWidth: 240, maxWidth: fillsWidth ? .infinity : 240,
+            minHeight: 96, maxHeight: fillsHeight ? .infinity : 96)
+    }
+}
+
 #if os(macOS)
 /// The multi-line editor on macOS: KayaEntry's exact contract
 /// (uncontrolled fold, identity-tag emits, model-driven focus) over an
@@ -10137,6 +10265,11 @@ struct KayaEntry: View {
 /// the live control, and a breach fails the leg that rendered it.
 struct KayaTextarea: View {
     let node: KayaNode
+    /// The main axis of the flex container this textarea sits in, if it
+    /// sits in one — see kayaTextareaFrame.
+    var flexVertical: Bool? = nil
+    /// Whether that container aligns `stretch` — the cross axis's half.
+    var flexStretch = false
 
     var body: some View {
         // EVERY MODEL FACT THE VIEW NEEDS IS READ HERE, in a SwiftUI
@@ -10165,7 +10298,7 @@ struct KayaTextarea: View {
             revealRequest: node.revealRequest,
             revealSeq: node.revealSeq
         )
-        .frame(width: 240, height: 96)
+        .kayaTextareaFrame(grow: node.grow, flexVertical: flexVertical, stretch: flexStretch)
         .border(Color.gray.opacity(0.4))
     }
 }
@@ -10773,6 +10906,11 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     /// kaya's iOS 16 floor.
     struct KayaTextarea: View {
         let node: KayaNode
+        /// The main axis of the flex container this textarea sits in, if
+        /// it sits in one — see kayaTextareaFrame.
+        var flexVertical: Bool? = nil
+        /// Whether that container aligns `stretch` — the cross axis's half.
+        var flexStretch = false
 
         var body: some View {
             // EVERY OBSERVATION IS READ HERE, in a SwiftUI body, and
@@ -10792,7 +10930,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 revealRequest: node.revealRequest,
                 revealSeq: node.revealSeq
             )
-            .frame(width: 240, height: 96)
+            .kayaTextareaFrame(grow: node.grow, flexVertical: flexVertical, stretch: flexStretch)
             .border(Color.gray.opacity(0.4))
         }
     }
@@ -11039,6 +11177,50 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 NSMaxRange(range) <= length
             {
                 coordinator.revealDone = revealSeq
+                // THE LAYOUT BELOW THE VIEWPORT IS AN ESTIMATE, AND A
+                // SCROLL COMPUTED AGAINST IT LANDS SHORT. TextKit 2 lays
+                // out what the viewport shows and guesses the rest, so a
+                // range the view has never displayed has no real position
+                // to scroll to — and `scrollRangeToVisible` scrolls to the
+                // guess without saying so.
+                //
+                // Measured here on the editor's 59-line document, revealing
+                // its LAST two bytes from the top:
+                //
+                //     scroll   off 8 -> 1178, contentSize 1369 (estimated)
+                //     settled  contentSize 1314, the line at 1276..1298
+                //     visible  1178..1274 — the line 10pt below the fold
+                //
+                // The height was 55pt of guesswork out, the line 32pt of
+                // it, and the viewport stopped just above the range the app
+                // asked for. Nothing re-scrolls afterwards: the one-shot is
+                // spent, so the miss is PERMANENT and silent. The same
+                // estimate is why `contentSize` reads 1369 from the top of
+                // this document and 1314 from the bottom.
+                //
+                // So the layout up to the target is forced FIRST, and the
+                // scroll then runs against real geometry (measured: off
+                // 1210, the line at 1276..1298, inside). Up to the TARGET
+                // and no further: nothing below it can move it, and a
+                // reveal must not pay for laying out the rest of a document
+                // it is scrolling away from. Everything ABOVE it must be
+                // real, which is not a cost this can avoid — a character's
+                // position IS the height of everything before it.
+                //
+                // `ranges.steps` never caught this: its reveal target sits
+                // mid-document with a fifth of the text below it, where the
+                // guess is close enough to land inside a 22pt line. The
+                // editor walks to the LAST match, which is where an
+                // estimate has the most room to be wrong, and it is the
+                // first scene in the tree that does.
+                if let layout = view.textLayoutManager,
+                    let content = layout.textContentManager,
+                    let end = content.location(
+                        content.documentRange.location, offsetBy: NSMaxRange(range)),
+                    let laid = NSTextRange(location: content.documentRange.location, end: end)
+                {
+                    layout.ensureLayout(for: laid)
+                }
                 // WITHOUT ANIMATION, and this is the difference between a
                 // deterministic verb and a sleep. `scrollRangeToVisible`
                 // is ANIMATED on iOS — measured at ~300ms over a standard

@@ -319,16 +319,53 @@ path = sys.argv[1]
 text = sys.stdin.read() if path == "-" else open(path).read()
 bad = []
 focused = False
+# The most recent `type` that is still the newest thing in the focused
+# field native undo history: (lineno, step, payload). Any OTHER action
+# pushes its own entry in front of it, which is why a click clears this.
+pending = None
 for lineno, line in enumerate(text.splitlines(), 1):
     if line.lstrip().startswith("#"):
         continue
     for step in line.split(";"):
         s = step.strip()
+        if not s:
+            continue
         if s.startswith("expect_focused"):
             focused = True
             continue
         m = re.match(r"type\s+\"(.*)\"\s*$", s)
         if not m:
+            # HOW MUCH OF A TYPED RUN ONE UNDO SPENDS IS FRONTIER
+            # GRANULARITY, and a shared scene may not assert it:
+            # "the only platform-flavored part" of the undo design,
+            # which invariant 6 forbids asserting "across five lanes
+            # with five keystroke cadences" (docs/undo-plan.md §2,
+            # §5.2). One character is the floor every platform agrees
+            # on; more than one is a coin toss dressed as an assertion.
+            #
+            # MEASURED, NOT FEARED (2026-08-10, editor.steps): a five
+            # character run undone in one step passed on mac, where
+            # AppKit coalesces a burst whole, and failed on linux/x11
+            # where the same characters arrive through
+            # `xdotool --delay 0` and GtkTextHistory spends one per
+            # undo. Wayland `wtype -d 1` coalesced and passed. One
+            # scene, one backend, two cadences, two answers.
+            if re.match(r"menu_activate\s+\"Edit>Undo\"\s*$", s):
+                if pending is not None and len(pending[2]) > 1:
+                    bad.append(f"{path}:{pending[0]}: {pending[1]} — then "
+                               f"line {lineno} undoes it. How much of a MULTI "
+                               "character typed run one Edit>Undo spends is "
+                               "frontier granularity, which is platform "
+                               "flavored (docs/undo-plan.md §5.2) and which "
+                               "invariant 6 forbids a shared scene from "
+                               "asserting. Type ONE character before an undo "
+                               "that must restore the whole run, or put an app "
+                               "action between them so the undo spends THAT")
+                pending = None
+            elif not s.startswith("expect") and not s.startswith("settle"):
+                # Anything else that acts — a click, a set_text, another
+                # menu — becomes the newest history entry itself.
+                pending = None
             continue
         payload = m.group(1)
         if re.search(r"\\[nrt]", payload) or not payload:
@@ -346,6 +383,7 @@ for lineno, line in enumerate(text.splitlines(), 1):
                        "type has no target: whoever holds focus takes the keys, so "
                        "a script must expect_focused first (which is also the WAIT "
                        "for focus to land, since actions are not retried)")
+        pending = (lineno, s, payload)
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 ' "$1"
@@ -371,10 +409,332 @@ if ! printf 'expect_focused entry#0\ntype "milk 2"\n' | typing_lint - >/dev/null
     echo "check-steps: SELF-TEST FAIL (a well-formed type step was refused)" >&2
     exit 1
 fi
+# The frontier-granularity clause, all four directions. The two PASSING
+# shapes are the ones that make the failing one mean something: a
+# one-character run is the floor every platform agrees on, and an app
+# action between the typing and the undo makes the undo spend THAT.
+if printf 'expect_focused entry#0\ntype "tail"\nexpect_dirty true\nmenu_activate "Edit>Undo"\n' \
+    | typing_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (undoing a multi-character typed run passed)" >&2
+    exit 1
+fi
+if ! printf 'expect_focused entry#0\ntype "z"\nexpect_dirty true\nmenu_activate "Edit>Undo"\n' \
+    | typing_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (undoing a one-character run was refused)" >&2
+    exit 1
+fi
+if ! printf 'expect_focused entry#0\ntype "milk"\nclick button#0\nmenu_activate "Edit>Undo"\n' \
+    | typing_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (an app action between typing and undo was refused)" >&2
+    exit 1
+fi
+# AND THE CLAUSE MUST FIRE ON THE REAL FILE THAT PROVOKED IT, not only
+# on a synthetic sample: the perturbation goes into a COPY of
+# editor.steps, the substitution count is printed and asserted, and an
+# unchanged file is a failed test rather than a passed one (the vacuous
+# negative test this project has been bitten by twice).
+undo_granularity_selftest() {
+    local copy applied
+    copy="$(mktemp)"
+    applied="$(python3 - "$copy" <<'PY'
+import pathlib
+import sys
+
+out = pathlib.Path(sys.argv[1])
+src = pathlib.Path("tools/scenes/editor.steps").read_text()
+# The exact shape the lane caught: a multi-character run undone whole.
+patched, n = __import__("re").subn(r"^type \"z\"$", "type \" tail\"", src, flags=8)
+out.write_text(patched)
+print(n)
+PY
+    )" || return 1
+    if [ "$applied" != 1 ]; then
+        echo "check-steps: SELF-TEST FAIL (the undo-granularity perturbation" \
+            "applied $applied times, wanted 1 — editor.steps was reshaped and" \
+            "this negative test is now vacuous)" >&2
+        rm -f "$copy"
+        return 1
+    fi
+    if typing_lint "$copy" >/dev/null; then
+        echo "check-steps: SELF-TEST FAIL (editor.steps with a multi-character" \
+            "run before Edit>Undo passed the real file)" >&2
+        rm -f "$copy"
+        return 1
+    fi
+    rm -f "$copy"
+}
+undo_granularity_selftest || exit 1
+
+# ── expect_title MAY NOT SIT INSIDE A DIRTY STRETCH ──────────────────
+#
+# docs/dirty-plan.md §2 wrote this rule down and nothing enforced it.
+# The declared title is untouched by `dirty` on every backend — a marker
+# composed into the app's own title string is D1's named rejection —
+# but the WinUI arm composes its asterisk into the RENDERED CAPTION,
+# and the rendered caption is exactly what expect_title reads there
+# (crates/kaya/src/winui/mod.rs, window_caption + Stage::window_title).
+# So a title assertion made while the window is dirty is a byte
+# comparison that reads "notes" on four lanes and "*notes" on the fifth.
+#
+# WHERE THE WALL IS, and why here rather than in a list somebody has to
+# remember: this gate runs in the fast set, which validate-mac and
+# gates.sh both run before any lane starts. The failure it prevents is
+# otherwise discovered on WINDOWS — the slowest lane to reach, the one
+# needing a VM, and the last one a session with no context will run.
+#
+# THE DIRTY STRETCH IS THE SCENE'S OWN CLAIM about itself: from an
+# `expect_dirty true` up to the next `expect_dirty false`. That is the
+# only mechanical record of the state, and it is the same record the
+# rule is written against. A scene that never asserts `dirty` at all
+# (window, nav, panels, split) is untouched — there is no stretch.
+#
+# `python3 -c` AND NOT A HEREDOC, which is not a style choice: a
+# heredoc IS this process's stdin, so the `-` spelling the self-tests
+# below pipe into would read the program instead of the script and
+# every negative test would pass vacuously. It did, once, for the ten
+# minutes between writing this guard and watching it fail.
+title_dirty_lint() {
+    python3 -c '
+import re, sys
+path = sys.argv[1]
+src = sys.stdin.read() if path == "-" else open(path).read()
+bad = []
+dirty = None
+dirty_line = 0
+for lineno, step in enumerate(src.split("\n"), start=1):
+    s = step.strip()
+    if not s or s.startswith("#"):
+        continue
+    m = re.match(r"expect_dirty\s+(true|false)\s*$", s)
+    if m:
+        dirty = m.group(1) == "true"
+        dirty_line = lineno
+        continue
+    if s.startswith("expect_title") and dirty:
+        bad.append(
+            f"{path}:{lineno}: {s} — this window was claimed DIRTY at line "
+            f"{dirty_line} and nothing has cleared the claim. The WinUI arm "
+            "composes its unsaved-work asterisk into the RENDERED CAPTION, "
+            "which is what expect_title reads there, so this line compares "
+            "one string on four lanes and a marked one on the fifth "
+            "(docs/dirty-plan.md D1 and its open question 2). Put an "
+            "`expect_dirty false` in front of it: a title read is a "
+            "five-lane byte comparison only once the scene has CLAIMED the "
+            "window clean, and that claim is the only record a gate has")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# Both directions, because a guard that only ever passes is not a guard:
+# a title read inside the stretch must FAIL, and the same read after the
+# mark comes down must PASS.
+if printf 'expect_dirty true\nexpect_title "notes"\n' | title_dirty_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (expect_title inside a dirty stretch passed)" >&2
+    exit 1
+fi
+if ! printf 'expect_dirty true\nexpect_dirty false\nexpect_title "notes"\n' \
+    | title_dirty_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (expect_title after the mark cleared was refused)" >&2
+    exit 1
+fi
+if ! printf 'expect_title "window probe"\n' | title_dirty_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a scene with no dirty claim at all was refused)" >&2
+    exit 1
+fi
+# AND ON THE REAL FILE THAT NEEDS IT, not only on synthetic samples: the
+# perturbation moves editor.steps' own launch title read to just after an
+# `expect_dirty true`, the substitution count is printed and asserted,
+# and an unchanged file is a FAILED test rather than a passed one — the
+# vacuous negative test this project has been bitten by twice.
+title_dirty_selftest() {
+    local copy applied
+    copy="$(mktemp)"
+    applied="$(python3 - "$copy" <<'PY'
+import pathlib
+import re
+import sys
+
+out = pathlib.Path(sys.argv[1])
+src = pathlib.Path("tools/scenes/editor.steps").read_text()
+# The exact shape the rule forbids: a title read while the mark is up.
+patched, n = re.subn(
+    r"^expect_dirty true$",
+    'expect_dirty true\nexpect_title "notes"',
+    src,
+    count=1,
+    flags=re.M,
+)
+out.write_text(patched)
+print(n)
+PY
+    )" || return 1
+    if [ "$applied" != 1 ]; then
+        echo "check-steps: SELF-TEST FAIL (the title/dirty perturbation applied" \
+            "$applied times, wanted 1 — editor.steps no longer claims a dirty" \
+            "stretch and this negative test is now vacuous)" >&2
+        rm -f "$copy"
+        return 1
+    fi
+    if title_dirty_lint "$copy" >/dev/null; then
+        echo "check-steps: SELF-TEST FAIL (editor.steps with a title read inside" \
+            "a dirty stretch passed the real file)" >&2
+        rm -f "$copy"
+        return 1
+    fi
+    rm -f "$copy"
+}
+title_dirty_selftest || exit 1
+
+# ── TWO ALERTS WITH THE SAME TITLE NEED `expect_alerts 0` BETWEEN ────
+#
+# MEASURED 2026-08-10 on the iOS lane, with editor.steps. The app guards
+# unsaved work at three doors and every door's alert carries the same
+# title, so `expect_alert "unsaved changes"` cannot tell a NEW dialog
+# from the one still on screen. The stretch that failed:
+#
+#   alert_choose cancel
+#   expect textarea#0 "scratch"   <- already true; passes instantly
+#   expect_dirty true             <- already true; passes instantly
+#   menu_activate "File>New"
+#   expect_alert "unsaved changes" <- matched the OLD alert, +0ms
+#
+# and the app's second show then hit the core's one-alert-per-process
+# assertion and ABORTED the guest. A CANCEL is the sharp case because
+# its continuation changes nothing, so no state assertion can serve as
+# the wait — but the shape is what is wrong, not the luck.
+#
+# WHAT THIS CLAUSE DELIBERATELY DOES NOT CATCH, said plainly, because a
+# guard that fires on correct scripts gets deleted rather than obeyed.
+# Two conditions have to meet for the race to exist:
+#
+#  1. THE TITLES REPEAT. confirm.steps answers one dialog and opens
+#     another with no count assertion between, correctly, wherever the
+#     second title differs: a stale "delete item?" can never satisfy
+#     `expect_alert "eject disk?"`.
+#  2. THE ANSWER WAS `cancel`. An ACTION's continuation does something
+#     the script can wait on — confirm.steps' `expect label#0 "deleted"`
+#     is written BY the handler, so reaching it proves the dialog was
+#     answered, and that is real synchronization. A CANCEL's
+#     continuation is by construction "leave everything as it was", so
+#     every assertion after it was already true before the dialog
+#     opened. There is nothing to wait on but the dialog itself.
+#
+# So the clause fires on a cancel answered into a repeat of its own
+# title, which is the measured case and nothing wider. An action-side
+# repeat with no waitable effect would race too; no gate can see the
+# difference, and the narrow rule that never cries wolf beats the broad
+# one that gets switched off.
+alert_wait_lint() {
+    python3 -c '
+import re, sys
+path = sys.argv[1]
+src = sys.stdin.read() if path == "-" else open(path).read()
+bad = []
+cancelled = None         # (line, title) of the last CANCELLED alert
+seen = None              # the title expect_alert last matched
+for lineno, step in enumerate(src.split("\n"), start=1):
+    s = step.strip()
+    if not s or s.startswith("#"):
+        continue
+    m = re.match(r"expect_alert\s+\"(.*)\"\s*$", s)
+    if m:
+        if cancelled and cancelled[1] == m.group(1):
+            bad.append(
+                f"{path}:{lineno}: {s} — the alert CANCELLED at line "
+                f"{cancelled[0]} carries the SAME title and nothing has "
+                "asserted it is gone. expect_alert matches by title, so this "
+                "line can be satisfied by the dialog still on screen; the "
+                "app then shows its next one into a live slot and the core "
+                "aborts the guest (\"alert N is already live — one alert per "
+                "process\"). Put `expect_alerts 0` between them: a cancel "
+                "changes nothing, so every other assertion here was already "
+                "true and only the dialog count can be the wait")
+        seen = m.group(1)
+        continue
+    if re.match(r"expect_alerts\s+0\s*$", s):
+        cancelled = None
+        seen = None
+        continue
+    m = re.match(r"alert_choose\s+(\S+)\s*$", s)
+    if m:
+        cancelled = (lineno, seen) if m.group(1) == "cancel" else None
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+' "$1"
+}
+
+# Every direction. The cancelled repeat must FAIL; the same pair with
+# the count assertion between must PASS; a repeat after an ACTION must
+# pass (its continuation is waitable — confirm.steps); and two
+# DIFFERENT titles must pass.
+if printf 'expect_alert "x"\nalert_choose cancel\nexpect_alert "x"\n' \
+    | alert_wait_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a cancelled same-title repeat with no wait passed)" >&2
+    exit 1
+fi
+if ! printf 'expect_alert "x"\nalert_choose cancel\nexpect_alerts 0\nexpect_alert "x"\n' \
+    | alert_wait_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a same-title repeat behind expect_alerts 0 was refused)" >&2
+    exit 1
+fi
+if ! printf 'expect_alert "x"\nalert_choose 0\nexpect_alert "x"\n' \
+    | alert_wait_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (a same-title repeat after an ACTION was refused)" >&2
+    exit 1
+fi
+if ! printf 'expect_alert "x"\nalert_choose cancel\nexpect_alert "y"\n' \
+    | alert_wait_lint - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (two DIFFERENT alert titles were refused)" >&2
+    exit 1
+fi
+# AND ON THE REAL FILE THAT PROVOKED IT: delete editor.steps' first
+# `expect_alerts 0` and the lint must catch what the iOS lane caught.
+alert_wait_selftest() {
+    local copy applied
+    copy="$(mktemp)"
+    applied="$(python3 - "$copy" <<'PY'
+import pathlib
+import re
+import sys
+
+out = pathlib.Path(sys.argv[1])
+src = pathlib.Path("tools/scenes/editor.steps").read_text()
+patched, n = re.subn(r"^expect_alerts 0\n", "", src, count=1, flags=re.M)
+out.write_text(patched)
+print(n)
+PY
+    )" || return 1
+    if [ "$applied" != 1 ]; then
+        echo "check-steps: SELF-TEST FAIL (the alert-wait perturbation applied" \
+            "$applied times, wanted 1 — editor.steps no longer spells the wait" \
+            "and this negative test is now vacuous)" >&2
+        rm -f "$copy"
+        return 1
+    fi
+    if alert_wait_lint "$copy" >/dev/null; then
+        echo "check-steps: SELF-TEST FAIL (editor.steps with its alert wait" \
+            "deleted passed the real file)" >&2
+        rm -f "$copy"
+        return 1
+    fi
+    rm -f "$copy"
+}
+alert_wait_selftest || exit 1
 
 for f in tools/scenes/*.steps; do
     out="$(typing_lint "$f")" || {
         echo "check-steps: $f types in a way no keyboard can:" >&2
+        echo "$out" >&2
+        status=1
+    }
+    out="$(title_dirty_lint "$f")" || {
+        echo "check-steps: $f asserts a window title while the window is dirty:" >&2
+        echo "$out" >&2
+        status=1
+    }
+    out="$(alert_wait_lint "$f")" || {
+        echo "check-steps: $f reopens a same-titled alert with no wait:" >&2
         echo "$out" >&2
         status=1
     }

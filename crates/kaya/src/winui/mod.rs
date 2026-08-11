@@ -1357,6 +1357,29 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         } else {
             Grid::SetColumn(&element, index)?;
         }
+        // THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES
+        // IT. 240x96 is the size all four backends declare, and on the
+        // other three it is a MINIMUM their layout stretches from
+        // (GTK's `set_size_request`, this arm's own MinWidth). The
+        // HEIGHT could not be one here — WinUI measures a control in an
+        // Auto row against infinite height and gives it whatever it
+        // asks for, so a 40-line document asked for 758 pixels and got
+        // them — and an explicit Height is the only thing that bounds
+        // it. It also OUTRANKS the star row's Stretch, which is how an
+        // editor asking for a full-window buffer with grow(1) got 96dip
+        // inside a correct 126dip track, with expect_shares (which
+        // reads the definition) passing all the way.
+        //
+        // So the explicit height is what a NON-GROWER keeps, and a
+        // grower on THIS grid's main axis trades it for the floor plus
+        // Stretch. Main axis only: a grower in a ROW divides width, and
+        // its height is align's business — releasing it there would
+        // hand the wart straight back.
+        if let NativeWidget::Textarea(field) = widget {
+            let grows = vertical && core.grow.get(child).copied().unwrap_or(0.0) > 0.0;
+            field.SetMinHeight(if grows { 96.0 } else { 0.0 })?;
+            field.SetHeight(if grows { f64::NAN } else { 96.0 })?;
+        }
         // Cross placement from the container's align mode. WinUI's
         // own default is Stretch; kaya's normalized default is start,
         // stamped explicitly so the two never drift. Baseline (rows
@@ -5128,11 +5151,11 @@ fn range_spelling(text: &str, ranges: &[(i32, i32)]) -> String {
 /// raised ASYNCHRONOUSLY — the fact the swallow counters already stand
 /// on, and re-measured for a routed `Undo()` by this arm's probe
 /// (`inside_undo_call=false` on every raise).
-fn bank_text_changed(id: u64, text: &str) {
+fn bank_text_changed(id: u64, text: &str) -> bool {
     CORE.with_borrow_mut(|core| {
-        let Some(core) = core.as_mut() else { return };
-        bank_text_changed_on(core, id, text);
-    });
+        let Some(core) = core.as_mut() else { return false };
+        bank_text_changed_on(core, id, text)
+    })
 }
 
 /// The same banking with the core ALREADY BORROWED — the harness's
@@ -5145,7 +5168,37 @@ fn bank_text_changed(id: u64, text: &str) {
 /// was extracted to end (the harness path told the ledger nothing at
 /// all, and a stamped row's typing was outside the history on this
 /// backend alone).
-fn bank_text_changed_on(core: &mut CoreState, id: u64, text: &str) {
+fn bank_text_changed_on(core: &mut CoreState, id: u64, text: &str) -> bool {
+    // A RAISE THAT CARRIES NO TEXT CHANGE IS NOT A TEXT CHANGE, and on
+    // THIS control that is not a theoretical case: a RichEditBox raises
+    // TextChanged for a CHARACTER FORMAT write as readily as for a
+    // keystroke, so `highlight_ranges` — a background colour and not one
+    // character — comes back through the same event as an edit.
+    //
+    // MEASURED, and it is a FEEDBACK LOOP rather than a stray event
+    // (2026-08-10, the editor's first windows leg): the app folds
+    // text_changed and re-declares its find set from the fold, so
+    // kaya's paint raised TextChanged, the raise reached the app as an
+    // edit, the app re-declared, and the pair ran at ~260 round trips a
+    // second for the whole 180-second leg. Every one of that leg's six
+    // failures was downstream of it — the UI thread never went idle, so
+    // the find bar's own keystrokes sat on the queue for a minute, a
+    // ContentDialog never reached `IsLoaded`, and the app's match count
+    // was overwritten by the next spurious fold before anything could
+    // read it.
+    //
+    // The compare is against what THIS HANDLER LAST SAW on the control
+    // (`banked_text`), never against the core's model of the field: the
+    // core is told about kaya's own writes through `absorb_text_writes`,
+    // so comparing there would also silence the echo of a routed native
+    // undo — the one programmatic write whose report the app is
+    // REQUIRED to hear (§3a).
+    //
+    // Answers whether the guest should be told, so the one rule lives in
+    // the one place both handlers already call.
+    if core.banked_text.get(&id).map(String::as_str) == Some(text) {
+        return false;
+    }
     // THE LEDGER HAS BEEN SHOWN THIS TEXT, whichever way the next
     // few lines go: a quiet echo was reported through
     // `note_native_undo` and an ordinary edit is banked below, and
@@ -5159,12 +5212,16 @@ fn bank_text_changed_on(core: &mut CoreState, id: u64, text: &str) {
     // erase the walk the redo side needs.
     if core.ledger_quiet.get(&id).map(String::as_str) == Some(text) {
         core.ledger_quiet.remove(&id);
-        return;
+        // The APP still hears it: a routed native undo is an edit like
+        // any other from the guest's side (§3a), and only the ledger's
+        // second look is suppressed.
+        return true;
     }
     let focused = focused_editable_id(core) == Some(id);
     let window = ledger_window(core);
     core.scene
         .note_text_changed(window, WidgetId(id), text, focused);
+    true
 }
 
 /// A4's ONE named query — "can the focused widget undo?" — answered in
@@ -5346,6 +5403,12 @@ fn perform_undo_role(core: &mut CoreState, role: &str) -> bool {
     }
 }
 
+/// How many native records ONE Edit>Undo may spend looking for the text
+/// to move (`native_walk`). A BOUND AND NOT A `while`: the walk runs on
+/// the UI thread, so a stack that never satisfies the condition has to
+/// stop and SAY SO rather than spin the window into a hang.
+const NATIVE_WALK_LIMIT: usize = 64;
+
 /// THE NATIVE TIER, and THE RECONCILIATION SAMPLE with it (§3).
 ///
 /// The core walks its frontier episode backwards from three facts — the
@@ -5387,7 +5450,44 @@ fn native_walk(core: &mut CoreState, redo: bool) {
     let Some(field) = editable_by_id(core, id) else {
         return;
     };
-    let called = if redo { field.redo() } else { field.undo() };
+    // ONE Edit>Undo IS ONE TEXT STEP, and on this control the stack
+    // holds records that move no text at all. Rich Edit records a
+    // CharacterFormat write like any other change, so a `highlight_ranges`
+    // declaration — kaya's own paint, which no user asked for — sits on
+    // top of the user's typing. MEASURED (2026-08-10, the editor leg):
+    // `Undo()` returned with the text byte-identical, `CanUndo` still
+    // true, and the keystroke the user wanted back still in the document.
+    //
+    // kaya's undo means the user's last EDIT, so the walk spends records
+    // until the text moves. It cannot overshoot: the loop stops at the
+    // FIRST record that moves the text, which is exactly one text step.
+    let start = lf(field.text().unwrap_or_default());
+    let mut called: windows_core::Result<()>;
+    let mut spent = 0usize;
+    loop {
+        called = if redo { field.redo() } else { field.undo() };
+        spent += 1;
+        if called.is_err() || lf(field.text().unwrap_or_default()) != start {
+            break;
+        }
+        // The text has not moved and the stack has nothing left to
+        // spend: the episode is exhausted, which the sample below
+        // reports and `note_native_undo` finishes coarsely.
+        let more = if redo { field.can_redo() } else { field.can_undo() };
+        if !more.unwrap_or(false) {
+            break;
+        }
+        if spent >= NATIVE_WALK_LIMIT {
+            eprintln!(
+                "kaya: winui native {} spent {NATIVE_WALK_LIMIT} records without \
+                 the text moving — the control's stack is holding more \
+                 non-text records than any paint this backend makes, so the \
+                 walk stops here rather than spinning on the UI thread",
+                if redo { "redo" } else { "undo" }
+            );
+            break;
+        }
+    }
     if let Err(e) = called {
         eprintln!("kaya: winui native {} failed: {}", if redo { "redo" } else { "undo" }, e.message());
         return;
@@ -5556,9 +5656,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             return Ok(());
                         }
                         let text = lf(field_for_handler.Text()?.to_string());
-                        // The ledger sees it BEFORE the app does (§3).
-                        bank_text_changed(bank_id, &text);
-                        sink.send_text_tag(&handler_tag, &text);
+                        // The ledger sees it BEFORE the app does (§3) —
+                        // and it is also the party that decides whether
+                        // anything happened at all (see the no-change
+                        // guard there).
+                        if bank_text_changed(bank_id, &text) {
+                            sink.send_text_tag(&handler_tag, &text);
+                        }
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
@@ -5799,9 +5903,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             return Ok(());
                         }
                         let text = lf(field_for_handler.text()?);
-                        // The ledger sees it BEFORE the app does (§3).
-                        bank_text_changed(bank_id, &text);
-                        sink.send_text_tag(&handler_tag, &text);
+                        // The ledger sees it BEFORE the app does (§3) —
+                        // and it is also the party that decides whether
+                        // anything happened at all. THIS control is why
+                        // that guard exists: a CharacterFormat write
+                        // raises TextChanged here, so `highlight_ranges`
+                        // would otherwise report an edit the document
+                        // never had.
+                        if bank_text_changed(bank_id, &text) {
+                            sink.send_text_tag(&handler_tag, &text);
+                        }
                         Ok(())
                     });
                     field.TextChanged(&handler)?;
@@ -6436,14 +6547,40 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let Some(field) = textarea_by_id(core, id.0) else {
                 return Ok(());
             };
+            // A DECLARATION THAT CHANGES NOTHING WRITES NOTHING, and
+            // on this control that is not a micro-optimization: every
+            // paint goes through `clear_highlights`, which is a
+            // CharacterFormat write over the whole story, and a
+            // CharacterFormat write RAISES TextChanged and lands on the
+            // control's own undo stack. An app that re-declares from its
+            // text_changed fold — which is what a find bar is — therefore
+            // paid a spurious edit report and a spurious undo record for
+            // every keystroke, with an empty set and nothing painted.
+            let painted = HIGHLIGHT_TEXT.with_borrow(|map| map.contains_key(&id.0));
+            if ranges.is_empty() && !painted {
+                return Ok(());
+            }
             paint_highlights(&field, &ranges)?;
             // D2's compare needs the text these offsets were validated
             // against, and the control is holding it RIGHT NOW: a text
             // write earlier in this same batch has already landed (the
             // ops are applied in order, and the core read its own
             // batch's writes to validate against exactly this string).
+            //
+            // AN EMPTY DECLARATION LEAVES NO ENTRY: nothing is painted,
+            // so there is no stale set for a later edit to drop — and an
+            // entry kept here would send `drop_stale_highlights` into
+            // `clear_highlights` on the next keystroke, which is the very
+            // write the branch above exists to avoid.
             HIGHLIGHT_TEXT.with_borrow_mut(|map| {
-                map.insert(id.0, Editable::Textarea(field.clone()).text().unwrap_or_default())
+                if ranges.is_empty() {
+                    map.remove(&id.0);
+                } else {
+                    map.insert(
+                        id.0,
+                        Editable::Textarea(field.clone()).text().unwrap_or_default(),
+                    );
+                }
             });
         }
         ApplyOp::SelectRange { id, range } => {
@@ -7964,6 +8101,40 @@ impl WinUiStage {
         );
     }
 
+    /// THE UI THREAD WITHOUT THE CORE — for a call that must not be
+    /// running inside a `CORE` borrow when it completes.
+    ///
+    /// `on_ui`, `on_ui_mut` and `on_ui_read` all hand their closure a
+    /// borrow that lives for the whole dispatched call. A WinRT call
+    /// that completes SYNCHRONOUSLY inside one then re-enters `CORE`
+    /// from its completion handler and aborts the process, because a
+    /// panic crossing a dispatcher callback cannot unwind:
+    ///
+    ///   panicked at winui/mod.rs: RefCell already borrowed
+    ///   panic in a function that cannot unwind
+    ///
+    /// MEASURED on the VM 2026-08-10 (the editor leg): `ContentDialog::
+    /// Hide()` on a dialog that never finished loading completes
+    /// `ShowAsync` right there, and `ShowAsync`'s completion takes the
+    /// mutable borrow. WinRT handles are refcounted, so the shape that
+    /// works is: read what you need under a borrow, drop it, drive the
+    /// control here.
+    fn on_ui_bare<T: Send + 'static>(
+        f: impl FnOnce() -> windows_core::Result<T> + Send + 'static,
+    ) -> windows_core::Result<T> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let dispatcher = DISPATCHER.get().expect("the dispatcher is up");
+        let cell = std::sync::Mutex::new(Some((f, tx)));
+        let handler = DispatcherQueueHandler::new(move || {
+            if let Some((f, tx)) = cell.lock().unwrap().take() {
+                let _ = tx.send(f());
+            }
+            Ok(())
+        });
+        let _ = dispatcher.0.TryEnqueue(&handler);
+        rx.recv().expect("the dispatcher applied the step")
+    }
+
     fn on_ui_read<T: Send + 'static>(
         f: impl FnOnce(&CoreState) -> windows_core::Result<T> + Send + 'static,
     ) -> windows_core::Result<T> {
@@ -7982,6 +8153,71 @@ impl WinUiStage {
         let _ = dispatcher.0.TryEnqueue(&handler);
         rx.recv().expect("the dispatcher applied the step")
     }
+}
+
+/// The element a `kind#index` target names, from the per-kind registry
+/// every WinUI verb resolves through — creation order, which is what
+/// `kind#index` means. `None` is "no such target", never a panic.
+///
+/// It was `ax`'s inline match until `widget_fills` needed the same
+/// answer. Two copies of a fourteen-arm registry table is exactly the
+/// shape that ships one kind wired to the wrong Vec (the row-versus-
+/// column misresolution child_shares shipped is the same class), so
+/// there is one.
+#[cfg(feature = "harness")]
+fn target_element(
+    core: &CoreState,
+    target: crate::harness::Target,
+) -> windows_core::Result<Option<bindings::Microsoft::UI::Xaml::UIElement>> {
+    use crate::harness::{try_resolve, TargetKind as K};
+    macro_rules! nth {
+        ($reg:expr) => {
+            match try_resolve(target.index, $reg.len()) {
+                Some(i) => $reg[i].cast()?,
+                None => return Ok(None),
+            }
+        };
+    }
+    Ok(Some(match target.kind {
+        K::Checkbox => nth!(core.checkboxes),
+        K::Entry => nth!(core.entries),
+        K::Textarea => nth!(core.textareas),
+        K::Label => nth!(core.labels),
+        K::Slider => nth!(core.sliders),
+        K::Row => nth!(core.rows),
+        K::Column => nth!(core.columns),
+        K::Image => nth!(core.images),
+        K::Progress => nth!(core.progresses),
+        K::Select => nth!(core.selects),
+        K::Radio => nth!(core.radios),
+        K::Grid => nth!(core.grids),
+        K::Scroll => nth!(core.scrolls),
+        // Buttons live in the registry as CLICK TAGS, not widgets, and
+        // the tag is captured in the click closure rather than stored
+        // on the Button — so there is no tag->widget link to follow.
+        // Both orderings are CREATION order though: core.buttons is a
+        // push-order Vec and WidgetId is assigned in sequence, so the
+        // Nth button widget by ascending id is the Nth entry. The ids
+        // must be sorted explicitly: core.widgets is a HashMap and its
+        // iteration order is arbitrary.
+        K::Button => {
+            if try_resolve(target.index, core.buttons.len()).is_none() {
+                return Ok(None);
+            }
+            let i = crate::harness::resolve(target.index, core.buttons.len());
+            let mut ids: Vec<_> = core
+                .widgets
+                .iter()
+                .filter(|(_, w)| matches!(w, NativeWidget::Button { .. }))
+                .map(|(id, _)| *id)
+                .collect();
+            ids.sort_by_key(|id| id.0);
+            match ids.get(i).and_then(|id| core.widgets.get(id)) {
+                Some(NativeWidget::Button { button, .. }) => button.cast()?,
+                _ => return Ok(None),
+            }
+        }
+    }))
 }
 
 #[cfg(feature = "harness")]
@@ -8152,87 +8388,11 @@ impl crate::harness::Stage for WinUiStage {
             // handles Label ONLY — every other kind hit its panic!,
             // inside the UI closure, surfacing as an opaque RecvError.
             use crate::harness::{try_resolve, TargetKind as K};
-            let element: bindings::Microsoft::UI::Xaml::UIElement = match target.kind {
-                K::Checkbox => match try_resolve(target.index, core.checkboxes.len()) {
-                    Some(i) => core.checkboxes[i].cast()?,
+            let element: bindings::Microsoft::UI::Xaml::UIElement =
+                match target_element(core, target)? {
+                    Some(e) => e,
                     None => return Ok("<no such target>".to_owned()),
-                },
-                K::Entry => match try_resolve(target.index, core.entries.len()) {
-                    Some(i) => core.entries[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Textarea => match try_resolve(target.index, core.textareas.len()) {
-                    Some(i) => core.textareas[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Label => match try_resolve(target.index, core.labels.len()) {
-                    Some(i) => core.labels[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Slider => match try_resolve(target.index, core.sliders.len()) {
-                    Some(i) => core.sliders[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Row => match try_resolve(target.index, core.rows.len()) {
-                    Some(i) => core.rows[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Column => match try_resolve(target.index, core.columns.len()) {
-                    Some(i) => core.columns[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Image => match try_resolve(target.index, core.images.len()) {
-                    Some(i) => core.images[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Progress => match try_resolve(target.index, core.progresses.len()) {
-                    Some(i) => core.progresses[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Select => match try_resolve(target.index, core.selects.len()) {
-                    Some(i) => core.selects[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Radio => match try_resolve(target.index, core.radios.len()) {
-                    Some(i) => core.radios[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Grid => match try_resolve(target.index, core.grids.len()) {
-                    Some(i) => core.grids[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                K::Scroll => match try_resolve(target.index, core.scrolls.len()) {
-                    Some(i) => core.scrolls[i].cast()?,
-                    None => return Ok("<no such target>".to_owned()),
-                },
-                // Buttons live in the registry as CLICK TAGS, not
-                // widgets, and the tag is captured in the click
-                // closure rather than stored on the Button — so there
-                // is no tag->widget link to follow. Both orderings are
-                // CREATION order though: core.buttons is a push-order
-                // Vec and WidgetId is assigned in sequence, so the Nth
-                // button widget by ascending id is the Nth entry. The
-                // ids must be sorted explicitly: core.widgets is a
-                // HashMap and its iteration order is arbitrary.
-                K::Button => {
-                    if try_resolve(target.index, core.buttons.len()).is_none() {
-                        return Ok("<no such target>".to_owned());
-                    }
-                    let i = crate::harness::resolve(target.index, core.buttons.len());
-                    let mut ids: Vec<_> = core
-                        .widgets
-                        .iter()
-                        .filter(|(_, w)| matches!(w, NativeWidget::Button { .. }))
-                        .map(|(id, _)| *id)
-                        .collect();
-                    ids.sort_by_key(|id| id.0);
-                    match ids.get(i).and_then(|id| core.widgets.get(id)) {
-                        Some(NativeWidget::Button { button, .. }) => button.cast()?,
-                        _ => return Ok("<no such target>".to_owned()),
-                    }
-                }
-                _ => return Ok("<no such target>".to_owned()),
-            };
+                };
             let fe: bindings::Microsoft::UI::Xaml::FrameworkElement = element.cast()?;
             // FromElement returns an EXISTING peer; a plain container
             // (Row/Column are Grids) has none until one is made, so it
@@ -8991,7 +9151,7 @@ impl crate::harness::Stage for WinUiStage {
                 // silences the control's own change event: mac banks
                 // inside `kaya_emit_text_changed` and GTK from the
                 // widget's `changed`.
-                bank_text_changed_on(core, id, &text);
+                let _ = bank_text_changed_on(core, id, &text);
                 if let Some(tag) = core.entry_tags.get(&id) {
                     core.occurrences.send_text_tag(tag, &text);
                 }
@@ -9188,6 +9348,60 @@ impl crate::harness::Stage for WinUiStage {
                     "children span {}dip of {}dip",
                     span.round() as i64,
                     inner.round() as i64
+                )
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn widget_fills(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let element: FrameworkElement = match target_element(core, t)? {
+                Some(e) => e.cast()?,
+                None => return Ok("<no such target>".to_owned()),
+            };
+            // The container's own registry decides the axis, the way
+            // reindex decided it when it built the tracks — never the
+            // element's shape.
+            let Ok(grid) = element.Parent()?.cast::<Grid>() else {
+                return Ok("parent is not a flex container".to_owned());
+            };
+            let vertical = core.columns.iter().any(|g| g == &grid);
+            if !vertical && !core.rows.iter().any(|g| g == &grid) {
+                return Ok("parent is not a flex container".to_owned());
+            }
+            // Measure/arrange are lazy; force them or the first read
+            // after mount sees zeros (the child_shares precedent).
+            grid.UpdateLayout()?;
+            let (track, drawn) = if vertical {
+                let at = Grid::GetRow(&element)? as u32;
+                let defs = grid.RowDefinitions()?;
+                if at >= defs.Size()? {
+                    return Ok("no track recorded — not a flex child".to_owned());
+                }
+                (defs.GetAt(at)?.ActualHeight()?, element.ActualHeight()?)
+            } else {
+                let at = Grid::GetColumn(&element)? as u32;
+                let defs = grid.ColumnDefinitions()?;
+                if at >= defs.Size()? {
+                    return Ok("no track recorded — not a flex child".to_owned());
+                }
+                (defs.GetAt(at)?.ActualWidth()?, element.ActualWidth()?)
+            };
+            // The track is the definition's resolved extent and the
+            // drawn size is the control's own — the same distinction
+            // child_shares makes when it reads definitions rather than
+            // children, and the gap between them is exactly where a
+            // control with an explicit Height sat: 96dip inside a
+            // correct 126dip star row, every share passing. An overflow
+            // is not a leftover, so the test is one-sided.
+            Ok(if drawn >= track - 2.0 {
+                String::new()
+            } else {
+                format!(
+                    "draws {}dip of a {}dip track",
+                    drawn.round() as i64,
+                    track.round() as i64
                 )
             })
         })
@@ -9400,18 +9614,29 @@ impl crate::harness::Stage for WinUiStage {
             ButtonAutomationPeer, FrameworkElementAutomationPeer,
         };
         use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
-        Self::on_ui(move |core| {
-            let Some(live) = core.live_alert.as_ref() else {
-                return Ok(());
-            };
+        // THE HANDLE UNDER THE BORROW, THE PRESS WITHOUT IT. Both calls
+        // below can complete `ShowAsync` synchronously — measured for
+        // `Hide()` on a dialog that never finished loading — and that
+        // completion takes a MUTABLE core borrow, so driving them from
+        // inside `on_ui` aborts the process (see `on_ui_bare`).
+        let live = Self::on_ui(move |core| {
+            Ok(core
+                .live_alert
+                .as_ref()
+                .map(|live| (live.dialog.clone(), live.actions)))
+        });
+        let Some((dialog, actions)) = live else {
+            return;
+        };
+        if choice != crate::wire::ALERT_CHOICE_CANCEL && choice as usize >= actions {
+            return;
+        }
+        let asked = Self::on_ui_bare(move || {
             if choice == crate::wire::ALERT_CHOICE_CANCEL {
                 // The REAL dismissal path: Hide() completes ShowAsync
                 // with None exactly as Esc or the close button does.
-                live.dialog.Hide()?;
-                return Ok(());
-            }
-            if choice as usize >= live.actions {
-                return Ok(());
+                dialog.Hide()?;
+                return Ok(true);
             }
             // The REAL press: the open dialog lives in the popup
             // layer; find its template button by part name and drive
@@ -9422,7 +9647,7 @@ impl crate::harness::Stage for WinUiStage {
             } else {
                 "SecondaryButton"
             };
-            let xaml_root = live.dialog.XamlRoot()?;
+            let xaml_root = dialog.XamlRoot()?;
             let popups = VisualTreeHelper::GetOpenPopupsForXamlRoot(&xaml_root)?;
             for i in 0..popups.Size()? {
                 let popup = popups.GetAt(i)?;
@@ -9431,11 +9656,58 @@ impl crate::harness::Stage for WinUiStage {
                     let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&button)?;
                     let peer: ButtonAutomationPeer = peer.cast()?;
                     peer.Invoke()?;
-                    return Ok(());
+                    return Ok(true);
                 }
             }
-            Ok(())
+            Ok(false)
         })
+        .unwrap_or(false);
+        if !asked {
+            return;
+        }
+        // AND WAIT FOR IT TO ACTUALLY GO, which is what makes this verb
+        // mean the same thing here as it does on every other backend
+        // (CLAUDE.md invariant 1 — the idiom decides the spelling, never
+        // the semantics; gtk.rs's choose_alert waits for the same thing
+        // in GTK's vocabulary).
+        //
+        // `Hide()` and `Invoke()` only ASK. `ShowAsync`'s completion is
+        // what runs capi::alert_retire, and until it lands the one live
+        // slot is still taken — so an app that shows its NEXT alert from
+        // any other path walks into "alert N is already live" and the
+        // process aborts. MEASURED 2026-08-10, the editor leg: File>New's
+        // alert is cancelled and the window's close_requested shows the
+        // second one one millisecond later. That abort took the whole
+        // run's verdict with it, and the scene before it had already
+        // passed `expect_alert` against the FIRST dialog, still up.
+        //
+        // THE OBSERVABLE IS capi's SLOT, not this backend's `live_alert`,
+        // and the difference is what makes the wait possible at all: the
+        // slot is a plain Mutex the harness thread reads directly, while
+        // every route into `CoreState` here holds a RefCell borrow that
+        // the completion itself needs (`capi::alert_is_live` says this in
+        // full). It is also the STRONGER condition — this backend clears
+        // `live_alert` first and retires second.
+        //
+        // A stuck alert dies LOUDLY: a silent give-up would leave the
+        // next expect_alert reading the wrong dialog and passing. The
+        // same two numbers every other observation gets, because this is
+        // a wait for an observable to settle and has no business
+        // inventing a second deadline.
+        let deadline = std::time::Instant::now() + crate::harness::POLL_DEADLINE;
+        loop {
+            if !crate::capi::alert_is_live() {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "kaya: the alert was answered but never resolved — its \
+                 ShowAsync completion has not run, so the core still holds \
+                 it in the one live slot and the next alert this app shows \
+                 will abort the process"
+            );
+            std::thread::sleep(crate::harness::POLL_INTERVAL);
+        }
     }
 
     fn entry_count(&self, window: u64) -> usize {

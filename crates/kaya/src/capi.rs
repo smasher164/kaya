@@ -1777,6 +1777,32 @@ pub(crate) fn alert_shown(alert: crate::protocol::AlertId) {
     *live = Some(alert.0);
 }
 
+/// Whether an alert holds the one live slot RIGHT NOW.
+///
+/// THE HARNESS'S `alert_choose` WAITS ON THIS. Pressing a dialog's
+/// button only ASKS; the platform answers through a completion, and
+/// that completion is what calls `alert_retire`. Until it lands, the
+/// slot is still taken and the next `show_alert` — from any path that
+/// is not this alert's own result handler — hits the panic above and
+/// takes the process with it.
+///
+/// READ WITHOUT ANY BACKEND STATE, which is the whole reason it lives
+/// here: on WinUI every route into `CoreState` holds a `RefCell` borrow
+/// for the length of the call, and the completion that frees the slot
+/// needs a MUTABLE one. A verb that waited by polling the backend would
+/// therefore be waiting on a borrow it was itself preventing. This slot
+/// is a plain `Mutex` and the harness thread can read it directly.
+///
+/// CFG'd TO ITS ONE CALLER, the way `alert_resolved` below is cfg'd
+/// away from it. mac, iOS and Android answer an alert inside their own
+/// interpreter and never reach this file for it; GTK waits on its own
+/// core's live slot, which it can read without this hazard. Widening
+/// the cfg is what a second caller costs.
+#[cfg(all(feature = "harness", target_os = "windows"))]
+pub(crate) fn alert_is_live() -> bool {
+    ALERT_LIVE.lock().unwrap().is_some()
+}
+
 /// Validate the alert id against the live slot and free it — the one
 /// retire gate for every backend. EMISSION is the caller's: the
 /// C entry below rides the presentation sink / ring, and the

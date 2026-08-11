@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -95,6 +96,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -302,12 +304,33 @@ val kayaTextLayouts = HashMap<Long, () -> androidx.compose.ui.text.TextLayoutRes
  * Where each textarea's viewport sits IN THE WINDOW — the rectangle the
  * paint witness photographs.
  *
- * Window coordinates because that is the space `PixelCopy` takes, and
- * measured from the laid-out node rather than computed from anything
+ * WINDOW coordinates, which is what `boundsInWindow()` answers and which
+ * is NOT what `PixelCopy` takes: its srcRect is in the window's SURFACE
+ * space, and the two agree only while nothing has panned the window.
+ * Measured 2026-08-10 with the soft keyboard up,
+ * `decorView.getLocationInWindow()` was (0, -199) and a witness that
+ * handed these numbers straight to `PixelCopy` photographed 199px below
+ * the field. The conversion lives in `kayaPhotograph`, which is the one
+ * place that crosses between the two spaces.
+ *
+ * Measured from the laid-out node rather than computed from anything
  * kaya knows, in the same discipline the layout observations already
  * keep (`kayaCrossRects` and friends).
  */
 val kayaTextBoxes = HashMap<Long, android.graphics.Rect>()
+
+/**
+ * The selection background each textarea is painted UNDER, ARGB, by node
+ * id — published from the draw beside [kayaPaintedRanges], because the
+ * paint witness has to composite what it expects to photograph and the
+ * platform's wash sits on top of kaya's decoration.
+ *
+ * Resolved by the composition rather than assumed: an app that wraps a
+ * MaterialTheme gets that theme's selection colour, and one that does not
+ * gets foundation's default. The witness would refuse a correctly painted
+ * highlight under either if it guessed the wrong one.
+ */
+val kayaSelectionWash = HashMap<Long, Int>()
 
 /**
  * How many apply batches this interpreter has finished — the signal an
@@ -349,6 +372,20 @@ val kayaContainerExtents = HashMap<Long, Double>()
 val kayaContainerCross = HashMap<Long, Double>()
 val kayaCrossRects = HashMap<Long, Pair<Double, Double>>()
 val kayaBaselineOffsets = HashMap<Long, Double>()
+
+/**
+ * The main-axis extent each flex child DREW at, by node id — what
+ * `expect_fills` compares against that child's track on a widget target.
+ *
+ * THE TRACK'S SIBLING, AND DELIBERATELY NOT THE SAME NUMBER.
+ * [kayaMainExtents] is the weighted cell, which is the layout rect the
+ * grow arithmetic decided; this is the box the control took inside it.
+ * A widget that draws at a hard size in a correct cell splits its
+ * container exactly right and renders wrong — measured on two backends
+ * at once when a textarea with grow(1) stayed 96 units tall — and the
+ * gap between these two maps is the only place that shows.
+ */
+val kayaDrawnExtents = HashMap<Long, Double>()
 
 /**
  * The display density, recorded at composition (the runner thread has
@@ -2974,12 +3011,40 @@ object KayaCompose {
      * every `expect_highlights` with a non-empty set at least one match
      * is inside the viewport.
      *
-     * THE PREDICATE IS MEASURED, not eyeballed: the decoration blends to
-     * #F4E689 over this field's #E6E0E9 container (sampled from a device
-     * screenshot, and exactly what 0x8CFFEB3B over that background
-     * computes to), so "much more red and green than blue" separates it
-     * from both the container and the glyphs drawn on top of it, with
-     * no dependence on the theme's own colours.
+     * THE PREDICATE IS COMPUTED FROM THE COLOURS IN PLAY, not guessed at
+     * and not hard-coded. It used to be "much more red and green than
+     * blue", which is what the decoration alone blends to (#F4E689: the
+     * highlight over this field's #E6E0E9 container, and exactly what
+     * 0x8CFFEB3B over that background computes to). That predicate is
+     * BLIND TO THE ONE RANGE EVERY FIND BAR HAS — the current match,
+     * which is highlighted AND selected. The platform paints its
+     * selection wash on top of this layer, so the pixel is the highlight
+     * seen THROUGH the wash, measured 2026-08-10 on the editor scene as
+     * #ACC0B4 (r-b = -8, g-b = 12: both clauses fail) — and the leg
+     * accused the lowering of painting nothing.
+     *
+     * So the witness composites what it expects instead: the field's own
+     * undecorated background is SAMPLED from the photograph, the
+     * decoration is that background under KAYA_HIGHLIGHT_COLOR, and the
+     * washed form is the decoration under the platform's own selection
+     * background (read from the composition, not assumed — this app wraps
+     * no MaterialTheme, so foundation's default 0xFF4286F4 at 0.4 is what
+     * actually paints). Both computed values reproduced the measured
+     * pixels to within one level. A pixel matching either is the
+     * decoration; nothing else the field paints is within reach of them —
+     * the wash over the BARE container computes to #A4BCED, 57 levels of
+     * blue away from #ACC0B4, so "selected but not highlighted" is still
+     * refused, which is the whole point of photographing at all.
+     *
+     * AND THE PHOTOGRAPH IS AIMED IN THE RIGHT SPACE. `PixelCopy` takes
+     * its srcRect in the window's SURFACE space; `boundsInWindow()`
+     * answers in WINDOW space; those are the same numbers only while
+     * nothing has panned the window. Measured on the same leg with the
+     * soft keyboard up, `decorView.getLocationInWindow()` was (0, -199)
+     * and the witness photographed 199px below the field — a flat block
+     * of the app's background, which it then reported as "the lowering
+     * painted nothing". A read that cannot see the thing must say so
+     * (`offwindow@`) and never accuse the paint.
      *
      * NOT ON THE UI THREAD: `PixelCopy` answers on a main-thread
      * callback, so waiting for it there would deadlock. The semantics
@@ -2989,13 +3054,15 @@ object KayaCompose {
     private fun kayaHighlightRead(activity: ComponentActivity, spec: String): String {
         val gathered = onUi(activity) { kayaGatherHighlights(activity, spec) }
         if (gathered.trouble != null) return gathered.trouble
-        val unpainted = kayaUnwitnessed(activity, gathered)
-        return kayaRangeSpelling(gathered.text, gathered.ranges, unpainted)
+        val (unpainted, offwindow) = kayaUnwitnessed(activity, gathered)
+        return kayaRangeSpelling(gathered.text, gathered.ranges, unpainted, offwindow)
     }
 
     /** Everything the witness needs, read in ONE main-thread hop: the
      * platform's text, what the draw scope recorded, the viewport's
-     * rectangle in the window, and each range's rectangle inside it. */
+     * rectangle in the window, each range's rectangle inside it, the
+     * window-to-surface offset the photograph is aimed with, and the
+     * selection wash the platform paints over this layer. */
     private class KayaHighlights(
         val trouble: String? = null,
         val text: String = "",
@@ -3004,6 +3071,17 @@ object KayaCompose {
         // Per range, its rectangle in WINDOW coordinates, or null when
         // the range is scrolled out of the viewport.
         val onScreen: List<android.graphics.Rect?> = emptyList(),
+        // WINDOW space plus this is SURFACE space — `decorView`'s own
+        // location in the window, which is (0,0) until something pans
+        // the window and (0,-199) when the soft keyboard has. Read here
+        // because it is a View read and this is the UI hop.
+        val surfaceOffset: android.graphics.Point = android.graphics.Point(0, 0),
+        // The window's drawn area, surface space: nothing outside it is
+        // in the app's own rendering at all.
+        val surfaceSize: android.graphics.Point = android.graphics.Point(0, 0),
+        // The platform's selection background, ARGB, as the composition
+        // resolved it — the wash this layer is painted under.
+        val wash: Int = 0,
     )
 
     private fun kayaGatherHighlights(
@@ -3021,6 +3099,12 @@ object KayaCompose {
         val ranges = kayaPaintedRanges[node.id] ?: emptyList()
         val box = kayaTextBoxes[node.id]
         val layout = kayaTextLayouts[node.id]?.invoke()
+        val decor = activity.window.decorView
+        val loc = IntArray(2)
+        decor.getLocationInWindow(loc)
+        val offset = android.graphics.Point(loc[0], loc[1])
+        val surface = android.graphics.Point(decor.width, decor.height)
+        val wash = kayaSelectionWash[node.id] ?: 0
         if (box == null || layout == null || ranges.isEmpty()) {
             return KayaHighlights(text = text, ranges = ranges)
         }
@@ -3040,32 +3124,80 @@ object KayaCompose {
             if (clipped.width() <= 0 || clipped.height() <= 0) null else clipped
         }
         return KayaHighlights(
-            text = text, ranges = ranges, viewport = box, onScreen = rects)
+            text = text, ranges = ranges, viewport = box, onScreen = rects,
+            surfaceOffset = offset, surfaceSize = surface, wash = wash)
+    }
+
+    /** The photograph, with the space it was taken in carried beside it
+     * so a caller reads pixels by the WINDOW coordinate it has and never
+     * by an offset it computed itself — the whole defect this class
+     * exists to make unspellable. */
+    private class KayaShot(
+        val bitmap: android.graphics.Bitmap,
+        // Surface coordinates of the bitmap's (0,0).
+        val originX: Int,
+        val originY: Int,
+        // Window coordinates plus this is surface coordinates.
+        val offsetX: Int,
+        val offsetY: Int,
+    ) {
+        /** The pixel at a WINDOW coordinate, or null when the window's
+         * own surface does not hold it. */
+        fun at(wx: Int, wy: Int): Int? {
+            val x = wx + offsetX - originX
+            val y = wy + offsetY - originY
+            if (x < 0 || y < 0 || x >= bitmap.width || y >= bitmap.height) return null
+            return bitmap.getPixel(x, y)
+        }
     }
 
     /** The ranges that are on screen and are NOT actually decorated
-     * there — empty when everything the record claims is really painted. */
+     * there, and the ranges the window itself does not hold — empty when
+     * everything the record claims is really painted. */
     private fun kayaUnwitnessed(
         activity: ComponentActivity,
         read: KayaHighlights,
-    ): Set<KayaRange> {
-        val box = read.viewport ?: return emptySet()
-        if (read.onScreen.all { it == null }) return emptySet()
-        val shot = kayaPhotograph(activity, box) ?: return emptySet()
+    ): Pair<Set<KayaRange>, Set<KayaRange>> {
+        val none = Pair(emptySet<KayaRange>(), emptySet<KayaRange>())
+        val box = read.viewport ?: return none
+        if (read.onScreen.all { it == null }) return none
+        val shot = kayaPhotograph(activity, box, read) ?: return none
+        // THE FIELD'S OWN BACKGROUND, sampled rather than assumed: what
+        // this field paints where nothing is decorated. Sampling is what
+        // makes the two expected colours below follow the theme (a dark
+        // scheme moves every one of them) instead of pinning the witness
+        // to one palette.
+        val base = kayaModalColour(shot, box, read.onScreen)
+        val deco = kayaOver(KAYA_HIGHLIGHT_COLOR.toArgb(), base)
+        val washed = kayaOver(read.wash, deco)
+        // AND WHAT THE FIELD PAINTS WITH NO DECORATION AT ALL, both
+        // ways, because a colour the witness cannot TELL APART from that
+        // is a colour it must not accept. This is the clause the flip
+        // proof paid for: with the highlight's alpha set to zero the
+        // decoration composites to the background exactly, every
+        // background pixel matched the expectation, and the leg passed
+        // with nothing on screen — the same false green this whole
+        // witness exists to refuse (watched failing to fail 2026-08-10,
+        // and again 2026-08-06 for the deleted drawPath). An invisible
+        // decoration is an undecorated range, and it is reported as one.
+        val bare = kayaOver(read.wash, base)
+        val decoShows = !kayaSameColour(deco, base)
+        val washedShows = !kayaSameColour(washed, bare)
         val missing = HashSet<KayaRange>()
+        val offwindow = HashSet<KayaRange>()
         for ((i, rect) in read.onScreen.withIndex()) {
             if (rect == null) continue
             var found = false
-            var y = rect.top - box.top
-            while (y < rect.bottom - box.top && !found) {
-                var x = rect.left - box.left
-                while (x < rect.right - box.left) {
-                    if (x in 0 until shot.width && y in 0 until shot.height) {
-                        val p = shot.getPixel(x, y)
-                        val r = (p shr 16) and 0xFF
-                        val g = (p shr 8) and 0xFF
-                        val b = p and 0xFF
-                        if (r - b > 48 && g - b > 40) {
+            var seen = false
+            var y = rect.top
+            while (y < rect.bottom && !found) {
+                var x = rect.left
+                while (x < rect.right) {
+                    val p = shot.at(x, y)
+                    if (p != null) {
+                        seen = true
+                        if ((decoShows && kayaSameColour(p, deco)) ||
+                            (washedShows && kayaSameColour(p, washed))) {
                             found = true
                             break
                         }
@@ -3074,25 +3206,99 @@ object KayaCompose {
                 }
                 y += 1
             }
-            if (!found) missing.add(read.ranges[i])
+            // NOT SEEN IS NOT THE SAME AS NOT PAINTED, and conflating
+            // them is how this read once accused the lowering of a defect
+            // the window manager had committed.
+            if (!seen) offwindow.add(read.ranges[i])
+            else if (!found) missing.add(read.ranges[i])
         }
-        shot.recycle()
-        return missing
+        shot.bitmap.recycle()
+        return Pair(missing, offwindow)
     }
 
-    /** The field's viewport, out of the window's own surface. */
+    /** The commonest colour the photograph holds OUTSIDE every declared
+     * range — the field's own undecorated background. Falls back to the
+     * commonest colour anywhere in it when every pixel is inside some
+     * range, which no scene does today and which would otherwise sample
+     * the decoration as if it were the background. */
+    private fun kayaModalColour(
+        shot: KayaShot,
+        box: android.graphics.Rect,
+        rects: List<android.graphics.Rect?>,
+    ): Int {
+        val outside = HashMap<Int, Int>()
+        val everywhere = HashMap<Int, Int>()
+        var y = box.top
+        while (y < box.bottom) {
+            var x = box.left
+            while (x < box.right) {
+                val p = shot.at(x, y)
+                if (p != null) {
+                    everywhere[p] = (everywhere[p] ?: 0) + 1
+                    if (rects.none { it != null && it.contains(x, y) }) {
+                        outside[p] = (outside[p] ?: 0) + 1
+                    }
+                }
+                x += 1
+            }
+            y += 1
+        }
+        val pick = if (outside.isNotEmpty()) outside else everywhere
+        return pick.maxByOrNull { it.value }?.key ?: 0
+    }
+
+    /** `src` composited over an opaque `dst`, the platform's own alpha
+     * blend — the arithmetic that turns kaya's declared colours into the
+     * pixel the photograph must contain. */
+    private fun kayaOver(src: Int, dst: Int): Int {
+        val a = ((src ushr 24) and 0xFF) / 255.0
+        if (a <= 0.0) return dst
+        fun mix(shift: Int): Int {
+            val s = (src shr shift) and 0xFF
+            val d = (dst shr shift) and 0xFF
+            return Math.round(a * s + (1 - a) * d).toInt().coerceIn(0, 255)
+        }
+        return (0xFF shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
+    }
+
+    /** Equal to within the rounding two composites can differ by. The
+     * blends this compares are FLAT fills, so the tolerance covers
+     * arithmetic and nothing else — every measured match was exact or
+     * one level off. */
+    private fun kayaSameColour(a: Int, b: Int): Boolean {
+        for (shift in intArrayOf(16, 8, 0)) {
+            val da = (a shr shift) and 0xFF
+            val db = (b shr shift) and 0xFF
+            if (da - db > 6 || db - da > 6) return false
+        }
+        return true
+    }
+
+    /** The field's viewport, out of the window's own surface.
+     *
+     * THE SRCRECT IS IN SURFACE SPACE and the caller's rectangle is in
+     * window space; they differ by `decorView`'s location in the window,
+     * which the gather hop read. Clipped to the surface as well, because
+     * `PixelCopy` is given a rectangle it can actually copy — a panned
+     * window puts part of the field outside it, and the pixels that are
+     * left are still worth photographing. */
     private fun kayaPhotograph(
         activity: ComponentActivity,
         box: android.graphics.Rect,
-    ): android.graphics.Bitmap? {
+        read: KayaHighlights,
+    ): KayaShot? {
         if (box.width() <= 0 || box.height() <= 0) return null
+        val src = android.graphics.Rect(box)
+        src.offset(read.surfaceOffset.x, read.surfaceOffset.y)
+        if (!src.intersect(0, 0, read.surfaceSize.x, read.surfaceSize.y)) return null
+        if (src.width() <= 0 || src.height() <= 0) return null
         val bitmap = android.graphics.Bitmap.createBitmap(
-            box.width(), box.height(), android.graphics.Bitmap.Config.ARGB_8888)
+            src.width(), src.height(), android.graphics.Bitmap.Config.ARGB_8888)
         val latch = java.util.concurrent.CountDownLatch(1)
         var ok = false
         android.view.PixelCopy.request(
             activity.window,
-            box,
+            src,
             bitmap,
             { result ->
                 ok = result == android.view.PixelCopy.SUCCESS
@@ -3105,7 +3311,8 @@ object KayaCompose {
             bitmap.recycle()
             return null
         }
-        return bitmap
+        return KayaShot(
+            bitmap, src.left, src.top, read.surfaceOffset.x, read.surfaceOffset.y)
     }
 
     /** `visible` when the byte range is inside the textarea's viewport,
@@ -4688,15 +4895,47 @@ object KayaCompose {
                         }
                     }
                     "expect_fills" -> {
-                        // The container's children span its content box
-                        // — the leftover-consumption half of the grow
+                        // ONE VERB, TWO SUBJECTS (harness.rs
+                        // Step::ExpectFills).
+                        //
+                        // A CONTAINER's children span its content box —
+                        // the leftover-consumption half of the grow
                         // contract, which shares (total-invariant) and
                         // root_fills (root-level only) can never see.
                         // Span = the measured cell tracks plus the 8-dp
                         // gaps, against the container's own rendered
-                        // extent; the pass observation matches
-                        // harness.rs byte-for-byte.
+                        // extent.
+                        //
+                        // A WIDGET spans the cell its weight earned, on
+                        // its container's main axis — the half shares
+                        // cannot see either, and for the opposite
+                        // reason: kayaMainExtents is the CELL, so a
+                        // control drawing three lines tall inside a
+                        // correct cell splits the column exactly right
+                        // and renders a small box. An overflow is not a
+                        // leftover, so that test is one-sided.
+                        //
+                        // The pass observation matches harness.rs
+                        // byte-for-byte in both cases.
+                        val isContainer = parts[1].startsWith("row") ||
+                            parts[1].startsWith("column")
                         val slack = onUi(activity) {
+                            if (!isContainer) {
+                                return@onUi kayaWidgetTarget(parts[1])?.let { widget ->
+                                    val track = kayaMainExtents[widget.id] ?: 0.0
+                                    if (track <= 0.0) {
+                                        "no track recorded — not a flex child"
+                                    } else {
+                                        val drawn = kayaDrawnExtents[widget.id] ?: 0.0
+                                        if (drawn >= track - 2.0) {
+                                            ""
+                                        } else {
+                                            "draws ${Math.round(drawn)}px of a " +
+                                                "${Math.round(track)}px track"
+                                        }
+                                    }
+                                }
+                            }
                             val isRow = parts[1].startsWith("row")
                             target(
                                 parts[1], if (isRow) "row" else "column",
@@ -4723,8 +4962,10 @@ object KayaCompose {
                         when {
                             slack == null -> failures.add("no such target ${parts[1]}")
                             slack.isEmpty() -> observed.add("${parts[1]} fills")
-                            else ->
+                            isContainer ->
                                 failures.add("${parts[1]} leaves leftover ($slack)")
+                            else ->
+                                failures.add("${parts[1]} is short of its track ($slack)")
                         }
                     }
                     "expect_menus" -> {
@@ -5206,16 +5447,25 @@ internal fun kayaRangeSpelling(
     text: String,
     ranges: List<KayaRange>,
     unpainted: Set<KayaRange> = emptySet(),
+    offwindow: Set<KayaRange> = emptySet(),
 ): String =
     ranges.sortedBy { it.start }.joinToString("|") { r ->
         val from = kayaByteOffset(text, r.start)
         val to = kayaByteOffset(text, r.stop)
         when {
             // Named, not silently coerced: no scene will ever expect
-            // either of these, and each says which defect it is.
+            // any of these, and each says which defect it is.
             from < 0 || to < 0 || r.start > r.stop -> "split@${r.start}:${r.stop}="
-            // The range was declared, was recorded as painted, and the
-            // pixels where it should be say otherwise.
+            // The range sits where the app's own window does not reach —
+            // something outside the app moved the window out from under
+            // the field (the soft keyboard's pan is the measured case).
+            // NOT a claim about the paint: the photograph never saw the
+            // field, so it may not accuse the lowering, and it may not
+            // pass either.
+            offwindow.contains(r) -> "offwindow@${r.start}:${r.stop}="
+            // The range was declared, was recorded as painted, the
+            // photograph really is of the field, and the pixels where the
+            // decoration should be say otherwise.
             unpainted.contains(r) -> "unpainted@${r.start}:${r.stop}="
             else -> "$from:$to=" + text.substring(r.start, r.stop)
         }
@@ -5577,10 +5827,15 @@ internal fun kayaCoreRedo() {
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
+fun KayaRender(
+    node: KayaNode,
+    isRoot: Boolean = false,
+    flexVertical: Boolean? = null,
+    flexStretch: Boolean = false,
+) {
     val attachment = KayaSceneModel.contextMenus[node.id]
     if (attachment == null) {
-        KayaRenderCore(node, isRoot)
+        KayaRenderCore(node, isRoot, flexVertical, flexStretch)
         return
     }
     Box(
@@ -5591,7 +5846,7 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
             onLongClick = { KayaSceneModel.openContextWidget = node.id },
         )
     ) {
-        KayaRenderCore(node, isRoot)
+        KayaRenderCore(node, isRoot, flexVertical, flexStretch)
         val open = KayaSceneModel.openContextWidget == node.id
         DropdownMenu(
             expanded = open,
@@ -5651,7 +5906,31 @@ fun KayaRender(node: KayaNode, isRoot: Boolean = false) {
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
+private fun KayaRenderCore(
+    node: KayaNode,
+    isRoot: Boolean = false,
+    /**
+     * The MAIN AXIS of the flex container this node is a child of —
+     * true inside a column, false inside a row — and null wherever grow
+     * has no meaning: a grid cell, a scroll's content, the mounted root.
+     *
+     * A control whose natural size is a fixed box needs this to honour
+     * grow: a grower's extent is the cell its weight earned on THIS
+     * axis, and the control can only fill the right dimension if it
+     * knows which one that is. Filling both would take the cross axis
+     * too, which is align's business — GTK gives a grown textarea its
+     * natural 240 across a start-aligned column, and this backend must
+     * not disagree.
+     */
+    flexVertical: Boolean? = null,
+    /**
+     * Whether that container aligns its children `stretch` — the CROSS
+     * axis's half of the same question [flexVertical] answers for the
+     * main one. Only controls whose natural size is a fixed box need it;
+     * everything else already fills the cell it is given.
+     */
+    flexStretch: Boolean = false,
+) {
     // The mounted root fills its window — the same normalization GTK
     // and UIKit needed. A Compose Column wraps its width even when
     // weighted children have forced its height, so the grow scene's
@@ -5870,7 +6149,23 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                     }
                     if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
                     if (node.align == KayaCompose.ALIGN_STRETCH) cell = cell.fillMaxWidth()
-                    Box(cell) { KayaRender(child) }
+                    // The reader INSIDE the cell sees what the child
+                    // drew; the one on the cell sees the track. Both, or
+                    // expect_fills on a widget cannot tell a control
+                    // that filled its cell from one that ignored it.
+                    Box(cell) {
+                        Box(
+                            Modifier.onGloballyPositioned {
+                                kayaDrawnExtents[child.id] = it.size.height.toDouble()
+                            }
+                        ) {
+                            KayaRender(
+                                child,
+                                flexVertical = true,
+                                flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
+                            )
+                        }
+                    }
                 }
             }
         KayaCompose.KIND_BUTTON ->
@@ -5911,7 +6206,20 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
                     if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
                     if (node.align == KayaCompose.ALIGN_STRETCH) cell = cell.fillMaxHeight()
                     if (node.align == KayaCompose.ALIGN_BASELINE) cell = cell.alignByBaseline()
-                    Box(cell) { KayaRender(child) }
+                    // The drawn-extent reader, the column arm's sibling.
+                    Box(cell) {
+                        Box(
+                            Modifier.onGloballyPositioned {
+                                kayaDrawnExtents[child.id] = it.size.width.toDouble()
+                            }
+                        ) {
+                            KayaRender(
+                                child,
+                                flexVertical = false,
+                                flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
+                            )
+                        }
+                    }
                 }
             }
         KayaCompose.KIND_LABEL -> Text(node.text, modifier = a11y)
@@ -5988,7 +6296,14 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
         // over a multiline field. One composable serves both kinds —
         // they differed only in two arguments, and a second copy is a
         // second place for the echo guard to be got wrong.
-        KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, singleLine = false)
+        KayaCompose.KIND_TEXTAREA ->
+            KayaTextField(
+                node,
+                a11y,
+                singleLine = false,
+                flexVertical = flexVertical,
+                flexStretch = flexStretch,
+            )
         KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, singleLine = true)
     }
 }
@@ -6028,7 +6343,41 @@ private fun KayaRenderCore(node: KayaNode, isRoot: Boolean = false) {
 // call, one error, at material3 1.3.1.
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun KayaTextField(node: KayaNode, a11y: Modifier, singleLine: Boolean) {
+fun KayaTextField(
+    node: KayaNode,
+    a11y: Modifier,
+    singleLine: Boolean,
+    flexVertical: Boolean? = null,
+    flexStretch: Boolean = false,
+) {
+    // THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES IT.
+    //
+    // The line limits below are a FLOOR AND A CEILING in lines, which is
+    // what bounds an unweighted field — but a GROWER's size is the cell
+    // its weight earned, and a field that ignored that cell rendered
+    // three lines tall inside it while the cell (which expect_shares
+    // reads) was exactly right. So a grower fills its cell on the
+    // container's MAIN AXIS, and only there: the cross axis is align's
+    // business, and the other backends give a grown textarea its natural
+    // breadth across a start-aligned container.
+    val grown = when {
+        node.grow <= 0 -> Modifier
+        flexVertical == true -> Modifier.fillMaxHeight()
+        flexVertical == false -> Modifier.fillMaxWidth()
+        else -> Modifier
+    }
+    // AND THE CROSS AXIS IS ALIGN'S, by the same argument one axis over:
+    // `stretch` says every child spans the container's breadth, and a
+    // control with a fixed natural box has to be told, exactly as a
+    // grower does. GTK's size request and WinUI's MinWidth are minima
+    // their FILL/Stretch alignment already grows from; this arm and the
+    // SwiftUI one had to say it.
+    val stretched = when {
+        !flexStretch -> Modifier
+        flexVertical == true -> Modifier.fillMaxWidth()
+        flexVertical == false -> Modifier.fillMaxHeight()
+        else -> Modifier
+    }
     val focusRequester = remember { FocusRequester() }
     val interaction = remember { MutableInteractionSource() }
     // ONE COLLECTOR PER NODE, keyed by the node itself: a destroy and
@@ -6086,6 +6435,8 @@ fun KayaTextField(node: KayaNode, a11y: Modifier, singleLine: Boolean) {
         interactionSource = interaction,
         textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
         modifier = a11y
+            .then(grown)
+            .then(stretched)
             .focusRequester(focusRequester)
             // Gain-only back-propagation: onFocusChanged also fires with
             // the initial unfocused state at attach, and a loss branch
@@ -6161,6 +6512,14 @@ fun KayaTextField(node: KayaNode, a11y: Modifier, singleLine: Boolean) {
  */
 @Composable
 private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
+    // THE WASH THIS LAYER IS PAINTED UNDER, taken from the composition
+    // that will paint it. Read in the body because a CompositionLocal can
+    // only be read here — it is not snapshot state that moves per
+    // declaration, so the phase rule below is untouched — and PUBLISHED
+    // inside the draw, beside the record, so the witness never reads a
+    // colour from a composition that did not draw.
+    val wash = androidx.compose.foundation.text.selection.LocalTextSelectionColors
+        .current.backgroundColor.toArgb()
     androidx.compose.foundation.layout.Box(
         propagateMinConstraints = true,
         modifier = Modifier
@@ -6196,6 +6555,7 @@ private fun KayaHighlightLayer(node: KayaNode, inner: @Composable () -> Unit) {
             // the answer is true. expect_highlights reads this and not
             // the declaration, so a verb cannot pass on kaya's intent.
             kayaPaintedRanges[node.id] = paint
+            kayaSelectionWash[node.id] = wash
             if (paint.isEmpty()) return@drawBehind
             val layout = kayaTextLayouts[node.id]?.invoke() ?: return@drawBehind
             // The field scrolls its text inside this box, so the paint
@@ -6240,23 +6600,38 @@ fun KayaRoot() {
     // draws, taken directly so the interpreter needs no extra artifact.
     KayaSceneModel.formFactor =
         if (LocalConfiguration.current.screenWidthDp >= 600) "regular" else "compact"
-    if (KayaSceneModel.menubar.isEmpty()) {
-        // No catalog: the surface keeps its exact pre-menus shape (no
-        // phantom bar over scenes that declared no commands).
-        KayaSceneModel.menuPresentation = "none"
-        KayaSurface()
-    } else {
-        // The window catalog's phone lowering (DESIGN.md, Menus): the
-        // catalog folds into the top app bar — promoted primaries as
-        // real bar actions, everything in the overflow ⋮.
-        // Stamped by the arm that renders, not inferred from the size
-        // class above. Android has no menu-bar lowering yet, so this is
-        // `overflow` in BOTH classes — which is the honest report, and
-        // is what a tablet-width assertion would correctly fail on.
-        KayaSceneModel.menuPresentation = "overflow"
-        Column(modifier = Modifier.fillMaxSize()) {
-            KayaMenuTopBar()
-            Box(modifier = Modifier.weight(1f)) { KayaSurface() }
+    // THE SOFT KEYBOARD IS AN INSET THIS SURFACE CONSUMES, and the
+    // measurement is what put it here. Without it the system's answer to
+    // a focused field low in the window is to PAN the whole window up:
+    // measured 2026-08-10 on the editor scene with the find bar focused,
+    // `decorView.getLocationInWindow()` = (0, -199), which puts the menu
+    // bar and the document's first line ABOVE the window — not clipped on
+    // screen, NEVER DRAWN, absent from the app's own surface. An editor
+    // whose Find hides the document it is finding in is the half a person
+    // sees; the half nobody sees is that kaya's model, the semantics tree
+    // and the field's own viewport all still read correctly, so only a
+    // PIXEL read ever notices. Consuming the inset resizes the content
+    // instead, which is the platform's own guidance for API 30 and up and
+    // what every other backend already does by having a window manager.
+    Box(modifier = Modifier.fillMaxSize().imePadding()) {
+        if (KayaSceneModel.menubar.isEmpty()) {
+            // No catalog: the surface keeps its exact pre-menus shape (no
+            // phantom bar over scenes that declared no commands).
+            KayaSceneModel.menuPresentation = "none"
+            KayaSurface()
+        } else {
+            // The window catalog's phone lowering (DESIGN.md, Menus): the
+            // catalog folds into the top app bar — promoted primaries as
+            // real bar actions, everything in the overflow ⋮.
+            // Stamped by the arm that renders, not inferred from the size
+            // class above. Android has no menu-bar lowering yet, so this is
+            // `overflow` in BOTH classes — which is the honest report, and
+            // is what a tablet-width assertion would correctly fail on.
+            KayaSceneModel.menuPresentation = "overflow"
+            Column(modifier = Modifier.fillMaxSize()) {
+                KayaMenuTopBar()
+                Box(modifier = Modifier.weight(1f)) { KayaSurface() }
+            }
         }
     }
 

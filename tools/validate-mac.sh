@@ -985,6 +985,32 @@ drain
 run save-c-swiftui env KAYA_SELFTEST=save target/c-guests/save
 drain
 
+# THE TEXT EDITOR — kaya's forcing artifact (docs/editor-plan.md), and
+# the only script on this lane that drives an APP rather than a feature:
+# launch to an empty buffer, type, save-as, open, edit, undo, save, find
+# with a regex, and the unsaved-work warning on close.
+#
+# GO ALONE, AND NOT AS A DEPTH SLICE WAITING ON SEVEN BINDINGS. The plan
+# chose Go deliberately — an editor in Rust would be kaya testing itself,
+# and every awkward corner of a BINDING would stay invisible — so there
+# is no rust example and no per-language sweep pending. That is why
+# `editor` is in neither SCENES nor DEPTH_SCENES: both of those derive a
+# `cargo build --example` and a per-language guest hunt this app does not
+# want. The Go guest is one binary carrying every scene, so the leg needs
+# nothing but its name.
+#
+# ALONE BETWEEN DRAINS, for both reasons this file already states
+# elsewhere. It opens real NSSavePanel and NSOpenPanel chrome, and macOS
+# remembers a panel's last directory as a USER PREFERENCE shared by every
+# process (measured 2026-08-10 — a save leg was shown a sibling leg's
+# directory). And it injects REAL key events, which land wherever the
+# window server thinks focus is, not where the leg does.
+KAYA_SELFTEST_SCRIPT="$(scene_script editor)"
+export KAYA_SELFTEST_SCRIPT
+drain
+run editor-go-swiftui env KAYA_SELFTEST=editor target/go-guests/kaya-go
+drain
+
 # The clipboard scene: one clip in several representations, and the
 # privileged read. Still a DEPTH slice while the bindings fan out, and
 # it drives the platform's own clipboard tools as child processes —

@@ -978,6 +978,40 @@ own the state (see the undo note in this file).
 
 ## Protocol / core
 
+- **No app can control the margin around its window content** (found by
+  the editor, 2026-08-10; the maintainer chose to ship v1 with the
+  margin rather than fix it now). The SwiftUI interpreter insets window
+  content by a hard-coded `.padding(16)` (swift/KayaSwiftUI.swift, five
+  sites) and the spec has NO padding property anywhere: containers can
+  SPACE their children apart, but nothing controls the space AROUND
+  content. So a full-bleed layout — a Sublime-shaped editor, a canvas,
+  a photo view — is inexpressible.
+  Two shapes were costed when it came up:
+  (a) a WINDOW content-padding prop beside title/size/dirty, defaulting
+      to today's 16 so no existing scene moves; the app asks for 0.
+      Additive, spec-first, the dirty-state milestone's shape.
+  (b) padding as a property of any CONTAINER, with the interpreter no
+      longer padding the root. More correct and useful to every app,
+      but it moves how every existing scene lays out, so all nine
+      guests and their byte-frozen strings need re-examining.
+  Whoever picks this up: (b) is the better framework answer and (a) is
+  the cheaper one; the editor only needs (a).
+  **HOME: the styling/branding pass** (Akhil, 2026-08-10), which is
+  ALREADY DESIGNED in DESIGN.md (brand slots, semantic emphasis via the
+  role grammar, symbol sets, and the WinUI accent trap) — this entry
+  should be read against that section, not as a fresh idea.
+  AND NOTE THE TENSION, because it is the actual decision: that section
+  explicitly REFUSES arbitrary per-widget appearance and names "a
+  padding override" as an example of what the dressed floor exists to
+  refuse. So the question is not "add padding"; it is whether the
+  WINDOW CONTENT INSET is (i) part of the platform-flowing bet and
+  therefore correct as-is, with full-bleed layouts simply unsupported,
+  or (ii) a LAYOUT fact rather than an appearance one — like grow and
+  spacing, which the design already admits — and therefore the one knob
+  that belongs. Decide that first; the two costings above only matter
+  if the answer is (ii).
+
+
 - **A stable identifier prop (`test_id`, doubling as the accessibility
   identifier)** — Akhil's instinct, 2026-07-20: harness scripts should
   address widgets by the same authored key on every platform, not by

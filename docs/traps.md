@@ -464,6 +464,34 @@ the same patterns return through interpreter drop-downs
   drop-down tier — see DESIGN's lowering tiers — and a gap that other
   backends solve by reaching into the older toolkit must be
   CONSTRUCTED here.
+- **A TextKit 2 scroll to a range the view has never shown lands on a
+  GUESS, and the miss is permanent.** TextKit 2 lays out the viewport
+  and ESTIMATES the rest, so `scrollRangeToVisible` for a range below
+  the laid-out region scrolls to an estimated position and reports
+  nothing. Measured on iOS with the editor's 59-line document, revealing
+  its last two bytes from the top: the scroll landed at offset 1178 with
+  `contentSize` reading 1369; when the real layout replaced the guess,
+  `contentSize` was 1314 and the target line sat at 1276..1298 against a
+  visible 1178..1274 — ten points below the fold, with the one-shot
+  already spent so nothing scrolled again. The same estimate is why that
+  document's `contentSize` reads 1369 from the top and 1314 from the
+  bottom. Force the layout up to the target first
+  (`NSTextLayoutManager.ensureLayout(for:)` over document-start..target)
+  and then call the platform's scroll. Only up to the target: nothing
+  below it can move it, and everything above it must be real anyway —
+  a character's position IS the height of everything before it. Guard:
+  `editor.steps` reveals the LAST match of a document far taller than
+  the viewport, which is where an estimate has the most room to be
+  wrong; `ranges.steps` reveals mid-document and cannot catch it.
+- **A text segment's frame is in the CONTAINER's coordinate space, not
+  the view's.** They differ by `textContainerInset` — 8pt top on a
+  stock UITextView — so a visibility read that intersects segment frames
+  with `view.bounds` answers "visible" for glyphs up to 8pt below the
+  fold. The arithmetic that proves it on any document: `contentSize`
+  minus `usageBoundsForTextContainer` is exactly the two insets (1314 vs
+  1298, measured). Move the viewport rectangle into the segments' space
+  rather than the other way round, so both sides of the comparison come
+  from the text system itself.
 
 ## Language / binding semantics
 

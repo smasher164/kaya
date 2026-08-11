@@ -31,6 +31,21 @@ use crate::scene::Scene;
 /// f64 we need with none of that, and lives and dies with the widget.
 const GROW_KEY: &str = "kaya-grow";
 
+/// Where the flex manager parks the main-axis extent it handed a child —
+/// THE TRACK, before GTK adjusts the allocation for the child's own
+/// align and margins. Same keyed-data channel as the grow weight, for
+/// the same reason.
+///
+/// It exists so `expect_fills <widget>` can be asked a question the
+/// allocation alone cannot answer. `child_extent` reads the allocation,
+/// which GTK has already shrunk to a start/center/end-aligned child's
+/// own size — so "did this widget take the space the layout gave it"
+/// needs the number the layout gave, kept beside the number the widget
+/// took. Nothing else reads it, and nothing else may: the SHARES are
+/// the allocation's business (that is what the other backends' tracks
+/// mean too), and this is the one observation that needs both halves.
+const TRACK_KEY: &str = "kaya-track";
+
 /// Guest-visible text uses LF as its line separator on every platform
 /// (strings are compared byte-for-byte across languages). GTK's
 /// Entry/TextView store pasted text verbatim — CR or CRLF from a paste
@@ -424,6 +439,18 @@ fn set_grow_weight(widget: &gtk4::Widget, weight: f64) {
     unsafe { widget.set_data(GROW_KEY, weight) }
 }
 
+fn child_track(widget: &gtk4::Widget) -> Option<f64> {
+    // SAFETY: the key is private to this module and only ever set to an
+    // f64 by set_child_track below. `None` is "never laid out by the
+    // flex manager", which is a different answer from "was given zero".
+    unsafe { widget.data::<f64>(TRACK_KEY).map(|p| *p.as_ref()) }
+}
+
+fn set_child_track(widget: &gtk4::Widget, extent: f64) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(TRACK_KEY, extent) }
+}
+
 /// A container's align mode (the align spec enum's wire values), same
 /// object-data pattern as the grow weight: AddChild reads it to stamp
 /// children that arrive after the prop did.
@@ -679,6 +706,12 @@ mod flex {
                 };
                 let transform = gtk4::gsk::Transform::new()
                     .translate(&gtk4::graphene::Point::new(x as f32, y as f32));
+                // The track, recorded BEFORE the allocate: what GTK
+                // stores on the child afterwards is the box the child's
+                // own align and margins shrank it to, and the two
+                // together are what expect_fills compares on a widget
+                // target.
+                super::set_child_track(c, f64::from(extent));
                 c.allocate(w, h, baseline, Some(transform));
                 offset += extent + self.spacing.get();
             }
@@ -2657,10 +2690,32 @@ impl ClipboardHub {
     /// delegates to an internal GtkText (the entry itself is never the
     /// focus widget) and every ancestor container "contains" the focus
     /// too.
+    ///
+    /// THE ACTIVE TOPLEVEL FIRST, AND THEN EVERY OTHER ONE — not the
+    /// first toplevel that happens to have a focus widget. Window
+    /// activation belongs to the WINDOW MANAGER, and after a modal
+    /// dialog closes there may be no active toplevel at all: the lane's
+    /// X server has no window manager, and the headless compositor does
+    /// not re-activate a parent either. The old fallback committed to
+    /// the first toplevel with a focus widget, and a dismissed-but-not-
+    /// yet-finalized GtkFileChooser is exactly that — its focus widget
+    /// is not one of ours, so this answered None and every caller lost
+    /// its subject.
+    ///
+    /// Measured 2026-08-10 on the editor scene: after File>Open,
+    /// `undo_route` saw no focused field and no can-undo, so Edit>Undo
+    /// routed to the CORE tier. The core's coarse restore is a
+    /// PROGRAMMATIC write, which is `apply_quiet` and reaches no app —
+    /// so the document went back on screen while the guest's own model
+    /// kept the edit, and `expect_dirty false` failed for fifteen
+    /// seconds with the buffer already correct.
+    ///
+    /// A candidate must still map to one of OUR widgets, so this cannot
+    /// invent focus — it only stops giving up early.
     fn focused_widget_id(&self) -> Option<u64> {
         use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
         let toplevels = gtk4::Window::toplevels();
-        let mut focus: Option<gtk4::Widget> = None;
+        let mut candidates: Vec<gtk4::Widget> = Vec::new();
         for i in 0..gtk4::gio::prelude::ListModelExt::n_items(&toplevels) {
             let Some(window) = gtk4::gio::prelude::ListModelExt::item(&toplevels, i)
                 .and_then(|o| o.downcast::<gtk4::Window>().ok())
@@ -2669,28 +2724,32 @@ impl ClipboardHub {
             };
             if let Some(f) = GtkWindowExt::focus(&window) {
                 if window.is_active() {
-                    focus = Some(f);
-                    break;
-                }
-                if focus.is_none() {
-                    focus = Some(f);
+                    candidates.insert(0, f);
+                } else {
+                    candidates.push(f);
                 }
             }
         }
-        let focus = focus?;
         let mut best: Option<(u64, u32)> = None;
-        for (id, (weak, _)) in self.widgets.borrow().iter() {
-            let Some(w) = weak.upgrade() else { continue };
-            if focus == w || focus.is_ancestor(&w) {
-                let mut depth = 0u32;
-                let mut p = w.parent();
-                while let Some(q) = p {
-                    depth += 1;
-                    p = q.parent();
+        for focus in candidates {
+            for (id, (weak, _)) in self.widgets.borrow().iter() {
+                let Some(w) = weak.upgrade() else { continue };
+                if focus == w || focus.is_ancestor(&w) {
+                    let mut depth = 0u32;
+                    let mut p = w.parent();
+                    while let Some(q) = p {
+                        depth += 1;
+                        p = q.parent();
+                    }
+                    if best.is_none_or(|(_, d)| depth > d) {
+                        best = Some((*id, depth));
+                    }
                 }
-                if best.is_none_or(|(_, d)| depth > d) {
-                    best = Some((*id, depth));
-                }
+            }
+            // The first toplevel that owns one of ours answers; the
+            // active one is at the head, so a real session is unchanged.
+            if best.is_some() {
+                break;
             }
         }
         best.map(|(id, _)| id)
@@ -3325,11 +3384,50 @@ fn active_window_id(core: &CoreState) -> Option<WindowId> {
 /// GtkText, so the entry itself is never the toplevel's focus widget
 /// and FOCUS_WITHIN is the flag that answers.
 fn widget_focused(widget: &impl IsA<gtk4::Widget>) -> bool {
-    use gtk4::prelude::WidgetExt;
-    widget
-        .as_ref()
+    use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
+    let widget = widget.as_ref();
+    if widget
         .state_flags()
         .intersects(gtk4::StateFlags::FOCUSED | gtk4::StateFlags::FOCUS_WITHIN)
+    {
+        return true;
+    }
+    // THE SECOND CLAUSE, and the one a session with no window manager
+    // needs. GTK keeps both flags above in step with WINDOW ACTIVATION:
+    // `gtk_window_set_is_active` runs a focus change over the focus
+    // widget and its ancestors, so both CLEAR the moment the toplevel
+    // goes inactive — while `gtk_window_get_focus` still names the same
+    // widget and keystrokes still land in it.
+    //
+    // A modal dialog deactivates its parent, and re-activating the
+    // parent afterwards is the window manager's job. The lane's X server
+    // has none and the headless compositor does not do it either, so
+    // after any file dialog the flags never come back.
+    //
+    // MEASURED 2026-08-10, editor scene, linux/x11, right after
+    // File>Open… closed:
+    //
+    //   widget_focused flags=false win_active=false
+    //                  win_has_focus_widget=true
+    //
+    // What that cost: this function is how a text change is classified
+    // as a USER EDIT rather than a programmatic one, so the keystroke
+    // after the dialog was banked as programmatic, no open episode was
+    // recorded on the field, and `route_undo` therefore sent Edit>Undo
+    // to the CORE tier. The core's coarse restore is a programmatic
+    // write, which reaches no guest — so the document went back on
+    // screen while the app's own model kept the edit.
+    //
+    // The clause cannot invent focus: the widget must really be its own
+    // window's focus widget, or contain it (a GtkEntry delegates to an
+    // internal GtkText, which is why containment is the test).
+    let Some(window) = widget.root().and_then(|r| r.downcast::<gtk4::Window>().ok()) else {
+        return false;
+    };
+    let Some(focus) = GtkWindowExt::focus(&window) else {
+        return false;
+    };
+    &focus == widget || focus.is_ancestor(widget)
 }
 
 /// Choose the RICHEST representation the clipboard offers that the
@@ -6701,25 +6799,20 @@ impl crate::harness::Stage for GtkStage {
             // A focused GtkEntry delegates to its internal GtkText, so
             // the entry itself is never the toplevel's focus widget
             // (is_focus() stays false) — FOCUS_WITHIN is the flag GTK
-            // sets on the ancestors of the focus widget, and it stays
-            // per-window (key status not required).
+            // sets on the ancestors of the focus widget.
             match t.kind {
                 crate::harness::TargetKind::Entry => {
                     let Some(i) = crate::harness::try_resolve(t.index, core.entries.len()) else {
                         return false;
                     };
-                    core.entries[i]
-                        .state_flags()
-                        .intersects(gtk4::StateFlags::FOCUSED | gtk4::StateFlags::FOCUS_WITHIN)
+                    widget_focused(&core.entries[i])
                 }
                 crate::harness::TargetKind::Textarea => {
                     let Some(i) = crate::harness::try_resolve(t.index, core.textareas.len())
                     else {
                         return false;
                     };
-                    core.textareas[i]
-                        .state_flags()
-                        .intersects(gtk4::StateFlags::FOCUSED | gtk4::StateFlags::FOCUS_WITHIN)
+                    widget_focused(&core.textareas[i])
                 }
                 other => panic!("kaya: is_focused not wired for {other:?} on gtk"),
             }
@@ -6821,6 +6914,53 @@ impl crate::harness::Stage for GtkStage {
                 String::new()
             } else {
                 format!("children span {span}px of {inner}px")
+            }
+        })
+    }
+
+    fn widget_fills(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, WidgetExt};
+            // The LAYOUT widget, not the control: a textarea's flex
+            // child is its GtkScrolledWindow, and target_widget hands
+            // out the GtkTextView inside it (that is what every text
+            // verb wants). Asking the view about its track would find
+            // none — it is not the box the flex manager placed.
+            let Some(control) = target_widget(core, t) else {
+                return "<no such target>".to_string();
+            };
+            let widget = core
+                .widgets
+                .values()
+                .find(|w| w.control() == control)
+                .map_or(control, |w| w.widget());
+            while glib::MainContext::default().iteration(false) {}
+            // The container's own manager decides the axis — the same
+            // authority reindex uses, never the widget's shape.
+            let Some(parent) = widget.parent() else {
+                return "no parent — not a flex child".to_string();
+            };
+            let Some(flex) = parent
+                .layout_manager()
+                .and_then(|m| m.downcast::<flex::FlexLayout>().ok())
+            else {
+                return "parent is not a flex container".to_string();
+            };
+            let vertical = flex.orientation() == gtk4::Orientation::Vertical;
+            let Some(track) = child_track(&widget) else {
+                return "no track recorded — not a flex child".to_string();
+            };
+            // The allocation is what the widget DREW at: GTK adjusts it
+            // for the child's align and margins on the way in, so a
+            // start-aligned or size-request-bound child reads its own
+            // box here while the track above stays what the layout
+            // handed out. An overflow is not a leftover, so this is
+            // one-sided.
+            let drawn = flex::child_extent(&widget, vertical);
+            if drawn >= track - 2.0 {
+                String::new()
+            } else {
+                format!("draws {}px of a {}px track", drawn.round(), track.round())
             }
         })
     }
@@ -7047,7 +7187,45 @@ impl crate::harness::Stage for GtkStage {
                     return;
                 }
             }
-        })
+        });
+        // AND WAIT FOR IT TO ACTUALLY GO, which is what makes this verb
+        // mean the same thing here as everywhere else.
+        //
+        // Activating the button only ASKS: `AlertDialog::choose`
+        // answers through an async callback, and that callback is what
+        // runs capi::alert_retire. Until it lands the core still holds
+        // the alert in its one live slot, so an app that shows its NEXT
+        // alert from any other event — not from this one's result
+        // handler — walks into "alert N is already live" and the
+        // process aborts.
+        //
+        // Measured 2026-08-10, both protocols: the editor scene cancels
+        // File>New's alert, and 40ms later a close_requested shows the
+        // second one. That abort took the whole run's verdict with it.
+        // Every other backend's alert_choose is settled when it
+        // returns; a scene author must not have to know this one is
+        // not, so the difference is paid here rather than in five
+        // hundred lines of scene script (CLAUDE.md invariant 1).
+        //
+        // A stuck alert dies LOUDLY: a silent give-up would leave the
+        // next expect_alert reading the wrong dialog and passing.
+        // THE SAME BOUNDED RETRY EVERY OBSERVATION GETS, and deliberately
+        // the same two numbers: this is a wait for an observable to
+        // settle, so it has no business inventing a second deadline.
+        let deadline = std::time::Instant::now() + crate::harness::POLL_DEADLINE;
+        loop {
+            if Self::on_main(move |core| core.live_alert.borrow().is_none()) {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "kaya: the alert was answered but never resolved — its \
+                 AlertDialog::choose callback has not run, so the core still \
+                 holds it in the one live slot and the next alert this app \
+                 shows will abort the process"
+            );
+            std::thread::sleep(crate::harness::POLL_INTERVAL);
+        }
     }
 
     fn entry_count(&self, window: u64) -> usize {
