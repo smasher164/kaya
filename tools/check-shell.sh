@@ -441,6 +441,46 @@ if [ -n "$badffmpeg" ]; then
     status=1
 fi
 
+# A LEG MAY NOT EXEC OUT OF A BUILD DIRECTORY.
+#
+# macOS registers every unbundled executable with LaunchServices at
+# launch, and `_LSApplicationCheckIn` enumerates the executable's
+# CONTAINING DIRECTORY as if it were a bundle. Point a leg at
+# `target/debug/examples` — a build directory that accumulates a
+# hashed binary, a .d and a .dSYM per example per build — and every
+# launch walks the lot. Measured 2026-08-10: 776,613 entries, 3.8 GB,
+# and the same binary took 7.7s from there against 0.13s from a
+# two-entry directory. Fifty-nine times, on 32 legs, for 48% of the mac
+# lane's leg time — and it was what made the five-lane matrix a coin
+# flip, because contention pushed those legs past the 120s timeout.
+#
+# So the lanes stage guests into a small directory and run them from
+# there (validate-mac's $RUST_GUESTS; the swift lane's target/swift-guests
+# already did). This clause is the wall: a `run` line naming a build
+# directory fails here rather than costing another six months of "the
+# machine must be busy".
+badexec=$(grep -nE '^[[:space:]]*run[[:space:]].*target/(debug|release)/(examples|deps)/' \
+    tools/*.sh tools/*/*.sh 2>/dev/null) || true
+if [ -n "$badexec" ]; then
+    echo "check-shell: a leg execs straight out of a build directory," \
+        "whose sibling count macOS walks on every launch (7.7s vs 0.13s," \
+        "measured). Stage the binary somewhere small and run it from there:" >&2
+    echo "$badexec" >&2
+    status=1
+fi
+# Its self-test: the pattern must fire on the shape it forbids and stay
+# quiet on the staging copy that legitimately names the build path.
+probe_exec=$(printf '%s\n' \
+    '    run split-rust-swiftui env KAYA_SELFTEST=split target/debug/examples/split' \
+    '    cp "$ROOT/target/debug/examples/$s" "$RUST_GUESTS/$s" || exit 1' \
+    '    run split-rust-swiftui env KAYA_SELFTEST=split "$RUST_GUESTS"/split' \
+    | grep -cE '^[[:space:]]*run[[:space:]].*target/(debug|release)/(examples|deps)/')
+if [ "$probe_exec" != "1" ]; then
+    echo "check-shell: self-test failed — the build-directory exec scan matched" \
+        "$probe_exec of 3 lines, want exactly 1 (the bare run)" >&2
+    status=1
+fi
+
 if [ "$status" = 0 ]; then
     echo "check-shell: OK"
 else

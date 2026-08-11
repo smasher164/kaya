@@ -2106,40 +2106,82 @@ separating "this spelling is the floor" from "this spelling is the floor
 IN A SCENE THAT HAS SUGAR FOR IT", which is a real piece of design and
 not a table edit.
 
-## The rust guests cost ~11s to START, and it is what makes the matrix fragile
+## SOLVED: the rust guests cost ~11s to START (macOS walked their build directory)
 
-Measured 2026-08-10, while diagnosing two matrix failures during the
-template-zone sugar pass.
+Measured and FIXED 2026-08-10, while diagnosing two matrix failures
+during the template-zone sugar pass. Kept because the mechanism
+generalises and the wrong first answer is instructive.
 
-Per-language leg times for one scene, mac lane, machine otherwise quiet
+Per-language leg times for one scene, mac lane, machine quiet
 (tools/validate-mac.sh, `split`):
 
     rust 38s   ocaml 16s   haskell 10s   swift 9s
     python 1s  go 0s       csharp 0s     java 1s
 
-Same scene, same core, same SwiftUI interpreter. The cost is in the
-GUEST's startup, not in kaya: launching `target/debug/examples/split`
-with no scene script — so it fails immediately, before a single step
-runs — takes **10.9s wall (2.5s user, 4.2s system)** against python's
-**0.47s**. Twenty-three times, to do nothing.
+**The wrong answer, written down first:** that a Rust example links the
+whole crate statically and pays a dyld pass over a big binary. It is
+tidy, it fits the language split, and it is false. The binary is 4.8 MB,
+and the other compiled guests (ocaml, haskell, swift) were not slow for
+that reason either. It survived long enough to reach this file.
 
-The likely reason is that a Rust example links the whole crate
-statically (libkaya.rlib is 19MB, unoptimized, with debug info) where
-every other language loads the already-resident libkaya.dylib, so each
-of the ~30 rust legs pays a fresh dyld + signature-validation pass over
-a large binary. Not confirmed — that is the investigation.
+**The real one, from `sample` on the live process** — which is what the
+lane's own timeout diagnostic tells you to do, and it named this in one
+shot. The whole stack sat in:
 
-**Why it matters now.** Under the five-lane matrix these legs stretch
-about 3x (split-rust 38s -> 120s+), and 120s is the per-leg timeout. So
-the mac lane is a coin flip on a loaded machine: two consecutive matrix
-runs failed on different lanes, each on a load-sensitive leg, each of
-which passed standalone. Nothing was wrong with the tree either time.
-`--serial` is the doctrine's escape hatch and it works, but a lane that
-only passes when the machine is quiet is a lane that will cry wolf, and
-the next real failure will be read as another flake.
+    NSApplication init -> _NSInitializeAppContext -> _isMenuBarVisible
+      -> GetCurrentProcess -> _RegisterApplication -> _LSApplicationCheckIn
+         -> CFBundleGetValueForInfoDictionaryKey -> _CFBundleReadDirectory
 
-Worth fixing rather than accommodating: a release-profile guest binary,
-or examples that link libkaya dynamically like every other language's
-guest does, should take the 38s to something near the 1s the other six
-manage. Check `--release` first; it is one flag and it would say
-immediately whether the size/debug-info theory is right.
+macOS registers every UNBUNDLED executable with LaunchServices at
+launch, and CoreFoundation reads the executable's CONTAINING DIRECTORY
+as if it were a bundle — enumerating every sibling.
+`target/debug/examples` is a build directory that accumulates a hashed
+binary, a `.d` and a `.dSYM` per example per build. On this machine it
+had reached **776,613 entries and 3.8 GB**.
+
+Same binary, back to back:
+
+    target/debug/examples/split   7.7s
+    a two-entry directory         0.13s
+
+Fifty-nine times. Across 32 legs that was 979s of the mac lane's 2020s
+of leg time — 48% — and it is the entire gap between rust (mean 30.6s)
+and go/python/csharp/java (mean ~1.2s). The staged binary is as fast as
+any of them; nothing about Rust was ever involved.
+
+It is also what made the parallel matrix a coin flip: contention
+stretched those legs ~3x and `split-rust` at 38s crossed the 120s
+per-leg timeout. Two consecutive matrix runs failed on different lanes
+with nothing wrong in the tree.
+
+**The fix:** validate-mac stages the built examples into
+`target/rust-guests` (list derived from `$SCENES`, so a new scene cannot
+be built and then left running out of the build directory) and asserts
+that directory stays small. `tools/check-shell.sh` refuses any `run`
+line that execs out of `target/{debug,release}/{examples,deps}`, with a
+self-test, watched failing.
+
+**Nothing is left, and the measured result is bigger than the diagnosis
+predicted.** Per-language leg totals across the whole mac lane, before
+and after:
+
+    rust   979s -> 50s      ocaml   348s -> 35s
+    haskell 272s -> 41s     swift   252s -> 48s
+    go       53s -> 50s     python   40s -> 41s
+    java     40s -> 38s     csharp   36s -> 40s
+
+    total leg-seconds 2020 -> 343; lane wall 547s -> 223s
+
+The prediction was that rust alone would collapse. Ocaml, haskell and
+swift collapsed with it — from 10.9s, 8.5s and 7.9s means to 1.1s, 1.3s
+and 1.5s — and that is the part worth keeping. They were never slow for
+their own reasons: they ran CONCURRENTLY with 32 rust legs, each walking
+a 776,613-entry directory through a single LaunchServices XPC service,
+and they were starved by the contention. All eight languages now sit
+between 1.1s and 1.6s.
+
+So a per-leg cost paid by ONE language showed up as every language being
+slow, which is why the per-language table at the top of this entry read
+as a language story and was not one. When a whole lane is slow, the
+shape to look for is a shared serialising service, not a per-language
+trait.

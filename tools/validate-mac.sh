@@ -60,6 +60,56 @@ cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
 # a build whose failure went unnoticed leaves the previous one in
 # place and every verdict below is then about stale code.
 tools/build-id.sh --verify target/debug/libkaya.dylib || exit 1
+
+# STAGE THE RUST GUESTS OUT OF THE BUILD DIRECTORY, and run them from
+# here. Not tidiness — 48% of this lane's leg time was one line of
+# CoreFoundation.
+#
+# Launching a bare (unbundled) executable on macOS registers it with
+# LaunchServices, and `_LSApplicationCheckIn` reads the executable's
+# CONTAINING DIRECTORY as if it were a bundle: `_CFBundleReadDirectory`
+# enumerates every sibling. `target/debug/examples` is a cargo build
+# directory — it accumulates a hashed binary, a .d and a .dSYM per
+# example per build — and on this machine it had reached 776,613
+# entries and 3.8 GB. Every rust leg paid that walk.
+#
+# MEASURED 2026-08-10, the same binary, back to back:
+#     target/debug/examples/split   7.7s
+#     a two-entry directory         0.13s
+# Fifty-nine times, and it is the whole of the difference between the
+# rust legs (mean 30.6s, 979s of this lane's 2020s of leg time) and the
+# go/python/csharp/java ones (mean ~1.2s). Nothing about Rust: the same
+# staged binary is as fast as any of them. The ocaml, haskell and swift
+# guests already live in small directories and were never affected.
+#
+# It is also what made the five-lane matrix a coin flip: under
+# contention these legs stretched ~3x, and split-rust at 38s crossed the
+# 120s per-leg timeout. Two consecutive matrix runs failed on different
+# lanes with nothing wrong in the tree.
+#
+# The staged list DERIVES FROM $SCENES, like BUILD_EXAMPLES above, so a
+# new scene cannot be built and then left running out of the build
+# directory.
+RUST_GUESTS="$ROOT/target/rust-guests"
+rm -rf "$RUST_GUESTS"
+mkdir -p "$RUST_GUESTS" || exit 1
+for s in $SCENES $DEPTH_SCENES; do
+    cp "$ROOT/target/debug/examples/$s" "$RUST_GUESTS/$s" || exit 1
+done
+# THE GUARD, on the path nobody can avoid: this staging is worthless if
+# the directory it stages INTO is itself large, and the only way that
+# happens is someone pointing it somewhere else. Checked here rather
+# than in a gate because the number is only true at this moment, and a
+# lane that quietly went back to 30s legs would read as "the machine is
+# busy" for another six months.
+staged=$(find "$RUST_GUESTS" -maxdepth 1 | wc -l | tr -d ' ')
+if [ "$staged" -gt 64 ]; then
+    echo "validate-mac: the rust guest staging directory holds $staged entries." \
+        "It exists to be SMALL — macOS enumerates an unbundled executable's" \
+        "siblings on every launch, and that walk was 7.7s per leg when this" \
+        "was target/debug/examples. Stage somewhere clean." >&2
+    exit 1
+fi
 # THE GATE SWEEP, and the artifacts it reads, in one entry point. The
 # list used to live right here as twenty-six lines nobody could count,
 # and it had already drifted four gates from the list CLAUDE.md
@@ -670,7 +720,7 @@ export KAYA_SWIFTUI_LIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
 scene_script() { grep -v '^#' "tools/scenes/$1.steps"; }
 KAYA_SELFTEST_SCRIPT="$(scene_script milestone2)"
 export KAYA_SELFTEST_SCRIPT
-run rust-swiftui target/debug/examples/milestone2
+run rust-swiftui "$RUST_GUESTS"/milestone2
 run python-swiftui python3 guests/python/milestone2.py
 run go-swiftui target/go-guests/kaya-go
 run csharp-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -683,7 +733,7 @@ run java-swiftui env KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script entry)"
 export KAYA_SELFTEST_SCRIPT
-run entry-rust-swiftui env KAYA_SELFTEST=entry target/debug/examples/entry
+run entry-rust-swiftui env KAYA_SELFTEST=entry "$RUST_GUESTS"/entry
 run entry-python-swiftui env KAYA_SELFTEST=entry python3 guests/python/entry.py
 run entry-go-swiftui env KAYA_SELFTEST=entry target/go-guests/kaya-go
 run entry-csharp-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -696,7 +746,7 @@ run entry-java-swiftui env KAYA_SELFTEST=entry KAYA_LIB="$ROOT/target/debug/libk
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script gallery)"
 export KAYA_SELFTEST_SCRIPT
-run gallery-rust-swiftui env KAYA_SELFTEST=gallery target/debug/examples/gallery
+run gallery-rust-swiftui env KAYA_SELFTEST=gallery "$RUST_GUESTS"/gallery
 run gallery-python-swiftui env KAYA_SELFTEST=gallery python3 guests/python/gallery.py
 run gallery-go-swiftui env KAYA_SELFTEST=gallery target/go-guests/kaya-go
 run gallery-csharp-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -709,7 +759,7 @@ run gallery-java-swiftui env KAYA_SELFTEST=gallery KAYA_LIB="$ROOT/target/debug/
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script todos)"
 export KAYA_SELFTEST_SCRIPT
-run todos-rust-swiftui env KAYA_SELFTEST=todos target/debug/examples/todos
+run todos-rust-swiftui env KAYA_SELFTEST=todos "$RUST_GUESTS"/todos
 run todos-python-swiftui env KAYA_SELFTEST=todos python3 guests/python/todos.py
 run todos-go-swiftui env KAYA_SELFTEST=todos target/go-guests/kaya-go
 run todos-csharp-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -722,7 +772,7 @@ run todos-java-swiftui env KAYA_SELFTEST=todos KAYA_LIB="$ROOT/target/debug/libk
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script reorder)"
 export KAYA_SELFTEST_SCRIPT
-run reorder-rust-swiftui env KAYA_SELFTEST=reorder target/debug/examples/reorder
+run reorder-rust-swiftui env KAYA_SELFTEST=reorder "$RUST_GUESTS"/reorder
 run reorder-python-swiftui env KAYA_SELFTEST=reorder python3 guests/python/reorder.py
 run reorder-go-swiftui env KAYA_SELFTEST=reorder target/go-guests/kaya-go
 run reorder-csharp-swiftui env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -735,7 +785,7 @@ run reorder-java-swiftui env KAYA_SELFTEST=reorder KAYA_LIB="$ROOT/target/debug/
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 KAYA_SELFTEST_SCRIPT="$(scene_script feed)"
 export KAYA_SELFTEST_SCRIPT
-run feed-rust-swiftui env KAYA_SELFTEST=feed target/debug/examples/feed
+run feed-rust-swiftui env KAYA_SELFTEST=feed "$RUST_GUESTS"/feed
 run feed-python-swiftui env KAYA_SELFTEST=feed python3 guests/python/feed.py
 run feed-go-swiftui env KAYA_SELFTEST=feed target/go-guests/kaya-go
 run feed-csharp-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -755,7 +805,7 @@ run feed-java-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkay
 # scene's tree.
 KAYA_SELFTEST_SCRIPT="$(scene_script grow)"
 export KAYA_SELFTEST_SCRIPT
-run grow-rust-swiftui env KAYA_SELFTEST=grow target/debug/examples/grow
+run grow-rust-swiftui env KAYA_SELFTEST=grow "$RUST_GUESTS"/grow
 run grow-python-swiftui env KAYA_SELFTEST=grow python3 guests/python/grow.py
 run grow-go-swiftui env KAYA_SELFTEST=grow target/go-guests/kaya-go
 run grow-csharp-swiftui env KAYA_SELFTEST=grow KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -774,7 +824,7 @@ drain
 # Desktop-only by design (phones reject the size request by physics).
 KAYA_SELFTEST_SCRIPT="$(scene_script window)"
 export KAYA_SELFTEST_SCRIPT
-run window-rust-swiftui env KAYA_SELFTEST=window target/debug/examples/window
+run window-rust-swiftui env KAYA_SELFTEST=window "$RUST_GUESTS"/window
 run window-python-swiftui env KAYA_SELFTEST=window python3 guests/python/window.py
 run window-go-swiftui env KAYA_SELFTEST=window target/go-guests/kaya-go
 run window-csharp-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -791,7 +841,7 @@ run window-java-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/li
 # Rust depth; the language sweep rides the phase's next slice.
 KAYA_SELFTEST_SCRIPT="$(scene_script panels)"
 export KAYA_SELFTEST_SCRIPT
-run panels-rust-swiftui env KAYA_SELFTEST=panels target/debug/examples/panels
+run panels-rust-swiftui env KAYA_SELFTEST=panels "$RUST_GUESTS"/panels
 run panels-python-swiftui env KAYA_SELFTEST=panels python3 guests/python/panels.py
 run panels-go-swiftui env KAYA_SELFTEST=panels target/go-guests/kaya-go
 run panels-csharp-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -809,7 +859,7 @@ run panels-java-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/li
 # pop_entry confirmation). All eight languages, byte-identical.
 KAYA_SELFTEST_SCRIPT="$(scene_script nav)"
 export KAYA_SELFTEST_SCRIPT
-run nav-rust-swiftui env KAYA_SELFTEST=nav target/debug/examples/nav
+run nav-rust-swiftui env KAYA_SELFTEST=nav "$RUST_GUESTS"/nav
 run nav-python-swiftui env KAYA_SELFTEST=nav python3 guests/python/nav.py
 run nav-go-swiftui env KAYA_SELFTEST=nav target/go-guests/kaya-go
 run nav-csharp-swiftui env KAYA_SELFTEST=nav KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -831,7 +881,7 @@ run nav-java-swiftui env KAYA_SELFTEST=nav KAYA_LIB="$ROOT/target/debug/libkaya.
 # languages, byte-identical.
 KAYA_SELFTEST_SCRIPT="$(scene_script split)"
 export KAYA_SELFTEST_SCRIPT
-run split-rust-swiftui env KAYA_SELFTEST=split target/debug/examples/split
+run split-rust-swiftui env KAYA_SELFTEST=split "$RUST_GUESTS"/split
 run split-python-swiftui env KAYA_SELFTEST=split python3 guests/python/split.py
 run split-go-swiftui env KAYA_SELFTEST=split target/go-guests/kaya-go
 run split-csharp-swiftui env KAYA_SELFTEST=split KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -851,7 +901,7 @@ run split-java-swiftui env KAYA_SELFTEST=split KAYA_LIB="$ROOT/target/debug/libk
 # lanes where it is the only list-detail coverage there is.
 KAYA_SELFTEST_SCRIPT="$(scene_script listdetail)"
 export KAYA_SELFTEST_SCRIPT
-run listdetail-rust-swiftui env KAYA_SELFTEST=listdetail target/debug/examples/split
+run listdetail-rust-swiftui env KAYA_SELFTEST=listdetail "$RUST_GUESTS"/split
 run listdetail-python-swiftui env KAYA_SELFTEST=listdetail python3 guests/python/split.py
 run listdetail-go-swiftui env KAYA_SELFTEST=listdetail target/go-guests/kaya-go
 run listdetail-csharp-swiftui env KAYA_SELFTEST=listdetail KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -871,7 +921,7 @@ run listdetail-java-swiftui env KAYA_SELFTEST=listdetail KAYA_LIB="$ROOT/target/
 # (docs/background-work-plan.md §5): the deadlock is the gate.
 KAYA_SELFTEST_SCRIPT="$(scene_script background)"
 export KAYA_SELFTEST_SCRIPT
-run background-rust-swiftui env KAYA_SELFTEST=background target/debug/examples/background
+run background-rust-swiftui env KAYA_SELFTEST=background "$RUST_GUESTS"/background
 run background-python-swiftui env KAYA_SELFTEST=background python3 guests/python/background.py
 run background-go-swiftui env KAYA_SELFTEST=background target/go-guests/kaya-go
 run background-csharp-swiftui env KAYA_SELFTEST=background KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -904,7 +954,7 @@ KAYA_SELFTEST_SCRIPT="$(scene_script filedialog)"
 export KAYA_SELFTEST_SCRIPT
 drain
 panel_mode_set 1 columns
-run filedialog-rust-swiftui env KAYA_SELFTEST=filedialog target/debug/examples/filedialog
+run filedialog-rust-swiftui env KAYA_SELFTEST=filedialog "$RUST_GUESTS"/filedialog
 run filedialog-python-swiftui env KAYA_SELFTEST=filedialog python3 guests/python/filedialog.py
 run filedialog-go-swiftui env KAYA_SELFTEST=filedialog target/go-guests/kaya-go
 drain
@@ -952,7 +1002,7 @@ drain
 # kaya-save-<pid> directory was shown a SIBLING leg's. Same rule as the
 # clipboard legs below, for the same reason: one shared piece of session
 # state per lane.
-run save-rust-swiftui env KAYA_SELFTEST=save target/debug/examples/save
+run save-rust-swiftui env KAYA_SELFTEST=save "$RUST_GUESTS"/save
 # Java's leg rides the same script, and it is the only one that also
 # proves a BINDING fix: until this milestone dev.kaya.KayaApp wrapped
 # every mode's descriptor in a FileInputStream, so no Java app could
@@ -1022,7 +1072,7 @@ export KAYA_SELFTEST_SCRIPT
 # pins on every runner's clipboard legs: one system clipboard per
 # session, so no clipboard leg may share the pool with anything.
 drain
-run clipboard-rust-swiftui env KAYA_SELFTEST=clipboard target/debug/examples/clipboard
+run clipboard-rust-swiftui env KAYA_SELFTEST=clipboard "$RUST_GUESTS"/clipboard
 drain
 run clipboard-python-swiftui env KAYA_SELFTEST=clipboard python3 guests/python/clipboard.py
 drain
@@ -1057,7 +1107,7 @@ drain
 KAYA_SELFTEST_SCRIPT="$(scene_script undo)"
 export KAYA_SELFTEST_SCRIPT
 drain
-run undo-rust-swiftui env KAYA_SELFTEST=undo target/debug/examples/undo
+run undo-rust-swiftui env KAYA_SELFTEST=undo "$RUST_GUESTS"/undo
 drain
 # The AMBIENT tier's undo guest: a handler does not open its transaction
 # here, so the group is named from inside it (kaya.undoable) and the
@@ -1094,7 +1144,7 @@ drain
 
 KAYA_SELFTEST_SCRIPT="$(scene_script scroll)"
 export KAYA_SELFTEST_SCRIPT
-run scroll-rust-swiftui env KAYA_SELFTEST=scroll target/debug/examples/scroll
+run scroll-rust-swiftui env KAYA_SELFTEST=scroll "$RUST_GUESTS"/scroll
 run scroll-python-swiftui env KAYA_SELFTEST=scroll python3 guests/python/scroll.py
 run scroll-go-swiftui env KAYA_SELFTEST=scroll target/go-guests/kaya-go
 run scroll-csharp-swiftui env KAYA_SELFTEST=scroll KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1110,7 +1160,7 @@ run scroll-java-swiftui env KAYA_SELFTEST=scroll KAYA_LIB="$ROOT/target/debug/li
 # mode read back from the REAL control. All eight languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script progress)"
 export KAYA_SELFTEST_SCRIPT
-run progress-rust-swiftui env KAYA_SELFTEST=progress target/debug/examples/progress
+run progress-rust-swiftui env KAYA_SELFTEST=progress "$RUST_GUESTS"/progress
 run progress-python-swiftui env KAYA_SELFTEST=progress python3 guests/python/progress.py
 run progress-go-swiftui env KAYA_SELFTEST=progress target/go-guests/kaya-go
 run progress-csharp-swiftui env KAYA_SELFTEST=progress KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1128,7 +1178,7 @@ run progress-java-swiftui env KAYA_SELFTEST=progress KAYA_LIB="$ROOT/target/debu
 # eight languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script select)"
 export KAYA_SELFTEST_SCRIPT
-run select-rust-swiftui env KAYA_SELFTEST=select target/debug/examples/select
+run select-rust-swiftui env KAYA_SELFTEST=select "$RUST_GUESTS"/select
 run select-python-swiftui env KAYA_SELFTEST=select python3 guests/python/select.py
 run select-go-swiftui env KAYA_SELFTEST=select target/go-guests/kaya-go
 run select-csharp-swiftui env KAYA_SELFTEST=select KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1145,7 +1195,7 @@ run select-java-swiftui env KAYA_SELFTEST=select KAYA_LIB="$ROOT/target/debug/li
 # languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script radio)"
 export KAYA_SELFTEST_SCRIPT
-run radio-rust-swiftui env KAYA_SELFTEST=radio target/debug/examples/radio
+run radio-rust-swiftui env KAYA_SELFTEST=radio "$RUST_GUESTS"/radio
 run radio-python-swiftui env KAYA_SELFTEST=radio python3 guests/python/radio.py
 run radio-go-swiftui env KAYA_SELFTEST=radio target/go-guests/kaya-go
 run radio-csharp-swiftui env KAYA_SELFTEST=radio KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1162,7 +1212,7 @@ run radio-java-swiftui env KAYA_SELFTEST=radio KAYA_LIB="$ROOT/target/debug/libk
 # languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script grid)"
 export KAYA_SELFTEST_SCRIPT
-run grid-rust-swiftui env KAYA_SELFTEST=grid target/debug/examples/grid
+run grid-rust-swiftui env KAYA_SELFTEST=grid "$RUST_GUESTS"/grid
 run grid-python-swiftui env KAYA_SELFTEST=grid python3 guests/python/grid.py
 run grid-go-swiftui env KAYA_SELFTEST=grid target/go-guests/kaya-go
 run grid-csharp-swiftui env KAYA_SELFTEST=grid KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1179,7 +1229,7 @@ run grid-java-swiftui env KAYA_SELFTEST=grid KAYA_LIB="$ROOT/target/debug/libkay
 # All eight languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script textarea)"
 export KAYA_SELFTEST_SCRIPT
-run textarea-rust-swiftui env KAYA_SELFTEST=textarea target/debug/examples/textarea
+run textarea-rust-swiftui env KAYA_SELFTEST=textarea "$RUST_GUESTS"/textarea
 run textarea-python-swiftui env KAYA_SELFTEST=textarea python3 guests/python/textarea.py
 run textarea-go-swiftui env KAYA_SELFTEST=textarea target/go-guests/kaya-go
 run textarea-csharp-swiftui env KAYA_SELFTEST=textarea KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1196,7 +1246,7 @@ run textarea-java-swiftui env KAYA_SELFTEST=textarea KAYA_LIB="$ROOT/target/debu
 # retention (DESIGN.md, Sections).
 KAYA_SELFTEST_SCRIPT="$(scene_script sections)"
 export KAYA_SELFTEST_SCRIPT
-run sections-rust-swiftui env KAYA_SELFTEST=sections target/debug/examples/sections
+run sections-rust-swiftui env KAYA_SELFTEST=sections "$RUST_GUESTS"/sections
 run sections-python-swiftui env KAYA_SELFTEST=sections python3 guests/python/sections.py
 run sections-go-swiftui env KAYA_SELFTEST=sections target/go-guests/kaya-go
 run sections-csharp-swiftui env KAYA_SELFTEST=sections KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1216,7 +1266,7 @@ run sections-java-swiftui env KAYA_SELFTEST=sections KAYA_LIB="$ROOT/target/debu
 # byte-identical.
 KAYA_SELFTEST_SCRIPT="$(scene_script menus)"
 export KAYA_SELFTEST_SCRIPT
-run menus-rust-swiftui env KAYA_SELFTEST=menus target/debug/examples/menus
+run menus-rust-swiftui env KAYA_SELFTEST=menus "$RUST_GUESTS"/menus
 run menus-python-swiftui env KAYA_SELFTEST=menus python3 guests/python/menus.py
 run menus-go-swiftui env KAYA_SELFTEST=menus target/go-guests/kaya-go
 run menus-csharp-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1244,7 +1294,7 @@ run menus-java-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/libk
 # of failure it was invented for.
 KAYA_SELFTEST_SCRIPT="$(scene_script a11y)"
 export KAYA_SELFTEST_SCRIPT
-run a11y-rust-swiftui env KAYA_SELFTEST=a11y target/debug/examples/a11y
+run a11y-rust-swiftui env KAYA_SELFTEST=a11y "$RUST_GUESTS"/a11y
 run a11y-python-swiftui env KAYA_SELFTEST=a11y python3 guests/python/a11y.py
 run a11y-go-swiftui env KAYA_SELFTEST=a11y target/go-guests/kaya-go
 run a11y-csharp-swiftui env KAYA_SELFTEST=a11y KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1263,7 +1313,7 @@ run a11y-java-swiftui env KAYA_SELFTEST=a11y KAYA_LIB="$ROOT/target/debug/libkay
 # menu while the item stays addressable where the app declared it.
 KAYA_SELFTEST_SCRIPT="$(scene_script commands)"
 export KAYA_SELFTEST_SCRIPT
-run commands-rust-swiftui env KAYA_SELFTEST=commands target/debug/examples/commands
+run commands-rust-swiftui env KAYA_SELFTEST=commands "$RUST_GUESTS"/commands
 run commands-python-swiftui env KAYA_SELFTEST=commands python3 guests/python/commands.py
 run commands-go-swiftui env KAYA_SELFTEST=commands target/go-guests/kaya-go
 run commands-csharp-swiftui env KAYA_SELFTEST=commands KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1294,7 +1344,7 @@ run commands-java-swiftui env KAYA_SELFTEST=commands KAYA_LIB="$ROOT/target/debu
 # reporting confirm's assertions against a scene that has no alerts.
 KAYA_SELFTEST_SCRIPT="$(scene_script stall)"
 export KAYA_SELFTEST_SCRIPT
-run stall-rust-swiftui env KAYA_SELFTEST=stall target/debug/examples/stall
+run stall-rust-swiftui env KAYA_SELFTEST=stall "$RUST_GUESTS"/stall
 run stall-python-swiftui env KAYA_SELFTEST=stall python3 guests/python/stall.py
 run stall-go-swiftui env KAYA_SELFTEST=stall target/go-guests/kaya-go
 run stall-csharp-swiftui env KAYA_SELFTEST=stall KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1308,7 +1358,7 @@ run stall-java-swiftui env KAYA_SELFTEST=stall KAYA_LIB="$ROOT/target/debug/libk
 
 KAYA_SELFTEST_SCRIPT="$(scene_script confirm)"
 export KAYA_SELFTEST_SCRIPT
-run confirm-rust-swiftui env KAYA_SELFTEST=confirm target/debug/examples/confirm
+run confirm-rust-swiftui env KAYA_SELFTEST=confirm "$RUST_GUESTS"/confirm
 run confirm-python-swiftui env KAYA_SELFTEST=confirm python3 guests/python/confirm.py
 run confirm-go-swiftui env KAYA_SELFTEST=confirm target/go-guests/kaya-go
 run confirm-csharp-swiftui env KAYA_SELFTEST=confirm KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1337,7 +1387,7 @@ run confirm-java-swiftui env KAYA_SELFTEST=confirm KAYA_LIB="$ROOT/target/debug/
 # undo-c precedent, where the floor rode this lane first.
 KAYA_SELFTEST_SCRIPT="$(scene_script dirty)"
 export KAYA_SELFTEST_SCRIPT
-run dirty-rust-swiftui env KAYA_SELFTEST=dirty target/debug/examples/dirty
+run dirty-rust-swiftui env KAYA_SELFTEST=dirty "$RUST_GUESTS"/dirty
 # Python's guest: the prop is a keyword argument on the window
 # construct, and setting it later is THAT CONSTRUCT CALLED AGAIN —
 # `app.window(dirty=True)` without the `with`, since a handler already
@@ -1377,7 +1427,7 @@ run dirty-csharp-swiftui env KAYA_SELFTEST=dirty KAYA_LIB="$ROOT/target/debug/li
 # every other runner's ranges legs shut until the feature is there.
 KAYA_SELFTEST_SCRIPT="$(scene_script ranges)"
 export KAYA_SELFTEST_SCRIPT
-run ranges-rust-swiftui env KAYA_SELFTEST=ranges target/debug/examples/ranges
+run ranges-rust-swiftui env KAYA_SELFTEST=ranges "$RUST_GUESTS"/ranges
 run ranges-python-swiftui env KAYA_SELFTEST=ranges python3 guests/python/ranges.py
 # The C floor's ranges guest, which does not wait on the seven sugar
 # bindings because it takes no sugar (the undo-c and dirty-c precedent):
@@ -1403,7 +1453,7 @@ run ranges-ocaml-swiftui env KAYA_SELFTEST=ranges KAYA_LIB="$ROOT/target/debug/l
     _build/default/guests/ocaml/ranges.exe
 KAYA_SELFTEST_SCRIPT="$(scene_script align)"
 export KAYA_SELFTEST_SCRIPT
-run align-rust-swiftui env KAYA_SELFTEST=align target/debug/examples/align
+run align-rust-swiftui env KAYA_SELFTEST=align "$RUST_GUESTS"/align
 run align-python-swiftui env KAYA_SELFTEST=align python3 guests/python/align.py
 run align-go-swiftui env KAYA_SELFTEST=align target/go-guests/kaya-go
 run align-csharp-swiftui env KAYA_SELFTEST=align KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
@@ -1417,7 +1467,7 @@ run align-java-swiftui env KAYA_SELFTEST=align KAYA_LIB="$ROOT/target/debug/libk
 drain
 KAYA_SELFTEST_SCRIPT="$(scene_script layout)"
 export KAYA_SELFTEST_SCRIPT
-run layout-rust-swiftui env KAYA_SELFTEST=layout target/debug/examples/layout
+run layout-rust-swiftui env KAYA_SELFTEST=layout "$RUST_GUESTS"/layout
 run layout-python-swiftui env KAYA_SELFTEST=layout python3 guests/python/layout.py
 run layout-go-swiftui env KAYA_SELFTEST=layout target/go-guests/kaya-go
 run layout-csharp-swiftui env KAYA_SELFTEST=layout KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \

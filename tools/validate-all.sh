@@ -133,7 +133,24 @@ if [ "$MODE" = parallel ]; then
             # headroom the other lanes have (the earlier 678s reading,
             # which this block previously declined to raise for, was an
             # environmental window and is NOT the reason for this one).
-            mac) budget=900 ;;
+            #
+            # LOWERED TO 560 on 2026-08-10, and lowering a ceiling is the
+            # rarer half of this block's job. The lane stopped running
+            # its guests out of `target/debug/examples`, a build
+            # directory that had reached 776,613 entries — macOS
+            # enumerates an unbundled executable's siblings on every
+            # launch, so all 32 rust legs walked it, and the resulting
+            # LaunchServices contention starved the ocaml, haskell and
+            # swift legs running beside them. All eight languages now
+            # measure 1.1-1.6s a leg where four of them were 8-31s
+            # (docs/deferred.md).
+            #
+            # Measured on the fixed tree: 431s contended at 268 legs,
+            # against 966s the run before. 560 is the same ~1.25x over
+            # the contended time the other lanes keep — and holding 900
+            # here would let this lane double again before saying a
+            # word, which is exactly what let the old cost hide.
+            mac) budget=560 ;;
             # 420 since 2026-08-07, raised in the commit that made the
             # lane slower, as this block asks. The text-ranges scene added
             # 16 legs (rust and the C floor, both protocols, plus the
