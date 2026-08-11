@@ -83,9 +83,12 @@ let () =
                let item_list, () =
                  for_each items
                    (fun () ->
-                     let row = widget kind_label in
-                     (* label#2 once g2/a stamps *)
-                     bind_text_element row;
+                     (* label#2 once g2/a stamps. [element] is the
+                        scalar collection's own token — its element IS
+                        the value, so there is no field name to give —
+                        and it lowers to the same bind_element this line
+                        used to spell at the widget-kind floor. *)
+                     let row = label ~bind_field:element () in
                      context_menu row catalog)
                    ()
                in

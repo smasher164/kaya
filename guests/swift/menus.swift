@@ -103,8 +103,12 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
             // (the milestone2 graduation's orphan class, 2026-08-05).
             _ = g.column {
                 g.forEach(items) { r -> Void in
-                    let row = r.widget(UInt32(KAYA_KIND_LABEL))  // label#2 once g2/a stamps
-                    r.bindTextElement(row)
+                    // label#2 once g2/a stamps. `.element` is the scalar
+                    // collection's own token — its element IS the value,
+                    // so there is no field name to give — and it lowers
+                    // to the same bind_element these two lines used to
+                    // spell at the widget-kind floor.
+                    let row = r.label(KayaField<String>.element)
                     r.contextMenu(row, catalog)
                 }.0
             }

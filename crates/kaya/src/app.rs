@@ -174,6 +174,27 @@ impl<K> Field<K> {
     }
 }
 
+impl Field<StrKind> {
+    /// THE WHOLE ELEMENT OF A SCALAR COLLECTION, as a source.
+    ///
+    /// A template constructor's element source is a FIELD, addressed by
+    /// index off a record — `t.label(Todo::title())`. A scalar
+    /// collection has no record: its element IS the value, and binding
+    /// it was spelled `bind_element` at the floor, which is why three
+    /// example scenes built a template label with `widget(kind_label)`
+    /// and a bare bind rather than with the sugar. Nothing was missing
+    /// but a NAME for field 0 — `PropValue::Element { level, field: 0 }`
+    /// is exactly what a `Field` at index 0 produces, so the floor call
+    /// and this put the same bytes on the wire.
+    ///
+    /// `StrKind` only, and that is a fact rather than a restriction:
+    /// `String` is the sole non-derived `KayaSum` implementor, so a
+    /// scalar collection is always a collection of strings.
+    pub const fn element() -> Self {
+        Field::new(0)
+    }
+}
+
 /// A property with its value kind in the type. The plain Prop enum
 /// stays the wire form; these tokens exist so bind_field can unify the
 /// prop's kind with the field's at compile time.

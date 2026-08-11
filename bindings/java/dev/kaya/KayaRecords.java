@@ -30,6 +30,23 @@ public final class KayaRecords {
         Field(int index) {
             this.index = index;
         }
+
+        /**
+         * THE WHOLE ELEMENT OF A SCALAR COLLECTION, as a field token.
+         *
+         * A field token names one field of a RECORD, and a scalar collection has
+         * no record: its element IS the value. Binding it was spelled with the
+         * bare element bind at the floor, which is why a template label over a
+         * scalar collection was built with the widget-kind floor rather than with
+         * the sugar. Nothing was missing but a NAME for field 0 — the wire record
+         * is the same either way.
+         *
+         * String only, and that is a fact rather than a restriction: a scalar
+         * collection is always a collection of strings, one field, one type.
+         */
+        public static Field<String> element() {
+            return new Field<>(0);
+        }
     }
 
     static final class Info {

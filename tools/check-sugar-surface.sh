@@ -260,6 +260,41 @@ case "$tpl_row_probe" in
 esac
 unset tpl_row_probe
 
+# THE SCALAR ELEMENT HAS A NAME, in all eight.
+#
+# A template constructor's element source is a FIELD, addressed by index
+# off a record. A SCALAR collection has no record — its element IS the
+# value — so binding it had no sugar spelling and three example scenes
+# built a template label at the widget-kind floor instead
+# (guests/{haskell/menus.hs, ocaml/menus.ml, swift/menus.swift}). Only
+# Go had a name for it, and Go's is the reason the gap was visible at
+# all: `Row.Value()` returns literally `FieldAt[string](0)`.
+#
+# Nothing was missing but a NAME for field 0. The wire record is
+# identical either way, which is exactly why nobody noticed: the floor
+# spelling WORKED, it just taught the floor (invariant 5).
+#
+# Go keeps `Row.Value()` — it is scoped to a row surface no other
+# binding has, and its doc already says "the element itself"; the idiom
+# decides the spelling, never the semantics. Python's ambient `for_each`
+# yields the element as `el`, so its "token" is the loop variable.
+check rust    crates/kaya/src/app.rs \
+    "scalar element" "pub const fn element\(\)"
+check python  bindings/python/kaya/__init__.py \
+    "scalar element" "class Element\b|def __enter__"
+check go      bindings/go/app.go \
+    "scalar element" "func \(r Row\) Value\(\)"
+check csharp  bindings/csharp/KayaRecords.cs \
+    "scalar element" "static Field<string> Element"
+check java    bindings/java/dev/kaya/KayaRecords.java \
+    "scalar element" "static Field<String> element\("
+check swift   bindings/swift/KayaRecords.swift \
+    "scalar element" "static var element: KayaField<String>"
+check ocaml   bindings/ocaml/kaya_app.ml \
+    "scalar element" "^let element : \('a, string\) field"
+check haskell bindings/haskell/KayaApp.hs \
+    "scalar element" "^element :: KField String"
+
 # A TEMPLATE NODE'S GROW WEIGHT, in all eight.
 #
 # The template zone carries exactly one prop, and this clause is why it

@@ -105,8 +105,11 @@ main = kayaMain $ \app -> do
     (groupList, itemsColl) <- forEach groups $ do
       itemsColl <- collection
       (itemList, ()) <- forEach itemsColl $ do
-        row <- widget kindLabel -- label#2 once g2/a stamps
-        bindTextElement row 0
+        -- label#2 once g2/a stamps. `element` is the scalar
+        -- collection's own token — its element IS the value, so there
+        -- is no field name to give — and it lowers to the same
+        -- bind_element this line used to spell at the widget-kind floor.
+        row <- label element
         nodeContextMenu row catalog
       _ <- columnOf [pure itemList]
       return itemsColl

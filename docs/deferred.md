@@ -2105,3 +2105,41 @@ which the "*" go row reads as a floor prop write. Widening the tier means
 separating "this spelling is the floor" from "this spelling is the floor
 IN A SCENE THAT HAS SUGAR FOR IT", which is a real piece of design and
 not a table edit.
+
+## The rust guests cost ~11s to START, and it is what makes the matrix fragile
+
+Measured 2026-08-10, while diagnosing two matrix failures during the
+template-zone sugar pass.
+
+Per-language leg times for one scene, mac lane, machine otherwise quiet
+(tools/validate-mac.sh, `split`):
+
+    rust 38s   ocaml 16s   haskell 10s   swift 9s
+    python 1s  go 0s       csharp 0s     java 1s
+
+Same scene, same core, same SwiftUI interpreter. The cost is in the
+GUEST's startup, not in kaya: launching `target/debug/examples/split`
+with no scene script — so it fails immediately, before a single step
+runs — takes **10.9s wall (2.5s user, 4.2s system)** against python's
+**0.47s**. Twenty-three times, to do nothing.
+
+The likely reason is that a Rust example links the whole crate
+statically (libkaya.rlib is 19MB, unoptimized, with debug info) where
+every other language loads the already-resident libkaya.dylib, so each
+of the ~30 rust legs pays a fresh dyld + signature-validation pass over
+a large binary. Not confirmed — that is the investigation.
+
+**Why it matters now.** Under the five-lane matrix these legs stretch
+about 3x (split-rust 38s -> 120s+), and 120s is the per-leg timeout. So
+the mac lane is a coin flip on a loaded machine: two consecutive matrix
+runs failed on different lanes, each on a load-sensitive leg, each of
+which passed standalone. Nothing was wrong with the tree either time.
+`--serial` is the doctrine's escape hatch and it works, but a lane that
+only passes when the machine is quiet is a lane that will cry wolf, and
+the next real failure will be read as another flake.
+
+Worth fixing rather than accommodating: a release-profile guest binary,
+or examples that link libkaya dynamically like every other language's
+guest does, should take the 38s to something near the 1s the other six
+manage. Check `--release` first; it is one flag and it would say
+immediately whether the size/debug-info theory is right.

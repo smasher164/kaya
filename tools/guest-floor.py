@@ -60,20 +60,20 @@ FLOOR = {
 # exemption is a claim on the record, not an absence, so a line that
 # stops being exempt fails here rather than sitting unread.
 #
-# All three want the SAME missing thing: a source for THE SCALAR ELEMENT
-# ITSELF. These build a template label over a one-field collection and
-# bind it with `bind_text_element` — field 0 of the row, the row's whole
-# value. Every binding's template `label` takes a source whose element
-# arm is a FIELD, and a field is addressed by index off a record; only
-# Go has a name for the scalar case (`Row.Value() Field[string]`).
-# Spelling it in the other seven is new vocabulary in eight languages,
-# which is a uniformity decision and not a guest fix — so these stay at
-# the floor, named, until that decision is made (docs/deferred.md).
-EXEMPT = {
-    "guests/haskell/menus.hs": "the scalar-element source has no name in 7 of 8 bindings",
-    "guests/ocaml/menus.ml": "the scalar-element source has no name in 7 of 8 bindings",
-    "guests/swift/menus.swift": "the scalar-element source has no name in 7 of 8 bindings",
-}
+# EMPTY, AND THAT IS THE POINT. It briefly held three entries —
+# guests/{haskell/menus.hs, ocaml/menus.ml, swift/menus.swift} — all
+# wanting the same missing thing: a source for THE SCALAR ELEMENT
+# ITSELF. Those three build a template label over a one-field collection
+# and bind the row's whole value; every binding's template `label` takes
+# a source whose element arm is a FIELD, addressed by index off a
+# record, and only Go had a name for the scalar case (`Row.Value()`).
+# Naming it (`element`, one nullary token per binding) removed all three
+# in an afternoon, so the sweep's rule now has no carve-outs left to
+# remember: a sugar guest does not name a widget kind, anywhere.
+#
+# Keep the mechanism. The next real exemption goes here with its reason,
+# and the anti-vacuity check below only fires when this is non-empty.
+EXEMPT = {}
 
 
 def strip_comments(lines, marker, ocaml):

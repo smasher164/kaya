@@ -3432,3 +3432,42 @@ today.
 NOT A PRODUCT RACE, as far as anything shows: a person focuses a field and pastes
 hundreds of milliseconds later. It needs focus and paste inside the same ~20ms,
 which only a harness does.
+
+## An ad-hoc `cabal build` poisons the shared dist-newstyle for the whole mac lane
+
+Measured 2026-08-10, cost one full validate-mac run (~14 minutes).
+
+The Haskell guests link against libkaya, which is not on any default
+search path: `guests/haskell/kaya-guests.cabal` declares
+`extra-libraries: kaya` and every caller supplies the directory —
+`--extra-lib-dirs="$ROOT/target/debug"` plus the matching `-L` and
+`-rpath` in `--ghc-options` (tools/validate-mac.sh's `build_haskell`,
+tools/check-abort.sh).
+
+Run `cabal build <target>` WITHOUT those flags — the obvious thing to
+type when checking one guest compiles — and it fails immediately with
+"Missing (or bad) C library: kaya", which reads like a broken
+environment and is easy to shrug off. What is not obvious is that the
+attempt writes a configuration into the shared `dist-newstyle`, and
+every later build in that directory reuses it. validate-mac then fails
+in its `guest build` phase with
+
+    ld: library not found for -lkaya
+
+**even though its own command line carries the flags**, and even though
+building the same target into a FRESH `--builddir` succeeds. The lane
+failure looks like a code regression in the binding that was just
+edited. It is not; nothing is wrong with the tree.
+
+The fix is `rm -rf guests/haskell/dist-newstyle` and rebuild.
+
+The habit that avoids it: when compile-checking one Haskell guest by
+hand, either pass the same three flags the lane passes, or send the
+output to a private `--builddir` (what tools/check-abort.sh does, for
+its own reason — it wants a guaranteed relink). Never a bare `cabal
+build` in that directory.
+
+This is the second time cabal's caching has cost a debugging round
+here; the first is the never-relinking one two sections up. Both have
+the same shape — cabal trusts a cache over the world — and neither is
+visible in the error message.

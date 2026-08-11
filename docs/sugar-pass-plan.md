@@ -212,6 +212,38 @@ zone:
 Per D3, the offers half asserts the source arm is REACHABLE, not that a
 declaration exists.
 
+### S7 — the scalar element gets a name (the follow-on slice)
+
+Ratified 2026-08-10, after the pass proper landed. Three guests still
+built a template label at the widget-kind floor —
+guests/haskell/menus.hs:108, guests/ocaml/menus.ml:86,
+guests/swift/menus.swift:106 — and all three wanted the same missing
+thing.
+
+A template constructor's element source is a FIELD, addressed by index
+off a record. A SCALAR collection has no record: its element IS the
+value. Binding it is spelled `bind_text_element` at the floor — level,
+no field — and every binding's sugar wanted a field token instead. Only
+Go had a name for one: `Row.Value()`, which returns literally
+`FieldAt[string](0)` (bindings/go/app.go).
+
+**The whole thing is that field 0 had no name.** `PropValue::Element {
+level, field: 0 }` is exactly what a `Field` at index 0 produces, so the
+floor call and the sugar call put the same bytes on the wire — the
+sugar just could not say "index 0" without a spelling that meant it.
+
+And the type is fixed, which is what makes this small: `String` is the
+only non-derived `KayaSum` (crates/kaya/src/app.rs:300), so a scalar
+collection is always a collection of strings and its element token is
+always the string field 0. One nullary accessor per binding, named for
+the protocol's own term — `element` — with Go keeping `Row.Value()`,
+which already documents itself as "the element itself" and is the
+idiom of a surface no other binding has.
+
+With that, the three exemptions in tools/guest-floor.py go away and the
+sweep's rule has no carve-outs left: **a sugar guest does not name a
+widget kind**, everywhere, with nothing to remember.
+
 ## §2 — what genuinely cannot exist, recorded
 
 - **A per-row option list.** `select` and `radio` build their options as
