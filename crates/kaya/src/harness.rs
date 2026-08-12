@@ -281,7 +281,12 @@ pub enum Step {
     /// the window's height where macOS's titlebar sits outside it, so
     /// the same window size yields different offers and the identical
     /// number everywhere is the inset itself (docs/styling-plan.md D3).
-    ExpectInset(u32),
+    /// `expect_inset N` reads the WINDOW's pair; `expect_inset
+    /// <target> N` reads a CONTAINER's own (docs/styling-plan.md D3
+    /// one level down — the prop born from the editor's full-bleed
+    /// window taking the status row's margin with it). Same relative
+    /// measurement at both scopes.
+    ExpectInset { target: Option<Target>, units: u32 },
     /// Expect the container's children to span its content box along
     /// the main axis — the leftover-consumption half of the grow
     /// contract, and the second blind spot shares can never see:
@@ -719,6 +724,10 @@ pub trait Stage: Send + 'static {
     /// root_fills: a backend that forgets it fails to compile rather
     /// than passing the inset leg vacuously.
     fn inset(&self) -> String;
+    /// A CONTAINER's own content inset, the same halved-gap measurement
+    /// one level down (its outer extent against its children's offer).
+    /// No default, for inset's exact reason.
+    fn container_inset(&self, target: Target) -> String;
     /// The main-axis extents of the container's children, in child
     /// order, each as a whole percentage of their sum, joined with `,`
     /// — the observation expect_shares verifies, and the only way a
@@ -1202,11 +1211,26 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::ExpectAligned(parse_target(target)?, parse_string(text)?)
             }
-            "expect_inset" => Step::ExpectInset(
-                rest.trim()
-                    .parse()
-                    .map_err(|_| format!("expect_inset wants whole layout units: {line:?}"))?,
-            ),
+            "expect_inset" => {
+                let rest = rest.trim();
+                if let Ok(units) = rest.parse() {
+                    Step::ExpectInset { target: None, units }
+                } else {
+                    let (target, units) =
+                        rest.split_once(char::is_whitespace).ok_or_else(|| {
+                            format!(
+                                "expect_inset wants whole layout units, optionally \
+                                 after a container target: {line:?}"
+                            )
+                        })?;
+                    Step::ExpectInset {
+                        target: Some(parse_target(target)?),
+                        units: units.trim().parse().map_err(|_| {
+                            format!("expect_inset wants whole layout units: {line:?}")
+                        })?,
+                    }
+                }
+            }
             "expect_root_fills" => {
                 if !rest.is_empty() {
                     return Err(format!(
@@ -2555,13 +2579,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }))
                 }
             }
-            Step::ExpectInset(units) => Some(poll(|| {
-                let got = stage.inset();
+            Step::ExpectInset { target, units } => Some(poll(|| {
+                let (got, subject) = match target {
+                    Some(t) => (stage.container_inset(*t), target_spec(t)),
+                    None => (stage.inset(), String::new()),
+                };
                 let want = format!("{units}");
-                if got == want {
-                    Ok(format!("inset {want}"))
+                let label = if subject.is_empty() {
+                    "inset".to_string()
                 } else {
-                    Err(format!("inset {got}, wanted {want}"))
+                    format!("inset {subject}")
+                };
+                if got == want {
+                    Ok(format!("{label} {want}"))
+                } else {
+                    Err(format!("{label} {got}, wanted {want}"))
                 }
             })),
             Step::ExpectRootFills => Some(poll(|| {
@@ -3520,6 +3552,9 @@ mod tests {
         fn inset(&self) -> String {
             "16".into()
         }
+        fn container_inset(&self, _target: Target) -> String {
+            "0".into()
+        }
         fn container_fills(&self, _: Target) -> String {
             String::new()
         }
@@ -3758,6 +3793,9 @@ mod tests {
         fn inset(&self) -> String {
             "16".into()
         }
+        fn container_inset(&self, _target: Target) -> String {
+            "0".into()
+        }
         fn choose_alert(&self, _choice: u32) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
             None
@@ -3927,6 +3965,9 @@ mod tests {
         }
         fn inset(&self) -> String {
             "16".into()
+        }
+        fn container_inset(&self, _target: Target) -> String {
+            "0".into()
         }
         fn choose_alert(&self, _choice: u32) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {

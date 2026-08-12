@@ -1883,6 +1883,20 @@ final class KayaAppTx {
         tx.setSpacing(w.id, gap)
     }
 
+    /// A container's OWN padding: DIP between its bounds and its
+    /// children, uniform on all four sides — the window inset one level
+    /// down (docs/styling-plan.md D3). Containers only — the scene
+    /// rejects it anywhere else. The declarative spelling is the
+    /// `inset:` argument at construction; this is the dynamic path.
+    ///
+    /// The window's own inset is the `inset:` argument on `window(...)`;
+    /// this is the same number one level down, so a full-bleed window
+    /// can still hold an inset status row — the app that forced the
+    /// prop into existence (the editor).
+    func setInset(_ w: KayaWidget, _ pad: Double) {
+        tx.setInset(w.id, pad)
+    }
+
     /// A container's cross-axis child placement. Containers only;
     /// baseline is rows-only — the scene rejects misuse at the root.
     /// The declarative spelling is the `align:` argument at
@@ -2259,11 +2273,13 @@ final class KayaAppTx {
     }
 
     func column(
-        grow: Double? = nil, spacing: Double? = nil, align: KayaAlign? = nil,
+        grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
+        align: KayaAlign? = nil,
         @KayaChildren _ children: () -> Void
     ) -> KayaWidget {
         containerOf(
-            UInt32(KAYA_KIND_COLUMN), children, grow: grow, spacing: spacing, align: align)
+            UInt32(KAYA_KIND_COLUMN), children, grow: grow, spacing: spacing,
+            inset: inset, align: align)
     }
 
     /// A vertical scroll viewport over EXACTLY ONE child (declare it
@@ -2274,28 +2290,34 @@ final class KayaAppTx {
         grow: Double? = nil, @KayaChildren _ children: () -> Void
     ) -> KayaWidget {
         containerOf(
-            UInt32(KAYA_KIND_SCROLL), children, grow: grow, spacing: nil, align: nil)
+            UInt32(KAYA_KIND_SCROLL), children, grow: grow, spacing: nil,
+            inset: nil, align: nil)
     }
 
     func row(
-        grow: Double? = nil, spacing: Double? = nil, align: KayaAlign? = nil,
+        grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
+        align: KayaAlign? = nil,
         @KayaChildren _ children: () -> Void
     ) -> KayaWidget {
         containerOf(
-            UInt32(KAYA_KIND_ROW), children, grow: grow, spacing: spacing, align: align)
+            UInt32(KAYA_KIND_ROW), children, grow: grow, spacing: spacing,
+            inset: inset, align: align)
     }
 
     /// A grid laying its children out row-major into `columns`
     /// columns — each column takes its NATURAL width, aligned across
     /// rows (the thing nested rows cannot express); `spacing` is the
-    /// inter-cell gap on both axes.
+    /// inter-cell gap on both axes and `inset` the padding around the
+    /// whole block.
     func grid(
-        columns: Int, spacing: Double? = nil, grow: Double? = nil,
+        columns: Int, spacing: Double? = nil, inset: Double? = nil,
+        grow: Double? = nil,
         @KayaChildren _ children: () -> Void
     ) -> KayaWidget {
         let parent = widget(UInt32(KAYA_KIND_GRID))
         tx.setColumns(parent.id, Double(columns))
         if let spacing { setSpacing(parent, spacing) }
+        if let inset { setInset(parent, inset) }
         if let grow { setGrow(parent, grow) }
         app.childFrames.append(KayaApp.KayaFrame(template: false))
         children()
@@ -2314,7 +2336,7 @@ final class KayaAppTx {
 
     private func containerOf(
         _ kind: UInt32, _ children: () -> Void, grow: Double? = nil, spacing: Double? = nil,
-        align: KayaAlign? = nil
+        inset: Double? = nil, align: KayaAlign? = nil
     ) -> KayaWidget {
         // Parent before children: statement-shaped construction is
         // parent-first in every language (expression trees are
@@ -2329,6 +2351,7 @@ final class KayaAppTx {
         // stays self-consistent); the recordings are the gate for
         // that class until per-binding emission checks exist.
         if let spacing { setSpacing(parent, spacing) }
+        if let inset { setInset(parent, inset) }
         if let align { setAlign(parent, align) }
         app.childFrames.append(KayaApp.KayaFrame(template: false))
         children()

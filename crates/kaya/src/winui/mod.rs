@@ -343,6 +343,11 @@ struct CoreState {
     /// harness's `offer` observation subtracts it from the root's
     /// actual size.
     inset: f64,
+    /// A CONTAINER's own inset (prop 17, one level down): the declared
+    /// number per container, kept because a WinUI Grid has ONE Padding
+    /// where SwiftUI and Compose nest two boxes — see
+    /// `container_padding`, which is the only thing that writes it.
+    container_insets: HashMap<WidgetId, f64>,
     transactions: Receiver<Transaction>,
     scene: Scene,
     occurrences: OccSink,
@@ -467,6 +472,13 @@ struct CoreState {
     /// can release the roots it holds (see release_split).
     split_views: HashMap<u64, TwoPaneView>,
     window_roots: HashMap<u64, UIElement>,
+    /// The WIDGET ID of each mounted surface root, by surface (window,
+    /// pushed navigation entry or section pane — the Mount arm treats
+    /// the three alike). `window_roots` keeps the same relation as
+    /// elements, for the window mounts only; this one is what tells
+    /// `container_padding` which containers carry the window inset in
+    /// their own Padding.
+    mounted_roots: HashMap<u64, WidgetId>,
     window_titles: HashMap<u64, String>,
     /// Unsaved work per window (wprop 7). Windows publishes no
     /// modified affordance at any layer — the whole App SDK metadata
@@ -1275,6 +1287,44 @@ fn compose_application() -> windows_core::Result<Application> {
 fn trace_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("KAYA_WINUI_TRACE").is_some())
+}
+
+/// The Padding a container Grid must carry: the inset the container
+/// itself declares (prop 17), plus the WINDOW inset when it is a
+/// mounted surface root (wprop 8).
+///
+/// WinUI folds two boxes into one. SwiftUI and Compose NEST the window
+/// inset — a padding on the window's content — around the container's
+/// own `.padding(node.inset)`; a WinUI Grid has a single Padding, and a
+/// mounted root's is already where the window inset lands. So a root's
+/// Padding is the SUM, which is the same visual the nesting backends
+/// produce, and the two harness reads take the other number back off
+/// (`inset` reads the window's, `container_inset` a container's own).
+/// Every writer goes through here — the prop's arm, the mount, the
+/// window prop's restamp — so none of them can drop the other's term;
+/// before this, the mount overwrote the container's inset with the
+/// window's and nothing said so.
+fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
+    let own = core.container_insets.get(&id).copied().unwrap_or(0.0);
+    let root = core.mounted_roots.values().any(|&r| r == id);
+    own + if root { core.inset } else { 0.0 }
+}
+
+/// Write [`container_padding`] onto a container. Not a container (or
+/// destroyed): nothing to stamp.
+fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
+    let Some(NativeWidget::Column(grid) | NativeWidget::Row(grid) | NativeWidget::Grid2D(grid)) =
+        core.widgets.get(&id)
+    else {
+        return Ok(());
+    };
+    let pad = container_padding(core, id);
+    grid.SetPadding(Thickness {
+        Left: pad,
+        Top: pad,
+        Right: pad,
+        Bottom: pad,
+    })
 }
 
 /// Rebuild one grid's track definitions and restamp its children's
@@ -6397,19 +6447,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (WindowProp::Inset, Value::F64(units)) => {
                     // LAYOUT, not appearance (docs/styling-plan.md D3):
-                    // store it, restamp the mounted root's padding if
-                    // one exists (a pre-mount write is the normal case
-                    // and the Mount arm reads the store).
+                    // store it, restamp the mounted roots' padding if any
+                    // exist (a pre-mount write is the normal case and the
+                    // Mount arm reads the store).
                     core.inset = *units;
-                    if let Ok(root) = core.window.Content() {
-                        if let Ok(panel) = root.cast::<Grid>() {
-                            let _ = panel.SetPadding(Thickness {
-                                Left: *units,
-                                Top: *units,
-                                Right: *units,
-                                Bottom: *units,
-                            });
-                        }
+                    // Through container_padding and the roots the mount
+                    // recorded, rather than straight onto the window's
+                    // Content: that Padding also carries the root
+                    // container's OWN inset (prop 17) when it declares
+                    // one, and a bare write here would drop it. It also
+                    // reaches the roots Content is not — a pushed entry's
+                    // and an auxiliary window's — which the mount stamps
+                    // and this arm used to miss.
+                    let roots: Vec<WidgetId> = core.mounted_roots.values().copied().collect();
+                    for id in roots {
+                        stamp_container_padding(core, id)?;
                     }
                 }
                 (WindowProp::Dirty, Value::Bool(on)) => {
@@ -7210,6 +7262,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // row spacing (expect_fills reads it back live).
                     grid.SetRowSpacing(gap)?;
                 }
+                (
+                    NativeWidget::Column(_) | NativeWidget::Row(_) | NativeWidget::Grid2D(_),
+                    Prop::Inset,
+                    Value::F64(pad),
+                ) => {
+                    // A container's own padding, one level down from the
+                    // window inset (docs/styling-plan.md D3). One arm for
+                    // all three container kinds because all three ARE
+                    // Grids here — Column and Row are star-sized Grids so
+                    // that `grow` can be a track weight — and Padding is
+                    // the same property on each. Stored and stamped
+                    // through container_padding: on a mounted root this
+                    // Padding carries the window inset too.
+                    core.container_insets.insert(id, pad);
+                    stamp_container_padding(core, id)?;
+                }
                 (NativeWidget::Column(_), Prop::Align, Value::I64(mode))
                 | (NativeWidget::Row(_), Prop::Align, Value::I64(mode)) => {
                     core.aligns.insert(id, mode);
@@ -7460,19 +7528,26 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         }
         ApplyOp::Mount { window, root } => {
             let widget = core.widgets.get(&root).expect("scene validated the id");
-            if let NativeWidget::Column(panel) | NativeWidget::Row(panel) = widget {
+            // Both handles are taken here, under the widget borrow: a
+            // WinRT handle is refcounted and outlives the map it came
+            // from, which is what lets the stamp below take the core
+            // state mutably.
+            let element = widget.element()?;
+            let panel = match widget {
+                NativeWidget::Column(panel) | NativeWidget::Row(panel) => Some(panel.clone()),
+                _ => None,
+            };
+            if let Some(panel) = panel {
                 // The normalized root inset — now the window's OWN
                 // (wprop 8, docs/styling-plan.md D3), 16 unless the app
                 // says otherwise, INSIDE the root (Grid.Padding is
                 // inside ActualSize, so the root still fills its island
-                // and expect_root_fills holds).
-                let inset = core.inset;
-                panel.SetPadding(Thickness {
-                    Left: inset,
-                    Top: inset,
-                    Right: inset,
-                    Bottom: inset,
-                })?;
+                // and expect_root_fills holds). Recorded as a mounted
+                // root FIRST, because the same Padding also carries this
+                // container's own inset when it declares one and
+                // container_padding is what adds the two.
+                core.mounted_roots.insert(window.0, root);
+                stamp_container_padding(core, root)?;
                 // Baseline compensation needs REAL text metrics,
                 // and at apply time the grid has never had a true
                 // layout pass (a detached or just-attached measure
@@ -7504,7 +7579,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // in-window (the push already stacked it; the mount fills
             // it), the primary is the window's own root, an auxiliary
             // presents its window.
-            let element = widget.element()?;
             if core.section_panes.contains_key(&window.0) {
                 // A section presents in-window: added to the set
                 // already; the mount fills its pane.
@@ -8197,6 +8271,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     CORE.with_borrow_mut(|core| {
         *core = Some(CoreState {
             inset: 16.0,
+            container_insets: HashMap::new(),
             transactions: tx_rx,
             scene: Scene::new(),
             occurrences: occ_tx,
@@ -8245,6 +8320,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             split_presentation: HashMap::new(),
             split_views: HashMap::new(),
             window_roots: HashMap::new(),
+            mounted_roots: HashMap::new(),
             window_titles: HashMap::new(),
             window_dirty: HashMap::new(),
             window_veto: HashMap::new(),
@@ -10592,7 +10668,80 @@ impl crate::harness::Stage for WinUiStage {
             let transform = child.TransformToVisual(&root)?;
             let origin = transform
                 .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
-            let (x, y) = (origin.X.round() as i64, origin.Y.round() as i64);
+            // The root's one Padding carries the root CONTAINER's own
+            // inset too, when it declares one (container_padding — WinUI
+            // has a single Padding where SwiftUI and Compose nest two
+            // boxes), and that number belongs to the other read. The
+            // primary window's root is the one Content holds; zero
+            // unless a scene puts an inset on it, which leaves this
+            // exactly what it measured.
+            let own = core
+                .mounted_roots
+                .get(&0)
+                .and_then(|id| core.container_insets.get(id))
+                .copied()
+                .unwrap_or(0.0);
+            let x = (f64::from(origin.X) - own).round() as i64;
+            let y = (f64::from(origin.Y) - own).round() as i64;
+            Ok(if x == y {
+                format!("{x}")
+            } else {
+                format!("{x}x{y} (axes disagree)")
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn container_inset(&self, target: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            // The walk `inset` does, one level down: a Grid's Padding
+            // offsets its first track, so the first child's arranged
+            // origin inside its container IS the container's inset.
+            // MEASURED, never Padding read back out of the property the
+            // apply arm wrote — a read-back would pass with no lowering
+            // at all.
+            //
+            // Through target_element because that is the one registry
+            // table (a second copy is how row#0 once resolved against
+            // the columns), and a target that is not a container is
+            // refused rather than measured: the runner does not screen
+            // the kind for this step the way it does for expect_order.
+            let Some(element) = target_element(core, target)? else {
+                return Ok("<no such target>".to_owned());
+            };
+            let Ok(grid) = element.cast::<Grid>() else {
+                return Ok(format!("{:?} is not a container", target.kind));
+            };
+            grid.UpdateLayout()?;
+            let children = grid.Children()?;
+            if children.Size()? == 0 {
+                return Ok("<no children to measure against>".to_owned());
+            }
+            let child = children.GetAt(0)?;
+            let origin = child
+                .TransformToVisual(&grid)?
+                .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+            // A child's own margin rides in that origin and is not the
+            // container's padding: a baseline row lifts its children with
+            // top margins (baseline_compensate), which would otherwise
+            // read as an inset nobody declared.
+            let margin = child.cast::<FrameworkElement>()?.Margin()?;
+            // And a mounted root's Padding carries the WINDOW inset as
+            // well (container_padding), which is `inset`'s number rather
+            // than this one's.
+            let root = core.mounted_roots.values().any(|id| {
+                matches!(
+                    core.widgets.get(id),
+                    Some(
+                        NativeWidget::Column(g)
+                        | NativeWidget::Row(g)
+                        | NativeWidget::Grid2D(g)
+                    ) if *g == grid
+                )
+            });
+            let window_term = if root { core.inset } else { 0.0 };
+            let x = (f64::from(origin.X) - margin.Left - window_term).round() as i64;
+            let y = (f64::from(origin.Y) - margin.Top - window_term).round() as i64;
             Ok(if x == y {
                 format!("{x}")
             } else {

@@ -685,6 +685,27 @@ func (tx *Tx) SetGrow(w Widget, weight float64) {
 	tx.emit(TxSetGrow(w.id, weight))
 }
 
+// SetInset sets a container's own padding — DIP between its bounds
+// and its children, uniform on all four sides, the window inset one
+// level down (docs/styling-plan.md D3). Containers only; the scene
+// rejects it anywhere else. The dynamic path; the declarative
+// spelling is the Inset chain at construction.
+func (tx *Tx) SetInset(w Widget, pad float64) {
+	tx.emit(TxSetInset(w.id, pad))
+}
+
+// Inset pads this container at construction — the declarative chain:
+// tx.Row(...).Inset(8). Same transaction discipline as Grow; born
+// from the first full-bleed app, whose Inset(0) window put the status
+// row on the window edge along with the buffer it was for.
+func (w Widget) Inset(pad float64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Inset on a widget outside its build transaction — use Tx.SetInset inside a live transaction")
+	}
+	w.tx.SetInset(w, pad)
+	return w
+}
+
 // Grow weights this widget within its row/column at construction —
 // the declarative chain: tx.Label(s).Grow(1). It appends to the
 // transaction that minted the widget, so it belongs in the build

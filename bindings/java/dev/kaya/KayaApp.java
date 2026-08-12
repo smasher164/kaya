@@ -1663,6 +1663,23 @@ public final class KayaApp {
         }
 
         /**
+         * This container's own padding at construction — the
+         * declarative chain: tx.row(() -> {...}).inset(8). The window
+         * inset one level down, so a full-bleed window can still hold
+         * an inset status row (the editor, which forced the prop).
+         * Same transaction discipline as grow.
+         */
+        public Widget inset(double pad) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: inset on a widget outside its build transaction"
+                    + " — use Tx.setInset inside a live transaction");
+            }
+            tx.setInset(this, pad);
+            return this;
+        }
+
+        /**
          * This container's cross-axis child placement at construction
          * — the declarative chain:
          * tx.row(() -> {...}).align(Align.BASELINE). Same transaction
@@ -2724,6 +2741,17 @@ public final class KayaApp {
          */
         public void setSpacing(Widget w, double gap) {
             emit(KayaWire.txSetSpacing(w.id, gap));
+        }
+
+        /**
+         * A container's own padding: DIP between its bounds and its
+         * children, uniform on all four sides — the window inset one
+         * level down (docs/styling-plan.md D3). Containers only — the
+         * scene rejects it anywhere else. The dynamic path; the
+         * declarative spelling is the inset chain at construction.
+         */
+        public void setInset(Widget w, double pad) {
+            emit(KayaWire.txSetInset(w.id, pad));
         }
 
         /**

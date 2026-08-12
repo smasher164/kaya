@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x5b58d076d72c3dbb
+SPEC_HASH = 0x426ae13f797cbb12
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -52,6 +52,7 @@ PROP_A11Y_LABEL = 13
 PROP_A11Y_HINT = 14
 PROP_ACCEPTS = 15
 PROP_ROLE = 16
+PROP_INSET = 17
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -654,6 +655,21 @@ def tx_bind_role(widget_id, signal_id):
 def tx_bind_role_element(widget_id, level=0, field=0):
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ROLE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_inset(widget_id, inset):
+    """set_property with a constant inset value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_INSET, SOURCE_CONST) + _enc.value(inset))
+
+
+def tx_bind_inset(widget_id, signal_id):
+    """set_property with a signal-bound inset value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_INSET, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_inset_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_INSET, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window, title):

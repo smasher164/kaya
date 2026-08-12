@@ -137,6 +137,7 @@ module KayaApp
     bindValue,
     bindSource,
     setSpacing,
+    setInset,
     setAlign,
     setA11yId,
     setA11yLabel,
@@ -1802,6 +1803,16 @@ bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
 setSpacing :: Widget -> Double -> Build ()
 setSpacing (Widget w) gap = emitB (W.txSetSpacing w gap)
 
+-- | A container's OWN padding: the DIP between its bounds and its
+-- children, uniform on all four sides — the window inset one level
+-- down (docs\/styling-plan.md D3). Containers only, exactly as
+-- 'setSpacing' is, and the ROOT is what says so: a leaf dies at
+-- declare time naming the prop, and a negative or non-finite pad dies
+-- the same way, in one sentence, the same in all eight languages.
+-- The dynamic path; the declarative spelling is the 'Inset' attr.
+setInset :: Widget -> Double -> Build ()
+setInset (Widget w) pad = emitB (W.txSetInset w pad)
+
 -- Construction props are a closed GADT indexed by widget class: the
 -- attr list admits exactly kaya's vocabulary (no forged config
 -- actions — uniform semantics, in types), 'applyAttr' is a total
@@ -1897,6 +1908,15 @@ data Attr (c :: WClass) where
   -- | This container's inter-child gap (main axis, DIP; the
   -- normalized default is 8). Containers only, held by the index.
   Spacing :: Double -> Attr 'BoxW
+  -- | This container's own padding, between its bounds and its
+  -- children — the window inset one level down. Containers only,
+  -- held by the index like 'Spacing'.
+  --
+  -- Born from the first full-bleed app: a window at inset 0 put the
+  -- status row on the window edge along with the buffer the 0 was
+  -- for, and the answer is an inset on the row rather than a window
+  -- that means two things.
+  Inset :: Double -> Attr 'BoxW
   -- | This container's cross-axis child placement. Containers only,
   -- held by the index like 'Spacing'.
   Align :: Align -> Attr 'BoxW
@@ -1938,6 +1958,7 @@ data Attr (c :: WClass) where
 applyAttr :: Attr c -> Widget -> Build ()
 applyAttr (Grow weight) w = setGrow w weight
 applyAttr (Spacing gap) w = setSpacing w gap
+applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yLabel l) w = setA11yLabel w l

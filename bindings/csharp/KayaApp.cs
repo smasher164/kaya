@@ -1325,6 +1325,14 @@ sealed class Tx
     public void SetSpacing(Widget w, double gap) =>
         Records.Add(KayaWire.TxSetSpacing(w.Id, gap));
 
+    /// A container's own padding: DIP between its bounds and its
+    /// children, uniform on all four sides — the window inset one level
+    /// down. Containers only, spacing's kinds exactly; the scene rejects
+    /// it anywhere else. The declarative spelling is the `inset:`
+    /// argument at construction; this is the dynamic path.
+    public void SetInset(Widget w, double pad) =>
+        Records.Add(KayaWire.TxSetInset(w.Id, pad));
+
     /// A container's cross-axis child placement (the align spec enum;
     /// the normalized default is Align.Start). Containers only;
     /// baseline is rows-only — the scene rejects misuse at the root.
@@ -1620,31 +1628,38 @@ sealed class Tx
     /// A container parents everything declared inside its body (the
     /// ambient stack). Statement position is the point: a foreach over
     /// a generated row trace stands between siblings.
+    ///
+    /// `inset:` is this container's own padding — the window inset one
+    /// level down, so a full-bleed window can still hold an inset row.
     public Widget Column(
-        Action body, double? grow = null, double? spacing = null, Align? align = null) =>
-        ContainerOf(KayaWire.KindColumn, body, grow, spacing, align);
+        Action body, double? grow = null, double? spacing = null, Align? align = null,
+        double? inset = null) =>
+        ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset);
 
     public Widget Row(
-        Action body, double? grow = null, double? spacing = null, Align? align = null) =>
-        ContainerOf(KayaWire.KindRow, body, grow, spacing, align);
+        Action body, double? grow = null, double? spacing = null, Align? align = null,
+        double? inset = null) =>
+        ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset);
 
     /// A vertical scroll viewport over EXACTLY ONE child (declare it
     /// in the body; the scene rejects a second). Pass grow: so the
     /// enclosing track CONSTRAINS it — an unconstrained viewport hugs
     /// its content and nothing overflows.
     public Widget Scroll(Action body, double? grow = null) =>
-        ContainerOf(KayaWire.KindScroll, body, grow, null, null);
+        ContainerOf(KayaWire.KindScroll, body, grow, null, null, null);
 
     /// A grid laying its children out row-major into `columns`
     /// columns — each column takes its NATURAL width, aligned across
     /// rows (the thing nested rows cannot express); `spacing` is the
     /// inter-cell gap on both axes.
-    public Widget Grid(int columns, Action body, double? spacing = null, double? grow = null)
+    public Widget Grid(int columns, Action body, double? spacing = null, double? grow = null,
+        double? inset = null)
     {
         var parent = Widget(KayaWire.KindGrid);
         Records.Add(KayaWire.TxSetColumns(parent.Id, columns));
         if (spacing is double gap) SetSpacing(parent, gap);
         if (grow is double g) SetGrow(parent, g);
+        if (inset is double pad) SetInset(parent, pad);
         App.Parents.Add(parent.Id);
         body?.Invoke();
         App.Parents.RemoveAt(App.Parents.Count - 1);
@@ -1661,12 +1676,14 @@ sealed class Tx
     }
 
     Widget ContainerOf(
-        uint kind, Action body, double? grow = null, double? spacing = null, Align? align = null)
+        uint kind, Action body, double? grow = null, double? spacing = null, Align? align = null,
+        double? inset = null)
     {
         var parent = Widget(kind);
         if (grow is double g) SetGrow(parent, g);
         if (spacing is double gap) SetSpacing(parent, gap);
         if (align is Align a) SetAlign(parent, a);
+        if (inset is double pad) SetInset(parent, pad);
         App.Parents.Add(parent.Id);
         body?.Invoke();
         App.Parents.RemoveAt(App.Parents.Count - 1);

@@ -223,6 +223,13 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * and heading is Compose's heading semantics plus a tier of
      * Material's own type ramp. */
     var role by mutableStateOf(0L)
+
+    /**
+     * A container's own padding (docs/styling-plan.md D3, the window
+     * inset one level down): DIP between its bounds and its children,
+     * uniform all sides. 0 = flush, every container's default.
+     */
+    var inset by mutableStateOf(0.0)
     var checked by mutableStateOf(false)
     var value by mutableStateOf(0.0)
     var minValue by mutableStateOf(0.0)
@@ -387,6 +394,17 @@ val kayaMainExtents = HashMap<Long, Double>()
  * measured-geometry discipline as the track extents.
  */
 val kayaContainerExtents = HashMap<Long, Double>()
+
+/**
+ * The container-inset measurement pair (docs/styling-plan.md D3, one
+ * level down from the window's kayaOuterSize/kayaAvailableSize): OUTER
+ * is the container's box before its own padding, INNER the content box
+ * inside it, and `expect_inset <target>` reads the halved gap in DP —
+ * RELATIVE for the window measurement's exact reason. Both record
+ * unconditionally, so a step can also assert a container is FLUSH (0).
+ */
+val kayaInsetOuter = HashMap<Long, Pair<Double, Double>>()
+val kayaInsetInner = HashMap<Long, Pair<Double, Double>>()
 
 /**
  * Cross-axis observations for expect_aligned: each container's cross
@@ -737,7 +755,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x5b58d076d72c3dbbuL
+    private const val SPEC_HASH: ULong = 0x426ae13f797cbb12uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -895,6 +913,7 @@ object KayaCompose {
      * fit, so every value that arrives here is already legal for its
      * kind. */
     private const val PROP_ROLE = 16
+    private const val PROP_INSET = 17
     // The role enum's wire values (spec enum "role"). Long, because the
     // prop rides as an i64 and the render arms compare against the
     // node's own field.
@@ -1195,6 +1214,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.accepts = readString(b)
                         PROP_ROLE ->
                             KayaSceneModel.nodes[id]!!.role = readI64(b)
+                        PROP_INSET ->
+                            KayaSceneModel.nodes[id]!!.inset = readF64(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into
@@ -4964,21 +4985,55 @@ object KayaCompose {
                         // RELATIVE deliberately, because absolute
                         // offers cannot be byte-frozen across platforms
                         // (docs/styling-plan.md D3).
-                        val want = parts[1]
-                        val got = onUi(activity) {
-                            val density = activity.resources.displayMetrics.density
-                            val outer = kayaOuterSize
-                            val inner = kayaAvailableSize
-                            if (outer.width <= 0 || inner.width <= 0) {
-                                "no layout recorded"
+                        // TWO FORMS, one measurement: `expect_inset N`
+                        // reads the WINDOW's pair, `expect_inset
+                        // <target> N` reads a CONTAINER's own
+                        // (kayaInsetOuter/Inner around its padding) —
+                        // the prop one level down, born from the
+                        // editor's full-bleed window taking the status
+                        // row's margin with it.
+                        if (parts.size >= 3) {
+                            val spec = parts[1]
+                            val want = parts[2]
+                            val node = kayaWidgetTarget(spec)
+                            val got = if (node == null) {
+                                "no such target $spec"
                             } else {
-                                val x = Math.round((outer.width - inner.width) / 2 / density)
-                                val y = Math.round((outer.height - inner.height) / 2 / density)
-                                if (x == y) "$x" else "${x}x$y (axes disagree)"
+                                onUi(activity) {
+                                    val density =
+                                        activity.resources.displayMetrics.density
+                                    val outer = kayaInsetOuter[node.id]
+                                    val inner = kayaInsetInner[node.id]
+                                    if (outer == null || inner == null) {
+                                        "no layout recorded for $spec"
+                                    } else {
+                                        val x = Math.round(
+                                            (outer.first - inner.first) / 2 / density)
+                                        val y = Math.round(
+                                            (outer.second - inner.second) / 2 / density)
+                                        if (x == y) "$x" else "${x}x$y (axes disagree)"
+                                    }
+                                }
                             }
+                            if (got == want) observed.add("inset $spec $want")
+                            else failures.add("inset $spec $got, wanted $want")
+                        } else {
+                            val want = parts[1]
+                            val got = onUi(activity) {
+                                val density = activity.resources.displayMetrics.density
+                                val outer = kayaOuterSize
+                                val inner = kayaAvailableSize
+                                if (outer.width <= 0 || inner.width <= 0) {
+                                    "no layout recorded"
+                                } else {
+                                    val x = Math.round((outer.width - inner.width) / 2 / density)
+                                    val y = Math.round((outer.height - inner.height) / 2 / density)
+                                    if (x == y) "$x" else "${x}x$y (axes disagree)"
+                                }
+                            }
+                            if (got == want) observed.add("inset $want")
+                            else failures.add("inset $got, wanted $want")
                         }
-                        if (got == want) observed.add("inset $want")
-                        else failures.add("inset $got, wanted $want")
                     }
                     "expect_root_fills" -> {
                         // The mounted root fills the area offered to it
@@ -6246,7 +6301,15 @@ private fun KayaRenderCore(
             val gapPx = with(LocalDensity.current) { node.spacing.dp.roundToPx() }
             androidx.compose.ui.layout.Layout(
                 content = { node.children.forEach { child -> KayaRender(child) } },
-                modifier = a11y,
+                // The inset pair brackets the padding (see the column's
+                // note).
+                modifier = a11y.onGloballyPositioned {
+                    kayaInsetOuter[node.id] =
+                        Pair(it.size.width.toDouble(), it.size.height.toDouble())
+                }.padding(node.inset.dp).onGloballyPositioned {
+                    kayaInsetInner[node.id] =
+                        Pair(it.size.width.toDouble(), it.size.height.toDouble())
+                },
             ) { measurables, _ ->
                 val placeables = measurables.map {
                     it.measure(androidx.compose.ui.unit.Constraints())
@@ -6327,7 +6390,16 @@ private fun KayaRenderCore(
             // Normalized default: children packed to the top at natural
             // size, leading-aligned (Alignment.Start), 8 dp between them.
             Column(
+                // The inset pair brackets the container's own padding
+                // (see kayaInsetOuter): outer box, then padding, then
+                // the content readers — so the extents shares divide
+                // are the CONTENT box, which is identical at inset 0.
                 modifier = rootFill.then(a11y).onGloballyPositioned {
+                    kayaInsetOuter[node.id] =
+                        Pair(it.size.width.toDouble(), it.size.height.toDouble())
+                }.padding(node.inset.dp).onGloballyPositioned {
+                    kayaInsetInner[node.id] =
+                        Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.height.toDouble()
                     kayaContainerCross[node.id] = it.size.width.toDouble()
                 },
@@ -6427,7 +6499,14 @@ private fun KayaRenderCore(
             // Normalized default: children packed to the leading edge at
             // natural size, top-aligned (Alignment.Top), 8 dp between them.
             Row(
+                // The inset pair brackets the padding (see the column's
+                // note).
                 modifier = rootFill.then(a11y).onGloballyPositioned {
+                    kayaInsetOuter[node.id] =
+                        Pair(it.size.width.toDouble(), it.size.height.toDouble())
+                }.padding(node.inset.dp).onGloballyPositioned {
+                    kayaInsetInner[node.id] =
+                        Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.width.toDouble()
                     kayaContainerCross[node.id] = it.size.height.toDouble()
                 },

@@ -539,6 +539,13 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // Alignment likewise: where the container places ITS children
         // on the cross axis.
         Prop::Align => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        // A container's own padding (docs/styling-plan.md D3, one level
+        // down from the window inset): spacing's kinds exactly, and for
+        // spacing's reason — the prop is about a container's relation
+        // to ITS children, and a leaf has none to hold off its edge.
+        Prop::Inset => {
+            matches!(kind, WidgetKind::Column | WidgetKind::Row | WidgetKind::Grid)
+        }
         // The grid's own shape: how many columns children fill
         // row-major.
         Prop::Columns => matches!(kind, WidgetKind::Grid),
@@ -706,6 +713,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Source => ValueType::Blob,
         Prop::Grow => ValueType::F64,
         Prop::Spacing => ValueType::F64,
+        Prop::Inset => ValueType::F64,
         Prop::Align => ValueType::I64,
         Prop::Role => ValueType::I64,
         Prop::Indeterminate => ValueType::Bool,
@@ -1095,6 +1103,14 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     // Same argument as grow's domain: a negative gap has no reading
     // under "8 units between adjacent children", and every backend
     // would invent its own overlap. Nonsense dies at the root.
+    // Same domain as the window inset's, for the same reason: negative
+    // padding has no reading, and every backend would invent one.
+    if let (Prop::Inset, Value::F64(pad)) = (prop, value) {
+        assert!(
+            *pad >= 0.0 && pad.is_finite(),
+            "kaya: a container's inset must be finite and non-negative, got {pad}"
+        );
+    }
     if let (Prop::Spacing, Value::F64(gap)) = (prop, value) {
         assert!(
             *gap >= 0.0 && gap.is_finite(),
@@ -5232,6 +5248,37 @@ mod tests {
                 widget: WidgetId(1),
                 prop: Prop::Role,
                 value: PropValue::Const(Value::I64(1)),
+            },
+        ]);
+    }
+
+    /// THE CONTAINER INSET'S TWO WALLS, spacing's exactly: a leaf has
+    /// no children to hold off its edge, and negative padding has no
+    /// reading for any backend to invent.
+    #[test]
+    #[should_panic(expected = "Label has no property Inset")]
+    fn an_inset_label_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Inset,
+                value: PropValue::Const(Value::F64(8.0)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "container's inset must be finite and non-negative")]
+    fn a_negative_container_inset_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Inset,
+                value: PropValue::Const(Value::F64(-1.0)),
             },
         ]);
     }

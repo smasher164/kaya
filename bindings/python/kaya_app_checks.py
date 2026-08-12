@@ -370,7 +370,7 @@ except RuntimeError:
 with app.build():
     if True:
         before = len(kaya._tx)
-        with kaya.column(grow=2, spacing=12, align="center"):
+        with kaya.column(grow=2, spacing=12, align="center", inset=6):
             kaya.label(text="x", grow=1)
         queued = kaya._tx[before:]
         def _prop_write(prop, value_type):
@@ -392,6 +392,15 @@ with app.build():
         check(
             "column align= reaches the records",
             _prop_write(kaya.wire.PROP_ALIGN, kaya.wire.VALUE_I64),
+        )
+        # And as the F64 the prop is typed as, out of the int written
+        # here: an inset arriving as an I64 is refused by the root for
+        # its TYPE, which is a true complaint about the wrong mistake
+        # (the window inset's lesson, one level down).
+        check(
+            "column inset= reaches the records",
+            _prop_write(kaya.wire.PROP_INSET, kaya.wire.VALUE_F64)
+            and not _prop_write(kaya.wire.PROP_INSET, kaya.wire.VALUE_I64),
         )
 
 # The generated shortcut canonicalizer (the one binding-tier parser;
@@ -1016,6 +1025,7 @@ with app_src.window():
             ("grow", lambda: kaya.label("x", grow=el.pct), kaya.wire.PROP_GROW),
             ("spacing", lambda: kaya.column(spacing=el.pct),
              kaya.wire.PROP_SPACING),
+            ("inset", lambda: kaya.column(inset=el.pct), kaya.wire.PROP_INSET),
             ("align", lambda: kaya.column(align=el.pct), kaya.wire.PROP_ALIGN),
         ):
             check(

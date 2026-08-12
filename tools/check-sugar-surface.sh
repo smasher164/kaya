@@ -844,6 +844,23 @@ check_styling_point role \
     'Role :: Role -> Attr' \
     'let (label|button) [^=]*\?role|let set_role \(Widget id\)'
 
+# THE CONTAINER INSET (docs/styling-plan.md D3 one level down, landed
+# 2026-08-12 — the prop the full-bleed editor forced). EVERY ROW IS
+# KEYED PAST ITS WINDOW-INSET TWIN, which shares the bare name in all
+# eight: the window's spelling rides the window construct and the
+# container's rides the widget chain beside grow, so the receiver or
+# the parameter is what tells them apart — the menu-role lesson, one
+# prop over.
+check_styling_point 'container inset' \
+    'pub fn inset\(&mut self, widget: WidgetId' \
+    'def inset\(self, pad\)' \
+    'func \(w Widget\) Inset\(' \
+    'public void SetInset\(' \
+    'public Widget inset\(' \
+    'func setInset\(' \
+    'Inset :: Double -> Attr' \
+    'let set_inset \(Widget id\)|let (row|column|grid) [^=]*\?inset'
+
 # EVERY WINDOW HANDLER NEEDS A CONSTRUCT SPELLING TOO — AND NO LOOSE
 # ONE. The props above are half of the window construct; its HANDLERS
 # are the other half, and nothing swept them. That is how the undo

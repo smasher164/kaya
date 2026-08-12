@@ -536,6 +536,21 @@ func App() *kaya.App {
 	}
 
 	app.Build(func(tx *kaya.Tx) {
+		// THE BRAND, before anything mounts (the set-once wall): one hex
+		// is the whole call, and the core derives every fill, foreground
+		// and state ramp from it (docs/styling-plan.md D1). What it
+		// touches in THIS app is exactly the chrome kaya owns — the find
+		// bar's buttons and the panels' default buttons pick it up; the
+		// buffer's text and the selection stay the platform's. And it is
+		// a REQUEST (D2): on a mac whose user has chosen a system accent,
+		// that accent wins and this line is a no-op, which is the
+		// semantics and not a failure of it.
+		//
+		// The find bar's buttons carry no ROLE, and that is a recorded
+		// gap rather than a choice: they are stamped from the template
+		// zone, which has no role spelling in any binding yet
+		// (docs/deferred.md, styling follow-ups).
+		tx.BrandAccent(0x0F7B6C)
 		// VETO_CLOSE says this window's close is the app's to answer;
 		// nothing else about it is armed. An editor owns its close so it
 		// can ask.
@@ -771,12 +786,14 @@ func App() *kaya.App {
 			// so this is the whole vocabulary, and "shown and hidden"
 			// (docs/editor-plan.md E1) means built and torn down.
 			//
-			// A BLUEPRINT TAKES NO PROPS in the Go template tier — no
-			// grow, no align, no a11y ids — so the field keeps its
-			// natural width and the buttons sit beside it. That is a
-			// binding-surface gap rather than a protocol one (the wire's
-			// set_property is happy to name a node), recorded here and
-			// not worked around.
+			// THE TEMPLATE TIER CARRIES SOME PROPS NOW — grow and the
+			// a11y trio arrived with the template-node props slice —
+			// but NOT inset: the stamped row below cannot pad itself
+			// the way the live status row does, so the bar sits flush
+			// while the chrome under it keeps its margin. Recorded as
+			// a styling follow-up (docs/deferred.md) and not worked
+			// around; the field also keeps its natural width, the
+			// remaining gap of the same class.
 			findRows = tx.Collection()
 			for row := range findRows.Rows(tx) {
 				row.Row(func() {
@@ -807,10 +824,20 @@ func App() *kaya.App {
 			// down and stamped again. Two labels in one row rather than
 			// two rows: a second line of chrome is exactly what the
 			// brief did not ask for.
+			// INSET 8 ON THE CHROME, NOT ON THE WINDOW: the window's
+			// Inset(0) above is the buffer's full bleed, and it took
+			// this row's margin with it — "new file" and the tally sat
+			// flush on the window edge (maintainer, 2026-08-12). The
+			// container inset is the styling pass's answer: the same
+			// number the window prop takes, one level down, so the
+			// document runs to the edge while the chrome keeps its
+			// margin. The find bar's row cannot say this yet — it is a
+			// TEMPLATE node and the template zone carries no inset
+			// (docs/deferred.md, styling follow-ups).
 			tx.Row(func() {
 				tx.Label(status).Grow(1).A11yID("status") // label#0
 				tx.Label(count).A11yID("matches")         // label#1
-			})
+			}).Inset(8)
 		}).Align(kaya.AlignStretch))
 
 		// AN EDITOR OPENS WITH THE CURSOR IN THE DOCUMENT. It is also

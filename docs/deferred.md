@@ -2322,6 +2322,17 @@ interpreter carries slice 1's one real brand lowering
   reference grows `Tpl` role first and the eight spellings follow —
   two lines each per the java arm's estimate — plus a
   tpl-surfaces/tools clause. Deliberately absent today, not forgotten.
+- **The template zone has no `inset` either — and the editor's find bar
+  is the live case.** The container inset landed 2026-08-12 (the prop
+  the full-bleed editor forced: its status row insets while the buffer
+  runs to the edge), but the find bar's row is a STAMPED node, and the
+  template zone carries exactly one layout prop (grow, which scroll
+  forced). So the bar still sits flush while the status row does not —
+  visible in the editor captures. Same closure shape as role above:
+  the reference grows the `Tpl` spelling first, eight bindings follow,
+  and the tpl-surfaces census holds it. Worth doing together with
+  template `role` if either is admitted, since the walls, sweeps and
+  gates are the same set twice.
 - **The brand mask bits deserve generated constants.** The
   `set_brand_accent` record's mask (bit 0 = light override, bit 1 =
   dark) has no spec-emitted name, so five bindings and both

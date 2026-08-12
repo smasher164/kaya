@@ -738,6 +738,16 @@ class Widget(_Handle):
         argument at construction; this is the dynamic path."""
         _records().append(wire.tx_set_spacing(self.id, float(gap)))
 
+    def inset(self, pad):
+        """Set this container's own padding: DIP between its bounds and
+        its children, uniform on all four sides — the window inset one
+        level down, so a full-bleed window can still hold an inset
+        status row (the app that forced it: the editor). Containers only
+        — the scene rejects it anywhere else, and refuses a negative
+        one. The declarative spelling is the `inset=` argument at
+        construction; this is the dynamic path."""
+        _records().append(wire.tx_set_inset(self.id, float(pad)))
+
     def context_menu(self):
         """The live-widget context anchor: `with target.context_menu():`
         declares the catalog — the same command vocabulary scoped to a
@@ -2531,6 +2541,12 @@ def _set_spacing(handle, spacing):
     _records().append(wire.tx_set_spacing(handle.id, float(spacing)))
 
 
+def _set_inset(handle, inset):
+    if inset is None:
+        return
+    _records().append(wire.tx_set_inset(handle.id, float(inset)))
+
+
 def _set_grow(handle, grow):
     # The one kind-agnostic prop: every constructor takes `grow=`, the
     # declarative spelling of Widget.grow (see that docstring for the
@@ -2549,16 +2565,17 @@ def scroll(grow=None):
     return _Container(handle)
 
 
-def grid(columns, grow=None, spacing=None):
+def grid(columns, grow=None, spacing=None, inset=None):
     """A grid container: `with kaya.grid(2):` parents its children,
     laying them out row-major into `columns` columns — each column
     takes its NATURAL width, aligned across rows (the thing nested
     rows cannot express). `spacing` is the inter-cell gap on both
-    axes."""
+    axes; `inset` its own padding inside its bounds."""
     handle = _widget(wire.KIND_GRID)
     _records().append(wire.tx_set_columns(handle.id, float(columns)))
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
+    _set_inset(handle, inset)
     return _Container(handle)
 
 
@@ -2571,15 +2588,17 @@ def spacer(grow=1.0):
     return handle
 
 
-def column(grow=None, spacing=None, align=None):
+def column(grow=None, spacing=None, align=None, inset=None):
     """A column container: `with kaya.column():` parents everything
     declared inside it. `grow` is its flex weight within the enclosing
     container; `spacing` its inter-child gap (main axis, DIP; the
-    normalized default is 8)."""
+    normalized default is 8); `inset` its own padding between its
+    bounds and those children (the window inset one level down)."""
     handle = _widget(wire.KIND_COLUMN)
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
     _set_align(handle, align)
+    _set_inset(handle, inset)
     return _Container(handle)
 
 
@@ -2593,15 +2612,18 @@ def button(text=None, on_click=None, grow=None):
     return handle
 
 
-def row(grow=None, spacing=None, align=None):
+def row(grow=None, spacing=None, align=None, inset=None):
     """A row container: column turned sideways; `with kaya.row():`
     parents everything declared inside it. `grow` is its flex weight
     within the enclosing container; `spacing` its inter-child gap
-    (main axis, DIP; the normalized default is 8)."""
+    (main axis, DIP; the normalized default is 8); `inset` its own
+    padding between its bounds and those children (the window inset one
+    level down)."""
     handle = _widget(wire.KIND_ROW)
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
     _set_align(handle, align)
+    _set_inset(handle, inset)
     return _Container(handle)
 
 

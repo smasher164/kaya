@@ -319,6 +319,13 @@ expect label#1 "no matches"
 click button#last
 expect label#1 ""
 expect_order row#0 "saved, 134 bytes|"
+# The STATUS ROW'S OWN INSET (docs/styling-plan.md D3 one level down):
+# the window declares 0 — the buffer's full bleed — and the chrome row
+# declares 8, measured here as the halved gap between the row's outer
+# box and its content box. Placed at a BAR-FREE moment deliberately:
+# the find bar's stamped row would shift row ordinals (the a11yrows
+# lesson), and right here the status row is the only row there is.
+expect_inset row#0 8
 
 # ---- the unsaved-work guard, from two different doors --------------
 #

@@ -668,6 +668,15 @@ let set_a11y ?a11y_id ?a11y_label w =
    is the [~spacing] labeled argument on the container. *)
 let set_spacing (Widget id) gap = emit (the_tx ()) (Kaya_wire.tx_set_spacing id gap)
 
+(* A container's OWN padding (DIP between its bounds and its children,
+   uniform on all four sides) — the window inset one level down, which
+   is why a full-bleed [window ~inset:0.0] can still hold an inset
+   status row. Containers only, spacing's kinds exactly; the scene
+   rejects it anywhere else. [set_inset] is the dynamic path; the
+   declarative spelling is the [~inset] labeled argument on the
+   container. *)
+let set_inset (Widget id) pad = emit (the_tx ()) (Kaya_wire.tx_set_inset id pad)
+
 (* A container's cross-axis child placement (the align spec enum; the
    normalized default is [Start]). Containers only; [Baseline] is
    rows-only — the scene rejects misuse at the root. [set_align] is
@@ -1029,13 +1038,14 @@ let image ?grow ?a11y_id ?a11y_label ?source ?bind () =
    stand, omit it to hand the creator to a container. Construction
    props are labeled optional arguments, the lablgtk idiom: [~grow]
    weights the container within ITS parent, [~spacing] sets its own
-   inter-child gap. *)
-let container ?grow ?a11y_id ?a11y_label ?spacing ?align kind children () =
+   inter-child gap, [~inset] its own padding. *)
+let container ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset kind children () =
   let parent = widget kind in
   Option.iter (fun g -> set_grow parent g) grow;
   set_a11y ?a11y_id ?a11y_label parent;
   Option.iter (fun s -> set_spacing parent s) spacing;
   Option.iter (fun a -> set_align parent a) align;
+  Option.iter (fun p -> set_inset parent p) inset;
   List.iter (fun child -> add_child parent (child ())) children;
   parent
 
@@ -1044,7 +1054,7 @@ let container ?grow ?a11y_id ?a11y_label ?spacing ?align kind children () =
    (the thing nested rows cannot express). [~spacing] is the
    inter-cell gap on both axes. The columns record lands BEFORE the
    add_childs (backends re-flow either way). *)
-let grid ~columns ?grow ?a11y_id ?a11y_label ?spacing children () =
+let grid ~columns ?grow ?a11y_id ?a11y_label ?spacing ?inset children () =
   let tx = the_tx () in
   let parent = widget Kaya_wire.kind_grid in
   let (Widget id) = parent in
@@ -1052,6 +1062,7 @@ let grid ~columns ?grow ?a11y_id ?a11y_label ?spacing children () =
   Option.iter (fun g -> set_grow parent g) grow;
   set_a11y ?a11y_id ?a11y_label parent;
   Option.iter (fun s -> set_spacing parent s) spacing;
+  Option.iter (fun p -> set_inset parent p) inset;
   List.iter (fun child -> add_child parent (child ())) children;
   parent
 
@@ -1062,8 +1073,9 @@ let spacer ?(grow = 1.0) () =
   set_grow w grow;
   w
 
-let column ?grow ?a11y_id ?a11y_label ?spacing ?align children =
-  container ?grow ?a11y_id ?a11y_label ?spacing ?align Kaya_wire.kind_column children
+let column ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset children =
+  container ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset Kaya_wire.kind_column
+    children
 
 (* A vertical scroll viewport over EXACTLY ONE child (the signature
    says so; the scene enforces it too). Pass [~grow] so the enclosing
@@ -1072,8 +1084,9 @@ let column ?grow ?a11y_id ?a11y_label ?spacing ?align children =
 let scroll ?grow ?a11y_id ?a11y_label children =
   container ?grow ?a11y_id ?a11y_label Kaya_wire.kind_scroll children
 
-let row ?grow ?a11y_id ?a11y_label ?spacing ?align children =
-  container ?grow ?a11y_id ?a11y_label ?spacing ?align Kaya_wire.kind_row children
+let row ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset children =
+  container ?grow ?a11y_id ?a11y_label ?spacing ?align ?inset Kaya_wire.kind_row
+    children
 
 (* An existing widget as a child: [w field] wraps an already-realized
    handle in an inert thunk, so a widget created earlier (because

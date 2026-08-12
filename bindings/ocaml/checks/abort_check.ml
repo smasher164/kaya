@@ -377,4 +377,64 @@ let () =
       fail "a plain window queued inset %g — an unstated inset must stay unstated, so the core's 16 stands"
         v);
 
+  (* THE CONTAINER INSET is the same prop one level down, and the two
+     spellings share the bare name [inset] in this binding: the window's
+     rides [window ~inset], the container's rides [row]/[column]/[grid]
+     and [set_inset]. So read the prop NUMBER, never the call — a
+     container spelling wired to the window's writer would set the
+     WINDOW's padding and every surface gate would still be green.
+     Presence and absence are one clause here too (the core's container
+     default is 8, so a binding-side default would re-pad every
+     container nobody asked about), and the record must carry the
+     CONTAINER'S OWN id: a reader on the wrong widget agrees with a
+     sugar that padded its child. What the ROOT does with the value —
+     leaves refused, negatives refused — is the root's, checked there
+     and end to end; this clause only proves the request is made. *)
+  let container_insets rs =
+    List.filter_map
+      (fun r ->
+        if
+          rec_kind r = Kaya_wire.tx_kind_set_property
+          && rec_u32 r 16 = Kaya_wire.prop_inset
+        then Some (rec_u64 r 8, rec_u32 r 24, Int64.float_of_bits (rec_u64 r 32))
+        else None)
+      rs
+  in
+  let inset_call call =
+    build app (fun () ->
+        let tx = the_tx () in
+        let before = List.length tx.records in
+        let (Widget id) = call () in
+        (id, container_insets (queued_since tx before)))
+  in
+  (match inset_call (fun () -> row ~inset:8.0 [ label ~text:"in" ] ()) with
+  | id, [ (on, tag, v) ] when on = id && tag = Kaya_wire.value_f64 && v = 8.0 -> ()
+  | id, [ (on, tag, v) ] ->
+      fail "row ~inset:8.0 queued (widget %Ld, tag %d, %g), wanted (%Ld, %d, 8)" on tag v
+        id Kaya_wire.value_f64
+  | _, l -> fail "row ~inset:8.0 queued %d inset props, not one" (List.length l));
+  (* The absence, next to the presence and before anything else can
+     drown it: a defaulted [?inset] shows up here as an unasked-for 0. *)
+  (match inset_call (fun () -> row ~spacing:4.0 [ label ~text:"in" ] ()) with
+  | _, [] -> ()
+  | _, (_, _, v) :: _ ->
+      fail "a plain row queued inset %g — an unstated inset must stay unstated, so the core's 8 stands"
+        v);
+  (match inset_call (fun () -> grid ~columns:2 ~inset:4.5 [ label ~text:"in" ] ()) with
+  | _, [ (_, _, v) ] when v = 4.5 -> ()
+  | _, [ (_, _, v) ] ->
+      fail "grid ~inset:4.5 queued %g — the reader is on the padding, not the value" v
+  | _, l -> fail "grid ~inset:4.5 queued %d inset props, not one" (List.length l));
+  (* The dynamic path reaches the same record as the labeled one. *)
+  (match
+     inset_call (fun () ->
+         let c = column [ label ~text:"in" ] () in
+         set_inset c 2.0;
+         c)
+   with
+  | id, [ (on, _, v) ] when on = id && v = 2.0 -> ()
+  | id, [ (on, _, v) ] ->
+      fail "set_inset queued (widget %Ld, %g), wanted (%Ld, 2)" on v id
+  | _, l -> fail "set_inset queued %d inset props, not one" (List.length l));
+
   print_endline "ocaml abort check: OK"

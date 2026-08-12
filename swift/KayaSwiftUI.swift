@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x5b58d076d72c3dbb
+let kayaSpecHash: UInt64 = 0x426ae13f797cbb12
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -143,6 +143,7 @@ private let propAccepts: UInt32 = 15
 /// Semantic emphasis (docs/styling-plan.md D4): destructive/prominent
 /// on buttons, heading on labels. The variant values follow.
 private let propRole: UInt32 = 16
+private let propInset: UInt32 = 17
 private let roleDestructive: Int64 = 1
 private let roleProminent: Int64 = 2
 private let roleHeading: Int64 = 3
@@ -191,6 +192,11 @@ final class KayaNode: Identifiable {
     /// SwiftUI's own button affordances and heading to the AX trait +
     /// the platform's heading text style — never a raw color.
     var role: Int64 = 0
+    /// A container's own padding (docs/styling-plan.md D3, the window
+    /// inset one level down): DIP between its bounds and its children,
+    /// uniform all sides. 0 = flush, which is every container's
+    /// default — the window's 16 belongs to the window alone.
+    var inset: Double = 0
     /// The widget's accept list, verbatim. Recorded here because the
     /// paste hook and the standard commands' enablement both read it
     /// off the focused node. Empty means the widget takes nothing.
@@ -3482,6 +3488,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propRole, valueI64):
                     kayaScene.nodes[id]!.role =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propInset, valueF64):
+                    kayaScene.nodes[id]!.inset =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.
@@ -6118,28 +6127,60 @@ private func kayaRunScript(_ script: String) {
                     failures.append("alerts \(got), wanted \(want)")
                 }
             case "expect_inset":
-                // The window content inset, MEASURED as the halved gap
-                // between the padding container's outer extent and the
-                // offer inside it — RELATIVE deliberately: absolute
-                // offers cannot be byte-frozen across platforms (GTK's
-                // CSD headerbar sits inside the window's height where
+                // The content inset, MEASURED as the halved gap between
+                // the padding container's outer extent and the offer
+                // inside it — RELATIVE deliberately: absolute offers
+                // cannot be byte-frozen across platforms (GTK's CSD
+                // headerbar sits inside the window's height where
                 // macOS's titlebar sits outside), while the inset is
                 // the same number everywhere (docs/styling-plan.md D3).
-                let wantInset = String(parts[1])
-                let gotInset = DispatchQueue.main.sync { () -> String in
-                    let outer = kayaOuterSize
-                    let inner = kayaAvailableSize
-                    guard outer.width > 0, inner.width > 0 else {
-                        return "no layout recorded"
+                //
+                // TWO FORMS, one measurement: `expect_inset N` reads
+                // the WINDOW's pair, `expect_inset <target> N` reads a
+                // CONTAINER's own (the KayaInsetReader pair around its
+                // padding) — the prop one level down, born from the
+                // editor's full-bleed window taking the status row's
+                // margin with it.
+                if parts.count >= 3 {
+                    let wantInset = String(parts[2])
+                    let spec = parts[1]
+                    let gotInset = DispatchQueue.main.sync { () -> String in
+                        guard let node = kayaAnyTarget(spec) else {
+                            return "no such target \(spec)"
+                        }
+                        guard let outer = kayaInsetOuter[node.id],
+                            let inner = kayaInsetInner[node.id],
+                            outer.width > 0, inner.width > 0
+                        else {
+                            return "no layout recorded for \(spec)"
+                        }
+                        let x = ((outer.width - inner.width) / 2).rounded()
+                        let y = ((outer.height - inner.height) / 2).rounded()
+                        return x == y ? "\(Int(x))" : "\(Int(x))x\(Int(y)) (axes disagree)"
                     }
-                    let x = ((outer.width - inner.width) / 2).rounded()
-                    let y = ((outer.height - inner.height) / 2).rounded()
-                    return x == y ? "\(Int(x))" : "\(Int(x))x\(Int(y)) (axes disagree)"
-                }
-                if gotInset == wantInset {
-                    observed.append("inset \(wantInset)")
+                    if gotInset == wantInset {
+                        observed.append("inset \(spec) \(wantInset)")
+                    } else {
+                        failures.append(
+                            "inset \(spec) \(gotInset), wanted \(wantInset)")
+                    }
                 } else {
-                    failures.append("inset \(gotInset), wanted \(wantInset)")
+                    let wantInset = String(parts[1])
+                    let gotInset = DispatchQueue.main.sync { () -> String in
+                        let outer = kayaOuterSize
+                        let inner = kayaAvailableSize
+                        guard outer.width > 0, inner.width > 0 else {
+                            return "no layout recorded"
+                        }
+                        let x = ((outer.width - inner.width) / 2).rounded()
+                        let y = ((outer.height - inner.height) / 2).rounded()
+                        return x == y ? "\(Int(x))" : "\(Int(x))x\(Int(y)) (axes disagree)"
+                    }
+                    if gotInset == wantInset {
+                        observed.append("inset \(wantInset)")
+                    } else {
+                        failures.append("inset \(gotInset), wanted \(wantInset)")
+                    }
                 }
             case "expect_root_fills":
                 // The mounted root fills the area the window offered it
@@ -7007,6 +7048,38 @@ private struct KayaCellReader: View {
 /// The container-extent sibling of KayaTrackReader: a background
 /// reader on the container view itself (either branch — flex or
 /// stock stack), recording its rendered main-axis extent.
+/// The container-inset measurement pair (docs/styling-plan.md D3, one
+/// level down from the window's kayaOuterSize/kayaAvailableSize): the
+/// INNER reader rides the container's content, the OUTER one rides the
+/// same view after `.padding(node.inset)`, and `expect_inset <target>`
+/// reads the halved gap between them — RELATIVE for the window
+/// measurement's exact reason. Both record unconditionally, so the
+/// step can also assert a container is FLUSH (0), absence being as
+/// load-bearing as presence.
+@MainActor var kayaInsetInner: [UInt64: CGSize] = [:]
+@MainActor var kayaInsetOuter: [UInt64: CGSize] = [:]
+
+private struct KayaInsetReader: View {
+    let id: UInt64
+    let outer: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { record(geo.size) }
+                .onChange(of: geo.size) { _, size in record(size) }
+        }
+    }
+
+    private func record(_ size: CGSize) {
+        if outer {
+            kayaInsetOuter[id] = size
+        } else {
+            kayaInsetInner[id] = size
+        }
+    }
+}
+
 private struct KayaBoxReader: View {
     let id: UInt64
     let vertical: Bool
@@ -7377,6 +7450,9 @@ struct KayaRender: View {
             }
             .coordinateSpace(name: "kaya-box-\(node.id)")
             .background(KayaBoxReader(id: node.id, vertical: true))
+            .background(KayaInsetReader(id: node.id, outer: false))
+            .padding(node.inset)
+            .background(KayaInsetReader(id: node.id, outer: true))
         case kindButton:
             // The dressed floor. macOS bridges to NSButton: in a
             // process whose main executable is stamped with a pre-26
@@ -7447,6 +7523,9 @@ struct KayaRender: View {
             }
             .coordinateSpace(name: "kaya-box-\(node.id)")
             .background(KayaBoxReader(id: node.id, vertical: false))
+            .background(KayaInsetReader(id: node.id, outer: false))
+            .padding(node.inset)
+            .background(KayaInsetReader(id: node.id, outer: true))
         case kindLabel:
             // The heading role (docs/styling-plan.md D4) is BOTH facts
             // at once: the platform's heading TEXT STYLE (.headline —
@@ -7567,6 +7646,9 @@ struct KayaRender: View {
                 }
             }
             .coordinateSpace(name: "kaya-grid-\(node.id)")
+            .background(KayaInsetReader(id: node.id, outer: false))
+            .padding(node.inset)
+            .background(KayaInsetReader(id: node.id, outer: true))
         case kindRadio:
             // The choice contract in its inline presentation. The
             // dressed floor per platform: macOS renders the REAL

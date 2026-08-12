@@ -8,7 +8,7 @@
 //! is the doorbell, carrying no data.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::Receiver;
@@ -45,6 +45,14 @@ const GROW_KEY: &str = "kaya-grow";
 /// the allocation's business (that is what the other backends' tracks
 /// mean too), and this is the one observation that needs both halves.
 const TRACK_KEY: &str = "kaya-track";
+
+/// The CSS class prefix a container's own inset rides on (prop 17): one
+/// class per DISTINCT value, `kaya-inset-8` and friends, defined in
+/// `CoreState::container_inset_css`. A class and not a per-widget
+/// provider because `gtk_style_context_add_provider` — GTK4's per-widget
+/// route — is deprecated, and because the display-level provider is the
+/// road the window inset already takes.
+const INSET_CLASS: &str = "kaya-inset-";
 
 /// Guest-visible text uses LF as its line separator on every platform
 /// (strings are compared byte-for-byte across languages). GTK's
@@ -1029,6 +1037,15 @@ struct CoreState {
     /// The provider holding the `.kaya-root` padding, kept to rewrite
     /// when the inset moves.
     inset_css: gtk4::CssProvider,
+    /// A CONTAINER's own inset (prop 17, the window inset one level
+    /// down): its own provider, holding one `kaya-inset-N` rule per
+    /// distinct value any container has asked for, and the set of values
+    /// those rules cover. Separate from `inset_css` for the brand's
+    /// reason — the window arm rewrites that one whole and would erase
+    /// these — and rewritten only when a value appears that no rule
+    /// covers yet.
+    container_inset_css: gtk4::CssProvider,
+    container_insets: BTreeSet<i64>,
     /// THE BRAND ACCENT (docs/styling-plan.md D1), in the two pieces the
     /// lowering needs: its own provider — separate from `inset_css`,
     /// which the inset arm rewrites whole and would otherwise erase the
@@ -5286,6 +5303,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // so both layout paths follow it.
                     container.set_spacing(gap.round() as i32);
                 }
+                // THE CONTAINER'S OWN PADDING (prop 17), all three kinds
+                // the root allows it on. The CSS box carries it, not the
+                // layout: GTK hands a layout manager the CONTENT size
+                // and places its children from the content origin, so
+                // both of this backend's layout paths — GtkBox's own and
+                // kaya's FlexLayout — inset their children with no code
+                // here (measured, docs/styling-plan.md D3).
+                (NativeWidget::Column(container), Prop::Inset, Value::F64(pad))
+                | (NativeWidget::Row(container), Prop::Inset, Value::F64(pad)) => {
+                    // Cloned out of `core.widgets` first: the helper
+                    // wants the whole core (the grid-columns arm above
+                    // does the same dance for the same reason).
+                    let widget = container.clone().upcast::<gtk4::Widget>();
+                    set_container_inset(core, &widget, pad);
+                }
+                (NativeWidget::Grid(grid), Prop::Inset, Value::F64(pad)) => {
+                    let widget = grid.clone().upcast::<gtk4::Widget>();
+                    set_container_inset(core, &widget, pad);
+                }
                 (NativeWidget::Column(container), Prop::Align, Value::I64(mode)) => {
                     use gtk4::prelude::WidgetExt;
                     let container = container.clone().upcast::<gtk4::Widget>();
@@ -5597,6 +5633,61 @@ fn load_kaya_css(
     }
 }
 
+/// A CONTAINER's own inset (prop 17): the space between its bounds and
+/// its children, lowered onto the container's CSS box.
+///
+/// A TRANSPARENT BORDER, NOT `padding` — the one spelling in this file
+/// GTK's cascade chose rather than kaya. This backend mounts the root
+/// with no wrapper of its own, so `.kaya-root`, which carries the WINDOW
+/// inset, sits on the very widget a root container's own inset lands on,
+/// and two `padding` declarations on one widget do not add: the later
+/// provider simply wins. Measured — a root under `.kaya-root { padding:
+/// 16px }` plus a second provider's `padding: 8px` places its children
+/// 8 in, and the window's 16 is gone with no error anywhere. Every other
+/// backend NESTS the two (SwiftUI's KayaRoot pads around the mounted
+/// view and the node's own `.padding(node.inset)` sits inside it; Compose
+/// the same), so the numbers add there. A border is a different CSS box,
+/// so they add here too (measured: 16 + 8 puts the content 24 in), it is
+/// subtracted from the content the same way padding is, and being
+/// transparent it draws nothing. Nothing else in kaya's GTK stylesheet
+/// writes a border, and Adwaita gives a plain box or grid none.
+///
+/// ONE RULE PER DISTINCT VALUE in one display-level provider, rather than
+/// a provider per widget: `gtk_style_context_add_provider` is GTK4's
+/// per-widget route and it is deprecated, and the class route is the one
+/// the window inset already takes. Per VALUE and not per widget because
+/// the stamped case is the one that scales — a thousand collection rows
+/// inset by 8 share one rule — and the sheet is rewritten only when a
+/// value nothing has asked for yet arrives.
+fn set_container_inset(core: &mut CoreState, widget: &gtk4::Widget, pad: f64) {
+    use gtk4::prelude::WidgetExt;
+    // Whole pixels, the window arm's rule — the value is a CSS length,
+    // and the measurement answers in whole layout units. Negative and
+    // non-finite died at the root (scene.rs's check_prop).
+    let px = pad.round().max(0.0) as i64;
+    // Exactly one of these classes at a time: a second write to the same
+    // container must not leave the first value behind it.
+    for class in widget.css_classes() {
+        if class.starts_with(INSET_CLASS) {
+            widget.remove_css_class(&class);
+        }
+    }
+    widget.add_css_class(&format!("{INSET_CLASS}{px}"));
+    if core.container_insets.insert(px) {
+        let sheet: String = core
+            .container_insets
+            .iter()
+            .map(|n| format!(".{INSET_CLASS}{n} {{ border: {n}px solid transparent; }}\n"))
+            .collect();
+        load_kaya_css(
+            &core.container_inset_css,
+            "container inset",
+            &sheet,
+            &core.css_error,
+        );
+    }
+}
+
 /// Arm one of kaya's providers to record its parse errors into the shared
 /// cell `load_kaya_css` reads.
 fn watch_css_errors(provider: &gtk4::CssProvider, error: &Rc<RefCell<Option<String>>>) {
@@ -5702,6 +5793,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // is that override.
         let brand_css = gtk4::CssProvider::new();
         watch_css_errors(&brand_css, &css_error);
+        // The container inset's provider, EMPTY until some container
+        // asks for one — a scene where nothing is inset contributes no
+        // rule at all (see set_container_inset).
+        let container_inset_css = gtk4::CssProvider::new();
+        watch_css_errors(&container_inset_css, &css_error);
         if let Some(display) = gtk4::gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
                 &display,
@@ -5711,6 +5807,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &brand_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &container_inset_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
         }
@@ -5805,6 +5906,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 },
                 inset: 16.0,
                 inset_css,
+                container_inset_css,
+                container_insets: BTreeSet::new(),
                 brand,
                 brand_css,
                 css_error,
@@ -7972,29 +8075,39 @@ impl crate::harness::Stage for GtkStage {
 
     fn inset(&self) -> String {
         Self::on_main(move |core| {
-            use gtk4::prelude::{GtkWindowExt, WidgetExt};
+            use gtk4::prelude::GtkWindowExt;
             let Some(root) = core.window.child() else {
                 return "nothing mounted".to_owned();
             };
             while glib::MainContext::default().iteration(false) {}
-            // MEASURED, not read back from the model: `.kaya-root` CSS
-            // padding shifts the first child inside the root's
-            // allocation by exactly the inset, so the child's origin
-            // relative to the root IS the number — real layout, the
-            // same fact the harness measures on every backend
-            // (docs/styling-plan.md D3).
-            let Some(child) = root.first_child() else {
-                return "no child".to_owned();
+            // The root's own CSS box, where `.kaya-root`'s padding is
+            // (docs/styling-plan.md D3). AND ON GTK THAT BOX IS SHARED:
+            // kaya mounts the root with no wrapper, so a root container
+            // carrying its own inset (prop 17) is counted here too, and
+            // the number is the total its children actually sit behind.
+            // A scene that wants the two apart asserts the container's
+            // on a container that is not the root — which is where the
+            // prop was born (the editor's full-bleed window and its
+            // inset status ROW).
+            css_inset_of(&root)
+        })
+    }
+
+    fn container_inset(&self, target: crate::harness::Target) -> String {
+        use crate::harness::TargetKind as K;
+        if !matches!(target.kind, K::Column | K::Row | K::Grid) {
+            // The runner does not pre-check this step's kind the way it
+            // does expect_shares, so the refusal lives here — and it
+            // names what arrived, because a leaf's CSS box would answer
+            // with the theme's padding and read like a measurement.
+            return format!("{:?} is not a container target", target.kind);
+        }
+        Self::on_main(move |core| {
+            let Some(widget) = target_widget(core, target) else {
+                return "<no such target>".to_owned();
             };
-            let Some((x, y)) = child.translate_coordinates(&root, 0.0, 0.0) else {
-                return "no shared ancestor".to_owned();
-            };
-            let (x, y) = (x.round() as i64, y.round() as i64);
-            if x == y {
-                format!("{x}")
-            } else {
-                format!("{x}x{y} (axes disagree)")
-            }
+            while glib::MainContext::default().iteration(false) {}
+            css_inset_of(&widget)
         })
     }
 
@@ -8063,6 +8176,40 @@ impl crate::harness::Stage for GtkStage {
         }
         // request_exit reads the main thread's CORE; hop before asking.
         Self::on_main(move |_| request_exit(code));
+    }
+}
+
+/// The inset MEASURED on a widget's own CSS box: the offset from its
+/// border box to the box its children are placed from, per side, in
+/// whole layout units — what both `expect_inset` forms report.
+///
+/// `compute_bounds(w, w)` gives the widget's BORDER box in the widget's
+/// OWN coordinate space, and GTK4 puts that space's origin at the
+/// CONTENT box, so the origin it returns is exactly minus the inset on
+/// each side. Measured in a container: a box under `padding: 16px`
+/// reports @(-16,-16), and one carrying that padding plus an 8px border
+/// reports @(-24,-24). Real layout, not the stylesheet read back — it is
+/// the allocated box the children were actually placed from.
+///
+/// THE FIRST-CHILD WALK CANNOT WORK HERE, and this backend shipped it:
+/// because a widget's coordinate space starts inside its own padding, a
+/// child sitting at its parent's content origin translates to (0, 0)
+/// whatever the parent's inset is (measured, both spellings —
+/// `translate_coordinates` is `compute_point` underneath). `inset` did
+/// exactly that walk and answered 0 for every window; the only step that
+/// has ever asserted it is the styling scene's `expect_inset 0`, so the
+/// vacuous number WAS the expected one and no lane ever failed.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn css_inset_of(widget: &gtk4::Widget) -> String {
+    use gtk4::prelude::WidgetExt;
+    let Some(bounds) = widget.compute_bounds(widget) else {
+        return "unallocated".to_owned();
+    };
+    let (x, y) = ((-bounds.x()).round() as i64, (-bounds.y()).round() as i64);
+    if x == y {
+        format!("{x}")
+    } else {
+        format!("{x}x{y} (axes disagree)")
     }
 }
 

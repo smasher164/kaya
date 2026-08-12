@@ -1197,6 +1197,16 @@ pub enum Prop {
     /// because color-without-semantics is how Qt and SWT broke their
     /// styling ceilings; it ships WITH the brand tier, deliberately.
     Role,
+    /// A CONTAINER'S OWN PADDING (docs/styling-plan.md D3, one level
+    /// down from the window inset): DIP between the container's bounds
+    /// and its children, uniform on all four sides like the window's.
+    /// LAYOUT beside grow/spacing/align, carried by the spacing kinds —
+    /// a leaf has no children to hold away from its edge. Born from the
+    /// first full-bleed app: the editor's Inset(0) window put the
+    /// buffer on the window edge as designed and took the status row
+    /// and find bar with it, and no prop could give the chrome rows
+    /// their margin back.
+    Inset,
 }
 
 /// Window property keys — the presentation-context twin of [`Prop`],

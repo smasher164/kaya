@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x5b58d076d72c3dbb
+	SpecHash uint64 = 0x426ae13f797cbb12
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -56,6 +56,7 @@ const (
 	PropA11yHint = 14
 	PropAccepts = 15
 	PropRole = 16
+	PropInset = 17
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -1157,6 +1158,38 @@ func TxBindRoleElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropRole)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetInset: set_property with a constant inset value.
+func TxSetInset(widgetID uint64, inset float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropInset)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, inset)
+	return endRecord(b)
+}
+
+// TxBindInset: set_property with a signal-bound inset value.
+func TxBindInset(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropInset)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindInsetElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindInsetElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropInset)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

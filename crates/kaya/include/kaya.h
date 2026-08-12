@@ -315,6 +315,13 @@
 #define PROP_ROLE 16
 
 /**
+ * A container's own padding (the window inset one level down): DIP
+ * between its bounds and its children, uniform all sides. Layout,
+ * carried by the spacing kinds.
+ */
+#define PROP_INSET 17
+
+/**
  * The clip representation masks (spec enum "clip"). BIT POSITIONS, not
  * an ordinal: a copy carries several and a widget accepts several, so
  * both ride as a mask. The canonical order richest-first is files,
@@ -974,6 +981,13 @@
  * looks. The variant values are the KAYA_ROLE_* block below.
  */
 #define KAYA_PROP_ROLE 16
+
+/**
+ * A container's own padding (docs/styling-plan.md D3, one level down
+ * from the window inset): DIP between its bounds and its children,
+ * uniform all sides. Layout, carried by the spacing kinds.
+ */
+#define KAYA_PROP_INSET 17
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —

@@ -163,6 +163,10 @@ pub const PROP_A11Y_HINT: u32 = 14;
 /// the focused target takes.
 pub const PROP_ACCEPTS: u32 = 15;
 pub const PROP_ROLE: u32 = 16;
+/// A container's own padding (the window inset one level down): DIP
+/// between its bounds and its children, uniform all sides. Layout,
+/// carried by the spacing kinds.
+pub const PROP_INSET: u32 = 17;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -428,6 +432,7 @@ fn prop(raw: u32) -> Prop {
         PROP_A11Y_HINT => Prop::A11yHint,
         PROP_ACCEPTS => Prop::Accepts,
         PROP_ROLE => Prop::Role,
+        PROP_INSET => Prop::Inset,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -2475,6 +2480,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::A11yLabel => PROP_A11Y_LABEL,
         Prop::Accepts => PROP_ACCEPTS,
         Prop::Role => PROP_ROLE,
+        Prop::Inset => PROP_INSET,
         Prop::A11yHint => PROP_A11Y_HINT,
     }
 }

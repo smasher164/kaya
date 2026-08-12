@@ -195,6 +195,16 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // push buttons" is Qt's own sentence for what a palette cannot say),
     // so the role tier ships WITH the brand tier, not after it.
     ("role", 16, PropKind::Enum("role")),
+    // A CONTAINER'S OWN PADDING, the window inset one level down
+    // (docs/styling-plan.md D3): space between a container's bounds and
+    // its children, in DIP, uniform on all four sides like the window's.
+    // LAYOUT, not appearance — it joins grow/spacing/align, carried by
+    // the same kinds spacing is (a leaf has no children to hold away
+    // from its edge). Born from the first full-bleed app: the editor's
+    // Inset(0) window put the BUFFER on the window edge as designed and
+    // took the status row and the find bar with it, and no prop could
+    // give the chrome rows their margin back (maintainer, 2026-08-12).
+    ("inset", 17, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, kept
@@ -2044,6 +2054,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("a11y_hint", 14),
                 ("accepts", 15),
                 ("role", 16),
+                ("inset", 17),
             ],
         },
         EnumSpec {
@@ -2615,6 +2626,7 @@ mod tests {
                     ("prop", "a11y_hint") => wire::PROP_A11Y_HINT,
                     ("prop", "accepts") => wire::PROP_ACCEPTS,
                     ("prop", "role") => wire::PROP_ROLE,
+                    ("prop", "inset") => wire::PROP_INSET,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

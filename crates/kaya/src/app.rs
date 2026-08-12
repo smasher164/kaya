@@ -924,6 +924,16 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This container's own padding — the chained spelling of
+    /// [`Tx::inset`], which remains the dynamic path. The window's
+    /// inset is [`WindowRef::inset`]; this is the same number one
+    /// level down, so a full-bleed window can still hold an inset
+    /// status row (the app that forced it: the editor).
+    pub fn inset(self, pad: f64) -> Self {
+        self.tx.inset(self.id, pad);
+        self
+    }
+
     /// This container's cross-axis child placement — the chained
     /// spelling of [`Tx::align`], which remains the dynamic path.
     pub fn align(self, align: Align) -> Self {
@@ -1623,6 +1633,14 @@ impl<'a> Tx<'a> {
     /// [`Prop::Spacing`].
     pub fn spacing(&mut self, widget: WidgetId, gap: f64) {
         self.set(widget, Prop::Spacing, gap);
+    }
+
+    /// A container's own padding: DIP between its bounds and its
+    /// children, uniform on all four sides — the window inset one
+    /// level down (docs/styling-plan.md D3). Containers only. See
+    /// [`Prop::Inset`].
+    pub fn inset(&mut self, widget: WidgetId, pad: f64) {
+        self.set(widget, Prop::Inset, pad);
     }
 
     /// A container's cross-axis child placement (the normalized

@@ -587,6 +587,10 @@ pub const KAYA_PROP_ACCEPTS: u32 = 15;
 /// on buttons, heading on labels — what a widget MEANS, never how it
 /// looks. The variant values are the KAYA_ROLE_* block below.
 pub const KAYA_PROP_ROLE: u32 = 16;
+/// A container's own padding (docs/styling-plan.md D3, one level down
+/// from the window inset): DIP between its bounds and its children,
+/// uniform all sides. Layout, carried by the spacing kinds.
+pub const KAYA_PROP_INSET: u32 = 17;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -746,6 +750,7 @@ const _: () = assert!(
         && KAYA_PROP_A11Y_HINT == wire::PROP_A11Y_HINT
         && KAYA_PROP_ACCEPTS == wire::PROP_ACCEPTS
         && KAYA_PROP_ROLE == wire::PROP_ROLE
+        && KAYA_PROP_INSET == wire::PROP_INSET
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -789,7 +794,7 @@ const _: () = assert!(
 // first thing to notice). A new spec prop trips this count and walks
 // you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 16,
+    crate::spec::PROPS.len() == 17,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
