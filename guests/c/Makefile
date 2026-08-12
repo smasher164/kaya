@@ -26,7 +26,7 @@ LDFLAGS += -L$(TARGET_DIR) -lkaya -Wl,-rpath,$(TARGET_DIR)
 # dependency has to be written down.
 HEADERS := $(ROOT)/crates/kaya/include/kaya.h $(ROOT)/bindings/c/kaya_wire.h
 
-SCENES := background milestone2 a11y entry gallery todos reorder feed menus commands undo dirty ranges save a11yrows
+SCENES := background milestone2 a11y entry gallery todos reorder feed menus commands undo dirty ranges save a11yrows styling
 
 all: $(SCENES:%=$(OUT)/%)
 

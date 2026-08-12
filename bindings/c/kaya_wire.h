@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xbfba1ee8ec9461cbULL
+#define KAYA_SPEC_HASH 0x5b58d076d72c3dbbULL
 
 
 /* Create a signal holding `initial`. */
@@ -497,6 +497,16 @@ static inline void kaya_tx_show_save_dialog(KayaTx *tx, uint64_t window, uint64_
     kaya_wire_u64(tx, dialog);
     kaya_wire_value(tx, suggested_name);
     kaya_wire_values(tx, filters, filters_len);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists. */
+static inline void kaya_tx_set_brand_accent(KayaTx *tx, uint32_t seed, uint32_t mask, uint32_t light, uint32_t dark) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_BRAND_ACCENT);
+    kaya_wire_u32(tx, seed);
+    kaya_wire_u32(tx, mask);
+    kaya_wire_u32(tx, light);
+    kaya_wire_u32(tx, dark);
     kaya_wire_end(tx, kaya_at);
 }
 
@@ -974,6 +984,38 @@ static inline void kaya_tx_bind_accepts_element(KayaTx *tx, uint64_t widget_id, 
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ACCEPTS);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant role value. */
+static inline void kaya_tx_set_role(KayaTx *tx, uint64_t widget_id, int64_t role) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_ROLE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(role));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound role value. */
+static inline void kaya_tx_bind_role(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_ROLE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_role_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_ROLE);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);

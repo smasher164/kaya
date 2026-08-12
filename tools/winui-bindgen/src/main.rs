@@ -312,6 +312,18 @@ fn main() {
         // drops the method that returns it — the vtable slot survives as
         // a bare usize, so the omission reads as "no such method".
         "Microsoft.UI.Xaml.Automation.Peers.AutomationControlType".to_string(),
+        // The heading role's enum (docs/styling-plan.md D4), and it
+        // gates BOTH halves of that role at once: without it
+        // IAutomationPropertiesStatics keeps HeadingLevelProperty,
+        // GetHeadingLevel and SetHeadingLevel as bare usize pads (the
+        // SETTER), and every peer's GetHeadingLevel/GetHeadingLevelCore
+        // is padded the same way (the READ `ax` reports `heading/<label>`
+        // from). Measured before it was added: 5 pads, no type. UIA's
+        // HeadingLevel is the property that gives real heading
+        // NAVIGATION; AutomationProperties::SetLevel is a different
+        // property (hierarchical item level) and SetLocalizedControlType
+        // would only make Narrator say the word.
+        "Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel".to_string(),
         // Menus (DESIGN.md, Menus and the command vocabulary): the
         // ratified WinUI lowering — MenuBar in its own Auto row of the
         // window shell Grid, MenuBarItem per top-level grouping node,

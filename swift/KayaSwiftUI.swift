@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xbfba1ee8ec9461cb
+let kayaSpecHash: UInt64 = 0x5b58d076d72c3dbb
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -59,6 +59,7 @@ private let applyHighlightRanges: UInt16 = 28
 private let applySelectRange: UInt16 = 29
 private let applyRevealRange: UInt16 = 30
 private let applyPresentSaveDialog: UInt16 = 31
+private let applySetBrand: UInt16 = 32
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
@@ -83,6 +84,7 @@ private let wpropVetoClose: UInt32 = 4
 private let wpropSectionsPresentation: UInt32 = 5
 private let wpropListDetail: UInt32 = 6
 private let wpropDirty: UInt32 = 7
+private let wpropInset: UInt32 = 8
 private let spropTitle: UInt32 = 1
 private let spropIcon: UInt32 = 2
 private let sectionsPresentationAuto: Int64 = 0
@@ -138,6 +140,12 @@ private let propA11yHint: UInt32 = 14
 /// a space-separated string of the closed kind names and any custom
 /// format ids. Not a mask — half the set is open-ended.
 private let propAccepts: UInt32 = 15
+/// Semantic emphasis (docs/styling-plan.md D4): destructive/prominent
+/// on buttons, heading on labels. The variant values follow.
+private let propRole: UInt32 = 16
+private let roleDestructive: Int64 = 1
+private let roleProminent: Int64 = 2
+private let roleHeading: Int64 = 3
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -178,6 +186,11 @@ final class KayaNode: Identifiable {
     var a11yId = ""
     var a11yLabel = ""
     var a11yHint = ""
+    /// Semantic emphasis (docs/styling-plan.md D4), 0 = none. What the
+    /// widget MEANS: the render layer lowers destructive/prominent to
+    /// SwiftUI's own button affordances and heading to the AX trait +
+    /// the platform's heading text style — never a raw color.
+    var role: Int64 = 0
     /// The widget's accept list, verbatim. Recorded here because the
     /// paste hook and the standard commands' enablement both read it
     /// off the focused node. Empty means the widget takes nothing.
@@ -282,6 +295,12 @@ final class KayaWindowModel: Identifiable {
     /// NOTHING, because the platform has no chrome to put it in (D4).
     /// The declared title is never rewritten on either.
     var dirty = false
+    /// The window CONTENT INSET (wprop 8; docs/styling-plan.md D3) —
+    /// LAYOUT, not appearance: kaya's own padding inside the mounted
+    /// root, 16 unless the app says otherwise, 0 for full bleed. The
+    /// hard-coded .padding(16) this replaces lived at five render
+    /// sites; they all read this now.
+    var inset: Double = 16
     /// The presentation the view layer ACTUALLY rendered — "split" or
     /// "stacked" — stamped by the arm that ran, never derived from
     /// `listDetail` or `formFactor`. Deriving it would make the
@@ -449,6 +468,14 @@ final class KayaSceneModel {
     // The focus command's landing spot: the entry view's FocusState
     // mirrors it into SwiftUI, and expect_focused reads it back.
     var focusedId: UInt64?
+    /// The DERIVED brand accent (apply 32), eleven packed sRGB words —
+    /// seed + light five + dark five, in the wire's order. nil until an
+    /// app requests one; applied at the root as .tint for the current
+    /// appearance. A REQUEST, uniformly (docs/styling-plan.md D2): on
+    /// this platform the system accent wins unless the user chose
+    /// multicolor, and that is macOS's call to make, not kaya's to
+    /// fight.
+    var brand: [UInt32]?
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     var buttons: [KayaNode] = []
@@ -3116,6 +3143,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (wpropDirty, valueBool):
                     model?.dirty = raw[body + 24] != 0
                     kayaApplyWindowDirty(wid)
+                case (wpropInset, valueF64):
+                    model?.inset =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (wpropSectionsPresentation, valueI64):
                     // ADVISORY (the width/height precedent): honored
                     // where this platform has the idiom.
@@ -3267,6 +3297,18 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     dialog: dialogId,
                     allowsMultiple: allowsMultiple,
                     extensions: extensions)
+            case applySetBrand:
+                // Eleven packed sRGB words in the wire's fixed order:
+                // seed, light's five (fill, on_fill, standalone, hover,
+                // pressed), dark's five. VALUES — the core derived,
+                // nothing here re-computes (docs/styling-plan.md D1).
+                var brand: [UInt32] = []
+                brand.reserveCapacity(11)
+                for i in 0..<11 {
+                    brand.append(
+                        raw.loadUnaligned(fromByteOffset: body + i * 4, as: UInt32.self))
+                }
+                kayaScene.brand = brand
             case applyPresentSaveDialog:
                 // The platform's REAL save dialog (NSSavePanel), answered
                 // exactly once through kaya_emit_save_dialog_result — one
@@ -3437,6 +3479,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propAccepts, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.accepts = String(decoding: bytes, as: UTF8.self)
+                case (propRole, valueI64):
+                    kayaScene.nodes[id]!.role =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`.
@@ -3809,6 +3854,11 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         switch role {
         case kAXButtonRole: return "button"
         case kAXStaticTextRole: return "label"
+        // A label with the heading role (docs/styling-plan.md D4):
+        // SwiftUI's .isHeader surfaces as the AXHeading ROLE on macOS —
+        // measured on the styling scene's first run, not assumed — so
+        // the closed name for it is the role vocabulary's own word.
+        case "AXHeading": return "heading"
         case kAXTextFieldRole, kAXTextAreaRole: return "field"
         case kAXCheckBoxRole: return "checkbox"
         case kAXSliderRole: return "slider"
@@ -4239,6 +4289,15 @@ func kayaA11y(_ view: some View, _ node: KayaNode) -> some View {
         if let button = element as? UIButton, button.menu != nil { return "combobox" }
         if traits.contains(.button) { return "button" }
         if element is UITextView || element is UITextField { return "field" }
+        // A HEADING LABEL publishes header|staticText (traits 65600 =
+        // 0x40 | 1<<16, measured 2026-08-12 by the styling legs failing
+        // exactly here): `.header` is what `.accessibilityAddTraits(
+        // .isHeader)` becomes on this platform, and it rides ON TOP of
+        // staticText — so the specific signal is weighed first, the
+        // rule this whole ladder is built on, or every heading reads as
+        // a plain label. The macOS half of this read learned the same
+        // role from AXHeading; one vocabulary, two platform spellings.
+        if traits.contains(.header) { return "heading" }
         if traits.contains(.staticText) { return "label" }
         // CONTAINERS. A scroll view is a container of content by class;
         // anything else that publishes accessibility ELEMENTS rather
@@ -6058,6 +6117,30 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("alerts \(got), wanted \(want)")
                 }
+            case "expect_inset":
+                // The window content inset, MEASURED as the halved gap
+                // between the padding container's outer extent and the
+                // offer inside it — RELATIVE deliberately: absolute
+                // offers cannot be byte-frozen across platforms (GTK's
+                // CSD headerbar sits inside the window's height where
+                // macOS's titlebar sits outside), while the inset is
+                // the same number everywhere (docs/styling-plan.md D3).
+                let wantInset = String(parts[1])
+                let gotInset = DispatchQueue.main.sync { () -> String in
+                    let outer = kayaOuterSize
+                    let inner = kayaAvailableSize
+                    guard outer.width > 0, inner.width > 0 else {
+                        return "no layout recorded"
+                    }
+                    let x = ((outer.width - inner.width) / 2).rounded()
+                    let y = ((outer.height - inner.height) / 2).rounded()
+                    return x == y ? "\(Int(x))" : "\(Int(x))x\(Int(y)) (axes disagree)"
+                }
+                if gotInset == wantInset {
+                    observed.append("inset \(wantInset)")
+                } else {
+                    failures.append("inset \(gotInset), wanted \(wantInset)")
+                }
             case "expect_root_fills":
                 // The mounted root fills the area the window offered it
                 // — the observation shares can never make: a share is a
@@ -7144,6 +7227,54 @@ func kayaRowAlignment(_ mode: Int64) -> VerticalAlignment {
     }
 }
 
+/// One style switch, because `.buttonStyle` takes a concrete type:
+/// bordered is the dressed floor, borderedProminent is the `prominent`
+/// role's chrome — the platform's own emphasis, not a color kaya
+/// invented. Top level: the iOS render arm is its consumer and the
+/// macOS branch never needs it, but a platform-conditional TYPE would
+/// put the compile error on the other platform's lane.
+/// The brand tint for the CURRENT appearance, or nil for "no request"
+/// — and nil too when this platform's USER overrode the accent
+/// (docs/styling-plan.md D2). The macOS read is the AppleAccentColor
+/// preference: PRESENT means the user chose an accent (kaya yields),
+/// ABSENT means multicolor/default (the brand applies). Deliberately
+/// NOT NSColor.controlAccentColor, whose read-back is poisoned
+/// (FB13688723) — the styling research's read-backs-lie rule.
+/// The padding container's OUTER size (before the window inset is
+/// taken), captured by the reader just outside `.padding` on the
+/// primary root — the other half of the measured-inset observation.
+@MainActor var kayaOuterSize: CGSize = .zero
+
+private func kayaBrandTint() -> Color? {
+    guard let brand = kayaScene.brand else { return nil }
+    #if os(macOS)
+        if UserDefaults.standard.object(forKey: "AppleAccentColor") != nil {
+            return nil
+        }
+        let dark =
+            NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    #else
+        let dark = UITraitCollection.current.userInterfaceStyle == .dark
+    #endif
+    // Wire order: seed, light[fill,on,standalone,hover,pressed], dark[...].
+    let fill = dark ? brand[6] : brand[1]
+    return Color(
+        red: Double((fill >> 16) & 0xFF) / 255.0,
+        green: Double((fill >> 8) & 0xFF) / 255.0,
+        blue: Double(fill & 0xFF) / 255.0)
+}
+
+private struct KayaButtonStyle: PrimitiveButtonStyle {
+    let prominent: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if prominent {
+            BorderedProminentButtonStyle().makeBody(configuration: configuration)
+        } else {
+            BorderedButtonStyle().makeBody(configuration: configuration)
+        }
+    }
+}
+
 struct KayaRender: View {
     let node: KayaNode
     /// The mounted root fills its window; nested containers do not.
@@ -7259,16 +7390,23 @@ struct KayaRender: View {
             // style is the chrome, and KayaCell keeps the proposals
             // around it honest.
             #if os(macOS)
-                KayaMacButton(title: node.text, tag: node.tag)
+                KayaMacButton(title: node.text, tag: node.tag, role: node.role)
                     .alignmentGuide(.top) { d in
                         kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                         return d[.top]
                     }
             #else
-                Button(node.text) {
+                // SwiftUI's own role vocabulary (docs/styling-plan.md
+                // D4): destructive rides Button(role:), prominence is
+                // the borderedProminent style — both platform
+                // affordances, never raw color.
+                Button(
+                    node.text,
+                    role: node.role == roleDestructive ? .destructive : nil
+                ) {
                     KayaHost.emit(node.tag)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(KayaButtonStyle(prominent: node.role == roleProminent))
                 .alignmentGuide(.top) { d in
                     kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                     return d[.top]
@@ -7310,7 +7448,15 @@ struct KayaRender: View {
             .coordinateSpace(name: "kaya-box-\(node.id)")
             .background(KayaBoxReader(id: node.id, vertical: false))
         case kindLabel:
+            // The heading role (docs/styling-plan.md D4) is BOTH facts
+            // at once: the platform's heading TEXT STYLE (.headline —
+            // the scale's own tier, never a raw size) and the AX
+            // heading trait, which is what assistive users skim by and
+            // the half the styling scene can freeze on every lane.
             Text(node.text)
+                .font(node.role == roleHeading ? .headline : nil)
+                .accessibilityAddTraits(
+                    node.role == roleHeading ? .isHeader : [])
                 .alignmentGuide(.top) { d in
                     kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                     return d[.top]
@@ -7539,6 +7685,7 @@ struct KayaRender: View {
     private struct KayaMacButton: NSViewRepresentable {
         let title: String
         let tag: [UInt8]
+        var role: Int64 = 0
 
         final class Coordinator: NSObject {
             var tag: [UInt8] = []
@@ -7558,6 +7705,15 @@ struct KayaRender: View {
         func updateNSView(_ button: NSButton, context: Context) {
             button.title = title
             context.coordinator.tag = tag
+            // SEMANTIC EMPHASIS, in AppKit's own words (docs/
+            // styling-plan.md D4): destructive is NSButton's
+            // hasDestructiveAction (macOS 11+ — the system decides what
+            // that looks like, red text today), prominent is the
+            // default-button key equivalent (the accent-filled bezel,
+            // exactly what a dialog's primary action gets). Never a raw
+            // color: the platform stays the judge of the chrome.
+            button.hasDestructiveAction = role == roleDestructive
+            button.keyEquivalent = role == roleProminent ? "\r" : ""
         }
 
         func sizeThatFits(
@@ -10126,7 +10282,11 @@ struct KayaEntryRoot: View {
                 KayaRender(node: root, isRoot: true)
             }
         }
-        .padding(16)
+        // The OWNING WINDOW's inset (D3: the knob is per-window; an
+        // entry is a surface WITHIN one). Entries present on the
+        // primary in every scene today; an aux-window stack would want
+        // the entry model to carry its window, ledgered with the knob.
+        .padding(scene.windows[0]?.inset ?? 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(scene.navEntries[entryId]?.title ?? "")
     }
@@ -10155,7 +10315,7 @@ struct KayaAuxRoot: View {
                     KayaRender(node: root, isRoot: true)
                 }
             }
-            .padding(16)
+            .padding(scene.windows[windowId]?.inset ?? 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle(scene.windows[windowId]?.title ?? "")
             .navigationDestination(for: UInt64.self) { eid in
@@ -10194,7 +10354,7 @@ struct KayaSplitRoot: View {
                     KayaRender(node: root, isRoot: true)
                 }
             }
-            .padding(16)
+            .padding(scene.windows[windowId]?.inset ?? 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle(scene.windows[windowId]?.title ?? "")
         } detail: {
@@ -11517,7 +11677,9 @@ struct KayaSectionPane: View {
                     KayaRender(node: root, isRoot: true)
                 }
             }
-            .padding(16)
+            // The owning window's inset — same reasoning as the
+            // entry site above.
+            .padding(scene.windows[0]?.inset ?? 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             // The hosting window's catalog rides each pane's top bar
             // on iOS (sections share the window's command catalog).
@@ -11580,9 +11742,22 @@ struct KayaRoot: View {
                 kayaAvailableSize = size
             }
         }
-        // The normalized root inset: 16 units, the same default the
-        // other six backends now apply inside their roots.
-        .padding(16)
+        // The normalized root inset, now the window's OWN (wprop 8,
+        // docs/styling-plan.md D3): 16 unless the app says otherwise,
+        // 0 for full bleed. This is the primary surface, window 0.
+        .padding(kayaScene.windows[0]?.inset ?? 16)
+        // The OUTER half of the measured-inset observation: this
+        // reader sits just outside the padding, its inner twin just
+        // inside; (outer - inner)/2 is the inset the harness asserts.
+        .background(
+            GeometryReader { outer in
+                Color.clear
+                    .onAppear { kayaOuterSize = outer.size }
+                    .onChange(of: outer.size) { _, size in
+                        kayaOuterSize = size
+                    }
+            }
+        )
         // Normalized: pack content to the top-leading corner of the
         // surface rather than letting the window center it.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -11591,6 +11766,15 @@ struct KayaRoot: View {
         // titling path on macOS; harmless on iOS, where the switcher
         // label is stamped in the apply arm instead.
         .navigationTitle(scene.windowTitle)
+        // THE BRAND ACCENT, applied as .tint of the current
+        // appearance's derived FILL — a value the core computed, never
+        // re-derived here (docs/styling-plan.md D1). And a REQUEST
+        // (D2): on macOS a user who chose a system accent color wins —
+        // kayaBrandTint reads that preference and yields, which is the
+        // uniform semantics ("a platform may let its user override")
+        // rather than a macOS carve-out. On iOS there is no such
+        // preference and the brand applies as written.
+        .tint(kayaBrandTint())
         // The window's command catalog rides the window construct: on
         // iOS this is the trailing More menu + promoted bar actions
         // (a no-op on macOS, where the NSMenu segment owns the bar).

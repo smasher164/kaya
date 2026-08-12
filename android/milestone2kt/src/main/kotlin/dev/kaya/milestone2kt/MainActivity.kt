@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
             // scene to select the moment that arm lands, rather than
             // silently running milestone2 against the ranges script.
             "ranges" -> Ranges::app
+            "styling" -> Styling::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

@@ -546,6 +546,38 @@ class _Handle:
         _records().append(wire.tx_set_accepts(self.id, _accept_list(kinds)))
         return self
 
+    def role(self, role):
+        """Declare what this widget MEANS — never how it looks
+        (docs/styling-plan.md D4). `kaya.Role.DESTRUCTIVE` and
+        `kaya.Role.PROMINENT` are button emphasis, `kaya.Role.HEADING` is
+        label hierarchy, and the names are accepted as plain strings too
+        (`role("heading")`, the `align=` spelling).
+
+        A ROLE NEVER CHANGES WHAT A WIDGET DOES. A destructive button
+        presses like any other and the app's handler is what acts; a
+        heading label is still a label. What it changes is the platform's
+        own emphasis chrome AND — for `heading` — the accessibility tree,
+        which is the point: a heading is how an assistive user skims, so
+        it is a role and not a font size.
+
+        THE VOCABULARY IS CLOSED, and closed to APPS specifically (D5):
+        kaya grows it through its own work on the widgets and lowerings,
+        a spec change at a time, but there is no per-widget escape into
+        raw appearance. An unknown name raises here rather than travelling
+        as an integer nobody lowers.
+
+        WHICH KINDS FIT IS THE ROOT'S ANSWER, not this binding's: a
+        handle carries an id, and the kind lives in the scene, so
+        `role("destructive")` on a label dies at declare time in the
+        root's own words naming both sides. CONSTANT ONLY, like
+        `accepts`: a role describes the control, not the state, and no
+        binding offers a Signal here.
+
+        Returns the handle, so it chains:
+        `kaya.button("Delete").role(kaya.Role.DESTRUCTIVE).a11y_id("delete")`."""
+        _records().append(wire.tx_set_role(self.id, _role_value(role)))
+        return self
+
     def on_paste(self, fn):
         """Take pasted content here: fn(clip) with the Representation
         sum, or fn(*keys, clip) for a stamped copy — the copy's key path
@@ -2230,6 +2262,87 @@ def window_size(width, height):
     _records().append(wire.tx_set_window_height(0, float(height)))
 
 
+def _accent(what, value):
+    """The wire field's domain, and NOTHING SEMANTIC: this clause is
+    Python's spelling of what the other bindings' u32 parameter TYPE
+    refuses at compile time, so the eight surfaces refuse the same
+    calls. A bool is excluded before int (which it subclasses) for the
+    same reason `_role_value` excludes it: `True` would silently become
+    the colour 0x000001, and an int outside u32 would otherwise reach
+    `struct.pack` and come back as "argument out of range" — true, and
+    about the wrong layer.
+
+    THE 24-BIT RULE IS DELIBERATELY NOT HERE. An in-u32 word with a
+    stray high byte (an ARGB constant pasted where 0xRRGGBB belongs)
+    dies at the ROOT's own wall, in the root's sentence, the same one
+    all eight languages get — a binding-local version of that refusal
+    was this file's alone for one fan-out and measured as the only
+    wall in eight (invariant 1).
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f"kaya: brand accent {what} takes one packed sRGB int "
+            f"(0x3584E4), not {type(value).__name__} — brand is identity, "
+            "set once before the first mount, so it is never a signal"
+        )
+    if not 0 <= value <= 0xFFFFFFFF:
+        raise ValueError(
+            f"kaya: brand accent {what} is {value:#x}, which does not fit "
+            "the wire's u32 — the accent is one packed sRGB hex (0x3584E4)"
+        )
+    return value
+
+
+def brand_accent(seed, light=None, dark=None):
+    """REQUEST the app's brand accent (docs/styling-plan.md D1/D2): one
+    hex is the whole call, and `light`/`dark` are there for a brand book
+    that specifies a per-appearance variant.
+
+        kaya.brand_accent(0x3584E4)
+        kaya.brand_accent(0x3584E4, dark=0x62A0EA)
+
+    ONE FUNCTION WHERE RUST HAS TWO (`brand_accent` and
+    `brand_accent_with`), because optional keyword arguments are how
+    Python spells an optional record — the semantics is the same one:
+    whatever an appearance does not state is filled from the seed.
+
+    A REQUEST, UNIFORMLY. A platform may let its user override the app's
+    accent, and macOS does today — an app accent applies only while the
+    user's system accent is multicolor. That is the semantics in every
+    binding rather than a macOS carve-out, so nothing here promises the
+    pixels; the app states a brand and the platform stays the judge of
+    its own chrome.
+
+    SET ONCE, BEFORE THE FIRST MOUNT: declare it inside the scene scope
+    (`with app.window():`) before the container that mounts. The root
+    refuses a second write and a late one — brand is identity, not state,
+    and a slot that could flip at runtime would promise a
+    theme-switching surface the vocabulary deliberately does not have.
+
+    THE APP NEVER WRITES A FOREGROUND AND NEVER WRITES CONTRAST
+    VARIANTS. The core derives fill, on-fill, standalone and a
+    hover/pressed ramp per appearance (the danger-band clamp, D1) and
+    hands every backend values; an app-supplied foreground could be
+    illegible with nothing to catch it, and three of four platforms
+    compute or hard-code theirs anyway — so honoring one would be
+    honored on some platforms and ignored on others.
+
+    NO PER-PLATFORM MAP HERE, and the same absence in every binding:
+    D1's grammar allows one, the reference sugar (`Tx::brand_accent`)
+    does not spell it, and one binding growing a surface the other seven
+    lack is the divergence invariant 1 refuses. If it is ever admitted,
+    the Python spelling is a `per_platform=` mapping resolved through
+    `sys.platform` in this function — one function, no guest code.
+    """
+    mask = (1 if light is not None else 0) | (2 if dark is not None else 0)
+    _records().append(wire.tx_set_brand_accent(
+        _accent("seed", seed),
+        mask,
+        _accent("light", light) if light is not None else 0,
+        _accent("dark", dark) if dark is not None else 0,
+    ))
+
+
 #: The undo-group record's kind, in the two header bytes `record()`
 #: frames it with — how `undoable` recognises a marker it already put at
 #: the head, without unpacking anything.
@@ -2345,6 +2458,65 @@ def _align_value(align):
                 f"align must be one of {sorted(_ALIGN_NAMES)}, got {align!r}"
             ) from None
     return int(align)
+
+
+class Role:
+    """The role enum: SEMANTIC EMPHASIS, the closed vocabulary
+    (docs/styling-plan.md D4). `Widget.role` also accepts these names as
+    plain strings — `role("heading")` — the Pythonic spelling, exactly as
+    `align=` does.
+
+    Three, and what each is for: DESTRUCTIVE marks the press that
+    destroys something (the platform's own destructive affordance — red
+    text on Apple, an error-role container on Material,
+    `.destructive-action` on GTK); PROMINENT marks THE primary action,
+    one per dialog's worth of emphasis; HEADING marks a text hierarchy
+    heading, which is both the platform's heading style and the
+    accessibility heading trait."""
+
+    DESTRUCTIVE = wire.ROLE_DESTRUCTIVE
+    PROMINENT = wire.ROLE_PROMINENT
+    HEADING = wire.ROLE_HEADING
+
+
+_ROLE_NAMES = {
+    "destructive": wire.ROLE_DESTRUCTIVE,
+    "prominent": wire.ROLE_PROMINENT,
+    "heading": wire.ROLE_HEADING,
+}
+
+
+def _role_value(role):
+    """One role, from either spelling, refused here if it is neither.
+
+    THE CLOSED SET IS CHECKED IN THE BINDING because Python has no enum
+    to close it with: the seven other bindings make a role that is not a
+    role fail to compile, and this is where that becomes a raise. What
+    stays the ROOT's is the pairing — whether this role fits the kind it
+    was written on — which no handle here knows.
+    """
+    if isinstance(role, str):
+        try:
+            return _ROLE_NAMES[role]
+        except KeyError:
+            raise ValueError(
+                f"kaya: role must be one of {sorted(_ROLE_NAMES)}, got "
+                f"{role!r}"
+            ) from None
+    # bool BEFORE int, which it subclasses: `role(True)` would otherwise
+    # read as 1, the destructive role, out of a value that meant nothing.
+    if isinstance(role, bool) or not isinstance(role, int):
+        raise TypeError(
+            f"kaya: role takes kaya.Role.HEADING or its name, not "
+            f"{type(role).__name__} — a role says what a widget MEANS and "
+            "is declared once, so no binding binds one to a signal"
+        )
+    if role not in _ROLE_NAMES.values():
+        raise ValueError(
+            f"kaya: {role} is not a role — the vocabulary is "
+            f"{sorted(_ROLE_NAMES)} (kaya.Role.DESTRUCTIVE/PROMINENT/HEADING)"
+        )
+    return role
 
 
 def _set_align(handle, align):
@@ -2662,7 +2834,7 @@ def when(sig):
 
 
 def _window_props(window, title, width, height, veto_close, dirty,
-                  list_detail, sections_presentation):
+                  list_detail, sections_presentation, inset):
     """The window construct's props, emitted into the ambient
     transaction — ONE place, so the scene scope and the live call
     cannot drift apart. The scope calls it from `__enter__` (right
@@ -2683,6 +2855,13 @@ def _window_props(window, title, width, height, veto_close, dirty,
     if sections_presentation is not None:
         records.append(wire.tx_set_window_sections_presentation(
             window, int(sections_presentation)))
+    # LAYOUT, and the one number here the root range-checks: see
+    # App.window for what it means. float() so the value lands as the F64
+    # the window prop is typed as — an int would arrive as I64 and the
+    # root would refuse the TYPE, which is a true complaint about the
+    # wrong mistake.
+    if inset is not None:
+        records.append(wire.tx_set_window_inset(window, float(inset)))
     if width is not None or height is not None:
         if width is None or height is None:
             raise ValueError("kaya: window width and height travel together")
@@ -2719,7 +2898,7 @@ class _TxScope:
     def __init__(self, app, mount_on_exit, title=None, width=None, height=None,
                  window=0, create=False, veto_close=None, dirty=None,
                  list_detail=None,
-                 sections_presentation=None, push=False,
+                 sections_presentation=None, inset=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
                  section=False, on_selected=None):
         # FIRST, so __del__ below can read them even if this __init__
@@ -2736,6 +2915,7 @@ class _TxScope:
         self._dirty = dirty
         self._list_detail = list_detail
         self._sections_presentation = sections_presentation
+        self._inset = inset
         self._push = push
         self._intercept_back = intercept_back
         self._on_popped = on_popped
@@ -2837,7 +3017,7 @@ class _TxScope:
         _window_props(
             self._window, self._title, self._width, self._height,
             self._veto_close, self._dirty, self._list_detail,
-            self._sections_presentation)
+            self._sections_presentation, self._inset)
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -2981,7 +3161,7 @@ class App:
 
     def create_window(self, window_id, title=None, width=None, height=None,
                       veto_close=None, dirty=None, list_detail=None,
-                      sections_presentation=None,
+                      sections_presentation=None, inset=None,
                       on_close_requested=None, on_closed=None,
                       on_undone=None, on_redone=None):
         """An auxiliary surface's scene scope: create_window plus its
@@ -2998,10 +3178,12 @@ class App:
         it. on_undone(label, delta) / on_redone(label, delta) fire each
         time kaya routes an undo at THIS surface — see App.window.
 
-        The prop set is App.window's, `dirty` included: an auxiliary
-        surface holds unsaved work as readily as the primary one. To
-        raise or lower the mark LATER, call the construct again with
-        this surface's id — `app.window(dirty=True, window_id=7)`."""
+        The prop set is App.window's, `dirty` and `inset` included: an
+        auxiliary surface holds unsaved work as readily as the primary
+        one, and an inspector wants its own content inset as much as the
+        main window does. To raise or lower the mark LATER, call the
+        construct again with this surface's id —
+        `app.window(dirty=True, window_id=7)`."""
         if on_close_requested is not None:
             self._close_requested[int(window_id)] = on_close_requested
         if on_closed is not None:
@@ -3011,11 +3193,11 @@ class App:
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close,
             dirty=dirty, list_detail=list_detail,
-            sections_presentation=sections_presentation)
+            sections_presentation=sections_presentation, inset=inset)
 
     def window(self, title=None, width=None, height=None, veto_close=None,
                dirty=None, list_detail=None, sections_presentation=None,
-               on_close_requested=None, on_closed=None,
+               inset=None, on_close_requested=None, on_closed=None,
                on_undone=None, on_redone=None, window_id=0):
         """The scene scope: an ambient transaction whose single
         top-level container mounts into the default window on exit.
@@ -3031,6 +3213,19 @@ class App:
         (kaya.SECTIONS_AUTO/BAR/SIDEBAR); `window_id` names the surface
         the attributes are about — 0, the primary, unless you say
         otherwise (the trailing-id spelling C# and OCaml already carry).
+
+        `inset` is the window's CONTENT INSET in layout units — LAYOUT,
+        not appearance (docs/styling-plan.md D3): the space kaya's own
+        interpreters put around the mounted root. 16 unless you say
+        otherwise, so no existing scene moves; 0 is full bleed, which is
+        what an editor or a canvas asks for. HONORED UNCONDITIONALLY on
+        every platform, because the inset is kaya's own padding and
+        nothing platform-side defends it — the number is not advisory
+        the way `width`/`height` are. A platform's SAFE AREA is a
+        separate fact and is not removed by it: content extends to the
+        safe-area edge, not past it, and the notch keeps its space.
+        Negative is refused by the root — an inset is space, not an
+        offset.
 
         `dirty` says this surface holds UNSAVED WORK, and each backend
         spells its own platform's affordance: the dot in the close
@@ -3088,13 +3283,13 @@ class App:
             # thread's open transaction (see _require_app_thread).
             _require_app_thread()
             _window_props(window_id, title, width, height, veto_close,
-                          dirty, list_detail, sections_presentation)
+                          dirty, list_detail, sections_presentation, inset)
             return _LiveWindow()
         return _TxScope(
             self, mount_on_exit=True, window=window_id,
             title=title, width=width, height=height,
             veto_close=veto_close, dirty=dirty, list_detail=list_detail,
-            sections_presentation=sections_presentation)
+            sections_presentation=sections_presentation, inset=inset)
 
     def build(self):
         """An ambient transaction without the mount — for mutations

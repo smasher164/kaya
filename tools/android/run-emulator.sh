@@ -1046,6 +1046,19 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity a11yrows \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script a11yrows)'"
+    # THE STYLING SCENE (docs/styling-plan.md slice 1): brand + roles +
+    # inset. On this backend the brand SEED drives Material's own
+    # scheme derivation (the other ten derived words are for the
+    # backends that lower colours directly), roles lower to M3's
+    # emphasis ladder, and `heading` is Compose heading() semantics —
+    # the real-tree read the expect_ax step freezes. Graduated
+    # 2026-08-12 when the fan-out replaced the compose depth stub; this
+    # leg is also the first on-device exercise of the APPLY_SET_BRAND
+    # wire decode.
+    run_apk styling-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity styling \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script styling)'"
     # The clipboard scene: one clip in several representations, the
     # privileged read, the paste split, and Paste as a standard command.
     # The foreign process on the other side of every assertion is
@@ -1320,6 +1333,14 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity undo \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script undo)'"
+    # The styling scene through the JVM binding (see the compose leg):
+    # same interpreter, same lowerings; what this arm adds is the Java
+    # binding's Role enum, brandAccent overloads and inset chain riding
+    # the shared guests/java sources on a device.
+    run_apk styling-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity styling \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script styling)'"
     drain
     timing legs-jvm
 fi
@@ -1429,6 +1450,11 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity a11yrows \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script a11yrows)'"
+    # The styling scene through the Go binding (see the compose leg).
+    run_apk styling-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity styling \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script styling)'"
     run_apk entry-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity entry \

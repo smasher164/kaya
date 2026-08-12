@@ -1788,7 +1788,13 @@ hits="$(ios_perturb tools/ios/run-sim.sh \
     'queue_leg run_swiftui_on clipboard-swiftui[\s\S]*?clipboard clipboard\n' '' \
     "$IOS_T/half.sh")"
 ios_applied "$hits" "the rust-leg removal"
-hits="$(ios_perturb "$IOS_T/half.sh" ' clipboard"' '"' "$IOS_T/unwired.sh")"
+# The word is deleted FROM THE TWO LIST ASSIGNMENTS BY NAME, not "the
+# word before the closing quote": clipboard sat last in both lists when
+# this was written, and the styling graduation appending one more word
+# turned the tail-anchored pattern into 0 substitutions — a failed
+# self-test, exactly as ios_applied is built to report, but for a
+# reason that was this pattern's fragility rather than a rotted rule.
+hits="$(ios_perturb "$IOS_T/half.sh" '(IOS_[A-Z]+_SCENES="[^"]*) clipboard' '\1' "$IOS_T/unwired.sh")"
 ios_applied "$hits" "the guest-list removal" 2
 ios_selftest "$IOS_T/unwired.sh" "no clipboard leg found" "a runner with no clipboard leg"
 

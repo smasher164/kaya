@@ -48,6 +48,7 @@ static class Program
             case "ranges": RangesScene.Run(); break;
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;
+            case "styling": StylingScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;
         }

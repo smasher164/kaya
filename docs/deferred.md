@@ -2220,3 +2220,116 @@ reports named:
   implementation was offered at the fan-out
   (scratchpad/csprobe/facade-parity.py, watched failing against HEAD's
   11 missing forwards including a year-old SetGrow drift).
+
+## The styling scene's depth stubs (slice 1 mid-flight, expected to close with the fan-out)
+
+Three backends hold `depth_stub("styling")` while the SwiftUI
+interpreter carries slice 1's one real brand lowering
+(docs/styling-plan.md §3 — depth then breadth, the standing pattern):
+
+- ~~**DEPTH STUB: styling on gtk** — the accent lowering is the
+  `--accent-bg-color`/`--accent-fg-color`/standalone override route,
+  measured working in kaya's container by the styling research, plus
+  the adw feature bump v1_4 → v1_7 it needs. Fan-out work; the inset
+  arm is already live there.~~ LANDED 2026-08-12: the three custom
+  properties per appearance, re-written when the session flips, plus
+  `.destructive-action`/`.suggested-action`/`.heading` + the AT-SPI
+  heading role. NO adw bump was needed — the override is CSS the
+  runtime library reads (1.6+, and the image ships 1.7.6), while the
+  Rust surface it uses (`StyleManager::dark`) is 1.0-era; measured by
+  building and painting at `v1_4`.
+- ~~**DEPTH STUB: styling on winui**~~ — LANDED 2026-08-12. The brand
+  accent and the two button roles were already real (the six
+  `SystemAccentColor*` stops in Light+Dark ThemeDictionaries, crossed
+  the way Fluent reads them, never `SystemAccentColor` itself and never
+  a HighContrast entry; `AccentButtonStyle` for prominent,
+  `SystemFillColorCriticalBrush` on the caption for destructive —
+  Fluent ships no destructive button); the stub survived on HEADING
+  alone, blocked by one missing line in tools/winui-bindgen's filter.
+  `Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel` is now
+  filtered in, and regenerating turned the four `usize` vtable pads
+  into real methods — `AutomationProperties::SetHeadingLevel` (the
+  setter) plus `GetHeadingLevel` on `AutomationPeer` and its subclasses
+  (the read). The role arm is SetHeadingLevel(`Level2`) +
+  `SubtitleTextBlockStyle`, and `WinUiStage::ax` consults HeadingLevel
+  BEFORE the control-type ladder, because UIA has no heading control
+  type — a heading TextBlock reports `Text`, so a type-first ladder
+  answers `label/Sections` where the scene froze `heading/Sections`.
+  That ordering is pinned by `ax_role`'s unit tests, watched failing.
+  The enum's members are `None`, `Level1`..`Level9`; the docs'
+  `HeadingLevel1` spelling is the UWP one and does not exist here. NOT
+  PROVEN HERE: no leg ran — the windows lane needs its styling legs
+  wired in tools/deploy-win.sh, and the pixels are the captures'
+  business. (The inset arm was already live.)
+- ~~**DEPTH STUB: styling on compose**~~ — LANDED 2026-08-12. The
+  seed-derived scheme goes through the MaterialTheme root the foundation
+  landed, the contrast level is read from UiModeManager and re-read
+  through a ContrastChangeListener (a scheme that samples it once is the
+  MDC #3524 no-op rebuilt one layer up), and the appearance is unpinned:
+  the three app manifests now name kaya's own DayNight theme, the theme
+  root paints the scheme's background and content colour, and the lane
+  was run 82/82 in BOTH notnight and night with the mode read back
+  before and after. Roles lower to M3's own emphasis ladder (outlined
+  floor -> filled prominent, error-role container for destructive,
+  `heading()` semantics + titleLarge for headings, which the published
+  AccessibilityNodeInfo reports as `heading/` and which was watched
+  falling back to `label/` with the lowering perturbed out). WHAT IS NOT
+  DERIVED and is now its own open question below: the secondary,
+  tertiary and neutral palettes stay Material's baseline, because
+  deriving them needs HCT chroma clamping and that is a dependency
+  decision rather than a coding one.
+- **THE FULL M3 SCHEME FROM A SEED NEEDS A DEPENDENCY DECISION** (open,
+  Akhil's; measured 2026-08-12 while landing the entry above). The
+  Compose brand lowering derives the PRIMARY family from the seed —
+  Material's own tone→role table, its own contrast curves, and its own
+  tone function (CIELab lightness) with a gamut loop that keeps the tone
+  and gives up chroma. What it cannot do without HCT is the other four
+  palettes, whose whole content is chroma clamping: secondary is the
+  seed's hue at chroma 16, tertiary at hue+60, the neutrals at chroma 4
+  and 8. Visible consequence today: under a brand, a NavigationBar's
+  selected-item indicator (secondaryContainer) and the page's surfaces
+  keep Material's baseline lavender hint. The four routes, priced:
+  (a) vendor Google's Java sources (Apache-2.0, a few thousand lines in
+  the tree, nothing to pin — the styling research's own first choice);
+  (b) `com.materialkolor:material-color-utilities`, a third-party KMP
+  port of the same code, one pinned line; (c) MDC-Android 1.12.0, which
+  bundles the utilities but marks every class `@RestrictTo` and drags
+  appcompat and a dozen more artifacts behind it (measured: 46 classes
+  under its `color/utilities` package, all restricted);
+  (d) leave it — the accent family is what every other backend brands
+  too. Nothing here is urgent and (d) is a real answer.
+
+## Styling follow-ups the fan-out surfaced (2026-08-12, none blocking)
+
+- **The per-platform accent VALUE map is spelled in no binding, and
+  cannot be until the core carries a platform id.** D1's grammar admits
+  `{<platform>: Accent}` resolved binding-side at runtime; all eight
+  arms skipped it independently and said so in their doc comments
+  (uniform absence is uniform). The java arm found the real blocker:
+  the only platform signal a JVM binding has is `os.name`, which
+  reports `Linux` on Android — an app's android value would silently
+  resolve to its linux one — and `kaya_capabilities()` carries one bit
+  (aux-windows), no platform id. So this is a SPEC question first: a
+  platform id the core answers, then eight resolver spellings, then
+  the sugar-surface clause. Until then a brand book with per-platform
+  values writes per-platform guests, which is exactly what the map
+  exists to prevent.
+- **The template zone has no `role`.** A stamped "Delete" button inside
+  a For cannot be declared destructive in any language — the reference
+  sugar (`Tx`/`Tpl`) carries role on the live zone only, and every
+  binding matched it (checked during the fan-out, uniform). If a
+  collection scene ever wants per-row destructive actions, the
+  reference grows `Tpl` role first and the eight spellings follow —
+  two lines each per the java arm's estimate — plus a
+  tpl-surfaces/tools clause. Deliberately absent today, not forgotten.
+- **The brand mask bits deserve generated constants.** The
+  `set_brand_accent` record's mask (bit 0 = light override, bit 1 =
+  dark) has no spec-emitted name, so five bindings and both
+  interpreters hand-write `1` and `2` at their pack/decode sites — the
+  check-file-modes shape one record over: renumber the bits and every
+  generated surface holds while the literals drift, and the failure is
+  a dark override painting the light appearance with no error
+  anywhere. The fan-out measured the bits correct everywhere (each arm
+  decoded the core's derived words per bit); a `BRAND_MASK_LIGHT`/
+  `BRAND_MASK_DARK` pair in the spec moves the agreement from measured
+  to structural. Spec-hash move + regeneration + seven callsite edits.

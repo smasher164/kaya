@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xbfba1ee8ec9461cb
+let kayaSpecHash: UInt64 = 0x5b58d076d72c3dbb
 
 struct KayaTx {
     var bytes = Data()
@@ -447,6 +447,16 @@ struct KayaTx {
         self.u64(dialog)
         self.value(suggestedName)
         self.values(filters)
+        self.end(kayaAt)
+    }
+
+    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists.
+    mutating func setBrandAccent(_ seed: UInt32, _ mask: UInt32, _ light: UInt32, _ dark: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_BRAND_ACCENT))
+        self.u32(seed)
+        self.u32(mask)
+        self.u32(light)
+        self.u32(dark)
         self.end(kayaAt)
     }
 
@@ -930,6 +940,38 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant role value.
+    mutating func setRole(_ widgetId: UInt64, _ role: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_ROLE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(role))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound role value.
+    mutating func bindRole(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_ROLE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindRoleElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_ROLE))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -1065,6 +1107,26 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
         self.u64(window)
         self.u32(UInt32(KAYA_WPROP_DIRTY))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_window_prop with a constant inset value (window 0, the primary surface).
+    mutating func setWindowInset(_ window: UInt64, _ inset: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_INSET))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(inset))
+        self.end(kayaAt)
+    }
+
+    /// set_window_prop with a signal-bound inset value (window 0, the primary surface).
+    mutating func bindWindowInset(_ window: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_INSET))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
         self.end(kayaAt)

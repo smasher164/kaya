@@ -55,7 +55,20 @@ use bindings::Microsoft::UI::Text::{PointOptions, TextConstants, TextGetOptions,
 use bindings::Windows::Foundation::TypedEventHandler;
 use bindings::Microsoft::UI::Xaml::Input::KeyboardAccelerator;
 use bindings::Windows::System::{VirtualKey, VirtualKeyModifiers};
-use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Thickness, Visibility};
+use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Style, Thickness, Visibility};
+// The styling pass's two resource types (docs/styling-plan.md D4): a
+// role lowers to a keyed Style (`AccentButtonStyle`,
+// `SubtitleTextBlockStyle`) or to a keyed Brush
+// (`SystemFillColorCriticalBrush`), both looked up out of the
+// framework's own dictionary rather than constructed here.
+use bindings::Microsoft::UI::Xaml::Media::Brush;
+// The accessibility read's control-type vocabulary, at module scope
+// because `ax_role` names it in its signature — that function is the
+// pure half of the `ax` verb, split out so the role ladder can be tested
+// where nobody can run WinUI. Gated with the read itself: a shipped app
+// carries no scene interpreter.
+#[cfg(feature = "harness")]
+use bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationControlType;
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
@@ -325,6 +338,11 @@ impl Editable {
 }
 
 struct CoreState {
+    /// The window content inset (wprop 8, docs/styling-plan.md D3):
+    /// stored because the Mount arm stamps it as Grid.Padding and the
+    /// harness's `offer` observation subtracts it from the root's
+    /// actual size.
+    inset: f64,
     transactions: Receiver<Transaction>,
     scene: Scene,
     occurrences: OccSink,
@@ -5605,6 +5623,193 @@ fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
     }
 }
 
+/// THE BRAND ACCENT, AS A THEME DICTIONARY OF STOPS
+/// (docs/styling-plan.md D1).
+///
+/// WHAT THIS OVERRIDES AND WHY IT IS NOT `SystemAccentColor`. The Fluent
+/// control styles never read `SystemAccentColor` for a control fill.
+/// They read the DERIVED STOPS the XAML core injects beside it —
+/// `SystemAccentColorDark1..3` and `SystemAccentColorLight1..3` — and
+/// WHICH stop depends on the theme, CROSSED: the LIGHT theme reads the
+/// DARK stops and the DARK theme reads the LIGHT ones (Fluent's names
+/// say how light the SHADE is, not which theme owns it). Read out of
+/// `CommonStyles/Common_themeresources_any.xaml`:
+/// `AccentFillColorDefaultBrush` is `SystemAccentColorDark1` under
+/// `Light` and `SystemAccentColorLight2` under `Default`. So an app that
+/// writes `SystemAccentColor` alone changes the text-selection highlight
+/// and NOTHING ELSE — the confirmed silent near-no-op of
+/// microsoft-ui-xaml#6394, which the live theming docs still publish as
+/// the answer, and which is the worst diagnostic shape there is: it
+/// looks like it half worked, so the author concludes the VALUE is wrong
+/// rather than the KEY.
+///
+/// THE SECONDARY AND TERTIARY TIERS COME FOR FREE. Fluent expresses the
+/// pointer-over and pressed fills as the SAME stop at opacity 0.9 / 0.8,
+/// and its accent border as a two-stop gradient of fixed alphas over the
+/// stop. Overriding the stops recomputes all of them; overriding the
+/// derived brushes instead would make kaya reproduce Fluent's opacity
+/// ladder, and those brushes are reached through `StaticResource`
+/// ALIASES, which resolve once at load. The stops are referenced with
+/// `{ThemeResource}` — that is the difference, and it is why the stop
+/// route is the one this arm takes.
+///
+/// LIGHT AND DARK ONLY, NEVER HighContrast. Under a contrast theme the
+/// framework's own `HighContrast` dictionary re-points every accent
+/// brush at `SystemColor*`, which is a documented accessibility
+/// contract ("Do not hard-code colors in HighContrast"). kaya writes no
+/// HighContrast entry, so the brand simply stops applying there — the
+/// yield is the platform's own, and that is D2's "a platform may let
+/// its user override the request" with the user speaking through their
+/// contrast theme.
+///
+/// MARKUP AND NOT THE OBJECT MODEL, and the reason is mechanical rather
+/// than stylistic: a stop's key holds a `Windows.UI.Color`, a WinRT
+/// STRUCT, and inserting one into `ResourceDictionary.ThemeDictionaries`
+/// through the projection would need that struct boxed as
+/// `IReference<Color>`. C#'s projection boxes value types for you;
+/// `windows-core` does not, and `PropertyValue` has no `CreateColor`
+/// (its factories stop at the primitives, Point, Size and Rect). The
+/// XAML parser is what boxes a `<Color>` element, so `XamlReader.Load`
+/// is not a preference here — it is the only route from Rust that can
+/// put a Color under a Color key. It is also the shape every documented
+/// example takes.
+fn brand_dictionary(accent: &crate::brand::BrandAccent) -> String {
+    // THE MAPPING, stop by stop. kaya's core derives per appearance
+    // {fill, on_fill, standalone, hover, pressed}; Fluent's ramp is
+    // three stops per appearance with fixed consumers. The pairing is by
+    // CONSUMER, never by position in a ramp:
+    //
+    //   Light dictionary (what the LIGHT theme reads — the Dark stops):
+    //     Dark1 <- light.fill       AccentFillColorDefault/Secondary/
+    //                               Tertiary (the filled button, plus
+    //                               its 0.9/0.8 states), and
+    //                               AccentTextFillColorTertiary.
+    //     Dark2 <- light.standalone AccentTextFillColorPrimary: accent
+    //                               COLOURED TEXT on a neutral surface,
+    //                               which is exactly the word the core
+    //                               derives separately because a fill's
+    //                               number is the wrong number for text.
+    //     Dark3 <- light.hover      AccentTextFillColorSecondary, whose
+    //                               consumer is HyperlinkButtonForeground
+    //                               PointerOver — an interaction tier,
+    //                               and DARKER, which is the direction
+    //                               kaya's light ramp already takes.
+    //
+    //   Dark dictionary (what the DARK theme reads — the Light stops):
+    //     Light2 <- dark.fill       the same fill family, plus
+    //                               SystemFillColorAttention.
+    //     Light3 <- dark.standalone AccentTextFillColorPrimary AND
+    //                               Secondary both read Light3 here.
+    //     Light1 <- dark.hover      NOTHING in the framework's dictionary
+    //                               reads Light1 — said plainly so the
+    //                               next reader does not go looking for
+    //                               its effect. It is written because a
+    //                               HALF-overridden ramp is the trap one
+    //                               level down: a stop left at the system
+    //                               value paints the USER's accent beside
+    //                               kaya's brand in any consumer this
+    //                               table has not enumerated.
+    //
+    // `on_fill` is not written: Fluent hard-codes the accent foreground
+    // (`TextOnAccentFillColorPrimaryBrush` is #FFFFFF under Light and
+    // #000000 under Default) rather than deriving it, which is the very
+    // agreement D1's danger-band clamp exists to guarantee — the core
+    // already promises white below L* 60 and black at or above it, so
+    // kaya's word and Fluent's constant say the same thing and nothing
+    // needs writing. `pressed` reaches no stop either: this platform
+    // derives its pressed fill as the fill stop at opacity 0.8, so a
+    // separate pressed COLOUR has nowhere to land.
+    let hex = |rgb: u32| format!("#FF{rgb:06X}");
+    format!(
+        "<ResourceDictionary xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+           xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">\
+           <ResourceDictionary.ThemeDictionaries>\
+             <ResourceDictionary x:Key=\"Light\">\
+               <Color x:Key=\"SystemAccentColorDark1\">{}</Color>\
+               <Color x:Key=\"SystemAccentColorDark2\">{}</Color>\
+               <Color x:Key=\"SystemAccentColorDark3\">{}</Color>\
+             </ResourceDictionary>\
+             <ResourceDictionary x:Key=\"Dark\">\
+               <Color x:Key=\"SystemAccentColorLight2\">{}</Color>\
+               <Color x:Key=\"SystemAccentColorLight3\">{}</Color>\
+               <Color x:Key=\"SystemAccentColorLight1\">{}</Color>\
+             </ResourceDictionary>\
+           </ResourceDictionary.ThemeDictionaries>\
+         </ResourceDictionary>",
+        hex(accent.light.fill),
+        hex(accent.light.standalone),
+        hex(accent.light.hover),
+        hex(accent.dark.fill),
+        hex(accent.dark.standalone),
+        hex(accent.dark.hover),
+    )
+}
+
+/// Merge the brand dictionary into the application's resources.
+///
+/// APPENDED LAST, AND THAT IS THE WHOLE ORDERING RULE: merged
+/// dictionaries are searched in REVERSE order, so kaya's entry must go
+/// in after `XamlControlsResources` (which `outer_on_launched` merges at
+/// launch) or the framework's own stops would keep winning.
+///
+/// ONCE, BEFORE ANY WIDGET EXISTS. The core emits `SetBrand` before the
+/// first mount and refuses a second write, which is what makes this
+/// safe: changing a resource VALUE at runtime does NOT refresh a WinUI
+/// tree — Microsoft's own theme editor cycles `RequestedTheme` to force
+/// it — so a brand that could arrive late would need a visible re-theme
+/// to take. Arriving before the first control is created, every
+/// `{ThemeResource}` resolves against kaya's stops the first time it is
+/// asked.
+fn apply_brand(accent: &crate::brand::BrandAccent) -> windows_core::Result<()> {
+    let markup = brand_dictionary(accent);
+    let loaded = match bindings::Microsoft::UI::Xaml::Markup::XamlReader::Load(&HSTRING::from(
+        markup.as_str(),
+    )) {
+        Ok(loaded) => loaded,
+        Err(e) => panic!(
+            "kaya: winui: the brand accent's resource dictionary did not parse: {}. \
+             That markup is kaya's own fixed text with six colour literals in it, so \
+             a parse failure is the XAML reader refusing to run in this process rather \
+             than a malformed document — the same class as the ms-appx resolution that \
+             already costs this backend XamlControlsResources in dll-hosted guests \
+             (require_control_resources). kaya refuses here rather than shipping an \
+             unbranded window, which is the silent no-op the whole stop route exists \
+             to avoid.",
+            e.message()
+        ),
+    };
+    let dictionary: bindings::Microsoft::UI::Xaml::ResourceDictionary = loaded.cast()?;
+    APP.with_borrow(|app| {
+        // No `if let Some` fallback here, deliberately: an absent
+        // Application would make this a silently unbranded app, which is
+        // the failure the whole arm is written against. Ops are applied
+        // on the UI thread, which is the thread `setup` puts the
+        // Application in, so None is not a state this can reach.
+        let app = app
+            .as_ref()
+            .expect("apply runs on the UI thread, where the Application lives");
+        app.Resources()?.MergedDictionaries()?.Append(&dictionary)
+    })
+}
+
+/// One theme resource, by key, or the error the framework answered with.
+///
+/// `Application.Current.Resources` is the lookup ROOT: it searches the
+/// application dictionary, then the merged ones in reverse order, then
+/// their theme dictionaries — which is how a framework key like
+/// `AccentButtonStyle` (defined in XamlControlsResources) is reached
+/// from code with no XAML scope of our own.
+fn theme_resource<T: windows_core::Interface>(key: &str) -> windows_core::Result<T> {
+    APP.with_borrow(|app| {
+        let app = app
+            .as_ref()
+            .expect("the role lowering runs on the UI thread, where APP lives");
+        app.Resources()?
+            .Lookup(&PropertyValue::CreateString(&HSTRING::from(key))?)?
+            .cast()
+    })
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     // KAYA_WINUI_TRACE=1: print every op before applying it, so a
     // stowed-exception crash names its last op. The probe sets it.
@@ -6190,6 +6395,23 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // (the same bytes already there) instead of skipping.
                     refresh_caption(core, window.0)?;
                 }
+                (WindowProp::Inset, Value::F64(units)) => {
+                    // LAYOUT, not appearance (docs/styling-plan.md D3):
+                    // store it, restamp the mounted root's padding if
+                    // one exists (a pre-mount write is the normal case
+                    // and the Mount arm reads the store).
+                    core.inset = *units;
+                    if let Ok(root) = core.window.Content() {
+                        if let Ok(panel) = root.cast::<Grid>() {
+                            let _ = panel.SetPadding(Thickness {
+                                Left: *units,
+                                Top: *units,
+                                Right: *units,
+                                Bottom: *units,
+                            });
+                        }
+                    }
+                }
                 (WindowProp::Dirty, Value::Bool(on)) => {
                     // WINDOWS PUBLISHES NO MODIFIED AFFORDANCE — not in
                     // WinUI, not in the Windows App SDK metadata (all 28
@@ -6606,6 +6828,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .TextDocument()?
                 .Selection()?
                 .SetRange(range.start as i32, range.stop as i32)?;
+        }
+        ApplyOp::SetBrand { accent } => {
+            // VALUES IN, VALUES OUT: the core derived the eleven words
+            // (crates/kaya/src/brand.rs) and this arm re-derives none of
+            // them — no opacity ladder, no foreground rule, no second
+            // opinion about what "lighter" means. See `brand_dictionary`
+            // for which word lands in which stop and why.
+            apply_brand(&accent)?;
         }
         ApplyOp::RevealRange { id, range } => {
             let Some(field) = textarea_by_id(core, id.0) else {
@@ -7024,6 +7254,101 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         );
                     }
                 }
+                // THE ROLE TIER (docs/styling-plan.md D4): three semantic
+                // roles, each lowered to the platform's OWN emphasis and
+                // never to a colour or a size kaya picked. The legal
+                // (kind, role) pairs sit in the PATTERNS, so a role on a
+                // kind it does not fit falls to this match's catch-all
+                // and dies naming the prop and the value — the root
+                // already refused it at declare time, in its own words,
+                // and this is the second wall rather than the first.
+                (NativeWidget::Button { button, .. }, Prop::Role, Value::I64(2)) => {
+                    // PROMINENT — the one-primary-action affordance, and
+                    // on this platform it is first class: a single keyed
+                    // Style in CommonStyles/Button_themeresources.xaml.
+                    // Its background is `AccentFillColorDefaultBrush` and
+                    // its foreground `TextOnAccentFillColorPrimaryBrush`,
+                    // which is to say it is painted by the accent stops
+                    // the brand lowering wrote — nothing here picks a
+                    // colour, and a brandless app gets the user's
+                    // Windows accent, which is the correct default.
+                    button.SetStyle(&theme_resource::<Style>("AccentButtonStyle")?)?;
+                }
+                (NativeWidget::Button { caption, .. }, Prop::Role, Value::I64(1)) => {
+                    // DESTRUCTIVE, AND FLUENT SHIPS NO DESTRUCTIVE
+                    // BUTTON. The complete set of keyed Button styles is
+                    // DefaultButtonStyle, AccentButtonStyle and the two
+                    // navigation-back ones; there is no
+                    // DestructiveButtonStyle, no DangerButtonStyle, no
+                    // CriticalButtonStyle. Fluent expresses
+                    // destructiveness through DIALOG STRUCTURE — "all
+                    // dialogs should have a safe, non-destructive
+                    // action" — rather than through a red button.
+                    //
+                    // What the platform DOES have is a severity palette:
+                    // `SystemFillColorCritical*` is what InfoBar paints
+                    // an error with. So kaya's lowering is the
+                    // platform's own critical colour on the button's
+                    // TEXT, with the button chrome left standard. That is
+                    // a choice among expressible options rather than a
+                    // capability limit, and it is written down here
+                    // rather than pretending this toolkit has an
+                    // affordance it does not (D4).
+                    //
+                    // ON THE CAPTION, NOT ON THE BUTTON: the framework's
+                    // Button template re-points the content presenter's
+                    // Foreground in its PointerOver and Pressed states,
+                    // so a value set on the control would show in the
+                    // resting state alone. A role is not a state — it is
+                    // what the button MEANS — and the caption is the
+                    // text surface this backend owns, so a local value
+                    // there is what carries the colour across the
+                    // framework's own state changes.
+                    caption.SetForeground(&theme_resource::<Brush>(
+                        "SystemFillColorCriticalBrush",
+                    )?)?;
+                }
+                (NativeWidget::Label(label), Prop::Role, Value::I64(3)) => {
+                    // THE HEADING ROLE IS TWO FACTS AT ONCE, the same two
+                    // every backend lowers it to: the platform's heading
+                    // TEXT TIER and the platform's heading ACCESSIBLE
+                    // fact. Neither implies the other here — a style
+                    // changes no UIA property, and HeadingLevel changes
+                    // no pixel — so both are written, and a scene that
+                    // reads only the second is reading the half that
+                    // Narrator users depend on.
+                    //
+                    // THE ACCESSIBLE FACT IS UIA's OWN HeadingLevel, the
+                    // property that gives real heading NAVIGATION (a
+                    // client's next-heading command finds it). The two
+                    // things it is not: `SetLevel` is a different UIA
+                    // property — an item's depth in a hierarchy — and
+                    // `SetLocalizedControlType` would only make Narrator
+                    // SAY "heading" while navigation still skipped it,
+                    // which is a lie in the shape of a fix.
+                    //
+                    // `Level2` and not `HeadingLevel2`: the enum's
+                    // members are `None`, `Level1`..`Level9`
+                    // (bindings.rs, generated from the vendored
+                    // Microsoft.UI.Xaml.winmd — the docs' `HeadingLevel1`
+                    // spelling is the UWP `Windows.UI.Xaml` one). Level 2
+                    // and not 1 for the reason every backend picks the
+                    // section tier: the window itself is the document's
+                    // level 1, and a kaya heading heads a section inside
+                    // it.
+                    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetHeadingLevel(
+                        label,
+                        bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationHeadingLevel::Level2,
+                    )?;
+                    // THE TEXT TIER IS A STYLE KEY, NEVER A FONT SIZE.
+                    // `SubtitleTextBlockStyle` is Fluent's own
+                    // section-heading step of the XAML type ramp
+                    // (BasedOn BaseTextBlockStyle like every other step),
+                    // so the size, weight and line height are the
+                    // platform's scale — picking numbers out of that
+                    // ramp is exactly what D4's ceiling refuses.
+                    label.SetStyle(&theme_resource::<Style>("SubtitleTextBlockStyle")?)?;
+                }
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }
@@ -7136,15 +7461,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::Mount { window, root } => {
             let widget = core.widgets.get(&root).expect("scene validated the id");
             if let NativeWidget::Column(panel) | NativeWidget::Row(panel) = widget {
-                // The normalized root inset: 16 units INSIDE the
-                // root (Grid.Padding is inside ActualSize, so the
-                // root still fills its island and
-                // expect_root_fills holds).
+                // The normalized root inset — now the window's OWN
+                // (wprop 8, docs/styling-plan.md D3), 16 unless the app
+                // says otherwise, INSIDE the root (Grid.Padding is
+                // inside ActualSize, so the root still fills its island
+                // and expect_root_fills holds).
+                let inset = core.inset;
                 panel.SetPadding(Thickness {
-                    Left: 16.0,
-                    Top: 16.0,
-                    Right: 16.0,
-                    Bottom: 16.0,
+                    Left: inset,
+                    Top: inset,
+                    Right: inset,
+                    Bottom: inset,
                 })?;
                 // Baseline compensation needs REAL text metrics,
                 // and at apply time the grid has never had a true
@@ -7869,6 +8196,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
 
     CORE.with_borrow_mut(|core| {
         *core = Some(CoreState {
+            inset: 16.0,
             transactions: tx_rx,
             scene: Scene::new(),
             occurrences: occ_tx,
@@ -8378,7 +8706,7 @@ impl crate::harness::Stage for WinUiStage {
         // and the read has to match by ordinal.
         Self::on_ui_read(move |core| {
             use bindings::Microsoft::UI::Xaml::Automation::Peers::{
-                AutomationControlType, FrameworkElementAutomationPeer,
+                AutomationHeadingLevel, FrameworkElementAutomationPeer,
             };
             // Resolve the ELEMENT from the per-kind registry, the way
             // every other WinUI verb does (read_label/read_text), with
@@ -8409,45 +8737,38 @@ impl crate::harness::Stage for WinUiStage {
                 },
             };
             let kind = peer.GetAutomationControlType()?;
-            let role = if kind == AutomationControlType::Button {
-                "button"
-            } else if kind == AutomationControlType::CheckBox {
-                "checkbox"
-            } else if kind == AutomationControlType::Edit {
-                "field"
-            } else if kind == AutomationControlType::Text {
-                "label"
-            } else if kind == AutomationControlType::Slider {
-                "slider"
-            } else if kind == AutomationControlType::Image {
-                "image"
-            } else if kind == AutomationControlType::ProgressBar {
-                "progress"
-            } else if kind == AutomationControlType::ComboBox {
-                // The chooser, spelled `combobox` in the closed set:
-                // AXPopUpButton on macOS, a UIButton owning a menu on
-                // iOS, Role.DropdownList on Compose, ComboBox here and
-                // on AT-SPI.
-                "combobox"
-            } else if kind == AutomationControlType::Group
-                || kind == AutomationControlType::Pane
-                || kind == AutomationControlType::List
-            {
-                // NORMALIZED to the coarsest container role every
-                // platform publishes. UIA distinguishes Group, Pane and
-                // List (a RadioButtons group is a List here); the
-                // closed set has one name for "a container an assistive
-                // client steps into", because that is all a shared
-                // scene can assert.
-                "group"
-            } else {
+            // THE HEADING ROLE IS A PROPERTY READ, NOT A TYPE READ. A
+            // heading is not a control TYPE in UIA — a TextBlock carrying
+            // HeadingLevel still reports `Text` — so `ax_role`'s ladder
+            // could never see it, and `None` is what an unmarked element
+            // answers. `?` rather than a swallowed default on purpose: a
+            // failed property read must surface as
+            // `<accessibility read failed>`, never as the confident wrong
+            // answer "this is an ordinary label".
+            //
+            // AND THIS READ IS WEAKER THAN ITS SIBLINGS, said plainly
+            // rather than left for someone to discover. It asks the PEER,
+            // which is the provider side and not kaya's model —
+            // `GetHeadingLevelCore` is the method a peer subclass
+            // overrides and what a client receives. But it does not leave
+            // this process, where GTK's read crosses the AT-SPI bus and
+            // Compose's crosses into a published AccessibilityNodeInfo.
+            // An out-of-process UIA client is barred at the Cargo.toml
+            // (`highlights` below says what that costs and why), so this
+            // is the strongest read available here: it proves the
+            // property reaches the peer, not that a client in another
+            // process would hear it.
+            let role = ax_role(
+                peer.GetHeadingLevel()? != AutomationHeadingLevel::None,
+                kind,
+            );
+            if role == UNMAPPED_ROLE {
                 // The role the platform published is one kaya has no
                 // name for — the finding this verb exists to surface,
                 // and the next question is always WHICH one, so it goes
                 // to the log rather than costing a VM round-trip.
                 eprintln!("KAYA_AX_TRACE: unmapped UIA control type {kind:?} for {target:?}");
-                "unknown"
-            };
+            }
             let name = peer.GetName()?.to_string();
             // A text field with no authored label publishes an EMPTY
             // UIA Name — its content lives on the ValuePattern, and
@@ -10258,6 +10579,29 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui(move |core| Ok(usize::from(core.live_alert.is_some())))
     }
 
+    fn inset(&self) -> String {
+        Self::on_ui_read(move |core| {
+            // MEASURED from real layout, never read back from the
+            // model: Grid.Padding shifts the first child's visual
+            // offset inside the root by exactly the inset
+            // (docs/styling-plan.md D3).
+            let root: FrameworkElement = core.window.Content()?.cast()?;
+            root.UpdateLayout()?;
+            let grid: Grid = root.cast()?;
+            let child: UIElement = grid.Children()?.GetAt(0)?;
+            let transform = child.TransformToVisual(&root)?;
+            let origin = transform
+                .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+            let (x, y) = (origin.X.round() as i64, origin.Y.round() as i64);
+            Ok(if x == y {
+                format!("{x}")
+            } else {
+                format!("{x}x{y} (axes disagree)")
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn root_fills(&self) -> String {
         Self::on_ui_read(move |core| {
             // The mounted root is the window's Content; the content
@@ -10446,4 +10790,222 @@ fn find_template_button(
         }
     }
     Ok(None)
+}
+
+/// What `ax` answers when the platform published a role kaya's closed set
+/// has no name for. Named because two places need it: the ladder that
+/// returns it and the trace that reports it.
+#[cfg(feature = "harness")]
+const UNMAPPED_ROLE: &str = "unknown";
+
+/// THE ROLE HALF OF THE `ax` VERB, as a pure function of the two things
+/// UIA answered with — nothing else in `ax` can be reached off Windows,
+/// and this part is where the ordering bug lives.
+///
+/// `heading` comes FIRST and that is the whole reason this is a function
+/// rather than an inline ladder: UIA has no heading control type, so a
+/// heading TextBlock reports `Text`, and a ladder that consulted the type
+/// first would answer `label` for every heading kaya declares — a wrong
+/// answer that looks exactly like a right one. The compiler cannot see
+/// that ordering, so `mod tests` below does.
+///
+/// Gated with the `Stage` impl that calls it: a shipped app carries no
+/// scene interpreter, so it carries no accessibility read either.
+#[cfg(feature = "harness")]
+fn ax_role(heading: bool, kind: AutomationControlType) -> &'static str {
+    if heading {
+        // Spelled the way every other backend spells it,
+        // `heading/<the label's text>` — ONE word for all nine levels,
+        // because the closed set names the ROLE and a shared scene
+        // cannot freeze a per-platform level ladder
+        // (docs/styling-plan.md D4).
+        "heading"
+    } else if kind == AutomationControlType::Button {
+        "button"
+    } else if kind == AutomationControlType::CheckBox {
+        "checkbox"
+    } else if kind == AutomationControlType::Edit {
+        "field"
+    } else if kind == AutomationControlType::Text {
+        "label"
+    } else if kind == AutomationControlType::Slider {
+        "slider"
+    } else if kind == AutomationControlType::Image {
+        "image"
+    } else if kind == AutomationControlType::ProgressBar {
+        "progress"
+    } else if kind == AutomationControlType::ComboBox {
+        // The chooser, spelled `combobox` in the closed set:
+        // AXPopUpButton on macOS, a UIButton owning a menu on iOS,
+        // Role.DropdownList on Compose, ComboBox here and on AT-SPI.
+        "combobox"
+    } else if kind == AutomationControlType::Group
+        || kind == AutomationControlType::Pane
+        || kind == AutomationControlType::List
+    {
+        // NORMALIZED to the coarsest container role every platform
+        // publishes. UIA distinguishes Group, Pane and List (a
+        // RadioButtons group is a List here); the closed set has one
+        // name for "a container an assistive client steps into",
+        // because that is all a shared scene can assert.
+        "group"
+    } else {
+        UNMAPPED_ROLE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One theme dictionary's markup, from its key to its close.
+    fn section(xaml: &str, key: &str) -> String {
+        let at = xaml
+            .find(&format!("x:Key=\"{key}\""))
+            .unwrap_or_else(|| panic!("no {key} theme dictionary in {xaml}"));
+        let rest = &xaml[at..];
+        let close = rest
+            .find("</ResourceDictionary>")
+            .expect("a theme dictionary closes");
+        rest[..close].to_owned()
+    }
+
+    /// THE CROSS-READ, WHICH IS THIS ARM'S ONE LANDMINE. Fluent's stop
+    /// names say how light the SHADE is, not which theme owns it: the
+    /// LIGHT theme reads `SystemAccentColorDark1` and the DARK theme
+    /// reads `SystemAccentColorLight2`. Getting it backwards produces an
+    /// app that is branded in one appearance and the user's system
+    /// accent in the other — a bug nobody sees until they flip the OS
+    /// setting, and one no read-back in this process can catch, because
+    /// the dictionary reads back exactly what was written either way.
+    ///
+    /// Each stop is also pinned to the WORD the core derived for it, so
+    /// the consumer-by-consumer pairing in `brand_dictionary` cannot
+    /// drift into "some accent-ish colour in some accent-ish slot".
+    #[test]
+    fn the_stops_are_crossed_and_carry_the_word_their_consumer_wants() {
+        let accent = crate::brand::derive(0x3584E4, None, None);
+        let xaml = brand_dictionary(&accent);
+        let light = section(&xaml, "Light");
+        let dark = section(&xaml, "Dark");
+        let entry = |stop: &str, rgb: u32| format!("x:Key=\"{stop}\">#FF{rgb:06X}<");
+        for (which, dict, wants, forbidden) in [
+            (
+                "Light",
+                &light,
+                vec![
+                    entry("SystemAccentColorDark1", accent.light.fill),
+                    entry("SystemAccentColorDark2", accent.light.standalone),
+                    entry("SystemAccentColorDark3", accent.light.hover),
+                ],
+                "SystemAccentColorLight",
+            ),
+            (
+                "Dark",
+                &dark,
+                vec![
+                    entry("SystemAccentColorLight2", accent.dark.fill),
+                    entry("SystemAccentColorLight3", accent.dark.standalone),
+                    entry("SystemAccentColorLight1", accent.dark.hover),
+                ],
+                "SystemAccentColorDark",
+            ),
+        ] {
+            for want in wants {
+                assert!(
+                    dict.contains(&want),
+                    "the {which} theme dictionary is missing {want}\n{dict}"
+                );
+            }
+            assert!(
+                !dict.contains(forbidden),
+                "the {which} theme dictionary writes a {forbidden}* stop — the \
+                 cross-read is inverted, which brands one appearance and leaves \
+                 the other on the user's system accent\n{dict}"
+            );
+        }
+    }
+
+    /// THE ORDERING NO COMPILER CAN SEE, and the one this arm is most
+    /// likely to lose.
+    ///
+    /// UIA publishes no heading control type. The styling pass's heading
+    /// is a TextBlock, and its peer answers
+    /// `AutomationControlType::Text` whether or not the role was applied
+    /// — so the ONLY evidence a heading exists is the HeadingLevel
+    /// property, and the ladder has to consult it before the type. Get
+    /// that backwards and every heading reads `label/Sections` where
+    /// tools/scenes/styling.steps froze `heading/Sections`: a wrong
+    /// answer shaped exactly like a right one, from a verb whose whole
+    /// job is to be believed.
+    ///
+    /// (`AutomationControlType::Header` is NOT the heading and is not a
+    /// route out of this — it is the header of a table, list or tree.)
+    #[test]
+    #[cfg(feature = "harness")]
+    fn a_heading_outranks_the_control_type_its_peer_reports() {
+        assert_eq!(ax_role(true, AutomationControlType::Text), "heading");
+        // The same element with the role absent. The two calls differ in
+        // the property alone, which is the entire claim.
+        assert_eq!(ax_role(false, AutomationControlType::Text), "label");
+    }
+
+    /// THE REST OF THE LADDER, PINNED BECAUSE THE HEADING BRANCH WAS
+    /// INSERTED AT THE TOP OF IT. Every word here is bytes in a shared
+    /// scene's expected string (tools/scenes/*.steps, compared
+    /// byte-for-byte across all eight languages), so a dropped or
+    /// re-spelled arm is a matrix failure on a lane this machine cannot
+    /// run. The three container types collapsing to one word is
+    /// deliberate, not an oversight.
+    #[test]
+    #[cfg(feature = "harness")]
+    fn the_closed_role_set_is_what_each_uia_type_answers() {
+        for (kind, want) in [
+            (AutomationControlType::Button, "button"),
+            (AutomationControlType::CheckBox, "checkbox"),
+            (AutomationControlType::Edit, "field"),
+            (AutomationControlType::Text, "label"),
+            (AutomationControlType::Slider, "slider"),
+            (AutomationControlType::Image, "image"),
+            (AutomationControlType::ProgressBar, "progress"),
+            (AutomationControlType::ComboBox, "combobox"),
+            (AutomationControlType::Group, "group"),
+            (AutomationControlType::Pane, "group"),
+            (AutomationControlType::List, "group"),
+        ] {
+            assert_eq!(ax_role(false, kind), want, "{kind:?} answered the wrong role");
+            // And the heading property outranks every one of them —
+            // stated across the whole table rather than at `Text` alone,
+            // because "consult the property first" is a claim about the
+            // ladder and not about one arm of it.
+            assert_eq!(ax_role(true, kind), "heading", "{kind:?} swallowed the heading");
+        }
+        // A type kaya has no word for reports as such, so the trace in
+        // `ax` fires and names it. Window is one the framework really
+        // does publish.
+        assert_eq!(ax_role(false, AutomationControlType::Window), UNMAPPED_ROLE);
+    }
+
+    /// The two keys this lowering must NEVER write, each for its own
+    /// reason. `SystemAccentColor` is the documented-but-broken route of
+    /// microsoft-ui-xaml#6394: no control fill reads it, so an app that
+    /// writes it changes the text-selection highlight and nothing else.
+    /// A `HighContrast` (or fallback `Default`) dictionary would override
+    /// the framework's own contrast arm, which re-points every accent
+    /// brush at `SystemColor*` — a documented accessibility contract
+    /// ("Do not hard-code colors in HighContrast").
+    #[test]
+    fn the_brand_writes_neither_the_bare_accent_nor_a_contrast_theme() {
+        let xaml = brand_dictionary(&crate::brand::derive(0x3584E4, None, None));
+        for forbidden in [
+            "x:Key=\"SystemAccentColor\"",
+            "x:Key=\"HighContrast\"",
+            "x:Key=\"Default\"",
+        ] {
+            assert!(
+                !xaml.contains(forbidden),
+                "the brand dictionary writes {forbidden}\n{xaml}"
+            );
+        }
+    }
 }

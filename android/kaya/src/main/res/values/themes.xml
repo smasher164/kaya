@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- THE PLATFORM THEME EVERY KAYA APP DECLARES, and the reason it
+         exists is a measured half-dark-mode (docs/styling-plan.md D1).
+
+         An Activity's window background, its status bar and everything
+         drawn before the first Compose frame come from the MANIFEST
+         theme, which no Compose theme reaches. Every kaya app used to
+         name `@android:style/Theme.Material.Light*` — a hard LIGHT
+         theme — so a composition following the system into dark mode
+         put dark-scheme controls on a light page: screencapped on
+         emulator-5554, window #FAFAFA in both appearances while the
+         primary role moved #6750A4 -> #D0BCFF.
+
+         DAY/NIGHT WITHOUT APPCOMPAT: the `-night` resource qualifier
+         does it, which is the platform's own mechanism and needs no
+         dependency (AppCompat's DayNight themes are the same trick with
+         a compatibility layer for the pre-API-29 devices that had no
+         system dark mode; kaya's floor is API 26 and those devices
+         simply stay light, which is exactly what `isSystemInDarkTheme()`
+         reports there).
+
+         Two entries, because the validation apps differ and that
+         difference is theirs to keep: the Rust app hides the platform
+         action bar (Compose draws the whole surface), the JVM and Go
+         apps keep it. -->
+    <style name="Theme.Kaya" parent="@android:style/Theme.Material.Light" />
+
+    <style name="Theme.Kaya.NoActionBar"
+        parent="@android:style/Theme.Material.Light.NoActionBar" />
+</resources>

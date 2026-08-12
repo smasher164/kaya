@@ -182,7 +182,19 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // advertised and never served on GTK, and the same path lowercases
     // (docs/clipboard-plan.md §5b finding 4). read_clipboard takes the
     // same string for the same reason.
-    ("accepts", 15, PropKind::Str),
+        ("accepts", 15, PropKind::Str),
+    // SEMANTIC EMPHASIS, the styling pass's role tier (docs/
+    // styling-plan.md D4): what this widget MEANS, never how it looks —
+    // destructive and prominent on buttons, heading on labels. A closed
+    // enum for the same reason align is one, and value-dependent
+    // kind-legality (which VARIANT fits which kind) is the root's check,
+    // not a type: the prop is one wire slot, the variants divide it.
+    // The comparative survey's sharpest finding sits behind this row:
+    // Qt and SWT both broke their styling ceilings because they shipped
+    // colors WITHOUT semantics ("red text for potentially destructive
+    // push buttons" is Qt's own sentence for what a palette cannot say),
+    // so the role tier ships WITH the brand tier, not after it.
+    ("role", 16, PropKind::Enum("role")),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, kept
@@ -256,6 +268,18 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     // no alert. One attribute, one meaning: show the platform's
     // unsaved-work affordance.
     ("dirty", 7, PropKind::Bool),
+    // THE WINDOW CONTENT INSET, in layout units — LAYOUT, not appearance
+    // (ratified 2026-08-12, docs/styling-plan.md D3): the space kaya's
+    // interpreters put around the mounted root, which was a hard-coded
+    // 16 in every backend until the text editor needed 0 and could not
+    // say so (a Sublime-shaped buffer, a canvas, a photo view — full
+    // bleed was inexpressible). Defaults to 16, so no existing scene
+    // moves. It is KAYA'S OWN padding, applied inside the root, so 0 is
+    // honored unconditionally on every platform; what it does NOT
+    // remove is a platform's safe area (notch, home indicator) — those
+    // regions were never kaya's inset, and content extends to the
+    // safe-area edge, not past it.
+    ("inset", 8, PropKind::F64),
 ];
 
 /// Navigation-entry properties: their own typed table, deliberately
@@ -1099,6 +1123,44 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   caller's intent, and a mode would let a guest ask for it \
                   on a file it merely opened.",
         },
+        Record {
+            kind: 42,
+            name: "set_brand_accent",
+            fields: &[
+                f("seed", FieldTy::U32),
+                f("mask", FieldTy::U32),
+                f("light", FieldTy::U32),
+                f("dark", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "REQUEST the app's brand accent (docs/styling-plan.md D1/D2). \
+                  `seed` is one packed sRGB (0xRRGGBB) — the only value most \
+                  apps write; `mask` says which per-appearance overrides are \
+                  present (bit 0 = light, bit 1 = dark) and `light`/`dark` \
+                  carry them when set, 0 otherwise. Per-PLATFORM values never \
+                  ride the wire: the binding resolves its platform at runtime \
+                  and sends one resolved trio (values may vary per platform; \
+                  code and wire shape never do).\n\n\
+                  A REQUEST, uniformly: a platform may let its user override \
+                  the app's accent — macOS does today (an app accent applies \
+                  only while the system accent is multicolor), and the \
+                  semantics does not change if another platform grows the \
+                  preference. The app states a brand; the platform stays the \
+                  judge of its chrome.\n\n\
+                  SET ONCE, before the first mount: the root refuses a second \
+                  write and a late one — brand is identity, not state, and a \
+                  slot that could flip at runtime would promise a theme- \
+                  switching surface the vocabulary deliberately does not \
+                  have.\n\n\
+                  The app NEVER writes a foreground and NEVER writes contrast \
+                  variants; the core derives fill/on-fill/standalone and a \
+                  hover/pressed ramp per appearance (the danger-band clamp, \
+                  docs/styling-plan.md D1) and hands every backend VALUES. \
+                  Backends do not re-derive — except Compose, which receives \
+                  the SEED as well because Material 3's own documented flow \
+                  derives a full role scheme from it, and kaya defers to the \
+                  platform's derivation where one exists.",
+        },
     ],
     apply: &[
         Record {
@@ -1530,6 +1592,37 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   platforms that hand back a name for a file nobody has \
                   made behave like the two that hand back a document.",
         },
+        Record {
+            kind: 32,
+            name: "set_brand",
+            fields: &[
+                f("seed", FieldTy::U32),
+                f("light_fill", FieldTy::U32),
+                f("light_on_fill", FieldTy::U32),
+                f("light_standalone", FieldTy::U32),
+                f("light_hover", FieldTy::U32),
+                f("light_pressed", FieldTy::U32),
+                f("dark_fill", FieldTy::U32),
+                f("dark_on_fill", FieldTy::U32),
+                f("dark_standalone", FieldTy::U32),
+                f("dark_hover", FieldTy::U32),
+                f("dark_pressed", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "The brand accent, DERIVED — eleven packed sRGB words \
+                  (docs/styling-plan.md D1). Backends apply VALUES and \
+                  re-derive nothing: fill is the accent as a background, \
+                  on_fill its fixed foreground (chosen by the core's \
+                  danger-band clamp so every platform's own foreground rule \
+                  agrees with it), standalone is accent-colored text on a \
+                  neutral surface (a different number than a fill — \
+                  libadwaita's clamp verbatim), hover/pressed the \
+                  interaction ramp. The SEED rides along for the one \
+                  platform whose own documented derivation kaya defers to: \
+                  Material builds its role scheme from the seed. Emitted \
+                  once, before the first mount; a backend never sees a \
+                  brand it must un-apply.",
+        },
     ],
     occurrence: &[
         Record {
@@ -1950,6 +2043,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("a11y_label", 13),
                 ("a11y_hint", 14),
                 ("accepts", 15),
+                ("role", 16),
             ],
         },
         EnumSpec {
@@ -1962,6 +2056,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("sections_presentation", 5),
                 ("list_detail", 6),
                 ("dirty", 7),
+                ("inset", 8),
             ],
         },
         EnumSpec {
@@ -2038,6 +2133,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("end", 2),
                 ("stretch", 3),
                 ("baseline", 4),
+            ],
+        },
+        EnumSpec {
+            name: "role",
+            variants: &[
+                ("destructive", 1),
+                ("prominent", 2),
+                ("heading", 3),
             ],
         },
         EnumSpec {
@@ -2213,6 +2316,7 @@ mod tests {
             ("select_range", wire::TX_SELECT_RANGE),
             ("reveal_range", wire::TX_REVEAL_RANGE),
             ("show_save_dialog", wire::TX_SHOW_SAVE_DIALOG),
+            ("set_brand_accent", wire::TX_SET_BRAND_ACCENT),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -2257,6 +2361,7 @@ mod tests {
                 ("select_range", wire::APPLY_SELECT_RANGE),
                 ("reveal_range", wire::APPLY_REVEAL_RANGE),
                 ("present_save_dialog", wire::APPLY_PRESENT_SAVE_DIALOG),
+            ("set_brand", wire::APPLY_SET_BRAND),
             ]
         );
         // THE SAME TABLE SHAPE AS THE TWO ABOVE, and it was not always:
@@ -2509,12 +2614,14 @@ mod tests {
                     ("prop", "a11y_label") => wire::PROP_A11Y_LABEL,
                     ("prop", "a11y_hint") => wire::PROP_A11Y_HINT,
                     ("prop", "accepts") => wire::PROP_ACCEPTS,
+                    ("prop", "role") => wire::PROP_ROLE,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
                     ("wprop", "veto_close") => wire::WPROP_VETO_CLOSE,
                     ("wprop", "list_detail") => wire::WPROP_LIST_DETAIL,
                     ("wprop", "dirty") => wire::WPROP_DIRTY,
+                    ("wprop", "inset") => wire::WPROP_INSET,
                     ("wprop", "sections_presentation") => wire::WPROP_SECTIONS_PRESENTATION,
                     ("eprop", "title") => wire::EPROP_TITLE,
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
@@ -2562,6 +2669,9 @@ mod tests {
                     ("clip", "image") => wire::CLIP_IMAGE,
                     ("clip", "files") => wire::CLIP_FILES,
                     ("clip", "custom") => wire::CLIP_CUSTOM,
+                    ("role", "destructive") => wire::ROLE_DESTRUCTIVE,
+                    ("role", "prominent") => wire::ROLE_PROMINENT,
+                    ("role", "heading") => wire::ROLE_HEADING,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,

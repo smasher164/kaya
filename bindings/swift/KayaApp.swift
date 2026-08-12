@@ -156,6 +156,24 @@ enum KayaAlign: Int64 {
     case baseline = 4
 }
 
+/// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
+/// never how it looks — a closed vocabulary, so there is no raw value to
+/// reach for. Destructive and prominent are BUTTON emphasis, heading is
+/// LABEL hierarchy, and the root refuses the other combinations at
+/// declare time, in one sentence naming both the role and the kind.
+enum KayaRole: Int64 {
+    /// An action whose press destroys something: the platform's own
+    /// destructive affordance (red title on Apple, the error-role
+    /// container on Material, `.destructive-action` on GTK).
+    case destructive = 1
+    /// THE primary action — one per dialog's worth of emphasis: the
+    /// default-button treatment on every platform.
+    case prominent = 2
+    /// A text hierarchy heading — the platform's heading text style AND
+    /// the accessibility heading trait assistive users skim by.
+    case heading = 3
+}
+
 struct KayaWidget {
     let id: UInt64
 }
@@ -1873,6 +1891,15 @@ final class KayaAppTx {
         tx.setAlign(w.id, align.rawValue)
     }
 
+    /// A widget's SEMANTIC EMPHASIS: destructive/prominent on buttons,
+    /// heading on labels — what it means, never how it looks. The
+    /// declarative spelling is the `role:` argument at construction;
+    /// this is the dynamic path. A role on a kind it does not fit dies
+    /// at the root, at declare time.
+    func setRole(_ w: KayaWidget, _ role: KayaRole) {
+        tx.setRole(w.id, role.rawValue)
+    }
+
     func setGrow(_ w: KayaWidget, _ weight: Double) {
         tx.setGrow(w.id, weight)
     }
@@ -2059,12 +2086,18 @@ final class KayaAppTx {
     // the container and its addChilds. Sugar over the record calls,
     // never a scene value interpreted later.
 
+    /// `role:` is this button's semantic emphasis — `.destructive` or
+    /// `.prominent`, the two that fit an action. It changes what the
+    /// press MEANS to the platform and to assistive tech, never what
+    /// `onClick:` does.
     func button(
-        _ text: String? = nil, onClick: ((KayaAppTx) throws -> Void)? = nil,
+        _ text: String? = nil, role: KayaRole? = nil,
+        onClick: ((KayaAppTx) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_BUTTON))
         if let text { setText(w, text) }
+        if let role { setRole(w, role) }
         if let onClick { app.onClick(w, onClick) }
         if let grow { setGrow(w, grow) }
         return w
@@ -2091,12 +2124,18 @@ final class KayaAppTx {
         return w
     }
 
+    /// `role:` is this label's place in the text hierarchy — `.heading`
+    /// is the one that fits a label, and it is a semantic fact (the
+    /// platform's heading style AND the trait assistive users skim by),
+    /// not a font size.
     func label(
-        _ text: String? = nil, bind: KayaSignal? = nil, grow: Double? = nil
+        _ text: String? = nil, bind: KayaSignal? = nil, role: KayaRole? = nil,
+        grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_LABEL))
         if let text { setText(w, text) }
         if let bind { bindText(w, bind) }
+        if let role { setRole(w, role) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -2762,6 +2801,46 @@ final class KayaAppTx {
         app.onPaste(n, handler)
     }
 
+    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2):
+    /// one packed sRGB hex (0xRRGGBB) is the whole call for most apps.
+    /// `light:`/`dark:` are the per-appearance overrides a brand book
+    /// with a stated dark variant needs; whichever you leave out is
+    /// filled from `seed`. One name for both forms is the Swift
+    /// spelling — the same defaulted-argument shape the window
+    /// construct uses.
+    ///
+    /// SET ONCE, BEFORE THE FIRST MOUNT: brand is identity, not state,
+    /// and the root refuses a second write and a late one.
+    ///
+    /// You never write a foreground and never write contrast variants.
+    /// The core derives fill, on-fill, standalone and the hover/pressed
+    /// ramp per appearance and hands every backend values — a pair an
+    /// app supplied could be illegible with nothing to catch it, and
+    /// three of the four platforms hard-code or compute the foreground
+    /// anyway.
+    ///
+    /// AND IT IS A REQUEST: a platform may let its user override the
+    /// app's accent. macOS does today — an app accent applies only
+    /// while the system accent is multicolor — and the semantics does
+    /// not change if another platform grows the preference.
+    ///
+    /// NO PER-PLATFORM VALUE MAP HERE, and the same absence in every
+    /// binding: D1's grammar allows one, the reference sugar does not
+    /// spell it, and a surface one language has is the divergence
+    /// invariant 1 refuses. Swift is the tempting place — one source
+    /// serves macOS and iOS — which is exactly why the answer is a
+    /// `perPlatform:` label resolved inside THIS function if it is ever
+    /// admitted, never `#if os(...)` in a guest.
+    func brandAccent(_ seed: UInt32, light: UInt32? = nil, dark: UInt32? = nil) {
+        // The mask is what tells the core "unstated" from "0x000000":
+        // black is a legal accent, so absence cannot be encoded as a
+        // zero value.
+        var mask: UInt32 = 0
+        if light != nil { mask |= 1 }
+        if dark != nil { mask |= 2 }
+        tx.setBrandAccent(seed, mask, light ?? 0, dark ?? 0)
+    }
+
     /// Create an auxiliary window (capability-gated: phone hosts
     /// reject at the root); materializes hidden, mountIn presents.
     /// Named arguments are the Swift spelling.
@@ -2775,6 +2854,7 @@ final class KayaAppTx {
         _ id: UInt64, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
         listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
+        inset: Double? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
         onUndone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
@@ -2785,7 +2865,7 @@ final class KayaAppTx {
         window(
             id, title: title, width: width, height: height,
             vetoClose: vetoClose, dirty: dirty, listDetail: listDetail,
-            sectionsPresentation: sectionsPresentation,
+            sectionsPresentation: sectionsPresentation, inset: inset,
             onCloseRequested: onCloseRequested, onClosed: onClosed,
             onUndone: onUndone, onRedone: onRedone,
             menus: menus)
@@ -2810,10 +2890,20 @@ final class KayaAppTx {
     /// — "unsaved changes, close anyway?" is `vetoClose:` plus a
     /// dialog, which is yours to compose, because apps legitimately
     /// differ on what it should do.
+    ///
+    /// `inset:` is this window's CONTENT INSET in layout units — LAYOUT,
+    /// not appearance (docs/styling-plan.md D3): the space kaya's own
+    /// interpreter puts around the mounted root. 16 unless you say
+    /// otherwise; 0 is full bleed (an editor, a canvas), honored
+    /// unconditionally because the inset is kaya's own padding and
+    /// nothing platform-side defends it. A platform's SAFE AREA is a
+    /// separate fact and is not removed by it: on iPhone the content
+    /// reaches the safe-area edge, not past it.
     func window(
         _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
         listDetail: Bool? = nil, sectionsPresentation: Int64? = nil,
+        inset: Double? = nil,
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
         onUndone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
@@ -2829,6 +2919,7 @@ final class KayaAppTx {
         if let sectionsPresentation {
             tx.setWindowSectionsPresentation(id, sectionsPresentation)
         }
+        if let inset { tx.setWindowInset(id, inset) }
         if let onCloseRequested { app.onCloseRequested(id, onCloseRequested) }
         if let onClosed { app.onWindowClosed(id, onClosed) }
         // The history handlers ride the window construct because the

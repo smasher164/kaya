@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xbfba1ee8ec9461cb
+specHash = 0x5b58d076d72c3dbb
 
 valueBool :: Word32
 valueBool = 1
@@ -104,6 +104,8 @@ propA11yHint :: Word32
 propA11yHint = 14
 propAccepts :: Word32
 propAccepts = 15
+propRole :: Word32
+propRole = 16
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -118,6 +120,8 @@ wpropListDetail :: Word32
 wpropListDetail = 6
 wpropDirty :: Word32
 wpropDirty = 7
+wpropInset :: Word32
+wpropInset = 8
 epropTitle :: Word32
 epropTitle = 1
 epropInterceptBack :: Word32
@@ -182,6 +186,12 @@ alignStretch :: Word32
 alignStretch = 3
 alignBaseline :: Word32
 alignBaseline = 4
+roleDestructive :: Word32
+roleDestructive = 1
+roleProminent :: Word32
+roleProminent = 2
+roleHeading :: Word32
+roleHeading = 3
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -284,6 +294,8 @@ txKindRevealRange :: Word16
 txKindRevealRange = 40
 txKindShowSaveDialog :: Word16
 txKindShowSaveDialog = 41
+txKindSetBrandAccent :: Word16
+txKindSetBrandAccent = 42
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -346,6 +358,8 @@ applyKindRevealRange :: Word16
 applyKindRevealRange = 30
 applyKindPresentSaveDialog :: Word16
 applyKindPresentSaveDialog = 31
+applyKindSetBrand :: Word16
+applyKindSetBrand = 32
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -577,6 +591,10 @@ txRevealRange widgetId start stop = wireRecord txKindRevealRange (word64LE widge
 -- Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened.
 txShowSaveDialog :: Word64 -> Word64 -> Value -> [Value] -> Builder
 txShowSaveDialog window dialog suggestedName filters = wireRecord txKindShowSaveDialog (word64LE window <> word64LE dialog <> encodeValue suggestedName <> encodeValues filters)
+
+-- REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists.
+txSetBrandAccent :: Word32 -> Word32 -> Word32 -> Word32 -> Builder
+txSetBrandAccent seed mask light dark = wireRecord txKindSetBrandAccent (word32LE seed <> word32LE mask <> word32LE light <> word32LE dark)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder
@@ -863,6 +881,25 @@ txBindAcceptsElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propAccepts <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant role value.
+txSetRole :: Word64 -> Int64 -> Builder
+txSetRole widgetId role = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRole <> word32LE sourceConst
+    <> encodeValue (VI64 role))
+
+-- set_property with a signal-bound role value.
+txBindRole :: Word64 -> Word64 -> Builder
+txBindRole widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRole <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindRoleElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindRoleElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propRole <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -945,6 +982,18 @@ txSetWindowDirty window dirty = wireRecord txKindSetWindowProp
 txBindWindowDirty :: Word64 -> Word64 -> Builder
 txBindWindowDirty window signalId = wireRecord txKindSetWindowProp
   (word64LE window <> word32LE wpropDirty <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_window_prop with a constant inset value (window 0, the primary surface).
+txSetWindowInset :: Word64 -> Double -> Builder
+txSetWindowInset window inset = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropInset <> word32LE sourceConst
+    <> encodeValue (VF64 inset))
+
+-- set_window_prop with a signal-bound inset value (window 0, the primary surface).
+txBindWindowInset :: Word64 -> Word64 -> Builder
+txBindWindowInset window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropInset <> word32LE sourceSignal
     <> word64LE signalId)
 
 -- set_entry_prop with a constant title value.

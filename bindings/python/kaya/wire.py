@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xbfba1ee8ec9461cb
+SPEC_HASH = 0x5b58d076d72c3dbb
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -51,6 +51,7 @@ PROP_A11Y_ID = 12
 PROP_A11Y_LABEL = 13
 PROP_A11Y_HINT = 14
 PROP_ACCEPTS = 15
+PROP_ROLE = 16
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -58,6 +59,7 @@ WPROP_VETO_CLOSE = 4
 WPROP_SECTIONS_PRESENTATION = 5
 WPROP_LIST_DETAIL = 6
 WPROP_DIRTY = 7
+WPROP_INSET = 8
 EPROP_TITLE = 1
 EPROP_INTERCEPT_BACK = 2
 SPROP_TITLE = 1
@@ -90,6 +92,9 @@ ALIGN_CENTER = 1
 ALIGN_END = 2
 ALIGN_STRETCH = 3
 ALIGN_BASELINE = 4
+ROLE_DESTRUCTIVE = 1
+ROLE_PROMINENT = 2
+ROLE_HEADING = 3
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
@@ -142,6 +147,7 @@ TX_HIGHLIGHT_RANGES = 38
 TX_SELECT_RANGE = 39
 TX_REVEAL_RANGE = 40
 TX_SHOW_SAVE_DIALOG = 41
+TX_SET_BRAND_ACCENT = 42
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -173,6 +179,7 @@ APPLY_HIGHLIGHT_RANGES = 28
 APPLY_SELECT_RANGE = 29
 APPLY_REVEAL_RANGE = 30
 APPLY_PRESENT_SAVE_DIALOG = 31
+APPLY_SET_BRAND = 32
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -404,6 +411,10 @@ def tx_show_save_dialog(window, dialog, suggested_name, filters):
     """Request the platform's save dialog over a live window (0 = primary), on the SAME request/result grammar as the open picker (docs/save-plan.md D2): guest-chosen dialog ids out of the one id space, one dialog live per process whichever kind it is, and the answer arriving as a file_dialog_result whose id retires there. `filters` is the picker's advisory encoding unchanged — alternating Str values, a label then its space-separated extensions. `suggested_name` is the name the dialog opens with, which every platform takes (nameFieldStringValue, GtkFileDialog's initial name, IFileSaveDialog's SetFileName, EXTRA_TITLE, the export controller's filename) and none guarantees: the user renames it, and Android may append an extension matching the mime type, so a guest reads the name it GOT rather than the name it asked for.  THE ANSWER IS EXACTLY ONE LOCATOR OR NONE, and there is no `multiple` twin of the picker's flag: no platform's save dialog names two destinations. Cancel is the empty answer, the picker's rule verbatim.  WHAT THE DESTINATION IS FOR is the decision with the semantics in it (docs/save-plan.md D1): the result's handle opens with CREATE, so opening a name the dialog invented succeeds and yields an EMPTY file on every platform. Android and iOS hand back a document that already exists; macOS, GTK and Windows hand back a name for a file nobody has made (measured: macOS does not even truncate on Replace). The core absorbs that, not the guest, and NOT a fourth file mode — creation is a property of the destination the dialog promised, never of the caller's intent, and a mode would let a guest ask for it on a file it merely opened."""
     return record(TX_SHOW_SAVE_DIALOG, struct.pack("<Q", window) + struct.pack("<Q", dialog) + _enc.value(suggested_name) + _enc.values(filters))
 
+def tx_set_brand_accent(seed, mask, light, dark):
+    """REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists."""
+    return record(TX_SET_BRAND_ACCENT, struct.pack("<I", seed) + struct.pack("<I", mask) + struct.pack("<I", light) + struct.pack("<I", dark))
+
 
 def tx_set_text(widget_id, text):
     """set_property with a constant text value (str)."""
@@ -630,6 +641,21 @@ def tx_bind_accepts_element(widget_id, level=0, field=0):
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ACCEPTS, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_role(widget_id, role):
+    """set_property with a constant role value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ROLE, SOURCE_CONST) + _enc.value(int(role)))
+
+
+def tx_bind_role(widget_id, signal_id):
+    """set_property with a signal-bound role value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_ROLE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_role_element(widget_id, level=0, field=0):
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ROLE, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window, title):
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -698,6 +724,16 @@ def tx_set_window_dirty(window, dirty):
 def tx_bind_window_dirty(window, signal_id):
     """set_window_prop with a signal-bound dirty value; window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_DIRTY, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_window_inset(window, inset):
+    """set_window_prop with a constant inset value (float); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_INSET, SOURCE_CONST) + _enc.value(inset))
+
+
+def tx_bind_window_inset(window, signal_id):
+    """set_window_prop with a signal-bound inset value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_INSET, SOURCE_SIGNAL, signal_id))
 
 
 def tx_set_entry_title(entry, title):

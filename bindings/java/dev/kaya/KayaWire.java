@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xbfba1ee8ec9461cbL;
+    public static final long SPEC_HASH = 0x5b58d076d72c3dbbL;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -54,6 +54,7 @@ public final class KayaWire {
     public static final int PROP_A11Y_LABEL = 13;
     public static final int PROP_A11Y_HINT = 14;
     public static final int PROP_ACCEPTS = 15;
+    public static final int PROP_ROLE = 16;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -61,6 +62,7 @@ public final class KayaWire {
     public static final int WPROP_SECTIONS_PRESENTATION = 5;
     public static final int WPROP_LIST_DETAIL = 6;
     public static final int WPROP_DIRTY = 7;
+    public static final int WPROP_INSET = 8;
     public static final int EPROP_TITLE = 1;
     public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int SPROP_TITLE = 1;
@@ -93,6 +95,9 @@ public final class KayaWire {
     public static final int ALIGN_END = 2;
     public static final int ALIGN_STRETCH = 3;
     public static final int ALIGN_BASELINE = 4;
+    public static final int ROLE_DESTRUCTIVE = 1;
+    public static final int ROLE_PROMINENT = 2;
+    public static final int ROLE_HEADING = 3;
     public static final int SOURCE_CONST = 0;
     public static final int SOURCE_SIGNAL = 1;
     public static final int SOURCE_ELEMENT = 2;
@@ -144,6 +149,7 @@ public final class KayaWire {
     public static final short TX_KIND_SELECT_RANGE = 39;
     public static final short TX_KIND_REVEAL_RANGE = 40;
     public static final short TX_KIND_SHOW_SAVE_DIALOG = 41;
+    public static final short TX_KIND_SET_BRAND_ACCENT = 42;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -175,6 +181,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_SELECT_RANGE = 29;
     public static final short APPLY_KIND_REVEAL_RANGE = 30;
     public static final short APPLY_KIND_PRESENT_SAVE_DIALOG = 31;
+    public static final short APPLY_KIND_SET_BRAND = 32;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -607,6 +614,16 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists. */
+    public static byte[] txSetBrandAccent(int seed, int mask, int light, int dark) {
+        ByteBuffer b = begin(TX_KIND_SET_BRAND_ACCENT);
+        b.putInt(seed);
+        b.putInt(mask);
+        b.putInt(light);
+        b.putInt(dark);
+        return finish(b);
+    }
+
     /** set_property with a constant text value. */
     public static byte[] txSetText(long widgetId, String text) {
         ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
@@ -952,6 +969,29 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant role value. */
+    public static byte[] txSetRole(long widgetId, long role) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_ROLE).putInt(SOURCE_CONST);
+        encodeValue(b, role);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound role value. */
+    public static byte[] txBindRole(long widgetId, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_ROLE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindRoleElement(long widgetId, int level, int field) {
+        ByteBuffer b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_ROLE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -1054,6 +1094,21 @@ public final class KayaWire {
     public static byte[] txBindWindowDirty(long window, long signalId) {
         ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
         b.putLong(window).putInt(WPROP_DIRTY).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_window_prop with a constant inset value (window 0, the primary surface). */
+    public static byte[] txSetWindowInset(long window, double inset) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_INSET).putInt(SOURCE_CONST);
+        encodeValue(b, inset);
+        return finish(b);
+    }
+
+    /** set_window_prop with a signal-bound inset value (window 0, the primary surface). */
+    public static byte[] txBindWindowInset(long window, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_INSET).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 

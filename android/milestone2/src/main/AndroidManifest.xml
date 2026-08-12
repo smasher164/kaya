@@ -23,7 +23,7 @@
     </queries>
     <application
         android:label="kaya milestone 0"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@style/Theme.Kaya.NoActionBar">
         <activity
             android:name=".MainActivity"
             android:exported="true">

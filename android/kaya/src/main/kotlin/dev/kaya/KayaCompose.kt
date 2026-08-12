@@ -1,5 +1,6 @@
 package dev.kaya
 
+import android.app.UiModeManager
 import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
@@ -7,6 +8,7 @@ import android.content.ContentResolver
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.os.PersistableBundle
 import android.provider.DocumentsContract
@@ -21,6 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
 // The entry/textarea path (docs/undo-plan.md §1.4): the foundation field
 // that owns a TextFieldState, plus the M3 dressing that makes it look
@@ -51,15 +54,22 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 // Material 3 adaptive: Android's OWN list-detail container and the
 // arrangement it lays out from. Imported rather than written out
 // inline because the swap touches a dozen of these names, and two of
@@ -79,8 +89,11 @@ import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldValue
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.calculateThreePaneScaffoldValue
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,8 +105,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.colorspace.ColorSpaces
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.toArgb
@@ -103,6 +118,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -111,6 +127,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.VisualTransformation
@@ -198,6 +215,14 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * paste hook and the standard commands' enablement both read it off
      * the focused node. Empty means the widget takes nothing. */
     var accepts by mutableStateOf("")
+
+    /** Semantic emphasis (docs/styling-plan.md D4), 0 = none. The
+     * render layer lowers it to M3's own emphasis ladder — never to a
+     * colour this file chose: prominent is the filled button, the floor
+     * is the outlined one, destructive takes the error-role container,
+     * and heading is Compose's heading semantics plus a tier of
+     * Material's own type ramp. */
+    var role by mutableStateOf(0L)
     var checked by mutableStateOf(false)
     var value by mutableStateOf(0.0)
     var minValue by mutableStateOf(0.0)
@@ -404,6 +429,11 @@ var kayaDensity = 1.0
 var kayaRootSize = androidx.compose.ui.unit.IntSize.Zero
 var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
 
+/** The padding container's OUTER size — captured before the window
+ * inset is taken; (outer - available)/2 is the measured inset the
+ * harness asserts (docs/styling-plan.md D3). */
+var kayaOuterSize = androidx.compose.ui.unit.IntSize.Zero
+
 // THE DEPTH-STUB HELPER IS GONE AGAIN, the sixth time it has come and
 // gone — it came back for the text-ranges slice and leaves with it, now
 // that this backend has the three range primitives and the android
@@ -453,6 +483,23 @@ object KayaSceneModel {
     // walks it into the platform focus system, and expect_focused
     // reads it back.
     var focusedId by mutableStateOf<Long?>(null)
+    /** The window content inset (wprop 8, docs/styling-plan.md D3), in
+     * DP — layout, not appearance; 0 is full bleed. */
+    var windowInset by mutableStateOf(16.0)
+
+    /**
+     * THE REQUESTED BRAND ACCENT, packed 0xRRGGBB, or null for "the app
+     * asked for nothing" (apply 32; docs/styling-plan.md D1/D2).
+     *
+     * A composition STATE and not a plain field, because the theme is
+     * what reads it: the brand arrives in an apply batch, which is
+     * after the first composition on any scene that mounts before it,
+     * and a plain field would leave the scheme at Material's baseline
+     * until something unrelated recomposed. Set once, before the first
+     * mount — the root refuses a second write, so nothing here has to
+     * un-apply a brand.
+     */
+    var brandSeed by mutableStateOf<Int?>(null)
     /// A counter bumped whenever what the system clipboard OFFERS may
     /// have moved (a copy went out, a foreign seed landed). It carries
     /// no information; reading it is what SUBSCRIBES a composition to
@@ -690,7 +737,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xbfba1ee8ec9461cbuL
+    private const val SPEC_HASH: ULong = 0x5b58d076d72c3dbbuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -713,6 +760,7 @@ object KayaCompose {
      * carry.
      */
     private const val APPLY_PRESENT_SAVE_DIALOG = 31
+    private const val APPLY_SET_BRAND = 32
 
     /** The clipboard pair: a copy going out, and the privileged read
      * asking for one back. */
@@ -770,6 +818,7 @@ object KayaCompose {
     private const val WPROP_SECTIONS_PRESENTATION = 5
     private const val WPROP_LIST_DETAIL = 6
     private const val WPROP_DIRTY = 7
+    private const val WPROP_INSET = 8
     private const val SPROP_TITLE = 1
     private const val SPROP_ICON = 2
     // Navigation-entry properties: their own typed table;
@@ -839,6 +888,19 @@ object KayaCompose {
      * LIST, a space-separated string of the closed kind names and any
      * custom format ids. Not a mask — half the set is open-ended. */
     private const val PROP_ACCEPTS = 15
+
+    /** SEMANTIC EMPHASIS (docs/styling-plan.md D4): what the widget
+     * MEANS, never how it looks. destructive/prominent on buttons,
+     * heading on labels; the root refuses a role on a kind it does not
+     * fit, so every value that arrives here is already legal for its
+     * kind. */
+    private const val PROP_ROLE = 16
+    // The role enum's wire values (spec enum "role"). Long, because the
+    // prop rides as an i64 and the render arms compare against the
+    // node's own field.
+    const val ROLE_DESTRUCTIVE = 1L
+    const val ROLE_PROMINENT = 2L
+    const val ROLE_HEADING = 3L
     // The align enum's wire values (spec enum "align").
     const val ALIGN_START = 0L
     const val ALIGN_CENTER = 1L
@@ -893,7 +955,11 @@ object KayaCompose {
             "kaya: stale Compose interpreter — its spec hash %016x does not match the core's %016x; rebuild the APK".format(SPEC_HASH, host)
         }
         startPump(activity)
-        activity.setContent { KayaRoot() }
+        // The composition root, and the ONE place this backend's theme is
+        // installed — every scene, every dialog and every dropdown is a
+        // sub-composition of this one, so they all read the same scheme
+        // (see KayaTheme).
+        activity.setContent { KayaTheme { KayaRoot() } }
         if (System.getenv("KAYA_SELFTEST") != null) startSelftest(activity)
     }
 
@@ -1127,6 +1193,8 @@ object KayaCompose {
                             // pastes, through the platform's own
                             // insertion.
                             KayaSceneModel.nodes[id]!!.accepts = readString(b)
+                        PROP_ROLE ->
+                            KayaSceneModel.nodes[id]!!.role = readI64(b)
                         PROP_SOURCE -> {
                             // The value's payload is a u64 batch-local
                             // handle; the pump prefetched the bytes into
@@ -1193,6 +1261,7 @@ object KayaCompose {
                         // label stays exactly the string the app
                         // declared (D1).
                         WPROP_DIRTY -> KayaSceneModel.windowDirty = readBool(b)
+                        WPROP_INSET -> KayaSceneModel.windowInset = readF64(b)
                         else -> error("kaya: unknown window prop $prop")
                     }
                 }
@@ -1657,6 +1726,22 @@ object KayaCompose {
                 // core/interpreter disagreement — fail LOUDLY (the
                 // SwiftUI sibling's fatalError); a silent skip is the
                 // false-verdict class.
+                APPLY_SET_BRAND ->
+                    // ELEVEN packed sRGB words in the wire's fixed
+                    // order: seed, light's five (fill, on_fill,
+                    // standalone, hover, pressed), dark's five. THIS
+                    // BACKEND READS THE FIRST ONE AND NOTHING ELSE, and
+                    // that is the design rather than laziness
+                    // (docs/styling-plan.md D1): every other backend
+                    // applies the core's derived VALUES because its
+                    // platform has no derivation of its own, while
+                    // Material's whole colour system is "one seed hex,
+                    // one deterministic role scheme" — so kaya hands
+                    // Material the seed and defers, exactly as it
+                    // defers to libadwaita's clamp on GTK. The other
+                    // ten words are skipped by the record cursor at the
+                    // bottom of this loop.
+                    KayaSceneModel.brandSeed = b.int
                 else -> error("kaya: unknown apply record kind $kind")
             }
             b.position(start + size)
@@ -3717,8 +3802,21 @@ object KayaCompose {
      * its own comes out as the generic `android.view.View`. A generic
      * node WITH children is what a group is here; a generic LEAF is a
      * control we failed to classify, and stays `unknown`.
+     *
+     * A THIRD SOURCE, ahead of both, for the one role that is not a
+     * control kind: `heading` is a PROPERTY a text node carries, and it
+     * is read from the published AccessibilityNodeInfo rather than from
+     * the semantics config this interpreter wrote — the config would only
+     * tell us what we asked for, and what a service receives is the
+     * question (the read-backs-lie rule).
      */
-    private fun kayaAxRole(role: Role?, className: CharSequence?, childCount: Int): String {
+    private fun kayaAxRole(
+        role: Role?,
+        className: CharSequence?,
+        childCount: Int,
+        heading: Boolean,
+    ): String {
+        if (heading) return "heading"
         val byRole =
             when (role) {
                 Role.Button -> "button"
@@ -3859,15 +3957,51 @@ object KayaCompose {
      * SnapshotStateObserver's multithreaded-access check — measured, as
      * a hard crash rather than a wrong answer.
      */
-    private fun kayaAx(activity: ComponentActivity, tag: String): String? {
+    private fun kayaAx(activity: ComponentActivity, tag: String): KayaAxRead? {
         val view = kayaComposeRoot(activity.window.decorView) ?: return null
         val owner = (view as RootForTest).semanticsOwner
         val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return null
-        val className = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
-            ?.className
+        val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
         val role = node.config.getOrNull(SemanticsProperties.Role)
-        return kayaAxRole(role, className, node.children.size) + "/" + kayaAxName(node)
+        return KayaAxRead(
+            kayaAxRole(role, info?.className, node.children.size, kayaAxHeading(info)) +
+                "/" + kayaAxName(node),
+            infoServed = info != null,
+        )
     }
+
+    /**
+     * One ax read, with the PROVIDER'S SILENCE carried out-of-band. The
+     * semantics tree is in-process and always answers; the provider
+     * serves AccessibilityNodeInfo from its own view of that tree, and
+     * the two can DISAGREE: three straight 2026-08-12 matrix runs had
+     * clipboard-jvm's pasted field findable by tag while
+     * createAccessibilityNodeInfo returned null past the step's whole
+     * 5s deadline — under five-lane host contention only, solo green
+     * every time. WHY the provider lags that far is deliberately not
+     * claimed here (the on-device probe DISPROVED the obvious story:
+     * with accessibility disabled outright, regular node infos are
+     * still served — and the root node's id never is, which is also
+     * why no readiness probe of the root can stand in for the real
+     * read). What is measured is the disagreement itself, so it is
+     * carried as its own state instead of being conflated with a
+     * classification: a read with [infoServed] false measured NO
+     * classification, and reporting it as `unknown/…` sends the reader
+     * after a lowering that was never consulted.
+     */
+    private data class KayaAxRead(val spec: String, val infoServed: Boolean)
+
+
+    /**
+     * Whether the platform publishes this node as a HEADING. The
+     * framework getter arrived in API 28 and kaya's floor is 26, so
+     * below it the answer is the honest one for the pre-28 platform:
+     * there was no heading bit on an AccessibilityNodeInfo to publish,
+     * and Compose stashes it in an extras bundle no service of that era
+     * reads.
+     */
+    private fun kayaAxHeading(info: android.view.accessibility.AccessibilityNodeInfo?): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && info?.isHeading == true
 
     /**
      * MAIN THREAD ONLY (callers go through [onUi]). The HINT as a
@@ -3883,21 +4017,23 @@ object KayaCompose {
     }
 
     /**
-     * The two inputs [kayaAxRole] weighs, for a MISMATCH. `unknown/…`
-     * says the platform classified the control as something the closed
-     * set has no name for, and the next question is always which
-     * something — one emulator round-trip per answer without this, and
-     * the whole point of reading the real tree is that its answers are
-     * not guessable from here.
+     * The inputs [kayaAxRole] weighs, for a MISMATCH. `unknown/…` says
+     * the platform classified the control as something the closed set
+     * has no name for, and the next question is always which something —
+     * one emulator round-trip per answer without this, and the whole
+     * point of reading the real tree is that its answers are not
+     * guessable from here. Every input it weighs is printed, heading
+     * included: a sentence that omits one is a sentence that cannot tell
+     * a wrong classification from a missing heading bit.
      */
     private fun kayaAxWhy(activity: ComponentActivity, tag: String): String {
         val view = kayaComposeRoot(activity.window.decorView) ?: return ""
         val owner = (view as RootForTest).semanticsOwner
         val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return ""
-        val className = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
-            ?.className
+        val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
         return " (role=" + node.config.getOrNull(SemanticsProperties.Role) +
-            " class=" + className + " kids=" + node.children.size + ")"
+            " class=" + info?.className + " kids=" + node.children.size +
+            " heading=" + kayaAxHeading(info) + ")"
     }
 
     private fun quoted(parts: List<String>): String {
@@ -3946,7 +4082,8 @@ object KayaCompose {
                 // text. Actions never re-run; the FIRST expect
                 // doubles as the scene-ready wait (scripts open
                 // with one).
-                val stepDeadline = System.nanoTime() + 5_000_000_000L
+                val stepStart = System.nanoTime()
+                var stepDeadline = stepStart + 5_000_000_000L
                 var retryStep = true
                 while (retryStep) {
                 retryStep = false
@@ -4818,6 +4955,31 @@ object KayaCompose {
                                     "wanted ${wantW.toInt()}x${wantH.toInt()}")
                         }
                     }
+                    "expect_inset" -> {
+                        // The window content inset, MEASURED: the
+                        // halved gap between the padding container's
+                        // outer extent and the offer inside it, in DP
+                        // (the scene's layout unit; densities differ
+                        // per device while the inset number does not) —
+                        // RELATIVE deliberately, because absolute
+                        // offers cannot be byte-frozen across platforms
+                        // (docs/styling-plan.md D3).
+                        val want = parts[1]
+                        val got = onUi(activity) {
+                            val density = activity.resources.displayMetrics.density
+                            val outer = kayaOuterSize
+                            val inner = kayaAvailableSize
+                            if (outer.width <= 0 || inner.width <= 0) {
+                                "no layout recorded"
+                            } else {
+                                val x = Math.round((outer.width - inner.width) / 2 / density)
+                                val y = Math.round((outer.height - inner.height) / 2 / density)
+                                if (x == y) "$x" else "${x}x$y (axes disagree)"
+                            }
+                        }
+                        if (got == want) observed.add("inset $want")
+                        else failures.add("inset $got, wanted $want")
+                    }
                     "expect_root_fills" -> {
                         // The mounted root fills the area offered to it
                         // — the observation shares can never make: a
@@ -5005,19 +5167,46 @@ object KayaCompose {
                                 )
                             else -> {
                                 val got = onUi(activity) { kayaAx(activity, node.a11yId) }
-                                if (got == null) {
-                                    failures.add(
+                                when {
+                                    got == null -> failures.add(
                                         "ax ${parts[1]}: nothing carries " +
                                             "test tag \"${node.a11yId}\"; " +
                                             onUi(activity) { kayaAxDump(activity) }
                                     )
-                                } else if (got != want) {
-                                    failures.add(
-                                        "ax \"$got\", wanted \"$want\"" +
+                                    // THE PROVIDER'S SILENCE IS ITS OWN
+                                    // VERDICT, ahead of the comparison: a
+                                    // read that got no AccessibilityNodeInfo
+                                    // measured no classification, so it must
+                                    // not print as one (see [KayaAxRead]).
+                                    // It also earns a longer leash, once per
+                                    // step: the disagreement outlived the
+                                    // whole 5s deadline in three straight
+                                    // matrix runs and resolved on its own in
+                                    // every solo run, so the retry is what
+                                    // absorbs it — and only the extended
+                                    // deadline turns this sentence into a
+                                    // failure, naming the state that was
+                                    // actually seen.
+                                    !got.infoServed -> {
+                                        stepDeadline = maxOf(
+                                            stepDeadline,
+                                            stepStart + 20_000_000_000L,
+                                        )
+                                        failures.add(
+                                            "ax ${parts[1]}: the accessibility " +
+                                                "provider served no node info " +
+                                                "for tag \"${node.a11yId}\" " +
+                                                "though its semantics node " +
+                                                "exists — no classification " +
+                                                "was published to read " +
+                                                "(retried ${(System.nanoTime() - stepStart) / 1_000_000}ms)"
+                                        )
+                                    }
+                                    got.spec != want -> failures.add(
+                                        "ax \"${got.spec}\", wanted \"$want\"" +
                                             onUi(activity) { kayaAxWhy(activity, node.a11yId) }
                                     )
-                                } else {
-                                    observed.add("ax \"$want\"")
+                                    else -> observed.add("ax \"$want\"")
                                 }
                             }
                         }
@@ -6186,8 +6375,53 @@ private fun KayaRenderCore(
                 }
             }
         KayaCompose.KIND_BUTTON ->
-            Button(onClick = { KayaPresent.emitClicked(node.tag) }, modifier = a11y) {
-                Text(node.text)
+            // THE ROLE TIER, in M3's own emphasis ladder
+            // (docs/styling-plan.md D4). Material's buttons are one
+            // component with four dressings, and the ladder is the
+            // platform's, not kaya's: filled is the highest emphasis
+            // Material offers, outlined the medium one.
+            //
+            // Which puts the FLOOR at outlined, and that is a deliberate
+            // move rather than a leftover: a roleless button used to be
+            // the filled one, which left `prominent` with nowhere to go
+            // — the same button, and a role that changed nothing is
+            // exactly the silent no-op this pass exists to refuse. It
+            // also puts this backend where the other three already are
+            // (bordered -> borderedProminent on Apple, plain ->
+            // .suggested-action on GTK, standard -> AccentButtonStyle on
+            // WinUI): a neutral floor, and the accent reserved for the
+            // one primary action.
+            //
+            // DESTRUCTIVE takes the error-role container. Material has no
+            // destructive button either, but unlike Fluent it has a
+            // colour PAIR that means error and carries its own legible
+            // foreground, and that pair is fixed by Material rather than
+            // derived from the brand — red keeps meaning destructive in a
+            // red-branded app. Never `Color.Red`: the role, so the
+            // platform stays the judge of the shade.
+            when (node.role) {
+                KayaCompose.ROLE_PROMINENT ->
+                    Button(onClick = { KayaPresent.emitClicked(node.tag) }, modifier = a11y) {
+                        Text(node.text)
+                    }
+                KayaCompose.ROLE_DESTRUCTIVE ->
+                    Button(
+                        onClick = { KayaPresent.emitClicked(node.tag) },
+                        modifier = a11y,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ),
+                    ) {
+                        Text(node.text)
+                    }
+                else ->
+                    OutlinedButton(
+                        onClick = { KayaPresent.emitClicked(node.tag) },
+                        modifier = a11y,
+                    ) {
+                        Text(node.text)
+                    }
             }
         KayaCompose.KIND_ROW ->
             // Normalized default: children packed to the leading edge at
@@ -6239,7 +6473,24 @@ private fun KayaRenderCore(
                     }
                 }
             }
-        KayaCompose.KIND_LABEL -> Text(node.text, modifier = a11y)
+        KayaCompose.KIND_LABEL ->
+            // The heading role is BOTH facts at once (docs/styling-plan.md
+            // D4): Compose's `heading()` semantics — which is how an
+            // assistive user SKIMS, and the half every platform publishes,
+            // so it is the half the styling scene freezes on every lane —
+            // and a tier of Material's own type ramp. titleLarge is the
+            // ramp's own section-heading tier; picking a tier is not
+            // changing the scale, which is the line DESIGN.md draws and
+            // KayaTheme's note keeps.
+            if (node.role == KayaCompose.ROLE_HEADING) {
+                Text(
+                    node.text,
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = a11y.semantics { heading() },
+                )
+            } else {
+                Text(node.text, modifier = a11y)
+            }
         KayaCompose.KIND_CHECKBOX ->
             // Uncontrolled toward the app, the entry's shape: the node
             // mirrors the box's state (Compose needs it), and every
@@ -6606,6 +6857,389 @@ private const val KAYA_TEXTAREA_LINES = 6
  * one scene describes one appearance. */
 private val KAYA_HIGHLIGHT_COLOR = androidx.compose.ui.graphics.Color(0x8CFFEB3B)
 
+/**
+ * TONE, the number Material's whole colour system is built on: HCT's T
+ * is CIE L*, so a tone is perceptual lightness and a TONE DIFFERENCE IS
+ * A CONTRAST GUARANTEE — that is the property every rule below leans on.
+ *
+ * Read through Compose's own colour-space machinery (`ColorSpaces.CieLab`
+ * is D50, and the connector Bradford-adapts sRGB's D65 into it), so the
+ * number here is the number material3 itself works in.
+ */
+private fun Color.kayaTone(): Float = convert(ColorSpaces.CieLab).red
+
+/**
+ * The seed's palette AT A TONE — the one piece of colour maths this
+ * backend does, and it is Material's own: material3 computes the tones
+ * the platform does not publish exactly this way (`setLuminance` in
+ * DynamicTonalPalette.android.kt — convert to CIELab, keep the a and b
+ * axes, set L), and this is that function with one thing added.
+ *
+ * THE THING ADDED IS THE GAMUT LOOP, and without it the derivation is
+ * wrong in the direction that matters. A saturated seed at tone 90 has
+ * no sRGB representative: the conversion CLIPS, and a clipped colour
+ * lands at some other lightness — measured, Adwaita blue #3584E4 at tone
+ * 90 comes back at L* 78 unclipped-naive, which quietly destroys the
+ * contrast the tone was chosen for. HCT solves this by keeping the tone
+ * and giving up chroma (that IS its "closest in-gamut colour at this
+ * tone"), so this bisects the seed's chroma for the most colourful
+ * candidate whose REALIZED tone is the one asked for, within half a
+ * tone. Aim, measure, correct — the same shape as the core's own
+ * danger-band clamp (crates/kaya/src/brand.rs), for the same reason:
+ * a number nobody measured back is a number nobody has.
+ *
+ * Degenerate seeds fall out right: white and black have no chroma to
+ * keep, so every tone of them is the grey at that tone.
+ */
+private fun kayaToneOf(seed: Color, tone: Float): Color {
+    val lab = seed.convert(ColorSpaces.CieLab)
+    // The chroma-free candidate always realizes its tone exactly; it is
+    // the floor the bisection falls back to.
+    var best = Color(tone, 0f, 0f, colorSpace = ColorSpaces.CieLab).convert(ColorSpaces.Srgb)
+    var lo = 0f
+    var hi = 1f
+    repeat(12) {
+        val mid = (lo + hi) / 2f
+        val candidate =
+            Color(tone, lab.green * mid, lab.blue * mid, colorSpace = ColorSpaces.CieLab)
+                .convert(ColorSpaces.Srgb)
+        if (kotlin.math.abs(candidate.kayaTone() - tone) <= 0.5f) {
+            best = candidate
+            lo = mid
+        } else {
+            hi = mid
+        }
+    }
+    return best
+}
+
+/** Y (relative luminance, 0..100) at a tone — CIE's own inverse, and
+ * what a contrast ratio is computed from. */
+private fun kayaYFromTone(tone: Float): Float {
+    val ft = (tone + 16f) / 116f
+    val cubed = ft * ft * ft
+    return 100f * if (cubed > 216f / 24389f) cubed else (116f * ft - 16f) / (24389f / 27f)
+}
+
+/** The contrast ratio between two tones, the WCAG formula on Y. */
+private fun kayaRatioOfTones(a: Float, b: Float): Float {
+    val hi = kotlin.math.max(kayaYFromTone(a), kayaYFromTone(b))
+    val lo = kotlin.math.min(kayaYFromTone(a), kayaYFromTone(b))
+    return (hi + 5f) / (lo + 5f)
+}
+
+/**
+ * A CONTRAST CURVE — Material's own type, four values indexed by the
+ * contrast level (its class doc: "The four values correspond to values
+ * for contrast levels -1.0, 0.0, 0.5, and 1.0"), linearly interpolated
+ * between them. Every role below carries the curve
+ * material-color-utilities gives it, quoted in the derivation.
+ */
+private fun kayaContrastAt(
+    level: Float,
+    low: Float,
+    normal: Float,
+    medium: Float,
+    high: Float,
+): Float = when {
+    level <= -1f -> low
+    level < 0f -> low + (normal - low) * (level + 1f)
+    level < 0.5f -> normal + (medium - normal) * (level / 0.5f)
+    level < 1f -> medium + (high - medium) * ((level - 0.5f) / 0.5f)
+    else -> high
+}
+
+/**
+ * A ROLE'S TONE: the nominal one if it already meets the contrast its
+ * curve asks for against its own background, else the one
+ * `DynamicColor.foregroundTone` would pick — walked a tone at a time
+ * rather than solved analytically (the two agree to within a tone, and a
+ * walk cannot return an out-of-range answer).
+ *
+ * BOTH DIRECTIONS ARE WEIGHED, and that is not a refinement: walking one
+ * way is wrong in exactly the case the contrast slider creates, measured
+ * on emulator-5554 before this rule had the second half. At high
+ * contrast the container tone is pulled down to ~45 to clear the page,
+ * and a rule that only walked "away from the background" then took
+ * onPrimaryContainer DOWN to black — 3.9:1 — when white above it was
+ * 5.4:1. So: a background below tone 60 wants a LIGHT foreground and one
+ * at or above it wants a dark one (Material's
+ * `tonePrefersLightForeground`), and the other side wins anyway when the
+ * preferred one cannot reach the ratio and it can.
+ *
+ * Either candidate CLAMPS at 0 or 100 rather than failing, which is
+ * Material's `lighterUnsafe`/`darkerUnsafe`: its own light `onPrimary` is
+ * tone 100 against a tone-40 primary — 6.1:1 where the curve asks 7 —
+ * because there is nothing lighter than white.
+ */
+private fun kayaRoleTone(nominal: Float, background: Float, desired: Float): Float {
+    if (kayaRatioOfTones(nominal, background) >= desired) return nominal
+    var lighter = 100f
+    var tone = background
+    while (tone < 100f) {
+        tone += 1f
+        if (kayaRatioOfTones(tone, background) >= desired) {
+            lighter = tone
+            break
+        }
+    }
+    var darker = 0f
+    tone = background
+    while (tone > 0f) {
+        tone -= 1f
+        if (kayaRatioOfTones(tone, background) >= desired) {
+            darker = tone
+            break
+        }
+    }
+    val lighterRatio = kayaRatioOfTones(lighter, background)
+    val darkerRatio = kayaRatioOfTones(darker, background)
+    return if (background < 60f) {
+        if (lighterRatio >= desired || lighterRatio >= darkerRatio) lighter else darker
+    } else {
+        if (darkerRatio >= desired || darkerRatio >= lighterRatio) darker else lighter
+    }
+}
+
+/**
+ * The colour schemes this backend composes under — Material's baseline
+ * until an app requests a brand, and the SEED'S OWN SCHEME once it does.
+ *
+ * WHY THIS BACKEND DERIVES AT ALL, when the rule everywhere else is that
+ * the core derives and backends apply values (docs/styling-plan.md D1):
+ * Material's colour system IS a derivation from one seed hex, published
+ * and deterministic, and kaya defers to a platform's own model wherever
+ * one exists rather than fighting it. So the wire's ten derived words are
+ * for the backends whose platforms have no such model, and this one takes
+ * the seed.
+ *
+ * WHAT IS DERIVED, AND WHAT DELIBERATELY IS NOT. The PRIMARY family —
+ * the accent — is computed from the seed: primary, onPrimary,
+ * primaryContainer, onPrimaryContainer, inversePrimary and surfaceTint,
+ * at the tones color_spec_2021.ts assigns them, with each role's own
+ * contrast curve. The secondary/tertiary/neutral palettes and the error
+ * palette stay Material's baseline. Two different reasons, and neither is
+ * "not yet":
+ *
+ *  - The ERROR palette is fixed by Material itself (SchemeTonalSpot
+ *    hands it a fixed palette rather than deriving one), because red
+ *    means destructive whatever an app's brand is. kaya's destructive
+ *    role reads those roles, and they must not follow the seed.
+ *  - The NEUTRALS carry chroma 4 and 8 in Material's own scheme, i.e.
+ *    they are grey with a hint of the seed — the visible difference
+ *    between one seed's surfaces and another's is a couple of levels per
+ *    channel. Reproducing that hint needs HCT's chroma clamping, which is
+ *    a dependency question (material-color-utilities is not published as
+ *    a first-party Maven artifact; MDC bundles it @RestrictTo) rather
+ *    than a coding one, and it is recorded for Akhil rather than decided
+ *    here. What the accent buys and the neutrals do not is the reason the
+ *    split is defensible: every other backend applies the accent to its
+ *    accent slots and nothing else.
+ *
+ * Not a composable and not remembered: a scheme is a value. The caller
+ * keys it on (seed, appearance, contrast) — the three inputs it has.
+ */
+internal object KayaColorSchemes {
+    val light: ColorScheme = lightColorScheme()
+    val dark: ColorScheme = darkColorScheme()
+
+    /**
+     * @param seed the requested brand accent, packed 0xRRGGBB, or null
+     *   for "the app asked for nothing" — which is Material's baseline,
+     *   NOT the wallpaper palette: opting into dynamic colour is a
+     *   ratified non-goal for v1 (docs/styling-plan.md D2).
+     * @param dark the appearance to build for.
+     * @param contrast the system contrast level, -1..1, 0 = default —
+     *   Material's own scale, and the input a STATIC scheme silently
+     *   ignores (MDC #3524). Every role's tone below moves with it.
+     */
+    fun of(seed: Int?, dark: Boolean, contrast: Float): ColorScheme {
+        val base = if (dark) this.dark else this.light
+        if (seed == null) return base
+        val key = Color(0xFF000000.toInt() or seed)
+        // The background these roles are read against. MEASURED off the
+        // scheme actually in force rather than assumed from the spec's
+        // surface tones, because this scheme's neutrals are Material's
+        // and a tone written down here would be a second copy of them.
+        val surfaceTone = base.surface.kayaTone()
+        // Tones and curves verbatim from color_spec_2021.ts (the
+        // TONAL_SPOT arm; kaya never exposes another variant):
+        //   primary            40/80, ContrastCurve(3, 4.5, 7, 7)
+        //   onPrimary          100/20, ContrastCurve(4.5, 7, 11, 21)
+        //   primaryContainer   90/30, ContrastCurve(1, 1, 3, 4.5)
+        //   onPrimaryContainer 30/90, ContrastCurve(3, 4.5, 7, 11)
+        //   inversePrimary     80/40, ContrastCurve(3, 4.5, 7, 7)
+        //   surfaceTint        = primary's tone, no curve (a background)
+        val primaryTone = kayaRoleTone(
+            nominal = if (dark) 80f else 40f,
+            background = surfaceTone,
+            desired = kayaContrastAt(contrast, 3f, 4.5f, 7f, 7f),
+        )
+        val onPrimaryTone = kayaRoleTone(
+            nominal = if (dark) 20f else 100f,
+            background = primaryTone,
+            desired = kayaContrastAt(contrast, 4.5f, 7f, 11f, 21f),
+        )
+        val containerTone = kayaRoleTone(
+            nominal = if (dark) 30f else 90f,
+            background = surfaceTone,
+            desired = kayaContrastAt(contrast, 1f, 1f, 3f, 4.5f),
+        )
+        val onContainerTone = kayaRoleTone(
+            nominal = if (dark) 90f else 30f,
+            background = containerTone,
+            desired = kayaContrastAt(contrast, 3f, 4.5f, 7f, 11f),
+        )
+        val inverseTone = kayaRoleTone(
+            nominal = if (dark) 40f else 80f,
+            background = base.inverseSurface.kayaTone(),
+            desired = kayaContrastAt(contrast, 3f, 4.5f, 7f, 7f),
+        )
+        val primary = kayaToneOf(key, primaryTone)
+        val onPrimary = kayaToneOf(key, onPrimaryTone)
+        val container = kayaToneOf(key, containerTone)
+        val onContainer = kayaToneOf(key, onContainerTone)
+        val inverse = kayaToneOf(key, inverseTone)
+        // Every role NOT named here keeps its default, and the defaults
+        // of these two builders are exactly the baseline scheme above —
+        // so "the rest stays Material's" is what the call itself says,
+        // rather than thirty copied fields that could drift from it.
+        // surfaceTint IS primary in Material's spec (same palette, same
+        // tone), which is how an elevated surface picks up the brand.
+        return if (dark) {
+            darkColorScheme(
+                primary = primary,
+                onPrimary = onPrimary,
+                primaryContainer = container,
+                onPrimaryContainer = onContainer,
+                inversePrimary = inverse,
+                surfaceTint = primary,
+            )
+        } else {
+            lightColorScheme(
+                primary = primary,
+                onPrimary = onPrimary,
+                primaryContainer = container,
+                onPrimaryContainer = onContainer,
+                inversePrimary = inverse,
+                surfaceTint = primary,
+            )
+        }
+    }
+}
+
+/**
+ * THE THEME ROOT — the one place this backend's appearance is decided.
+ *
+ * There was none until now, and the reason it was survivable is also the
+ * reason it had to change: an unthemed composition still renders, because
+ * every Material component falls back to `LocalColorScheme`'s default,
+ * which IS `lightColorScheme()` (read off material3 1.3.1's bytecode, not
+ * assumed). So the pixels were fine and there was simply NOTHING TO WRITE
+ * TO — no scheme in kaya's hands, so nowhere for a brand accent to land
+ * and nowhere for a contrast level to be read into. Android could not
+ * take one line of the styling pass before this existed
+ * (docs/styling-plan.md §3 step 3).
+ *
+ * ITS THREE INPUTS, all of them read from the platform or the app and
+ * none of them assumed: the brand SEED (apply 32, or null), the
+ * APPEARANCE (the system's, no longer pinned — see below), and the
+ * CONTRAST level (Android 14's slider; a static scheme ignores it
+ * silently, MDC #3524, which is the read-backs-lie rule with a Material
+ * spelling). The typeface (D6, slice 2) is MaterialTheme's `typography`
+ * argument, and the note on the text style below is the thing to read
+ * before touching it.
+ *
+ * THE APPEARANCE UNPINS HERE, and it took three changes rather than one.
+ * The foundation measured why: with the scheme following the system, the
+ * window stayed #FAFAFA in BOTH appearances while the primary role moved
+ * #6750A4 -> #D0BCFF — dark-scheme controls on a light page, because the
+ * window background came from the platform theme each app declares in its
+ * manifest, where no Compose theme reaches. So all three moved together:
+ * the manifests now name kaya's own DayNight theme
+ * (android/kaya/src/main/res/values{,-night}/themes.xml), this wrapper
+ * paints `colorScheme.background` and takes the matching content colour
+ * (a black label on a dark page is the other half of that same bug), and
+ * the appearance follows `isSystemInDarkTheme()`. The lane still runs
+ * `notnight` on all four AVDs, so the dark arm is proven the way the
+ * foundation proved it: the whole lane re-run with every device forced to
+ * night mode, with the setting read back before and after.
+ *
+ * MaterialTheme ALSO PROVIDES A TEXT STYLE, and that one is not a
+ * fallback anybody was already getting: it ends in
+ * `ProvideTextStyle(typography.bodyLarge)`. Without a theme
+ * `LocalTextStyle` is material3's `DefaultTextStyle`, whose font size
+ * is UNSPECIFIED and lays out at the text layer's own default;
+ * bodyLarge is 16sp on a 24sp line. Every label
+ * (`KIND_LABEL -> Text(node.text, …)`) and every text field
+ * (`textStyle = LocalTextStyle.current.copy(…)`) in this interpreter
+ * reads that local, so accepting it would resize all of them. That is
+ * a change to the type SCALE, which is precisely what DESIGN.md says a
+ * brand typeface may never make. The ambient style is therefore held at
+ * whatever it was outside this theme; moving it is the typeface slice's
+ * ratified decision, made in this one line. The heading role reaches
+ * into `typography` for ITS tier and nothing else does — a tier picked
+ * per widget is not a scale changed under everything.
+ */
+@Composable
+internal fun KayaTheme(content: @Composable () -> Unit) {
+    // Read BEFORE the theme, which is what makes it the pre-theme value:
+    // inside MaterialTheme this local is already bodyLarge.
+    val ambientTextStyle = LocalTextStyle.current
+    val dark = isSystemInDarkTheme()
+    val contrast = kayaSystemContrast()
+    val seed = KayaSceneModel.brandSeed
+    val scheme = remember(seed, dark, contrast) { KayaColorSchemes.of(seed, dark, contrast) }
+    MaterialTheme(colorScheme = scheme) {
+        CompositionLocalProvider(LocalTextStyle provides ambientTextStyle) {
+            // The page itself, in the scheme's own colours: `Surface`
+            // paints `background` AND provides the content colour that
+            // goes with it, which is the pair every label and field in
+            // this interpreter reads. Material's own composable rather
+            // than a Box with a background, because "the surface decides
+            // what its content colour is" is the M3 contract and kaya
+            // wraps the platform's idiom rather than restating it.
+            Surface(modifier = Modifier.fillMaxSize(), color = scheme.background) {
+                content()
+            }
+        }
+    }
+}
+
+/**
+ * THE SYSTEM CONTRAST LEVEL, -1..1 with 0 the default — Android 14's
+ * accessibility slider (Settings -> Accessibility -> Colour and motion),
+ * on Material's own scale, which is why it can be handed to the
+ * derivation unconverted.
+ *
+ * LIVE, not sampled once: the slider is not a Configuration field, so a
+ * composition that read it at startup would keep the old scheme for the
+ * life of the process — the silent no-op of MDC #3524 rebuilt one layer
+ * up. `addContrastChangeListener` is the platform's own answer and this
+ * is the whole of it.
+ *
+ * Below API 34 there is no slider and no listener, and the honest answer
+ * is Material's default rather than a guess: 0.
+ */
+@Composable
+private fun kayaSystemContrast(): Float {
+    val context = LocalContext.current
+    val manager =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            context.getSystemService(UiModeManager::class.java)
+        } else {
+            null
+        }
+    var contrast by remember(manager) { mutableFloatStateOf(manager?.contrast ?: 0f) }
+    DisposableEffect(manager) {
+        if (manager == null) return@DisposableEffect onDispose {}
+        val listener = UiModeManager.ContrastChangeListener { level -> contrast = level }
+        manager.addContrastChangeListener(context.mainExecutor, listener)
+        onDispose { manager.removeContrastChangeListener(listener) }
+    }
+    return contrast
+}
+
 @Composable
 fun KayaRoot() {
     // The runner thread has no density; convert the 8-dp gap here,
@@ -6779,10 +7413,16 @@ private fun KayaSurface() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            // The normalized root inset: 16 units, applied before the
-            // offer is measured so the available area is the content
-            // box, exactly as the SwiftUI interpreter reads it.
-            .padding(16.dp)
+            // The OUTER half of the measured-inset observation: this
+            // capture sits before the padding, its twin after, and the
+            // halved difference is the inset the harness asserts.
+            .onGloballyPositioned { kayaOuterSize = it.size }
+            // The normalized root inset — now the window's OWN (wprop
+            // 8, docs/styling-plan.md D3): 16 unless the app says
+            // otherwise, applied before the offer is measured so the
+            // available area is the content box, exactly as the
+            // SwiftUI interpreter reads it.
+            .padding(KayaSceneModel.windowInset.dp)
             .onGloballyPositioned { kayaAvailableSize = it.size },
         contentAlignment = Alignment.TopStart,
     ) {

@@ -683,6 +683,33 @@ let align_wire = function
   | Baseline -> 4L
 
 let set_align (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_align id (align_wire a))
+
+(* SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
+   never how it looks. [Destructive] and [Prominent] are an ACTION's
+   emphasis — what pressing it does to the user's data, and which of a
+   surface's actions is THE one — so they belong to a button and nothing
+   else. [Heading] is a text hierarchy fact: the platform's own heading
+   text style AND the trait assistive users skim a screen by, which is
+   why it is a role and not a font size.
+
+   The vocabulary is CLOSED — a variant, with no raw value behind it —
+   because a color or a weight per widget is what the styling ceiling
+   exists to refuse; kaya grows the set, an app never does.
+
+   THE KIND IS THE ROOT'S JUDGEMENT, exactly as [Baseline] is one
+   declaration up: a [Heading] on a button dies at declare time, in one
+   sentence naming both sides, before any backend improvises on a
+   combination that means nothing. [set_role] is the dynamic path; the
+   declarative spelling is the [~role] labeled argument, which rides the
+   two constructors a role fits (the [~a11y_hint] discipline). *)
+type role = Destructive | Prominent | Heading
+
+let role_wire = function
+  | Destructive -> Int64.of_int Kaya_wire.role_destructive
+  | Prominent -> Int64.of_int Kaya_wire.role_prominent
+  | Heading -> Int64.of_int Kaya_wire.role_heading
+
+let set_role (Widget id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
 let bind_text (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s)
 let set_checked (Widget id) checked = emit (the_tx ()) (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_checked id s)
@@ -823,12 +850,14 @@ let add_child (Widget parent) (Widget child) =
    binding interprets later (the design's no-guest-AST rule); the
    explicit floor above stays for whoever wants one call ≈ one record. *)
 
-let button ?grow ?a11y_id ?a11y_label ?a11y_hint ?text ?on_click () =
+let button ?grow ?a11y_id ?a11y_label ?a11y_hint ?role ?text ?on_click () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_button in
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_label w;
   Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
+  (* [Destructive] or [Prominent]; a [Heading] button dies at the root. *)
+  Option.iter (fun r -> set_role w r) role;
   Option.iter (fun t -> set_text w t) text;
   (match on_click with
   | Some handler ->
@@ -851,10 +880,12 @@ let textarea ?grow ?a11y_id ?a11y_label ?on_change () =
   | None -> ());
   w
 
-let label ?grow ?a11y_id ?a11y_label ?text ?bind () =
+let label ?grow ?a11y_id ?a11y_label ?role ?text ?bind () =
   let w = widget Kaya_wire.kind_label in
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_label w;
+  (* [Heading] is the label's role; the two button emphases die here. *)
+  Option.iter (fun r -> set_role w r) role;
   Option.iter (fun t -> set_text w t) text;
   Option.iter (fun s -> bind_text w s) bind;
   w
@@ -1374,6 +1405,45 @@ let derive rc compute =
     :: tx.pending_derived;
   s
 
+(* REQUEST this app's brand accent (docs/styling-plan.md D1/D2): one
+   sRGB hex — [brand_accent 0x3584E4] — is the whole call, and the core
+   derives the rest.
+
+   A REQUEST, and the word is the semantics in every language: a
+   platform may let its user override what the app asks for. macOS does
+   today (an app accent applies only while the user's system accent is
+   multicolor), and this sentence does not change if another platform
+   grows the preference — the app states a brand, the platform stays the
+   judge of its own chrome.
+
+   THE APP NEVER WRITES A FOREGROUND, and never writes a contrast
+   variant: the core derives fill, on-fill, standalone and the
+   hover/pressed ramp per appearance and hands every backend VALUES. An
+   app-supplied pair can be illegible with nothing to catch it, and
+   three of the four platforms compute or hard-code the foreground
+   anyway — so an app value would be honored on some and ignored on
+   others, which is divergence by construction.
+
+   [~light] and [~dark] are the per-appearance form, for a brand book
+   that specifies its own dark variant; whatever they leave unstated
+   comes from the seed. The optional labels are the OCaml spelling of
+   what other languages spell as a second function — one call, one
+   meaning.
+
+   SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write and
+   a late one. Brand is identity, not state, and a slot that could flip
+   at runtime would promise a theme-switching surface the vocabulary
+   deliberately does not have. *)
+let brand_accent ?light ?dark seed =
+  let mask =
+    (match light with Some _ -> 1 | None -> 0)
+    lor match dark with Some _ -> 2 | None -> 0
+  in
+  emit (the_tx ())
+    (Kaya_wire.tx_set_brand_accent seed mask
+       (Option.value light ~default:0)
+       (Option.value dark ~default:0))
+
 (* Mount into the default window; per-window targets arrive with the
    window vocabulary. *)
 (* Set a window's attributes in one construct — the attribute set is
@@ -1382,13 +1452,26 @@ let derive rc compute =
    the process owns it): [window ~title:"sections"
    ~sections_presentation:(Int64.of_int
    Kaya_wire.sections_presentation_bar) ()]. *)
-let window ?title ?width ?height ?veto_close ?dirty ?list_detail
+let window ?title ?width ?height ?inset ?veto_close ?dirty ?list_detail
     ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ?(id = 0L) () =
   let tx = the_tx () in
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
   Option.iter (fun h -> emit tx (Kaya_wire.tx_set_window_height id h)) height;
+  (* [~inset] is the space kaya's own interpreters put around the
+     mounted root, in layout units — LAYOUT, not appearance
+     (docs/styling-plan.md D3), which is why it rides here beside the
+     size and not in any styling vocabulary. 16 unless you say
+     otherwise; 0 is full bleed, for an editor or a canvas, and it is
+     honored unconditionally on every platform because the inset is
+     kaya's own padding and nothing platform-side defends it.
+
+     A PHONE'S SAFE AREA IS A SEPARATE FACT and is not removed by 0:
+     content extends to the safe-area edge, not under the notch or the
+     home indicator. Negative has no reading — an inset is space, not an
+     offset — and the root says so. *)
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_inset id v)) inset;
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_veto_close id v)) veto_close;
   (* [~dirty] declares that this surface holds unsaved work; the backend
      spells its own platform's affordance (the dot in the close button on
@@ -1449,7 +1532,7 @@ let window ?title ?width ?height ?veto_close ?dirty ?list_detail
    at the root); materializes hidden, [mount_in] presents. Labeled
    optional arguments are the OCaml spelling — the same set [window]
    takes. *)
-let create_window ?title ?width ?height ?veto_close ?dirty
+let create_window ?title ?width ?height ?inset ?veto_close ?dirty
     ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus id =
   let tx = the_tx () in
@@ -1457,7 +1540,7 @@ let create_window ?title ?width ?height ?veto_close ?dirty
   (* [~dirty] rides the creation like every other window attribute: an
      auxiliary editor can be born with unsaved work, and the mark has to
      survive the surface not existing yet. *)
-  window ?title ?width ?height ?veto_close ?dirty ?sections_presentation
+  window ?title ?width ?height ?inset ?veto_close ?dirty ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus ~id ()
 
 (* Close and forget an auxiliary window — also the veto grammar's

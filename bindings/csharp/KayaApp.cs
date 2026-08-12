@@ -364,6 +364,28 @@ enum Align : long
     Baseline = 4,
 }
 
+/// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
+/// never how it looks. A closed set — the vocabulary grows by a spec
+/// change, never by an app naming a value — and each variant belongs to
+/// one kind: Destructive and Prominent are what pressing an action
+/// means, Heading is a text hierarchy fact. The root refuses the
+/// misfits at declare time, in one sentence naming both sides, which is
+/// why the `role:` argument appears on Button and Label alone and
+/// SetRole (the dynamic path, every kind) leans on that wall.
+enum Role : long
+{
+    /// An action whose press destroys something — the platform's own
+    /// destructive affordance (red text on Apple, the error-role
+    /// container on Material, `.destructive-action` on GTK).
+    Destructive = KayaWire.RoleDestructive,
+    /// THE primary action — one per dialog's worth of emphasis: the
+    /// default-button treatment on every platform.
+    Prominent = KayaWire.RoleProminent,
+    /// A text hierarchy heading — the platform's heading text style AND
+    /// the accessibility heading trait assistive users skim by.
+    Heading = KayaWire.RoleHeading,
+}
+
 sealed class KayaInstance
 {
     internal readonly List<object> Path;
@@ -1333,6 +1355,16 @@ sealed class Tx
     public void SetA11yHint(Widget w, string hint) =>
         Records.Add(KayaWire.TxSetA11yHint(w.Id, hint));
 
+    /// A widget's SEMANTIC EMPHASIS (Role): what it means, never how it
+    /// looks — the platform picks the chrome, and Heading is also the
+    /// accessibility heading trait. Destructive and Prominent are
+    /// button emphasis, Heading is label hierarchy, and the root
+    /// refuses a role on a kind it does not fit. The declarative
+    /// spelling is the `role:` argument at construction; this is the
+    /// dynamic path.
+    public void SetRole(Widget w, Role role) =>
+        Records.Add(KayaWire.TxSetRole(w.Id, (long)role));
+
     public void BindChecked(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 
@@ -1435,12 +1467,18 @@ sealed class Tx
     // the same records — children first, then the container, then the
     // AddChilds; never a scene value interpreted later.
 
-    public Widget Button(string text = null, Action<Tx> onClick = null, double? grow = null)
+    /// `role:` is this button's semantic emphasis (Role.Destructive,
+    /// Role.Prominent) — the ONE thing an app says about a widget's
+    /// appearance, and it says it in meaning rather than in colour. It
+    /// changes nothing about what pressing the button does.
+    public Widget Button(string text = null, Action<Tx> onClick = null, double? grow = null,
+        Role? role = null)
     {
         var w = Widget(KayaWire.KindButton);
         if (text != null) SetText(w, text);
         if (onClick != null) App.OnClick(w, onClick);
         if (grow is double g) SetGrow(w, g);
+        if (role is Role r) SetRole(w, r);
         return w;
     }
 
@@ -1462,12 +1500,18 @@ sealed class Tx
         return w;
     }
 
-    public Widget Label(string text = null, Signal? bind = null, double? grow = null)
+    /// `role:` is this label's place in the text hierarchy
+    /// (Role.Heading) — the platform's heading text style AND the
+    /// heading trait assistive users skim by, which is why it is a role
+    /// and not a font size.
+    public Widget Label(string text = null, Signal? bind = null, double? grow = null,
+        Role? role = null)
     {
         var w = Widget(KayaWire.KindLabel);
         if (text != null) SetText(w, text);
         if (bind is Signal s) BindText(w, s);
         if (grow is double g) SetGrow(w, g);
+        if (role is Role r) SetRole(w, r);
         return w;
     }
 
@@ -1948,6 +1992,39 @@ sealed class Tx
         return App.InstanceOf(c.Id, c.Path)?.Entries.Count ?? 0;
     }
 
+    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2).
+    /// `seed` is one packed sRGB hex (0xRRGGBB) and is the whole call
+    /// for most apps; `light:`/`dark:` are the per-appearance overrides
+    /// a brand book that specifies a dark variant writes, and the seed
+    /// fills whichever is left unstated:
+    /// tx.BrandAccent(0x3584E4) — tx.BrandAccent(0x3584E4, dark: 0x62A0EA).
+    ///
+    /// A REQUEST, uniformly: a platform may let its user override the
+    /// app's accent — macOS does today (an app accent applies only
+    /// while the system accent is multicolor) — and the semantics does
+    /// not change if another platform grows the preference.
+    ///
+    /// SET ONCE, BEFORE THE FIRST MOUNT: brand is identity, not state,
+    /// and the root refuses a second write and a late one.
+    ///
+    /// The app NEVER writes a foreground and NEVER writes contrast
+    /// variants. The core derives fill, on-fill, standalone and a
+    /// hover/pressed ramp per appearance and hands every backend
+    /// values — an app-supplied foreground can be illegible with
+    /// nothing to catch it, and three of four platforms compute or
+    /// hard-code theirs anyway.
+    ///
+    /// There is no per-PLATFORM value map in this binding, as in every
+    /// other: D1 admits one, no binding spells it yet, and a C#-only
+    /// spelling would be a vocabulary that exists in one language.
+    public void BrandAccent(uint seed, uint? light = null, uint? dark = null)
+    {
+        // The mask says which overrides are PRESENT, so a legitimate
+        // 0x000000 override is not read as absence.
+        uint mask = (light is null ? 0u : 1u) | (dark is null ? 0u : 2u);
+        Records.Add(KayaWire.TxSetBrandAccent(seed, mask, light ?? 0, dark ?? 0));
+    }
+
     /// Mount into the default window; per-window targets arrive with
     /// the window vocabulary.
     /// Set the window's attributes in one construct — the attribute
@@ -1967,10 +2044,20 @@ sealed class Tx
     /// for (the rejected Qt design). It ARMS NOTHING either — "unsaved
     /// changes, close anyway?" is vetoClose plus a dialog, yours to
     /// compose, because apps legitimately differ on what it should do.
+    ///
+    /// inset: the window CONTENT INSET, in layout units — LAYOUT, not
+    /// appearance (docs/styling-plan.md D3): the space kaya's own
+    /// interpreters put around the mounted root. 16 unless you say
+    /// otherwise; 0 is full bleed (a Sublime-shaped editor, a canvas),
+    /// honored unconditionally because the inset is kaya's own padding.
+    /// A platform's safe area is a separate fact and is not removed by
+    /// it: content extends to the safe-area edge, not past it. Negative
+    /// has no reading — an inset is space, not an offset — and the root
+    /// refuses one.
     public void Window(
         string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, bool? listDetail = null, bool? dirty = null,
-        long? sectionsPresentation = null,
+        double? inset = null, long? sectionsPresentation = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
@@ -1982,6 +2069,7 @@ sealed class Tx
         if (vetoClose is { } v) Records.Add(KayaWire.TxSetWindowVetoClose(id, v));
         if (listDetail is { } ld) Records.Add(KayaWire.TxSetWindowListDetail(id, ld));
         if (dirty is { } d) Records.Add(KayaWire.TxSetWindowDirty(id, d));
+        if (inset is { } ins) Records.Add(KayaWire.TxSetWindowInset(id, ins));
         if (sectionsPresentation is { } sp)
             Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, sp));
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
@@ -2020,14 +2108,14 @@ sealed class Tx
     public void CreateWindow(
         ulong id, string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, bool? listDetail = null, bool? dirty = null,
-        long? sectionsPresentation = null,
+        double? inset = null, long? sectionsPresentation = null,
         Action<Tx>? onCloseRequested = null, Action<Tx>? onClosed = null,
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
         MenuItem[]? menus = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
-        Window(title, width, height, vetoClose, listDetail, dirty, sectionsPresentation,
+        Window(title, width, height, vetoClose, listDetail, dirty, inset, sectionsPresentation,
             onCloseRequested, onClosed, onUndone, onRedone, menus, id);
     }
 

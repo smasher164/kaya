@@ -1329,7 +1329,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling"
     swift_pids=()
     swift_names=()
     for entry in $IOS_SWIFT_SCENES; do
@@ -1438,7 +1438,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # CGO_CFLAGS/CGO_LDFLAGS because cgo uses CC to LINK as well as to
     # compile, and -isysroot has to reach both halves.
     IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
-    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard"
+    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling"
     # ONE CROSS-BUILD FOR THE WHOLE SUITE. guests/go/cmd is the guest
     # tree's only main package: it imports every scene library and picks
     # one from KAYA_SELFTEST, which each leg below already passes as its
@@ -1667,6 +1667,16 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle a11yrowsrs-swiftui dev.kaya.a11yrowsswiftui "$TARGET_DIR/examples/a11yrows")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on a11yrows-swiftui "$APP" dev.kaya.a11yrowsswiftui a11yrows-swiftui a11yrows a11yrows
+
+    # The styling scene (docs/styling-plan.md slice 1): brand + roles +
+    # inset. Rode this lane rust-only through the depth slice (the
+    # SwiftUI interpreter carried the first real brand lowering);
+    # graduated 2026-08-12 with the fan-out — the swift and go legs ride
+    # the scene lists above.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example styling
+    APP=$(make_bundle stylingrs-swiftui dev.kaya.stylingswiftui "$TARGET_DIR/examples/styling")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on styling-swiftui "$APP" dev.kaya.stylingswiftui styling-swiftui styling styling
 
     # The text-ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one,
     # plus the two things that make those three a contract — a user's

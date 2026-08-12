@@ -12301,6 +12301,38 @@ pub mod Microsoft {
                             .ok()
                         })
                     }
+                    pub fn GetHeadingLevel<P0>(
+                        element: P0,
+                    ) -> windows_core::Result<Peers::AutomationHeadingLevel>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetHeadingLevel)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        })
+                    }
+                    pub fn SetHeadingLevel<P0>(
+                        element: P0,
+                        value: Peers::AutomationHeadingLevel,
+                    ) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::DependencyObject>,
+                    {
+                        Self::IAutomationPropertiesStatics(|this| unsafe {
+                            (windows_core::Interface::vtable(this).SetHeadingLevel)(
+                                windows_core::Interface::as_raw(this),
+                                element.param().abi(),
+                                value,
+                            )
+                            .ok()
+                        })
+                    }
                     pub fn GetIsDialog<P0>(element: P0) -> windows_core::Result<bool>
                     where
                         P0: windows_core::Param<super::DependencyObject>,
@@ -12700,8 +12732,18 @@ pub mod Microsoft {
                     )
                         -> windows_core::HRESULT,
                     HeadingLevelProperty: usize,
-                    GetHeadingLevel: usize,
-                    SetHeadingLevel: usize,
+                    pub GetHeadingLevel: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut Peers::AutomationHeadingLevel,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetHeadingLevel: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        Peers::AutomationHeadingLevel,
+                    )
+                        -> windows_core::HRESULT,
                     IsDialogProperty: usize,
                     pub GetIsDialog: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
@@ -12796,6 +12838,27 @@ pub mod Microsoft {
                     }
                     impl windows_core::RuntimeType for AutomationControlType {
                         const SIGNATURE :windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice ( b"enum(Microsoft.UI.Xaml.Automation.Peers.AutomationControlType;i4)" ) ;
+                    }
+                    #[repr(transparent)]
+                    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                    pub struct AutomationHeadingLevel(pub i32);
+                    impl AutomationHeadingLevel {
+                        pub const None: Self = Self(0i32);
+                        pub const Level1: Self = Self(1i32);
+                        pub const Level2: Self = Self(2i32);
+                        pub const Level3: Self = Self(3i32);
+                        pub const Level4: Self = Self(4i32);
+                        pub const Level5: Self = Self(5i32);
+                        pub const Level6: Self = Self(6i32);
+                        pub const Level7: Self = Self(7i32);
+                        pub const Level8: Self = Self(8i32);
+                        pub const Level9: Self = Self(9i32);
+                    }
+                    impl windows_core::TypeKind for AutomationHeadingLevel {
+                        type TypeKind = windows_core::CopyType;
+                    }
+                    impl windows_core::RuntimeType for AutomationHeadingLevel {
+                        const SIGNATURE :windows_core::imp::ConstBuffer = windows_core::imp::ConstBuffer::from_slice ( b"enum(Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel;i4)" ) ;
                     }
                     #[repr(transparent)]
                     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13291,6 +13354,19 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).GetCulture)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn GetHeadingLevel(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevel)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -13827,6 +13903,20 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).GetCultureCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn GetHeadingLevelCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevelCore)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -14405,6 +14495,19 @@ pub mod Microsoft {
                                 .map(|| result__)
                             }
                         }
+                        pub fn GetHeadingLevel(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevel)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn IsDialog(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
                             unsafe {
@@ -14923,6 +15026,20 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).GetCultureCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn GetHeadingLevelCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevelCore)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -15530,6 +15647,19 @@ pub mod Microsoft {
                                 .map(|| result__)
                             }
                         }
+                        pub fn GetHeadingLevel(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevel)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn IsDialog(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
                             unsafe {
@@ -16048,6 +16178,20 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).GetCultureCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn GetHeadingLevelCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevelCore)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -16646,6 +16790,19 @@ pub mod Microsoft {
                                 .map(|| result__)
                             }
                         }
+                        pub fn GetHeadingLevel(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevel)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn IsDialog(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
                             unsafe {
@@ -17170,6 +17327,20 @@ pub mod Microsoft {
                                 .map(|| result__)
                             }
                         }
+                        pub fn GetHeadingLevelCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevelCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn IsDialogCore(&self) -> windows_core::Result<bool> {
                             let this =
                                 &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
@@ -17537,7 +17708,11 @@ pub mod Microsoft {
                         )
                             -> windows_core::HRESULT,
                         RaiseNotificationEvent: usize,
-                        GetHeadingLevel: usize,
+                        pub GetHeadingLevel: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut AutomationHeadingLevel,
+                        )
+                            -> windows_core::HRESULT,
                         pub IsDialog: unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                             *mut bool,
@@ -17797,7 +17972,11 @@ pub mod Microsoft {
                             *mut i32,
                         )
                             -> windows_core::HRESULT,
-                        GetHeadingLevelCore: usize,
+                        pub GetHeadingLevelCore: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut AutomationHeadingLevel,
+                        )
+                            -> windows_core::HRESULT,
                         pub IsDialogCore: unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                             *mut bool,
@@ -18593,6 +18772,19 @@ pub mod Microsoft {
                                 .map(|| result__)
                             }
                         }
+                        pub fn GetHeadingLevel(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevel)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn IsDialog(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
                             unsafe {
@@ -19111,6 +19303,20 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).GetCultureCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn GetHeadingLevelCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevelCore)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -19744,6 +19950,19 @@ pub mod Microsoft {
                                 .map(|| result__)
                             }
                         }
+                        pub fn GetHeadingLevel(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevel)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn IsDialog(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
                             unsafe {
@@ -20262,6 +20481,20 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).GetCultureCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn GetHeadingLevelCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevelCore)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )
@@ -20875,6 +21108,19 @@ pub mod Microsoft {
                                 .map(|| result__)
                             }
                         }
+                        pub fn GetHeadingLevel(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevel)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn IsDialog(&self) -> windows_core::Result<bool> {
                             let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
                             unsafe {
@@ -21393,6 +21639,20 @@ pub mod Microsoft {
                             unsafe {
                                 let mut result__ = core::mem::zeroed();
                                 (windows_core::Interface::vtable(this).GetCultureCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn GetHeadingLevelCore(
+                            &self,
+                        ) -> windows_core::Result<AutomationHeadingLevel> {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetHeadingLevelCore)(
                                     windows_core::Interface::as_raw(this),
                                     &mut result__,
                                 )

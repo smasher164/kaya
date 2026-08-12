@@ -77,6 +77,7 @@ pub const TX_REVEAL_RANGE: u16 = 40;
 /// grammar; only the request differs, which is the only place they
 /// differ for a guest either.
 pub const TX_SHOW_SAVE_DIALOG: u16 = 41;
+pub const TX_SET_BRAND_ACCENT: u16 = 42;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -115,6 +116,7 @@ pub const APPLY_HIGHLIGHT_RANGES: u16 = 28;
 pub const APPLY_SELECT_RANGE: u16 = 29;
 pub const APPLY_REVEAL_RANGE: u16 = 30;
 pub const APPLY_PRESENT_SAVE_DIALOG: u16 = 31;
+pub const APPLY_SET_BRAND: u16 = 32;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -160,6 +162,7 @@ pub const PROP_A11Y_HINT: u32 = 14;
 /// is live is the intersection of what the clipboard offers and what
 /// the focused target takes.
 pub const PROP_ACCEPTS: u32 = 15;
+pub const PROP_ROLE: u32 = 16;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -181,6 +184,7 @@ pub const WPROP_VETO_CLOSE: u32 = 4;
 pub const WPROP_SECTIONS_PRESENTATION: u32 = 5;
 pub const WPROP_LIST_DETAIL: u32 = 6;
 pub const WPROP_DIRTY: u32 = 7;
+pub const WPROP_INSET: u32 = 8;
 
 /// Section property ids (spec::SECTION_PROPS) — the third typed
 /// surface table (see DESIGN.md, Sections).
@@ -239,6 +243,10 @@ pub const ALIGN_CENTER: u32 = 1;
 pub const ALIGN_END: u32 = 2;
 pub const ALIGN_STRETCH: u32 = 3;
 pub const ALIGN_BASELINE: u32 = 4;
+
+pub const ROLE_DESTRUCTIVE: u32 = 1;
+pub const ROLE_PROMINENT: u32 = 2;
+pub const ROLE_HEADING: u32 = 3;
 
 // set_property sources.
 pub const SOURCE_CONST: u32 = 0;
@@ -419,6 +427,7 @@ fn prop(raw: u32) -> Prop {
         PROP_A11Y_LABEL => Prop::A11yLabel,
         PROP_A11Y_HINT => Prop::A11yHint,
         PROP_ACCEPTS => Prop::Accepts,
+        PROP_ROLE => Prop::Role,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -432,6 +441,7 @@ fn window_prop(raw: u32) -> WindowProp {
         WPROP_SECTIONS_PRESENTATION => WindowProp::SectionsPresentation,
         WPROP_LIST_DETAIL => WindowProp::ListDetail,
         WPROP_DIRTY => WindowProp::Dirty,
+        WPROP_INSET => WindowProp::Inset,
         other => panic!("kaya: unknown window property {other}"),
     }
 }
@@ -445,6 +455,7 @@ fn window_prop_raw(p: WindowProp) -> u32 {
         WindowProp::SectionsPresentation => WPROP_SECTIONS_PRESENTATION,
         WindowProp::ListDetail => WPROP_LIST_DETAIL,
         WindowProp::Dirty => WPROP_DIRTY,
+        WindowProp::Inset => WPROP_INSET,
     }
 }
 
@@ -774,6 +785,17 @@ pub fn decode_transaction_with_blobs(
                 widget: WidgetId(r.u64()),
                 range: TextRange::new(r.u64(), r.u64()),
             },
+            TX_SET_BRAND_ACCENT => {
+                let seed = r.u32();
+                let mask = r.u32();
+                let light_raw = r.u32();
+                let dark_raw = r.u32();
+                TxOp::SetBrandAccent {
+                    seed,
+                    light: (mask & 1 != 0).then_some(light_raw),
+                    dark: (mask & 2 != 0).then_some(dark_raw),
+                }
+            }
             TX_SHOW_SAVE_DIALOG => {
                 let window = WindowId(r.u64());
                 let dialog = crate::protocol::FileDialogId(r.u64());
@@ -1737,6 +1759,28 @@ impl Writer {
                 b.extend_from_slice(&range.start.to_le_bytes());
                 b.extend_from_slice(&range.stop.to_le_bytes());
             }),
+            // Eleven packed sRGB words, fixed order: seed, then the
+            // light appearance's five (fill, on_fill, standalone,
+            // hover, pressed), then dark's five. The interpreters'
+            // decoders carry the same order by name; check-verbs pins
+            // the constant into both.
+            ApplyOp::SetBrand { accent } => self.record(APPLY_SET_BRAND, |b, _| {
+                for word in [
+                    accent.seed,
+                    accent.light.fill,
+                    accent.light.on_fill,
+                    accent.light.standalone,
+                    accent.light.hover,
+                    accent.light.pressed,
+                    accent.dark.fill,
+                    accent.dark.on_fill,
+                    accent.dark.standalone,
+                    accent.dark.hover,
+                    accent.dark.pressed,
+                ] {
+                    b.extend_from_slice(&word.to_le_bytes());
+                }
+            }),
             ApplyOp::AddChild { parent, child } => self.record(APPLY_ADD_CHILD, |b, _| {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&child.0.to_le_bytes());
@@ -2031,6 +2075,15 @@ impl Writer {
                     .collect();
                 write_values(b, &flat, blobs);
             }),
+            TxOp::SetBrandAccent { seed, light, dark } => {
+                self.record(TX_SET_BRAND_ACCENT, |b, _| {
+                    let mask: u32 = light.map_or(0, |_| 1) | dark.map_or(0, |_| 2);
+                    b.extend_from_slice(&seed.to_le_bytes());
+                    b.extend_from_slice(&mask.to_le_bytes());
+                    b.extend_from_slice(&light.unwrap_or(0).to_le_bytes());
+                    b.extend_from_slice(&dark.unwrap_or(0).to_le_bytes());
+                })
+            }
             TxOp::ShowSaveDialog(spec) => self.record(TX_SHOW_SAVE_DIALOG, |b, blobs| {
                 b.extend_from_slice(&spec.window.0.to_le_bytes());
                 b.extend_from_slice(&spec.dialog.0.to_le_bytes());
@@ -2421,6 +2474,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::A11yId => PROP_A11Y_ID,
         Prop::A11yLabel => PROP_A11Y_LABEL,
         Prop::Accepts => PROP_ACCEPTS,
+        Prop::Role => PROP_ROLE,
         Prop::A11yHint => PROP_A11Y_HINT,
     }
 }

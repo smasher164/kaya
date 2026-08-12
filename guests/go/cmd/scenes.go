@@ -54,6 +54,7 @@ import (
 	selectscene "dev.kaya/guests/go/select"
 	"dev.kaya/guests/go/split"
 	"dev.kaya/guests/go/stall"
+	"dev.kaya/guests/go/styling"
 	"dev.kaya/guests/go/textarea"
 	"dev.kaya/guests/go/todos"
 	"dev.kaya/guests/go/undo"
@@ -126,6 +127,7 @@ var scenes = map[string]func() *kaya.App{
 	"select":     selectscene.App,
 	"split":      split.App,
 	"stall":      stall.App,
+	"styling":    styling.App,
 	"textarea":   textarea.App,
 	"todos":      todos.App,
 	"undo":       undo.App,

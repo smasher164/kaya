@@ -1282,5 +1282,177 @@ with app_tpl.window():
                     )
                 _rewind(before5)
 
+# THE STYLING TIER (docs/styling-plan.md slice 1): the brand accent, the
+# role and the window inset, each checked where this file can see —
+# WHAT REACHED THE WIRE, and what the binding refuses before anything
+# does. It cannot see the core: no transaction is ever applied here, so
+# the pairings (role vs kind, a non-negative inset, the set-once wall)
+# are the ROOT's and are probed against a running core instead.
+#
+# THE EMISSION HALF IS THE `spacing=` LESSON one prop over: a styling
+# argument that is accepted and dropped changes nothing on screen and
+# raises nothing, and neither a screenshot nor an accessibility read can
+# tell "the platform ignored the role" from "the role never left the
+# guest".
+app_style = kaya.App()
+with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
+    window_records = list(kaya._tx)
+
+    def _window_prop(prop, value_type, records=None):
+        return any(
+            _rec_kind(r) == kaya.wire.TX_SET_WINDOW_PROP
+            and int.from_bytes(r[16:20], "little") == prop
+            and int.from_bytes(r[20:24], "little") == kaya.wire.SOURCE_CONST
+            and int.from_bytes(r[24:28], "little") == value_type
+            for r in (window_records if records is None else records)
+        )
+
+    check("window inset= reaches the records",
+          _window_prop(kaya.wire.WPROP_INSET, kaya.wire.VALUE_F64))
+    # AS AN F64 AND NOT AN I64, and the int is WRITTEN here rather than
+    # assumed: the window prop is typed, so `inset=0` reaching the core
+    # as an I64 would be refused for its TYPE — a true complaint about
+    # the wrong mistake. (The live spelling of the same construct, which
+    # is what a handler uses.)
+    before_int = len(kaya._tx)
+    app_style.window(inset=0)
+    int_records = list(kaya._tx[before_int:])
+    _rewind(before_int)
+    check("and an int inset reaches it as the F64 the prop is typed as",
+          _window_prop(kaya.wire.WPROP_INSET, kaya.wire.VALUE_F64, int_records)
+          and not _window_prop(kaya.wire.WPROP_INSET, kaya.wire.VALUE_I64,
+                               int_records))
+
+    before = len(kaya._tx)
+    kaya.brand_accent(0x3584E4)
+    brand = [r for r in kaya._tx[before:]
+             if _rec_kind(r) == kaya.wire.TX_SET_BRAND_ACCENT]
+    check("brand_accent reaches the records", len(brand) == 1)
+    if brand:
+        seed, mask, light, dark = (
+            int.from_bytes(brand[0][8 + 4 * i:12 + 4 * i], "little")
+            for i in range(4)
+        )
+        check("the seed rides as one packed sRGB word", seed == 0x3584E4)
+        check("and an unstated appearance sets no mask bit",
+              (mask, light, dark) == (0, 0, 0))
+    _rewind(before)
+
+    # THE MASK IS THE ONE THING THIS CALL CAN GET SILENTLY WRONG: swap
+    # bit 0 and bit 1 and a brand book's dark variant paints the light
+    # appearance, with nothing raised anywhere. The convention is the
+    # CORE's (crates/kaya/src/wire.rs decodes bit 0 = light, bit 1 =
+    # dark), and it is pinned here so an edit cannot quietly reverse it.
+    for what, call, want_mask, want_light, want_dark in (
+        ("dark", lambda: kaya.brand_accent(0x3584E4, dark=0x62A0EA),
+         2, 0, 0x62A0EA),
+        ("light", lambda: kaya.brand_accent(0x3584E4, light=0xE62D42),
+         1, 0xE62D42, 0),
+        ("both", lambda: kaya.brand_accent(0x3584E4, light=0xE62D42,
+                                           dark=0x62A0EA),
+         3, 0xE62D42, 0x62A0EA),
+    ):
+        before = len(kaya._tx)
+        call()
+        rec = [r for r in kaya._tx[before:]
+               if _rec_kind(r) == kaya.wire.TX_SET_BRAND_ACCENT][0]
+        got = tuple(int.from_bytes(rec[8 + 4 * i:12 + 4 * i], "little")
+                    for i in range(1, 4))
+        check(f"a {what} override rides its own mask bit and slot",
+              got == (want_mask, want_light, want_dark))
+        _rewind(before)
+
+    for what, value in (("a str", "#3584E4"), ("a bool", True),
+                        ("a float", 1.0)):
+        before = len(kaya._tx)
+        try:
+            kaya.brand_accent(value)
+            ok = False
+        except TypeError as exc:
+            ok = "packed sRGB" in str(exc)
+        except Exception:
+            ok = False
+        _rewind(before)
+        check(f"brand_accent refuses {what}", ok)
+
+    # THE BINDING REFUSES THE u32 DOMAIN ONLY — its spelling of what the
+    # other bindings' parameter type refuses at compile time. The 24-bit
+    # rule is deliberately NOT the binding's: for one fan-out this file's
+    # was the only 0xRRGGBB wall in eight languages (invariant 1), so
+    # that refusal now lives in the ROOT's SetBrandAccent arm
+    # (crates/kaya/src/scene.rs, an_alpha_carrying_seed_dies), and the
+    # binding's job is to deliver the word untouched for the root to
+    # judge.
+    for what, kwargs in (("a negative seed", {"seed": -1}),
+                         ("a seed beyond u32", {"seed": 0x1_0000_0000})):
+        before = len(kaya._tx)
+        try:
+            kaya.brand_accent(**kwargs)
+            ok = False
+        except ValueError as exc:
+            ok = "does not fit the wire's u32" in str(exc)
+        except Exception:
+            ok = False
+        _rewind(before)
+        check(f"brand_accent refuses {what}", ok)
+
+    before = len(kaya._tx)
+    kaya.brand_accent(0xFF3584E4)
+    argb = [r for r in kaya._tx[before:]
+            if _rec_kind(r) == kaya.wire.TX_SET_BRAND_ACCENT]
+    check("an in-u32 ARGB word passes through for the ROOT's wall to refuse",
+          len(argb) == 1
+          and int.from_bytes(argb[0][8:12], "little") == 0xFF3584E4)
+    _rewind(before)
+
+    with kaya.column():
+        before = len(kaya._tx)
+        kaya.label(text="Sections").role(kaya.Role.HEADING)
+        role_records = [
+            r for r in kaya._tx[before:]
+            if _rec_kind(r) == kaya.wire.TX_SET_PROPERTY
+            and int.from_bytes(r[16:20], "little") == kaya.wire.PROP_ROLE
+        ]
+        check("role() reaches the records", len(role_records) == 1)
+        if role_records:
+            r = role_records[0]
+            check("as a constant I64 carrying the role's own value",
+                  int.from_bytes(r[20:24], "little") == kaya.wire.SOURCE_CONST
+                  and int.from_bytes(r[24:28], "little") == kaya.wire.VALUE_I64
+                  and int.from_bytes(r[32:40], "little") == kaya.wire.ROLE_HEADING)
+        # THE NAME SPELLING IS THE SAME PROP, not a second surface (the
+        # `align="center"` precedent).
+        before_name = len(kaya._tx)
+        kaya.button("Delete").role("destructive")
+        named = [r for r in kaya._tx[before_name:]
+                 if _rec_kind(r) == kaya.wire.TX_SET_PROPERTY
+                 and int.from_bytes(r[16:20], "little") == kaya.wire.PROP_ROLE]
+        check("the string spelling writes the same prop",
+              len(named) == 1
+              and int.from_bytes(named[0][32:40], "little")
+              == kaya.wire.ROLE_DESTRUCTIVE)
+        _rewind(before)
+
+        # THE CLOSED SET, said out loud where the other bindings have an
+        # enum: a name outside it, a number outside it, and the three
+        # source shapes that would otherwise coerce — `role(True)` reads
+        # as 1, the destructive role, out of a value that meant nothing.
+        role_signal = kaya.signal("heading")
+        for what, value, kind, fragment in (
+            ("an unknown name", "shouty", ValueError, "must be one of"),
+            ("a number outside the vocabulary", 4, ValueError, "is not a role"),
+            ("a bool", True, TypeError, "not bool"),
+            ("a Signal", role_signal, TypeError, "not Signal"),
+            ("a float", 3.0, TypeError, "not float"),
+        ):
+            before_bad = len(kaya._tx)
+            try:
+                kaya.button("Delete").role(value)
+                ok = False
+            except Exception as exc:
+                ok = isinstance(exc, kind) and fragment in str(exc)
+            _rewind(before_bad)
+            check(f"role refuses {what}", ok)
+
 sys.exit(1 if failures else 0)
 

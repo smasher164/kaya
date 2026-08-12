@@ -84,6 +84,9 @@ mod dirty;
 #[path = "ranges.rs"]
 mod ranges;
 
+#[path = "styling.rs"]
+mod styling;
+
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
 /// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
@@ -154,6 +157,11 @@ fn app(ctx: kaya::AppCtx) {
         // and the document's CJK first line is what makes that a
         // testable claim rather than a stated one.
         Ok("ranges") => ranges::app(ctx),
+        // The styling scene: brand + roles + inset (docs/styling-plan.md
+        // slice 1). The same guest the mac lane runs; here the brand
+        // SEED drives Material's own scheme derivation and `heading` is
+        // Compose heading() semantics — what the expect_ax step reads.
+        Ok("styling") => styling::app(ctx),
         // The milestone-2 scene is the DEFAULT and says so: its leg
         // passes "1" (the selftest flag's original spelling, from
         // before the value doubled as a scene selector), and a build

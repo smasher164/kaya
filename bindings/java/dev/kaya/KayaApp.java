@@ -103,6 +103,50 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
+     * never how it looks. A closed vocabulary — an app picks a meaning
+     * and each platform spells it in its own chrome (red text on Apple,
+     * an error-role container on Material, {@code .destructive-action}
+     * on GTK), which is the whole reason this is an enum and not a
+     * color.
+     *
+     * <p>Each variant fits one kind, and the ROOT refuses the misfits at
+     * declare time in one sentence naming both sides — a destructive
+     * label never reaches a backend to be improvised on.
+     *
+     * <p>Not to be confused with the {@code ROLE_*} string constants
+     * above: those are the MENU role vocabulary (the platform's own
+     * Cut/Copy/Paste items), a different tier with a different wire
+     * prop.
+     */
+    public enum Role {
+        /** An action whose press destroys something — buttons. */
+        DESTRUCTIVE(KayaWire.ROLE_DESTRUCTIVE),
+        /** THE primary action, one per dialog's worth of emphasis —
+         * buttons. */
+        PROMINENT(KayaWire.ROLE_PROMINENT),
+        /** A text hierarchy heading — labels. The platform's heading
+         * text style AND the accessibility heading trait assistive
+         * users skim by. */
+        HEADING(KayaWire.ROLE_HEADING);
+
+        final long wire;
+
+        Role(long wire) {
+            this.wire = wire;
+        }
+    }
+
+    // Which per-appearance brand overrides ride the set_brand_accent
+    // record (Tx.brandAccent packs them). HAND-WRITTEN, because the
+    // mask bits are the one part of that record the generator emits no
+    // constant for: they are named here so the two numbers are said
+    // once, with their meaning, rather than as bare 1 and 2 inside the
+    // call.
+    private static final int BRAND_MASK_LIGHT = 1;
+    private static final int BRAND_MASK_DARK = 2;
+
     private long signals, widgets, collections, nodes, menuItems;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
     // Menu dispatch tables, keyed by MENU ITEM id — their own id
@@ -1088,6 +1132,26 @@ public final class KayaApp {
         }
 
         /**
+         * The window CONTENT INSET, in layout units — LAYOUT, not
+         * appearance (docs/styling-plan.md D3): the space kaya's own
+         * interpreters put around the mounted root. 16 unless you say
+         * otherwise; 0 is full bleed (a Sublime-shaped editor, a
+         * canvas), honored unconditionally because the inset is kaya's
+         * own padding.
+         *
+         * <p>A platform's SAFE AREA is a separate fact and is not
+         * removed by it: content extends to the safe-area edge, not
+         * past it, so a phone keeps flowing like itself at inset 0.
+         *
+         * <p>Negative has no reading — an inset is space, not an offset
+         * — and the root refuses it.
+         */
+        public WindowRef inset(double units) {
+            tx.emit(KayaWire.txSetWindowInset(id, units));
+            return this;
+        }
+
+        /**
          * Ask this window to present its ENTRY STACK as list-detail: on a REGULAR window the base root takes the leading pane and the top of the stack the trailing one; on a COMPACT one nothing changes.
          * There is no argument for WHICH way it presents - that is the size class's answer, not the app's.
          */
@@ -1611,6 +1675,27 @@ public final class KayaApp {
                     + " — use Tx.setAlign inside a live transaction");
             }
             tx.setAlign(this, align);
+            return this;
+        }
+
+        /**
+         * This widget's SEMANTIC EMPHASIS at construction — the
+         * declarative chain:
+         * tx.button("Delete").role(Role.DESTRUCTIVE). Same transaction
+         * discipline as grow.
+         *
+         * <p>What the widget MEANS, never how it looks: destructive and
+         * prominent are button emphasis, heading is label hierarchy,
+         * and the root refuses a role on a kind it does not fit — at
+         * declare time, in one sentence naming both sides.
+         */
+        public Widget role(Role role) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: role on a widget outside its build transaction"
+                    + " — use Tx.setRole inside a live transaction");
+            }
+            tx.setRole(this, role);
             return this;
         }
 
@@ -2651,6 +2736,17 @@ public final class KayaApp {
         }
 
         /**
+         * A widget's semantic emphasis (docs/styling-plan.md D4): what
+         * it MEANS, which the platform spells in its own chrome. The
+         * dynamic path; the declarative spelling is the role chain at
+         * construction. Each variant fits one kind — the root refuses
+         * the misfits, naming both sides.
+         */
+        public void setRole(Widget w, Role role) {
+            emit(KayaWire.txSetRole(w.id, role.wire));
+        }
+
+        /**
          * A widget's accessibility IDENTIFIER: a stable authored key
          * that assistive tooling and UI automation address it by, and
          * which is NEVER spoken. Universal — every kind carries one.
@@ -3480,6 +3576,62 @@ public final class KayaApp {
          * construction. */
         public void setAccepts(Widget w, String... kinds) {
             emit(KayaWire.txSetAccepts(w.id, acceptList(kinds)));
+        }
+
+        /**
+         * REQUEST the app's brand accent (docs/styling-plan.md D1/D2):
+         * one packed sRGB hex ({@code 0xRRGGBB}) is the whole call, and
+         * for most apps the only one they ever write — kaya derives
+         * every other number from it.
+         *
+         * <p>THE APP NEVER WRITES A FOREGROUND and never writes
+         * contrast variants: the core derives fill, on-fill,
+         * standalone and a hover/pressed ramp per appearance, and hands
+         * every backend VALUES. An app-supplied foreground could be
+         * illegible with nothing to catch it, and three of four
+         * platforms compute or hard-code theirs anyway, so honoring one
+         * would mean honoring it on some platforms and ignoring it on
+         * others.
+         *
+         * <p>A REQUEST, NOT A COMMAND, uniformly in all eight
+         * languages: a platform may let its user override the app's
+         * accent. macOS is the one that does today (an app accent
+         * applies only while the system accent is multicolor), and the
+         * semantics does not change if another grows the preference.
+         *
+         * <p>SET ONCE, BEFORE THE FIRST MOUNT — brand is identity, not
+         * state. The root refuses a second write and a late one, so a
+         * slot that could flip at runtime never promises the
+         * theme-switching surface the vocabulary deliberately does not
+         * have.
+         */
+        public void brandAccent(int seed) {
+            brandAccent(seed, null, null);
+        }
+
+        /**
+         * The per-appearance form: {@code light} and {@code dark} are
+         * for a brand book that specifies its own dark variant, and
+         * either may be {@code null} — {@code seed} fills whatever they
+         * leave unstated. Overrides are clamped like anything else; an
+         * authored color does not get to sit in the band where the
+         * platforms' foreground rules disagree.
+         *
+         * <p>Boxed {@code Integer} because unstated is a real state and
+         * Java has no other way to say it in argument position — the
+         * {@code null} handler the constructors already take.
+         */
+        public void brandAccent(int seed, Integer light, Integer dark) {
+            // The mask says which overrides ride along; the wire
+            // carries 0 for an unstated one (spec.rs's set_brand_accent
+            // — bit 0 light, bit 1 dark). Values, never per-platform
+            // code: what a platform is allowed to differ on is the
+            // NUMBER, and the resolution would happen here, in the
+            // binding.
+            int mask = (light != null ? BRAND_MASK_LIGHT : 0)
+                    | (dark != null ? BRAND_MASK_DARK : 0);
+            emit(KayaWire.txSetBrandAccent(
+                    seed, mask, light != null ? light : 0, dark != null ? dark : 0));
         }
 
         public WindowRef createWindow(long id) {

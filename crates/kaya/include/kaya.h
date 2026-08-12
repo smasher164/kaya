@@ -160,6 +160,8 @@
  */
 #define TX_SHOW_SAVE_DIALOG 41
 
+#define TX_SET_BRAND_ACCENT 42
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -230,6 +232,8 @@
 #define APPLY_REVEAL_RANGE 30
 
 #define APPLY_PRESENT_SAVE_DIALOG 31
+
+#define APPLY_SET_BRAND 32
 
 #define VALUE_BOOL 1
 
@@ -308,6 +312,8 @@
  */
 #define PROP_ACCEPTS 15
 
+#define PROP_ROLE 16
+
 /**
  * The clip representation masks (spec enum "clip"). BIT POSITIONS, not
  * an ordinal: a copy carries several and a widget accepts several, so
@@ -342,6 +348,8 @@
 #define WPROP_LIST_DETAIL 6
 
 #define WPROP_DIRTY 7
+
+#define WPROP_INSET 8
 
 /**
  * Section property ids (spec::SECTION_PROPS) — the third typed
@@ -440,6 +448,12 @@
 #define ALIGN_STRETCH 3
 
 #define ALIGN_BASELINE 4
+
+#define ROLE_DESTRUCTIVE 1
+
+#define ROLE_PROMINENT 2
+
+#define ROLE_HEADING 3
 
 #define SOURCE_CONST 0
 
@@ -706,6 +720,8 @@
  */
 #define KAYA_TX_SHOW_SAVE_DIALOG 41
 
+#define KAYA_TX_SET_BRAND_ACCENT 42
+
 /**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
@@ -849,6 +865,8 @@
  */
 #define KAYA_APPLY_PRESENT_SAVE_DIALOG 31
 
+#define KAYA_APPLY_SET_BRAND 32
+
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply
  * record): momentary verbs into widget-owned state. The closed
@@ -951,6 +969,13 @@
 #define KAYA_PROP_ACCEPTS 15
 
 /**
+ * Semantic emphasis (docs/styling-plan.md D4): destructive/prominent
+ * on buttons, heading on labels — what a widget MEANS, never how it
+ * looks. The variant values are the KAYA_ROLE_* block below.
+ */
+#define KAYA_PROP_ROLE 16
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */
@@ -974,6 +999,14 @@
  * own platform's affordance and the app's title string is untouched.
  */
 #define KAYA_WPROP_DIRTY 7
+
+/**
+ * The window content inset, in layout units — LAYOUT, not appearance
+ * (docs/styling-plan.md D3). Kaya's own padding inside the mounted
+ * root; defaults to 16, and 0 is full bleed. Platform safe areas are
+ * not part of it and are not removed by it.
+ */
+#define KAYA_WPROP_INSET 8
 
 /**
  * Navigation-entry properties (spec::ENTRY_PROPS): their own typed
@@ -1065,6 +1098,18 @@
 #define KAYA_ALIGN_STRETCH 3
 
 #define KAYA_ALIGN_BASELINE 4
+
+/**
+ * The role enum's values (spec enum "role"): semantic emphasis, a
+ * closed set. Which variant fits which KIND is the root's
+ * value-dependent check (destructive/prominent are buttons-only,
+ * heading is labels-only) — one wire slot, the variants divide it.
+ */
+#define KAYA_ROLE_DESTRUCTIVE 1
+
+#define KAYA_ROLE_PROMINENT 2
+
+#define KAYA_ROLE_HEADING 3
 
 /**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.

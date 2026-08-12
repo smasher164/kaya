@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xbfba1ee8ec9461cb
+	SpecHash uint64 = 0x5b58d076d72c3dbb
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -55,6 +55,7 @@ const (
 	PropA11yLabel = 13
 	PropA11yHint = 14
 	PropAccepts = 15
+	PropRole = 16
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -62,6 +63,7 @@ const (
 	WpropSectionsPresentation = 5
 	WpropListDetail = 6
 	WpropDirty = 7
+	WpropInset = 8
 	EpropTitle = 1
 	EpropInterceptBack = 2
 	SpropTitle = 1
@@ -94,6 +96,9 @@ const (
 	AlignEnd = 2
 	AlignStretch = 3
 	AlignBaseline = 4
+	RoleDestructive = 1
+	RoleProminent = 2
+	RoleHeading = 3
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -145,6 +150,7 @@ const (
 	txSelectRange = 39
 	txRevealRange = 40
 	txShowSaveDialog = 41
+	txSetBrandAccent = 42
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -176,6 +182,7 @@ const (
 	applySelectRange = 29
 	applyRevealRange = 30
 	applyPresentSaveDialog = 31
+	applySetBrand = 32
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -631,6 +638,16 @@ func TxShowSaveDialog(window uint64, dialog uint64, suggestedName any, filters [
 	b = binary.LittleEndian.AppendUint64(b, dialog)
 	b = encodeValue(b, suggestedName)
 	b = encodeValues(b, filters)
+	return endRecord(b)
+}
+
+// TxSetBrandAccent: REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists.
+func TxSetBrandAccent(seed uint32, mask uint32, light uint32, dark uint32) []byte {
+	b := beginRecord(txSetBrandAccent)
+	b = binary.LittleEndian.AppendUint32(b, seed)
+	b = binary.LittleEndian.AppendUint32(b, mask)
+	b = binary.LittleEndian.AppendUint32(b, light)
+	b = binary.LittleEndian.AppendUint32(b, dark)
 	return endRecord(b)
 }
 
@@ -1114,6 +1131,38 @@ func TxBindAcceptsElement(widgetID uint64, level uint32, field uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetRole: set_property with a constant role value.
+func TxSetRole(widgetID uint64, role int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropRole)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, role)
+	return endRecord(b)
+}
+
+// TxBindRole: set_property with a signal-bound role value.
+func TxBindRole(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropRole)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindRoleElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindRoleElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropRole)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -1249,6 +1298,26 @@ func TxBindWindowDirty(window uint64, signalID uint64) []byte {
 	b := beginRecord(txSetWindowProp)
 	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint32(b, WpropDirty)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetWindowInset: set_window_prop with a constant inset value (window 0, the primary surface).
+func TxSetWindowInset(window uint64, inset float64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropInset)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, inset)
+	return endRecord(b)
+}
+
+// TxBindWindowInset: set_window_prop with a signal-bound inset value (window 0, the primary surface).
+func TxBindWindowInset(window uint64, signalID uint64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropInset)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
 	return endRecord(b)

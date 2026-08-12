@@ -1019,6 +1019,29 @@ struct CoreState {
     /// `window_dirty` to agree with itself about (the read goes to the
     /// accessibility tree for exactly that reason).
     dirty_markers: HashMap<u64, gtk4::Label>,
+    /// The window content inset (wprop 8, docs/styling-plan.md D3):
+    /// the value behind the `.kaya-root` CSS padding, kept here because
+    /// TWO consumers need the number and the stylesheet cannot be read
+    /// back — the wprop arm rewrites the provider, and the harness's
+    /// `offer` observation subtracts it from the root's allocation
+    /// (offer = what the root's children are actually proposed).
+    inset: f64,
+    /// The provider holding the `.kaya-root` padding, kept to rewrite
+    /// when the inset moves.
+    inset_css: gtk4::CssProvider,
+    /// THE BRAND ACCENT (docs/styling-plan.md D1), in the two pieces the
+    /// lowering needs: its own provider — separate from `inset_css`,
+    /// which the inset arm rewrites whole and would otherwise erase the
+    /// brand — and the derived values themselves, kept because the
+    /// stylesheet holds ONE appearance's numbers at a time and has to be
+    /// rewritten when the system flips light/dark. Shared with the
+    /// `dark` notify handler, which is why it is an Rc rather than a
+    /// plain field.
+    brand: Rc<RefCell<Option<crate::brand::BrandAccent>>>,
+    brand_css: gtk4::CssProvider,
+    /// Where kaya's own stylesheets report their parse errors, read by
+    /// `load_kaya_css` immediately after each load.
+    css_error: Rc<RefCell<Option<String>>>,
     /// The live modal alert (one per process): the request's identity
     /// plus the REAL dialog object for the runner's reads. Shared with
     /// the choose callback, which clears it when the one result fires.
@@ -4069,6 +4092,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .expect("every kaya window installs its chrome")
                         .set_visible(*on);
                 }
+                (WindowProp::Inset, Value::F64(units)) => {
+                    // LAYOUT, not appearance (docs/styling-plan.md D3):
+                    // rewrite the one provider the padding lives in.
+                    // Whole pixels — GTK CSS padding takes integers.
+                    core.inset = *units;
+                    load_kaya_css(
+                        &core.inset_css,
+                        "root inset",
+                        &format!(".kaya-root {{ padding: {}px; }}", units.round() as i64),
+                        &core.css_error,
+                    );
+                }
                 (WindowProp::SectionsPresentation, Value::I64(hint)) => {
                     // ADVISORY: bar/auto = the header StackSwitcher,
                     // sidebar = GtkStackSidebar; the chrome rebuilds
@@ -4631,6 +4666,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // are what keep the direction.
             buffer.select_range(&stop, &start);
         }
+        ApplyOp::SetBrand { accent } => {
+            // libadwaita's documented app override, written into kaya's
+            // own provider (brand_css_for carries the spelling and the
+            // reasoning). The request is recorded first: the appearance
+            // can flip afterwards, and the notify handler re-lowers from
+            // exactly this value.
+            *core.brand.borrow_mut() = Some(accent);
+            let dark = adw::StyleManager::default().is_dark();
+            load_kaya_css(
+                &core.brand_css,
+                "brand accent",
+                &brand_css_for(accent, dark),
+                &core.css_error,
+            );
+        }
         ApplyOp::RevealRange { id, range } => {
             let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
                 return;
@@ -5097,6 +5147,59 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.clipboard.armed.set(true);
                     refresh_roles(core);
                 }
+                // SEMANTIC EMPHASIS (docs/styling-plan.md D4): what the
+                // widget MEANS, lowered to the platform's OWN name for
+                // it. libadwaita ships both button affordances as
+                // documented style classes — there is no `.brand-action`
+                // and inventing one would mean writing colors, which is
+                // leaving the tier — so the lowering is the class and
+                // nothing else. WHICH variant may reach which kind is
+                // the root's check (scene.rs: a destructive label dies
+                // at declare time), so these two arms see only the
+                // variants that belong to them.
+                //
+                // Both classes are removed before one is added: the two
+                // emphases are mutually exclusive in libadwaita's own
+                // stylesheet, and a re-applied role would otherwise
+                // leave the previous one stacked underneath.
+                //
+                // The legal variants sit in the PATTERNS, so a role on a
+                // kind it does not fit falls to this match's catch-all
+                // and dies naming the prop and the value — the same
+                // sentence any other impossible pair gets.
+                (NativeWidget::Button(button), Prop::Role, Value::I64(role @ (1 | 2))) => {
+                    use gtk4::prelude::WidgetExt;
+                    button.remove_css_class("destructive-action");
+                    button.remove_css_class("suggested-action");
+                    button.add_css_class(if role == 1 {
+                        "destructive-action"
+                    } else {
+                        "suggested-action"
+                    });
+                }
+                // THE HEADING ROLE IS TWO FACTS AT ONCE, the same two
+                // every backend lowers it to: the platform's heading
+                // TEXT STYLE and the platform's heading ACCESSIBLE role.
+                //
+                // `.heading` and not `.title-1`..`.title-4`: those are a
+                // SIZE ladder (measured — .title-2 and .title-3 are the
+                // same size and differ only in weight), and one role has
+                // no business picking a level out of it. `.heading` is
+                // libadwaita's own name for "this text heads something",
+                // at the base size, which is the class SwiftUI's
+                // `.headline` corresponds to.
+                //
+                // The accessible role is the half a scene can read. A
+                // style class does not touch it (measured: a `.title-1`
+                // label still publishes `label`), so without this line
+                // the role would be invisible to every assistive client
+                // AND to `expect_ax` — GTK 4.18 maps HEADING to
+                // ATSPI_ROLE_HEADING, which is what the steps freeze.
+                (NativeWidget::Label(label), Prop::Role, Value::I64(3)) => {
+                    use gtk4::prelude::{AccessibleExt, WidgetExt};
+                    label.add_css_class("heading");
+                    label.set_accessible_role(gtk4::AccessibleRole::Heading);
+                }
                 (NativeWidget::Grid(grid), Prop::Columns, Value::F64(cols)) => {
                     core.grid_cols.insert(id.0, cols as i32);
                     let grid = grid.clone();
@@ -5460,6 +5563,87 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
     }
 }
 
+/// Load one of kaya's OWN generated stylesheets, with a parse error made
+/// FATAL rather than silent.
+///
+/// `GtkCssProvider::parsing-error` fires with a precise section for a bad
+/// property, a bad color and a bad selector, and it is the only signal
+/// GTK gives that the string it was handed did not do what it said. It is
+/// also NECESSARY AND NOT SUFFICIENT, measured both ways by the styling
+/// research: `var(--kaya-no-such-variable)` raises nothing and silently
+/// inherits, so this catches "kaya's CSS is malformed" and never "the
+/// variable name is one libadwaita does not read". The second question
+/// belongs to a rendered pixel, which is where this arm's verification
+/// went (scratchpad styling/fanout-gtk.md).
+///
+/// The error is recorded and the panic raised HERE rather than in the
+/// handler: `load_from_data` calls it synchronously, and unwinding out of
+/// a Rust panic through GTK's C frames is not something to do for a
+/// diagnostic. Every string that reaches this function is kaya's, never
+/// the app's — an unparseable one is kaya's bug, so it dies naming both
+/// the stylesheet and the fix.
+fn load_kaya_css(
+    provider: &gtk4::CssProvider, what: &str, css: &str,
+    error: &Rc<RefCell<Option<String>>>,
+) {
+    error.borrow_mut().take();
+    provider.load_from_data(css);
+    if let Some(why) = error.borrow_mut().take() {
+        panic!(
+            "kaya: gtk refused its own {what} stylesheet: {why}\n{css}\n\
+             (custom properties, `:root` and var() are GTK 4.16+; this \
+             build's GTK is older, or the generated string is malformed)"
+        );
+    }
+}
+
+/// Arm one of kaya's providers to record its parse errors into the shared
+/// cell `load_kaya_css` reads.
+fn watch_css_errors(provider: &gtk4::CssProvider, error: &Rc<RefCell<Option<String>>>) {
+    let error = error.clone();
+    provider.connect_parsing_error(move |_, section, err| {
+        *error.borrow_mut() = Some(format!("{err} at {section}"));
+    });
+}
+
+/// THE BRAND ACCENT, GTK's half (docs/styling-plan.md D1): libadwaita's
+/// documented app-override route, carrying the values the CORE derived.
+///
+/// Three variables and no fourth. `--accent-bg-color` is the accent as a
+/// background (what `.suggested-action` fills with), `--accent-fg-color`
+/// the foreground that sits on it, `--accent-color` the STANDALONE
+/// variant — accent-colored text on a neutral surface, which needs a
+/// different number than a fill and which libadwaita's own docs say must
+/// be set alongside the background or it goes stale. All three are read
+/// straight out of the appearance's `DerivedAccent`: the core's
+/// derivation is the one place the color math lives, so this backend
+/// re-derives nothing. In particular it does NOT use libadwaita's
+/// documented per-widget recipe
+/// `oklab(from var(--accent-bg-color) var(--standalone-color-oklab))`,
+/// which the research measured producing an out-of-gamut GdkRGBA (a
+/// negative green channel) for a saturated seed.
+///
+/// CUSTOM PROPERTIES ONLY, NEVER `@name`. The two spellings are not
+/// aliases: `@accent_bg_color` still parses on 4.18.6 and resolves to the
+/// SYSTEM accent even while `--accent-bg-color` is overridden (measured).
+/// Mixing them yields a half-branded window with no error anywhere.
+///
+/// One appearance at a time, because GTK CSS has no appearance selector:
+/// libadwaita switches by swapping its own stylesheet, so kaya writes the
+/// CURRENT appearance's values and rewrites them when the system flips
+/// (the `dark` notify wired in `run_core`). `AdwStyleManager:dark` is a
+/// read of the SESSION's preference, which that object answers correctly
+/// — unlike its accent getters, which report the system accent even after
+/// an app override succeeds and must never be used to verify one.
+fn brand_css_for(accent: crate::brand::BrandAccent, dark: bool) -> String {
+    let a = if dark { accent.dark } else { accent.light };
+    format!(
+        ":root {{\n  --accent-bg-color: #{:06x};\n  --accent-fg-color: #{:06x};\n  \
+         --accent-color: #{:06x};\n}}\n",
+        a.fill, a.on_fill, a.standalone
+    )
+}
+
 fn request_exit(code: i32) {
     EXIT_CODE.store(code, Ordering::Relaxed);
     CORE.with_borrow(|core| {
@@ -5500,14 +5684,65 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // still fills its window and expect_root_fills holds — margins
         // would shrink the allocation instead and break it). The class
         // is stamped on the mounted root in the Mount arm.
+        let css_error: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
         let css = gtk4::CssProvider::new();
-        css.load_from_data(".kaya-root { padding: 16px; }");
+        watch_css_errors(&css, &css_error);
+        load_kaya_css(&css, "root inset", ".kaya-root { padding: 16px; }", &css_error);
+        // The brand's own provider, EMPTY until a SetBrand arrives: an
+        // app that requests no accent must leave the platform's own
+        // alone, and an empty provider contributes nothing at all.
+        //
+        // APPLICATION priority (600) for both, which is the whole
+        // vocabulary's position on Linux: it outranks libadwaita's own
+        // stylesheet (THEME, 200) and the settings-derived values (400),
+        // and it LOSES to the user's `~/.config/gtk-4.0/gtk.css` (USER,
+        // 800). Losing there is D2 holding structurally with no code —
+        // "the app requests a brand accent; a platform may let its user
+        // override it" — and on this platform the user's own stylesheet
+        // is that override.
+        let brand_css = gtk4::CssProvider::new();
+        watch_css_errors(&brand_css, &css_error);
         if let Some(display) = gtk4::gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &brand_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+        let inset_css = css.clone();
+        // The accent is written for the appearance the session is in
+        // RIGHT NOW, so a session that flips has to be re-lowered. This
+        // is not the runtime theme-SWITCHING surface the plan declines
+        // (§2): the app still states its brand once, before the first
+        // mount; what moves is the platform underneath it, and following
+        // it is what every other backend's arm does too (the SwiftUI one
+        // recomputes its tint from the current appearance on each pass).
+        //
+        // The handler holds the derived values and the provider directly
+        // rather than reaching for CORE: a notify can arrive at any
+        // point in a main-loop turn, including one where CORE is already
+        // borrowed by an apply.
+        let brand = Rc::new(RefCell::new(None));
+        {
+            let brand = brand.clone();
+            let provider = brand_css.clone();
+            let error = css_error.clone();
+            adw::StyleManager::default().connect_dark_notify(move |manager| {
+                let accent = *brand.borrow();
+                if let Some(accent) = accent {
+                    load_kaya_css(
+                        &provider,
+                        "brand accent",
+                        &brand_css_for(accent, manager.is_dark()),
+                        &error,
+                    );
+                }
+            });
         }
         let (primary_back, primary_marker) = {
             use gtk4::prelude::Cast;
@@ -5568,6 +5803,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     buttons.insert(0, primary_back);
                     buttons
                 },
+                inset: 16.0,
+                inset_css,
+                brand,
+                brand_css,
+                css_error,
                 dirty_markers: {
                     let mut markers = HashMap::new();
                     markers.insert(0, primary_marker);
@@ -6038,50 +6278,29 @@ impl crate::harness::Stage for GtkStage {
         // correspondence each platform offers.
         #[cfg(feature = "harness")]
         {
-            use crate::harness::TargetKind as K;
-            let want = match target.kind {
-                K::Button => atspi::Role::Button,
-                K::Checkbox => atspi::Role::CheckBox,
-                // GTK exposes an entry as AT-SPI role TEXT, not Entry —
-                // read off the live bus with the probe, not guessed.
-                K::Entry | K::Textarea => atspi::Role::Text,
-                K::Label => atspi::Role::Label,
-                K::Slider => atspi::Role::Slider,
-                K::Image => atspi::Role::Image,
-                K::Progress => atspi::Role::ProgressBar,
-                K::Select => atspi::Role::ComboBox,
-                // A scroll viewport keeps GTK's own role: the Group
-                // promotion the other containers take does not apply to
-                // a GtkScrolledWindow (measured — it stays `scroll
-                // pane`, with the authored name attached), and the
-                // closed set normalizes it to `group` below, exactly as
-                // macOS normalizes AXScrollArea.
-                K::Scroll => atspi::Role::ScrollPane,
-                // A container kaya has NAMED carries role Grouping
-                // (the lowering promotes it); an unnamed one stays
-                // GENERIC/Panel and is not a semantic group at all.
-                // Matching Grouping also sidesteps the panel-ordinal
-                // problem: the tree is full of GTK-internal panels (a
-                // check box contains one), so "Nth panel" never lined
-                // up with "Nth container kaya created". The radio group
-                // rides here too: its accessibility shape is a group of
-                // radio buttons, and the lowering promotes it with the
-                // rest.
-                K::Row | K::Column | K::Grid | K::Radio => atspi::Role::Grouping,
-            };
-            let role = match want {
-                atspi::Role::Button => "button",
-                atspi::Role::CheckBox => "checkbox",
-                atspi::Role::Text => "field",
-                atspi::Role::Label => "label",
-                atspi::Role::Slider => "slider",
-                atspi::Role::Image => "image",
-                atspi::Role::ProgressBar => "progress",
-                atspi::Role::ComboBox => "combobox",
-                atspi::Role::Grouping | atspi::Role::ScrollPane => "group",
-                _ => "unknown",
-            };
-            // THE ORDINAL IS NOT kaya's INDEX. `label#0` means the
+            // THE ROLE COMES FROM THE WIDGET, NOT FROM ITS KIND, and the
+            // two are not always the same question. For every kind but
+            // one they agree by construction — a kaya button is a
+            // GtkButton and publishes `push button`, an entry and a
+            // textarea are both `text` (read off the live bus with the
+            // probe, not guessed), a scroll viewport keeps GTK's own
+            // `scroll pane` while the other containers are promoted to
+            // Grouping by being NAMED. Where they part is the styling
+            // pass's heading role (docs/styling-plan.md D4): a LABEL
+            // carrying it publishes ATSPI heading, which is the one
+            // styling fact an assistive client — and this read — can
+            // see. A mapping keyed on the kind would still ask for
+            // `label`, rank the target among labels, and answer with a
+            // different element's name.
+            //
+            // atspi_role_of is also the function atspi_rank ranks BY, so
+            // asking it here is what keeps the ordinal and the collected
+            // role from being two different questions. A widget it does
+            // not answer for — an unnamed container, which publishes
+            // GENERIC and is not a semantic node at all — has no ordinal
+            // either, and that is a finding rather than a zero.
+            //
+            // AND THE ORDINAL IS NOT kaya's INDEX. `label#0` means the
             // first label kaya created, but the bus's Nth Label counts
             // the captions inside buttons and check boxes too — so
             // `label#0` read `label/Save`, the caption inside the first
@@ -6108,14 +6327,32 @@ impl crate::harness::Stage for GtkStage {
             // The rank is read on the MAIN thread (the widget tree
             // lives there), the bus walk on this one — the same split
             // every other GTK verb makes.
-            let index = match Self::on_main(move |core| {
-                target_widget(core, target)
-                    .and_then(|widget| atspi_rank(&core.window, &widget))
-            }) {
-                Some(rank) => rank as isize,
-                None => return "<not in the accessibility tree>".to_owned(),
+            let Some((want, index)) = Self::on_main(move |core| {
+                target_widget(core, target).and_then(|widget| {
+                    let want = atspi_role_of(&widget)?;
+                    atspi_rank(&core.window, &widget).map(|rank| (want, rank))
+                })
+            }) else {
+                return "<not in the accessibility tree>".to_owned();
             };
-            return match atspi_collect(want, index as usize, false) {
+            let role = match want {
+                atspi::Role::Button => "button",
+                atspi::Role::CheckBox => "checkbox",
+                atspi::Role::Text => "field",
+                atspi::Role::Label => "label",
+                // The heading role, spelled the way every other backend
+                // spells it: `heading/<the label's text>`.
+                atspi::Role::Heading => "heading",
+                atspi::Role::Slider => "slider",
+                atspi::Role::Image => "image",
+                atspi::Role::ProgressBar => "progress",
+                atspi::Role::ComboBox => "combobox",
+                // The closed set normalizes a scroll pane to `group`,
+                // exactly as macOS normalizes AXScrollArea.
+                atspi::Role::Grouping | atspi::Role::ScrollPane => "group",
+                _ => "unknown",
+            };
+            return match atspi_collect(want, index, false) {
                 Some(name) => format!("{role}/{name}"),
                 None => "<not in the accessibility tree>".to_owned(),
             };
@@ -7733,6 +7970,34 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn inset(&self) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{GtkWindowExt, WidgetExt};
+            let Some(root) = core.window.child() else {
+                return "nothing mounted".to_owned();
+            };
+            while glib::MainContext::default().iteration(false) {}
+            // MEASURED, not read back from the model: `.kaya-root` CSS
+            // padding shifts the first child inside the root's
+            // allocation by exactly the inset, so the child's origin
+            // relative to the root IS the number — real layout, the
+            // same fact the harness measures on every backend
+            // (docs/styling-plan.md D3).
+            let Some(child) = root.first_child() else {
+                return "no child".to_owned();
+            };
+            let Some((x, y)) = child.translate_coordinates(&root, 0.0, 0.0) else {
+                return "no shared ancestor".to_owned();
+            };
+            let (x, y) = (x.round() as i64, y.round() as i64);
+            if x == y {
+                format!("{x}")
+            } else {
+                format!("{x}x{y} (axes disagree)")
+            }
+        })
+    }
+
     fn section_count(&self) -> usize {
         // The REAL switcher's page model, never the section map.
         Self::on_main(|core| {
@@ -7871,6 +8136,15 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     // Group is exactly what the bus then publishes for it.
     if w.accessible_role() == gtk4::AccessibleRole::Group {
         return Some(atspi::Role::Grouping);
+    }
+    // A label carrying the heading role (docs/styling-plan.md D4) was
+    // given HEADING by the lowering, and GTK 4.18 maps that to
+    // ATSPI_ROLE_HEADING — so it is not a Label on the bus and must not
+    // be counted as one. BEFORE the Label check for exactly that reason:
+    // reading it as a label would put it in the labels' ordinal run and
+    // shift every label after it by one.
+    if w.accessible_role() == gtk4::AccessibleRole::Heading {
+        return Some(atspi::Role::Heading);
     }
     if w.is::<gtk4::Label>() {
         // Kaya's labels AND the captions inside buttons and check

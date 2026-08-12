@@ -1,0 +1,38 @@
+# The styling conformance scene (docs/styling-plan.md): the brand
+# accent, the role tier, and the window inset — slice 1's whole surface,
+# asserted at the walls the design says hold each piece (D4):
+#
+#   - `heading` freezes HERE, on every lane, because every platform
+#     publishes it to assistive tech — it is the one role with a
+#     real-tree observable everywhere.
+#   - `destructive` and `prominent` are DECLARED here so every backend's
+#     arm runs, and their press semantics are asserted (a role never
+#     changes what a button DOES) — but their look has no AX-visible
+#     marker on SwiftUI, so the chrome is held by lowering-side gates
+#     and screenshots, not by a step pretending to read it.
+#   - the INSET is asserted by measurement: expect_inset reads the
+#     halved gap between the padding container's outer extent and the
+#     offer inside it — RELATIVE, because absolute offers cannot be
+#     byte-frozen across platforms (GTK's CSD headerbar sits inside the
+#     window's height where macOS's titlebar sits outside it), while
+#     the inset is the same number everywhere.
+#   - the BRAND accent is requested (the arm runs on every lane; a
+#     backend with a stubbed lowering refuses loudly, which is what
+#     keeps this scene off a lane until its lowering is real). Its
+#     pixels are the captures' business.
+#
+# No opening settle: the first expect's bounded retry IS the
+# scene-ready wait.
+expect label#0 "Sections"
+expect_ax label#0 "heading/Sections"
+expect_inset 0
+expect label#1 "ready"
+expect_ax button#0 "button/Delete"
+expect_ax button#1 "button/Save"
+# A ROLE NEVER CHANGES WHAT A BUTTON DOES: destructive and prominent
+# press like any button, and the app's handler is what acts. These two
+# clicks are the semantics half of the roles' contract.
+click button#0
+expect label#1 "deleted"
+click button#1
+expect label#1 "saved"

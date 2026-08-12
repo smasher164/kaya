@@ -1189,6 +1189,14 @@ pub enum Prop {
     /// focused target, and Android's `setOnReceiveContentListener`
     /// takes the accepted MIME types as an argument on the view.
     Accepts,
+    /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what this widget
+    /// MEANS — destructive, prominent, heading — never how it looks.
+    /// U32-valued from the closed role enum; which variant fits which
+    /// KIND is the root's value-dependent check (a destructive label
+    /// dies at declare time in the root's own words). The tier exists
+    /// because color-without-semantics is how Qt and SWT broke their
+    /// styling ceilings; it ships WITH the brand tier, deliberately.
+    Role,
 }
 
 /// Window property keys — the presentation-context twin of [`Prop`],
@@ -1280,6 +1288,14 @@ pub enum WindowProp {
     /// (measured: Cmd+W on an edited window calls windowShouldClose
     /// once and closes, with no save sheet).
     Dirty,
+    /// The window CONTENT INSET in layout units (F64-valued) — LAYOUT,
+    /// not appearance (docs/styling-plan.md D3): the space kaya's own
+    /// interpreters put around the mounted root. Defaults to 16 (the
+    /// value every backend hard-coded before this prop existed); 0 is
+    /// full bleed, honored unconditionally because the inset is kaya's
+    /// own padding. Platform safe areas are separate facts and are not
+    /// removed by it.
+    Inset,
 }
 
 /// The presentation hint's closed set (spec enum
@@ -1440,6 +1456,15 @@ pub enum TxOp {
     /// id space, one live slot, and the same FileDialogResult back
     /// carrying one file or none (docs/save-plan.md D2).
     ShowSaveDialog(SaveDialogSpec),
+    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2):
+    /// `seed` packed sRGB, plus the optional per-appearance author
+    /// overrides. Set once, before the first mount — the root refuses a
+    /// second or late write. The core derives; backends receive values.
+    SetBrandAccent {
+        seed: u32,
+        light: Option<u32>,
+        dark: Option<u32>,
+    },
     /// Put one clip on the system clipboard.
     Copy(Clip),
     /// Read the clipboard outside any paste gesture — the privileged
@@ -1669,6 +1694,14 @@ pub enum ApplyOp {
     SelectRange { id: WidgetId, range: NativeRange },
     /// Scroll the range into the widget's viewport, in native units.
     RevealRange { id: WidgetId, range: NativeRange },
+    /// The brand accent, DERIVED (docs/styling-plan.md D1): the seed
+    /// (for the one platform whose own derivation kaya defers to —
+    /// Material builds its role scheme from it) plus per-appearance
+    /// values no backend re-computes. Emitted once, before the first
+    /// mount's ops, by the root's set-once arm.
+    SetBrand {
+        accent: crate::brand::BrandAccent,
+    },
 }
 
 /// Where occurrences go: the Rust API consumes over mpsc, the C ABI over

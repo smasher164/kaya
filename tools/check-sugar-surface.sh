@@ -727,20 +727,122 @@ print(parts[0] + ''.join(p.capitalize() for p in parts[1:]))" "$wprop")
     pascal=$(python3 -c "
 import sys
 print(''.join(p.capitalize() for p in sys.argv[1].split('_')))" "$wprop")
-    check python bindings/python/kaya/__init__.py "$wprop" "$wprop"
-    check go bindings/go/app.go "$wprop" "$pascal"
-    check csharp bindings/csharp/KayaApp.cs "$wprop" "$camel"
-    check java bindings/java/dev/kaya/KayaApp.java "$wprop" "$camel"
-    check swift bindings/swift/KayaApp.swift "$wprop" "$camel"
-    check ocaml bindings/ocaml/kaya_app.ml "$wprop" "$wprop"
+    # WHOLE TOKENS, NOT SUBSTRINGS. The first cut of this sweep grepped
+    # the bare name, and the styling fan-out watched that go vacuous in
+    # real time: a Haskell negative that renamed WInset to WInsetXX
+    # still satisfied /WInset/, so the perturbation proved nothing and
+    # had to be redone as an outright deletion. `\b` holds both edges
+    # (`_` is a word character, so a generated `tx_set_window_inset`
+    # cannot stand in for the sugar's own `inset`).
+    check python bindings/python/kaya/__init__.py "$wprop" "\b$wprop\b"
+    # Go folds width and height into ONE Size(w, h) chain method, the
+    # same flavor as Haskell's WSize below — surfaced by the \b
+    # tightening, which is the proof the old substring match was passing
+    # on an accident (exactly one bare `Width` existed in the file, and
+    # it was not a constructor).
+    case "$wprop" in
+        width | height) go_pat="\bSize\b" ;;
+        *) go_pat="\b$pascal\b" ;;
+    esac
+    check go bindings/go/app.go "$wprop" "$go_pat"
+    check csharp bindings/csharp/KayaApp.cs "$wprop" "\b$camel\b"
+    check java bindings/java/dev/kaya/KayaApp.java "$wprop" "\b$camel\b"
+    check swift bindings/swift/KayaApp.swift "$wprop" "\b$camel\b"
+    check ocaml bindings/ocaml/kaya_app.ml "$wprop" "\b$wprop\b"
     # Haskell carries width and height as ONE WSize constructor — a
     # language flavor, not a gap, exactly like the kind spellings above.
     case "$wprop" in
         width | height) hs="WSize" ;;
         *) hs="W$pascal" ;;
     esac
-    check haskell bindings/haskell/KayaApp.hs "$wprop" "$hs"
+    check haskell bindings/haskell/KayaApp.hs "$wprop" "\b$hs\b"
 done
+
+# ─────────────────────────────────────────────────────────────────────
+# THE STYLING SURFACE (docs/styling-plan.md, slice 1). Three points,
+# and the sweeps above already hold one of them: `inset` is a
+# WINDOW_PROPS entry, so the spec-derived window-prop loop demands its
+# spelling in all eight by construction — its rows appeared the moment
+# the generators ran. The other two are neither widget kinds nor window
+# props, so nothing else in this file can see them, and each would
+# otherwise be held by a ledger line and memory:
+#
+#   - `brand_accent` is a TRANSACTION verb, copy's shape: the set-once
+#     identity write carrying the one seed hex. The per-appearance
+#     override form rides the same base name (a sibling `_with`, keyword
+#     arguments, optional labels — the idiom's call), so the patterns
+#     key on the base name and the override form's uniformity is the
+#     sweep verdict's business, not a ninth pattern's.
+#   - `role` rides the WIDGET chain the way grow does, with the closed
+#     vocabulary (destructive/prominent/heading) as a real enum type
+#     wherever the language has one. The root's declare-time wall is
+#     what refuses a misfit kind; the binding's job is only to spell
+#     the request.
+#
+# A binding shipping either wire-only leaves apps in that language
+# unable to brand or to say what a widget MEANS, and every other gate
+# would pass — invariant 2's exact failure shape, one pass later.
+
+# check_styling_point <point> <rust-re> <python-re> <go-re> <csharp-re>
+#                     <java-re> <swift-re> <haskell-re> <ocaml-re>
+check_styling_point() {
+    local point="$1"
+    check rust    crates/kaya/src/app.rs              "$point" "$2"
+    check python  bindings/python/kaya/__init__.py    "$point" "$3"
+    check go      bindings/go/app.go                  "$point" "$4"
+    check csharp  bindings/csharp/KayaApp.cs          "$point" "$5"
+    check java    bindings/java/dev/kaya/KayaApp.java "$point" "$6"
+    check swift   bindings/swift/KayaApp.swift        "$point" "$7"
+    check haskell bindings/haskell/KayaApp.hs         "$point" "$8"
+    check ocaml   bindings/ocaml/kaya_app.ml          "$point" "$9"
+}
+
+# Its negative, the fake-kind pattern above: a point that exists
+# nowhere must fail in all eight THROUGH check_styling_point itself,
+# or its argument-splitting has rotted. The subshell keeps the fake's
+# status=1 out of the real verdict.
+fake_styling=$(check_styling_point kayafakestyling \
+    'pub fn kayafakestyling\(' '^def kayafakestyling\(' \
+    'func \(tx \*Tx\) Kayafakestyling\(' 'public void Kayafakestyling\(' \
+    'public Widget kayafakestyling\(' 'func kayafakestyling\(' \
+    '^kayafakestyling ::' '^let kayafakestyling ' 2>&1 \
+    | grep -c "no live-zone constructor")
+if [ "$fake_styling" -ne 8 ]; then
+    echo "check-sugar-surface: styling self-test failed ($fake_styling/8 patterns" \
+        "fired for a styling point that exists nowhere)"
+    exit 1
+fi
+unset fake_styling
+
+check_styling_point brand_accent \
+    'pub fn brand_accent\(&mut self' \
+    '^def brand_accent\(' \
+    'func \(tx \*Tx\) BrandAccent\(' \
+    'public void BrandAccent\(' \
+    'public void brandAccent\(' \
+    'func brandAccent\(' \
+    '^brandAccent ::' \
+    '^let brand_accent '
+
+# THREE ROWS ARE KEYED PAST THE MENU ITEM'S ROLE, which shares the
+# bare name: Rust's `role(self, role: MenuRole)`, Python's
+# `def role(self, name)` on the item class and OCaml's `let item …
+# ?role …` all predate this clause, and a bare-name pattern was
+# satisfied by each before any widget sugar existed (caught by running
+# the clause the day it was written — the OCaml template-grow lesson,
+# one surface over). Rust is keyed on the widget enum's type, Python on
+# the parameter name the way grow/a11y_hint are, OCaml on the
+# constructor or the setter receiver — none of which the menu item's
+# line can supply.
+check_styling_point role \
+    'pub fn role\(self, role: crate::Role\)' \
+    'def role\(self, role\)' \
+    'func \(w Widget\) Role\(' \
+    'public void SetRole\(' \
+    'public Widget role\(' \
+    'func setRole\(' \
+    'Role :: Role -> Attr' \
+    'let (label|button) [^=]*\?role|let set_role \(Widget id\)'
 
 # EVERY WINDOW HANDLER NEEDS A CONSTRUCT SPELLING TOO — AND NO LOOSE
 # ONE. The props above are half of the window construct; its HANDLERS

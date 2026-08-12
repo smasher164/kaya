@@ -4,6 +4,7 @@
 //! ring transport. See DESIGN.md at the repository root.
 
 mod app;
+mod brand;
 // The Rust-side harness serves the Rust-native backends (GTK, WinUI)
 // and the unit tests; the interpreter platforms run their own Kotlin/
 // Swift step runners against the shared .steps scripts.
@@ -67,7 +68,7 @@ pub use app::{
     Accepts, ActionRef, Align, AnyAnchor, AppCtx, BarAnchor, Collection, ContextAnchor, ContextCatalog,
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
-    CatalogHome, MenuRole, ToggleRef, Tpl, TplSource, Tx, ValueKind, props,
+    CatalogHome, MenuRole, Role, ToggleRef, Tpl, TplSource, Tx, ValueKind, props,
 };
 
 /// The type's own shape is the schema: an enum derives the element

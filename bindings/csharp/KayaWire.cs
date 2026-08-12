@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xbfba1ee8ec9461cb;
+    public const ulong SpecHash = 0x5b58d076d72c3dbb;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -53,6 +53,7 @@ static class KayaWire
     public const uint PropA11yLabel = 13;
     public const uint PropA11yHint = 14;
     public const uint PropAccepts = 15;
+    public const uint PropRole = 16;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -60,6 +61,7 @@ static class KayaWire
     public const uint WpropSectionsPresentation = 5;
     public const uint WpropListDetail = 6;
     public const uint WpropDirty = 7;
+    public const uint WpropInset = 8;
     public const uint EpropTitle = 1;
     public const uint EpropInterceptBack = 2;
     public const uint SpropTitle = 1;
@@ -92,6 +94,9 @@ static class KayaWire
     public const uint AlignEnd = 2;
     public const uint AlignStretch = 3;
     public const uint AlignBaseline = 4;
+    public const uint RoleDestructive = 1;
+    public const uint RoleProminent = 2;
+    public const uint RoleHeading = 3;
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
@@ -143,6 +148,7 @@ static class KayaWire
     public const ushort TxKindSelectRange = 39;
     public const ushort TxKindRevealRange = 40;
     public const ushort TxKindShowSaveDialog = 41;
+    public const ushort TxKindSetBrandAccent = 42;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -174,6 +180,7 @@ static class KayaWire
     public const ushort ApplyKindSelectRange = 29;
     public const ushort ApplyKindRevealRange = 30;
     public const ushort ApplyKindPresentSaveDialog = 31;
+    public const ushort ApplyKindSetBrand = 32;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -665,6 +672,17 @@ static class KayaWire
         return Finish(stream, w, TxKindShowSaveDialog);
     }
 
+    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists.
+    public static byte[] TxSetBrandAccent(uint seed, uint mask, uint light, uint dark)
+    {
+        var w = Begin(out var stream);
+        w.Write(seed);
+        w.Write(mask);
+        w.Write(light);
+        w.Write(dark);
+        return Finish(stream, w, TxKindSetBrandAccent);
+    }
+
     /// set_property with a constant text value.
     public static byte[] TxSetText(ulong widgetId, string text)
     {
@@ -1040,6 +1058,31 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant role value.
+    public static byte[] TxSetRole(ulong widgetId, long role)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRole); w.Write(SourceConst);
+        EncodeValue(w, role);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound role value.
+    public static byte[] TxBindRole(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRole); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindRoleElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropRole); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -1156,6 +1199,23 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(window); w.Write(WpropDirty); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a constant inset value (window 0, the primary surface).
+    public static byte[] TxSetWindowInset(ulong window, double inset)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropInset); w.Write(SourceConst);
+        EncodeValue(w, inset);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound inset value (window 0, the primary surface).
+    public static byte[] TxBindWindowInset(ulong window, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropInset); w.Write(SourceSignal); w.Write(signalId);
         return Finish(stream, w, TxKindSetWindowProp);
     }
 

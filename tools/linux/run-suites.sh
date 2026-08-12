@@ -38,7 +38,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -646,6 +646,29 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     run "$proto" a11yrows-c env KAYA_SELFTEST=a11yrows \
         tools/linux/a11y-leg.sh /tmp/c-guests/a11yrows
+    # THE STYLING SCENE (docs/styling-plan.md slice 1): brand + roles +
+    # inset. On this backend the brand is libadwaita's accent override
+    # from the core's derived words, `heading` is the .heading label
+    # class published as the AT-SPI heading role (which is what the
+    # expect_ax step freezes — hence a11y-leg.sh on every leg), and
+    # destructive/prominent press like any button. Graduated 2026-08-12
+    # when the fan-out replaced the gtk depth stub.
+    run "$proto" styling-rust env KAYA_SELFTEST=styling \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/styling"
+    run "$proto" styling-python env KAYA_SELFTEST=styling KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/styling.py
+    run "$proto" styling-go env KAYA_SELFTEST=styling \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" styling-csharp env KAYA_SELFTEST=styling KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" styling-ocaml env KAYA_SELFTEST=styling KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/styling.exe
+    run "$proto" styling-haskell env KAYA_SELFTEST=styling \
+        tools/linux/a11y-leg.sh "$(hs_bin styling)"
+    run "$proto" styling-java env KAYA_SELFTEST=styling KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    run "$proto" styling-c env KAYA_SELFTEST=styling \
+        tools/linux/a11y-leg.sh /tmp/c-guests/styling
     # The confirm scene: the modal-alert grammar (gtk::AlertDialog),
     # all three answer paths through the REAL dialog button.
     # The stall diagnostic (crates/kaya/src/stall.rs): the one scene

@@ -271,6 +271,17 @@ pub enum Step {
     /// pinned top+leading only) and both times only a recording caught
     /// it — this step is the gate that does instead.
     ExpectRootFills,
+    /// The window content inset, MEASURED: the gap between the padding
+    /// container's outer extent and the offer its children receive,
+    /// halved, in whole layout units. The one observation that can
+    /// tell inset 0 from inset 16 (expect_root_fills compares the root
+    /// against the offer, so it reads "fills" at every inset) — and
+    /// deliberately RELATIVE, because absolute offers cannot be
+    /// byte-frozen across platforms: GTK's CSD headerbar sits inside
+    /// the window's height where macOS's titlebar sits outside it, so
+    /// the same window size yields different offers and the identical
+    /// number everywhere is the inset itself (docs/styling-plan.md D3).
+    ExpectInset(u32),
     /// Expect the container's children to span its content box along
     /// the main axis — the leftover-consumption half of the grow
     /// contract, and the second blind spot shares can never see:
@@ -559,6 +570,7 @@ impl Step {
             Step::ExpectFocused { .. } => true,
             Step::ExpectShares { .. } => true,
             Step::ExpectRootFills { .. } => true,
+            Step::ExpectInset { .. } => true,
             Step::ExpectFills { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectTitle { .. } => true,
@@ -700,6 +712,13 @@ pub trait Stage: Send + 'static {
     /// Android. No default, like child_shares: a backend that forgets
     /// it must fail to compile rather than pass the fill leg vacuously.
     fn root_fills(&self) -> String;
+    /// The window content inset, MEASURED from real layout — the gap
+    /// between the padding container's outer extent and its children's
+    /// offer, halved — as whole layout units ("16"), or the backend's
+    /// own words when the two axes disagree. No default, like
+    /// root_fills: a backend that forgets it fails to compile rather
+    /// than passing the inset leg vacuously.
+    fn inset(&self) -> String;
     /// The main-axis extents of the container's children, in child
     /// order, each as a whole percentage of their sum, joined with `,`
     /// — the observation expect_shares verifies, and the only way a
@@ -1183,6 +1202,11 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 Step::ExpectAligned(parse_target(target)?, parse_string(text)?)
             }
+            "expect_inset" => Step::ExpectInset(
+                rest.trim()
+                    .parse()
+                    .map_err(|_| format!("expect_inset wants whole layout units: {line:?}"))?,
+            ),
             "expect_root_fills" => {
                 if !rest.is_empty() {
                     return Err(format!(
@@ -1796,9 +1820,18 @@ fn check_ax(spec: &str) -> Result<(), String> {
     // no shared scene can assert. `combobox` earns its place the other
     // way: every platform has a chooser role, and only the spelling
     // differs (AXPopUpButton, Compose's dropdown, AT-SPI/UIA ComboBox).
-    const ROLES: [&str; 10] = [
+    // `heading` joined with the styling pass (docs/styling-plan.md D4):
+    // it is the one ROLE-tier value with a real-tree observable on
+    // every platform (AXHeading, AT-SPI heading, UIA HeadingLevel,
+    // Compose heading()), and the styling scene freezes it on every
+    // lane — a vocabulary without it refuses to PARSE styling.steps,
+    // which is exactly how the gap surfaced: the two interpreter
+    // backends parse the steps themselves and never validate the role
+    // half, so mac went green while this list blocked linux and
+    // windows.
+    const ROLES: [&str; 11] = [
         "button", "label", "field", "checkbox", "slider", "image", "progress",
-        "combobox", "group", "unknown",
+        "combobox", "group", "heading", "unknown",
     ];
     let Some((role, _label)) = spec.split_once('/') else {
         return Err(format!("ax {spec:?} wants <role>/<label>"));
@@ -2522,6 +2555,15 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }))
                 }
             }
+            Step::ExpectInset(units) => Some(poll(|| {
+                let got = stage.inset();
+                let want = format!("{units}");
+                if got == want {
+                    Ok(format!("inset {want}"))
+                } else {
+                    Err(format!("inset {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectRootFills => Some(poll(|| {
                 // Empty means fills; anything else is the platform's
                 // own description of the hug, for the failure text
@@ -3475,6 +3517,9 @@ mod tests {
         fn root_fills(&self) -> String {
             String::new()
         }
+        fn inset(&self) -> String {
+            "16".into()
+        }
         fn container_fills(&self, _: Target) -> String {
             String::new()
         }
@@ -3710,6 +3755,9 @@ mod tests {
             fn alert_title(&self, _window: u64) -> Option<String> {
             None
         }
+        fn inset(&self) -> String {
+            "16".into()
+        }
         fn choose_alert(&self, _choice: u32) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {
             None
@@ -3876,6 +3924,9 @@ mod tests {
             }
             fn alert_title(&self, _window: u64) -> Option<String> {
             None
+        }
+        fn inset(&self) -> String {
+            "16".into()
         }
         fn choose_alert(&self, _choice: u32) {}
         fn file_dialog_state(&self) -> Option<(String, Vec<String>)> {

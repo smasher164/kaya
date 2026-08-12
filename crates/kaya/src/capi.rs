@@ -239,6 +239,8 @@ const _: () = assert!(
 /// destination the dialog promised, not to the caller's intent.
 pub const KAYA_TX_SHOW_SAVE_DIALOG: u16 = 41;
 const _: () = assert!(KAYA_TX_SHOW_SAVE_DIALOG == wire::TX_SHOW_SAVE_DIALOG);
+pub const KAYA_TX_SET_BRAND_ACCENT: u16 = 42;
+const _: () = assert!(KAYA_TX_SET_BRAND_ACCENT == wire::TX_SET_BRAND_ACCENT);
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -428,6 +430,8 @@ const _: () = assert!(
 /// kaya_emit_save_dialog_result: ONE locator, or a null one for cancel.
 pub const KAYA_APPLY_PRESENT_SAVE_DIALOG: u16 = 31;
 const _: () = assert!(KAYA_APPLY_PRESENT_SAVE_DIALOG == wire::APPLY_PRESENT_SAVE_DIALOG);
+pub const KAYA_APPLY_SET_BRAND: u16 = 32;
+const _: () = assert!(KAYA_APPLY_SET_BRAND == wire::APPLY_SET_BRAND);
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
         && KAYA_APPLY_READ_CLIPBOARD == wire::APPLY_READ_CLIPBOARD
@@ -579,6 +583,10 @@ pub const KAYA_PROP_A11Y_HINT: u32 = 14;
 /// generated binding failing to compile against a constant that does
 /// not exist.
 pub const KAYA_PROP_ACCEPTS: u32 = 15;
+/// Semantic emphasis (docs/styling-plan.md D4): destructive/prominent
+/// on buttons, heading on labels — what a widget MEANS, never how it
+/// looks. The variant values are the KAYA_ROLE_* block below.
+pub const KAYA_PROP_ROLE: u32 = 16;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -595,6 +603,11 @@ pub const KAYA_WPROP_LIST_DETAIL: u32 = 6;
 /// (docs/dirty-plan.md D1). State, not chrome: each backend spells its
 /// own platform's affordance and the app's title string is untouched.
 pub const KAYA_WPROP_DIRTY: u32 = 7;
+/// The window content inset, in layout units — LAYOUT, not appearance
+/// (docs/styling-plan.md D3). Kaya's own padding inside the mounted
+/// root; defaults to 16, and 0 is full bleed. Platform safe areas are
+/// not part of it and are not removed by it.
+pub const KAYA_WPROP_INSET: u32 = 8;
 
 /// Navigation-entry properties (spec::ENTRY_PROPS): their own typed
 /// table (DESIGN.md, Navigation). `intercept_back` is the close-veto
@@ -732,12 +745,14 @@ const _: () = assert!(
         && KAYA_PROP_A11Y_LABEL == wire::PROP_A11Y_LABEL
         && KAYA_PROP_A11Y_HINT == wire::PROP_A11Y_HINT
         && KAYA_PROP_ACCEPTS == wire::PROP_ACCEPTS
+        && KAYA_PROP_ROLE == wire::PROP_ROLE
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
         && KAYA_WPROP_VETO_CLOSE == wire::WPROP_VETO_CLOSE
         && KAYA_WPROP_LIST_DETAIL == wire::WPROP_LIST_DETAIL
         && KAYA_WPROP_DIRTY == wire::WPROP_DIRTY
+        && KAYA_WPROP_INSET == wire::WPROP_INSET
         && KAYA_EPROP_TITLE == wire::EPROP_TITLE
         && KAYA_EPROP_INTERCEPT_BACK == wire::EPROP_INTERCEPT_BACK
 );
@@ -755,17 +770,30 @@ const _: () = assert!(
         && KAYA_ALIGN_STRETCH == wire::ALIGN_STRETCH
         && KAYA_ALIGN_BASELINE == wire::ALIGN_BASELINE
 );
+
+/// The role enum's values (spec enum "role"): semantic emphasis, a
+/// closed set. Which variant fits which KIND is the root's
+/// value-dependent check (destructive/prominent are buttons-only,
+/// heading is labels-only) — one wire slot, the variants divide it.
+pub const KAYA_ROLE_DESTRUCTIVE: u32 = 1;
+pub const KAYA_ROLE_PROMINENT: u32 = 2;
+pub const KAYA_ROLE_HEADING: u32 = 3;
+const _: () = assert!(
+    KAYA_ROLE_DESTRUCTIVE == wire::ROLE_DESTRUCTIVE
+        && KAYA_ROLE_PROMINENT == wire::ROLE_PROMINENT
+        && KAYA_ROLE_HEADING == wire::ROLE_HEADING
+);
 // Completeness, not just agreement: the value pins above cannot see a
 // FORGOTTEN export (the spacing prop shipped to every generated wire
 // file while kaya.h silently lacked it, and the Swift binding was the
 // first thing to notice). A new spec prop trips this count and walks
 // you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 15,
+    crate::spec::PROPS.len() == 16,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
-    crate::spec::WINDOW_PROPS.len() == 7,
+    crate::spec::WINDOW_PROPS.len() == 8,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
      this count"
 );
@@ -2806,6 +2834,7 @@ mod tests {
             ("select_range", KAYA_TX_SELECT_RANGE),
             ("reveal_range", KAYA_TX_REVEAL_RANGE),
             ("show_save_dialog", KAYA_TX_SHOW_SAVE_DIALOG),
+            ("set_brand_accent", KAYA_TX_SET_BRAND_ACCENT),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -2839,6 +2868,7 @@ mod tests {
             ("select_range", KAYA_APPLY_SELECT_RANGE),
             ("reveal_range", KAYA_APPLY_REVEAL_RANGE),
             ("present_save_dialog", KAYA_APPLY_PRESENT_SAVE_DIALOG),
+            ("set_brand", KAYA_APPLY_SET_BRAND),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

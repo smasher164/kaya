@@ -963,6 +963,16 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what this widget
+    /// MEANS — never how it looks. Destructive and prominent are button
+    /// emphasis, heading is label hierarchy, and the root refuses a
+    /// role on a kind it does not fit, at declare time, in one
+    /// sentence naming both sides.
+    pub fn role(self, role: crate::Role) -> Self {
+        self.tx.set(self.id, Prop::Role, role as i64);
+        self
+    }
+
     /// End the chain: the durable id, releasing the transaction
     /// borrow.
     pub fn id(self) -> WidgetId {
@@ -1352,6 +1362,23 @@ impl<'a> Tx<'a> {
     }
 
     /// The prop proxy for an existing window (0 = the primary).
+    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2):
+    /// one hex is the whole call for most apps; the per-appearance
+    /// overrides exist for a brand book that specifies a dark variant.
+    /// Set ONCE, before the first mount — the root refuses a second or
+    /// late write. The app never writes a foreground and never writes
+    /// contrast variants: the core derives both, and a platform may
+    /// let its user override the accent (macOS does).
+    pub fn brand_accent(&mut self, seed: u32) {
+        self.ops.push(TxOp::SetBrandAccent { seed, light: None, dark: None });
+    }
+
+    /// The per-appearance form: `seed` fills whatever `light`/`dark`
+    /// leave unstated (D1's grammar).
+    pub fn brand_accent_with(&mut self, seed: u32, light: Option<u32>, dark: Option<u32>) {
+        self.ops.push(TxOp::SetBrandAccent { seed, light, dark });
+    }
+
     pub fn window(&mut self, window: WindowId) -> WindowRef<'_, 'a> {
         WindowRef { tx: self, window }
     }
@@ -3756,6 +3783,18 @@ impl WindowRef<'_, '_> {
         self
     }
 
+    /// The window CONTENT INSET, in layout units — LAYOUT, not
+    /// appearance (docs/styling-plan.md D3): the space kaya's own
+    /// interpreters put around the mounted root. 16 unless you say
+    /// otherwise; 0 is full bleed (a Sublime-shaped editor, a canvas),
+    /// honored unconditionally because the inset is kaya's own padding.
+    /// A platform's safe area is a separate fact and is not removed by
+    /// it: content extends to the safe-area edge, not past it.
+    pub fn inset(self, units: f64) -> Self {
+        self.tx.set_window_prop(self.window, WindowProp::Inset, units);
+        self
+    }
+
     /// How this window presents its sections — ADVISORY, the
     /// width/height precedent: honored where the platform has the
     /// idiom, nearest thing otherwise, ignored on the phones.
@@ -4251,6 +4290,21 @@ impl<'t, 'b, A: MenuAnchor> RadioOptions<'t, 'b, A> {
 /// format that could be written and never accepted would be an escape
 /// hatch that only opens outward, and the whole reason to have one is
 /// an app round-tripping its own data.
+/// The role vocabulary (spec enum "role"): semantic emphasis, closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    /// An action whose press destroys something — the platform's own
+    /// destructive affordance (red text on Apple, error-role container
+    /// on Material, `.destructive-action` on GTK).
+    Destructive = 1,
+    /// THE primary action — one per dialog's worth of emphasis: the
+    /// default-button treatment on every platform.
+    Prominent = 2,
+    /// A text hierarchy heading — the platform's heading text style AND
+    /// the accessibility heading trait assistive users skim by.
+    Heading = 3,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Accepts<'a> {
     Text,

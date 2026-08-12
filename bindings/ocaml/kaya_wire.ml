@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xbfba1ee8ec9461cbL
+let spec_hash = 0x5b58d076d72c3dbbL
 
 let value_bool = 1
 let value_i64 = 2
@@ -56,6 +56,7 @@ let prop_a11y_id = 12
 let prop_a11y_label = 13
 let prop_a11y_hint = 14
 let prop_accepts = 15
+let prop_role = 16
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -63,6 +64,7 @@ let wprop_veto_close = 4
 let wprop_sections_presentation = 5
 let wprop_list_detail = 6
 let wprop_dirty = 7
+let wprop_inset = 8
 let eprop_title = 1
 let eprop_intercept_back = 2
 let sprop_title = 1
@@ -95,6 +97,9 @@ let align_center = 1
 let align_end = 2
 let align_stretch = 3
 let align_baseline = 4
+let role_destructive = 1
+let role_prominent = 2
+let role_heading = 3
 let source_const = 0
 let source_signal = 1
 let source_element = 2
@@ -146,6 +151,7 @@ let tx_kind_highlight_ranges = 38
 let tx_kind_select_range = 39
 let tx_kind_reveal_range = 40
 let tx_kind_show_save_dialog = 41
+let tx_kind_set_brand_accent = 42
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -177,6 +183,7 @@ let apply_kind_highlight_ranges = 28
 let apply_kind_select_range = 29
 let apply_kind_reveal_range = 30
 let apply_kind_present_save_dialog = 31
+let apply_kind_set_brand = 32
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -525,6 +532,14 @@ let tx_show_save_dialog window dialog suggested_name filters =
       Buffer.add_int64_le b dialog;
       encode_value b suggested_name;
       encode_values b filters)
+
+(* REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists. *)
+let tx_set_brand_accent seed mask light dark =
+  finish tx_kind_set_brand_accent (fun b ->
+      Buffer.add_int32_le b (Int32.of_int seed);
+      Buffer.add_int32_le b (Int32.of_int mask);
+      Buffer.add_int32_le b (Int32.of_int light);
+      Buffer.add_int32_le b (Int32.of_int dark))
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =
@@ -916,6 +931,32 @@ let tx_bind_accepts_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant role value. *)
+let tx_set_role widget_id role =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_role);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 role))
+
+(* set_property with a signal-bound role value. *)
+let tx_bind_role widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_role);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_role_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_role);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
 let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
@@ -1025,6 +1066,22 @@ let tx_bind_window_dirty window signal_id =
   finish tx_kind_set_window_prop (fun b ->
       Buffer.add_int64_le b window;
       Buffer.add_int32_le b (Int32.of_int wprop_dirty);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_window_prop with a constant inset value (window 0, the primary surface). *)
+let tx_set_window_inset window inset =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_inset);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 inset))
+
+(* set_window_prop with a signal-bound inset value (window 0, the primary surface). *)
+let tx_bind_window_inset window signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_inset);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 

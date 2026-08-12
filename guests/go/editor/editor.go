@@ -545,7 +545,15 @@ func App() *kaya.App {
 		// provably nil here. One expression names this window in all
 		// four places it can be named, so a future "reopen the last
 		// document at launch" would be titled right for free.
-		win := tx.Window(0).Title(docName(dest)).Size(640, 420).VetoClose(true)
+		// AND INSET 0 IS THE FULL BLEED THIS APP WAS BUILT WANTING
+		// (docs/styling-plan.md D3): a text editor's buffer runs to the
+		// window's edge — the 16-unit default kaya puts around every
+		// mounted root is a frame around a document, and no editor on any
+		// of these platforms draws one. LAYOUT, not appearance, and
+		// honored unconditionally because the inset is kaya's own
+		// padding; the phones' safe area is a separate fact this does not
+		// touch, so the buffer still stops at the notch.
+		win := tx.Window(0).Title(docName(dest)).Size(640, 420).Inset(0).VetoClose(true)
 
 		status = tx.Signal("new file")
 		// EMPTY, because the bar is not up. The editor opens on a buffer

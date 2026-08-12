@@ -366,6 +366,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ShowAlert(_) => UndoVerdict::Refused("show_alert"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
+        TxOp::SetBrandAccent { .. } => UndoVerdict::Refused("set_brand_accent"),
         TxOp::Copy(_) => UndoVerdict::Refused("copy"),
         TxOp::ReadClipboard { .. } => UndoVerdict::Refused("read_clipboard"),
         TxOp::PushEntry { .. } => UndoVerdict::Refused("push_entry"),
@@ -390,6 +391,10 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
 
 #[derive(Default)]
 pub(crate) struct Scene {
+    /// The brand accent, once set — brand is identity, not state, so
+    /// the arm below refuses a second write and a post-mount one, and
+    /// this Option is the whole record of it.
+    brand_accent: Option<crate::brand::BrandAccent>,
     signals: HashMap<SignalId, Value>,
     /// signal -> the (widget, property) pairs it feeds (live and stamped).
     bindings: HashMap<SignalId, Vec<(WidgetId, Prop)>>,
@@ -570,6 +575,12 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Select
                 | WidgetKind::Radio
         ),
+        // Semantic emphasis (docs/styling-plan.md D4). KIND legality
+        // here is the union of the variants' homes — buttons and
+        // labels; WHICH variant fits which kind is value-dependent and
+        // lives in check_prop_value, where a destructive label dies at
+        // declare time naming both the role and the kind.
+        Prop::Role => matches!(kind, WidgetKind::Button | WidgetKind::Label),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -696,6 +707,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Grow => ValueType::F64,
         Prop::Spacing => ValueType::F64,
         Prop::Align => ValueType::I64,
+        Prop::Role => ValueType::I64,
         Prop::Indeterminate => ValueType::Bool,
         Prop::Columns => ValueType::F64,
         Prop::A11yId | Prop::A11yLabel | Prop::A11yHint => ValueType::Str,
@@ -722,6 +734,15 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
             assert!(
                 v.is_finite() && *v > 0.0,
                 "kaya: window size request must be finite and positive, got {v}"
+            );
+        }
+        // ZERO IS THE POINT (docs/styling-plan.md D3): a full-bleed
+        // window is the inset's reason to exist; negative has no
+        // reading — an inset is space, not an offset.
+        (WindowProp::Inset, Value::F64(v)) => {
+            assert!(
+                v.is_finite() && *v >= 0.0,
+                "kaya: window inset must be finite and non-negative, got {v}"
             );
         }
         // The enum's closed set (the align precedent): the wire
@@ -1033,6 +1054,34 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         assert!(
             cols.is_finite() && *cols >= 1.0 && cols.fract() == 0.0,
             "kaya: a grid's columns is an integral count >= 1, got {cols}"
+        );
+    }
+    // The ROLE'S VARIANT is what decides the kind, not the prop
+    // (docs/styling-plan.md D4): check_prop admits Role on the union of
+    // the variants' homes, and this is where a destructive LABEL dies —
+    // at declare time, in one sentence naming both sides, rather than
+    // as four backends' improvisations on a meaningless combination.
+    if let (Prop::Role, Value::I64(role)) = (prop, value) {
+        let ok = match *role {
+            // destructive, prominent: an ACTION's emphasis — what
+            // pressing it means. Only a button presses.
+            1 | 2 => kind == WidgetKind::Button,
+            // heading: a text hierarchy fact — what assistive users
+            // skim by. Only a label heads a section.
+            3 => kind == WidgetKind::Label,
+            other => panic!(
+                "kaya: {other} is not a role (destructive=1, prominent=2, heading=3)"
+            ),
+        };
+        let name = match *role {
+            1 => "destructive",
+            2 => "prominent",
+            _ => "heading",
+        };
+        assert!(
+            ok,
+            "kaya: role {name} does not fit {kind:?} — destructive and \
+             prominent are button emphasis, heading is label hierarchy"
         );
     }
     // The accept list's own domain: at least one token, no token twice.
@@ -1506,6 +1555,52 @@ impl Scene {
                     // singleton.
                     crate::capi::file_dialog_shown(spec.dialog);
                     out.push(ApplyOp::PresentFileDialog(spec));
+                }
+                TxOp::SetBrandAccent { seed, light, dark } => {
+                    // SET ONCE, BEFORE THE FIRST MOUNT. Brand is
+                    // identity, not state: a second write is a program
+                    // error, and a post-mount write would promise the
+                    // runtime theme-switching surface the vocabulary
+                    // deliberately does not have (docs/styling-plan.md
+                    // §2). Both die here, in the root's words, before
+                    // any backend sees an accent it would have to
+                    // un-apply.
+                    assert!(
+                        self.brand_accent.is_none(),
+                        "kaya: set_brand_accent called twice — brand is set once, \
+                         at startup; a slot that could flip at runtime would be a \
+                         theme-switching surface, which the vocabulary does not \
+                         promise (docs/styling-plan.md)"
+                    );
+                    assert!(
+                        self.mounted_windows.is_empty(),
+                        "kaya: set_brand_accent after a mount — brand is set once, \
+                         BEFORE the first mount, so no backend ever shows an \
+                         unbranded frame it must repaint"
+                    );
+                    // THE SEED IS A PACKED sRGB HEX AND NOTHING ELSE.
+                    // Without this wall the binding-side spelling decides
+                    // what a stray high byte means: an ARGB constant
+                    // pasted where 0xRRGGBB belongs applied cleanly and
+                    // reached every backend as seed AND fill (measured by
+                    // the fan-out through Swift and Java — Java can even
+                    // spell it as a negative int), while Compose feeds
+                    // the raw word to Material's own derivation. One
+                    // refusal here is the same answer in all eight
+                    // languages; a per-binding precondition is eight.
+                    for (word, which) in [(Some(seed), "seed"), (light, "light"), (dark, "dark")] {
+                        if let Some(w) = word {
+                            assert!(
+                                w <= 0xFF_FFFF,
+                                "kaya: brand {which} {w:#08x} is not a packed \
+                                 sRGB hex — the accent is 0xRRGGBB, no alpha, \
+                                 no extra bytes (docs/styling-plan.md D1)"
+                            );
+                        }
+                    }
+                    let accent = crate::brand::derive(seed, light, dark);
+                    self.brand_accent = Some(accent);
+                    out.push(ApplyOp::SetBrand { accent });
                 }
                 TxOp::ShowSaveDialog(spec) => {
                     assert!(
@@ -5122,6 +5217,134 @@ mod tests {
             TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
             TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
+    }
+
+    /// THE ROLE WALLS, both directions. The variant decides the kind:
+    /// a destructive label and a heading button both die at declare
+    /// time in the root's words, and the legal pairings record clean.
+    #[test]
+    #[should_panic(expected = "role destructive does not fit Label")]
+    fn a_destructive_label_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Role,
+                value: PropValue::Const(Value::I64(1)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "role heading does not fit Button")]
+    fn a_heading_button_dies_at_declare() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Role,
+                value: PropValue::Const(Value::I64(3)),
+            },
+        ]);
+    }
+
+    #[test]
+    fn the_legal_role_pairings_record() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(2),
+                prop: Prop::Role,
+                value: PropValue::Const(Value::I64(1)),
+            },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(3),
+                prop: Prop::Role,
+                value: PropValue::Const(Value::I64(2)),
+            },
+            TxOp::CreateWidget { id: WidgetId(4), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(4),
+                prop: Prop::Role,
+                value: PropValue::Const(Value::I64(3)),
+            },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    /// THE BRAND'S SET-ONCE WALLS. A second write and a post-mount
+    /// write both die in the root's words; the clean path emits ONE
+    /// derived SetBrand carrying the seed.
+    #[test]
+    #[should_panic(expected = "set_brand_accent called twice")]
+    fn a_second_brand_write_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetBrandAccent { seed: 0x3584E4, light: None, dark: None }]);
+        scene.apply(vec![TxOp::SetBrandAccent { seed: 0xE62D42, light: None, dark: None }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "after a mount")]
+    fn a_post_mount_brand_write_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        scene.apply(vec![TxOp::SetBrandAccent { seed: 0x3584E4, light: None, dark: None }]);
+    }
+
+    /// AND THE DOMAIN WALL: the seed is 0xRRGGBB and nothing else. The
+    /// fan-out measured an ARGB constant sailing through seven bindings
+    /// and reaching every backend as seed AND fill (only Python's local
+    /// precondition caught it); the refusal belongs here, where the
+    /// answer is the same in all eight languages. All three words are
+    /// walled — the overrides take the same grammar as the seed.
+    #[test]
+    #[should_panic(expected = "brand seed 0xff3584e4 is not a packed")]
+    fn an_alpha_carrying_seed_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetBrandAccent { seed: 0xFF3584E4, light: None, dark: None }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "brand dark 0x1000000 is not a packed")]
+    fn an_out_of_range_override_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetBrandAccent {
+            seed: 0x3584E4,
+            light: None,
+            dark: Some(0x0100_0000),
+        }]);
+    }
+
+    #[test]
+    fn the_brand_derives_once_and_carries_the_seed() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![TxOp::SetBrandAccent {
+            seed: 0x3584E4,
+            light: None,
+            dark: None,
+        }]);
+        let brands: Vec<_> = ops
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetBrand { accent } => Some(accent),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(brands.len(), 1, "one derived SetBrand out");
+        assert_eq!(brands[0].seed, 0x3584E4, "the seed rides along for Material");
+        // Adwaita blue takes white — the derivation's empirical anchor.
+        assert_eq!(brands[0].light.on_fill, 0xFFFFFF);
     }
 
     #[test]

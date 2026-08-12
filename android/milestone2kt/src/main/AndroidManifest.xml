@@ -9,7 +9,7 @@
     </queries>
     <application
         android:label="kaya milestone 0 (jvm ring)"
-        android:theme="@android:style/Theme.Material.Light">
+        android:theme="@style/Theme.Kaya">
         <activity
             android:name=".MainActivity"
             android:exported="true">

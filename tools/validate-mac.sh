@@ -48,10 +48,12 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
-# arrive, when they move into SCENES.
+# arrive, when they move into SCENES. Empty today: styling graduated
+# 2026-08-12 when its fan-out landed all eight guests and the real
+# brand lowerings (winui's heading arm was the last stub out).
 DEPTH_SCENES=""
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
@@ -661,7 +663,7 @@ build_c() {
     # very assignment to say so — every name here must have a leg below.
     # SCENES is a command-line override, so the Makefile keeps one list
     # and the linux suite keeps building all of them.
-    make -C guests/c SCENES="undo dirty ranges save a11yrows" TARGET_DIR="$ROOT/target/debug" \
+    make -C guests/c SCENES="undo dirty ranges save a11yrows styling" TARGET_DIR="$ROOT/target/debug" \
         OUT="$ROOT/target/c-guests"
 }
 
@@ -1084,6 +1086,33 @@ run a11yrows-swift-swiftui env KAYA_SELFTEST=a11yrows target/swift-guests/a11yro
 run a11yrows-java-swiftui env KAYA_SELFTEST=a11yrows KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 run a11yrows-c-swiftui env KAYA_SELFTEST=a11yrows target/c-guests/a11yrows
+drain
+
+# THE STYLING SCENE (docs/styling-plan.md slice 1): the brand accent,
+# the role tier and the window inset. `heading` is frozen from the real
+# tree (measured: SwiftUI's .isHeader IS the AXHeading role on macOS);
+# the inset is asserted by measurement (expect_inset, the halved
+# outer-minus-offer gap); destructive/prominent press like any button —
+# their chrome is the captures' business. Began as a DEPTH slice; the
+# fan-out landed all eight sugar spellings and their guests on
+# 2026-08-12 and the scene graduated from DEPTH_SCENES into SCENES —
+# check-steps demands these legs now. The C floor rides too, spelling
+# the brand record, the role prop and the inset wprop as the generated
+# primitives they are (invariant 5's documentation tier).
+KAYA_SELFTEST_SCRIPT="$(scene_script styling)"
+export KAYA_SELFTEST_SCRIPT
+run styling-rust-swiftui env KAYA_SELFTEST=styling "$RUST_GUESTS"/styling
+run styling-python-swiftui env KAYA_SELFTEST=styling python3 guests/python/styling.py
+run styling-go-swiftui env KAYA_SELFTEST=styling target/go-guests/kaya-go
+run styling-swift-swiftui env KAYA_SELFTEST=styling target/swift-guests/styling
+run styling-csharp-swiftui env KAYA_SELFTEST=styling KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run styling-ocaml-swiftui env KAYA_SELFTEST=styling KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/styling.exe
+run styling-haskell-swiftui env KAYA_SELFTEST=styling "$(hs_bin styling)"
+run styling-java-swiftui env KAYA_SELFTEST=styling KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+run styling-c-swiftui env KAYA_SELFTEST=styling target/c-guests/styling
 drain
 
 # The clipboard scene: one clip in several representations, and the

@@ -129,6 +129,9 @@ public final class Main {
             case "ranges":
                 app = Ranges::app;
                 break;
+            case "styling":
+                app = Styling::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

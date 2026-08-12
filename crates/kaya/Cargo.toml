@@ -295,6 +295,10 @@ name = "a11yrows"
 path = "../../guests/rust/a11yrows.rs"
 
 [[example]]
+name = "styling"
+path = "../../guests/rust/styling.rs"
+
+[[example]]
 name = "ranges"
 path = "../../guests/rust/ranges.rs"
 

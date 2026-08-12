@@ -799,6 +799,35 @@ func (w Widget) A11yHint(hint string) Widget {
 	return w
 }
 
+// SetRole sets a widget's SEMANTIC EMPHASIS — what it MEANS, never how
+// it looks (docs/styling-plan.md D4): one of the generated role
+// constants (RoleDestructive, RoleProminent, RoleHeading), Go's enum
+// idiom, the same one Align and SectionsPresentation use.
+//
+// The vocabulary is closed and each entry fits some kinds and not
+// others: destructive and prominent are BUTTON emphasis, heading is
+// LABEL hierarchy. The root refuses a misfit at declare time, naming
+// both the role and the kind, so no backend ever sees one. The dynamic
+// path; the declarative spelling is the Role chain at construction.
+//
+// (The Role* STRING constants a few hundred lines down are the menu
+// tier's standard commands — cut/copy/paste/undo/redo. Same prefix,
+// different vocabulary, and the types keep them apart.)
+func (tx *Tx) SetRole(w Widget, role int64) {
+	tx.emit(TxSetRole(w.id, role))
+}
+
+// Role sets this widget's semantic emphasis at construction — the
+// declarative chain: tx.Label(s).Role(kaya.RoleHeading). Same
+// transaction discipline as Grow.
+func (w Widget) Role(role int64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Role on a widget outside its build transaction — use Tx.SetRole inside a live transaction")
+	}
+	w.tx.SetRole(w, role)
+	return w
+}
+
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 	tx.emit(TxBindChecked(w.id, s.id))
 }
@@ -1471,6 +1500,73 @@ func (tx *Tx) Len(c Collection) int {
 func (tx *Tx) CreateWindow(id uint64) WindowRef {
 	tx.emit(TxCreateWindow(id))
 	return WindowRef{tx: tx, id: id}
+}
+
+// AccentOverride is one per-appearance brand override, made by
+// LightAccent or DarkAccent and passed to Tx.BrandAccent. The zero
+// value is "unstated", which is what most apps hand it: the seed fills
+// every appearance it does not hear about.
+type AccentOverride struct {
+	// mask is the wire's presence bit — 1 light, 2 dark — so a
+	// hand-made zero AccentOverride carries nothing and is ignored.
+	mask uint32
+	hex  uint32
+}
+
+// LightAccent overrides the accent for the LIGHT appearance only.
+func LightAccent(hex uint32) AccentOverride { return AccentOverride{mask: 1, hex: hex} }
+
+// DarkAccent overrides the accent for the DARK appearance only.
+func DarkAccent(hex uint32) AccentOverride { return AccentOverride{mask: 2, hex: hex} }
+
+// BrandAccent REQUESTS the app's brand accent (docs/styling-plan.md
+// D1/D2): one packed sRGB hex (0xRRGGBB) is the whole call for most
+// apps, and the per-appearance overrides exist for a brand book that
+// specifies a dark variant.
+//
+//	tx.BrandAccent(0x3584E4)
+//	tx.BrandAccent(0x3584E4, kaya.DarkAccent(0x62A0EA))
+//
+// NAMED OVERRIDES RATHER THAN TWO POSITIONAL ARGUMENTS, which is Go's
+// answer to Rust's brand_accent_with: light and dark are the same type,
+// so a positional pair lets a caller swap them with nothing in the
+// language or on the wire able to notice. Same semantics either way —
+// the seed fills whatever an appearance leaves unstated.
+//
+// SET ONCE, BEFORE THE FIRST MOUNT. Brand is identity, not state: the
+// root refuses a second write and a late one, because a slot that could
+// flip at runtime would promise a theme-switching surface the
+// vocabulary deliberately does not have.
+//
+// A REQUEST, uniformly: a platform may let its user override it. macOS
+// is the one that does today (an app accent applies only while the
+// user's system accent is multicolor), and the semantics does not
+// change if another platform grows the preference.
+//
+// The app NEVER writes a foreground and NEVER writes contrast variants
+// — the core derives fill, on-fill, standalone and a hover/pressed ramp
+// per appearance and hands every backend values. An app-supplied
+// foreground can be illegible with nothing to catch it, and three of
+// the four platforms compute or hard-code one anyway, so honoring one
+// would be divergence by construction.
+func (tx *Tx) BrandAccent(seed uint32, overrides ...AccentOverride) {
+	var mask, light, dark uint32
+	for _, o := range overrides {
+		if o.mask&mask != 0 {
+			// Last-wins would let a brand book's real value be
+			// shadowed by a stray line with no error anywhere — the
+			// silent-write failure this whole pass is written against.
+			panic("kaya: BrandAccent got the same appearance override twice — light and dark are set at most once each")
+		}
+		mask |= o.mask
+		switch o.mask {
+		case 1:
+			light = o.hex
+		case 2:
+			dark = o.hex
+		}
+	}
+	tx.emit(TxSetBrandAccent(seed, mask, light, dark))
 }
 
 // Window is the prop chain for an existing window (0 = the primary).
@@ -2184,6 +2280,24 @@ func (w WindowRef) ListDetail(on bool) WindowRef {
 // compose, because apps legitimately differ on what it should do.
 func (w WindowRef) Dirty(on bool) WindowRef {
 	w.tx.emit(TxSetWindowDirty(w.id, on))
+	return w
+}
+
+// Inset sets the window's CONTENT INSET in layout units — LAYOUT, not
+// appearance (docs/styling-plan.md D3): the space kaya's own
+// interpreters put around the mounted root. 16 unless you say
+// otherwise; 0 is full bleed (a Sublime-shaped editor, a canvas),
+// honored unconditionally on every platform because the inset is
+// kaya's own padding and nothing platform-side defends it.
+//
+// A platform's SAFE AREA is a separate fact and is not removed by it:
+// content extends to the safe-area edge, not past it, so a phone keeps
+// its notch and home indicator whatever this says.
+//
+// Negative is refused by the root, which is where every language hears
+// the same sentence: an inset is space, not an offset.
+func (w WindowRef) Inset(units float64) WindowRef {
+	w.tx.emit(TxSetWindowInset(w.id, units))
 	return w
 }
 

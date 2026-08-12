@@ -117,6 +117,8 @@ module KayaApp
     EntryAttr (..),
     destroyWindow,
     WindowAttr (..),
+    brandAccent,
+    BrandAttr (..),
     AlertAttr (..),
     showAlert,
     PickedFile (..),
@@ -139,12 +141,15 @@ module KayaApp
     setA11yId,
     setA11yLabel,
     setA11yHint,
+    setRole,
     Align (..),
+    Role (..),
     Attr (..),
     WClass (..),
     RowCol,
     LeafArgs,
     BothZones,
+    BrandArgs,
     row,
     column,
     scroll,
@@ -288,7 +293,7 @@ import Data.ByteString.Builder (Builder)
 import Data.Int (Int64)
 import Data.IORef
 import Data.List (elemIndex)
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import GHC.Records (HasField)
 import GHC.TypeLits (ErrorMessage (..), KnownSymbol, TypeError, symbolVal)
 import qualified Data.Map.Strict as Map
@@ -916,6 +921,63 @@ items (Collection n path) = Build $ \s ->
 count :: Collection -> Build Int
 count c = length <$> items c
 
+-- | One per-appearance override of the brand accent, for a brand book
+-- that specifies a dark variant. Unstated cells fall back to the seed,
+-- which is why most apps pass none of these.
+data BrandAttr
+  = -- | The accent to use while the platform is in its LIGHT appearance.
+    BLight Word32
+  | -- | The accent to use while it is in its DARK one.
+    BDark Word32
+
+-- | REQUEST this app's brand accent (docs/styling-plan.md D1/D2): one
+-- packed sRGB hex, @0xRRGGBB@, is the whole call —
+-- @brandAccent 0x3584E4@ — and the per-appearance form adds the
+-- attribute list: @brandAccent 0x3584E4 [BDark 0x62A0EA]@.
+--
+-- A REQUEST, uniformly: a platform may let its user override it, and
+-- macOS does today (an app accent applies only while the user's system
+-- accent is multicolor). The app states a brand; the platform stays the
+-- judge of its own chrome. That sentence is the semantics in all eight
+-- languages, so nothing here is a macOS carve-out.
+--
+-- SET ONCE, BEFORE THE FIRST MOUNT — brand is identity, not state, and
+-- the root refuses a second write or a late one.
+--
+-- THE APP NEVER WRITES A FOREGROUND and never writes contrast variants:
+-- the core derives fill, on-fill, standalone and a hover/pressed ramp
+-- per appearance, and hands every backend values. There is no slot here
+-- to put an illegible pair in.
+--
+-- ONE NAME, BOTH ARITIES — the 'row' and 'button' idiom of this module,
+-- for the same reason: the bare call is what most apps write, and a
+-- mandatory @[]@ on it would be the paper cut the sugar tier exists to
+-- remove. A repeated attribute is last-wins, like every other attribute
+-- list here.
+brandAccent :: (BrandArgs r) => Word32 -> r
+brandAccent = brandish
+
+class BrandArgs r where
+  brandish :: Word32 -> r
+
+instance (a ~ ()) => BrandArgs (Build a) where
+  brandish seed = emitBrand seed []
+
+instance (a ~ BrandAttr, r ~ Build ()) => BrandArgs ([a] -> r) where
+  brandish = emitBrand
+
+emitBrand :: Word32 -> [BrandAttr] -> Build ()
+emitBrand seed attrs = emitB (W.txSetBrandAccent seed mask (pack light) (pack dark))
+  where
+    lastOf p = foldl (\held a -> maybe held Just (p a)) Nothing attrs
+    light = lastOf (\a -> case a of BLight c -> Just c; _ -> Nothing)
+    dark = lastOf (\a -> case a of BDark c -> Just c; _ -> Nothing)
+    -- The wire's presence mask: bit 0 light, bit 1 dark. Disjoint bits,
+    -- so the sum IS the union; an absent cell rides as 0 and the core
+    -- fills it from the seed.
+    mask = maybe 0 (const 1) light + maybe 0 (const 2) dark
+    pack = fromMaybe 0
+
 -- | Mount into the default window; per-window targets arrive with the
 -- window vocabulary.
 -- | Window construction attributes — the config-list spelling. The
@@ -953,6 +1015,21 @@ data WindowAttr
     -- prop; the two are orthogonal and either rides the window
     -- construct without the other.
     WDirty Bool
+  | -- | The space kaya's own interpreters put around this window's
+    -- mounted root, in layout units — LAYOUT, not appearance
+    -- (docs/styling-plan.md D3). 16 unless you say otherwise; 0 is full
+    -- bleed, for an editor or a canvas, and it is honored
+    -- unconditionally because the inset is kaya's own padding — nothing
+    -- platform-side defends it.
+    --
+    -- A PLATFORM'S SAFE AREA IS A SEPARATE FACT and is not removed by
+    -- it: on the phones content extends to the safe-area edge (the
+    -- notch, the home indicator), not past it. Two facts, one knob.
+    --
+    -- Negative has no reading — an inset is space, not an offset — so
+    -- the root refuses one at declare time rather than letting four
+    -- backends improvise.
+    WInset Double
   | WOnCloseRequested (IO ())
   | WOnClosed (IO ())
   | -- | Hear an undo kaya routed in this window: the step's label —
@@ -1001,6 +1078,7 @@ window n = mapM_ apply
     apply (WListDetail v) = emitB (W.txSetWindowListDetail n v)
     apply (WSectionsPresentation p) = emitB (W.txSetWindowSectionsPresentation n p)
     apply (WDirty v) = emitB (W.txSetWindowDirty n v)
+    apply (WInset units) = emitB (W.txSetWindowInset n units)
     apply (WOnCloseRequested handler) = pendB (PCloseRequested n handler)
     apply (WOnClosed handler) = pendB (PWindowClosed n handler)
     apply (WOnUndone handler) = pendB (PUndone n handler)
@@ -1754,6 +1832,42 @@ alignWire AlignBaseline = 4
 setAlign :: Widget -> Align -> Build ()
 setAlign (Widget w) a = emitB (W.txSetAlign w (alignWire a))
 
+-- | The role vocabulary (docs/styling-plan.md D4): SEMANTIC EMPHASIS —
+-- what a widget MEANS, never how it looks. Closed, and closed to apps:
+-- kaya grows it by shipping a lowering in every backend, the way the
+-- menu roles grow, and there is deliberately no raw value beside it.
+--
+-- Unprefixed constructors, unlike 'Align' beside it: @Role Destructive@
+-- reads as the sentence it is, and the three words are specific enough
+-- to claim (a scene's own @Start@ or @End@ is likely, a @Prominent@ is
+-- not). The type and the 'Attr' constructor share the name @Role@ the
+-- way 'Align' does — different namespaces, one word at the call site.
+data Role
+  = -- | An action whose press destroys something. Buttons only.
+    Destructive
+  | -- | THE primary action, one per dialog's worth of emphasis: the
+    -- platform's default-button treatment. Buttons only.
+    Prominent
+  | -- | A text hierarchy heading — the platform's heading text style AND
+    -- the heading trait assistive users skim by. Labels only.
+    Heading
+  deriving (Eq, Show)
+
+roleWire :: Role -> Int64
+roleWire Destructive = 1
+roleWire Prominent = 2
+roleWire Heading = 3
+
+-- | The dynamic path; the declarative spelling is the 'Role' attr.
+--
+-- WHICH KIND EACH ROLE FITS IS THE ROOT'S CALL, not this type's: the
+-- index below narrows it to leaves (a heading column is a type error
+-- here), and the scene refuses the rest at declare time, in one
+-- sentence naming both the role and the kind — the same answer in all
+-- eight languages.
+setRole :: Widget -> Role -> Build ()
+setRole (Widget w) r = emitB (W.txSetRole w (roleWire r))
+
 -- | A widget's accessibility IDENTIFIER: a stable authored key that
 -- assistive tooling and UI automation address it by, and which is
 -- NEVER spoken. Universal — every kind carries one. The dynamic path;
@@ -1797,6 +1911,12 @@ data Attr (c :: WClass) where
   -- other two: a hint needs an activation to describe, and the root
   -- admits it on button, checkbox, select and radio alone.
   A11yHint :: String -> Attr 'LeafW
+  -- | What this widget MEANS (docs/styling-plan.md D4) — semantic
+  -- emphasis, never appearance. Leaf-class, the 'A11yHint' precedent:
+  -- every role in the vocabulary lands on a button or a label, so a
+  -- container asking for one is a type error, and the root holds the
+  -- finer rule (which role fits which kind).
+  Role :: Role -> Attr 'LeafW
   -- | What this widget takes from a paste — the closed kinds by name
   -- ('acceptText' and friends) plus any custom format ids. Any widget
   -- class, like 'Grow'.
@@ -1822,6 +1942,7 @@ applyAttr (Align a) w = setAlign w a
 applyAttr (A11yId i) w = setA11yId w i
 applyAttr (A11yLabel l) w = setA11yLabel w l
 applyAttr (A11yHint h) w = setA11yHint w h
+applyAttr (Role r) w = setRole w r
 applyAttr (Accepts kinds) w = setAccepts w kinds
 
 withAttrs :: [Attr c] -> Build Widget -> Build Widget
