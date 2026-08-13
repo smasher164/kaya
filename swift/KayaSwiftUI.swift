@@ -7306,24 +7306,27 @@ func kayaRowAlignment(_ mode: Int64) -> VerticalAlignment {
 /// invented. Top level: the iOS render arm is its consumer and the
 /// macOS branch never needs it, but a platform-conditional TYPE would
 /// put the compile error on the other platform's lane.
-/// The brand tint for the CURRENT appearance, or nil for "no request"
-/// — and nil too when this platform's USER overrode the accent
-/// (docs/styling-plan.md D2). The macOS read is the AppleAccentColor
-/// preference: PRESENT means the user chose an accent (kaya yields),
-/// ABSENT means multicolor/default (the brand applies). Deliberately
-/// NOT NSColor.controlAccentColor, whose read-back is poisoned
-/// (FB13688723) — the styling research's read-backs-lie rule.
 /// The padding container's OUTER size (before the window inset is
 /// taken), captured by the reader just outside `.padding` on the
 /// primary root — the other half of the measured-inset observation.
 @MainActor var kayaOuterSize: CGSize = .zero
 
+/// The brand tint for the CURRENT appearance, or nil for "no request".
+/// A DECLARED BRAND WINS ON EVERY PLATFORM — the maintainer dropped
+/// the macOS user-accent yield on 2026-08-12: this function used to
+/// return nil when the user's AppleAccentColor preference was set,
+/// implementing the HIG's accent-ASSET convention on top of `.tint()`,
+/// which never needed it (the tint is an explicit environment value
+/// the system does not arbitrate — measured, see the styling plan's
+/// D2 note). The other three backends already branded unconditionally
+/// (GTK's CSS override, WinUI's theme-dictionary stops, Compose's
+/// seed-derived scheme all shadow their platform's user accent), so
+/// the yield was the one divergence, not the rule. A BRANDLESS app
+/// still gets the user's accent everywhere — nil here means the
+/// environment default, which on macOS IS that preference.
 private func kayaBrandTint() -> Color? {
     guard let brand = kayaScene.brand else { return nil }
     #if os(macOS)
-        if UserDefaults.standard.object(forKey: "AppleAccentColor") != nil {
-            return nil
-        }
         let dark =
             NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     #else
@@ -7792,10 +7795,38 @@ struct KayaRender: View {
             // hasDestructiveAction (macOS 11+ — the system decides what
             // that looks like, red text today), prominent is the
             // default-button key equivalent (the accent-filled bezel,
-            // exactly what a dialog's primary action gets). Never a raw
-            // color: the platform stays the judge of the chrome.
+            // exactly what a dialog's primary action gets).
             button.hasDestructiveAction = role == roleDestructive
             button.keyEquivalent = role == roleProminent ? "\r" : ""
+            // THE BRAND'S ONE PIPE INTO APPKIT. This bridge exists for
+            // the SDK-stamp bezel bug, and it took the brand out with
+            // it: an NSButton never reads SwiftUI's `.tint`
+            // environment, so the root tint the brand arm sets reached
+            // every SwiftUI control and no mac button — the maintainer
+            // saw an unbranded mac while the other four backends
+            // painted (2026-08-12). The default-button bezel is the one
+            // accent surface AppKit gives a button, so the PROMINENT
+            // role carries the brand fill here, per appearance and
+            // re-resolved on appearance change (the dynamic provider —
+            // a color computed once at update would go stale when the
+            // system flips dark). Brandless stays nil: the system
+            // paints its own accent, which on macOS is the user's.
+            if role == roleProminent, let brand = kayaScene.brand {
+                button.bezelColor = NSColor(
+                    name: nil,
+                    dynamicProvider: { appearance in
+                        let dark =
+                            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                        let fill = dark ? brand[6] : brand[1]
+                        return NSColor(
+                            srgbRed: Double((fill >> 16) & 0xFF) / 255.0,
+                            green: Double((fill >> 8) & 0xFF) / 255.0,
+                            blue: Double(fill & 0xFF) / 255.0,
+                            alpha: 1.0)
+                    })
+            } else {
+                button.bezelColor = nil
+            }
         }
 
         func sizeThatFits(

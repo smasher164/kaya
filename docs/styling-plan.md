@@ -86,16 +86,45 @@ Per-platform lowering of those values:
   Dark1, dark reads Light2), Light+Dark dictionaries only (D4's
   high-contrast rule owns the third).
 
-### D2 — the accent is a REQUEST, uniformly (ratified)
+### D2 — the accent is a REQUEST, uniformly (ratified; mac yield DROPPED 2026-08-12)
 
-macOS honors an app accent only when the user's system accent is
-multicolor; a user-chosen accent wins. Rather than a macOS carve-out,
-the SEMANTICS in all eight bindings and all five platforms is: **the
-app requests a brand accent; a platform may let its user override it.**
-Today macOS is the one platform that does; the semantics does not
-change if another grows the preference. Uniform statement, per-platform
-behavior, no divergence in the vocabulary — the shape invariant 1
-wants.
+**AS REVISED (maintainer, 2026-08-12): a declared brand wins on every
+platform.** The original reading kept a macOS yield — the interpreter
+returned no tint when the user's AppleAccentColor preference was set,
+implementing the HIG's accent-ASSET convention ("the system applies
+your accent color when the user's setting is multicolor") on top of
+SwiftUI's `.tint()`, which never needed it: the tint is an explicit
+environment value the system does not arbitrate, which is how every
+heavily-styled native mac app paints its own colors. Meanwhile the
+other three backends already branded unconditionally (GTK's per-app
+CSS override, WinUI's theme-dictionary stops and Compose's
+seed-derived scheme all shadow their platform's user accent), so the
+yield was the vocabulary's one divergence, not its rule. Dropped —
+the mac arm now paints the derived tint whenever a brand is declared.
+
+What survives of the request semantics: a BRANDLESS app gets the
+platform default everywhere, and on macOS that default IS the user's
+accent preference (nil tint = the environment's own value). The same
+sentence still covers Android dynamic color below.
+
+MEASURED 2026-08-12, pixels on an active window: with the machine's
+AppleAccentColor forced to purple, the styling scene's prominent
+button paints the BRAND fill, both appearances (the capture set
+beside the artifact). Two findings came out of taking that
+measurement rather than trusting the docs:
+- **The brand had no pipe into AppKit at all.** The mac button is an
+  NSButton bridge (the SDK-stamp bezel bug), and an NSButton never
+  reads SwiftUI's `.tint` environment — so the root tint reached
+  every SwiftUI control and NO mac button, which is why the first
+  hand-run looked unbranded regardless of the yield. The prominent
+  role now carries the derived fill as `bezelColor`, per appearance
+  via a dynamic provider; brandless stays nil and the system paints
+  the user's accent.
+- **An unbundled binary's default activation policy is PROHIBITED**
+  (policy=2 measured), which also leaves the AX tree partially
+  unpublished — the accessory call was RAISING guests, not lowering
+  them. KAYA_ACTIVATE=1 now sets `.regular` explicitly for pixel
+  proofs; the lanes never set it and stay accessory.
 
 The same sentence covers Android dynamic color: if the app requests a
 brand accent, kaya builds the static scheme from it (brand wins); an

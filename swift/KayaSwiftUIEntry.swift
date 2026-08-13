@@ -37,8 +37,32 @@ struct KayaApp: App {
 #if os(macOS)
 final class KayaAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
-        if ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
+        // KAYA_ACTIVATE=1 makes the app REGULAR — EXPLICITLY, because
+        // an unbundled binary with no policy set defaults to PROHIBITED
+        // (measured: policy=2 in the diag line, no activation, and a
+        // partially unpublished AX tree — merely skipping the accessory
+        // call left the app LOWER, not higher). A pixel-proof capture
+        // needs active-window chrome, macOS 14's cooperative activation
+        // refuses an accessory app's self-activation, and System Events
+        // cannot even see one to front it. The lanes never set it, so
+        // suite runs stay accessory and steal nobody's keyboard.
+        if ProcessInfo.processInfo.environment["KAYA_ACTIVATE"] != nil {
+            NSApplication.shared.setActivationPolicy(.regular)
+        } else if ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
             NSApplication.shared.setActivationPolicy(.accessory)
+        }
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // PIXEL-PROOF RUNS ONLY (KAYA_ACTIVATE=1): AppKit renders an
+        // inactive app's chrome grey, so a capture that needs to see a
+        // control's real fill needs the app active — and macOS 14's
+        // cooperative activation ignores another process's activate
+        // call, so the app must ask for itself. Never set by the
+        // lanes: a suite's windows must not steal the human's
+        // keyboard, which is the accessory rule above.
+        if ProcessInfo.processInfo.environment["KAYA_ACTIVATE"] != nil {
+            NSApplication.shared.activate()
         }
     }
 }
