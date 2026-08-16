@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x426ae13f797cbb12
+let kayaSpecHash: UInt64 = 0xf84da2a3fe758bc7
 
 struct KayaTx {
     var bytes = Data()
@@ -1244,6 +1244,26 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_section_prop with a constant symbol value.
+    mutating func setSectionSymbol(_ section: UInt64, _ symbol: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        self.u64(section)
+        self.u32(UInt32(KAYA_SPROP_SYMBOL))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(symbol))
+        self.end(kayaAt)
+    }
+
+    /// set_section_prop with a signal-bound symbol value.
+    mutating func bindSectionSymbol(_ section: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_SECTION_PROP))
+        self.u64(section)
+        self.u32(UInt32(KAYA_SPROP_SYMBOL))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
     /// set_menu_prop with a constant label value.
     mutating func setMenuLabel(_ item: UInt64, _ label: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
@@ -1362,6 +1382,16 @@ struct KayaTx {
         self.u32(UInt32(KAYA_MPROP_ROLE))
         self.u32(UInt32(KAYA_SOURCE_CONST))
         self.value(.str(role))
+        self.end(kayaAt)
+    }
+
+    /// set_menu_prop with a constant symbol value.
+    mutating func setMenuSymbol(_ item: UInt64, _ symbol: Int64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_SYMBOL))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.i64(symbol))
         self.end(kayaAt)
     }
 

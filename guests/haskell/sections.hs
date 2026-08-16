@@ -37,10 +37,16 @@ main = kayaMain $ \app -> do
     -- rides on it.
     window 0 [WTitle "sections", WSectionsPresentation 1]
     visits <- signal (VStr "archive: 0 visits")
-    addSection feedId [STitle "Feed"]
+    -- THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar without
+    -- icons is not the platform's real thing, and the glyph that means
+    -- `home` differs per platform — SF Symbols spells it `house`, and no
+    -- shared asset would be legal anyway (SF Symbols are licensed to
+    -- Apple platforms only).
+    addSection feedId [STitle "Feed", SSymbol SymbolHome]
     addSection
       archiveId
       [ STitle "Archive",
+        SSymbol SymbolStar,
         SOnSelected
           ( do
               modifyIORef' visitTally (+ 1)
@@ -67,8 +73,10 @@ main = kayaMain $ \app -> do
             -- render body stamped and never switches them.
             buildTx app $ do
               createWindow libraryId [WTitle "library", WSectionsPresentation 2]
-              addSectionIn libraryId shelvesId [STitle "Shelves"]
-              addSectionIn libraryId loansId [STitle "Loans"]
+              -- The SIDEBAR arm carries symbols too: the source list is
+              -- where a mac app most wants them.
+              addSectionIn libraryId shelvesId [STitle "Shelves", SSymbol SymbolSearch]
+              addSectionIn libraryId loansId [STitle "Loans", SSymbol SymbolLock]
               shelvesRoot <-
                 column
                   []

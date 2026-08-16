@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x426ae13f797cbb12
+SPEC_HASH = 0xf84da2a3fe758bc7
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -65,6 +65,7 @@ EPROP_TITLE = 1
 EPROP_INTERCEPT_BACK = 2
 SPROP_TITLE = 1
 SPROP_ICON = 2
+SPROP_SYMBOL = 3
 MENU_KIND_MENU = 1
 MENU_KIND_ACTION = 2
 MENU_KIND_TOGGLE = 3
@@ -79,6 +80,7 @@ MPROP_ICON = 5
 MPROP_PRIMARY = 6
 MPROP_SHORTCUT = 7
 MPROP_ROLE = 8
+MPROP_SYMBOL = 9
 SECTIONS_PRESENTATION_AUTO = 0
 SECTIONS_PRESENTATION_BAR = 1
 SECTIONS_PRESENTATION_SIDEBAR = 2
@@ -96,6 +98,26 @@ ALIGN_BASELINE = 4
 ROLE_DESTRUCTIVE = 1
 ROLE_PROMINENT = 2
 ROLE_HEADING = 3
+SYMBOL_ADD = 1
+SYMBOL_REMOVE = 2
+SYMBOL_DELETE = 3
+SYMBOL_EDIT = 4
+SYMBOL_DONE = 5
+SYMBOL_CLOSE = 6
+SYMBOL_SEARCH = 7
+SYMBOL_SETTINGS = 8
+SYMBOL_REFRESH = 9
+SYMBOL_INFO = 10
+SYMBOL_WARNING = 11
+SYMBOL_BACK = 12
+SYMBOL_FORWARD = 13
+SYMBOL_MORE = 14
+SYMBOL_COPY = 15
+SYMBOL_PASTE = 16
+SYMBOL_STAR = 17
+SYMBOL_LOCK = 18
+SYMBOL_PERSON = 19
+SYMBOL_HOME = 20
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
@@ -792,6 +814,16 @@ def tx_bind_section_icon(section, signal_id):
     return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_ICON, SOURCE_SIGNAL, signal_id))
 
 
+def tx_set_section_symbol(section, symbol):
+    """set_section_prop with a constant symbol value (int)."""
+    return record(TX_SET_SECTION_PROP, struct.pack("<QII", section, SPROP_SYMBOL, SOURCE_CONST) + _enc.value(int(symbol)))
+
+
+def tx_bind_section_symbol(section, signal_id):
+    """set_section_prop with a signal-bound symbol value."""
+    return record(TX_SET_SECTION_PROP, struct.pack("<QIIQ", section, SPROP_SYMBOL, SOURCE_SIGNAL, signal_id))
+
+
 _SHORTCUT_NAMED_KEYS = frozenset(("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"))
 
 
@@ -888,6 +920,11 @@ def tx_set_menu_shortcut(item, shortcut):
 def tx_set_menu_role(item, role):
     """set_menu_prop with a constant role value (str)."""
     return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_ROLE, SOURCE_CONST) + _enc.value(role))
+
+
+def tx_set_menu_symbol(item, symbol):
+    """set_menu_prop with a constant symbol value (int)."""
+    return record(TX_SET_MENU_PROP, struct.pack("<QII", item, MPROP_SYMBOL, SOURCE_CONST) + _enc.value(int(symbol)))
 
 
 def parse_value(buf, at):

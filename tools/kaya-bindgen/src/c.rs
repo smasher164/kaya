@@ -280,7 +280,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => ("int ", "kaya_bool", *prop),
             crate::PropKind::F64 => ("double ", "kaya_f64", *prop),
             crate::PropKind::Blob => ("uint64_t ", "kaya_blob", "handle"),
-            other => unreachable!("no menu prop carries {other:?}"),
+            crate::PropKind::Enum(_) => ("int64_t ", "kaya_i64", *prop),
         };
         c.line("");
         if *prop == "shortcut" {

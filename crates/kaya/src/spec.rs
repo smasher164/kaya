@@ -317,6 +317,15 @@ pub const ENTRY_PROPS: &[(&'static str, u32, PropKind)] = &[
 pub const SECTION_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("title", 1, PropKind::Str),
     ("icon", 2, PropKind::Blob),
+    // THE SEMANTIC ICON NAME (docs/styling-plan.md D6; DESIGN.md,
+    // "Icons want names, not bytes"): a closed vocabulary each backend
+    // maps to its own symbol set, beside — never instead of — the Blob
+    // above, which stays for genuinely app-specific art. A tab bar
+    // wants `home`, and the glyph that means home is a house on Apple,
+    // a different house on Material, and a third on Adwaita; no single
+    // asset is right on all three, and the platform sets metric-match
+    // the text beside them while a blob cannot.
+    ("symbol", 3, PropKind::Enum("symbol")),
 ];
 
 /// Menu-item properties: the fifth typed surface table (the
@@ -339,6 +348,11 @@ pub const MENU_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("primary", 6, PropKind::Bool),
     ("shortcut", 7, PropKind::Str),
     ("role", 8, PropKind::Str),
+    // The semantic icon name (docs/styling-plan.md D6) — const-only,
+    // like `icon` beside it. NOT id 6: these ids are wire facts and are
+    // append-only, so a new prop takes the next free number rather than
+    // renumbering `primary` out from under every generated surface.
+    ("symbol", 9, PropKind::Enum("symbol")),
 ];
 
 /// The variable tail of SET_PROPERTY, after `source`: a value for
@@ -2076,7 +2090,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             name: "sprop",
-            variants: &[("title", 1), ("icon", 2)],
+            variants: &[("title", 1), ("icon", 2), ("symbol", 3)],
         },
         EnumSpec {
             // The menu item vocabulary (DESIGN.md, Menus). `menu` and
@@ -2105,6 +2119,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("primary", 6),
                 ("shortcut", 7),
                 ("role", 8),
+                ("symbol", 9),
             ],
         },
         EnumSpec {
@@ -2152,6 +2167,45 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("destructive", 1),
                 ("prominent", 2),
                 ("heading", 3),
+            ],
+        },
+        EnumSpec {
+            // THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6;
+            // DESIGN.md, "Icons want names, not bytes"). Closed and
+            // SMALL on purpose, the `role` trick one tier over: an app
+            // names a CONCEPT and each backend draws its own platform's
+            // glyph for it, because the platforms draw the same concept
+            // differently and their symbol sets metric-match the text
+            // beside them. Apple maintains exactly this shape and keeps
+            // it to fifteen entries
+            // (CoreGlyphs' semantic_to_descriptive_name.strings).
+            //
+            // THE IDS ARE APPEND-ONLY, FOREVER. They are wire values in
+            // eight generated bindings and four backends' lowering
+            // tables; a renumber would silently redraw every shipped
+            // app's menus. A new concept takes 21.
+            name: "symbol",
+            variants: &[
+                ("add", 1),
+                ("remove", 2),
+                ("delete", 3),
+                ("edit", 4),
+                ("done", 5),
+                ("close", 6),
+                ("search", 7),
+                ("settings", 8),
+                ("refresh", 9),
+                ("info", 10),
+                ("warning", 11),
+                ("back", 12),
+                ("forward", 13),
+                ("more", 14),
+                ("copy", 15),
+                ("paste", 16),
+                ("star", 17),
+                ("lock", 18),
+                ("person", 19),
+                ("home", 20),
             ],
         },
         EnumSpec {
@@ -2639,6 +2693,7 @@ mod tests {
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
                     ("sprop", "title") => wire::SPROP_TITLE,
                     ("sprop", "icon") => wire::SPROP_ICON,
+                    ("sprop", "symbol") => wire::SPROP_SYMBOL,
                     ("menu_kind", "menu") => wire::MENU_KIND_MENU,
                     ("menu_kind", "action") => wire::MENU_KIND_ACTION,
                     ("menu_kind", "toggle") => wire::MENU_KIND_TOGGLE,
@@ -2653,6 +2708,7 @@ mod tests {
                     ("mprop", "primary") => wire::MPROP_PRIMARY,
                     ("mprop", "shortcut") => wire::MPROP_SHORTCUT,
                     ("mprop", "role") => wire::MPROP_ROLE,
+                    ("mprop", "symbol") => wire::MPROP_SYMBOL,
                     ("sections_presentation", "auto") => wire::SECTIONS_PRESENTATION_AUTO,
                     ("sections_presentation", "bar") => wire::SECTIONS_PRESENTATION_BAR,
                     ("sections_presentation", "sidebar") => {
@@ -2684,6 +2740,26 @@ mod tests {
                     ("role", "destructive") => wire::ROLE_DESTRUCTIVE,
                     ("role", "prominent") => wire::ROLE_PROMINENT,
                     ("role", "heading") => wire::ROLE_HEADING,
+                    ("symbol", "add") => wire::SYMBOL_ADD,
+                    ("symbol", "remove") => wire::SYMBOL_REMOVE,
+                    ("symbol", "delete") => wire::SYMBOL_DELETE,
+                    ("symbol", "edit") => wire::SYMBOL_EDIT,
+                    ("symbol", "done") => wire::SYMBOL_DONE,
+                    ("symbol", "close") => wire::SYMBOL_CLOSE,
+                    ("symbol", "search") => wire::SYMBOL_SEARCH,
+                    ("symbol", "settings") => wire::SYMBOL_SETTINGS,
+                    ("symbol", "refresh") => wire::SYMBOL_REFRESH,
+                    ("symbol", "info") => wire::SYMBOL_INFO,
+                    ("symbol", "warning") => wire::SYMBOL_WARNING,
+                    ("symbol", "back") => wire::SYMBOL_BACK,
+                    ("symbol", "forward") => wire::SYMBOL_FORWARD,
+                    ("symbol", "more") => wire::SYMBOL_MORE,
+                    ("symbol", "copy") => wire::SYMBOL_COPY,
+                    ("symbol", "paste") => wire::SYMBOL_PASTE,
+                    ("symbol", "star") => wire::SYMBOL_STAR,
+                    ("symbol", "lock") => wire::SYMBOL_LOCK,
+                    ("symbol", "person") => wire::SYMBOL_PERSON,
+                    ("symbol", "home") => wire::SYMBOL_HOME,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
@@ -2692,6 +2768,33 @@ mod tests {
                 assert_eq!(*value, expected, "{}::{}", e.name, name);
             }
         }
+    }
+
+    /// wire::SYMBOLS is a SECOND spelling of the symbol vocabulary —
+    /// the (id, name) table the root's value wall and every diagnostic
+    /// print from. enums_match_wire pins the VALUES; nothing pinned the
+    /// NAMES, and a drifted name there is the worst shape of this bug:
+    /// the wall still fires, but its sentence names a concept the app
+    /// never wrote and the reader chases the wrong slot.
+    #[test]
+    fn symbol_names_match_the_spec_enum() {
+        let e = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "symbol")
+            .expect("spec has a symbol enum");
+        assert_eq!(e.variants.len(), wire::SYMBOLS.len());
+        for ((name, value), (id, table_name)) in e.variants.iter().zip(wire::SYMBOLS) {
+            assert_eq!(name, table_name, "symbol name drift at id {id}");
+            assert_eq!(value, id, "symbol id drift at {name}");
+            assert_eq!(wire::symbol_name(i64::from(*value)), Some(*name));
+        }
+        // The wall's own domain, from both ends: nothing outside the
+        // table resolves, including the off-by-one neighbours and the
+        // negative a signed wire slot can carry.
+        assert_eq!(wire::symbol_name(0), None);
+        assert_eq!(wire::symbol_name(21), None);
+        assert_eq!(wire::symbol_name(-1), None);
     }
 
     /// Encode every fixed-layout tx record through the spec and decode

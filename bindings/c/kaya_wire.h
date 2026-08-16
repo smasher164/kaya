@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x426ae13f797cbb12ULL
+#define KAYA_SPEC_HASH 0xf84da2a3fe758bc7ULL
 
 
 /* Create a signal holding `initial`. */
@@ -1179,6 +1179,16 @@ static inline void kaya_tx_set_menu_role(KayaTx *tx, uint64_t item, const char *
     kaya_wire_u32(tx, KAYA_MPROP_ROLE);
     kaya_wire_u32(tx, KAYA_SOURCE_CONST);
     kaya_wire_value(tx, kaya_str(role));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_menu_prop with a constant symbol value. */
+static inline void kaya_tx_set_menu_symbol(KayaTx *tx, uint64_t item, int64_t symbol) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_SYMBOL);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_i64(symbol));
     kaya_wire_end(tx, kaya_at);
 }
 

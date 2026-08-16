@@ -36,10 +36,16 @@ main = kayaMain $ \app -> do
         [IEnabledBy canExport]
         [ item
             "Save"
-            [ IShortcut "primary+s",
+            -- THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT,
+            -- drawn by each platform in its own symbol set. `done` is
+            -- the checkmark idiom — the vocabulary has no `save` on
+            -- purpose (Apple's own catalog has no save-specific glyph
+            -- either).
+            [ ISymbol SymbolDone,
+              IShortcut "primary+s",
               IOnActivate (submitTx app (writeSignal status (VStr "saved")))
             ],
-          item "Export" [IEnabledBy canExport],
+          item "Export" [IEnabledBy canExport, ISymbol SymbolForward],
           pure share
         ]
     window
@@ -52,7 +58,9 @@ main = kayaMain $ \app -> do
               []
               [ toggle
                   "Details"
+                  -- A toggle carries a symbol like any other leaf.
                   [ ICheckedBy details,
+                    ISymbol SymbolInfo,
                     IOnToggle
                       ( \on ->
                           submitTx app $
@@ -83,7 +91,8 @@ main = kayaMain $ \app -> do
       contextCatalog
         [ item
             "Remove"
-            [ IOnActivateNode
+            [ ISymbol SymbolDelete,
+              IOnActivateNode
                 ( \keys -> case keys of
                     [VStr group, VStr itemKey] -> do
                       maybeItems <- readIORef itemsRef
@@ -137,15 +146,17 @@ main = kayaMain $ \app -> do
               setMenuLabel file "Document"
               menuAppend
                 file
-                [item "Publish" [IPrimary True, IOnActivate onShare]]
-              window 0 [WMenus [menu "Tools" [] [item "Inspect" []]]],
+                [item "Publish" [IPrimary True, ISymbol SymbolCopy, IOnActivate onShare]]
+              window 0 [WMenus [menu "Tools" [] [item "Inspect" [ISymbol SymbolSearch]]]],
           do
             target <- labelBound targetText -- label#1
             contextMenu
               target
               [ item
                   "Rename"
-                  [IOnActivate (submitTx app (writeSignal status (VStr "renamed")))]
+                  [ ISymbol SymbolEdit,
+                    IOnActivate (submitTx app (writeSignal status (VStr "renamed")))
+                  ]
               ]
             return target,
           pure groupList

@@ -41,9 +41,17 @@ final class Sections {
                     .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_BAR);
             KayaApp.Signal<String> visits = tx.signal("archive: 0 visits");
 
-            long feed = tx.addSection(FEED).title("Feed").id();
+            // THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar
+            // without icons is not the platform's real thing, and the
+            // glyph that means `home` differs per platform — SF Symbols
+            // spells it `house`, and no shared asset would be legal
+            // anyway (SF Symbols are licensed to Apple platforms only).
+            long feed = tx.addSection(FEED).title("Feed")
+                    .symbol(KayaApp.Symbol.HOME)
+                    .id();
             long archive = tx.addSection(ARCHIVE)
                     .title("Archive")
+                    .symbol(KayaApp.Symbol.STAR)
                     .onSelected(inner -> {
                         visitCount++;
                         inner.write(visits, "archive: " + visitCount + " visits");
@@ -63,8 +71,16 @@ final class Sections {
                     inner.createWindow(LIBRARY)
                             .title("library")
                             .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_SIDEBAR);
-                    long shelves = inner.addSectionIn(LIBRARY, SHELVES).title("Shelves").id();
-                    long loans = inner.addSectionIn(LIBRARY, LOANS).title("Loans").id();
+                    // The SIDEBAR arm carries symbols too: the source
+                    // list is where a mac app most wants them.
+                    long shelves = inner.addSectionIn(LIBRARY, SHELVES)
+                            .title("Shelves")
+                            .symbol(KayaApp.Symbol.SEARCH)
+                            .id();
+                    long loans = inner.addSectionIn(LIBRARY, LOANS)
+                            .title("Loans")
+                            .symbol(KayaApp.Symbol.LOCK)
+                            .id();
 
                     KayaApp.Widget shelvesRoot = inner.column(() -> {
                         KayaApp.Signal<String> shelvesReady = inner.signal("shelves ready");

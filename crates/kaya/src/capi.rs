@@ -623,6 +623,9 @@ pub const KAYA_EPROP_INTERCEPT_BACK: u32 = 2;
 /// table (DESIGN.md, Sections). `icon` rides the blob channel.
 pub const KAYA_SPROP_TITLE: u32 = 1;
 pub const KAYA_SPROP_ICON: u32 = 2;
+/// The switcher item's SEMANTIC ICON NAME (docs/styling-plan.md D6):
+/// a value of the KAYA_SYMBOL_* block below, never bytes.
+pub const KAYA_SPROP_SYMBOL: u32 = 3;
 
 /// Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
 /// and `radio_group` are the grouping nodes; the rest are leaves.
@@ -673,6 +676,10 @@ pub const KAYA_MPROP_ICON: u32 = 5;
 pub const KAYA_MPROP_PRIMARY: u32 = 6;
 pub const KAYA_MPROP_SHORTCUT: u32 = 7;
 pub const KAYA_MPROP_ROLE: u32 = 8;
+/// The item's SEMANTIC ICON NAME (docs/styling-plan.md D6): a value of
+/// the KAYA_SYMBOL_* block below. Const-only, beside KAYA_MPROP_ICON —
+/// a name for the standard concepts, a blob for app-specific art.
+pub const KAYA_MPROP_SYMBOL: u32 = 9;
 const _: () = assert!(
     KAYA_MPROP_LABEL == wire::MPROP_LABEL
         && KAYA_MPROP_ENABLED == wire::MPROP_ENABLED
@@ -682,11 +689,12 @@ const _: () = assert!(
         && KAYA_MPROP_PRIMARY == wire::MPROP_PRIMARY
         && KAYA_MPROP_SHORTCUT == wire::MPROP_SHORTCUT
         && KAYA_MPROP_ROLE == wire::MPROP_ROLE
+        && KAYA_MPROP_SYMBOL == wire::MPROP_SYMBOL
 );
 // Completeness for the menu-prop exports (the SECTION_PROPS count-pin
 // sibling): a new MENU_PROPS row trips this count.
 const _: () = assert!(
-    crate::spec::MENU_PROPS.len() == 8,
+    crate::spec::MENU_PROPS.len() == 9,
     "spec::MENU_PROPS grew: export the new KAYA_MPROP_* above, extend the pin, and bump this \
      count"
 );
@@ -701,6 +709,7 @@ pub const KAYA_SECTIONS_PRESENTATION_SIDEBAR: u32 = 2;
 const _: () = assert!(
     KAYA_SPROP_TITLE == wire::SPROP_TITLE
         && KAYA_SPROP_ICON == wire::SPROP_ICON
+        && KAYA_SPROP_SYMBOL == wire::SPROP_SYMBOL
         && KAYA_WPROP_SECTIONS_PRESENTATION == wire::WPROP_SECTIONS_PRESENTATION
         && KAYA_SECTIONS_PRESENTATION_AUTO == wire::SECTIONS_PRESENTATION_AUTO
         && KAYA_SECTIONS_PRESENTATION_BAR == wire::SECTIONS_PRESENTATION_BAR
@@ -717,7 +726,7 @@ const _: () = assert!(
      bump this count"
 );
 const _: () = assert!(
-    crate::spec::SECTION_PROPS.len() == 2,
+    crate::spec::SECTION_PROPS.len() == 3,
     "spec::SECTION_PROPS grew: export the new KAYA_SPROP_* above, extend the pin, and bump \
      this count"
 );
@@ -788,6 +797,83 @@ const _: () = assert!(
         && KAYA_ROLE_PROMINENT == wire::ROLE_PROMINENT
         && KAYA_ROLE_HEADING == wire::ROLE_HEADING
 );
+
+/// The SEMANTIC ICON VOCABULARY (spec enum "symbol";
+/// docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
+/// A closed set of CONCEPTS: each backend maps a value to its own
+/// platform's symbol set, since the platforms draw the same idea
+/// differently and their sets metric-match the text beside them. Both
+/// the menu-item slot (KAYA_MPROP_SYMBOL) and the section slot
+/// (KAYA_SPROP_SYMBOL) take these values.
+///
+/// APPEND-ONLY. These numbers are wire facts in eight generated
+/// bindings and every backend's glyph table; renumbering silently
+/// redraws shipped menus. New concepts start at 21.
+pub const KAYA_SYMBOL_ADD: u32 = 1;
+pub const KAYA_SYMBOL_REMOVE: u32 = 2;
+pub const KAYA_SYMBOL_DELETE: u32 = 3;
+pub const KAYA_SYMBOL_EDIT: u32 = 4;
+pub const KAYA_SYMBOL_DONE: u32 = 5;
+pub const KAYA_SYMBOL_CLOSE: u32 = 6;
+pub const KAYA_SYMBOL_SEARCH: u32 = 7;
+pub const KAYA_SYMBOL_SETTINGS: u32 = 8;
+pub const KAYA_SYMBOL_REFRESH: u32 = 9;
+pub const KAYA_SYMBOL_INFO: u32 = 10;
+pub const KAYA_SYMBOL_WARNING: u32 = 11;
+pub const KAYA_SYMBOL_BACK: u32 = 12;
+pub const KAYA_SYMBOL_FORWARD: u32 = 13;
+pub const KAYA_SYMBOL_MORE: u32 = 14;
+pub const KAYA_SYMBOL_COPY: u32 = 15;
+pub const KAYA_SYMBOL_PASTE: u32 = 16;
+pub const KAYA_SYMBOL_STAR: u32 = 17;
+pub const KAYA_SYMBOL_LOCK: u32 = 18;
+pub const KAYA_SYMBOL_PERSON: u32 = 19;
+pub const KAYA_SYMBOL_HOME: u32 = 20;
+const _: () = assert!(
+    KAYA_SYMBOL_ADD == wire::SYMBOL_ADD
+        && KAYA_SYMBOL_REMOVE == wire::SYMBOL_REMOVE
+        && KAYA_SYMBOL_DELETE == wire::SYMBOL_DELETE
+        && KAYA_SYMBOL_EDIT == wire::SYMBOL_EDIT
+        && KAYA_SYMBOL_DONE == wire::SYMBOL_DONE
+        && KAYA_SYMBOL_CLOSE == wire::SYMBOL_CLOSE
+        && KAYA_SYMBOL_SEARCH == wire::SYMBOL_SEARCH
+        && KAYA_SYMBOL_SETTINGS == wire::SYMBOL_SETTINGS
+        && KAYA_SYMBOL_REFRESH == wire::SYMBOL_REFRESH
+        && KAYA_SYMBOL_INFO == wire::SYMBOL_INFO
+        && KAYA_SYMBOL_WARNING == wire::SYMBOL_WARNING
+        && KAYA_SYMBOL_BACK == wire::SYMBOL_BACK
+        && KAYA_SYMBOL_FORWARD == wire::SYMBOL_FORWARD
+        && KAYA_SYMBOL_MORE == wire::SYMBOL_MORE
+        && KAYA_SYMBOL_COPY == wire::SYMBOL_COPY
+        && KAYA_SYMBOL_PASTE == wire::SYMBOL_PASTE
+        && KAYA_SYMBOL_STAR == wire::SYMBOL_STAR
+        && KAYA_SYMBOL_LOCK == wire::SYMBOL_LOCK
+        && KAYA_SYMBOL_PERSON == wire::SYMBOL_PERSON
+        && KAYA_SYMBOL_HOME == wire::SYMBOL_HOME
+);
+// Completeness, not just agreement (the KAYA_MENU_KIND count-pin
+// precedent): the value pins above cannot see a FORGOTTEN export, and
+// a symbol nobody exported is a concept the C floor and every generated
+// header silently lack. A new variant trips this count and walks you
+// here.
+const _: () = {
+    let variants = {
+        let mut n = 0;
+        let mut i = 0;
+        while i < crate::spec::SPEC.enums.len() {
+            if konst_eq(crate::spec::SPEC.enums[i].name, "symbol") {
+                n = crate::spec::SPEC.enums[i].variants.len();
+            }
+            i += 1;
+        }
+        n
+    };
+    assert!(
+        variants == 20,
+        "the spec symbol enum grew: export the new KAYA_SYMBOL_* above, extend the pin, and \
+         bump this count"
+    );
+};
 // Completeness, not just agreement: the value pins above cannot see a
 // FORGOTTEN export (the spacing prop shipped to every generated wire
 // file while kaya.h silently lacked it, and the Swift binding was the

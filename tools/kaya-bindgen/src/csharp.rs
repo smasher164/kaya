@@ -316,6 +316,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "ulong",
                 "EncodeValue(w, new BlobHandle(handle));".to_string(),
             ),
+            crate::PropKind::Enum(_) => (
+                camel(prop),
+                "long",
+                format!("EncodeValue(w, {});", camel(prop)),
+            ),
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -411,7 +416,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "ulong",
                 "EncodeValue(w, new BlobHandle(handle));".to_string(),
             ),
-            other => unreachable!("no menu prop carries {other:?}"),
+            crate::PropKind::Enum(_) => (
+                camel(prop),
+                "long",
+                format!("EncodeValue(w, {});", camel(prop)),
+            ),
         };
         c.line("");
         if *prop == "shortcut" {

@@ -114,6 +114,7 @@ module KayaApp
     selectSection,
     window,
     SectionAttr (..),
+    Symbol (..),
     popEntry,
     EntryAttr (..),
     destroyWindow,
@@ -261,6 +262,7 @@ module KayaApp
     setMenuValue,
     bindMenuValue,
     setMenuIcon,
+    setMenuSymbol,
     setMenuPrimary,
     setMenuShortcut,
     setMenuRole,
@@ -1121,6 +1123,11 @@ data EntryAttr
 
 data SectionAttr
   = STitle String
+  | -- | The switcher item's SEMANTIC ICON ('Symbol'): a concept each
+    -- backend draws in its own platform's symbol set — a tab bar
+    -- without icons is not the platform's real thing, and a blob is the
+    -- wrong primitive for a STANDARD one. Const-only, like the title.
+    SSymbol Symbol
   | SOnSelected (IO ())
 
 -- | Push a navigation entry onto the primary surface's stack (entry
@@ -1169,12 +1176,97 @@ addSectionIn w n attrs = do
   mapM_ apply attrs
   where
     apply (STitle t) = emitB (W.txSetSectionTitle n t)
+    apply (SSymbol s) = emitB (W.txSetSectionSymbol n (symbolWire s))
     apply (SOnSelected handler) = pendB (PSectionSelected n handler)
 
 -- | Select a section programmatically: configuration, never echoes
 -- 'SOnSelected' (the echo doctrine).
 selectSection :: Word64 -> Build ()
 selectSection n = emitB (W.txSelectSection 0 n)
+
+-- --- The semantic icon vocabulary (docs/styling-plan.md D6) ---------
+
+-- | THE SEMANTIC ICON VOCABULARY (spec enum @symbol@; DESIGN.md "Icons
+-- want names, not bytes"), shared by the two constructs above and below
+-- it: 'SSymbol' on a section, 'ISymbol' on a menu item.
+--
+-- An app names a CONCEPT and each backend draws its own platform's
+-- glyph for it: 'SymbolCopy' is @doc.on.doc@ on Apple, @content_copy@ on
+-- Material, @edit-copy-symbolic@ on Adwaita, and no single asset is
+-- right on all three — SF Symbols are license-locked to Apple platforms,
+-- so a shared one is not even legal either. The platform sets also
+-- metric-match the text beside them (weight, baseline) while a blob
+-- cannot. The blob icon slot stays for genuinely app-specific art.
+--
+-- Closed, and small on purpose — the 'Role' trick one tier over. Apple
+-- keeps its own semantic set to fifteen entries. Growing it is a spec
+-- change with its gates, never a per-app escape hatch.
+--
+-- CONSTRUCTORS ARE PREFIXED, the 'Align' spelling rather than 'Role's.
+-- Role's three words are specific enough to claim unprefixed; these
+-- twenty are the most ordinary nouns an app has, and a scene's own
+-- @Add@, @Remove@, @Done@ or @Home@ is not merely likely but the
+-- expected shape of a message type. The prefix also matches the
+-- generated wire names ('W.symbolAdd' and friends) constructor for
+-- constructor, so the two spellings of one vocabulary read alike.
+data Symbol
+  = SymbolAdd
+  | SymbolRemove
+  | -- | Destroying something, the wastebasket idiom — distinct from
+    -- 'SymbolRemove', which takes an item out of a list.
+    SymbolDelete
+  | SymbolEdit
+  | -- | Confirmation, the checkmark idiom.
+    SymbolDone
+  | -- | Dismissal, the ✕ idiom — not 'SymbolDelete'.
+    SymbolClose
+  | SymbolSearch
+  | SymbolSettings
+  | SymbolRefresh
+  | SymbolInfo
+  | SymbolWarning
+  | -- | The direction-relative pair: every platform mirrors these under
+    -- a right-to-left layout, so they mean BACKWARD and FORWARD in
+    -- reading order, never "left" and "right".
+    SymbolBack
+  | SymbolForward
+  | -- | The overflow affordance (the ellipsis idiom).
+    SymbolMore
+  | SymbolCopy
+  | SymbolPaste
+  | -- | Favourite.
+    SymbolStar
+  | SymbolLock
+  | -- | A person or account.
+    SymbolPerson
+  | SymbolHome
+  deriving (Eq, Show)
+
+-- The wire values, from the generated table rather than from literals:
+-- the discriminants are spec facts and are append-only, and a hand-typed
+-- 1..20 here would be a second copy of them to drift.
+symbolWire :: Symbol -> Int64
+symbolWire s = fromIntegral $ case s of
+  SymbolAdd -> W.symbolAdd
+  SymbolRemove -> W.symbolRemove
+  SymbolDelete -> W.symbolDelete
+  SymbolEdit -> W.symbolEdit
+  SymbolDone -> W.symbolDone
+  SymbolClose -> W.symbolClose
+  SymbolSearch -> W.symbolSearch
+  SymbolSettings -> W.symbolSettings
+  SymbolRefresh -> W.symbolRefresh
+  SymbolInfo -> W.symbolInfo
+  SymbolWarning -> W.symbolWarning
+  SymbolBack -> W.symbolBack
+  SymbolForward -> W.symbolForward
+  SymbolMore -> W.symbolMore
+  SymbolCopy -> W.symbolCopy
+  SymbolPaste -> W.symbolPaste
+  SymbolStar -> W.symbolStar
+  SymbolLock -> W.symbolLock
+  SymbolPerson -> W.symbolPerson
+  SymbolHome -> W.symbolHome
 
 -- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 
@@ -1285,6 +1377,12 @@ data IAttr (s :: MScope) where
   IValue :: Int -> IAttr s
   IValueBy :: Signal -> IAttr s
   IIcon :: BS.ByteString -> IAttr s
+  -- | The item's SEMANTIC ICON ('Symbol') — the closed concept
+  -- vocabulary each backend maps to its own platform's symbol set.
+  -- BESIDE 'IIcon', not instead of it: app-specific art still rides the
+  -- blob. Every kind but 'separator' takes one (the root holds that
+  -- rule, as it holds icon's); const-only, so there is no bind flavor.
+  ISymbol :: Symbol -> IAttr s
   IPrimary :: Bool -> IAttr s
   -- | Any window-anchored LEAF command — an action, a toggle, or one
   -- option of a group: a chord needs a window catalog as its native
@@ -1315,6 +1413,7 @@ applyIAttr n attr = case attr of
   IValue v -> emitB (W.txSetMenuValue n (fromIntegral v))
   IValueBy (Signal s) -> emitB (W.txBindMenuValue n s)
   IIcon bytes -> emitBIO (W.txSetMenuIcon n <$> registerBlob bytes)
+  ISymbol s -> emitB (W.txSetMenuSymbol n (symbolWire s))
   IPrimary v -> emitB (W.txSetMenuPrimary n v)
   IShortcut spelling -> emitB (W.txSetMenuShortcut n spelling)
   IRole name -> emitB (W.txSetMenuRole n name)
@@ -1441,6 +1540,12 @@ bindMenuValue (MItem n) (Signal s) = emitB (W.txBindMenuValue n s)
 
 setMenuIcon :: MItem s -> BS.ByteString -> Build ()
 setMenuIcon (MItem n) bytes = emitBIO (W.txSetMenuIcon n <$> registerBlob bytes)
+
+-- | The item's SEMANTIC ICON, dynamic path — the declarative spelling is
+-- the 'ISymbol' attr. Writing it again replaces it; there is no clearing
+-- spelling, exactly as for 'setMenuIcon'.
+setMenuSymbol :: MItem s -> Symbol -> Build ()
+setMenuSymbol (MItem n) s = emitB (W.txSetMenuSymbol n (symbolWire s))
 
 -- | The phone-bar promotion hint (actions only — root-checked).
 -- Flipping it recomputes the promoted set deterministically; INERT on

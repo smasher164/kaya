@@ -778,8 +778,33 @@ fn check_section_prop_value(prop: SectionProp, value: &Value) {
     match (prop, value) {
         (SectionProp::Title, Value::Str(_)) => {}
         (SectionProp::Icon, Value::Blob(_)) => {}
+        // The enum's closed set (the sections_presentation precedent,
+        // one table over): the wire carries I64 and the domain is the
+        // spec enum's values.
+        (SectionProp::Symbol, Value::I64(v)) => check_symbol(*v),
         (p, v) => panic!("kaya: section property {p:?} rejects value {v:?}"),
     }
+}
+
+/// THE VALUE WALL for the semantic icon vocabulary (docs/styling-plan.md
+/// D6), the `role` precedent: an out-of-enum number dies AT THE ROOT,
+/// naming the vocabulary, before any backend improvises on it. Without
+/// it the wire slot is a bare integer, and the failure is silent in the
+/// worst direction — a backend's glyph table simply misses, the item
+/// draws with no icon, and nothing anywhere says why.
+///
+/// The sentence lists the whole vocabulary rather than the count,
+/// because the reader's next question is always "then what may I say?".
+fn check_symbol(value: i64) {
+    assert!(
+        crate::wire::symbol_name(value).is_some(),
+        "kaya: {value} is not a symbol — the vocabulary is {}",
+        crate::wire::SYMBOLS
+            .iter()
+            .map(|(id, name)| format!("{name}={id}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 }
 
 /// The closed parent/child grammar (DESIGN.md, Menus): a `menu`
@@ -817,7 +842,7 @@ fn is_menu_group(kind: MenuItemKind) -> bool {
 /// the check_prop precedent.
 fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
     let ok = match prop {
-        MenuProp::Label | MenuProp::Enabled | MenuProp::Icon => {
+        MenuProp::Label | MenuProp::Enabled | MenuProp::Icon | MenuProp::Symbol => {
             !matches!(kind, MenuItemKind::Separator)
         }
         MenuProp::Checked => matches!(kind, MenuItemKind::Toggle),
@@ -872,11 +897,17 @@ fn menu_prop_value_type(prop: MenuProp) -> ValueType {
         MenuProp::Enabled | MenuProp::Checked | MenuProp::Primary => ValueType::Bool,
         MenuProp::Value => ValueType::F64,
         MenuProp::Icon => ValueType::Blob,
+        // The semantic icon vocabulary rides I64 like every other
+        // spec enum; check_menu_prop_value walls the domain.
+        MenuProp::Symbol => ValueType::I64,
     }
 }
 
 /// The signal-bindable menu props: label, enabled, checked, value. icon,
-/// primary, and shortcut are const-only (DESIGN.md, Menus).
+/// symbol, primary, shortcut and role are const-only (DESIGN.md, Menus;
+/// docs/styling-plan.md D6 for the symbol). Kept in lockstep with
+/// kaya-bindgen's menu_prop_bindable, which panics on an undeclared
+/// prop rather than guessing.
 fn is_bindable_menu_prop(prop: MenuProp) -> bool {
     matches!(
         prop,
@@ -899,6 +930,11 @@ fn check_menu_prop_value(prop: MenuProp, value: &Value) {
             "kaya: a radio group's value is a 0-based option index \
              (integral, non-negative), got {idx}"
         );
+    }
+    // The same wall the section slot gets, on the same vocabulary: one
+    // function, so the two surfaces cannot drift into two answers.
+    if let (MenuProp::Symbol, Value::I64(symbol)) = (prop, value) {
+        check_symbol(*symbol);
     }
 }
 
@@ -3619,7 +3655,7 @@ impl Scene {
                 assert!(
                     is_bindable_menu_prop(prop),
                     "kaya: menu property {prop:?} is not signal-bindable \
-                     (icon, primary, shortcut, and role are const-only)"
+                     (icon, symbol, primary, shortcut, and role are const-only)"
                 );
                 let current = self
                     .signals
@@ -5742,6 +5778,62 @@ mod tests {
         ]);
     }
 
+    /// THE SYMBOL VALUE WALL, section side (docs/styling-plan.md D6).
+    /// The slot is a bare integer on the wire, so without this an
+    /// out-of-vocabulary number reaches four backends' glyph tables,
+    /// misses in each, and the tab simply draws with no icon — silent
+    /// everywhere. 21 is the first free id, i.e. exactly what a guest
+    /// generated against a NEWER spec would send.
+    #[test]
+    #[should_panic(expected = "21 is not a symbol")]
+    fn section_symbol_rejects_a_value_outside_the_vocabulary() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
+            TxOp::SetSectionProp {
+                section: WindowId(7),
+                prop: SectionProp::Symbol,
+                value: PropValue::Const(Value::I64(21)),
+            },
+        ]);
+    }
+
+    /// The sentence NAMES THE VOCABULARY, not just the count — the
+    /// reader's next question is always "then what may I say?". Pinned
+    /// because a message that merely said "bad symbol" would satisfy
+    /// the test above and help nobody.
+    #[test]
+    #[should_panic(expected = "the vocabulary is add=1, remove=2")]
+    fn the_symbol_refusal_names_the_vocabulary() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
+            TxOp::SetSectionProp {
+                section: WindowId(7),
+                prop: SectionProp::Symbol,
+                value: PropValue::Const(Value::I64(0)),
+            },
+        ]);
+    }
+
+    /// Every legal value passes on the section slot — the accept
+    /// direction, without which a wall that refused EVERYTHING would
+    /// pass both tests above.
+    #[test]
+    fn every_symbol_in_the_vocabulary_is_accepted_on_a_section() {
+        for (id, _name) in crate::wire::SYMBOLS {
+            let mut scene = Scene::new();
+            scene.apply(vec![
+                TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
+                TxOp::SetSectionProp {
+                    section: WindowId(7),
+                    prop: SectionProp::Symbol,
+                    value: PropValue::Const(Value::I64(i64::from(*id))),
+                },
+            ]);
+        }
+    }
+
     #[test]
     fn data_before_for_stamps_at_bind_time() {
         let mut scene = Scene::new();
@@ -7453,6 +7545,82 @@ mod tests {
     fn unknown_role_rejected() {
         let mut scene = Scene::new();
         scene.apply(vec![item(1, MenuItemKind::Action), role(1, "about")]);
+    }
+
+    /// The menu side of the symbol wall — the SAME function as the
+    /// section side, which is the point: one vocabulary, one sentence,
+    /// two surfaces that cannot answer differently.
+    #[test]
+    #[should_panic(expected = "21 is not a symbol")]
+    fn menu_symbol_rejects_a_value_outside_the_vocabulary() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Symbol,
+                value: PropValue::Const(Value::I64(21)),
+            },
+        ]);
+    }
+
+    /// A separator has no label and no icon, and it has no symbol
+    /// either — the `icon` scoping, restated by the same clause.
+    #[test]
+    #[should_panic(expected = "has no property")]
+    fn symbol_on_a_separator_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Separator),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Symbol,
+                value: PropValue::Const(Value::I64(crate::wire::SYMBOL_COPY.into())),
+            },
+        ]);
+    }
+
+    /// Const-only, like `icon` beside it: a symbol names a fixed
+    /// concept, so a per-frame signal binding has no reading.
+    #[test]
+    #[should_panic(expected = "is not signal-bindable")]
+    fn symbol_signal_bind_rejected() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateSignal { id: SignalId(1), initial: Value::I64(1) },
+            item(1, MenuItemKind::Action),
+            TxOp::SetMenuProp {
+                item: MenuItemId(1),
+                prop: MenuProp::Symbol,
+                value: PropValue::Signal(SignalId(1)),
+            },
+        ]);
+    }
+
+    /// The accept direction on the menu slot, on every kind that takes
+    /// one: a wall that refused everything would pass all three
+    /// refusals above.
+    #[test]
+    fn every_symbol_is_accepted_on_every_menu_kind_that_takes_one() {
+        for kind in [
+            MenuItemKind::Menu,
+            MenuItemKind::Action,
+            MenuItemKind::Toggle,
+            MenuItemKind::RadioGroup,
+            MenuItemKind::RadioOption,
+        ] {
+            for (id, _name) in crate::wire::SYMBOLS {
+                let mut scene = Scene::new();
+                scene.apply(vec![
+                    item(1, kind),
+                    TxOp::SetMenuProp {
+                        item: MenuItemId(1),
+                        prop: MenuProp::Symbol,
+                        value: PropValue::Const(Value::I64(i64::from(*id))),
+                    },
+                ]);
+            }
+        }
     }
 
     #[test]

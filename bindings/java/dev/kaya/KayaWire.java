@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x426ae13f797cbb12L;
+    public static final long SPEC_HASH = 0xf84da2a3fe758bc7L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -68,6 +68,7 @@ public final class KayaWire {
     public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int SPROP_TITLE = 1;
     public static final int SPROP_ICON = 2;
+    public static final int SPROP_SYMBOL = 3;
     public static final int MENU_KIND_MENU = 1;
     public static final int MENU_KIND_ACTION = 2;
     public static final int MENU_KIND_TOGGLE = 3;
@@ -82,6 +83,7 @@ public final class KayaWire {
     public static final int MPROP_PRIMARY = 6;
     public static final int MPROP_SHORTCUT = 7;
     public static final int MPROP_ROLE = 8;
+    public static final int MPROP_SYMBOL = 9;
     public static final int SECTIONS_PRESENTATION_AUTO = 0;
     public static final int SECTIONS_PRESENTATION_BAR = 1;
     public static final int SECTIONS_PRESENTATION_SIDEBAR = 2;
@@ -99,6 +101,26 @@ public final class KayaWire {
     public static final int ROLE_DESTRUCTIVE = 1;
     public static final int ROLE_PROMINENT = 2;
     public static final int ROLE_HEADING = 3;
+    public static final int SYMBOL_ADD = 1;
+    public static final int SYMBOL_REMOVE = 2;
+    public static final int SYMBOL_DELETE = 3;
+    public static final int SYMBOL_EDIT = 4;
+    public static final int SYMBOL_DONE = 5;
+    public static final int SYMBOL_CLOSE = 6;
+    public static final int SYMBOL_SEARCH = 7;
+    public static final int SYMBOL_SETTINGS = 8;
+    public static final int SYMBOL_REFRESH = 9;
+    public static final int SYMBOL_INFO = 10;
+    public static final int SYMBOL_WARNING = 11;
+    public static final int SYMBOL_BACK = 12;
+    public static final int SYMBOL_FORWARD = 13;
+    public static final int SYMBOL_MORE = 14;
+    public static final int SYMBOL_COPY = 15;
+    public static final int SYMBOL_PASTE = 16;
+    public static final int SYMBOL_STAR = 17;
+    public static final int SYMBOL_LOCK = 18;
+    public static final int SYMBOL_PERSON = 19;
+    public static final int SYMBOL_HOME = 20;
     public static final int SOURCE_CONST = 0;
     public static final int SOURCE_SIGNAL = 1;
     public static final int SOURCE_ELEMENT = 2;
@@ -1196,6 +1218,21 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_section_prop with a constant symbol value. */
+    public static byte[] txSetSectionSymbol(long section, long symbol) {
+        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        b.putLong(section).putInt(SPROP_SYMBOL).putInt(SOURCE_CONST);
+        encodeValue(b, symbol);
+        return finish(b);
+    }
+
+    /** set_section_prop with a signal-bound symbol value. */
+    public static byte[] txBindSectionSymbol(long section, long signalId) {
+        ByteBuffer b = begin(TX_KIND_SET_SECTION_PROP);
+        b.putLong(section).putInt(SPROP_SYMBOL).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
     private static final java.util.Set<String> SHORTCUT_NAMED_KEYS =
             java.util.Set.of("enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket");
 
@@ -1346,6 +1383,14 @@ public final class KayaWire {
         ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
         b.putLong(item).putInt(MPROP_ROLE).putInt(SOURCE_CONST);
         encodeValue(b, role);
+        return finish(b);
+    }
+
+    /** set_menu_prop with a constant symbol value. */
+    public static byte[] txSetMenuSymbol(long item, long symbol) {
+        ByteBuffer b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_SYMBOL).putInt(SOURCE_CONST);
+        encodeValue(b, symbol);
         return finish(b);
     }
 

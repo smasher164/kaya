@@ -719,6 +719,81 @@ let role_wire = function
   | Heading -> Int64.of_int Kaya_wire.role_heading
 
 let set_role (Widget id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
+
+(* THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
+   docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
+
+   An app names a CONCEPT and each backend draws its own platform's
+   glyph for it: [Copy] is [doc.on.doc] on Apple, [content_copy] on
+   Material, [edit-copy-symbolic] on Adwaita, and no single asset is
+   right on all three — SF Symbols are license-locked to Apple
+   platforms, so a shared one is not even legal. The platform sets also
+   metric-match the text beside them (weight, baseline) while a blob
+   cannot. The [~icon] blob slot stays for genuinely app-specific art:
+   this rides BESIDE it, never instead of it.
+
+   CLOSED, and small on purpose — the [role] trick one declaration up,
+   for the same reason: a variant with no raw value behind it, so an
+   app cannot name a concept kaya has not mapped on every platform.
+   Apple keeps its own semantic set to fifteen entries. Growing this
+   one is a spec change with its gates, never a per-app escape hatch.
+
+   The WIRE VALUES ARE APPEND-ONLY (a new concept takes 21); they live
+   in the generated [Kaya_wire] and are never spelled here. *)
+type symbol =
+  | Add
+  | Remove
+  (* Destroying something, the wastebasket idiom — distinct from
+     [Remove], which takes an item out of a list. *)
+  | Delete
+  | Edit
+  (* Confirmation, the checkmark idiom. *)
+  | Done
+  (* Dismissal, the ✕ idiom — not [Delete]. *)
+  | Close
+  | Search
+  | Settings
+  | Refresh
+  | Info
+  | Warning
+  (* The direction-relative pair: every platform mirrors these under a
+     right-to-left layout, so they mean BACKWARD and FORWARD in reading
+     order, never "left" and "right". *)
+  | Back
+  | Forward
+  (* The overflow affordance (the ellipsis idiom). *)
+  | More
+  | Copy
+  | Paste
+  (* Favourite. *)
+  | Star
+  | Lock
+  (* A person or account. *)
+  | Person
+  | Home
+
+let symbol_wire = function
+  | Add -> Int64.of_int Kaya_wire.symbol_add
+  | Remove -> Int64.of_int Kaya_wire.symbol_remove
+  | Delete -> Int64.of_int Kaya_wire.symbol_delete
+  | Edit -> Int64.of_int Kaya_wire.symbol_edit
+  | Done -> Int64.of_int Kaya_wire.symbol_done
+  | Close -> Int64.of_int Kaya_wire.symbol_close
+  | Search -> Int64.of_int Kaya_wire.symbol_search
+  | Settings -> Int64.of_int Kaya_wire.symbol_settings
+  | Refresh -> Int64.of_int Kaya_wire.symbol_refresh
+  | Info -> Int64.of_int Kaya_wire.symbol_info
+  | Warning -> Int64.of_int Kaya_wire.symbol_warning
+  | Back -> Int64.of_int Kaya_wire.symbol_back
+  | Forward -> Int64.of_int Kaya_wire.symbol_forward
+  | More -> Int64.of_int Kaya_wire.symbol_more
+  | Copy -> Int64.of_int Kaya_wire.symbol_copy
+  | Paste -> Int64.of_int Kaya_wire.symbol_paste
+  | Star -> Int64.of_int Kaya_wire.symbol_star
+  | Lock -> Int64.of_int Kaya_wire.symbol_lock
+  | Person -> Int64.of_int Kaya_wire.symbol_person
+  | Home -> Int64.of_int Kaya_wire.symbol_home
+
 let bind_text (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s)
 let set_checked (Widget id) checked = emit (the_tx ()) (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_checked id s)
@@ -1598,11 +1673,18 @@ let push_entry ?(window = 0L) ?title ?intercept_back ?on_popped
    [add_section ~title:"Feed" ~on_selected:(fun tx -> …) 7L].
    [~on_selected] rides the add (per-section): fires each time the
    USER switches to it — post-fact and NOT one-shot; a programmatic
-   [select_section] does not fire it (the echo doctrine). *)
-let add_section ?(window = 0L) ?title ?on_selected id =
+   [select_section] does not fire it (the echo doctrine).
+
+   [~symbol] is the switcher item's SEMANTIC ICON ([symbol], the closed
+   vocabulary): a tab bar without icons is not the platform's real
+   thing, and a blob is the wrong primitive for a STANDARD glyph. *)
+let add_section ?(window = 0L) ?title ?symbol ?on_selected id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_section window id);
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_section_title id t)) title;
+  Option.iter
+    (fun s -> emit tx (Kaya_wire.tx_set_section_symbol id (symbol_wire s)))
+    symbol;
   Option.iter
     (fun f -> Hashtbl.replace tx.app.section_selected id f)
     on_selected
@@ -1905,8 +1987,16 @@ let alloc_menu_item kind label =
 
 (* The shared optional-prop tail: [?enabled] a constant,
    [?bind_enabled] a Bool signal (the labeled-optional family — one
-   label per (prop, source) pair), [?icon] the blob channel. *)
-let menu_prop_tail id ?enabled ?bind_enabled ?icon () =
+   label per (prop, source) pair), [?icon] the blob channel and
+   [?symbol] the SEMANTIC one — the closed [symbol] vocabulary each
+   backend draws in its own platform's set. The two ride together
+   because they are different channels, not alternatives: a standard
+   concept takes [~symbol], app-specific art takes [~icon].
+
+   Both live on the TAIL, so every leaf and every grouping node gets
+   them from one place: a per-kind spelling is how a surface goes
+   uneven between kinds without anyone noticing. *)
+let menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol () =
   let tx = the_tx () in
   Option.iter (fun e -> emit tx (Kaya_wire.tx_set_menu_enabled id e)) enabled;
   Option.iter
@@ -1915,7 +2005,10 @@ let menu_prop_tail id ?enabled ?bind_enabled ?icon () =
   Option.iter
     (fun data ->
       emit tx (Kaya_wire.tx_set_menu_icon id (Kaya_runtime.register_blob data)))
-    icon
+    icon;
+  Option.iter
+    (fun s -> emit tx (Kaya_wire.tx_set_menu_symbol id (symbol_wire s)))
+    symbol
 
 (* An action — a leaf command firing exactly one menu_activated
    occurrence (menu click OR its shortcut: ONE occurrence, one
@@ -1925,13 +2018,13 @@ let menu_prop_tail id ?enabled ?bind_enabled ?icon () =
    first — the keys ARE the noun. The shortcut is canonicalized by the
    binding's one parser; the root judges its anchor (window catalogs
    only). *)
-let item ?shortcut ?enabled ?bind_enabled ?icon ?primary ?role ?on_activate
-    ?on_activate_node ~label () =
+let item ?shortcut ?enabled ?bind_enabled ?icon ?symbol ?primary ?role
+    ?on_activate ?on_activate_node ~label () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_action (Some label) in
   Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
   Option.iter (fun r -> emit tx (Kaya_wire.tx_set_menu_role id r)) role;
-  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol ();
   Option.iter (fun p -> emit tx (Kaya_wire.tx_set_menu_primary id p)) primary;
   Option.iter (fun f -> Hashtbl.replace tx.app.menu_activated id f) on_activate;
   Option.iter
@@ -1943,8 +2036,8 @@ let item ?shortcut ?enabled ?bind_enabled ?icon ?primary ?role ?on_activate
    flips emit menu_toggled ([~on_toggle] receives the new state; the
    [_node] flavor gets the stamped keys first); programmatic checked
    writes are QUIET (the echo doctrine). *)
-let toggle ?checked ?bind_checked ?enabled ?bind_enabled ?icon ?shortcut
-    ?on_toggle ?on_toggle_node ~label () =
+let toggle ?checked ?bind_checked ?enabled ?bind_enabled ?icon ?symbol
+    ?shortcut ?on_toggle ?on_toggle_node ~label () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_toggle (Some label) in
   Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
@@ -1952,7 +2045,7 @@ let toggle ?checked ?bind_checked ?enabled ?bind_enabled ?icon ?shortcut
   Option.iter
     (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_menu_checked id s))
     bind_checked;
-  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol ();
   Option.iter (fun f -> Hashtbl.replace tx.app.menu_toggled id f) on_toggle;
   Option.iter
     (fun f -> Hashtbl.replace tx.app.menu_toggled_node id f)
@@ -1961,11 +2054,11 @@ let toggle ?checked ?bind_checked ?enabled ?bind_enabled ?icon ?shortcut
 
 (* One labeled radio option, appended in declaration order — the order
    IS the index vocabulary the group's value selects over. *)
-let option ?enabled ?bind_enabled ?icon ?shortcut ~label () =
+let option ?enabled ?bind_enabled ?icon ?symbol ?shortcut ~label () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_radio_option (Some label) in
   Option.iter (fun s -> emit tx (Kaya_wire.tx_set_menu_shortcut id s)) shortcut;
-  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol ();
   MenuItem id
 
 (* Native grouping chrome: no label, no props, no handle kept. *)
@@ -1986,11 +2079,11 @@ let realize_menu_children tx parent children =
    child list (one nested grouping level is the cap, root-checked).
    Disabling a menu disables its subtree (the inherited-disabled
    contract). *)
-let menu ?enabled ?bind_enabled ?icon ~label children () =
+let menu ?enabled ?bind_enabled ?icon ?symbol ~label children () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_menu (Some label) in
   realize_menu_children tx id children;
-  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol ();
   MenuItem id
 
 (* A radio group — the Choice contract with the platform's checkmark
@@ -2000,8 +2093,8 @@ let menu ?enabled ?bind_enabled ?icon ~label children () =
    options so the index has options to address (programmatic writes
    are quiet); [~on_select] receives each USER pick's new index, and
    [~on_select_node] the stamped keys first. *)
-let radio_group ?value ?bind_value ?enabled ?bind_enabled ?icon ?on_select
-    ?on_select_node ~label options () =
+let radio_group ?value ?bind_value ?enabled ?bind_enabled ?icon ?symbol
+    ?on_select ?on_select_node ~label options () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_radio_group (Some label) in
   realize_menu_children tx id options;
@@ -2011,7 +2104,7 @@ let radio_group ?value ?bind_value ?enabled ?bind_enabled ?icon ?on_select
   Option.iter
     (fun (Signal s) -> emit tx (Kaya_wire.tx_bind_menu_value id s))
     bind_value;
-  menu_prop_tail id ?enabled ?bind_enabled ?icon ();
+  menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol ();
   Option.iter (fun f -> Hashtbl.replace tx.app.menu_selected id f) on_select;
   Option.iter
     (fun f -> Hashtbl.replace tx.app.menu_selected_node id f)
@@ -2074,6 +2167,13 @@ let bind_menu_value (MenuItem id) (Signal s) =
 let set_menu_icon (MenuItem id) data =
   emit (the_tx ())
     (Kaya_wire.tx_set_menu_icon id (Kaya_runtime.register_blob data))
+
+(* The SEMANTIC icon on a retained item ([symbol], the closed
+   vocabulary) — [set_menu_icon]'s sibling, and the dynamic spelling of
+   the constructors' [~symbol], exactly as [set_role] is the dynamic
+   spelling of [~role]. *)
+let set_menu_symbol (MenuItem id) s =
+  emit (the_tx ()) (Kaya_wire.tx_set_menu_symbol id (symbol_wire s))
 
 (* The phone-bar promotion hint (actions only — root-checked).
    Flipping it recomputes the promoted set deterministically; INERT on

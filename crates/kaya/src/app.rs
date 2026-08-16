@@ -3882,6 +3882,17 @@ impl SectionRef<'_, '_> {
         self
     }
 
+    /// The switcher item's SEMANTIC ICON ([`Symbol`]): a concept each
+    /// backend draws in its own platform's symbol set — a tab bar
+    /// without icons is not the platform's real thing, and a blob is
+    /// the wrong primitive for a STANDARD one. Beside `icon`, not
+    /// instead of it: app-specific art still rides the blob.
+    pub fn symbol(self, symbol: crate::Symbol) -> Self {
+        self.tx
+            .set_section_prop(self.section, SectionProp::Symbol, symbol as i64);
+        self
+    }
+
     pub fn id(&self) -> WindowId {
         self.section
     }
@@ -4323,6 +4334,57 @@ pub enum Role {
     Heading = 3,
 }
 
+/// THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
+/// docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
+///
+/// An app names a CONCEPT and each backend draws its own platform's
+/// glyph for it: `Copy` is `doc.on.doc` on Apple, `content_copy` on
+/// Material, `edit-copy-symbolic` on Adwaita, and no single asset is
+/// right on all three — SF Symbols are license-locked to Apple
+/// platforms, so a shared one is not even legal. The platform sets also
+/// metric-match the text beside them (weight, baseline) while a blob
+/// cannot. The Blob `icon` slot stays for genuinely app-specific art.
+///
+/// Closed, and small on purpose — the `Role` trick one tier over. Apple
+/// keeps its own semantic set to fifteen entries. Growing it is a spec
+/// change with its gates, never a per-app escape hatch (D5).
+///
+/// THE DISCRIMINANTS ARE WIRE VALUES AND ARE APPEND-ONLY. A new concept
+/// takes 21; renumbering silently redraws every shipped app's menus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Symbol {
+    Add = 1,
+    Remove = 2,
+    /// Destroying something, the wastebasket idiom — distinct from
+    /// `Remove`, which takes an item out of a list.
+    Delete = 3,
+    Edit = 4,
+    /// Confirmation, the checkmark idiom.
+    Done = 5,
+    /// Dismissal, the ✕ idiom — not `Delete`.
+    Close = 6,
+    Search = 7,
+    Settings = 8,
+    Refresh = 9,
+    Info = 10,
+    Warning = 11,
+    /// The direction-relative pair: every platform mirrors these under
+    /// a right-to-left layout, so they mean BACKWARD and FORWARD in
+    /// reading order, never "left" and "right".
+    Back = 12,
+    Forward = 13,
+    /// The overflow affordance (the ellipsis idiom).
+    More = 14,
+    Copy = 15,
+    Paste = 16,
+    /// Favourite.
+    Star = 17,
+    Lock = 18,
+    /// A person or account.
+    Person = 19,
+    Home = 20,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Accepts<'a> {
     Text,
@@ -4431,6 +4493,16 @@ impl<A: MenuAnchor> ActionRef<'_, '_, A> {
         self
     }
 
+    /// The item's SEMANTIC ICON ([`Symbol`]): the closed concept
+    /// vocabulary each backend maps to its own platform's symbol set.
+    /// Const-only, beside `icon` — a name for the standard concepts, a
+    /// blob for app-specific art.
+    pub fn symbol(self, symbol: crate::Symbol) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Symbol, symbol as i64);
+        self
+    }
+
     /// The phone-bar promotion hint (default false): promoted actions
     /// become real top-bar actions in catalog preorder, the rest stay
     /// in overflow. INERT on desktops — not a toolbar grammar.
@@ -4507,6 +4579,16 @@ impl<A: MenuAnchor> ToggleRef<'_, '_, A> {
         self
     }
 
+    /// The item's SEMANTIC ICON ([`Symbol`]): the closed concept
+    /// vocabulary each backend maps to its own platform's symbol set.
+    /// Const-only, beside `icon` — a name for the standard concepts, a
+    /// blob for app-specific art.
+    pub fn symbol(self, symbol: crate::Symbol) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Symbol, symbol as i64);
+        self
+    }
+
     /// End the chain: the durable handle.
     pub fn id(self) -> MenuItemId {
         self.item
@@ -4547,6 +4629,16 @@ impl<A: MenuAnchor> OptionRef<'_, '_, A> {
     pub fn icon(self, bytes: &[u8]) -> Self {
         self.tx
             .set_menu_prop(self.item, MenuProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    /// The item's SEMANTIC ICON ([`Symbol`]): the closed concept
+    /// vocabulary each backend maps to its own platform's symbol set.
+    /// Const-only, beside `icon` — a name for the standard concepts, a
+    /// blob for app-specific art.
+    pub fn symbol(self, symbol: crate::Symbol) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Symbol, symbol as i64);
         self
     }
 
@@ -4599,6 +4691,16 @@ impl<R> MenuRef<'_, '_, R> {
         self
     }
 
+    /// The item's SEMANTIC ICON ([`Symbol`]): the closed concept
+    /// vocabulary each backend maps to its own platform's symbol set.
+    /// Const-only, beside `icon` — a name for the standard concepts, a
+    /// blob for app-specific art.
+    pub fn symbol(self, symbol: crate::Symbol) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Symbol, symbol as i64);
+        self
+    }
+
     /// End the chain: the durable handle — what [`Tx::menu`] reopens.
     pub fn id(self) -> MenuItemId {
         self.item
@@ -4641,6 +4743,16 @@ impl<R> RadioGroupRef<'_, '_, R> {
     pub fn icon(self, bytes: &[u8]) -> Self {
         self.tx
             .set_menu_prop(self.item, MenuProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    /// The item's SEMANTIC ICON ([`Symbol`]): the closed concept
+    /// vocabulary each backend maps to its own platform's symbol set.
+    /// Const-only, beside `icon` — a name for the standard concepts, a
+    /// blob for app-specific art.
+    pub fn symbol(self, symbol: crate::Symbol) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Symbol, symbol as i64);
         self
     }
 
@@ -4699,6 +4811,16 @@ impl<'t, 'b> MenuItemRef<'t, 'b> {
     pub fn icon(self, bytes: &[u8]) -> Self {
         self.tx
             .set_menu_prop(self.item, MenuProp::Icon, Value::Blob(bytes.into()));
+        self
+    }
+
+    /// The item's SEMANTIC ICON ([`Symbol`]): the closed concept
+    /// vocabulary each backend maps to its own platform's symbol set.
+    /// Const-only, beside `icon` — a name for the standard concepts, a
+    /// blob for app-specific art.
+    pub fn symbol(self, symbol: crate::Symbol) -> Self {
+        self.tx
+            .set_menu_prop(self.item, MenuProp::Symbol, symbol as i64);
         self
     }
 

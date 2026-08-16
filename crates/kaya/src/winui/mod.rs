@@ -33,12 +33,14 @@ use windows_core::{HSTRING, Interface as _};
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
     Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, ContentDialog,
-    ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, Grid, Image, MenuBar,
+    ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, FontIcon, Grid,
+    IconElement, Image, MenuBar,
     MenuBarItem, MenuFlyout,
     MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
     NavigationViewItem, NavigationViewPaneDisplayMode, ProgressBar, RadioMenuFlyoutItem,
     RichEditBox, RichEditClipboardFormat, RowDefinition,
     RadioButtons, ScrollBarVisibility, ScrollMode, ScrollViewer, SelectionChangedEventHandler,
+    SymbolIcon,
     Slider, TextBlock, TextBox, TextChangedEventHandler, TextCompositionEndedEventArgs,
     TextCompositionStartedEventArgs, TextControlPasteEventHandler,
     ToggleMenuFlyoutItem, TwoPaneView,
@@ -674,6 +676,11 @@ struct WinSection {
     window: u64,
     pane: Grid,
     title: String,
+    /// The SEMANTIC ICON (0 = none). Retained because the switcher's
+    /// item is minted lazily by `refresh_sections` — a section can be
+    /// given its symbol before its NavigationViewItem exists — and
+    /// re-read there.
+    symbol: i64,
     root: Option<UIElement>,
 }
 
@@ -714,6 +721,13 @@ struct MenuModel {
     /// folds in role_enabled (refresh_role_enablement).
     role: String,
     shortcut: String,
+    /// The SEMANTIC ICON (spec enum "symbol"; 0 = none). Retained for
+    /// the same reason label and shortcut are: `rebuild_menus` builds
+    /// every native from this model, so a symbol that lived only on the
+    /// old chrome would vanish at the next unrelated prop write. It is
+    /// NOT what the harness reads — `menu_symbol` asks the materialized
+    /// item, so a lowering that dropped this value still fails.
+    symbol: i64,
     children: Vec<u64>,
     parent: Option<u64>,
 }
@@ -757,6 +771,382 @@ impl MenuNative {
             MenuNative::Toggle(i) => i.SetIsEnabled(on),
             MenuNative::Option(i) => i.SetIsEnabled(on),
         }
+    }
+
+    /// The REAL chrome's icon — what expect_menu_symbol reads through
+    /// [`icon_uia_name`]. Never the model: a backend that decoded the
+    /// symbol prop and drew nothing has to fail the assertion, and the
+    /// only way to guarantee that is to ask the materialized item.
+    fn icon(&self) -> MenuIcon {
+        let slot: &dyn IconSlot = match self {
+            // The top-level bar grouping has no icon slot at all in
+            // WinUI, so its symbol is dropped rather than drawn — a
+            // fact this backend states rather than dresses up. The mac
+            // arm does put one on its bar holders; that divergence is a
+            // platform's missing affordance, not a semantic difference,
+            // and the read below names it.
+            MenuNative::Bar(_) => return MenuIcon::NoSlot,
+            MenuNative::Sub(i) => i,
+            MenuNative::Action(i) => i,
+            MenuNative::Toggle(i) => i,
+            MenuNative::Option(i) => i,
+        };
+        match slot.icon_element() {
+            Ok(icon) => MenuIcon::Present(icon),
+            // AN UNSET Icon IS AN `Err` WHOSE HRESULT SAYS SUCCESS, and
+            // that sentence is the whole reason this returns four cases
+            // instead of an Option. The property call itself returns
+            // S_OK with a NULL pointer; windows-core's `Type::from_abi`
+            // turns a null interface pointer into `Error::empty()`,
+            // whose `code()` is `HRESULT(0)` — NOT `E_POINTER`, which is
+            // what `Interface::cast` uses for its own null case and what
+            // this arm was first written against. So EMPTY is "the call
+            // succeeded and there is no icon", and only a genuine
+            // failure HRESULT means the slot could not be read.
+            //
+            // Read out of windows-core 0.62.2 (src/type.rs's
+            // InterfaceType `from_abi`) and windows-result 0.4.1
+            // (`S_EMPTY_ERROR`, whose `code()` reports 0), because this
+            // backend's host is not reachable from a mac and a branch
+            // nobody can make print is a guess about a state nobody has
+            // reached (CLAUDE.md invariant 3). Against E_POINTER the
+            // Empty arm was DEAD, and every icon-less item would have
+            // reported an unreadable slot with an empty message —
+            // a sentence blaming a failure that did not happen.
+            Err(e) if e.code().is_ok() => MenuIcon::Empty,
+            Err(e) => MenuIcon::Unreadable(e),
+        }
+    }
+}
+
+// --- The semantic icon vocabulary: the FLUENT column -------------------
+//
+// An app names a CONCEPT (`Symbol::Copy`) and this backend draws
+// Windows' own glyph for it. Every identifier in the table below was
+// taken from styling/symbols-fluent.md and NONE of it from memory: that
+// report extracted 1413 codepoint/name pairs out of the Segoe Fluent
+// Icons catalog mechanically, parsed the shipped font's cmap to prove
+// each codepoint resolves to a real glyph, and RENDERED the candidates
+// to check the shapes. The shape check is not ceremony — it is what
+// caught `Error` (U+E783) being a circle with an EXCLAMATION MARK
+// rather than the circle-X the name promises. kaya's v1 vocabulary has
+// no `error` concept, so no row here uses it, but `warning` sits one
+// glyph away and a future reader "fixing" it to the same-named glyph
+// would ship the collision.
+//
+// TWO ROUTES, BOTH REQUIRED. `Symbol` is an enum of stable API names —
+// preferred, because kaya then never writes a codepoint — but it covers
+// only a subset of the font, and three of kaya's twenty concepts (info,
+// warning, lock) have NO member at all. Those three can only be spelled
+// as codepoints through `FontIcon`. Neither route sets a FontFamily:
+// both resolve through the `SymbolThemeFontFamily` theme resource,
+// which is also what makes the Windows 10 story free — that resource
+// falls back to Segoe MDL2 Assets there, and all the codepoints kaya
+// uses are in that catalog too (33/33, checked mechanically).
+//
+// THE MEMBER NAMES ARE NOT THE GLYPH NAMES, and three of them bite:
+//   * `Symbol::Find` IS the magnifier whose catalog name is `Search`.
+//     There is no `Symbol::Search`. (`Symbol::Zoom` is a DIFFERENT
+//     magnifier meaning zoom — not search.)
+//   * `Symbol::Setting` is SINGULAR, though the Fluent catalog names
+//     the glyph `Settings`. Spelling it from the glyph name does not
+//     compile.
+//   * `Symbol::Back`/`Forward` are full ARROWS, not chevrons, which is
+//     the Windows convention for navigation — the concept kaya's back
+//     and forward name. The chevron spellings (U+E76B/U+E76C) have no
+//     enum member and belong to a disclosure affordance, not to this.
+// One more that is a choice rather than a trap: `star` takes
+// `OutlineStar` because `SolidStar` is its obvious sibling for a set
+// state later, while `Symbol::Favorite` is a mere duplicate of
+// OutlineStar (same U+E734).
+//
+// WHAT IS NOT ESTABLISHED: whether Windows mirrors the back/forward
+// arrows under a right-to-left layout. The catalog report makes no
+// claim either way and nothing here has been run on an RTL system, so
+// this comment does not make one — the concepts are direction-relative
+// by kaya's definition (crates/kaya/src/app.rs), and proving the
+// mirroring is a separate measurement on the Windows lane.
+enum FluentIcon {
+    /// Route 1: a `Symbol` enum member — 17 of the 20 concepts.
+    Member(bindings::Microsoft::UI::Xaml::Controls::Symbol),
+    /// Route 2: a Segoe Fluent Icons codepoint, for the three concepts
+    /// the enum never got.
+    Glyph(&'static str),
+}
+
+/// The Fluent spelling of a concept. EXHAUSTIVE ON PURPOSE: a 21st
+/// entry in the vocabulary fails the windows build right here, naming
+/// the file that has to grow, rather than compiling into an icon that
+/// silently never draws.
+const fn fluent_icon(symbol: crate::app::Symbol) -> FluentIcon {
+    use bindings::Microsoft::UI::Xaml::Controls::Symbol as Fluent;
+    use crate::app::Symbol as S;
+    match symbol {
+        S::Add => FluentIcon::Member(Fluent::Add),
+        S::Remove => FluentIcon::Member(Fluent::Remove),
+        // The trash can (U+E74D), distinct from Remove's single minus
+        // stroke — kaya draws the same distinction.
+        S::Delete => FluentIcon::Member(Fluent::Delete),
+        S::Edit => FluentIcon::Member(Fluent::Edit),
+        // The bare checkmark. `Completed` (U+E930) is the circled one,
+        // for a status rather than an action.
+        S::Done => FluentIcon::Member(Fluent::Accept),
+        // The general-purpose X. `ChromeClose` is the heavier X for
+        // window close buttons, deliberately not used for in-content
+        // dismissal.
+        S::Close => FluentIcon::Member(Fluent::Cancel),
+        S::Search => FluentIcon::Member(Fluent::Find),
+        S::Settings => FluentIcon::Member(Fluent::Setting),
+        S::Refresh => FluentIcon::Member(Fluent::Refresh),
+        // The three with no enum member — FontIcon or nothing.
+        S::Info => FluentIcon::Glyph("\u{E946}"),
+        S::Warning => FluentIcon::Glyph("\u{E7BA}"),
+        S::Back => FluentIcon::Member(Fluent::Back),
+        S::Forward => FluentIcon::Member(Fluent::Forward),
+        S::More => FluentIcon::Member(Fluent::More),
+        S::Copy => FluentIcon::Member(Fluent::Copy),
+        S::Paste => FluentIcon::Member(Fluent::Paste),
+        S::Star => FluentIcon::Member(Fluent::OutlineStar),
+        S::Lock => FluentIcon::Glyph("\u{E72E}"),
+        S::Person => FluentIcon::Member(Fluent::Contact),
+        S::Home => FluentIcon::Member(Fluent::Home),
+    }
+}
+
+/// A concept's WIRE id — the spec's number by way of `wire`, never a
+/// literal. Exhaustive for the same reason as [`fluent_icon`].
+const fn symbol_wire(symbol: crate::app::Symbol) -> u32 {
+    use crate::app::Symbol as S;
+    match symbol {
+        S::Add => crate::wire::SYMBOL_ADD,
+        S::Remove => crate::wire::SYMBOL_REMOVE,
+        S::Delete => crate::wire::SYMBOL_DELETE,
+        S::Edit => crate::wire::SYMBOL_EDIT,
+        S::Done => crate::wire::SYMBOL_DONE,
+        S::Close => crate::wire::SYMBOL_CLOSE,
+        S::Search => crate::wire::SYMBOL_SEARCH,
+        S::Settings => crate::wire::SYMBOL_SETTINGS,
+        S::Refresh => crate::wire::SYMBOL_REFRESH,
+        S::Info => crate::wire::SYMBOL_INFO,
+        S::Warning => crate::wire::SYMBOL_WARNING,
+        S::Back => crate::wire::SYMBOL_BACK,
+        S::Forward => crate::wire::SYMBOL_FORWARD,
+        S::More => crate::wire::SYMBOL_MORE,
+        S::Copy => crate::wire::SYMBOL_COPY,
+        S::Paste => crate::wire::SYMBOL_PASTE,
+        S::Star => crate::wire::SYMBOL_STAR,
+        S::Lock => crate::wire::SYMBOL_LOCK,
+        S::Person => crate::wire::SYMBOL_PERSON,
+        S::Home => crate::wire::SYMBOL_HOME,
+    }
+}
+
+/// The vocabulary in wire order — the decode side's only list.
+const SYMBOL_ORDER: [crate::app::Symbol; 20] = {
+    use crate::app::Symbol as S;
+    [
+        S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
+        S::Refresh, S::Info, S::Warning, S::Back, S::Forward, S::More, S::Copy, S::Paste, S::Star,
+        S::Lock, S::Person, S::Home,
+    ]
+};
+
+/// THE COMPILE-TIME PIN, and it is what makes the array above safe to
+/// hand-write. Position by position, `SYMBOL_ORDER[i]`'s wire id must
+/// equal `wire::SYMBOLS[i]`'s — the table the spec pins name-by-name
+/// and id-by-id (`symbol_names_match_the_spec_enum`). So a 21st concept
+/// in the spec fails to build here until this array grows, a renumbered
+/// concept fails here, and a repeated or misplaced entry fails here as
+/// well, since the ids are distinct. `const`, not a test: it is on
+/// `cargo check --target …-windows-msvc`, which is a gate the fast
+/// sweep already runs, rather than on a suite this backend's host has
+/// to be present to run.
+const _: () = {
+    assert!(
+        SYMBOL_ORDER.len() == crate::wire::SYMBOLS.len(),
+        "the symbol vocabulary grew: add the new concept to SYMBOL_ORDER \
+         and give it a Fluent spelling in fluent_icon (crates/kaya/src/winui/mod.rs)"
+    );
+    let mut i = 0;
+    while i < SYMBOL_ORDER.len() {
+        assert!(
+            symbol_wire(SYMBOL_ORDER[i]) == crate::wire::SYMBOLS[i].0,
+            "SYMBOL_ORDER disagrees with wire::SYMBOLS on a wire id \
+             (crates/kaya/src/winui/mod.rs)"
+        );
+        i += 1;
+    }
+};
+
+/// The concept a wire value names, or None for the unset slot (0) — and
+/// for anything else, which the root already refused at declare time,
+/// so it can only mean this backend and the core disagree.
+fn symbol_from_wire(value: i64) -> Option<crate::app::Symbol> {
+    SYMBOL_ORDER
+        .into_iter()
+        .find(|s| i64::from(symbol_wire(*s)) == value)
+}
+
+/// The platform icon for a wire symbol value, carrying THE SEMANTIC
+/// NAME as its UIA name.
+///
+/// The name is not decoration. An icon that carries meaning has to say
+/// what it means to an assistive client, and on this platform that is
+/// `AutomationProperties.Name` on the icon element — the same property
+/// the a11y label rides for every other widget here. It is also this
+/// slice's OBSERVATION CHANNEL: `menu_symbol` reads it back off the
+/// live element's automation peer, which works precisely because it is
+/// the surface a screen-reader user gets. Reading kaya's own model
+/// instead would agree with itself no matter what was drawn.
+///
+/// The name comes from `wire::symbol_name` — the spec's own table —
+/// rather than from a string typed here, so a renamed concept cannot
+/// mean one thing to the harness and another to the icon.
+fn symbol_icon(value: i64) -> windows_core::Result<Option<IconElement>> {
+    let Some(symbol) = symbol_from_wire(value) else {
+        return Ok(None);
+    };
+    let Some(name) = crate::wire::symbol_name(value) else {
+        return Ok(None);
+    };
+    let element: IconElement = match fluent_icon(symbol) {
+        FluentIcon::Member(member) => {
+            let icon = SymbolIcon::new()?;
+            icon.SetSymbol(member)?;
+            icon.cast()?
+        }
+        FluentIcon::Glyph(glyph) => {
+            // NO FontFamily on purpose: an unset one resolves through
+            // SymbolThemeFontFamily, which is the theme resource that
+            // also carries the Windows 10 fallback. Naming a font here
+            // would opt out of both.
+            let icon = FontIcon::new()?;
+            icon.SetGlyph(&HSTRING::from(glyph))?;
+            icon.cast()?
+        }
+    };
+    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
+        &element,
+        &HSTRING::from(name),
+    )?;
+    Ok(Some(element))
+}
+
+/// The controls with an `Icon` slot, as one surface.
+///
+/// WinUI puts `Icon` on each class separately with no common base, so
+/// without this the lowering would be five copies of the same three
+/// lines and the read another five. The impl list is also the honest
+/// statement of WHICH kinds have the slot: `MenuBarItem` is absent
+/// because it has none — 243 members in the pinned metadata, `Title`
+/// and `Items` among them and no `Icon` anywhere.
+trait IconSlot {
+    fn set_icon_element(&self, icon: &IconElement) -> windows_core::Result<()>;
+    /// `Err` for an EMPTY slot as much as for a failure: the property
+    /// returns a null pointer when nothing is set, and windows-core
+    /// turns that into `E_POINTER`. Callers that need to tell the two
+    /// apart compare the code (see [`MenuIcon`]).
+    fn icon_element(&self) -> windows_core::Result<IconElement>;
+}
+
+macro_rules! icon_slot {
+    ($($ty:ty),+ $(,)?) => {$(
+        impl IconSlot for $ty {
+            fn set_icon_element(&self, icon: &IconElement) -> windows_core::Result<()> {
+                self.SetIcon(icon)
+            }
+            fn icon_element(&self) -> windows_core::Result<IconElement> {
+                self.Icon()
+            }
+        }
+    )+};
+}
+
+// THE WINUI 3 HIERARCHY IS NOT THE UWP ONE, and this list is where it
+// shows. Under UWP `ToggleMenuFlyoutItem` derives from
+// MenuFlyoutItemBase and has no icon at all; in the pinned WinUI 2.2.1
+// metadata it derives from `MenuFlyoutItem`, so the checkable kind and
+// the radio option inherit the slot. Read from the metadata, not from
+// the UWP documentation a search finds first.
+icon_slot!(
+    MenuFlyoutItem,
+    ToggleMenuFlyoutItem,
+    RadioMenuFlyoutItem,
+    MenuFlyoutSubItem,
+    NavigationViewItem,
+);
+
+/// Stamp a concept onto a control's icon slot. One place, so every kind
+/// that HAS a slot gets identical treatment and an unset symbol is
+/// simply no icon (the `attach_accelerator` precedent).
+fn apply_symbol(target: &impl IconSlot, symbol: i64) -> windows_core::Result<()> {
+    let Some(icon) = symbol_icon(symbol)? else {
+        return Ok(());
+    };
+    target.set_icon_element(&icon)
+}
+
+/// What an item's icon slot holds — four outcomes, kept apart because
+/// they fail for four different reasons and the harness prints the one
+/// it measured.
+enum MenuIcon {
+    Present(IconElement),
+    /// The slot exists and is empty.
+    Empty,
+    /// The item's KIND has no icon slot on this platform.
+    NoSlot,
+    /// Reading the slot failed for a reason that is not emptiness.
+    Unreadable(windows_core::Error),
+}
+
+/// The semantic name an icon element publishes to UIA — the read half
+/// of [`symbol_icon`], and the one place that walks from an element to
+/// its automation peer for this purpose.
+///
+/// TOTAL: every failure is a short description of WHAT WAS MEASURED,
+/// never a panic and never a guess (CLAUDE.md invariant 3). The three
+/// answers are distinguishable on purpose — an element with no peer, a
+/// peer with an empty name, and a name — because they fail for
+/// different reasons and the reader chases the sentence.
+fn icon_uia_name(icon: &IconElement) -> String {
+    use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+    let Ok(fe) = icon.cast::<bindings::Microsoft::UI::Xaml::FrameworkElement>() else {
+        return "the icon element is not a FrameworkElement".to_owned();
+    };
+    // CreatePeerForElement first, FromElement second — the `ax` read's
+    // ladder, and for its measured reason: an element with no peer
+    // class of its own (a Grid there, an icon here) has no peer until
+    // one is made, and FromElement alone reported such elements absent
+    // from a tree UIA is perfectly willing to describe.
+    let peer = match FrameworkElementAutomationPeer::CreatePeerForElement(&fe) {
+        Ok(p) => p,
+        Err(_) => match FrameworkElementAutomationPeer::FromElement(&fe) {
+            Ok(p) => p,
+            // Same success-coded-error rule as MenuIcon::Empty: a NULL
+            // peer means the element genuinely has none, while a
+            // failure HRESULT means the call itself broke. The `ax`
+            // read collapses both into one sentence; they are different
+            // states and this one keeps them apart.
+            Err(e) if e.code().is_ok() => {
+                return "the icon has no automation peer".to_owned()
+            }
+            Err(e) => return format!("the icon's automation peer could not be made: {e}"),
+        },
+    };
+    // An element with no name publishes the EMPTY string, not an error:
+    // HSTRING is a clone type, so a null handle arrives as `Ok("")`
+    // (windows-core 0.62.2 src/type.rs, the CloneType `from_abi`) —
+    // which is why the empty case is a match guard here and not another
+    // error arm.
+    match peer.GetName() {
+        Ok(name) if name.is_empty() => {
+            // A real defect this read can see: kaya's lowering always
+            // sets the name, so an icon without one was built somewhere
+            // else or by a path that dropped it.
+            "the icon publishes no accessibility name".to_owned()
+        }
+        Ok(name) => name.to_string(),
+        Err(e) => format!("the icon's accessibility name could not be read: {e}"),
     }
 }
 
@@ -1968,6 +2358,10 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
         // content-stealing trap (docs/traps.md).
         item.SetContent(&PropertyValue::CreateString(&HSTRING::from(&**title))?)?;
         item.SetTag(&PropertyValue::CreateUInt64(*sid)?)?;
+        // The switcher entry's icon rides its OWN slot, not the
+        // content, so the title stays a plain string and the
+        // content-stealing trap above stays shut.
+        apply_symbol(&item, core.section_panes[sid].symbol)?;
         nav.MenuItems()?.Append(&item)?;
         core.section_items.insert(*sid, item);
     }
@@ -3536,6 +3930,13 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
             let bar_item = MenuBarItem::new()?;
             bar_item.SetTitle(&HSTRING::from(&*label))?;
             bar_item.SetIsEnabled(menu_effective_enabled(core, top))?;
+            // NO SYMBOL HERE, AND IT IS THE PLATFORM'S GAP, NOT AN
+            // OVERSIGHT: MenuBarItem has no Icon slot in the pinned
+            // metadata (Title and Items, 243 members, no Icon), so a
+            // symbol declared on a top-level grouping cannot be drawn
+            // on this host. It is dropped rather than approximated, and
+            // `menu_symbol` reports exactly that for a bar path instead
+            // of the "no icon" that would blame the app.
             // A bar-level radio_group is a top-level menu whose
             // options use the checkmark idiom — the same inline
             // materialization, one level up (the mac segment's shape).
@@ -3629,7 +4030,7 @@ fn build_menu_items(
 ) -> windows_core::Result<()> {
     use windows_core::Interface as _;
     for &id in ids {
-        let (kind, label, checked, value, shortcut, children) = {
+        let (kind, label, checked, value, shortcut, symbol, children) = {
             let m = &core.menu_models[&id];
             (
                 m.kind,
@@ -3637,6 +4038,7 @@ fn build_menu_items(
                 m.checked,
                 m.value,
                 m.shortcut.clone(),
+                m.symbol,
                 m.children.clone(),
             )
         };
@@ -3649,6 +4051,7 @@ fn build_menu_items(
                 let item = MenuFlyoutItem::new()?;
                 item.SetText(&HSTRING::from(&*label))?;
                 item.SetIsEnabled(enabled)?;
+                apply_symbol(&item, symbol)?;
                 attach_accelerator(&item.KeyboardAccelerators()?, &shortcut)?;
                 let handler = RoutedEventHandler::new(move |_, _| {
                     menu_user_activate(id, attachment);
@@ -3663,6 +4066,11 @@ fn build_menu_items(
                 item.SetText(&HSTRING::from(&*label))?;
                 item.SetIsChecked(checked)?;
                 item.SetIsEnabled(enabled)?;
+                // The checkable kind takes an icon like any other leaf,
+                // because in WinUI 3 it descends from MenuFlyoutItem
+                // (see the IconSlot impl list) — the UWP class it is
+                // usually confused with has no slot at all.
+                apply_symbol(&item, symbol)?;
                 attach_accelerator(&item.KeyboardAccelerators()?, &shortcut)?;
                 let handler = RoutedEventHandler::new(move |_, _| {
                     menu_user_activate(id, attachment);
@@ -3676,6 +4084,7 @@ fn build_menu_items(
                 let sub = MenuFlyoutSubItem::new()?;
                 sub.SetText(&HSTRING::from(&*label))?;
                 sub.SetIsEnabled(enabled)?;
+                apply_symbol(&sub, symbol)?;
                 build_menu_items(core, &sub.Items()?, &children, attachment)?;
                 dest.Append(&sub.cast::<MenuFlyoutItemBase>()?)?;
                 core.menu_natives.insert((attachment, id), MenuNative::Sub(sub));
@@ -3686,9 +4095,13 @@ fn build_menu_items(
                 // (RadioMenuFlyoutItem.GroupName per radio group);
                 // the GROUP mints no chrome of its own here.
                 for (index, &option) in children.iter().enumerate() {
-                    let (option_label, option_shortcut) = {
+                    // EACH OPTION'S OWN symbol, never the group's: the
+                    // group mints no chrome here, so there is nothing
+                    // for its symbol to ride, and reusing it would put
+                    // one concept on every option.
+                    let (option_label, option_shortcut, option_symbol) = {
                         let m = &core.menu_models[&option];
-                        (m.label.clone(), m.shortcut.clone())
+                        (m.label.clone(), m.shortcut.clone(), m.symbol)
                     };
                     let option_enabled = menu_effective_enabled(core, option);
                     let radio = RadioMenuFlyoutItem::new()?;
@@ -3696,6 +4109,7 @@ fn build_menu_items(
                     radio.SetGroupName(&HSTRING::from(format!("kmg{id}")))?;
                     radio.SetIsChecked(value == index as f64)?;
                     radio.SetIsEnabled(option_enabled)?;
+                    apply_symbol(&radio, option_symbol)?;
                     attach_accelerator(&radio.KeyboardAccelerators()?, &option_shortcut)?;
                     let handler = RoutedEventHandler::new(move |_, _| {
                         menu_user_activate(option, attachment);
@@ -6611,6 +7025,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     window: window.0,
                     pane,
                     title: String::new(),
+                    symbol: 0,
                     root: None,
                 },
             );
@@ -6646,6 +7061,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // Day-one slot: accepted; the switcher TITLE is the
                 // harness observable.
                 (SectionProp::Icon, Value::Blob(_)) => {}
+                // THE SEMANTIC ICON (docs/styling-plan.md D6):
+                // NavigationView's own Icon slot, the platform's idiom
+                // for a switcher entry. Stamped onto the live item when
+                // there is one; `refresh_sections` stamps it on the
+                // ones it mints later.
+                (SectionProp::Symbol, Value::I64(symbol)) => {
+                    record.symbol = *symbol;
+                    if let Some(item) = core.section_items.get(&section.0) {
+                        apply_symbol(item, *symbol)?;
+                    }
+                }
                 (p, v) => unreachable!("scene validated section prop {p:?}/{v:?}"),
             }
         }
@@ -6665,6 +7091,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     primary: false,
                     role: String::new(),
                     shortcut: String::new(),
+                    symbol: 0,
                     children: Vec::new(),
                     parent: None,
                 },
@@ -6736,6 +7163,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // the focused widget, and its enablement is the
                 // offer/accepts intersection, so the role is recorded
                 // and the role items resync now.
+                // THE SEMANTIC ICON (docs/styling-plan.md D6). Retained
+                // and drawn by the coalesced rebuild, like the label
+                // and the chord; `menu_symbol` still reads the
+                // materialized item rather than this copy.
+                MenuProp::Symbol => {
+                    model.symbol = match &value {
+                        Value::I64(v) => *v,
+                        other => unreachable!("kaya: symbol wants I64, the root passed {other:?}"),
+                    }
+                }
                 MenuProp::Role => {
                     model.role = crate::protocol::prop_str(&value).to_owned();
                     // AN AUTHORED ROLE IS ITSELF THE ARMING. Undo's
@@ -9283,6 +9720,66 @@ impl crate::harness::Stage for WinUiStage {
                         None => "no checked option".to_owned(),
                     }
                 }
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn menu_symbol(&self, path: &str) -> String {
+        let path = path.to_owned();
+        // FROM UIA, NEVER FROM THE MODEL. The answer is the name the
+        // icon in the REAL item's Icon slot publishes to its automation
+        // peer — what an assistive client hears — so a backend that
+        // decoded the symbol prop and drew nothing fails this read, and
+        // so does one that drew an icon and named it wrong.
+        Self::on_ui_read(move |core| {
+            // NO REFRESH STEP HERE, unlike menu_state, and the
+            // difference is deliberate: that read re-derives role
+            // enablement because a clipboard role's enablement MOVES
+            // with no menu traffic at all. A symbol changes only
+            // through a prop write, which sets menus_touched and forces
+            // the coalesced rebuild before this read can run — both are
+            // on the UI thread, so there is no interleaving.
+            //
+            // Open-context EXCLUSIVITY, exactly as menu_state has it:
+            // while a context menu is presented it owns resolution, and
+            // a miss reads as the retryable "no such item" rather than
+            // falling back to the bar.
+            let (roots, attachment) = match &core.open_context {
+                Some((widget, _)) => (
+                    core.context_roots.get(widget).cloned().unwrap_or_default(),
+                    MenuAttachment::Context(*widget),
+                ),
+                None => (
+                    core.menu_windows.get(&0).cloned().unwrap_or_default(),
+                    MenuAttachment::Window(0),
+                ),
+            };
+            let Some(item) = resolve_menu_path(core, &path, &roots) else {
+                return Ok("no such item".to_owned());
+            };
+            let Some(native) = core.menu_natives.get(&(attachment, item)) else {
+                // An inline nested grouping node mints no chrome of its
+                // own (the enablement read's rule).
+                return Ok("no such item".to_owned());
+            };
+            Ok(match native.icon() {
+                MenuIcon::Present(icon) => icon_uia_name(&icon),
+                // WHAT THIS MEASURED: the item is in the real menu and
+                // its icon slot is empty. It deliberately does NOT say
+                // whether the app asked for one — this reader cannot
+                // tell "no symbol declared" from "declared and never
+                // lowered", and a diagnostic may only print what it
+                // measured (CLAUDE.md invariant 3).
+                MenuIcon::Empty => "no icon on the menu item".to_owned(),
+                // The one honest answer for a top-level bar grouping:
+                // WinUI's MenuBarItem has no icon slot at all, so this
+                // is a statement about the PLATFORM, and saying "no
+                // icon" here would point the reader at the app instead.
+                MenuIcon::NoSlot => {
+                    "a WinUI MenuBarItem has no icon slot (top-level menu)".to_owned()
+                }
+                MenuIcon::Unreadable(e) => format!("the item's icon slot could not be read: {e}"),
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))

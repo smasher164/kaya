@@ -22,16 +22,22 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
     let file = tx.menu(
         "File", enabled: canExport,
         items: [
-            tx.item("Save", shortcut: "primary+s") { t in
+            // THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT,
+            // drawn by each platform in its own symbol set. `done` is
+            // the checkmark idiom — the vocabulary has no `save` on
+            // purpose (Apple's own catalog has no save-specific glyph
+            // either).
+            tx.item("Save", shortcut: "primary+s", symbol: .done) { t in
                 t.write(status, .str("saved"))
             },
-            tx.item("Export", enabled: canExport),
+            tx.item("Export", enabled: canExport, symbol: .forward),
             share,
         ])
     let view = tx.menu(
         "View",
         items: [
-            tx.toggle("Details", checked: details) { t, on in
+            // A toggle carries a symbol like any other leaf.
+            tx.toggle("Details", checked: details, symbol: .info) { t, on in
                 t.write(status, .str(on ? "details on" : "details off"))
             }
         ])
@@ -48,7 +54,7 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
     // Catalog built live: items are shared across stamped copies; the
     // template only attaches, and each activation carries its key path.
     let catalog = tx.contextCatalog(items: [
-        tx.item("Remove") { t, keys in
+        tx.item("Remove", symbol: .delete) { t, keys in
             guard case .str(let group) = keys[0], case .str(let item) = keys[1] else {
                 return
             }
@@ -77,9 +83,9 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
             t.menu(
                 file, label: "Document",
                 items: [
-                    t.item("Publish", primary: true, onActivate: onShare)
+                    t.item("Publish", symbol: .copy, primary: true, onActivate: onShare)
                 ])
-            t.window(menus: [t.menu("Tools", items: [t.item("Inspect")])])
+            t.window(menus: [t.menu("Tools", items: [t.item("Inspect", symbol: .search)])])
         }
 
         let targetText = tx.signal(.str("rename target"))
@@ -87,7 +93,7 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
         tx.contextMenu(
             target,
             items: [
-                tx.item("Rename") { t in
+                tx.item("Rename", symbol: .edit) { t in
                     t.write(status, .str("renamed"))
                 }
             ])

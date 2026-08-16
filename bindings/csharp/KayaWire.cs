@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x426ae13f797cbb12;
+    public const ulong SpecHash = 0xf84da2a3fe758bc7;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -67,6 +67,7 @@ static class KayaWire
     public const uint EpropInterceptBack = 2;
     public const uint SpropTitle = 1;
     public const uint SpropIcon = 2;
+    public const uint SpropSymbol = 3;
     public const uint MenuKindMenu = 1;
     public const uint MenuKindAction = 2;
     public const uint MenuKindToggle = 3;
@@ -81,6 +82,7 @@ static class KayaWire
     public const uint MpropPrimary = 6;
     public const uint MpropShortcut = 7;
     public const uint MpropRole = 8;
+    public const uint MpropSymbol = 9;
     public const uint SectionsPresentationAuto = 0;
     public const uint SectionsPresentationBar = 1;
     public const uint SectionsPresentationSidebar = 2;
@@ -98,6 +100,26 @@ static class KayaWire
     public const uint RoleDestructive = 1;
     public const uint RoleProminent = 2;
     public const uint RoleHeading = 3;
+    public const uint SymbolAdd = 1;
+    public const uint SymbolRemove = 2;
+    public const uint SymbolDelete = 3;
+    public const uint SymbolEdit = 4;
+    public const uint SymbolDone = 5;
+    public const uint SymbolClose = 6;
+    public const uint SymbolSearch = 7;
+    public const uint SymbolSettings = 8;
+    public const uint SymbolRefresh = 9;
+    public const uint SymbolInfo = 10;
+    public const uint SymbolWarning = 11;
+    public const uint SymbolBack = 12;
+    public const uint SymbolForward = 13;
+    public const uint SymbolMore = 14;
+    public const uint SymbolCopy = 15;
+    public const uint SymbolPaste = 16;
+    public const uint SymbolStar = 17;
+    public const uint SymbolLock = 18;
+    public const uint SymbolPerson = 19;
+    public const uint SymbolHome = 20;
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
@@ -1313,6 +1335,23 @@ static class KayaWire
         return Finish(stream, w, TxKindSetSectionProp);
     }
 
+    /// set_section_prop with a constant symbol value.
+    public static byte[] TxSetSectionSymbol(ulong section, long symbol)
+    {
+        var w = Begin(out var stream);
+        w.Write(section); w.Write(SpropSymbol); w.Write(SourceConst);
+        EncodeValue(w, symbol);
+        return Finish(stream, w, TxKindSetSectionProp);
+    }
+
+    /// set_section_prop with a signal-bound symbol value.
+    public static byte[] TxBindSectionSymbol(ulong section, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(section); w.Write(SpropSymbol); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetSectionProp);
+    }
+
     static readonly HashSet<string> ShortcutNamedKeys = new HashSet<string> { "enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket" };
 
     /// Canonicalize a shortcut spelling to the wire form: lowercase
@@ -1456,6 +1495,15 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(item); w.Write(MpropRole); w.Write(SourceConst);
         EncodeValue(w, role);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
+    /// set_menu_prop with a constant symbol value.
+    public static byte[] TxSetMenuSymbol(ulong item, long symbol)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropSymbol); w.Write(SourceConst);
+        EncodeValue(w, symbol);
         return Finish(stream, w, TxKindSetMenuProp);
     }
 

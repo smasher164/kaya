@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x426ae13f797cbb12
+let kayaSpecHash: UInt64 = 0xf84da2a3fe758bc7
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -87,6 +87,7 @@ private let wpropDirty: UInt32 = 7
 private let wpropInset: UInt32 = 8
 private let spropTitle: UInt32 = 1
 private let spropIcon: UInt32 = 2
+private let spropSymbol: UInt32 = 3
 private let sectionsPresentationAuto: Int64 = 0
 private let sectionsPresentationBar: Int64 = 1
 private let sectionsPresentationSidebar: Int64 = 2
@@ -112,6 +113,7 @@ private let mpropIcon: UInt32 = 5
 private let mpropPrimary: UInt32 = 6
 private let mpropShortcut: UInt32 = 7
 private let mpropRole: UInt32 = 8
+private let mpropSymbol: UInt32 = 9
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let kindColumn: UInt32 = 1
@@ -147,6 +149,29 @@ private let propInset: UInt32 = 17
 private let roleDestructive: Int64 = 1
 private let roleProminent: Int64 = 2
 private let roleHeading: Int64 = 3
+/// THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
+/// docs/styling-plan.md D6). APPEND-ONLY wire values; the SF Symbols
+/// spelling each one maps to is kayaSFSymbol below.
+private let symbolAdd: Int64 = 1
+private let symbolRemove: Int64 = 2
+private let symbolDelete: Int64 = 3
+private let symbolEdit: Int64 = 4
+private let symbolDone: Int64 = 5
+private let symbolClose: Int64 = 6
+private let symbolSearch: Int64 = 7
+private let symbolSettings: Int64 = 8
+private let symbolRefresh: Int64 = 9
+private let symbolInfo: Int64 = 10
+private let symbolWarning: Int64 = 11
+private let symbolBack: Int64 = 12
+private let symbolForward: Int64 = 13
+private let symbolMore: Int64 = 14
+private let symbolCopy: Int64 = 15
+private let symbolPaste: Int64 = 16
+private let symbolStar: Int64 = 17
+private let symbolLock: Int64 = 18
+private let symbolPerson: Int64 = 19
+private let symbolHome: Int64 = 20
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -171,6 +196,99 @@ private let valueBlob: UInt32 = 5
     typealias KayaPlatformImage = NSImage
 #else
     typealias KayaPlatformImage = UIImage
+#endif
+
+/// THE SEMANTIC ICON TABLE (docs/styling-plan.md D6): one row per
+/// vocabulary entry — the wire value, the name kaya's apps write, and
+/// the SF Symbols spelling Apple ships.
+///
+/// THE SF COLUMN IS NOT RECALLED, and must never be edited from the SF
+/// Symbols app. It was generated against
+/// `/System/Library/CoreServices/CoreGlyphs.bundle/.../name_availability.plist`
+/// and every string resolved live through
+/// `NSImage(systemSymbolName:)` with failing canaries beside it
+/// (styling/symbols-sf-symbols.md). Two traps live in this column:
+///
+///  - `copy`/`paste` are `doc.on.doc`/`doc.on.clipboard`, NOT
+///    `document.on.document`/`document.on.clipboard`. Apple renamed
+///    that family in SF Symbols 6; the NEW names need macOS 15 / iOS 18
+///    and fail as a BLANK IMAGE below that, with no compile error and
+///    no runtime complaint. Worse, Apple's own search index has already
+///    moved: searching the catalog for "copy" returns only the macOS-15
+///    name. kaya's floor is macOS 13 / iOS 16, so the old spellings are
+///    the correct ones and they still resolve on the newest OS.
+///  - `home` is `house`. There is no symbol called `home`.
+///
+/// The highest requirement in this column is macOS 11 / iOS 14
+/// (`gearshape`, `chevron.backward`, `chevron.forward`), comfortably
+/// under the floor.
+///
+/// AND NO SCENE CAN GUARD THIS COLUMN — measured 2026-08-16, not
+/// assumed. Shipping `document.on.document` here and running the menus
+/// scene on this machine PASSED: the macOS-15 name resolves perfectly
+/// on a current OS, and every machine the project runs on is a current
+/// OS. A resolution check only fails on a machine old enough to BE the
+/// floor, so the assertion that looks like the guard is vacuous
+/// everywhere it is run. The only thing that can answer is Apple's own
+/// `name_availability.plist` — every name's introduction year against
+/// the declared floor — which is a static gate, not a scene step. See
+/// styling/check-symbols.sh; it belongs at tools/check-symbols.sh.
+let kayaSymbolTable: [(value: Int64, name: String, sf: String)] = [
+    (symbolAdd, "add", "plus"),
+    (symbolRemove, "remove", "minus"),
+    (symbolDelete, "delete", "trash"),
+    (symbolEdit, "edit", "pencil"),
+    (symbolDone, "done", "checkmark"),
+    (symbolClose, "close", "xmark"),
+    (symbolSearch, "search", "magnifyingglass"),
+    (symbolSettings, "settings", "gearshape"),
+    (symbolRefresh, "refresh", "arrow.clockwise"),
+    (symbolInfo, "info", "info.circle"),
+    (symbolWarning, "warning", "exclamationmark.triangle"),
+    (symbolBack, "back", "chevron.backward"),
+    (symbolForward, "forward", "chevron.forward"),
+    (symbolMore, "more", "ellipsis.circle"),
+    (symbolCopy, "copy", "doc.on.doc"),
+    (symbolPaste, "paste", "doc.on.clipboard"),
+    (symbolStar, "star", "star"),
+    (symbolLock, "lock", "lock"),
+    (symbolPerson, "person", "person"),
+    (symbolHome, "home", "house"),
+]
+
+/// The SEMANTIC NAME of a wire symbol value. The root already refused
+/// anything outside the vocabulary, so a miss here means the
+/// interpreter and the core disagree — which the spec hash exists to
+/// make impossible — and the answer says exactly that rather than
+/// inventing a name.
+func kayaSymbolName(_ value: Int64) -> String? {
+    kayaSymbolTable.first { $0.value == value }?.name
+}
+
+/// The SF Symbols spelling for a wire symbol value.
+func kayaSFSymbol(_ value: Int64) -> String? {
+    kayaSymbolTable.first { $0.value == value }?.sf
+}
+
+#if os(macOS)
+    /// The platform image for a symbol, with THE SEMANTIC NAME as its
+    /// accessibility description.
+    ///
+    /// The description is not decoration: an icon that carries meaning
+    /// must say what it means to an assistive client, and Apple's own
+    /// initializer makes the description a required argument for
+    /// exactly that reason. It is also this slice's OBSERVATION
+    /// CHANNEL — the harness reads it back off the real NSMenuItem —
+    /// which works precisely because it is the accessibility surface a
+    /// screen-reader user gets. Reading kaya's model instead would
+    /// agree with itself.
+    ///
+    /// nil when the name does not resolve on this OS, which is the
+    /// rename trap's failure mode; the caller reports what it measured.
+    func kayaSymbolImage(_ value: Int64) -> NSImage? {
+        guard let sf = kayaSFSymbol(value), let name = kayaSymbolName(value) else { return nil }
+        return NSImage(systemSymbolName: sf, accessibilityDescription: name)
+    }
 #endif
 
 @Observable
@@ -400,6 +518,12 @@ final class KayaMenuItemModel: Identifiable {
     /// Optional icon, used by phone promotion; ignored where native
     /// menu dress has no icon.
     var icon: KayaPlatformImage?
+    /// The SEMANTIC ICON's wire value, 0 = none (docs/styling-plan.md
+    /// D6). Stored as the VALUE and resolved to a glyph at build time,
+    /// not stored as a resolved image: the mac bar is rebuilt from this
+    /// model on every catalog mutation, and a cached image would
+    /// survive a lowering that stopped working.
+    var symbol: Int64 = 0
     var children: [KayaMenuItemModel] = []
 
     init(id: UInt64, kind: UInt32) {
@@ -418,6 +542,9 @@ final class KayaSectionModel: Identifiable {
     let id: UInt64
     var root: KayaNode?
     var title = ""
+    /// The switcher item's SEMANTIC ICON, 0 = none
+    /// (docs/styling-plan.md D6).
+    var symbol: Int64 = 0
     var entries: [KayaEntryModel] = []
 
     init(id: UInt64) {
@@ -3710,6 +3837,18 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     // the harness observable, so the blob is accepted
                     // and title rendering stays authoritative.
                     break
+                case (spropSymbol, valueI64):
+                    // The names-not-bytes half: the tab item and the
+                    // sidebar row draw the platform's own glyph for the
+                    // concept (docs/styling-plan.md D6). VALUE AT +24,
+                    // not +20: the I64 payload is 8-aligned past the
+                    // type word, exactly like the widget arms — +20 is
+                    // padding, and reading it decoded garbage that
+                    // rendered as NO icon (caught by the capture,
+                    // 2026-08-16; sections had no symbol assert to
+                    // catch it first — see the report's gap note).
+                    section.symbol =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 default:
                     fatalError("kaya: bad section prop \(prop) value type \(svType)")
                 }
@@ -3796,6 +3935,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     // placeholder class, never a crash.
                     let handle = raw.loadUnaligned(fromByteOffset: body + 24, as: UInt64.self)
                     item.icon = blobs[handle].flatMap { KayaPlatformImage(data: $0) }
+                case (mpropSymbol, valueI64):
+                    // The SEMANTIC ICON (docs/styling-plan.md D6): a
+                    // concept, resolved to this platform's glyph when
+                    // the item is materialized.
+                    item.symbol =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 default:
                     fatalError("kaya: bad menu prop \(prop) value type \(mvType)")
                 }
@@ -6781,6 +6926,32 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("menu \"\(path)\" reads \"\(got)\", wanted \"\(wantS)\"")
                 }
+            case "expect_menu_symbol":
+                // THE SEMANTIC ICON, read from the REAL item
+                // (docs/styling-plan.md D6). Same shape as expect_menu
+                // above: a quoted path, then the quoted semantic name.
+                let restLine = String(line.dropFirst(parts[0].count))
+                guard let (path, wantSpec) = kayaQuotedPrefix(restLine),
+                    let (wantSymbol, tail) = kayaQuotedPrefix(wantSpec), tail.isEmpty
+                else {
+                    failures.append(
+                        "expect_menu_symbol wants a quoted path and a quoted symbol name: \(line)")
+                    break
+                }
+                if let bad = kayaCheckMenuPath(path) {
+                    failures.append("\(bad): \(line)")
+                    break
+                }
+                let gotSymbol = DispatchQueue.main.sync { kayaMenuSymbolRead(path) }
+                if gotSymbol == wantSymbol {
+                    observed.append("menu \"\(path)\" symbol \"\(wantSymbol)\"")
+                } else {
+                    // The MEASURED answer rides the failure: it is what
+                    // tells a wrong concept from an item with no image
+                    // from an item that is not there yet.
+                    failures.append(
+                        "menu \"\(path)\" symbol \"\(gotSymbol)\", wanted \"\(wantSymbol)\"")
+                }
             case "menu_activate":
                 // An action, silent like click. The OPEN context menu
                 // owns resolution while presented (a leaf fires once
@@ -9463,6 +9634,75 @@ func kayaModelMenuState(_ item: KayaMenuItemModel, _ aspect: KayaMenuAspect) -> 
     }
 }
 
+/// THE expect_menu_symbol READ (docs/styling-plan.md D6): the semantic
+/// name the item's REAL icon carries.
+///
+/// macOS reads it off the materialized NSMenuItem's image
+/// accessibilityDescription — the item AppKit will actually draw, not
+/// kaya's model — so an arm that decoded the prop and never built an
+/// image must fail. That description is the accessibility surface a
+/// VoiceOver user gets, which is why reading it is both the strongest
+/// available observation and a claim worth making: an icon that means
+/// something has to say what it means.
+///
+/// iOS has no retained item registry to read (UIMenu elements are
+/// rebuilt on demand by UIMenuSystem, and kaya keeps no handle on
+/// them), exactly as kayaMenuStateRead already documents for state. So
+/// this arm answers with what it CAN measure: it resolves the same SF
+/// name the lowering would use and reports the semantic name only if
+/// UIImage(systemName:) actually produces an image on this OS. That
+/// catches the failure this vocabulary is most exposed to — a symbol
+/// name above the deployment floor, which fails as a silent blank —
+/// and it does NOT claim the menu was built, which nothing here can
+/// see. A weaker claim stated plainly beats a stronger-looking one
+/// that is vacuous.
+///
+/// TOTAL, like kayaMenuStateRead: every failure is a short description
+/// and a retryable non-match, never a panic.
+func kayaMenuSymbolRead(_ path: String) -> String {
+    let item: KayaMenuItemModel?
+    if let wid = kayaOpenContextWidget {
+        // Open-context EXCLUSIVITY, the state read's rule verbatim.
+        item = kayaScene.contextRoots[wid].flatMap { kayaResolveMenuPath(path, roots: $0) }
+    } else {
+        item = kayaResolveMenuPath(path, roots: kayaPresentedCatalog())
+    }
+    guard let item else { return "no such item" }
+    #if os(macOS)
+        kayaEnsureMenuSegment()
+        guard let nsItem = kayaOwnedNSMenuItem(item.id) else { return "no such item" }
+        guard let image = nsItem.image else {
+            // WHAT THIS MEASURED: the item exists in the real menu and
+            // carries no image. It deliberately does NOT say whether
+            // the app asked for one — this reader cannot see the
+            // difference between "no symbol declared" and "declared and
+            // never lowered", and a diagnostic may only print what it
+            // measured (CLAUDE.md invariant 3).
+            return "no image on the menu item"
+        }
+        guard let described = image.accessibilityDescription else {
+            // An image with no description is a REAL defect this read
+            // can see: kaya's own lowering always sets one, so an image
+            // without it came from somewhere else or from a builder
+            // that dropped the argument.
+            return "menu item image carries no accessibility description"
+        }
+        return described
+    #else
+        guard item.symbol != 0 else { return "no symbol on the item" }
+        guard let sf = kayaSFSymbol(item.symbol), let name = kayaSymbolName(item.symbol) else {
+            return "symbol \(item.symbol) is not in this interpreter's table"
+        }
+        guard UIImage(systemName: sf) != nil else {
+            // The rename trap, caught where it actually bites: the
+            // name is reported so the reader knows which spelling this
+            // OS refused rather than hunting a blank icon.
+            return "SF symbol \(sf) does not resolve on this OS"
+        }
+        return name
+    #endif
+}
+
 /// The expect_menu read: wherever the item surfaced — the OPEN context
 /// menu first (context items shadow the bar while presented), then the
 /// bar. macOS reads the REAL NSMenuItem state from the owned segment
@@ -9635,6 +9875,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 let submenu = NSMenu(title: child.label)
                 submenu.autoenablesItems = false  // docs/traps.md
             submenu.delegate = kayaMenuRefresher
+                kayaApplySymbol(holder, child.symbol)
                 kayaBuildNSMenuItems(into: submenu, children: child.children)
                 holder.submenu = submenu
                 menu.addItem(holder)
@@ -9647,6 +9888,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                     nsItem.representedObject = NSNumber(value: option.id)
                     nsItem.isEnabled = kayaMenuEffectiveEnabled(option)
                     nsItem.state = Int(child.value) == index ? .on : .off
+                    kayaApplySymbol(nsItem, option.symbol)
                     kayaApplyKeyEquivalent(nsItem, option.shortcut)
                     menu.addItem(nsItem)
                 }
@@ -9665,6 +9907,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 if child.kind == menuKindToggle {
                     nsItem.state = child.checked ? .on : .off
                 }
+                kayaApplySymbol(nsItem, child.symbol)
                 // A chord rides any leaf command: "Show Sidebar" wants
                 // its checkmark AND its key, and AppKit has never cared
                 // which kind of item carries a key equivalent.
@@ -9674,6 +9917,16 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 break  // radio_option outside its group: the closed grammar forbids it
             }
         }
+    }
+
+    /// One place applies a SEMANTIC ICON to a native item, so every
+    /// leaf and grouping kind gets identical treatment and an unset
+    /// symbol is simply no image (the kayaApplyKeyEquivalent
+    /// precedent). The image carries the semantic name as its
+    /// accessibility description — see kayaSymbolImage.
+    private func kayaApplySymbol(_ nsItem: NSMenuItem, _ symbol: Int64) {
+        guard symbol != 0 else { return }
+        nsItem.image = kayaSymbolImage(symbol)
     }
 
     /// One place applies a chord to a native item, so every leaf kind
@@ -9743,6 +9996,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             let holder = NSMenuItem(title: top.label, action: nil, keyEquivalent: "")
             holder.representedObject = NSNumber(value: top.id)
             holder.isEnabled = kayaMenuEffectiveEnabled(top)
+            kayaApplySymbol(holder, top.symbol)
             let submenu = NSMenu(title: top.label)
             submenu.autoenablesItems = false  // docs/traps.md
             submenu.delegate = kayaMenuRefresher
@@ -9772,6 +10026,9 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             nsItem.target = kayaMenuDispatch
             nsItem.representedObject = NSNumber(value: settings.id)
             nsItem.isEnabled = kayaMenuEffectiveEnabled(settings)
+            // The relocated item keeps its icon: the move is placement
+            // only, and every other prop follows it.
+            kayaApplySymbol(nsItem, settings.symbol)
             kayaApplyKeyEquivalent(nsItem, settings.shortcut)
             appMenu.insertItem(nsItem, at: kayaSettingsInsertionIndex(appMenu.items))
             kayaOwnedMenuItems.append(nsItem)
@@ -11803,7 +12060,18 @@ struct KayaSectionsView: View {
                                 get: { selection.wrappedValue },
                                 set: { if let sid = $0 { selection.wrappedValue = sid } })
                         ) { section in
-                            Text(section.title).tag(section.id)
+                            // Label, not Text, so a section that named
+                            // a SEMANTIC ICON gets the platform's own
+                            // glyph beside its title — the sidebar row
+                            // is where a source list wants one
+                            // (docs/styling-plan.md D6). The icon-less
+                            // case stays exactly the Text it was.
+                            if let sf = kayaSFSymbol(section.symbol) {
+                                Label(section.title, systemImage: sf)
+                                    .tag(section.id)
+                            } else {
+                                Text(section.title).tag(section.id)
+                            }
                         }
                         // EXPLICIT, not inherited: the sidebar style is
                         // what NavigationSplitView's sidebar column
@@ -11835,7 +12103,16 @@ struct KayaSectionsView: View {
         TabView(selection: selection) {
             ForEach(window.sections) { section in
                 KayaSectionPane(sectionId: section.id)
-                    .tabItem { Text(section.title) }
+                    .tabItem {
+                        // The tab bar is the switcher that most wants an
+                        // icon — a bare-text bottom bar is not the
+                        // platform's real thing (DESIGN.md, Sections).
+                        if let sf = kayaSFSymbol(section.symbol) {
+                            Label(section.title, systemImage: sf)
+                        } else {
+                            Text(section.title)
+                        }
+                    }
                     .tag(section.id)
             }
         }

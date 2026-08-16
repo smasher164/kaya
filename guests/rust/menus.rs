@@ -37,9 +37,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .window(kaya::DEFAULT_WINDOW)
             .title("menus")
             .menu("File", |m| {
-                let save = m.item("Save").shortcut("primary+s").id();
+                // THE SEMANTIC ICON (docs/styling-plan.md D6): a
+                // CONCEPT, drawn by each platform in its own symbol
+                // set. `done` is the checkmark idiom — the vocabulary
+                // has no `save` on purpose (Apple's own catalog has no
+                // save-specific glyph either).
+                let save = m
+                    .item("Save")
+                    .symbol(kaya::Symbol::Done)
+                    .shortcut("primary+s")
+                    .id();
                 msgs.on_menu_item(save, Msg::Save);
-                let _export = m.item("Export").enabled(can_export).id();
+                let _export = m
+                    .item("Export")
+                    .enabled(can_export)
+                    .symbol(kaya::Symbol::Forward)
+                    .id();
                 let share = m.item("Share").primary(true).id();
                 msgs.on_menu_item(share, Msg::Share);
                 share
@@ -49,7 +62,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
         let details_item = tx
             .window(kaya::DEFAULT_WINDOW)
-            .menu("View", |m| m.toggle("Details").checked(details).id())
+            // A toggle carries a symbol like any other leaf.
+            .menu("View", |m| {
+                m.toggle("Details").checked(details).symbol(kaya::Symbol::Info).id()
+            })
             .out;
         msgs.on_menu_toggle(details_item, Msg::Details);
 
@@ -67,7 +83,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let groups = tx.collection::<String>();
         // Catalog built live: items are shared across stamped copies; the
         // template only attaches, and each activation carries its key path.
-        let catalog = tx.context_catalog(|m| m.item("Remove").id());
+        let catalog =
+            tx.context_catalog(|m| m.item("Remove").symbol(kaya::Symbol::Delete).id());
         msgs.on_menu_item_node(catalog.out, Msg::Remove);
 
         let (root, items) = tx
@@ -82,7 +99,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
                 let target_text = tx.signal("rename target");
                 let target = tx.label(target_text).id(); // label#1
-                let rename = tx.context_menu(target, |m| m.item("Rename").id());
+                let rename = tx.context_menu(target, |m| {
+                    m.item("Rename").symbol(kaya::Symbol::Edit).id()
+                });
                 msgs.on_menu_item(rename, Msg::Rename);
 
                 // Remove's activation names BOTH keys (group, then item).
@@ -167,10 +186,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let publish = tx
                         .menu(file)
                         .label("Document")
-                        .append(|m| m.item("Publish").primary(true).id());
+                        .append(|m| {
+                            m.item("Publish").primary(true)
+                                .symbol(kaya::Symbol::Copy)
+                                .id()
+                        });
                     tx.window(kaya::DEFAULT_WINDOW)
                         .menu("Tools", |m| {
-                            m.item("Inspect").id();
+                            m.item("Inspect").symbol(kaya::Symbol::Search).id();
                         })
                         .id();
                     publish

@@ -174,6 +174,56 @@ enum KayaRole: Int64 {
     case heading = 3
 }
 
+/// THE SEMANTIC ICON VOCABULARY (the `symbol` spec enum;
+/// docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
+///
+/// An app names a CONCEPT and each backend draws its own platform's
+/// glyph for it: `copy` is `doc.on.doc` on Apple, `content_copy` on
+/// Material, `edit-copy-symbolic` on Adwaita, and no single asset is
+/// right on all three — SF Symbols are license-locked to Apple
+/// platforms, so a shared one is not even legal. The platform sets also
+/// metric-match the text beside them (weight, baseline) while a blob
+/// cannot. The `icon:` blob slot stays for genuinely app-specific art.
+///
+/// Closed, and small on purpose — the `KayaRole` trick one tier over.
+/// Apple keeps its own semantic set to fifteen entries. Growing it is a
+/// spec change with its gates, never a per-app escape hatch.
+///
+/// THE RAW VALUES ARE WIRE VALUES AND ARE APPEND-ONLY. A new concept
+/// takes 21; renumbering silently redraws every shipped app's menus.
+enum KayaSymbol: Int64 {
+    case add = 1
+    case remove = 2
+    /// Destroying something, the wastebasket idiom — distinct from
+    /// `remove`, which takes an item out of a list.
+    case delete = 3
+    case edit = 4
+    /// Confirmation, the checkmark idiom.
+    case done = 5
+    /// Dismissal, the ✕ idiom — not `delete`.
+    case close = 6
+    case search = 7
+    case settings = 8
+    case refresh = 9
+    case info = 10
+    case warning = 11
+    /// The direction-relative pair: every platform mirrors these under
+    /// a right-to-left layout, so they mean BACKWARD and FORWARD in
+    /// reading order, never "left" and "right".
+    case back = 12
+    case forward = 13
+    /// The overflow affordance (the ellipsis idiom).
+    case more = 14
+    case copy = 15
+    case paste = 16
+    /// Favourite.
+    case star = 17
+    case lock = 18
+    /// A person or account.
+    case person = 19
+    case home = 20
+}
+
 struct KayaWidget {
     let id: UInt64
 }
@@ -3014,9 +3064,23 @@ final class KayaAppTx {
         }
     }
 
-    private func menuTail(_ m: KayaMenuItem, _ enabled: KayaMenuBool?, _ icon: Data?) {
+    /// The tail every menu-item CONSTRUCTOR shares. The symbol arrives
+    /// here rather than in each constructor's own body ON PURPOSE: it is
+    /// a REQUIRED positional, so a constructor added later cannot reach
+    /// the tail without deciding about the slot — the same reason
+    /// `enabled` and `icon` already sit here.
+    ///
+    /// Two kinds are deliberately outside it, exactly as they are for
+    /// `icon`: `separator()`, which takes no props at all (the root
+    /// refuses a symbol on a separator), and the REOPENING
+    /// `menu(_ item:…)`, which mutates each prop it was handed and has
+    /// no create to share.
+    private func menuTail(
+        _ m: KayaMenuItem, _ enabled: KayaMenuBool?, _ icon: Data?, _ symbol: KayaSymbol?
+    ) {
         if let enabled { menuEnabled(m, enabled) }
         if let icon { tx.setMenuIcon(m.id, kayaRegisterBlob(icon)) }
+        if let symbol { tx.setMenuSymbol(m.id, symbol.rawValue) }
     }
 
     /// The closed standard-command vocabulary (DESIGN.md, Menus):
@@ -3071,16 +3135,24 @@ final class KayaAppTx {
     /// dispatch path; the handler rides the declaration and covers
     /// both). The shortcut is canonicalized by the binding's one
     /// parser; the root judges its anchor (window catalogs only).
+    ///
+    /// `symbol:` is the item's SEMANTIC ICON — a concept from the closed
+    /// [KayaSymbol] vocabulary that each backend draws in its own
+    /// platform's symbol set. It sits BESIDE `icon:`, not instead of it:
+    /// a name for the standard concepts, a blob for app-specific art.
+    /// Both are const-only. Every item constructor below takes it on the
+    /// same terms.
     func item(
         _ label: KayaMenuText, shortcut: String? = nil,
-        enabled: KayaMenuBool? = nil, icon: Data? = nil, primary: Bool = false,
+        enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        symbol: KayaSymbol? = nil, primary: Bool = false,
         role: String? = nil,
         onActivate: ((KayaAppTx) throws -> Void)? = nil
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_ACTION, label)
         if let shortcut { tx.setMenuShortcut(m.id, shortcut) }
         if let role { tx.setMenuRole(m.id, role) }
-        menuTail(m, enabled, icon)
+        menuTail(m, enabled, icon, symbol)
         if primary { tx.setMenuPrimary(m.id, true) }
         if let onActivate { app.menuActivated[m.id] = onActivate }
         return m
@@ -3092,10 +3164,11 @@ final class KayaAppTx {
     /// acts on. Context items take no shortcuts (root-checked).
     func item(
         _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        symbol: KayaSymbol? = nil,
         onActivate: @escaping (KayaAppTx, [KayaValue]) throws -> Void
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_ACTION, label)
-        menuTail(m, enabled, icon)
+        menuTail(m, enabled, icon, symbol)
         app.menuActivatedNode[m.id] = onActivate
         return m
     }
@@ -3105,13 +3178,14 @@ final class KayaAppTx {
     /// programmatic checked writes are QUIET (the echo doctrine).
     func toggle(
         _ label: KayaMenuText, checked: KayaMenuBool? = nil,
-        enabled: KayaMenuBool? = nil, icon: Data? = nil, shortcut: String? = nil,
+        enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        symbol: KayaSymbol? = nil, shortcut: String? = nil,
         onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_TOGGLE, label)
         if let checked { menuChecked(m, checked) }
         if let shortcut { tx.setMenuShortcut(m.id, shortcut) }
-        menuTail(m, enabled, icon)
+        menuTail(m, enabled, icon, symbol)
         if let onToggle { app.menuToggled[m.id] = onToggle }
         return m
     }
@@ -3121,11 +3195,12 @@ final class KayaAppTx {
     func toggle(
         _ label: KayaMenuText, checked: KayaMenuBool? = nil,
         enabled: KayaMenuBool? = nil, icon: Data? = nil,
+        symbol: KayaSymbol? = nil,
         onToggle: @escaping (KayaAppTx, [KayaValue], Bool) throws -> Void
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_TOGGLE, label)
         if let checked { menuChecked(m, checked) }
-        menuTail(m, enabled, icon)
+        menuTail(m, enabled, icon, symbol)
         app.menuToggledNode[m.id] = onToggle
         return m
     }
@@ -3134,11 +3209,11 @@ final class KayaAppTx {
     /// order IS the index vocabulary the group's value selects over.
     func option(
         _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
-        shortcut: String? = nil
+        symbol: KayaSymbol? = nil, shortcut: String? = nil
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_RADIO_OPTION, label)
         if let shortcut { tx.setMenuShortcut(m.id, shortcut) }
-        menuTail(m, enabled, icon)
+        menuTail(m, enabled, icon, symbol)
         return m
     }
 
@@ -3154,11 +3229,11 @@ final class KayaAppTx {
     /// subtree (the inherited-disabled contract).
     func menu(
         _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
-        items: [KayaMenuItem] = []
+        symbol: KayaSymbol? = nil, items: [KayaMenuItem] = []
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_MENU, label)
         for child in items { tx.menuItemAppend(m.id, child.id) }
-        menuTail(m, enabled, icon)
+        menuTail(m, enabled, icon, symbol)
         return m
     }
 
@@ -3170,7 +3245,8 @@ final class KayaAppTx {
     func menu(
         _ item: KayaMenuItem, label: KayaMenuText? = nil,
         enabled: KayaMenuBool? = nil, checked: KayaMenuBool? = nil,
-        value: KayaMenuIndex? = nil, icon: Data? = nil, primary: Bool? = nil,
+        value: KayaMenuIndex? = nil, icon: Data? = nil,
+        symbol: KayaSymbol? = nil, primary: Bool? = nil,
         shortcut: String? = nil, role: String? = nil, items: [KayaMenuItem] = []
     ) {
         for child in items { tx.menuItemAppend(item.id, child.id) }
@@ -3179,6 +3255,7 @@ final class KayaAppTx {
         if let checked { menuChecked(item, checked) }
         if let value { menuValue(item, value) }
         if let icon { tx.setMenuIcon(item.id, kayaRegisterBlob(icon)) }
+        if let symbol { tx.setMenuSymbol(item.id, symbol.rawValue) }
         if let primary { tx.setMenuPrimary(item.id, primary) }
         if let shortcut { tx.setMenuShortcut(item.id, shortcut) }
         if let role { tx.setMenuRole(item.id, role) }
@@ -3194,12 +3271,13 @@ final class KayaAppTx {
     func radioGroup(
         _ label: KayaMenuText, options: [KayaMenuItem],
         value: KayaMenuIndex? = nil, enabled: KayaMenuBool? = nil,
-        icon: Data? = nil, onSelect: ((KayaAppTx, Int) throws -> Void)? = nil
+        icon: Data? = nil, symbol: KayaSymbol? = nil,
+        onSelect: ((KayaAppTx, Int) throws -> Void)? = nil
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_RADIO_GROUP, label)
         for child in options { tx.menuItemAppend(m.id, child.id) }
         if let value { menuValue(m, value) }
-        menuTail(m, enabled, icon)
+        menuTail(m, enabled, icon, symbol)
         if let onSelect { app.menuSelected[m.id] = onSelect }
         return m
     }
@@ -3209,13 +3287,13 @@ final class KayaAppTx {
     func radioGroup(
         _ label: KayaMenuText, options: [KayaMenuItem],
         value: KayaMenuIndex? = nil, enabled: KayaMenuBool? = nil,
-        icon: Data? = nil,
+        icon: Data? = nil, symbol: KayaSymbol? = nil,
         onSelect: @escaping (KayaAppTx, [KayaValue], Int) throws -> Void
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_RADIO_GROUP, label)
         for child in options { tx.menuItemAppend(m.id, child.id) }
         if let value { menuValue(m, value) }
-        menuTail(m, enabled, icon)
+        menuTail(m, enabled, icon, symbol)
         app.menuSelectedNode[m.id] = onSelect
         return m
     }
@@ -3286,13 +3364,23 @@ final class KayaAppTx {
     /// USER switches to it — post-fact and NOT one-shot; a
     /// programmatic selectSection does not fire it (the echo
     /// doctrine).
+    ///
+    /// `symbol:` is the switcher item's SEMANTIC ICON — a concept from
+    /// the closed [KayaSymbol] vocabulary each backend draws in its own
+    /// platform's symbol set. A tab bar without icons is not the
+    /// platform's real thing, and a blob is the wrong primitive for a
+    /// STANDARD one. It sits beside the section's blob `icon` slot, for
+    /// app-specific art — which this construct has never spelled in any
+    /// binding but Rust's; `KayaWire.setSectionIcon` is the floor until
+    /// one of them grows the sugar.
     func addSection(
-        _ id: UInt64, title: String? = nil,
+        _ id: UInt64, title: String? = nil, symbol: KayaSymbol? = nil,
         onSelected: ((KayaAppTx) throws -> Void)? = nil,
         window: UInt64 = 0
     ) {
         tx.addSection(window, id)
         if let title { tx.setSectionTitle(id, title) }
+        if let symbol { tx.setSectionSymbol(id, symbol.rawValue) }
         if let onSelected { app.onSectionSelected(id, onSelected) }
     }
 

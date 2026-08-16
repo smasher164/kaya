@@ -46,6 +46,159 @@ const GROW_KEY: &str = "kaya-grow";
 /// mean too), and this is the one observation that needs both halves.
 const TRACK_KEY: &str = "kaya-track";
 
+// --- The semantic icon vocabulary onto Adwaita (docs/styling-plan.md D6) ---
+//
+// EVERY NAME BELOW IS COPIED FROM THE CATALOG REPORT, NOT RECALLED
+// (styling/symbols-adwaita.md §3). Recall is exactly what that column
+// punishes: `dialog-information-symbolic` is a LIGHTBULB and not the
+// circled "i" (§4.2), `edit-delete-symbolic` is an X in a circle and not
+// a trash can (§4.3), `preferences-system-symbolic` is a wrench and
+// screwdriver and not a gear (§4.4), and `emblem-favorite-symbolic` —
+// the obvious spelling of `star` — was a HEART and was deleted from the
+// theme in the 48 cycle (§4.5). Each of those reads right and draws
+// wrong, and GTK reports none of it: an unresolvable name falls back
+// SILENTLY, with the only notice behind `GTK_DEBUG=iconfallback` (§1).
+// Every name here is present in adwaita-icon-theme 43, 45, 48 AND
+// 50, so there is no version hole across the range kaya can meet.
+//
+// Full names including the `-symbolic` suffix, deliberately: GTK decides
+// symbolic-ness by string-matching that suffix, and the bare name takes
+// the fullcolor legacy path, which modern Adwaita mostly does not have
+// (§7). And NO `-rtl` suffix is ever appended here: GTK's `choose_icon`
+// tries the direction-suffixed name first and falls back, so
+// `go-previous-symbolic` is RTL-aware for free while hard-coding the
+// suffix would break LTR (§7).
+//
+// Column order is the wire order (crate::wire::SYMBOLS), and the const
+// assertion below holds the two lists the same length. That catches an
+// APPENDED symbol with no glyph at compile time — the moment this
+// backend is built at all — and `assert_symbol_icons_resolve` catches
+// the rest (a wrong value, a duplicate, a name this machine lacks) the
+// first time an app declares any symbol.
+const SYMBOL_ICONS: &[(u32, &str)] = &[
+    (crate::wire::SYMBOL_ADD, "list-add-symbolic"),
+    (crate::wire::SYMBOL_REMOVE, "list-remove-symbolic"),
+    // NOT `edit-delete-symbolic`, which is an X in a circle (§4.3).
+    (crate::wire::SYMBOL_DELETE, "user-trash-symbolic"),
+    (crate::wire::SYMBOL_EDIT, "document-edit-symbolic"),
+    // NOT `emblem-ok-symbolic`: deleted from the theme at 48 (§4.5).
+    (crate::wire::SYMBOL_DONE, "object-select-symbolic"),
+    (crate::wire::SYMBOL_CLOSE, "window-close-symbolic"),
+    // The name GTK's own GtkSearchEntry reaches for (§7).
+    (crate::wire::SYMBOL_SEARCH, "system-search-symbolic"),
+    // NOT `preferences-system-symbolic` (wrench+screwdriver, §4.4) and
+    // NOT `emblem-system-symbolic` (a hole at 48, §4.5).
+    (crate::wire::SYMBOL_SETTINGS, "applications-system-symbolic"),
+    (crate::wire::SYMBOL_REFRESH, "view-refresh-symbolic"),
+    // NOT `dialog-information-symbolic`, which is a LIGHTBULB (§4.2).
+    (crate::wire::SYMBOL_INFO, "help-about-symbolic"),
+    (crate::wire::SYMBOL_WARNING, "dialog-warning-symbolic"),
+    // Chevrons at 45 AND 50, unlike `pan-start`/`pan-end`, which changed
+    // metaphor mid-range (§4.6). RTL-aware without a suffix.
+    (crate::wire::SYMBOL_BACK, "go-previous-symbolic"),
+    (crate::wire::SYMBOL_FORWARD, "go-next-symbolic"),
+    // The VERTICAL ellipsis; `view-more-horizontal-symbolic` is the
+    // other one (§7).
+    (crate::wire::SYMBOL_MORE, "view-more-symbolic"),
+    (crate::wire::SYMBOL_COPY, "edit-copy-symbolic"),
+    (crate::wire::SYMBOL_PASTE, "edit-paste-symbolic"),
+    // NOT `emblem-favorite-symbolic`, which is a HEART and is gone (§4.5).
+    (crate::wire::SYMBOL_STAR, "starred-symbolic"),
+    (crate::wire::SYMBOL_LOCK, "changes-prevent-symbolic"),
+    (crate::wire::SYMBOL_PERSON, "avatar-default-symbolic"),
+    // The ACTION (`go-home-symbolic`), not the place
+    // (`user-home-symbolic`) — §7.
+    (crate::wire::SYMBOL_HOME, "go-home-symbolic"),
+];
+
+// A symbol appended to the spec with no Adwaita glyph fails THE BUILD of
+// this backend, which is the cheapest wall available: nobody can reach
+// the GTK lane without passing it.
+const _: () = assert!(
+    SYMBOL_ICONS.len() == crate::wire::SYMBOLS.len(),
+    "every spec symbol needs an Adwaita name in SYMBOL_ICONS (crates/kaya/src/gtk.rs)"
+);
+
+/// The Adwaita name for a wire symbol value, or None when the table has
+/// no row for it (which `assert_symbol_icons_resolve` turns into a
+/// panic before any app can see a blank).
+fn symbol_icon_name(value: i64) -> Option<&'static str> {
+    u32::try_from(value)
+        .ok()
+        .and_then(|v| SYMBOL_ICONS.iter().find(|(id, _)| *id == v))
+        .map(|(_, name)| *name)
+}
+
+/// The reverse: the SEMANTIC name behind an Adwaita name. This is what
+/// the harness read answers with, so the byte-compared verdict is the
+/// same sentence every backend prints.
+fn symbol_name_of_icon(icon: &str) -> Option<&'static str> {
+    SYMBOL_ICONS
+        .iter()
+        .find(|(_, name)| *name == icon)
+        .and_then(|(value, _)| crate::wire::symbol_name(*value as i64))
+}
+
+/// THE SILENT-BLANK WALL, run once per process the first time any app
+/// declares any symbol.
+///
+/// GTK's icon lookup does not fail: `gtk_icon_theme_lookup_icon` ends at
+/// `icon_paintable_new ("image-missing", ...)`, and the only notice is
+/// behind `GTK_DEBUG=iconfallback` (styling/symbols-adwaita.md §1). So a
+/// name this machine does not have ships with no error anywhere — the
+/// failure class this whole column exists to kill. MEASURED on this
+/// image (GTK 4.18.6, adwaita-icon-theme 48.1), what a GtkStackSwitcher
+/// then paints is not even that broken-image glyph: the button is BLANK,
+/// zero ink in its whole box. `gtk_icon_theme_has_icon` answers exactly
+/// the question that fallback hides, and kaya resolves a CLOSED set of
+/// names, so all of them can be asked at once and the answer is a fact
+/// about the machine rather than about the app's luck.
+///
+/// It panics, and it names the semantic concept, the Adwaita name, the
+/// theme that was searched and the package that carries it, because the
+/// person reading it cannot be expected to know that kaya's `info` is
+/// Adwaita's `help-about-symbolic`. The same shape as the wrong-scene-name
+/// panic: a wall on the path of doing something basic.
+fn assert_symbol_icons_resolve(display: &gdk::Display) {
+    use std::cell::Cell;
+    thread_local! {
+        static CHECKED: Cell<bool> = const { Cell::new(false) };
+    }
+    if CHECKED.with(|c| c.replace(true)) {
+        return;
+    }
+    let theme = gtk4::IconTheme::for_display(display);
+    // The SPEC's list drives the walk, not the table's: a table row with
+    // a wrong or duplicated value would leave a spec symbol uncovered,
+    // and a length check alone cannot see that.
+    let mut missing: Vec<String> = Vec::new();
+    for (value, semantic) in crate::wire::SYMBOLS {
+        match symbol_icon_name(*value as i64) {
+            None => missing.push(format!(
+                "  {semantic} — no row in SYMBOL_ICONS (crates/kaya/src/gtk.rs)"
+            )),
+            Some(icon) if !theme.has_icon(icon) => missing.push(format!(
+                "  {semantic} -> {icon} — not in this machine's icon theme"
+            )),
+            Some(_) => {}
+        }
+    }
+    if !missing.is_empty() {
+        panic!(
+            "kaya: {} of {} semantic icons do not resolve on this machine. GTK does \
+             not fail on an unresolvable icon name — it falls back silently, and \
+             the only notice is behind GTK_DEBUG=iconfallback (measured on GTK \
+             4.18 / Adwaita 48: a stack switcher button then paints nothing at \
+             all). Searched icon theme {:?}:\n{}\nInstall the theme that carries \
+             them (Debian: adwaita-icon-theme) or fix the SYMBOL_ICONS row.",
+            missing.len(),
+            crate::wire::SYMBOLS.len(),
+            theme.theme_name(),
+            missing.join("\n"),
+        );
+    }
+}
+
 /// The CSS class prefix a container's own inset rides on (prop 17): one
 /// class per DISTINCT value, `kaya-inset-8` and friends, defined in
 /// `CoreState::container_inset_css`. A class and not a per-widget
@@ -851,6 +1004,11 @@ struct GtkSectionPage {
     window: u64,
     page: gtk4::Box,
     title: String,
+    /// The semantic icon's wire value (0 = none), held so the page's
+    /// `icon-name` can be re-applied whenever the chrome is rebuilt.
+    /// Not an observation: what the harness would read is the switcher's
+    /// own GtkImage, never this.
+    symbol: i64,
     root: Option<gtk4::Widget>,
 }
 
@@ -1675,6 +1833,118 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
         stack.set_visible_child_name(&sel.to_string());
         core.apply_quiet.set(false);
     }
+    // The chrome above is rebuilt from scratch whenever the hint moves,
+    // and a rebuilt GtkStackSwitcher mints fresh buttons — so the
+    // accessible descriptions have to be re-stamped every time, not
+    // once at declare time.
+    refresh_section_symbols(core, window);
+}
+
+/// The sections half of the semantic icon (docs/styling-plan.md D6):
+/// each page's `icon-name`, then the switcher's accessible description.
+///
+/// TWO MEASURED PLATFORM FACTS, both from the container (GTK 4.18.6,
+/// adwaita-icon-theme 48.1), neither recalled:
+///
+/// 1. `GtkStackSwitcher` renders icon OR title, never both. Its
+///    `rebuild_child` builds a GtkImage when the page has an icon-name
+///    and a GtkLabel otherwise, and moves the title to the button's
+///    TOOLTIP. The probe read `GtkToggleButton label=(null)` over
+///    `GtkImage visible=1 mapped=1 icon-name=go-home-symbolic`. So on
+///    this backend a section's symbol REPLACES its tab title, where the
+///    SwiftUI arm shows a Label with both. GTK's own component owns that
+///    choice, the same way the menu dress owns hiding row icons;
+///    libadwaita's AdwViewSwitcher is the component that shows both, and
+///    adopting it means moving sections onto AdwViewStack — a rewrite of
+///    this lowering, not a line of it. Flagged in the arm's report.
+/// 2. `GtkStackSidebar` ignores icon-name entirely: it binds only the
+///    page's title into a GtkLabel (probe: `GtkListBoxRow > GtkLabel`,
+///    no image anywhere). So the SIDEBAR arm draws no symbol at all.
+///    Recorded, not worked around — kaya does not hand-build rows inside
+///    a component that owns them.
+///
+/// THE ACCESSIBLE DESCRIPTION goes on the switcher button, and only
+/// there, because that is the one place on GTK where kaya's symbol is
+/// something a person actually sees. The button's accessible NAME is
+/// GTK's own and already carries the title — measured on the AT-SPI bus,
+/// `role='page tab' name='Feed'` with no label widget left — so kaya
+/// must not overwrite it; the DESCRIPTION was empty (the tooltip does
+/// NOT fill it) and is free for the semantic name. Read back off the
+/// live bus as `role='page tab' name='Archive' DESC='star'`.
+fn refresh_section_symbols(core: &CoreState, window: u64) {
+    use gtk4::prelude::{AccessibleExtManual, Cast, WidgetExt};
+    let Some(stack) = core.section_stacks.get(&window) else {
+        return;
+    };
+    let ids = core.sections.get(&window).cloned().unwrap_or_default();
+    for sid in &ids {
+        let Some(record) = core.section_pages.get(sid) else { continue };
+        if record.page.parent().is_none() {
+            continue;
+        }
+        let page = stack.page(record.page.upcast_ref::<gtk4::Widget>());
+        match symbol_icon_name(record.symbol) {
+            Some(icon) => page.set_icon_name(icon),
+            // 0 (no symbol) and nothing else: the wall already refused
+            // any value with no row. Cleared through the PROPERTY, not
+            // through `set_icon_name("")` — GtkStackSwitcher's
+            // `rebuild_child` branches on the name being NULL, and an
+            // empty string is not NULL, so the "" spelling would leave
+            // the button holding an empty image where the title should
+            // be.
+            None => {
+                use gtk4::glib::prelude::ObjectExt;
+                page.set_property("icon-name", None::<&str>);
+            }
+        }
+    }
+    // The switcher's buttons are minted from the stack's pages IN PAGE
+    // ORDER, which is the order sections were added — so the Nth child
+    // is the Nth section. Only the bar arm has buttons; the sidebar arm
+    // has a GtkStackSidebar, whose rows carry no icon (fact 2 above) and
+    // so have nothing to describe.
+    let Some((_, chrome)) = core.section_chrome.get(&window) else {
+        return;
+    };
+    let mut child = chrome.first_child();
+    while let Some(widget) = child {
+        if let Some(switcher) = widget.downcast_ref::<gtk4::StackSwitcher>() {
+            let mut button = switcher.first_child();
+            let mut index = 0usize;
+            while let Some(b) = button {
+                if let Some(sid) = ids.get(index) {
+                    let symbol = core.section_pages.get(sid).map_or(0, |r| r.symbol);
+                    // THE PAIRING IS POSITIONAL, and unlike the menu
+                    // read this is a WRITE — no assertion can catch a
+                    // description that landed on the wrong button, it
+                    // just quietly describes the wrong tab. So the
+                    // pairing is checked against the one thing on the
+                    // button that came from the page: the GtkImage
+                    // GtkStackSwitcher built from its icon-name.
+                    // Debug-only and a BACKEND invariant, never a guest
+                    // error — the assert_model_actions_resolve
+                    // precedent, and the lanes build debug.
+                    #[cfg(debug_assertions)]
+                    if let Some(want) = symbol_icon_name(symbol) {
+                        let got = first_image_icon_name(&b);
+                        assert_eq!(
+                            got.as_deref(),
+                            Some(want),
+                            "kaya: switcher button #{index} draws {got:?} while section \
+                             {sid} declares {want:?} — the switcher's buttons are no \
+                             longer this window's sections in order"
+                        );
+                    }
+                    if let Some(name) = crate::wire::symbol_name(symbol) {
+                        b.update_property(&[gtk4::accessible::Property::Description(name)]);
+                    }
+                }
+                index += 1;
+                button = b.next_sibling();
+            }
+        }
+        child = widget.next_sibling();
+    }
 }
 
 /// Reconcile a section page's visible child: its stack's top entry
@@ -1763,6 +2033,12 @@ struct MenuItemState {
     /// desktop by design (DESIGN.md, Menus), so nothing here reads it.
     #[allow(dead_code)]
     primary: bool,
+    /// The semantic icon's wire value (0 = none). Held ONLY so the GMenu
+    /// model can be rebuilt from the registry — nothing reads it back as
+    /// an observation. `Stage::menu_symbol` reads the GIcon off the
+    /// realized row instead, so a lowering that stored this and never
+    /// reached the chrome still fails.
+    symbol: i64,
     /// A standard-command role from the closed vocabulary ("" = none).
     /// PLACEMENT is inert here (no dress-owned home), but the
     /// clipboard roles change BEHAVIOR: activation performs the
@@ -2160,6 +2436,45 @@ fn flush_menu_section(into: &gio::Menu, section: &mut gio::Menu) {
     }
 }
 
+/// Put the item's semantic icon on a GMenu row.
+///
+/// `G_MENU_ATTRIBUTE_ICON` is GTK's own slot for this, and it is a
+/// SERIALIZED GIcon rather than a name, which is why the themed icon is
+/// built here instead of writing a string attribute.
+///
+/// MEASURED, and the reason this arm claims nothing about pixels
+/// (container, GTK 4.18.6, adwaita-icon-theme 48.1): the attribute DOES
+/// reach the widget — the realized `GtkModelButton` holds
+/// `GThemedIcon object-select-symbolic` — and GTK's menu dress then
+/// keeps that image HIDDEN. `gtk_model_button_set_icon` builds the
+/// GtkImage and `update_visibility` sets
+/// `visible = has_icon && (iconic || !has_text)`, so a row with a label
+/// shows the label alone; the probe read `GtkImage visible=0` beside
+/// `GtkLabel visible=1 label=Save`. That is GNOME's house style (icons
+/// in menus were deliberately dropped), and it is the same fact the
+/// `MenuProp::Icon` apply arm has recorded since day one — so kaya fills
+/// the platform's slot, and does not fight the dress into painting it.
+///
+/// It follows that NO accessible description is stamped on a menu row.
+/// The description would announce an icon that this platform draws
+/// nowhere, and a claim to a user about something they cannot perceive
+/// is the accessibility version of a diagnostic printing what it did not
+/// measure (CLAUDE.md invariant 3). The section switcher, which DOES
+/// paint the glyph, is where the description goes — see
+/// `refresh_section_symbols`.
+fn set_row_symbol(row: &gio::MenuItem, symbol: i64) {
+    if symbol == 0 {
+        return;
+    }
+    let Some(icon) = symbol_icon_name(symbol) else {
+        // Unreachable in practice: assert_symbol_icons_resolve has
+        // already refused the whole process. Silent rather than a
+        // second panic — the first one names the fix.
+        return;
+    };
+    row.set_icon(&gio::ThemedIcon::new(icon));
+}
+
 /// A radio group's option rows: each option carries its OWN stateful
 /// action plus its index as target — GMenu renders the radio idiom
 /// from exactly that shape (target + state), and the per-option action
@@ -2172,6 +2487,7 @@ fn append_radio_options(reg: &MenuRegistry, group: u64, prefix: &str, into: &gio
             Some(&format!("{prefix}.kmi-{option}")),
             Some(&(index as i32).to_variant()),
         );
+        set_row_symbol(&row, reg.items[&option].symbol);
         into.append_item(&row);
     }
 }
@@ -2188,17 +2504,29 @@ fn build_menu_items(reg: &MenuRegistry, children: &[u64], prefix: &str, into: &g
         match item.kind {
             MenuItemKind::Separator => flush_menu_section(into, &mut section),
             MenuItemKind::Action | MenuItemKind::Toggle => {
-                section.append(Some(&item.label), Some(&format!("{prefix}.kmi-{child}")));
+                let row = gio::MenuItem::new(
+                    Some(&item.label),
+                    Some(&format!("{prefix}.kmi-{child}")),
+                );
+                set_row_symbol(&row, item.symbol);
+                section.append_item(&row);
             }
             MenuItemKind::Menu => {
                 let submenu = gio::Menu::new();
                 build_menu_items(reg, &item.children, prefix, &submenu);
-                section.append_submenu(Some(&item.label), &submenu);
+                let row = gio::MenuItem::new_submenu(Some(&item.label), &submenu);
+                set_row_symbol(&row, item.symbol);
+                section.append_item(&row);
             }
             MenuItemKind::RadioGroup => {
                 flush_menu_section(into, &mut section);
                 let options = gio::Menu::new();
                 append_radio_options(reg, child, prefix, &options);
+                // A nested radio group lands as a LABELED SECTION, and a
+                // GMenu section header is not an item — it has no icon
+                // attribute to carry a symbol on. Declared and not
+                // materialized here; `Stage::menu_symbol` says exactly
+                // that rather than inventing an answer.
                 into.append_section(Some(&item.label), &options);
             }
             MenuItemKind::RadioOption => {
@@ -2232,6 +2560,13 @@ fn rebuild_menubar(core: &CoreState, window: u64) {
             } else {
                 build_menu_items(&reg, &item.children, "win", &submenu);
             }
+            // A TOP-LEVEL holder gets no icon, and that is a measured
+            // fact rather than an omission: PopoverMenuBar renders each
+            // one as a GtkPopoverMenuBarItem, which binds `label` alone
+            // (the note on menu_sync_enabled says the same for
+            // enablement) — the probe read its children as exactly one
+            // GtkLabel and the popover. Setting the attribute would put
+            // an icon in the model that nothing on the bar can draw.
             model.append_submenu(Some(&item.label), &submenu);
         }
     }
@@ -2289,6 +2624,86 @@ fn assert_model_actions_resolve(core: &CoreState, window: u64, model: &gio::Menu
 
 #[cfg(not(debug_assertions))]
 fn assert_model_actions_resolve(_core: &CoreState, _window: u64, _model: &gio::Menu) {}
+
+/// Every `GtkModelButton` under `root`, in tree order.
+///
+/// The rows exist BEFORE the menu is ever opened — measured in the
+/// container, `GtkModelButton ... visible=1 mapped=0` inside a popover
+/// that is neither — which is what lets the harness read a symbol
+/// without popping a menu the scene never opens.
+#[cfg(feature = "harness")]
+fn collect_model_buttons(root: &gtk4::Widget, out: &mut Vec<gtk4::Widget>) {
+    use gtk4::prelude::WidgetExt;
+    let mut child = root.first_child();
+    while let Some(w) = child {
+        if w.type_().name() == "GtkModelButton" {
+            out.push(w.clone());
+        }
+        collect_model_buttons(&w, out);
+        child = w.next_sibling();
+    }
+}
+
+/// A string GObject property, or None when the widget has no such
+/// property or holds NULL. Private GTK types are reachable no other way.
+#[cfg(feature = "harness")]
+fn widget_string_prop(widget: &gtk4::Widget, name: &str) -> Option<String> {
+    use gtk4::glib::prelude::ObjectExt;
+    if widget.find_property(name).is_none() {
+        return None;
+    }
+    widget.property::<Option<String>>(name)
+}
+
+/// The `icon` GObject property (a GIcon), or None.
+#[cfg(feature = "harness")]
+fn widget_icon_prop(widget: &gtk4::Widget) -> Option<gio::Icon> {
+    use gtk4::glib::prelude::ObjectExt;
+    if widget.find_property("icon").is_none() {
+        return None;
+    }
+    widget.property::<Option<gio::Icon>>("icon")
+}
+
+/// The icon name of the first GtkImage under `root` — what a
+/// GtkStackSwitcher button actually draws, which is the only thing on
+/// that button that came from the page it stands for.
+#[cfg(debug_assertions)]
+fn first_image_icon_name(root: &gtk4::Widget) -> Option<String> {
+    use gtk4::prelude::{Cast, WidgetExt};
+    let mut child = root.first_child();
+    while let Some(w) = child {
+        if let Some(image) = w.downcast_ref::<gtk4::Image>() {
+            if let Some(name) = image.icon_name() {
+                return Some(name.to_string());
+            }
+        }
+        if let Some(found) = first_image_icon_name(&w) {
+            return Some(found);
+        }
+        child = w.next_sibling();
+    }
+    None
+}
+
+/// The text of the first GtkLabel under `root` — how a
+/// GtkPopoverMenuBarItem's caption is read, since it publishes no
+/// `label` property of its own.
+#[cfg(feature = "harness")]
+fn first_label_text(root: &gtk4::Widget) -> Option<String> {
+    use gtk4::prelude::{Cast, WidgetExt};
+    let mut child = root.first_child();
+    while let Some(w) = child {
+        if let Some(label) = w.downcast_ref::<gtk4::Label>() {
+            return Some(label.text().to_string());
+        }
+        if let Some(found) = first_label_text(&w) {
+            return Some(found);
+        }
+        child = w.next_sibling();
+    }
+    None
+}
 
 /// Rebuild one context attachment's model from its root list.
 fn rebuild_context(core: &CoreState, widget: u64) {
@@ -4271,6 +4686,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     window: window.0,
                     page,
                     title: String::new(),
+                    symbol: 0,
                     root: None,
                 },
             );
@@ -4308,6 +4724,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         stack_page.set_title(&core.section_pages[&section.0].title);
                     }
                 }
+                // THE SEMANTIC ICON NAME (docs/styling-plan.md D6): onto
+                // GtkStackPage's own `icon-name`, which is the slot both
+                // switcher spellings read the page through.
+                (SectionProp::Symbol, Value::I64(symbol)) => {
+                    assert_symbol_icons_resolve(&gtk4::prelude::WidgetExt::display(&core.window));
+                    record.symbol = *symbol;
+                    let window = record.window;
+                    refresh_section_symbols(core, window);
+                }
                 // Day-one slot: accepted; the switcher TITLE is the
                 // harness observable (GTK's switcher shows titles).
                 (SectionProp::Icon, Value::Blob(_)) => {}
@@ -4327,6 +4752,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     checked: false,
                     value: 0.0,
                     primary: false,
+                    symbol: 0,
                     role: String::new(),
                     shortcut: String::new(),
                     parent: None,
@@ -4482,6 +4908,29 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // no item icons and phone promotion is not this
                     // platform (DESIGN.md, Menus — ignored where the
                     // dress has none).
+                }
+                // THE SEMANTIC ICON NAME (docs/styling-plan.md D6): onto
+                // the GMenu row's `icon` attribute, which is GTK's own
+                // slot for it. GMenu items are immutable snapshots, so
+                // the write is a registry update plus the same full
+                // rebuild live labels take.
+                //
+                // The theme wall runs HERE, on the first symbol any app
+                // declares, rather than at window creation: an app with
+                // no symbols must not be able to die of an icon theme it
+                // never asked for.
+                MenuProp::Symbol => {
+                    let Value::I64(symbol) = value else {
+                        unreachable!("kaya: menu symbol wants I64, the root passed {value:?}")
+                    };
+                    assert_symbol_icons_resolve(&gtk4::prelude::WidgetExt::display(&core.window));
+                    core.menus
+                        .borrow_mut()
+                        .items
+                        .get_mut(&item.0)
+                        .expect("scene validated the item id")
+                        .symbol = symbol;
+                    rebuild_menu_anchors(core, item.0);
                 }
                 MenuProp::Role => {
                     // PLACEMENT is a request this host has nowhere to
@@ -6817,6 +7266,149 @@ impl crate::harness::Stage for GtkStage {
                     }
                 }
             }
+        })
+    }
+
+    fn menu_symbol(&self, path: &str) -> String {
+        // THE REAL ROW GTK BUILT, never the registry's mirror: the
+        // GIcon held by the materialized GtkModelButton the menu tracker
+        // minted from the model. A lowering that stored the prop and
+        // never wrote the model attribute fails here, and so does one
+        // that wrote a name this backend cannot map back.
+        //
+        // GtkModelButton is private to GTK — there is no public type to
+        // downcast to and none in gtk4-rs — so the row is found by GType
+        // NAME and read through GObject properties. That is not a
+        // workaround for a better API; it is the only API. It is also
+        // why every step below states what it measured: a walk that
+        // finds nothing must not answer like a row that carries nothing.
+        //
+        // TOTAL, the menu_state style: every failure is a short sentence
+        // and a retryable non-match, never a panic — expect_menu_symbol
+        // doubles as the wait for a catalog rebuild.
+        let path = path.to_owned();
+        Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, WidgetExt};
+            let reg = core.menus.borrow();
+            // Open-context EXCLUSIVITY, the state read's rule verbatim.
+            let open = *core.open_context.borrow();
+            let roots = match open {
+                Some(anchor) => match core.context_menus.get(&anchor) {
+                    Some(attachment) => attachment.roots.clone(),
+                    None => return "no such item".to_owned(),
+                },
+                None => reg.bars.get(&0).cloned().unwrap_or_default(),
+            };
+            let Some(id) = menu_resolve_path(&reg, &roots, &path) else {
+                return "no such item".to_owned();
+            };
+            let label = reg.items[&id].label.clone();
+
+            // The chrome that presents this item's tree.
+            let popover: gtk4::Widget = match open {
+                Some(anchor) => core.context_menus[&anchor].popover.clone().upcast(),
+                None => {
+                    let root = menu_root_of(&reg, id);
+                    if root == id {
+                        // MEASURED, not assumed: PopoverMenuBar gives a
+                        // top-level holder a GtkPopoverMenuBarItem whose
+                        // only content is a GtkLabel, so there is no
+                        // icon slot on the bar at all. Named as a fact
+                        // about the platform rather than about the app.
+                        return "a top-level menu on GTK's bar carries no icon".to_owned();
+                    }
+                    // BY LABEL, not by ordinal. The ordinal would be a
+                    // second identity rule — `bars` order against the
+                    // bar's child order — and a drifted one answers with
+                    // a DIFFERENT menu's icon instead of failing.
+                    // menu_resolve_path already makes a byte-for-byte
+                    // label the identity of a menu (the shared-scene
+                    // contract), so this walk uses the same one, and the
+                    // miss prints the labels the bar actually shows.
+                    let want = reg.items[&root].label.clone();
+                    let bar = core
+                        .menu_strips
+                        .get(&0)
+                        .and_then(|(strip, _)| strip.first_child())
+                        .and_then(|w| w.downcast::<gtk4::PopoverMenuBar>().ok());
+                    let Some(bar) = bar else {
+                        return "the window has no menu bar chrome".to_owned();
+                    };
+                    let mut shown: Vec<String> = Vec::new();
+                    let mut found = None;
+                    let mut child = bar.first_child();
+                    while let Some(w) = child {
+                        let text = first_label_text(&w).unwrap_or_default();
+                        if found.is_none() && text == want {
+                            found = Some(w.clone());
+                        }
+                        shown.push(text);
+                        child = w.next_sibling();
+                    }
+                    let Some(item_widget) = found else {
+                        return format!("the bar shows {shown:?}, none of them {want:?}");
+                    };
+                    item_widget
+                }
+            };
+
+            let mut rows = Vec::new();
+            collect_model_buttons(&popover, &mut rows);
+            let matching: Vec<&gtk4::Widget> = rows
+                .iter()
+                .filter(|w| widget_string_prop(w, "text").as_deref() == Some(label.as_str()))
+                .collect();
+            let row = match matching.len() {
+                0 => {
+                    // The registry has the item and the chrome has no
+                    // row for it. TWO causes reach here — a rebuild
+                    // still pending, and a kind that mints no row at all
+                    // (a nested radio GROUP renders as a labeled GMenu
+                    // *section*, and a section header is not an item, so
+                    // it has no icon attribute) — and this reader cannot
+                    // tell them apart. So it prints the KIND rather than
+                    // naming a cause: the kind is the one fact that
+                    // separates them, and it is one this read measured.
+                    return format!(
+                        "no menu row is materialized for {label:?} (kind {:?})",
+                        reg.items[&id].kind
+                    );
+                }
+                1 => matching[0],
+                n => {
+                    return format!("{n} menu rows carry the label {label:?}");
+                }
+            };
+
+            let Some(icon) = widget_icon_prop(row) else {
+                // WHAT THIS MEASURED: the row exists in the real chrome
+                // and GTK holds no GIcon for it. Deliberately NOT "no
+                // symbol": this reader cannot tell "the app declared
+                // none" from "declared and never lowered", and a
+                // diagnostic may only print what it measured
+                // (CLAUDE.md invariant 3).
+                return "no icon on the menu row".to_owned();
+            };
+            // GThemedIcon carries a fallback chain (GIO appends the
+            // non-symbolic spelling of a `-symbolic` name), so every
+            // name is tried; only kaya's own `-symbolic` spellings are
+            // in the table, and the bare fallbacks cannot collide.
+            if let Some(themed) = icon.downcast_ref::<gio::ThemedIcon>() {
+                for name in &themed.names() {
+                    if let Some(semantic) = symbol_name_of_icon(name.as_str()) {
+                        return semantic.to_owned();
+                    }
+                }
+            }
+            // ONE sentence for both ways this can fail — an icon that is
+            // not themed at all, and a themed one naming something the
+            // table does not hold — because the useful half is the same
+            // in both: GIcon's own serialization, which is what was
+            // actually on the row.
+            let shown = gio::prelude::IconExt::to_string(&icon)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "<not serializable>".to_owned());
+            format!("the row's icon is {shown:?}, which is not in this backend's symbol table")
         })
     }
 

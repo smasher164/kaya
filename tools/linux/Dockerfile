@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ghc cabal-install \
     xvfb xauth imagemagick x11-utils \
     weston sway ffmpeg \
+    librsvg2-common adwaita-icon-theme \
     && rm -rf /var/lib/apt/lists/*
 
 # ctypes-foreign via opam on the system compiler: Debian's ctypes deb

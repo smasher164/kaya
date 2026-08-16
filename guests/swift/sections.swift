@@ -36,9 +36,14 @@ app.build { tx in
         sectionsPresentation: Int64(KAYA_SECTIONS_PRESENTATION_BAR))
     visits = tx.signal(.str("archive: 0 visits"))
 
-    tx.addSection(FEED, title: "Feed")
+    // THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar without
+    // icons is not the platform's real thing, and the glyph that means
+    // `home` differs per platform — SF Symbols spells it `house`, and
+    // no shared asset would be legal anyway (SF Symbols are licensed to
+    // Apple platforms only).
+    tx.addSection(FEED, title: "Feed", symbol: .home)
     tx.addSection(
-        ARCHIVE, title: "Archive",
+        ARCHIVE, title: "Archive", symbol: .star,
         onSelected: { inner in
             visitCount += 1
             inner.write(visits, .str("archive: \(visitCount) visits"))
@@ -61,8 +66,10 @@ app.build { tx in
                 inner.createWindow(
                     LIBRARY, title: "library",
                     sectionsPresentation: Int64(KAYA_SECTIONS_PRESENTATION_SIDEBAR))
-                inner.addSection(SHELVES, title: "Shelves", window: LIBRARY)
-                inner.addSection(LOANS, title: "Loans", window: LIBRARY)
+                // The SIDEBAR arm carries symbols too: the source list
+                // is where a mac app most wants them.
+                inner.addSection(SHELVES, title: "Shelves", symbol: .search, window: LIBRARY)
+                inner.addSection(LOANS, title: "Loans", symbol: .lock, window: LIBRARY)
                 let shelvesRoot = inner.column {
                     let l = inner.signal(.str("shelves ready"))
                     inner.label(bind: l)  // label#2

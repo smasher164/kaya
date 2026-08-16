@@ -194,6 +194,7 @@ pub const WPROP_INSET: u32 = 8;
 /// surface table (see DESIGN.md, Sections).
 pub const SPROP_TITLE: u32 = 1;
 pub const SPROP_ICON: u32 = 2;
+pub const SPROP_SYMBOL: u32 = 3;
 
 /// Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
 /// and `radio_group` are the grouping nodes.
@@ -214,6 +215,7 @@ pub const MPROP_ICON: u32 = 5;
 pub const MPROP_PRIMARY: u32 = 6;
 pub const MPROP_SHORTCUT: u32 = 7;
 pub const MPROP_ROLE: u32 = 8;
+pub const MPROP_SYMBOL: u32 = 9;
 
 /// The sections_presentation enum's wire values (spec enum
 /// "sections_presentation"): ADVISORY, the width/height precedent.
@@ -251,6 +253,66 @@ pub const ALIGN_BASELINE: u32 = 4;
 pub const ROLE_DESTRUCTIVE: u32 = 1;
 pub const ROLE_PROMINENT: u32 = 2;
 pub const ROLE_HEADING: u32 = 3;
+
+/// The semantic icon vocabulary's wire values (spec enum "symbol";
+/// docs/styling-plan.md D6). APPEND-ONLY: every backend keys its
+/// per-platform glyph table on these numbers.
+pub const SYMBOL_ADD: u32 = 1;
+pub const SYMBOL_REMOVE: u32 = 2;
+pub const SYMBOL_DELETE: u32 = 3;
+pub const SYMBOL_EDIT: u32 = 4;
+pub const SYMBOL_DONE: u32 = 5;
+pub const SYMBOL_CLOSE: u32 = 6;
+pub const SYMBOL_SEARCH: u32 = 7;
+pub const SYMBOL_SETTINGS: u32 = 8;
+pub const SYMBOL_REFRESH: u32 = 9;
+pub const SYMBOL_INFO: u32 = 10;
+pub const SYMBOL_WARNING: u32 = 11;
+pub const SYMBOL_BACK: u32 = 12;
+pub const SYMBOL_FORWARD: u32 = 13;
+pub const SYMBOL_MORE: u32 = 14;
+pub const SYMBOL_COPY: u32 = 15;
+pub const SYMBOL_PASTE: u32 = 16;
+pub const SYMBOL_STAR: u32 = 17;
+pub const SYMBOL_LOCK: u32 = 18;
+pub const SYMBOL_PERSON: u32 = 19;
+pub const SYMBOL_HOME: u32 = 20;
+
+/// The vocabulary as one table, in wire order: `(id, semantic name)`.
+/// The NAME is what a diagnostic prints and what the harness compares
+/// — never a per-backend glyph string — so the sentence a bad value
+/// dies with, and the sentence a scene fails with, come from one place.
+pub const SYMBOLS: &[(u32, &str)] = &[
+    (SYMBOL_ADD, "add"),
+    (SYMBOL_REMOVE, "remove"),
+    (SYMBOL_DELETE, "delete"),
+    (SYMBOL_EDIT, "edit"),
+    (SYMBOL_DONE, "done"),
+    (SYMBOL_CLOSE, "close"),
+    (SYMBOL_SEARCH, "search"),
+    (SYMBOL_SETTINGS, "settings"),
+    (SYMBOL_REFRESH, "refresh"),
+    (SYMBOL_INFO, "info"),
+    (SYMBOL_WARNING, "warning"),
+    (SYMBOL_BACK, "back"),
+    (SYMBOL_FORWARD, "forward"),
+    (SYMBOL_MORE, "more"),
+    (SYMBOL_COPY, "copy"),
+    (SYMBOL_PASTE, "paste"),
+    (SYMBOL_STAR, "star"),
+    (SYMBOL_LOCK, "lock"),
+    (SYMBOL_PERSON, "person"),
+    (SYMBOL_HOME, "home"),
+];
+
+/// The semantic name of a wire symbol value, or None if the value is
+/// outside the vocabulary. The root's value wall and every diagnostic
+/// read it, so no site spells the vocabulary a second time.
+pub fn symbol_name(value: i64) -> Option<&'static str> {
+    u32::try_from(value)
+        .ok()
+        .and_then(|v| SYMBOLS.iter().find(|(id, _)| *id == v).map(|(_, name)| *name))
+}
 
 // set_property sources.
 pub const SOURCE_CONST: u32 = 0;
@@ -468,6 +530,7 @@ fn section_prop(raw: u32) -> SectionProp {
     match raw {
         SPROP_TITLE => SectionProp::Title,
         SPROP_ICON => SectionProp::Icon,
+        SPROP_SYMBOL => SectionProp::Symbol,
         other => panic!("kaya: unknown section property {other}"),
     }
 }
@@ -476,6 +539,7 @@ fn section_prop_raw(p: SectionProp) -> u32 {
     match p {
         SectionProp::Title => SPROP_TITLE,
         SectionProp::Icon => SPROP_ICON,
+        SectionProp::Symbol => SPROP_SYMBOL,
     }
 }
 
@@ -512,6 +576,7 @@ fn menu_prop(raw: u32) -> MenuProp {
         MPROP_PRIMARY => MenuProp::Primary,
         MPROP_SHORTCUT => MenuProp::Shortcut,
         MPROP_ROLE => MenuProp::Role,
+        MPROP_SYMBOL => MenuProp::Symbol,
         other => panic!("kaya: unknown menu property {other}"),
     }
 }
@@ -526,6 +591,7 @@ fn menu_prop_raw(p: MenuProp) -> u32 {
         MenuProp::Primary => MPROP_PRIMARY,
         MenuProp::Shortcut => MPROP_SHORTCUT,
         MenuProp::Role => MPROP_ROLE,
+        MenuProp::Symbol => MPROP_SYMBOL,
     }
 }
 

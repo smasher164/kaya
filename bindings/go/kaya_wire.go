@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x426ae13f797cbb12
+	SpecHash uint64 = 0xf84da2a3fe758bc7
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -69,6 +69,7 @@ const (
 	EpropInterceptBack = 2
 	SpropTitle = 1
 	SpropIcon = 2
+	SpropSymbol = 3
 	MenuKindMenu = 1
 	MenuKindAction = 2
 	MenuKindToggle = 3
@@ -83,6 +84,7 @@ const (
 	MpropPrimary = 6
 	MpropShortcut = 7
 	MpropRole = 8
+	MpropSymbol = 9
 	SectionsPresentationAuto = 0
 	SectionsPresentationBar = 1
 	SectionsPresentationSidebar = 2
@@ -100,6 +102,26 @@ const (
 	RoleDestructive = 1
 	RoleProminent = 2
 	RoleHeading = 3
+	SymbolAdd = 1
+	SymbolRemove = 2
+	SymbolDelete = 3
+	SymbolEdit = 4
+	SymbolDone = 5
+	SymbolClose = 6
+	SymbolSearch = 7
+	SymbolSettings = 8
+	SymbolRefresh = 9
+	SymbolInfo = 10
+	SymbolWarning = 11
+	SymbolBack = 12
+	SymbolForward = 13
+	SymbolMore = 14
+	SymbolCopy = 15
+	SymbolPaste = 16
+	SymbolStar = 17
+	SymbolLock = 18
+	SymbolPerson = 19
+	SymbolHome = 20
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -1436,6 +1458,26 @@ func TxBindSectionIcon(section uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
+// TxSetSectionSymbol: set_section_prop with a constant symbol value.
+func TxSetSectionSymbol(section uint64, symbol int64) []byte {
+	b := beginRecord(txSetSectionProp)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	b = binary.LittleEndian.AppendUint32(b, SpropSymbol)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, symbol)
+	return endRecord(b)
+}
+
+// TxBindSectionSymbol: set_section_prop with a signal-bound symbol value.
+func TxBindSectionSymbol(section uint64, signalID uint64) []byte {
+	b := beginRecord(txSetSectionProp)
+	b = binary.LittleEndian.AppendUint64(b, section)
+	b = binary.LittleEndian.AppendUint32(b, SpropSymbol)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
 var shortcutNamedKeys = map[string]bool{"enter": true, "escape": true, "delete": true, "left": true, "right": true, "up": true, "down": true, "f1": true, "f2": true, "f3": true, "f4": true, "f5": true, "f6": true, "f7": true, "f8": true, "f9": true, "f10": true, "f11": true, "f12": true, "comma": true, "period": true, "slash": true, "backslash": true, "minus": true, "equal": true, "leftbracket": true, "rightbracket": true}
 
 // CanonicalizeShortcut canonicalizes a shortcut spelling to the wire
@@ -1614,6 +1656,16 @@ func TxSetMenuRole(item uint64, role string) []byte {
 	b = binary.LittleEndian.AppendUint32(b, MpropRole)
 	b = binary.LittleEndian.AppendUint32(b, SourceConst)
 	b = encodeValue(b, role)
+	return endRecord(b)
+}
+
+// TxSetMenuSymbol: set_menu_prop with a constant symbol value.
+func TxSetMenuSymbol(item uint64, symbol int64) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropSymbol)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, symbol)
 	return endRecord(b)
 }
 

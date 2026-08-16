@@ -31,13 +31,22 @@ final class Menus {
             // write moves both.
             KayaApp.WindowRef win = tx.window(0).title("menus");
             KayaApp.MenuItem file = win.menu("File").enabled(canExport);
-            file.item("Save").shortcut("primary+s").onActivate(t ->
-                    t.write(status, "saved"));
-            file.item("Export").enabled(canExport);
+            // THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT,
+            // drawn by each platform in its own symbol set. `DONE` is the
+            // checkmark idiom — the vocabulary has no `save` on purpose
+            // (Apple's own catalog has no save-specific glyph either).
+            file.item("Save")
+                    .symbol(KayaApp.Symbol.DONE)
+                    .shortcut("primary+s")
+                    .onActivate(t -> t.write(status, "saved"));
+            file.item("Export").enabled(canExport).symbol(KayaApp.Symbol.FORWARD);
             KayaApp.MenuItem share = file.item("Share").primary(true).onActivate(onShare);
 
-            win.menu("View").toggle("Details").checked(details).onToggle((t, on) ->
-                    t.write(status, on ? "details on" : "details off"));
+            // A toggle carries a symbol like any other leaf.
+            win.menu("View").toggle("Details").checked(details)
+                    .symbol(KayaApp.Symbol.INFO)
+                    .onToggle((t, on) ->
+                            t.write(status, on ? "details on" : "details off"));
 
             // Option order IS the index vocabulary: Name = 0, Date = 1.
             KayaApp.MenuItem sortGroup = win.radioGroup("Sort");
@@ -50,12 +59,13 @@ final class Menus {
             // Catalog built live: items are shared across stamped copies; the
             // template only attaches, and each activation carries its key path.
             KayaApp.ContextCatalog catalog = tx.contextCatalog();
-            catalog.item("Remove").onActivateNode((t, keys) -> {
-                String group = (String) keys.get(0);
-                String item = (String) keys.get(1);
-                t.remove(items.at(group), item);
-                t.write(status, "removed " + group + "/" + item);
-            });
+            catalog.item("Remove").symbol(KayaApp.Symbol.DELETE)
+                    .onActivateNode((t, keys) -> {
+                        String group = (String) keys.get(0);
+                        String item = (String) keys.get(1);
+                        t.remove(items.at(group), item);
+                        t.write(status, "removed " + group + "/" + item);
+                    });
 
             tx.mount(tx.column(() -> {
                 tx.label(status); // label#0
@@ -75,14 +85,18 @@ final class Menus {
                     // hint from Share to Publish, grow the bar by Tools.
                     t.menu(share).primary(false);
                     t.menu(file).label("Document")
-                            .item("Publish").primary(true).onActivate(onShare);
-                    t.window(0).menu("Tools").item("Inspect");
+                            .item("Publish").primary(true)
+                            .symbol(KayaApp.Symbol.COPY)
+                            .onActivate(onShare);
+                    t.window(0).menu("Tools").item("Inspect")
+                            .symbol(KayaApp.Symbol.SEARCH);
                 });
 
                 KayaApp.Signal<String> targetText = tx.signal("rename target");
                 KayaApp.Widget target = tx.label(targetText); // label#1
-                tx.contextMenu(target).item("Rename").onActivate(t ->
-                        t.write(status, "renamed"));
+                tx.contextMenu(target).item("Rename")
+                        .symbol(KayaApp.Symbol.EDIT)
+                        .onActivate(t -> t.write(status, "renamed"));
 
                 // Remove's activation names BOTH keys (group, then item).
                 for (var g : groups.rows()) {

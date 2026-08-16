@@ -52,9 +52,15 @@ func App() *kaya.App {
 		tx.Window(0).Title("sections").SectionsPresentation(kaya.SectionsPresentationBar)
 		visits = tx.Signal("archive: 0 visits")
 
-		feedSection := tx.AddSection(feed).Title("Feed").Id()
+		// THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar without
+		// icons is not the platform's real thing, and the glyph that
+		// means `home` differs per platform — SF Symbols spells it
+		// `house`, and no shared asset would be legal anyway (SF Symbols
+		// are licensed to Apple platforms only).
+		feedSection := tx.AddSection(feed).Title("Feed").Symbol(kaya.SymbolHome).Id()
 		archiveSection := tx.AddSection(archive).
 			Title("Archive").
+			Symbol(kaya.SymbolStar).
 			OnSelected(func(tx *kaya.Tx) {
 				visitCount++
 				tx.Write(visits, fmt.Sprintf("archive: %d visits", visitCount))
@@ -75,8 +81,12 @@ func App() *kaya.App {
 					Title("library").
 					SectionsPresentation(kaya.SectionsPresentationSidebar)
 
-				shelvesSection := tx.AddSectionIn(library, shelves).Title("Shelves").Id()
-				loansSection := tx.AddSectionIn(library, loans).Title("Loans").Id()
+				// The SIDEBAR arm carries symbols too: the source list
+				// is where a mac app most wants them.
+				shelvesSection := tx.AddSectionIn(library, shelves).
+					Title("Shelves").Symbol(kaya.SymbolSearch).Id()
+				loansSection := tx.AddSectionIn(library, loans).
+					Title("Loans").Symbol(kaya.SymbolLock).Id()
 
 				shelvesRoot := tx.Column(func() {
 					ready := tx.Signal("shelves ready")

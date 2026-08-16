@@ -76,10 +76,12 @@ static void build_scene(void) {
     kaya_tx_bind_menu_enabled(&tx, M_FILE, SIG_CAN_EXPORT);
     kaya_tx_menu_item_create(&tx, M_SAVE, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_SAVE, "Save");
+    kaya_tx_set_menu_symbol(&tx, M_SAVE, KAYA_SYMBOL_DONE);
     /* The canonical wire spelling, hand-written at this floor. */
     kaya_tx_set_menu_shortcut(&tx, M_SAVE, "primary+s");
     kaya_tx_menu_item_create(&tx, M_EXPORT, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_EXPORT, "Export");
+    kaya_tx_set_menu_symbol(&tx, M_EXPORT, KAYA_SYMBOL_FORWARD);
     kaya_tx_bind_menu_enabled(&tx, M_EXPORT, SIG_CAN_EXPORT);
     kaya_tx_menu_item_create(&tx, M_SHARE, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_SHARE, "Share");
@@ -94,6 +96,7 @@ static void build_scene(void) {
     kaya_tx_set_menu_label(&tx, M_VIEW, "View");
     kaya_tx_menu_item_create(&tx, M_DETAILS, KAYA_MENU_KIND_TOGGLE);
     kaya_tx_set_menu_label(&tx, M_DETAILS, "Details");
+    kaya_tx_set_menu_symbol(&tx, M_DETAILS, KAYA_SYMBOL_INFO);
     kaya_tx_bind_menu_checked(&tx, M_DETAILS, SIG_DETAILS);
     kaya_tx_menu_item_append(&tx, M_VIEW, M_DETAILS);
     kaya_tx_menubar_append(&tx, 0, M_VIEW);
@@ -115,6 +118,7 @@ static void build_scene(void) {
      * the template below. */
     kaya_tx_menu_item_create(&tx, M_REMOVE, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_REMOVE, "Remove");
+    kaya_tx_set_menu_symbol(&tx, M_REMOVE, KAYA_SYMBOL_DELETE);
 
     kaya_tx_create_widget(&tx, W_COLUMN, KAYA_KIND_COLUMN);
     kaya_tx_create_widget(&tx, W_STATUS, KAYA_KIND_LABEL);
@@ -133,6 +137,7 @@ static void build_scene(void) {
     kaya_tx_bind_text(&tx, W_TARGET, SIG_TARGET);
     kaya_tx_menu_item_create(&tx, M_RENAME, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_RENAME, "Rename");
+    kaya_tx_set_menu_symbol(&tx, M_RENAME, KAYA_SYMBOL_EDIT);
     kaya_tx_context_attach(&tx, W_TARGET, M_RENAME);
 
     /* Two-level For: the stamped row carries the shared Remove item;
@@ -220,12 +225,14 @@ static void *app(void *arg) {
                 kaya_tx_set_menu_label(&tx, M_FILE, "Document");
                 kaya_tx_menu_item_create(&tx, M_PUBLISH, KAYA_MENU_KIND_ACTION);
                 kaya_tx_set_menu_label(&tx, M_PUBLISH, "Publish");
+                kaya_tx_set_menu_symbol(&tx, M_PUBLISH, KAYA_SYMBOL_COPY);
                 kaya_tx_set_menu_primary(&tx, M_PUBLISH, 1);
                 kaya_tx_menu_item_append(&tx, M_FILE, M_PUBLISH);
                 kaya_tx_menu_item_create(&tx, M_TOOLS, KAYA_MENU_KIND_MENU);
                 kaya_tx_set_menu_label(&tx, M_TOOLS, "Tools");
                 kaya_tx_menu_item_create(&tx, M_INSPECT, KAYA_MENU_KIND_ACTION);
                 kaya_tx_set_menu_label(&tx, M_INSPECT, "Inspect");
+                kaya_tx_set_menu_symbol(&tx, M_INSPECT, KAYA_SYMBOL_SEARCH);
                 kaya_tx_menu_item_append(&tx, M_TOOLS, M_INSPECT);
                 kaya_tx_menubar_append(&tx, 0, M_TOOLS);
                 kaya_submit(tx.buf, tx.len);

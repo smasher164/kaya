@@ -1464,5 +1464,167 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
             _rewind(before_bad)
             check(f"role refuses {what}", ok)
 
+    # THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6). Same two
+    # halves as the role above: what reached the wire, and what the
+    # binding refuses before anything does. The PAIRINGS stay the
+    # root's — a symbol on a separator, a signal-bound one — and are
+    # probed against a running core, never here.
+
+    # THE CLASS IS HAND-WRITTEN AND THE CONSTANTS ARE GENERATED, so the
+    # first clause is the census that holds them together. Add a concept
+    # to crates/kaya/src/spec.rs, regenerate, and this goes red until
+    # kaya.Symbol grows the name — without it Python is silently the one
+    # binding that cannot say the new word, which is exactly how
+    # `list_detail` shipped unsayable here (invariant 2).
+    generated = {
+        name[len("SYMBOL_"):].lower(): value
+        for name, value in vars(kaya.wire).items()
+        if name.startswith("SYMBOL_") and isinstance(value, int)
+    }
+    authored = {
+        name.lower(): value
+        for name, value in vars(kaya.Symbol).items()
+        if name.isupper()
+    }
+    check("kaya.Symbol is exactly the generated vocabulary, name for name",
+          authored == generated and len(authored) == 20)
+    check("and the name spelling is derived from it, not typed twice",
+          kaya._SYMBOL_NAMES == generated)
+
+    def _menu_symbols(records):
+        """The symbol values that reached the wire as menu props."""
+        return [
+            int.from_bytes(r[32:40], "little")
+            for r in records
+            if _rec_kind(r) == kaya.wire.TX_SET_MENU_PROP
+            and int.from_bytes(r[16:20], "little") == kaya.wire.MPROP_SYMBOL
+            and int.from_bytes(r[20:24], "little") == kaya.wire.SOURCE_CONST
+            and int.from_bytes(r[24:28], "little") == kaya.wire.VALUE_I64
+        ]
+
+    # EVERY CONSTRUCTOR THAT TAKES `icon=` TAKES `symbol=` AND EMITS IT.
+    # A census and not one spot check: the failure this catches is the
+    # fan-out that grows `item` and forgets `option`, which no scene can
+    # see (the scene asserts the items it names) and which leaves one
+    # kind of menu entry unable to carry an icon at all.
+    with app_style.menu("File") as bar_menu:
+        surfaces = [
+            ("kaya.item", lambda: kaya.item("Save", symbol=kaya.Symbol.DONE)),
+            ("kaya.toggle", lambda: kaya.toggle("Details",
+                                                symbol=kaya.Symbol.DONE)),
+            ("kaya.menu", lambda: kaya.menu("Sub", symbol=kaya.Symbol.DONE)),
+            ("kaya.radio_group", lambda: kaya.radio_group(
+                "Sort", symbol=kaya.Symbol.DONE)),
+            ("MenuItem.symbol", lambda: bar_menu.symbol(kaya.Symbol.DONE)),
+        ]
+        for what, call in surfaces:
+            before_s = len(kaya._tx)
+            try:
+                call()
+                got = _menu_symbols(kaya._tx[before_s:])
+            except Exception as exc:
+                print(f"       (raised {type(exc).__name__}: {exc})")
+                got = []
+            _rewind(before_s)
+            check(f"{what} takes symbol= and it reaches the wire",
+                  got == [kaya.wire.SYMBOL_DONE])
+        # kaya.option only declares inside a radio group.
+        with kaya.radio_group("Sort") as _group:
+            before_s = len(kaya._tx)
+            kaya.option("Name", symbol=kaya.Symbol.DONE)
+            got = _menu_symbols(kaya._tx[before_s:])
+            _rewind(before_s)
+            check("kaya.option takes symbol= and it reaches the wire",
+                  got == [kaya.wire.SYMBOL_DONE])
+    before_s = len(kaya._tx)
+    with app_style.radio_group("Bar", symbol=kaya.Symbol.DONE):
+        pass
+    got = _menu_symbols(kaya._tx[before_s:])
+    _rewind(before_s)
+    check("app.radio_group takes symbol= and it reaches the wire",
+          got == [kaya.wire.SYMBOL_DONE])
+    before_s = len(kaya._tx)
+    with app_style.menu("Bar2", symbol=kaya.Symbol.DONE):
+        pass
+    got = _menu_symbols(kaya._tx[before_s:])
+    _rewind(before_s)
+    check("app.menu takes symbol= and it reaches the wire",
+          got == [kaya.wire.SYMBOL_DONE])
+
+    # THE NAME SPELLING IS THE SAME PROP, not a second surface (the
+    # `align="center"` / `role("heading")` precedent).
+    with app_style.menu("File2"):
+        before_s = len(kaya._tx)
+        kaya.item("Copy", symbol="copy")
+        got = _menu_symbols(kaya._tx[before_s:])
+        _rewind(before_s)
+        check("the name spelling writes the same menu prop and value",
+              got == [kaya.wire.SYMBOL_COPY])
+
+    # The SECTION half of the same prop — a different wire slot
+    # (SPROP_SYMBOL), so the menu clauses above say nothing about it.
+    before_s = len(kaya._tx)
+    with app_style.add_section(4242, title="Feed", symbol=kaya.Symbol.HOME):
+        with kaya.column():
+            kaya.label("feed")
+    section_symbols = [
+        int.from_bytes(r[32:40], "little")
+        for r in kaya._tx[before_s:]
+        if _rec_kind(r) == kaya.wire.TX_SET_SECTION_PROP
+        and int.from_bytes(r[16:20], "little") == kaya.wire.SPROP_SYMBOL
+        and int.from_bytes(r[20:24], "little") == kaya.wire.SOURCE_CONST
+        and int.from_bytes(r[24:28], "little") == kaya.wire.VALUE_I64
+    ]
+    _rewind(before_s)
+    check("add_section takes symbol= and it reaches the wire",
+          section_symbols == [kaya.wire.SYMBOL_HOME])
+
+    # THE CLOSED SET, said out loud where the other bindings have an
+    # enum. A bool is excluded before int (which it subclasses):
+    # `symbol(True)` would otherwise read as 1, the `add` glyph, out of
+    # a value that meant nothing.
+    symbol_signal = kaya.signal(5)
+    with app_style.menu("File3"):
+        bad_item = kaya.item("Save")
+        for what, value, kind, fragment in (
+            ("an unknown name", "save", ValueError, "must be one of"),
+            ("a number past the vocabulary", 21, ValueError,
+             "is not a symbol"),
+            ("zero", 0, ValueError, "is not a symbol"),
+            ("a bool", True, TypeError, "not bool"),
+            ("a Signal", symbol_signal, TypeError, "not Signal"),
+            ("a float", 15.0, TypeError, "not float"),
+        ):
+            before_bad = len(kaya._tx)
+            try:
+                bad_item.symbol(value)
+                ok = False
+            except Exception as exc:
+                ok = isinstance(exc, kind) and fragment in str(exc)
+            _rewind(before_bad)
+            check(f"symbol refuses {what}", ok)
+        # AND THE REFUSAL NAMES THE VOCABULARY: "not a symbol" alone
+        # leaves the reader's next question ("then what may I say?")
+        # unanswered, and there is no enum here to read it off.
+        try:
+            bad_item.symbol("save")
+            named = False
+        except ValueError as exc:
+            named = all(f"'{n}'" in str(exc)
+                        for n in sorted(kaya._SYMBOL_NAMES))
+        check("and the refusal lists the whole vocabulary", named)
+
+    # The section spelling refuses AT THE add_section CALL, not at the
+    # `with`: the scope records nothing until it is entered, so a raise
+    # from __enter__ would point at the block instead of at the word.
+    before_bad = len(kaya._tx)
+    try:
+        app_style.add_section(4243, title="Nope", symbol="save")
+        ok = False
+    except ValueError as exc:
+        ok = "must be one of" in str(exc)
+    _rewind(before_bad)
+    check("add_section refuses a bad symbol at the call, not at the with", ok)
+
 sys.exit(1 if failures else 0)
 

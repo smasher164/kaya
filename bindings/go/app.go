@@ -2455,6 +2455,17 @@ func (r SectionRef) Title(title string) SectionRef {
 	return r
 }
 
+// Symbol sets the switcher item's SEMANTIC ICON: one of the generated
+// Symbol* constants (SymbolHome, SymbolStar, …), the same closed
+// vocabulary MenuItem.Symbol takes — its doc comment carries the whole
+// story. A tab bar without icons is not the platform's real thing, and
+// a blob is the wrong primitive for a STANDARD one. Const-only, the
+// Title precedent one line up.
+func (r SectionRef) Symbol(symbol int64) SectionRef {
+	r.tx.emit(TxSetSectionSymbol(r.id, symbol))
+	return r
+}
+
 // OnSelected binds the selected handler to THIS section (per-section,
 // the entry-handler precedent): fires each time the USER switches to
 // it through the platform's switcher — post-fact and NOT one-shot. A
@@ -2623,6 +2634,40 @@ func (m MenuItem) BindValue(s Signal[float64]) MenuItem {
 // promotion, ignored where native menu dress has no icons. Const-only.
 func (m MenuItem) Icon(data []byte) MenuItem {
 	m.chain().emit(TxSetMenuIcon(m.id, RegisterBlob(data)))
+	return m
+}
+
+// Symbol sets the item's SEMANTIC ICON (docs/styling-plan.md D6): one
+// of the generated Symbol* constants — SymbolAdd, SymbolRemove,
+// SymbolDelete, SymbolEdit, SymbolDone, SymbolClose, SymbolSearch,
+// SymbolSettings, SymbolRefresh, SymbolInfo, SymbolWarning, SymbolBack,
+// SymbolForward, SymbolMore, SymbolCopy, SymbolPaste, SymbolStar,
+// SymbolLock, SymbolPerson, SymbolHome. Go's enum idiom, the one Role,
+// Align and SectionsPresentation already use.
+//
+// The app names a CONCEPT and each backend draws its own platform's
+// glyph for it: SymbolCopy is doc.on.doc on Apple, content_copy on
+// Material, edit-copy-symbolic on Adwaita, and no single asset is right
+// on all three — SF Symbols are license-locked to Apple platforms, so a
+// shared one is not even legal. The platform sets also metric-match the
+// text beside them; a blob cannot. BESIDE Icon, not instead of it: the
+// blob channel one method up stays for genuinely app-specific art.
+//
+// SymbolBack and SymbolForward are the direction-relative pair: every
+// platform mirrors them under a right-to-left layout, so they mean
+// BACKWARD and FORWARD in reading order, never "left" and "right".
+// SymbolDelete is the wastebasket idiom (destroying something) while
+// SymbolRemove takes an item out of a list, and SymbolClose is the ✕
+// dismissal, not a delete.
+//
+// The vocabulary is CLOSED — the Role trick one tier over — and an
+// out-of-vocabulary number dies AT THE ROOT at declare time, naming
+// every value it would have accepted, so no backend ever improvises on
+// one. Growing it is a spec change with its gates, never a per-app
+// escape hatch. Const-only, like Icon and Primary beside it: a symbol
+// names a fixed concept, so there is no signal-bound spelling.
+func (m MenuItem) Symbol(symbol int64) MenuItem {
+	m.chain().emit(TxSetMenuSymbol(m.id, symbol))
 	return m
 }
 

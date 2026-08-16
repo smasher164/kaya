@@ -427,6 +427,25 @@ pub enum Step {
     /// the scene model's copy, so a backend that ignored the write
     /// must fail.
     ExpectMenu(String, MenuState),
+    /// Expect the menu item at the path to carry the SEMANTIC ICON of
+    /// that name, read from the platform's REAL menu chrome
+    /// (docs/styling-plan.md D6).
+    ///
+    /// THE OBSERVATION IS THE ACCESSIBILITY DESCRIPTION, not the
+    /// platform's glyph string, and that is the whole design: kaya has
+    /// never asserted an icon anywhere, and a scene shared verbatim by
+    /// five lanes cannot compare `doc.on.doc` against `content_copy`
+    /// against `edit-copy-symbolic`. What every platform DOES agree on
+    /// is that an icon carrying meaning must say what it means to an
+    /// assistive client — so each backend sets that description to the
+    /// SEMANTIC NAME kaya was given, and the harness reads it back out
+    /// of the real item. One byte-comparable answer on every lane, and
+    /// the accessibility every icon should have had anyway.
+    ///
+    /// TOTAL, like menu_state: a missing item or a missing image reads
+    /// as a short description, a retryable non-match rather than a
+    /// panic, so this doubles as the wait for a catalog rebuild.
+    ExpectMenuSymbol(String, String),
     /// The window's top-level catalog count, from the REAL
     /// materialized bar (or the phone overflow's group list) — the
     /// observation menubar_append's topology is verified by.
@@ -614,6 +633,7 @@ impl Step {
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
             Step::ExpectMenu { .. } => true,
+            Step::ExpectMenuSymbol { .. } => true,
             Step::ExpectAx { .. } => true,
             Step::ExpectAxHint { .. } => true,
             Step::ExpectMenus { .. } => true,
@@ -1085,6 +1105,24 @@ pub trait Stage: Send + 'static {
     /// expect_menu doubles as the wait for a catalog rebuild to land.
     /// No default.
     fn menu_state(&self, path: &str, aspect: MenuAspect) -> String;
+    /// The SEMANTIC ICON NAME the platform's real menu item carries —
+    /// read from the materialized item's image accessibility
+    /// description (macOS: `NSMenuItem.image?.accessibilityDescription`),
+    /// never from the scene model, so a backend that decoded the prop
+    /// and drew nothing must fail.
+    ///
+    /// It answers with the semantic name (`"copy"`) and nothing else on
+    /// success. On failure it says WHAT IT MEASURED and no more: `"no
+    /// such item"` when the path does not resolve, `"no symbol"` when
+    /// the item resolved and carries no icon, and — where the platform
+    /// can tell — a sentence naming the platform glyph string that
+    /// failed to resolve. A diagnostic may only print what it measured
+    /// (CLAUDE.md invariant 3): if a backend cannot tell "never
+    /// lowered" from "lowered and rejected", it must say the one thing
+    /// it does know rather than pick.
+    /// No default: a backend that forgets this must fail to compile
+    /// rather than pass an icon leg vacuously.
+    fn menu_symbol(&self, path: &str) -> String;
     /// Drive the platform's key-equivalent dispatch for a canonical
     /// shortcut spelling — at minimum the same table the platform's
     /// own key event would traverse, emitting the SAME menu_activated
@@ -1499,6 +1537,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 check_menu_path(&path).map_err(|e| format!("{e}: {line:?}"))?;
                 let state = parse_menu_state(tail).map_err(|e| format!("{e}: {line:?}"))?;
                 Step::ExpectMenu(path, state)
+            }
+            "expect_menu_symbol" => {
+                let (path, want) = parse_quoted_prefix(rest).map_err(|e| {
+                    format!("expect_menu_symbol wants a quoted path and a quoted symbol name: {e}")
+                })?;
+                Step::ExpectMenuSymbol(path, parse_string(want)?)
             }
             "expect_menus" => Step::ExpectMenus(
                 rest.trim()
@@ -2979,6 +3023,19 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Err(format!("presentation {got}, wanted {want}"))
                 }
             })),
+            Step::ExpectMenuSymbol(path, want) => Some(poll(|| {
+                let got = stage.menu_symbol(path);
+                if got == *want {
+                    // Byte-identical on every backend: the path in its
+                    // quoted spelling, then the semantic name.
+                    Ok(format!("menu {path:?} symbol {want:?}"))
+                } else {
+                    // The MEASURED answer rides the failure, which is
+                    // the only thing that tells "wrong concept" from
+                    // "no icon at all" from "item not there yet".
+                    Err(format!("menu {path:?} symbol {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::ExpectMenu(path, want) => {
                 let want_s = want.spelling();
                 Some(poll(|| {
@@ -3657,6 +3714,9 @@ mod tests {
                 MenuAspect::Value => "value 1".to_owned(),
             }
         }
+        fn menu_symbol(&self, _: &str) -> String {
+            "copy".to_owned()
+        }
         fn shortcut(&self, spelling: &str) {
             self.seen.lock().unwrap().push(format!("shortcut {spelling}"));
         }
@@ -3889,6 +3949,9 @@ mod tests {
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
             String::new()
         }
+        fn menu_symbol(&self, _: &str) -> String {
+            String::new()
+        }
         fn shortcut(&self, _: &str) {}
         fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
@@ -4063,6 +4126,9 @@ mod tests {
         }
         fn compose(&self, _: Target, _: &str) {}
         fn menu_state(&self, _: &str, _: MenuAspect) -> String {
+            String::new()
+        }
+        fn menu_symbol(&self, _: &str) -> String {
             String::new()
         }
         fn shortcut(&self, _: &str) {}

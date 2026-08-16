@@ -221,6 +221,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "VStr"),
             crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob"),
+            crate::PropKind::Enum(_) => (camel(prop), "Int64", "VI64"),
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -306,7 +307,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => (camel(prop), "Bool", format!("VBool {}", camel(prop))),
             crate::PropKind::F64 => (camel(prop), "Double", format!("VF64 {}", camel(prop))),
             crate::PropKind::Blob => ("handle".to_string(), "Word64", "VBlob handle".to_string()),
-            other => unreachable!("no menu prop carries {other:?}"),
+            crate::PropKind::Enum(_) => (camel(prop), "Int64", format!("VI64 {}", camel(prop))),
         };
         c.line("");
         if *prop == "shortcut" {

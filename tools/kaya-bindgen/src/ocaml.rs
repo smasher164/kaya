@@ -219,6 +219,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         let (ctor, param) = match kind {
             crate::PropKind::Str => ("Str", *prop),
             crate::PropKind::Blob => ("Blob", "handle"),
+            crate::PropKind::Enum(_) => ("I64", *prop),
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -322,7 +323,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
             crate::PropKind::Bool => (format!("Bool {prop}"), *prop),
             crate::PropKind::F64 => (format!("F64 {prop}"), *prop),
             crate::PropKind::Blob => ("Blob handle".to_string(), "handle"),
-            other => unreachable!("no menu prop carries {other:?}"),
+            crate::PropKind::Enum(_) => (format!("I64 {prop}"), *prop),
         };
         c.line("");
         if *prop == "shortcut" {

@@ -2301,6 +2301,16 @@ interpreter carries slice 1's one real brand lowering
 
 ## Styling follow-ups the fan-out surfaced (2026-08-12, none blocking)
 
+- **Sections carry symbols with no harness assertion** (2026-08-16).
+  expect_menu_symbol reads menu items' icons from the real tree, but
+  nothing asserts a SECTION row's symbol — which is exactly how the
+  SwiftUI decode read the I64 at +20 (alignment padding) instead of
+  +24 and rendered NO icon while every lane stayed green; a capture
+  caught it, not a gate. The fix shape: a section-symbol read through
+  the sections ax/real-tree machinery, asserted in the sections
+  scene's desktop tail beside the presentation row. Until then the
+  captures are the only witness on every backend.
+
 - **The window chrome knob is DEFERRED (maintainer, 2026-08-16)** —
   docs/chrome-plan.md C1/C1b, drafted and held before ratification.
   `chrome: extended` (content under a transparent title bar) is the

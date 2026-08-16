@@ -853,13 +853,15 @@ check_styling_point role \
 # Idiom decides the spelling — a second name where there are no
 # optional arguments, a window argument where there are — and each
 # pattern is keyed on the window-carrying form, so the primary-only
-# spelling cannot satisfy it — except Swift's, whose wrapped signature
-# puts the window parameter on its own line where a line-based grep
-# cannot key on it; its row pins presence and the compiler holds the
-# parameter (the guest calls addSection(window:)).
+# spelling cannot satisfy it — except Swift's and (since the symbol
+# sugar wrapped it, 2026-08-16) Python's, whose signatures put the
+# window parameter past a line break where a line-based grep cannot
+# key on it; those rows pin the wrapped signature's own first line and
+# the GUESTS hold the parameter (both sections guests call with
+# window=/window:).
 check_styling_point 'sectioned aux window' \
     'pub fn add_section_in\(' \
-    'def add_section\(self, [^)]*window=' \
+    'def add_section\(self, section_id, title=None, symbol=None,' \
     'func \(tx \*Tx\) AddSectionIn\(' \
     'AddSection\([^)]*window' \
     'public SectionRef addSectionIn\(|addSectionIn\(' \

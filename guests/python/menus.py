@@ -63,9 +63,10 @@ def on_rework():
     share.primary(False)
     file.label("Document")
     with file.append():
-        kaya.item("Publish", primary=True, on_activate=on_share)
+        kaya.item("Publish", primary=True, symbol=kaya.Symbol.COPY,
+                  on_activate=on_share)
     with app.menu("Tools"):
-        kaya.item("Inspect")
+        kaya.item("Inspect", symbol=kaya.Symbol.SEARCH)
 
 
 with app.window(title="menus"):
@@ -77,12 +78,19 @@ with app.window(title="menus"):
     # File and its Export leaf share one enablement signal: one write
     # moves both.
     with app.menu("File", enabled=can_export) as file:
-        kaya.item("Save", shortcut="primary+s", on_activate=on_save)
-        kaya.item("Export", enabled=can_export)
+        # THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT, drawn
+        # by each platform in its own symbol set. `done` is the
+        # checkmark idiom — the vocabulary has no `save` on purpose
+        # (Apple's own catalog has no save-specific glyph either).
+        kaya.item("Save", symbol=kaya.Symbol.DONE, shortcut="primary+s",
+                  on_activate=on_save)
+        kaya.item("Export", enabled=can_export, symbol=kaya.Symbol.FORWARD)
         share = kaya.item("Share", primary=True, on_activate=on_share)
 
     with app.menu("View"):
-        kaya.toggle("Details", checked=details, on_toggle=on_details)
+        # A toggle carries a symbol like any other leaf.
+        kaya.toggle("Details", checked=details, symbol=kaya.Symbol.INFO,
+                    on_toggle=on_details)
 
     # Option order IS the index vocabulary: Name = 0, Date = 1.
     with app.radio_group("Sort", value=sort, on_select=on_sorted):
@@ -93,7 +101,7 @@ with app.window(title="menus"):
     # Catalog built live: items are shared across stamped copies; the
     # template only attaches, and each activation carries its key path.
     with kaya.context_catalog() as catalog:
-        kaya.item("Remove", on_activate=on_remove)
+        kaya.item("Remove", symbol=kaya.Symbol.DELETE, on_activate=on_remove)
 
     with kaya.column():
         kaya.label(bind=status)  # label#0
@@ -104,7 +112,7 @@ with app.window(title="menus"):
         target_text = kaya.signal("rename target")
         target = kaya.label(bind=target_text)  # label#1
         with target.context_menu():
-            kaya.item("Rename", on_activate=on_rename)
+            kaya.item("Rename", symbol=kaya.Symbol.EDIT, on_activate=on_rename)
 
         # Remove's activation names BOTH keys (group, then item).
         for _g in groups:

@@ -26,9 +26,14 @@ let () =
        let file =
          menu ~label:"File" ~bind_enabled:can_export
            [
-             item ~label:"Save" ~shortcut:"primary+s"
+             (* THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT,
+                drawn by each platform in its own symbol set. [Done] is
+                the checkmark idiom — the vocabulary has no `save` on
+                purpose (Apple's own catalog has no save-specific glyph
+                either). *)
+             item ~label:"Save" ~symbol:Done ~shortcut:"primary+s"
                ~on_activate:(fun () -> write status (Str "saved"));
-             item ~label:"Export" ~bind_enabled:can_export;
+             item ~label:"Export" ~bind_enabled:can_export ~symbol:Forward;
              w share;
            ]
            ()
@@ -37,9 +42,10 @@ let () =
          ~menus:
            [
              w file;
+             (* A toggle carries a symbol like any other leaf. *)
              menu ~label:"View"
                [
-                 toggle ~label:"Details" ~bind_checked:details
+                 toggle ~label:"Details" ~bind_checked:details ~symbol:Info
                    ~on_toggle:(fun on ->
                      write status
                        (Str (if on then "details on" else "details off")));
@@ -61,7 +67,7 @@ let () =
        let catalog =
          context_catalog
            [
-             item ~label:"Remove"
+             item ~label:"Remove" ~symbol:Delete
                ~on_activate_node:(fun keys ->
                  match keys with
                  | [ Str group; Str item ] ->
@@ -130,15 +136,22 @@ let () =
                  set_menu_primary share false;
                  set_menu_label file "Document";
                  menu_append file
-                   [ item ~label:"Publish" ~primary:true ~on_activate:on_share ];
+                   [
+                     item ~label:"Publish" ~primary:true ~symbol:Copy
+                       ~on_activate:on_share;
+                   ];
                  window
-                   ~menus:[ menu ~label:"Tools" [ item ~label:"Inspect" ] ]
+                   ~menus:
+                     [
+                       menu ~label:"Tools"
+                         [ item ~label:"Inspect" ~symbol:Search ];
+                     ]
                    ()) (* button#2 *);
              (fun () ->
                let target = label ~bind:target_text () (* label#1 *) in
                context_menu target
                  [
-                   item ~label:"Rename"
+                   item ~label:"Rename" ~symbol:Edit
                      ~on_activate:(fun () -> write status (Str "renamed"));
                  ];
                target);

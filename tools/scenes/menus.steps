@@ -5,6 +5,15 @@ expect label#0 "ready"
 expect_menus 3
 expect_menu "File>Save" disabled
 expect_menu "File>Export" disabled
+# THE SYMBOL VOCABULARY (docs/styling-plan.md D6): each name is read
+# off the REAL tree's accessible description of the item's icon — the
+# platform's own catalog glyph behind one semantic name, and the first
+# icon assertion kaya has ever had. Items only, never a top-level bar
+# grouping: Windows' MenuBarItem has no icon slot, so a top-level
+# symbol is not the 4/4 intersection.
+expect_menu_symbol "File>Save" "done"
+expect_menu_symbol "File>Export" "forward"
+expect_menu_symbol "View>Details" "info"
 expect_menu "View>Details" unchecked
 expect_menu "Sort" value 0
 
@@ -67,6 +76,8 @@ click button#2
 expect_menus 4
 expect_menu "Document>Publish" enabled
 expect_menu "Tools>Inspect" enabled
+expect_menu_symbol "Document>Publish" "copy"
+expect_menu_symbol "Tools>Inspect" "search"
 
 # No More-open step precedes this: on phones the same helper consumed by
 # the rendered toolbar must now surface the late primary. Desktop

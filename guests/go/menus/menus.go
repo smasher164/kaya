@@ -41,13 +41,20 @@ func App() *kaya.App {
 		// moves both.
 		win := tx.Window(0).Title("menus")
 		file := win.Menu("File").BindEnabled(canExport)
-		file.Item("Save").Shortcut("primary+s").OnActivate(func(tx *kaya.Tx) {
-			tx.Write(status, "saved")
-		})
-		file.Item("Export").BindEnabled(canExport)
+		// THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT, drawn
+		// by each platform in its own symbol set. SymbolDone is the
+		// checkmark idiom — the vocabulary has no `save` on purpose
+		// (Apple's own catalog has no save-specific glyph either).
+		file.Item("Save").Symbol(kaya.SymbolDone).Shortcut("primary+s").
+			OnActivate(func(tx *kaya.Tx) {
+				tx.Write(status, "saved")
+			})
+		file.Item("Export").BindEnabled(canExport).Symbol(kaya.SymbolForward)
 		share := file.Item("Share").Primary(true).OnActivate(onShare)
 
+		// A toggle carries a symbol like any other leaf.
 		win.Menu("View").Toggle("Details").BindChecked(details).
+			Symbol(kaya.SymbolInfo).
 			OnToggle(func(tx *kaya.Tx, on bool) {
 				if on {
 					tx.Write(status, "details on")
@@ -72,11 +79,12 @@ func App() *kaya.App {
 		// Catalog built live: items are shared across stamped copies; the
 		// template only attaches, and each activation carries its key path.
 		catalog := tx.ContextCatalog()
-		catalog.Item("Remove").OnActivateNode(func(tx *kaya.Tx, keys []any) {
-			group, item := keys[0].(string), keys[1].(string)
-			tx.Remove(items.At(group), item)
-			tx.Write(status, fmt.Sprintf("removed %s/%s", group, item))
-		})
+		catalog.Item("Remove").Symbol(kaya.SymbolDelete).
+			OnActivateNode(func(tx *kaya.Tx, keys []any) {
+				group, item := keys[0].(string), keys[1].(string)
+				tx.Remove(items.At(group), item)
+				tx.Write(status, fmt.Sprintf("removed %s/%s", group, item))
+			})
 
 		tx.Mount(tx.Column(func() {
 			tx.Label(status) // label#0
@@ -96,15 +104,17 @@ func App() *kaya.App {
 				// hint from Share to Publish, grow the bar by Tools.
 				tx.Menu(share).Primary(false)
 				tx.Menu(file).Label("Document").
-					Item("Publish").Primary(true).OnActivate(onShare)
-				tx.Window(0).Menu("Tools").Item("Inspect")
+					Item("Publish").Primary(true).Symbol(kaya.SymbolCopy).
+					OnActivate(onShare)
+				tx.Window(0).Menu("Tools").Item("Inspect").Symbol(kaya.SymbolSearch)
 			})
 
 			targetText := tx.Signal("rename target")
 			target := tx.Label(targetText) // label#1
-			tx.ContextMenu(target).Item("Rename").OnActivate(func(tx *kaya.Tx) {
-				tx.Write(status, "renamed")
-			})
+			tx.ContextMenu(target).Item("Rename").Symbol(kaya.SymbolEdit).
+				OnActivate(func(tx *kaya.Tx) {
+					tx.Write(status, "renamed")
+				})
 
 			// Remove's activation names BOTH keys (group, then item).
 			for g := range groups.Rows(tx) {

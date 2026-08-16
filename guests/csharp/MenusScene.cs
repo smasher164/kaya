@@ -30,14 +30,20 @@ static class MenusScene
             var share = tx.Item("Share", primary: true, onActivate: onShare);
             var file = tx.Menu("File", enabled: canExport, items: new[]
             {
-                tx.Item("Save", shortcut: "primary+s",
+                // THE SEMANTIC ICON (docs/styling-plan.md D6): a
+                // CONCEPT, drawn by each platform in its own symbol
+                // set. Done is the checkmark idiom — the vocabulary
+                // has no `save` on purpose (Apple's own catalog has no
+                // save-specific glyph either).
+                tx.Item("Save", shortcut: "primary+s", symbol: Symbol.Done,
                     onActivate: t => t.Write(status, "saved")),
-                tx.Item("Export", enabled: canExport),
+                tx.Item("Export", enabled: canExport, symbol: Symbol.Forward),
                 share,
             });
             var view = tx.Menu("View", items: new[]
             {
-                tx.Toggle("Details", isChecked: details,
+                // A toggle carries a symbol like any other leaf.
+                tx.Toggle("Details", isChecked: details, symbol: Symbol.Info,
                     onToggle: (t, on) => t.Write(status, on ? "details on" : "details off")),
             });
             // Option order IS the index vocabulary: Name = 0, Date = 1.
@@ -52,7 +58,7 @@ static class MenusScene
             // Catalog built live: items are shared across stamped copies; the
             // template only attaches, and each activation carries its key path.
             var catalog = tx.ContextCatalog(
-                tx.Item("Remove", onActivate: (t, keys) =>
+                tx.Item("Remove", symbol: Symbol.Delete, onActivate: (t, keys) =>
                 {
                     string group = (string)keys[0];
                     string item = (string)keys[1];
@@ -82,18 +88,23 @@ static class MenusScene
                     t.Menu(share, primary: false);
                     t.Menu(file, label: "Document", items: new[]
                     {
-                        t.Item("Publish", primary: true, onActivate: onShare),
+                        t.Item("Publish", symbol: Symbol.Copy, primary: true,
+                            onActivate: onShare),
                     });
                     t.Window(menus: new[]
                     {
-                        t.Menu("Tools", items: new[] { t.Item("Inspect") }),
+                        t.Menu("Tools", items: new[]
+                        {
+                            t.Item("Inspect", symbol: Symbol.Search),
+                        }),
                     });
                 });
 
                 var targetText = tx.Signal("rename target");
                 var target = tx.Label(bind: targetText); // label#1
                 tx.ContextMenu(target,
-                    tx.Item("Rename", onActivate: t => t.Write(status, "renamed")));
+                    tx.Item("Rename", symbol: Symbol.Edit,
+                        onActivate: t => t.Write(status, "renamed")));
 
                 // Remove's activation names BOTH keys (group, then item).
                 tx.Each(groups, g => g.Column(() =>

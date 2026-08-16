@@ -45,8 +45,14 @@ let () =
          (Str (Printf.sprintf "archive: %d visits" !visit_count))
         
      in
-     add_section ~title:"Feed" feed;
-     add_section ~title:"Archive" ~on_selected:on_archive_shown archive;
+     (* THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar without
+        icons is not the platform's real thing, and the glyph that
+        means [Home] differs per platform — SF Symbols spells it
+        `house`, and no shared asset would be legal anyway (SF Symbols
+        are licensed to Apple platforms only). *)
+     add_section ~title:"Feed" ~symbol:Home feed;
+     add_section ~title:"Archive" ~symbol:Star ~on_selected:on_archive_shown
+       archive;
      let go_archive () =
        (* Programmatic selection: configuration, no echo —
           [~on_selected] must NOT fire (the scene asserts the count
@@ -58,8 +64,10 @@ let () =
          ~sections_presentation:
            (Int64.of_int Kaya_wire.sections_presentation_sidebar)
          library;
-       add_section ~window:library ~title:"Shelves" shelves;
-       add_section ~window:library ~title:"Loans" loans;
+       (* The SIDEBAR arm carries symbols too: the source list is where
+          a mac app most wants them. *)
+       add_section ~window:library ~title:"Shelves" ~symbol:Search shelves;
+       add_section ~window:library ~title:"Loans" ~symbol:Lock loans;
        let shelves_ready = signal (Str "shelves ready") in
        let shelves_root =
          column [ label ~bind:shelves_ready (* label#2 *) ] ()

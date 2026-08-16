@@ -233,7 +233,18 @@ for path in (gtk, winui):
 for role in roles:
     if role not in PLACEMENT:
         continue
-    if any(f'"{role}"' in read(p) for p in (gtk, winui, swiftui, compose)):
+    # ROLE-SHAPED LINES ONLY, not a bare substring: D6's symbol
+    # vocabulary put the string "settings" into every backend's symbol
+    # TABLE (2026-08-16), and a whole-file search then counted those
+    # rows as the role being "named" — which made the settings-drop
+    # self-test unable to fire. A line that names the string beside the
+    # word role is the role machinery; a symbol row is not.
+    def names_role(p, role=role):
+        for line in read(p).splitlines():
+            if f'"{role}"' in line and re.search(r"(?i)role", line):
+                return True
+        return False
+    if any(names_role(p) for p in (gtk, winui, swiftui, compose)):
         continue
     bad.append(
         f'{scene}: the placement role "{role}" is exempt from the enablement and '

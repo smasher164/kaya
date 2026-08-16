@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x426ae13f797cbb12L
+let spec_hash = 0xf84da2a3fe758bc7L
 
 let value_bool = 1
 let value_i64 = 2
@@ -70,6 +70,7 @@ let eprop_title = 1
 let eprop_intercept_back = 2
 let sprop_title = 1
 let sprop_icon = 2
+let sprop_symbol = 3
 let menu_kind_menu = 1
 let menu_kind_action = 2
 let menu_kind_toggle = 3
@@ -84,6 +85,7 @@ let mprop_icon = 5
 let mprop_primary = 6
 let mprop_shortcut = 7
 let mprop_role = 8
+let mprop_symbol = 9
 let sections_presentation_auto = 0
 let sections_presentation_bar = 1
 let sections_presentation_sidebar = 2
@@ -101,6 +103,26 @@ let align_baseline = 4
 let role_destructive = 1
 let role_prominent = 2
 let role_heading = 3
+let symbol_add = 1
+let symbol_remove = 2
+let symbol_delete = 3
+let symbol_edit = 4
+let symbol_done = 5
+let symbol_close = 6
+let symbol_search = 7
+let symbol_settings = 8
+let symbol_refresh = 9
+let symbol_info = 10
+let symbol_warning = 11
+let symbol_back = 12
+let symbol_forward = 13
+let symbol_more = 14
+let symbol_copy = 15
+let symbol_paste = 16
+let symbol_star = 17
+let symbol_lock = 18
+let symbol_person = 19
+let symbol_home = 20
 let source_const = 0
 let source_signal = 1
 let source_element = 2
@@ -1176,6 +1198,22 @@ let tx_bind_section_icon section signal_id =
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
+(* set_section_prop with a constant symbol value. *)
+let tx_set_section_symbol section symbol =
+  finish tx_kind_set_section_prop (fun b ->
+      Buffer.add_int64_le b section;
+      Buffer.add_int32_le b (Int32.of_int sprop_symbol);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 symbol))
+
+(* set_section_prop with a signal-bound symbol value. *)
+let tx_bind_section_symbol section signal_id =
+  finish tx_kind_set_section_prop (fun b ->
+      Buffer.add_int64_le b section;
+      Buffer.add_int32_le b (Int32.of_int sprop_symbol);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
 let shortcut_named_keys = [ "enter"; "escape"; "delete"; "left"; "right"; "up"; "down"; "f1"; "f2"; "f3"; "f4"; "f5"; "f6"; "f7"; "f8"; "f9"; "f10"; "f11"; "f12"; "comma"; "period"; "slash"; "backslash"; "minus"; "equal"; "leftbracket"; "rightbracket" ]
 
 (* Canonicalize a shortcut spelling to the wire form: lowercase
@@ -1331,6 +1369,14 @@ let tx_set_menu_role item role =
       Buffer.add_int32_le b (Int32.of_int mprop_role);
       Buffer.add_int32_le b (Int32.of_int source_const);
       encode_value b (Str role))
+
+(* set_menu_prop with a constant symbol value. *)
+let tx_set_menu_symbol item symbol =
+  finish tx_kind_set_menu_prop (fun b ->
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int mprop_symbol);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 symbol))
 
 (* Reads assembled from a byte accessor (absolute offset -> byte);
    kaya v1 targets are all little-endian. *)

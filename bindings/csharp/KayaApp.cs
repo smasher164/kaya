@@ -386,6 +386,59 @@ enum Role : long
     Heading = KayaWire.RoleHeading,
 }
 
+/// THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6, DESIGN.md
+/// "Icons want names, not bytes"). An app names a CONCEPT and each
+/// backend draws its own platform's glyph for it: Copy is `doc.on.doc`
+/// on Apple, `content_copy` on Material, `edit-copy-symbolic` on
+/// Adwaita, and no single asset is right on all three — SF Symbols are
+/// license-locked to Apple platforms, so a shared one is not even
+/// legal. The platform sets also metric-match the text beside them
+/// (weight, baseline) while a blob cannot. The `icon:` byte[] argument
+/// stays for genuinely app-specific art.
+///
+/// Closed, and small on purpose — the Role trick one tier over. Apple
+/// keeps its own semantic set to fifteen entries. Growing it is a spec
+/// change with its gates, never a per-app escape hatch (D5), and the
+/// root refuses a value outside the set at declare time.
+///
+/// The members' values are the WIRE values (they come from the
+/// generated KayaWire constants, so this enum cannot drift from the
+/// spec) and they are APPEND-ONLY: a new concept takes 21, because
+/// renumbering silently redraws every shipped app's menus.
+enum Symbol : long
+{
+    Add = KayaWire.SymbolAdd,
+    Remove = KayaWire.SymbolRemove,
+    /// Destroying something, the wastebasket idiom — distinct from
+    /// Remove, which takes an item out of a list.
+    Delete = KayaWire.SymbolDelete,
+    Edit = KayaWire.SymbolEdit,
+    /// Confirmation, the checkmark idiom.
+    Done = KayaWire.SymbolDone,
+    /// Dismissal, the ✕ idiom — not Delete.
+    Close = KayaWire.SymbolClose,
+    Search = KayaWire.SymbolSearch,
+    Settings = KayaWire.SymbolSettings,
+    Refresh = KayaWire.SymbolRefresh,
+    Info = KayaWire.SymbolInfo,
+    Warning = KayaWire.SymbolWarning,
+    /// The direction-relative pair: every platform mirrors these under
+    /// a right-to-left layout, so they mean BACKWARD and FORWARD in
+    /// reading order, never "left" and "right".
+    Back = KayaWire.SymbolBack,
+    Forward = KayaWire.SymbolForward,
+    /// The overflow affordance (the ellipsis idiom).
+    More = KayaWire.SymbolMore,
+    Copy = KayaWire.SymbolCopy,
+    Paste = KayaWire.SymbolPaste,
+    /// Favourite.
+    Star = KayaWire.SymbolStar,
+    Lock = KayaWire.SymbolLock,
+    /// A person or account.
+    Person = KayaWire.SymbolPerson,
+    Home = KayaWire.SymbolHome,
+}
+
 sealed class KayaInstance
 {
     internal readonly List<object> Path;
@@ -2405,12 +2458,18 @@ sealed class Tx
     /// USER switches to it — post-fact and NOT one-shot; a
     /// programmatic SelectSection does not fire it (the echo
     /// doctrine).
+    /// `symbol:` is the switcher item's SEMANTIC ICON (Symbol): a
+    /// concept each backend draws in its own platform's symbol set — a
+    /// tab bar without icons is not the platform's real thing, and a
+    /// sidebar source list is where a desktop app most wants them.
     public void AddSection(
-        ulong id, string? title = null, Action<Tx>? onSelected = null,
-        ulong window = 0)
+        ulong id, string? title = null, Symbol? symbol = null,
+        Action<Tx>? onSelected = null, ulong window = 0)
     {
         Records.Add(KayaWire.TxAddSection(window, id));
         if (title is { } t) Records.Add(KayaWire.TxSetSectionTitle(id, t));
+        if (symbol is Symbol s)
+            Records.Add(KayaWire.TxSetSectionSymbol(id, (long)s));
         if (onSelected is { } fn) App.sectionSelected[id] = fn;
     }
 
@@ -2473,11 +2532,19 @@ sealed class Tx
             Records.Add(KayaWire.TxSetMenuValue(m.Id, value.Value));
     }
 
-    void MenuTail(MenuItem m, BoolSource? enabled, byte[] icon)
+    // The tail every item kind shares. `symbol` rides here BESIDE
+    // `icon` because they are the two answers to the same question —
+    // the semantic name the platform draws, or the app's own art — and
+    // one place to spell them is one place for a kind to forget them.
+    void MenuTail(MenuItem m, BoolSource? enabled, byte[] icon, Symbol? symbol = null)
     {
         if (enabled is { } e) MenuEnabled(m, e);
         if (icon != null) Records.Add(KayaWire.TxSetMenuIcon(m.Id, Kaya.RegisterBlob(icon)));
+        if (symbol is Symbol s) MenuSymbol(m, s);
     }
+
+    void MenuSymbol(MenuItem m, Symbol symbol) =>
+        Records.Add(KayaWire.TxSetMenuSymbol(m.Id, (long)symbol));
 
     void MenuAppendAll(MenuItem parent, MenuItem[] children)
     {
@@ -2535,13 +2602,13 @@ sealed class Tx
     /// both). The shortcut is canonicalized by the binding's one
     /// parser; the root judges its anchor (window catalogs only).
     public MenuItem Item(TextSource label, string shortcut = null,
-        BoolSource? enabled = null, byte[] icon = null, bool primary = false,
-        string role = null, Action<Tx> onActivate = null)
+        BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null,
+        bool primary = false, string role = null, Action<Tx> onActivate = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindAction, label);
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
         if (role != null) Records.Add(KayaWire.TxSetMenuRole(m.Id, role));
-        MenuTail(m, enabled, icon);
+        MenuTail(m, enabled, icon, symbol);
         if (primary) Records.Add(KayaWire.TxSetMenuPrimary(m.Id, true));
         if (onActivate != null) App.menuActivated[m.Id] = onActivate;
         return m;
@@ -2552,10 +2619,10 @@ sealed class Tx
     /// path, outermost first — the keys ARE the noun the command acts
     /// on. Context items take no shortcuts (root-checked).
     public MenuItem Item(TextSource label, Action<Tx, List<object>> onActivate,
-        BoolSource? enabled = null, byte[] icon = null)
+        BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindAction, label);
-        MenuTail(m, enabled, icon);
+        MenuTail(m, enabled, icon, symbol);
         App.menuActivatedNode[m.Id] = onActivate;
         return m;
     }
@@ -2564,13 +2631,13 @@ sealed class Tx
     /// flips emit menu_toggled (the handler receives the new state);
     /// programmatic isChecked writes are QUIET (the echo doctrine).
     public MenuItem Toggle(TextSource label, BoolSource? isChecked = null,
-        BoolSource? enabled = null, byte[] icon = null, string shortcut = null,
-        Action<Tx, bool> onToggle = null)
+        BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null,
+        string shortcut = null, Action<Tx, bool> onToggle = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindToggle, label);
         if (isChecked is { } c) MenuChecked(m, c);
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
-        MenuTail(m, enabled, icon);
+        MenuTail(m, enabled, icon, symbol);
         if (onToggle != null) App.menuToggled[m.Id] = onToggle;
         return m;
     }
@@ -2578,11 +2645,12 @@ sealed class Tx
     /// The template-node flavor of Toggle: the copy's keys, then the
     /// new state.
     public MenuItem Toggle(TextSource label, Action<Tx, List<object>, bool> onToggle,
-        BoolSource? isChecked = null, BoolSource? enabled = null, byte[] icon = null)
+        BoolSource? isChecked = null, BoolSource? enabled = null, byte[] icon = null,
+        Symbol? symbol = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindToggle, label);
         if (isChecked is { } c) MenuChecked(m, c);
-        MenuTail(m, enabled, icon);
+        MenuTail(m, enabled, icon, symbol);
         App.menuToggledNode[m.Id] = onToggle;
         return m;
     }
@@ -2590,11 +2658,11 @@ sealed class Tx
     /// One labeled radio option, appended in declaration order — the
     /// order IS the index vocabulary the group's value selects over.
     public MenuItem Option(TextSource label, BoolSource? enabled = null,
-        byte[] icon = null, string shortcut = null)
+        byte[] icon = null, Symbol? symbol = null, string shortcut = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindRadioOption, label);
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(m.Id, shortcut));
-        MenuTail(m, enabled, icon);
+        MenuTail(m, enabled, icon, symbol);
         return m;
     }
 
@@ -2607,11 +2675,11 @@ sealed class Tx
     /// menu appends them in order. Disabling a menu disables its
     /// subtree (the inherited-disabled contract).
     public MenuItem Menu(TextSource label, BoolSource? enabled = null,
-        byte[] icon = null, MenuItem[] items = null)
+        byte[] icon = null, Symbol? symbol = null, MenuItem[] items = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindMenu, label);
         MenuAppendAll(m, items);
-        MenuTail(m, enabled, icon);
+        MenuTail(m, enabled, icon, symbol);
         return m;
     }
 
@@ -2622,8 +2690,9 @@ sealed class Tx
     /// isChecked/value writes are configuration and stay QUIET.
     public void Menu(MenuItem item, TextSource? label = null,
         BoolSource? enabled = null, BoolSource? isChecked = null,
-        IndexSource? value = null, byte[] icon = null, bool? primary = null,
-        string shortcut = null, string role = null, MenuItem[] items = null)
+        IndexSource? value = null, byte[] icon = null, Symbol? symbol = null,
+        bool? primary = null, string shortcut = null, string role = null,
+        MenuItem[] items = null)
     {
         MenuAppendAll(item, items);
         if (label is { } l) MenuLabel(item, l);
@@ -2631,6 +2700,7 @@ sealed class Tx
         if (isChecked is { } c) MenuChecked(item, c);
         if (value is { } v) MenuValue(item, v);
         if (icon != null) Records.Add(KayaWire.TxSetMenuIcon(item.Id, Kaya.RegisterBlob(icon)));
+        if (symbol is Symbol sym) MenuSymbol(item, sym);
         if (primary is { } p) Records.Add(KayaWire.TxSetMenuPrimary(item.Id, p));
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(item.Id, shortcut));
         if (role != null) Records.Add(KayaWire.TxSetMenuRole(item.Id, role));
@@ -2645,12 +2715,12 @@ sealed class Tx
     /// pick's new index.
     public MenuItem RadioGroup(TextSource label, MenuItem[] options,
         IndexSource? value = null, BoolSource? enabled = null, byte[] icon = null,
-        Action<Tx, int> onSelect = null)
+        Symbol? symbol = null, Action<Tx, int> onSelect = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindRadioGroup, label);
         MenuAppendAll(m, options);
         if (value is { } v) MenuValue(m, v);
-        MenuTail(m, enabled, icon);
+        MenuTail(m, enabled, icon, symbol);
         if (onSelect != null) App.menuSelected[m.Id] = onSelect;
         return m;
     }
@@ -2659,12 +2729,12 @@ sealed class Tx
     /// the new index.
     public MenuItem RadioGroup(TextSource label, MenuItem[] options,
         Action<Tx, List<object>, int> onSelect, IndexSource? value = null,
-        BoolSource? enabled = null, byte[] icon = null)
+        BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null)
     {
         var m = NewMenuItem(KayaWire.MenuKindRadioGroup, label);
         MenuAppendAll(m, options);
         if (value is { } v) MenuValue(m, v);
-        MenuTail(m, enabled, icon);
+        MenuTail(m, enabled, icon, symbol);
         App.menuSelectedNode[m.Id] = onSelect;
         return m;
     }

@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x426ae13f797cbb12
+specHash = 0xf84da2a3fe758bc7
 
 valueBool :: Word32
 valueBool = 1
@@ -132,6 +132,8 @@ spropTitle :: Word32
 spropTitle = 1
 spropIcon :: Word32
 spropIcon = 2
+spropSymbol :: Word32
+spropSymbol = 3
 menuKindMenu :: Word32
 menuKindMenu = 1
 menuKindAction :: Word32
@@ -160,6 +162,8 @@ mpropShortcut :: Word32
 mpropShortcut = 7
 mpropRole :: Word32
 mpropRole = 8
+mpropSymbol :: Word32
+mpropSymbol = 9
 sectionsPresentationAuto :: Word32
 sectionsPresentationAuto = 0
 sectionsPresentationBar :: Word32
@@ -194,6 +198,46 @@ roleProminent :: Word32
 roleProminent = 2
 roleHeading :: Word32
 roleHeading = 3
+symbolAdd :: Word32
+symbolAdd = 1
+symbolRemove :: Word32
+symbolRemove = 2
+symbolDelete :: Word32
+symbolDelete = 3
+symbolEdit :: Word32
+symbolEdit = 4
+symbolDone :: Word32
+symbolDone = 5
+symbolClose :: Word32
+symbolClose = 6
+symbolSearch :: Word32
+symbolSearch = 7
+symbolSettings :: Word32
+symbolSettings = 8
+symbolRefresh :: Word32
+symbolRefresh = 9
+symbolInfo :: Word32
+symbolInfo = 10
+symbolWarning :: Word32
+symbolWarning = 11
+symbolBack :: Word32
+symbolBack = 12
+symbolForward :: Word32
+symbolForward = 13
+symbolMore :: Word32
+symbolMore = 14
+symbolCopy :: Word32
+symbolCopy = 15
+symbolPaste :: Word32
+symbolPaste = 16
+symbolStar :: Word32
+symbolStar = 17
+symbolLock :: Word32
+symbolLock = 18
+symbolPerson :: Word32
+symbolPerson = 19
+symbolHome :: Word32
+symbolHome = 20
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -1065,6 +1109,18 @@ txBindSectionIcon section signalId = wireRecord txKindSetSectionProp
   (word64LE section <> word32LE spropIcon <> word32LE sourceSignal
     <> word64LE signalId)
 
+-- set_section_prop with a constant symbol value.
+txSetSectionSymbol :: Word64 -> Int64 -> Builder
+txSetSectionSymbol section symbol = wireRecord txKindSetSectionProp
+  (word64LE section <> word32LE spropSymbol <> word32LE sourceConst
+    <> encodeValue (VI64 symbol))
+
+-- set_section_prop with a signal-bound symbol value.
+txBindSectionSymbol :: Word64 -> Word64 -> Builder
+txBindSectionSymbol section signalId = wireRecord txKindSetSectionProp
+  (word64LE section <> word32LE spropSymbol <> word32LE sourceSignal
+    <> word64LE signalId)
+
 shortcutNamedKeys :: [String]
 shortcutNamedKeys = ["enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket"]
 
@@ -1179,6 +1235,12 @@ txSetMenuRole :: Word64 -> String -> Builder
 txSetMenuRole item role = wireRecord txKindSetMenuProp
   (word64LE item <> word32LE mpropRole <> word32LE sourceConst
     <> encodeValue (VStr role))
+
+-- set_menu_prop with a constant symbol value.
+txSetMenuSymbol :: Word64 -> Int64 -> Builder
+txSetMenuSymbol item symbol = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropSymbol <> word32LE sourceConst
+    <> encodeValue (VI64 symbol))
 
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.

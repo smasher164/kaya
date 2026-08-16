@@ -46,10 +46,52 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+// THE SEMANTIC ICON VOCABULARY's glyphs (docs/styling-plan.md D6), one
+// import per concept. Every identifier here was taken from the measured
+// name lists beside styling/symbols-material-symbols.md — never from
+// memory — and set-membership against `core-filled.txt` /
+// `ext-filled.txt` is what decided which artifact each one ships in.
+//
+// THEY MUST BE IMPORTED, not written out at the callsite: every one is
+// an EXTENSION PROPERTY on `Icons.Filled` (or on `Icons.AutoMirrored
+// .Filled`) declared in its own package, and Kotlin has no way to spell
+// an extension property fully qualified. So the import list IS the
+// mapping table's other half, and a name that does not exist fails the
+// COMPILER rather than drawing nothing at runtime.
+//
+// back/forward COME FROM `automirrored`, and that is the column's one
+// real trap. The pre-1.6 spellings `Icons.Filled.ArrowBack` /
+// `ArrowForward` still exist and still compile — they are only
+// @Deprecated, with a ReplaceWith pointing here — so an arm that
+// imported those would build clean, run clean, and point the wrong way
+// in a right-to-left layout, which no test in this tree looks at.
+// (styling/symbols-material-symbols.md §3.1, §4.1.)
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -112,11 +154,13 @@ import androidx.compose.ui.graphics.colorspace.ColorSpaces
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.node.RootForTest
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -614,6 +658,42 @@ object KayaSceneModel {
     // presentation route); menu_activate resolves against it, and
     // closing — dismissal or a leaf firing — clears it.
     var openContextWidget by mutableStateOf<Long?>(null)
+    /**
+     * THE OVERFLOW ⋮'s presentation state, and the id of the submenu it
+     * is drilled into (0 = at its roots).
+     *
+     * HOISTED OUT OF THE COMPOSABLE for D6, and the reason is the same
+     * one that put [openContextWidget] here: a harness read of a menu
+     * row has to be able to MATERIALIZE that row, because on this
+     * platform an overflow row does not exist until the menu is
+     * presented — Compose composes a DropdownMenu's content only while
+     * it is open, in a popup window of its own. While these lived in
+     * `remember` locals the only thing outside composition could do was
+     * ask the model what it had decoded, which is the read that agrees
+     * with itself.
+     *
+     * The tap route and the read route now drive ONE state, exactly as
+     * context_open and the long-press do.
+     */
+    var menuOverflowOpen by mutableStateOf(false)
+    var menuOverflowDrilled by mutableStateOf(0L)
+    /// Did a HARNESS READ present the overflow, rather than a tap. Only
+    /// what a read opened may a read close.
+    var menuOverflowPresentedForRead = false
+    /**
+     * THE COMPOSE ROOTS OF THE OPEN MENU POPUPS — UI thread only,
+     * registered by the popup's own content and dropped when it leaves.
+     *
+     * A Compose `Popup` (which is what a DropdownMenu is) is a SEPARATE
+     * WINDOW: its view is added straight to the WindowManager and is not
+     * under `activity.window.decorView`, so [kayaComposeRoot]'s walk —
+     * the one every other semantics read starts from — cannot see one
+     * row of an open menu. `LocalView.current` INSIDE the popup's
+     * content is that window's AndroidComposeView, which is the public
+     * way to get a handle on it, and one line of registration turns the
+     * menu into a surface the a11y reads can reach.
+     */
+    val menuPopupViews = ArrayList<android.view.View>()
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     val buttons = ArrayList<KayaNode>()
@@ -650,6 +730,11 @@ object KayaSceneModel {
 class KayaSection(val id: Long) {
     var root by mutableStateOf<KayaNode?>(null)
     var title by mutableStateOf("")
+    // The switcher item's SEMANTIC ICON, 0 = none
+    // (docs/styling-plan.md D6). Drawn in the NavigationBarItem's icon
+    // slot — which this host was passing an EMPTY lambda until D6, so
+    // the bar had labels and nothing above them.
+    var symbol by mutableStateOf(0L)
     val entries = androidx.compose.runtime.mutableStateListOf<KayaNavEntry>()
 }
 
@@ -691,6 +776,23 @@ class KayaMenuItem(val id: Long, val kind: Int) {
     // Optional icon blob, decoded like Image; promoted bar actions
     // show it, overflow rows stay textual (native menu dress).
     var iconBitmap by mutableStateOf<ImageBitmap?>(null)
+    /**
+     * The SEMANTIC ICON's wire value, 0 = none (docs/styling-plan.md
+     * D6). Unlike [iconBitmap] this one reaches EVERY affordance the
+     * item materializes as — the promoted bar button, the overflow row,
+     * a drilled row, a context row, a radio option and a top-level
+     * group's header — because a concept the app named is a concept the
+     * platform can draw anywhere, while an app's own bitmap is dress
+     * that only the bar has room for.
+     *
+     * WHEN AN ITEM CARRIES BOTH, THE SYMBOL WINS. Nothing in the tree
+     * sets both today, so the rule is a choice rather than a
+     * compatibility fact, and the reason is uniformity: macOS puts the
+     * symbol on the NSMenuItem and never draws a blob in a menu at all,
+     * so "symbol first" is the reading that keeps the two backends
+     * showing the same thing for the same declaration.
+     */
+    var symbol by mutableStateOf(0L)
     // Single-parent (the root validates); set at append. Bar-level
     // items keep null.
     var parent: KayaMenuItem? = null
@@ -763,7 +865,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x426ae13f797cbb12uL
+    private const val SPEC_HASH: ULong = 0xf84da2a3fe758bc7uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -847,6 +949,7 @@ object KayaCompose {
     private const val WPROP_INSET = 8
     private const val SPROP_TITLE = 1
     private const val SPROP_ICON = 2
+    private const val SPROP_SYMBOL = 3
     // Navigation-entry properties: their own typed table;
     // intercept_back is the close-veto class transplanted to POP.
     private const val EPROP_TITLE = 1
@@ -871,6 +974,7 @@ object KayaCompose {
     private const val MPROP_PRIMARY = 6
     private const val MPROP_SHORTCUT = 7
     private const val MPROP_ROLE = 8
+    private const val MPROP_SYMBOL = 9
     /**
      * How many promoted primary actions the top bar carries: k is this
      * PLATFORM's idiom, never computed by kaya (DESIGN.md, Menus). M3
@@ -928,6 +1032,100 @@ object KayaCompose {
     const val ROLE_DESTRUCTIVE = 1L
     const val ROLE_PROMINENT = 2L
     const val ROLE_HEADING = 3L
+    // THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
+    // docs/styling-plan.md D6). Long, like the role values: the prop
+    // rides as an i64 and the model's field is what the render arms
+    // compare against.
+    const val SYMBOL_ADD = 1L
+    const val SYMBOL_REMOVE = 2L
+    const val SYMBOL_DELETE = 3L
+    const val SYMBOL_EDIT = 4L
+    const val SYMBOL_DONE = 5L
+    const val SYMBOL_CLOSE = 6L
+    const val SYMBOL_SEARCH = 7L
+    const val SYMBOL_SETTINGS = 8L
+    const val SYMBOL_REFRESH = 9L
+    const val SYMBOL_INFO = 10L
+    const val SYMBOL_WARNING = 11L
+    const val SYMBOL_BACK = 12L
+    const val SYMBOL_FORWARD = 13L
+    const val SYMBOL_MORE = 14L
+    const val SYMBOL_COPY = 15L
+    const val SYMBOL_PASTE = 16L
+    const val SYMBOL_STAR = 17L
+    const val SYMBOL_LOCK = 18L
+    const val SYMBOL_PERSON = 19L
+    const val SYMBOL_HOME = 20L
+
+    /**
+     * THE MATERIAL COLUMN: (wire value, semantic name, the glyph this
+     * platform draws for it). The KayaSwiftUI sibling of this table is
+     * `kayaSymbolTable`, spelled with SF names; same shape, same rule.
+     *
+     * The Compose column was NOT recalled. It comes from
+     * styling/symbols-material-symbols.md, which enumerated
+     * material-icons-core 1.7.8 and material-icons-extended 1.7.8
+     * class-by-class out of the aars themselves and decided glyph
+     * identity by comparing bytecode path data, not catalog pictures.
+     * Three of the twenty (remove, copy, paste) are in extended; the
+     * other seventeen are in core.
+     *
+     * WHAT NEEDS NO GATE HERE, and this is the interesting difference
+     * from the SF column: there is no version floor to check. These are
+     * Kotlin ImageVector builders COMPILED INTO THE APK, not platform
+     * assets resolved by name at runtime, so a name that does not exist
+     * is a compile error (see the import block) and a name that does
+     * exist draws on every API level the app runs on. The SF column's
+     * whole hazard — a spelling that resolves on the machine you develop
+     * on and blanks on the deployment floor — cannot occur on this one.
+     * What CAN occur is the auto-mirrored trap, and the import block is
+     * where that is held.
+     *
+     * The semantic name is the SECOND column for the same reason macOS
+     * puts it in the image's accessibility description: it is what the
+     * icon MEANS, it is what a TalkBack user hears, and it is what
+     * expect_menu_symbol reads back off the composed row.
+     */
+    val SYMBOLS: List<Triple<Long, String, ImageVector>> = listOf(
+        Triple(SYMBOL_ADD, "add", Icons.Default.Add),
+        Triple(SYMBOL_REMOVE, "remove", Icons.Default.Remove),
+        Triple(SYMBOL_DELETE, "delete", Icons.Default.Delete),
+        Triple(SYMBOL_EDIT, "edit", Icons.Default.Edit),
+        Triple(SYMBOL_DONE, "done", Icons.Default.Done),
+        Triple(SYMBOL_CLOSE, "close", Icons.Default.Close),
+        Triple(SYMBOL_SEARCH, "search", Icons.Default.Search),
+        Triple(SYMBOL_SETTINGS, "settings", Icons.Default.Settings),
+        Triple(SYMBOL_REFRESH, "refresh", Icons.Default.Refresh),
+        Triple(SYMBOL_INFO, "info", Icons.Default.Info),
+        Triple(SYMBOL_WARNING, "warning", Icons.Default.Warning),
+        Triple(SYMBOL_BACK, "back", Icons.AutoMirrored.Filled.ArrowBack),
+        Triple(SYMBOL_FORWARD, "forward", Icons.AutoMirrored.Filled.ArrowForward),
+        Triple(SYMBOL_MORE, "more", Icons.Default.MoreVert),
+        Triple(SYMBOL_COPY, "copy", Icons.Default.ContentCopy),
+        Triple(SYMBOL_PASTE, "paste", Icons.Default.ContentPaste),
+        Triple(SYMBOL_STAR, "star", Icons.Default.Star),
+        Triple(SYMBOL_LOCK, "lock", Icons.Default.Lock),
+        Triple(SYMBOL_PERSON, "person", Icons.Default.Person),
+        Triple(SYMBOL_HOME, "home", Icons.Default.Home),
+    )
+
+    /** The SEMANTIC NAME of a wire symbol value, or null for a value
+     * outside the vocabulary. The root's value wall already refused
+     * those at declare time, so null here means this interpreter's
+     * table has drifted from the spec — which is a different failure
+     * from "no symbol", and the read says so. */
+    fun symbolName(value: Long): String? = SYMBOLS.firstOrNull { it.first == value }?.second
+
+    /** The glyph for a wire symbol value. */
+    fun symbolIcon(value: Long): ImageVector? = SYMBOLS.firstOrNull { it.first == value }?.third
+
+    /** Is this string one of the twenty names — the question that tells
+     * a symbol's description apart from any OTHER content description a
+     * row might carry (an icon blob's, whose description is the item's
+     * label). The read needs it to avoid reporting "Share" as though it
+     * were a symbol nobody has heard of. */
+    fun isSymbolName(text: String): Boolean = SYMBOLS.any { it.second == text }
+
     // The align enum's wire values (spec enum "align").
     const val ALIGN_START = 0L
     const val ALIGN_CENTER = 1L
@@ -1558,6 +1756,9 @@ object KayaCompose {
                         // Day-one slot: accepted; the bar item's TITLE
                         // is the harness observable.
                         SPROP_ICON -> skipValue(b)
+                        // The SEMANTIC ICON: drawn in the bar item's
+                        // icon slot (docs/styling-plan.md D6).
+                        SPROP_SYMBOL -> section.symbol = readI64(b)
                         else -> error("kaya: unknown section prop $prop")
                     }
                 }
@@ -1660,6 +1861,11 @@ object KayaCompose {
                                 BitmapFactory.decodeByteArray(it, 0, it.size)
                             }?.asImageBitmap()
                         }
+                        // The SEMANTIC ICON: drawn on every affordance
+                        // this item materializes as, and read back off
+                        // the composed row by expect_menu_symbol
+                        // (docs/styling-plan.md D6).
+                        MPROP_SYMBOL -> item.symbol = readI64(b)
                         else -> error("kaya: unknown menu prop $prop")
                     }
                 }
@@ -4063,6 +4269,154 @@ object KayaCompose {
     }
 
     /**
+     * THE expect_menu_symbol READ (docs/styling-plan.md D6): the
+     * semantic name the item's REAL row carries, off the merged
+     * semantics tree — the post-merge node a service focuses and speaks.
+     *
+     * MAIN THREAD ONLY (callers go through [onUi]).
+     *
+     * WHY THIS AND NOT THE MODEL. `KayaMenuItem.symbol` is right there,
+     * and answering from it would make the verb agree with itself: the
+     * apply arm decoded a number, the read would hand the same number
+     * back, and a backend that drew nothing would be green. What is read
+     * instead is the content description on the row's merged node, and
+     * it got there from the [Icon] the lowering drew. Delete
+     * [KayaSymbolIcon]'s body and every assertion fails.
+     *
+     * WHY THE ROW HAS TO BE PRESENTED FIRST, which is the shape of this
+     * platform rather than a choice. macOS can read a menu that is shut,
+     * because NSMenuItem is a retained object AppKit hands you whether
+     * or not the menu is on screen. Compose composes a DropdownMenu's
+     * content ONLY while it is open — an overflow row that nobody is
+     * looking at does not exist, in any tree, at all. So the read drives
+     * the same presentation state the ⋮ tap drives ([kayaPresentMenuRow])
+     * and then reads what got composed. It is the one non-vacuous
+     * observation available here, and it is stronger than the iOS arm's,
+     * which can only confirm that a name resolves.
+     *
+     * TOTAL, like [kayaMenuStateRead]'s siblings: every failure is a
+     * short sentence and a retryable non-match, never an exception. The
+     * step wrapper re-runs it every 20ms, which is also what absorbs the
+     * frame the presentation needs.
+     */
+    private fun kayaMenuSymbolRead(activity: ComponentActivity, path: String): String {
+        val item = kayaResolveMenuPath(path)?.first ?: return "no such item"
+        kayaPresentMenuRow(item)
+        val node = kayaMenuRowNode(activity, kayaMenuTag(item.id))
+            ?: return kayaMenuRowMissing(item)
+        val described = node.config.getOrNull(SemanticsProperties.ContentDescription)
+        if (described.isNullOrEmpty()) {
+            // WHAT THIS MEASURED: the row is composed and the node a
+            // service focuses carries no description. It deliberately
+            // does NOT say whether the app asked for a symbol — this
+            // reader cannot tell "none declared" from "declared and
+            // never lowered", and a diagnostic may only print what it
+            // measured (CLAUDE.md invariant 3).
+            return "no icon on the menu row"
+        }
+        val name = described.joinToString(" ")
+        if (!isSymbolName(name)) {
+            // A description that is not one of the twenty came from
+            // something other than the symbol lowering — an icon blob's
+            // description is the item's LABEL, and reporting "Share" as
+            // though it were a symbol nobody recognises would send the
+            // reader after the vocabulary instead of the row.
+            return "the row's content description is \"$name\", which is not a symbol name"
+        }
+        return name
+    }
+
+    /**
+     * Present the surface this item's row materializes on, so there is
+     * something for [kayaMenuSymbolRead] to read. Idempotent: the step
+     * wrapper calls the read again every 20ms until the frame lands.
+     */
+    private fun kayaPresentMenuRow(item: KayaMenuItem) {
+        // An OPEN context menu owns resolution exclusively (the state
+        // read's rule verbatim) and context_open already presented it;
+        // nothing to drive.
+        if (KayaSceneModel.openContextWidget != null) return
+        // A promoted primary is a real bar action — composed whenever
+        // the bar is, menu open or shut.
+        if (kayaPromotedActions().any { it.id == item.id }) return
+        // Everything else in the window catalog lives behind the ⋮.
+        // The flag is claimed only by the call that actually OPENS it —
+        // a menu already on screen was somebody else's, and the closing
+        // rule is "only what a read opened may a read close".
+        if (!KayaSceneModel.menuOverflowOpen) {
+            KayaSceneModel.menuOverflowOpen = true
+            KayaSceneModel.menuOverflowPresentedForRead = true
+        }
+        // A row under a nested `menu` exists only inside that menu's
+        // drill-in — and the drill is a JUMP, not a path, so one hop
+        // reaches any depth. A top-level group's header and its direct
+        // children are at the overflow's root, and so are a radio
+        // group's options, which render inline wherever the group does.
+        val parent = item.parent
+        KayaSceneModel.menuOverflowDrilled =
+            if (parent != null && parent.parent != null &&
+                parent.kind == MENU_KIND_MENU
+            ) {
+                parent.id
+            } else {
+                0L
+            }
+    }
+
+    /** Put the overflow back the way the scene left it, once a read has
+     * had its answer. Only if THIS is what opened it: a menu the user's
+     * tap opened is the user's, and a read must not close it. */
+    private fun kayaDismissPresentedMenuRow() {
+        if (!KayaSceneModel.menuOverflowPresentedForRead) return
+        KayaSceneModel.menuOverflowPresentedForRead = false
+        KayaSceneModel.menuOverflowOpen = false
+        KayaSceneModel.menuOverflowDrilled = 0L
+    }
+
+    /**
+     * The tagged node for a materialized menu affordance, across every
+     * window this host can be showing one in: the activity's own tree
+     * (the bar), then each open menu popup (the overflow, a drill-in, a
+     * context menu).
+     *
+     * MERGED trees only — [kayaAxFind]'s rule, for [kayaAxFind]'s
+     * reason: what a client consumes is the post-merge view, and the
+     * row's description and the row's tag land on the same merged node
+     * precisely because the row merges its descendants.
+     */
+    private fun kayaMenuRowNode(activity: ComponentActivity, tag: String): SemanticsNode? {
+        kayaComposeRoot(activity.window.decorView)?.let { view ->
+            kayaAxFind((view as RootForTest).semanticsOwner.rootSemanticsNode, tag)
+                ?.let { return it }
+        }
+        for (popup in KayaSceneModel.menuPopupViews) {
+            val root = kayaComposeRoot(popup) ?: continue
+            kayaAxFind((root as RootForTest).semanticsOwner.rootSemanticsNode, tag)
+                ?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * Why no row was found — every input this reader weighed, because
+     * "not composed" has three quite different causes here and the
+     * sentence a reader chases has to tell them apart: the menu was
+     * never presented, it was presented but the row is one drill deeper
+     * than this arm jumped, or the lowering stopped tagging its rows.
+     * Printed only after the step's whole deadline, by which time the
+     * frame excuse is gone.
+     */
+    private fun kayaMenuRowMissing(item: KayaMenuItem): String =
+        "no composed row carries " + kayaMenuTag(item.id) +
+            " (overflow open=" + KayaSceneModel.menuOverflowOpen +
+            " drilled=" + KayaSceneModel.menuOverflowDrilled +
+            " context=" + KayaSceneModel.openContextWidget +
+            " promoted=" + kayaPromotedActions().any { it.id == item.id } +
+            " menu popups=" + KayaSceneModel.menuPopupViews.size +
+            "); on this host an overflow or context row is composed only " +
+            "while its menu is presented"
+
+    /**
      * The inputs [kayaAxRole] weighs, for a MISMATCH. `unknown/…` says
      * the platform classified the control as something the closed set
      * has no name for, and the next question is always which something —
@@ -5493,6 +5847,37 @@ object KayaCompose {
                             }
                         }
                     }
+                    "expect_menu_symbol" -> {
+                        // THE SEMANTIC ICON (docs/styling-plan.md D6),
+                        // read off the composed row's merged semantics —
+                        // see kayaMenuSymbolRead for why it is that and
+                        // not the model field sitting next to it, and
+                        // why the read presents the menu first.
+                        val head = quotedHead(line.substring(parts[0].length))
+                        val want = head?.let { quotedHead(it.second) }
+                        if (head == null || want == null || want.second.isNotEmpty()) {
+                            failures.add(
+                                "expect_menu_symbol wants a quoted path and a quoted " +
+                                    "symbol name: $line")
+                        } else {
+                            val got = onUi(activity) { kayaMenuSymbolRead(activity, head.first) }
+                            if (got == want.first) {
+                                // The read presented the overflow to
+                                // materialize the row; put it back now
+                                // that it has its answer, so the next
+                                // step sees the surface the scene left.
+                                // Only on the hit: a miss is retried,
+                                // and closing between attempts would
+                                // take the row away each time.
+                                onUi(activity) { kayaDismissPresentedMenuRow() }
+                                observed.add("menu \"${head.first}\" symbol \"${want.first}\"")
+                            } else {
+                                failures.add(
+                                    "menu \"${head.first}\" symbol \"$got\", " +
+                                        "wanted \"${want.first}\"")
+                            }
+                        }
+                    }
                     "menu_activate" -> {
                         // Drive the REAL activation route — the same
                         // helper every rendered row calls — wherever
@@ -6197,6 +6582,7 @@ fun KayaRender(
             expanded = open,
             onDismissRequest = { KayaSceneModel.openContextWidget = null },
         ) {
+            KayaMenuPopupRoot()
             val close = { KayaSceneModel.openContextWidget = null }
             // The drill-in state resets on every (re)open: the menu
             // always surfaces at its roots.
@@ -6216,6 +6602,8 @@ fun KayaRender(
                         KayaCompose.MENU_KIND_RADIO_GROUP ->
                             DropdownMenuItem(
                                 text = { Text(root.label) },
+                                modifier = Modifier.testTag(kayaMenuTag(root.id)),
+                                leadingIcon = kayaSymbolSlot(root.symbol),
                                 trailingIcon = { Text("▸") },
                                 enabled = kayaMenuEffectivelyEnabled(root),
                                 onClick = { drilled = root },
@@ -7672,11 +8060,73 @@ private fun KayaSurface() {
 }
 
 /**
+ * THE TEST TAG EVERY MATERIALIZED MENU AFFORDANCE CARRIES, keyed by the
+ * item's own id.
+ *
+ * It is what makes the symbol read an OBSERVATION: the tag says "this
+ * row is the row for item N", the merged semantics node it lands on is
+ * the node a TalkBack user focuses, and the content description on that
+ * node got there from the [Icon] the lowering drew — not from the field
+ * the apply arm decoded. An item with no row composed has no node with
+ * this tag, and the read reports that as its own state rather than
+ * guessing.
+ *
+ * On EVERY affordance, symbol or not, deliberately: "the row exists and
+ * carries no icon" and "no row exists" are different measurements, and a
+ * tag only on the icon-bearing rows would collapse them into one.
+ */
+fun kayaMenuTag(id: Long): String = "kaya:menu#$id"
+
+/** The SEMANTIC ICON, drawn once, in one place — the kayaApplySymbol
+ * precedent from the macOS arm, so every kind gets identical treatment
+ * and an unset symbol is simply no icon.
+ *
+ * `contentDescription` IS the semantic name. That is the whole
+ * observation channel on this backend, and it is also just correct
+ * accessibility: an icon that means something has to say what it means,
+ * and "done" is what the item's checkmark glyph means. */
+@Composable
+fun KayaSymbolIcon(symbol: Long) {
+    val icon = KayaCompose.symbolIcon(symbol) ?: return
+    Icon(imageVector = icon, contentDescription = KayaCompose.symbolName(symbol))
+}
+
+/** The same icon as a SLOT — null when the item declares no symbol, so
+ * a row with none passes `null` to `leadingIcon` and Material lays it
+ * out exactly as it did before D6 rather than reserving an empty box. */
+fun kayaSymbolSlot(symbol: Long): (@Composable () -> Unit)? =
+    if (symbol == 0L) null else { -> KayaSymbolIcon(symbol) }
+
+/**
+ * Hands the harness a handle on the WINDOW this menu is composed in.
+ *
+ * A Compose `Popup` — and every DropdownMenu is one — is its own window,
+ * added straight to the WindowManager, so nothing under
+ * `activity.window.decorView` leads to it and the a11y reads that start
+ * there see an open menu as an empty screen. Inside the popup's content
+ * `LocalView.current` IS that window's AndroidComposeView, which makes
+ * this two lines instead of a hunt through WindowManagerGlobal.
+ *
+ * Called at the TOP of each menu's content, so the registration outlives
+ * every row below it, and dropped on dispose so a closed menu leaves no
+ * stale root for a later read to walk.
+ */
+@Composable
+private fun KayaMenuPopupRoot() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        KayaSceneModel.menuPopupViews.add(view)
+        onDispose { KayaSceneModel.menuPopupViews.remove(view) }
+    }
+}
+
+/**
  * The window catalog's phone materialization (DESIGN.md, Menus): an M3
- * TopAppBar whose actions slot carries the promoted primaries — icon
- * blob when present, text otherwise — and the overflow ⋮ holding the
- * ENTIRE catalog. Every affordance here routes through
- * [kayaActivateMenuItem]: chrome emits, one dispatch path.
+ * TopAppBar whose actions slot carries the promoted primaries — the
+ * SEMANTIC ICON when the item names one, then the icon blob, then text
+ * — and the overflow ⋮ holding the ENTIRE catalog. Every affordance
+ * here routes through [kayaActivateMenuItem]: chrome emits, one
+ * dispatch path.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -7694,10 +8144,20 @@ fun KayaMenuTopBar() {
             kayaPromotedActions().forEach { item ->
                 val enabled = kayaMenuEffectivelyEnabled(item)
                 val icon = item.iconBitmap
-                if (icon != null) {
+                val tag = Modifier.testTag(kayaMenuTag(item.id))
+                if (item.symbol != 0L) {
                     IconButton(
                         onClick = { kayaActivateMenuItem(item, ByteArray(0)) },
                         enabled = enabled,
+                        modifier = tag,
+                    ) {
+                        KayaSymbolIcon(item.symbol)
+                    }
+                } else if (icon != null) {
+                    IconButton(
+                        onClick = { kayaActivateMenuItem(item, ByteArray(0)) },
+                        enabled = enabled,
+                        modifier = tag,
                     ) {
                         Image(bitmap = icon, contentDescription = item.label)
                     }
@@ -7705,6 +8165,7 @@ fun KayaMenuTopBar() {
                     TextButton(
                         onClick = { kayaActivateMenuItem(item, ByteArray(0)) },
                         enabled = enabled,
+                        modifier = tag,
                     ) {
                         Text(item.label)
                     }
@@ -7724,36 +8185,48 @@ fun KayaMenuTopBar() {
  */
 @Composable
 private fun KayaOverflowMenu() {
-    var expanded by remember { mutableStateOf(false) }
-    var drilled by remember { mutableStateOf<KayaMenuItem?>(null) }
     Box {
         IconButton(onClick = {
-            drilled = null
-            expanded = true
+            KayaSceneModel.menuOverflowDrilled = 0L
+            KayaSceneModel.menuOverflowOpen = true
         }) { Text("⋮") }
         DropdownMenu(
-            expanded = expanded,
+            expanded = KayaSceneModel.menuOverflowOpen,
             onDismissRequest = {
-                expanded = false
-                drilled = null
+                KayaSceneModel.menuOverflowOpen = false
+                KayaSceneModel.menuOverflowDrilled = 0L
             },
         ) {
+            KayaMenuPopupRoot()
             val close = {
-                expanded = false
-                drilled = null
+                KayaSceneModel.menuOverflowOpen = false
+                KayaSceneModel.menuOverflowDrilled = 0L
             }
             // Promotion moves an action OUT of overflow: the promoted
             // set renders as real bar actions and is excluded from
             // every overflow row run (drill-ins included).
             val promotedIds = kayaPromotedActions().map { it.id }.toSet()
-            val sub = drilled
+            val sub = KayaSceneModel.menuItems[KayaSceneModel.menuOverflowDrilled]
             if (sub == null) {
                 KayaSceneModel.menubar.forEachIndexed { i, group ->
                     if (i > 0) HorizontalDivider()
-                    Text(
-                        group.label,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
+                    // A GROUPING NODE'S HEADER IS AN AFFORDANCE TOO: it
+                    // carries the group's own symbol and its own tag, so
+                    // `expect_menu_symbol "File"` reads the same surface
+                    // a leaf's row does. Merged deliberately — the icon
+                    // and the label are one utterance to a service, and
+                    // a header that did not merge would hand the read a
+                    // node with a tag and no description on it.
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .testTag(kayaMenuTag(group.id))
+                            .semantics(mergeDescendants = true) {},
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        KayaSymbolIcon(group.symbol)
+                        Text(group.label)
+                    }
                     if (group.kind == KayaCompose.MENU_KIND_RADIO_GROUP) {
                         // A bar-level radio group: a labeled group
                         // whose options use the checkmark idiom.
@@ -7762,7 +8235,7 @@ private fun KayaOverflowMenu() {
                         KayaMenuRows(
                             group.children.toList(),
                             ByteArray(0),
-                            onDrill = { drilled = it },
+                            onDrill = { KayaSceneModel.menuOverflowDrilled = it.id },
                             onClose = close,
                             promoted = promotedIds,
                         )
@@ -7772,13 +8245,13 @@ private fun KayaOverflowMenu() {
                 // The drill-in: a back row over the submenu's rows.
                 DropdownMenuItem(
                     text = { Text("‹ ${sub.label}") },
-                    onClick = { drilled = null },
+                    onClick = { KayaSceneModel.menuOverflowDrilled = 0L },
                 )
                 HorizontalDivider()
                 KayaMenuRows(
                     sub.children.toList(),
                     ByteArray(0),
-                    onDrill = { drilled = it },
+                    onDrill = { KayaSceneModel.menuOverflowDrilled = it.id },
                     onClose = close,
                     promoted = promotedIds,
                 )
@@ -7806,11 +8279,21 @@ fun KayaMenuRows(
     promoted: Set<Long> = emptySet(),
 ) {
     items.forEach { item ->
+        // The SEMANTIC ICON rides the LEADING slot on every row kind
+        // that has one free — which is all of them here; a toggle's
+        // checkmark and a submenu's ▸ are trailing marks, and neither
+        // competes with it. (A radio option is the one row whose
+        // leading slot is taken; KayaRadioRows says what happens
+        // there.) A separator has no label, no id and no icon.
+        val symbol = kayaSymbolSlot(item.symbol)
+        val tag = Modifier.testTag(kayaMenuTag(item.id))
         when (item.kind) {
             KayaCompose.MENU_KIND_SEPARATOR -> HorizontalDivider()
             KayaCompose.MENU_KIND_MENU ->
                 DropdownMenuItem(
                     text = { Text(item.label) },
+                    modifier = tag,
+                    leadingIcon = symbol,
                     trailingIcon = { Text("▸") },
                     enabled = kayaMenuEffectivelyEnabled(item),
                     onClick = { onDrill(item) },
@@ -7819,6 +8302,8 @@ fun KayaMenuRows(
             KayaCompose.MENU_KIND_TOGGLE ->
                 DropdownMenuItem(
                     text = { Text(item.label) },
+                    modifier = tag,
+                    leadingIcon = symbol,
                     // The platform's checkmark idiom: a trailing mark
                     // while checked, nothing while not.
                     trailingIcon = { if (item.checked) Text("✓") },
@@ -7833,6 +8318,8 @@ fun KayaMenuRows(
                 if (!promoted.contains(item.id)) {
                     DropdownMenuItem(
                         text = { Text(item.label) },
+                        modifier = tag,
+                        leadingIcon = symbol,
                         enabled = kayaMenuEffectivelyEnabled(item),
                         onClick = {
                             onClose()
@@ -7843,6 +8330,8 @@ fun KayaMenuRows(
             else ->
                 DropdownMenuItem(
                     text = { Text(item.label) },
+                    modifier = tag,
+                    leadingIcon = symbol,
                     enabled = kayaMenuEffectivelyEnabled(item),
                     onClick = {
                         onClose()
@@ -7856,18 +8345,28 @@ fun KayaMenuRows(
 /** A radio group's options as RadioButton rows (inline wherever the
  * group appears — bar level or nested; the platform's checkmark
  * idiom). A pick routes through [kayaActivateMenuItem], which emits on
- * the GROUP with the option's index — the Choice contract. */
+ * the GROUP with the option's index — the Choice contract.
+ *
+ * THE ONE ROW WHOSE SEMANTIC ICON IS TRAILING, not leading: the
+ * leading slot holds the selection mark, which is the row's whole
+ * point, and moving that to make room for an icon would break the
+ * checkmark idiom this arm exists to keep. Nothing else changes — the
+ * icon is the same [Icon] with the same content description on the
+ * same merged node, so the read does not know or care which slot it
+ * came out of. */
 @Composable
 fun KayaRadioRows(group: KayaMenuItem, noun: ByteArray, onClose: () -> Unit) {
     group.children.forEachIndexed { i, option ->
         DropdownMenuItem(
             text = { Text(option.label) },
+            modifier = Modifier.testTag(kayaMenuTag(option.id)),
             leadingIcon = {
                 androidx.compose.material3.RadioButton(
                     selected = group.value.toInt() == i,
                     onClick = null,
                 )
             },
+            trailingIcon = kayaSymbolSlot(option.symbol),
             enabled = kayaMenuEffectivelyEnabled(option),
             onClick = {
                 onClose()
@@ -8071,7 +8570,14 @@ fun KayaSectionsScaffold(active: KayaSection) {
                 NavigationBarItem(
                     selected = section.id == active.id,
                     onClick = { kayaUserSelectsSection(section.id) },
-                    icon = {},
+                    // THE SEMANTIC ICON (docs/styling-plan.md D6). An
+                    // empty lambda until now, which is what an M3
+                    // NavigationBar looks like with the one thing it is
+                    // designed around missing: the icon is the primary
+                    // affordance and the label is the caption under it.
+                    // A section that declares no symbol still passes an
+                    // empty slot, exactly as before.
+                    icon = { KayaSymbolIcon(section.symbol) },
                     label = { Text(section.title) },
                 )
             }

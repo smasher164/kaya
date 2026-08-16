@@ -37,12 +37,18 @@ static class SectionsScene
                 sectionsPresentation: KayaWire.SectionsPresentationBar);
             visits = tx.Signal("archive: 0 visits");
 
-            tx.AddSection(Feed, title: "Feed");
-            tx.AddSection(Archive, title: "Archive", onSelected: inner =>
-            {
-                visitCount++;
-                inner.Write(visits, $"archive: {visitCount} visits");
-            });
+            // THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar
+            // without icons is not the platform's real thing, and the
+            // glyph that means `home` differs per platform — SF Symbols
+            // spells it `house`, and no shared asset would be legal
+            // anyway (SF Symbols are licensed to Apple platforms only).
+            tx.AddSection(Feed, title: "Feed", symbol: Symbol.Home);
+            tx.AddSection(Archive, title: "Archive", symbol: Symbol.Star,
+                onSelected: inner =>
+                {
+                    visitCount++;
+                    inner.Write(visits, $"archive: {visitCount} visits");
+                });
 
             var feedRoot = tx.Column(() =>
             {
@@ -64,8 +70,12 @@ static class SectionsScene
                         sectionsPresentation: KayaWire.SectionsPresentationSidebar);
                     // window: is the add-into-a-window spelling; the
                     // default 0 above is the primary.
-                    inner.AddSection(Shelves, title: "Shelves", window: Library);
-                    inner.AddSection(Loans, title: "Loans", window: Library);
+                    // The SIDEBAR arm carries symbols too: the source
+                    // list is where a mac app most wants them.
+                    inner.AddSection(Shelves, title: "Shelves",
+                        symbol: Symbol.Search, window: Library);
+                    inner.AddSection(Loans, title: "Loans",
+                        symbol: Symbol.Lock, window: Library);
 
                     var shelvesRoot = inner.Column(() =>
                     {

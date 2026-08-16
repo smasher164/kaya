@@ -302,6 +302,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "uint64",
                 "encodeValue(b, BlobHandle(handle))".to_string(),
             ),
+            crate::PropKind::Enum(_) => (param(prop), "int64", format!("encodeValue(b, {})", param(prop))),
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -416,7 +417,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "uint64",
                 "encodeValue(b, BlobHandle(handle))".to_string(),
             ),
-            other => unreachable!("no menu prop carries {other:?}"),
+            crate::PropKind::Enum(_) => (param(prop), "int64", format!("encodeValue(b, {})", param(prop))),
         };
         c.line("");
         if *prop == "shortcut" {

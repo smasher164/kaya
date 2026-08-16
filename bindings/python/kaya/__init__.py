@@ -1970,6 +1970,17 @@ class MenuItem:
         _records().append(
             wire.tx_set_menu_icon(self.id, runtime.register_blob(data)))
 
+    def symbol(self, symbol):
+        """The item's SEMANTIC ICON (`kaya.Symbol`, or its name): the
+        closed concept vocabulary each backend maps to its own
+        platform's symbol set. BESIDE `icon`, not instead of it — app
+        art still rides the blob; a STANDARD concept rides this, because
+        no one asset is right on all three platforms and the platform
+        sets metric-match the text beside them. No symbol on a
+        separator (root-checked). Const-only."""
+        _records().append(
+            wire.tx_set_menu_symbol(self.id, _symbol_value(symbol)))
+
     def primary(self, on):
         """The phone-bar promotion hint (actions only — root-checked).
         Flipping it recomputes the promoted set deterministically;
@@ -2141,8 +2152,8 @@ def _menu_require_catalog(scope):
         )
 
 
-def item(label, shortcut=None, enabled=None, icon=None, primary=None,
-         role=None, on_activate=None):
+def item(label, shortcut=None, enabled=None, icon=None, symbol=None,
+         primary=None, role=None, on_activate=None):
     """An action — a leaf command firing exactly one menu_activated
     occurrence (menu click OR its shortcut: ONE occurrence, one
     dispatch path). The handler rides the declaration; on a
@@ -2157,6 +2168,8 @@ def item(label, shortcut=None, enabled=None, icon=None, primary=None,
         it.enabled(enabled)
     if icon is not None:
         it.icon(icon)
+    if symbol is not None:
+        it.symbol(symbol)
     if primary is not None:
         it.primary(primary)
     if role is not None:
@@ -2171,8 +2184,8 @@ def item(label, shortcut=None, enabled=None, icon=None, primary=None,
     return it
 
 
-def toggle(label, checked=None, enabled=None, icon=None, shortcut=None,
-           on_toggle=None):
+def toggle(label, checked=None, enabled=None, icon=None, symbol=None,
+           shortcut=None, on_toggle=None):
     """A toggle — a stateful leaf reusing the Checkbox contract: user
     flips emit menu_toggled (the handler receives the new state;
     template-node copies get the stamped keys first); programmatic
@@ -2188,12 +2201,14 @@ def toggle(label, checked=None, enabled=None, icon=None, shortcut=None,
         it.enabled(enabled)
     if icon is not None:
         it.icon(icon)
+    if symbol is not None:
+        it.symbol(symbol)
     if on_toggle is not None:
         _app._menu_handlers[(wire.OCC_MENU_TOGGLED, it.id)] = on_toggle
     return it
 
 
-def option(label, enabled=None, icon=None, shortcut=None):
+def option(label, enabled=None, icon=None, symbol=None, shortcut=None):
     """One labeled radio option, appended in declaration order — the
     order IS the index vocabulary the group's value selects over.
     Options carry no state of their own; selection lives on the
@@ -2207,6 +2222,8 @@ def option(label, enabled=None, icon=None, shortcut=None):
         it.enabled(enabled)
     if icon is not None:
         it.icon(icon)
+    if symbol is not None:
+        it.symbol(symbol)
     return it
 
 
@@ -2216,7 +2233,7 @@ def separator():
     _menu_seat(it)
 
 
-def menu(label, enabled=None, icon=None):
+def menu(label, enabled=None, icon=None, symbol=None):
     """A NESTED menu — grouping, never navigation: `with
     kaya.menu("Sub"):` inside an open menu scope (one nested grouping
     level is the cap, root-checked). Bar-level menus are `app.menu` —
@@ -2227,10 +2244,13 @@ def menu(label, enabled=None, icon=None):
         it.enabled(enabled)
     if icon is not None:
         it.icon(icon)
+    if symbol is not None:
+        it.symbol(symbol)
     return _MenuScope(("item", it.id), scope._shortcut_ok, value=it)
 
 
-def radio_group(label, value=None, enabled=None, icon=None, on_select=None):
+def radio_group(label, value=None, enabled=None, icon=None, symbol=None,
+                on_select=None):
     """A NESTED radio group — the Choice contract inline, with the
     platform's checkmark idiom: `with kaya.radio_group("Sort"):`
     declares only kaya.option children. `value` is the selected
@@ -2243,6 +2263,8 @@ def radio_group(label, value=None, enabled=None, icon=None, on_select=None):
         it.enabled(enabled)
     if icon is not None:
         it.icon(icon)
+    if symbol is not None:
+        it.symbol(symbol)
     if on_select is not None:
         _app._menu_handlers[(wire.OCC_MENU_VALUE_CHANGED, it.id)] = on_select
     # value= lands at block exit, AFTER the option children: the index
@@ -2527,6 +2549,106 @@ def _role_value(role):
             f"{sorted(_ROLE_NAMES)} (kaya.Role.DESTRUCTIVE/PROMINENT/HEADING)"
         )
     return role
+
+
+class Symbol:
+    """THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
+    docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
+
+    An app names a CONCEPT and each backend draws its own platform's
+    glyph for it: `Symbol.COPY` is `doc.on.doc` on Apple, `content_copy`
+    on Material, `edit-copy-symbolic` on Adwaita, and no single asset is
+    right on all three — SF Symbols are license-locked to Apple
+    platforms, so a shared one is not even legal. The `icon=` blob slot
+    stays beside this one for genuinely app-specific art.
+
+    Closed, and small on purpose — the `Role` trick one tier over, and
+    spelled the same way here: every call also takes the plain name
+    (`symbol("copy")`), the Pythonic spelling `align=` and `role()`
+    already use.
+
+    THE VALUES ARE WIRE VALUES AND ARE APPEND-ONLY. A new concept takes
+    21; renumbering silently redraws every shipped app's menus.
+
+    What the entries mean where a word could go two ways: DELETE
+    destroys (the wastebasket idiom) while REMOVE takes an item out of a
+    list; CLOSE dismisses (the ✕ idiom) and is not DELETE; DONE is the
+    checkmark; MORE is the overflow ellipsis; STAR is favourite; PERSON
+    is a person or account. BACK and FORWARD are the direction-relative
+    pair — every platform mirrors them under a right-to-left layout, so
+    they mean BACKWARD and FORWARD in reading order, never "left" and
+    "right"."""
+
+    ADD = wire.SYMBOL_ADD
+    REMOVE = wire.SYMBOL_REMOVE
+    DELETE = wire.SYMBOL_DELETE
+    EDIT = wire.SYMBOL_EDIT
+    DONE = wire.SYMBOL_DONE
+    CLOSE = wire.SYMBOL_CLOSE
+    SEARCH = wire.SYMBOL_SEARCH
+    SETTINGS = wire.SYMBOL_SETTINGS
+    REFRESH = wire.SYMBOL_REFRESH
+    INFO = wire.SYMBOL_INFO
+    WARNING = wire.SYMBOL_WARNING
+    BACK = wire.SYMBOL_BACK
+    FORWARD = wire.SYMBOL_FORWARD
+    MORE = wire.SYMBOL_MORE
+    COPY = wire.SYMBOL_COPY
+    PASTE = wire.SYMBOL_PASTE
+    STAR = wire.SYMBOL_STAR
+    LOCK = wire.SYMBOL_LOCK
+    PERSON = wire.SYMBOL_PERSON
+    HOME = wire.SYMBOL_HOME
+
+
+#: The name spelling of the same twenty. Derived from the class rather
+#: than typed a second time: two hand-written tables are two things to
+#: keep in step, and the failure of a drifted one is that `symbol("home")`
+#: draws the wrong concept with nothing raised anywhere. `sorted()` of
+#: this is what the refusals print, so the app is told what it MAY say.
+_SYMBOL_NAMES = {
+    name.lower(): value
+    for name, value in vars(Symbol).items()
+    if name.isupper()
+}
+
+
+def _symbol_value(symbol):
+    """One symbol, from either spelling, refused here if it is neither —
+    the `_role_value` shape one vocabulary over.
+
+    THE CLOSED SET IS CHECKED IN THE BINDING because Python has no enum
+    to close it with: the seven other bindings make a symbol that is not
+    a symbol fail to compile, and this is where that becomes a raise.
+    The ROOT keeps its own wall (`check_symbol`, crates/kaya/src/scene.rs)
+    and keeps the PAIRING too — a symbol on a separator, or bound to a
+    signal — which no handle here knows.
+    """
+    if isinstance(symbol, str):
+        try:
+            return _SYMBOL_NAMES[symbol]
+        except KeyError:
+            raise ValueError(
+                f"kaya: symbol must be one of {sorted(_SYMBOL_NAMES)}, got "
+                f"{symbol!r}"
+            ) from None
+    # bool BEFORE int, which it subclasses: `symbol(True)` would
+    # otherwise read as 1, the `add` glyph, out of a value that meant
+    # nothing. A Signal lands in the same clause — a symbol is a fixed
+    # concept, declared once, so no binding binds one to a signal.
+    if isinstance(symbol, bool) or not isinstance(symbol, int):
+        raise TypeError(
+            f"kaya: symbol takes kaya.Symbol.COPY or its name, not "
+            f"{type(symbol).__name__} — a symbol names a CONCEPT the "
+            "platform draws, and is declared once, so no binding binds "
+            "one to a signal"
+        )
+    if symbol not in _SYMBOL_NAMES.values():
+        raise ValueError(
+            f"kaya: {symbol} is not a symbol — the vocabulary is "
+            f"{sorted(_SYMBOL_NAMES)} (kaya.Symbol.COPY and friends)"
+        )
+    return symbol
 
 
 def _set_align(handle, align):
@@ -2922,7 +3044,8 @@ class _TxScope:
                  list_detail=None,
                  sections_presentation=None, inset=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
-                 section=False, on_selected=None, host_window=0):
+                 section=False, on_selected=None, host_window=0,
+                 symbol=None):
         # FIRST, so __del__ below can read them even if this __init__
         # raises on one of its own conversions.
         self._entered = False
@@ -2950,6 +3073,9 @@ class _TxScope:
         self._on_back = on_back
         self._section = section
         self._on_selected = on_selected
+        # Already through _symbol_value at the add_section call site (a
+        # section prop, so it means nothing on the other scopes).
+        self._symbol = symbol
 
     def __del__(self):
         # A construct that was BUILT AND NEVER ENTERED emitted nothing —
@@ -2997,6 +3123,9 @@ class _TxScope:
             if self._title is not None:
                 _records().append(
                     wire.tx_set_section_title(self._window, str(self._title)))
+            if self._symbol is not None:
+                _records().append(
+                    wire.tx_set_section_symbol(self._window, self._symbol))
             # Per-section, NOT one-shot: the user can return any
             # number of times; a programmatic select never fires it.
             if self._on_selected is not None:
@@ -3346,7 +3475,8 @@ class App:
             title=title, intercept_back=intercept_back,
             on_popped=on_popped, on_back=on_back)
 
-    def add_section(self, section_id, title=None, on_selected=None, window=0):
+    def add_section(self, section_id, title=None, symbol=None,
+                    on_selected=None, window=0):
         """A section's scene scope (DESIGN.md, Sections): add_section
         into the primary window plus the section's props, and the
         single top-level container mounts INTO IT on exit. Section
@@ -3355,15 +3485,25 @@ class App:
         section's root is retained while covered — switching is
         SELECTION, not lifecycle.
 
+        `symbol=` is the switcher item's SEMANTIC ICON (`kaya.Symbol`,
+        or its name): a tab bar without icons is not the platform's
+        real thing, and the glyph that means `home` differs per
+        platform, so the app names the CONCEPT and each backend draws
+        its own. It is REFUSED HERE, at the add_section call, and not
+        at the `with` — the scope object records nothing until it is
+        entered, so a raise from inside __enter__ would point at the
+        block rather than at the wrong word.
+
         on_selected() rides the add (per-section): fires each time
         the USER switches to this section through the platform's
         switcher — post-fact and NOT one-shot. A programmatic
         kaya.select_section does not fire it (the echo doctrine)."""
         return _TxScope(
             self, mount_on_exit=True, window=section_id, section=True,
-            title=title, on_selected=on_selected, host_window=window)
+            title=title, symbol=None if symbol is None else _symbol_value(symbol),
+            on_selected=on_selected, host_window=window)
 
-    def menu(self, label, enabled=None, icon=None, window=0):
+    def menu(self, label, enabled=None, icon=None, symbol=None, window=0):
         """A top-level menu in `window`'s command catalog — the
         menubar rides the window construct (DESIGN.md, Menus):
         `with app.menu("File", enabled=can_export) as file:` declares
@@ -3379,10 +3519,12 @@ class App:
             it.enabled(enabled)
         if icon is not None:
             it.icon(icon)
+        if symbol is not None:
+            it.symbol(symbol)
         return _MenuScope(("item", it.id), shortcut_ok=True, value=it)
 
     def radio_group(self, label, value=None, enabled=None, icon=None,
-                    on_select=None, window=0):
+                    symbol=None, on_select=None, window=0):
         """A BAR-LEVEL radio group — admissible wherever a menu
         grouping node is (it materializes as a top-level menu with the
         platform's checkmark idiom): `with app.radio_group("Sort",
@@ -3396,6 +3538,8 @@ class App:
             it.enabled(enabled)
         if icon is not None:
             it.icon(icon)
+        if symbol is not None:
+            it.symbol(symbol)
         if on_select is not None:
             self._menu_handlers[(wire.OCC_MENU_VALUE_CHANGED, it.id)] = on_select
         # value= lands at block exit, AFTER the option children: the

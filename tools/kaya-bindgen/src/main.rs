@@ -177,7 +177,7 @@ pub(crate) fn menu_prop_variants(
 pub(crate) fn menu_prop_bindable(prop: &str) -> bool {
     match prop {
         "label" | "enabled" | "checked" | "value" => true,
-        "icon" | "primary" | "shortcut" | "role" => false,
+        "icon" | "symbol" | "primary" | "shortcut" | "role" => false,
         other => panic!(
             "menu prop {other:?}: declare its signal bindability here, in \
              lockstep with scene.rs is_bindable_menu_prop"

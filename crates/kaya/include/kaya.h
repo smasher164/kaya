@@ -366,6 +366,8 @@
 
 #define SPROP_ICON 2
 
+#define SPROP_SYMBOL 3
+
 /**
  * Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
  * and `radio_group` are the grouping nodes.
@@ -401,6 +403,8 @@
 #define MPROP_SHORTCUT 7
 
 #define MPROP_ROLE 8
+
+#define MPROP_SYMBOL 9
 
 /**
  * The sections_presentation enum's wire values (spec enum
@@ -461,6 +465,51 @@
 #define ROLE_PROMINENT 2
 
 #define ROLE_HEADING 3
+
+/**
+ * The semantic icon vocabulary's wire values (spec enum "symbol";
+ * docs/styling-plan.md D6). APPEND-ONLY: every backend keys its
+ * per-platform glyph table on these numbers.
+ */
+#define SYMBOL_ADD 1
+
+#define SYMBOL_REMOVE 2
+
+#define SYMBOL_DELETE 3
+
+#define SYMBOL_EDIT 4
+
+#define SYMBOL_DONE 5
+
+#define SYMBOL_CLOSE 6
+
+#define SYMBOL_SEARCH 7
+
+#define SYMBOL_SETTINGS 8
+
+#define SYMBOL_REFRESH 9
+
+#define SYMBOL_INFO 10
+
+#define SYMBOL_WARNING 11
+
+#define SYMBOL_BACK 12
+
+#define SYMBOL_FORWARD 13
+
+#define SYMBOL_MORE 14
+
+#define SYMBOL_COPY 15
+
+#define SYMBOL_PASTE 16
+
+#define SYMBOL_STAR 17
+
+#define SYMBOL_LOCK 18
+
+#define SYMBOL_PERSON 19
+
+#define SYMBOL_HOME 20
 
 #define SOURCE_CONST 0
 
@@ -1040,6 +1089,12 @@
 #define KAYA_SPROP_ICON 2
 
 /**
+ * The switcher item's SEMANTIC ICON NAME (docs/styling-plan.md D6):
+ * a value of the KAYA_SYMBOL_* block below, never bytes.
+ */
+#define KAYA_SPROP_SYMBOL 3
+
+/**
  * Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus). `menu`
  * and `radio_group` are the grouping nodes; the rest are leaves.
  */
@@ -1075,6 +1130,13 @@
 #define KAYA_MPROP_SHORTCUT 7
 
 #define KAYA_MPROP_ROLE 8
+
+/**
+ * The item's SEMANTIC ICON NAME (docs/styling-plan.md D6): a value of
+ * the KAYA_SYMBOL_* block below. Const-only, beside KAYA_MPROP_ICON —
+ * a name for the standard concepts, a blob for app-specific art.
+ */
+#define KAYA_MPROP_SYMBOL 9
 
 /**
  * The window prop naming how sections present, and its enum values
@@ -1124,6 +1186,59 @@
 #define KAYA_ROLE_PROMINENT 2
 
 #define KAYA_ROLE_HEADING 3
+
+/**
+ * The SEMANTIC ICON VOCABULARY (spec enum "symbol";
+ * docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
+ * A closed set of CONCEPTS: each backend maps a value to its own
+ * platform's symbol set, since the platforms draw the same idea
+ * differently and their sets metric-match the text beside them. Both
+ * the menu-item slot (KAYA_MPROP_SYMBOL) and the section slot
+ * (KAYA_SPROP_SYMBOL) take these values.
+ *
+ * APPEND-ONLY. These numbers are wire facts in eight generated
+ * bindings and every backend's glyph table; renumbering silently
+ * redraws shipped menus. New concepts start at 21.
+ */
+#define KAYA_SYMBOL_ADD 1
+
+#define KAYA_SYMBOL_REMOVE 2
+
+#define KAYA_SYMBOL_DELETE 3
+
+#define KAYA_SYMBOL_EDIT 4
+
+#define KAYA_SYMBOL_DONE 5
+
+#define KAYA_SYMBOL_CLOSE 6
+
+#define KAYA_SYMBOL_SEARCH 7
+
+#define KAYA_SYMBOL_SETTINGS 8
+
+#define KAYA_SYMBOL_REFRESH 9
+
+#define KAYA_SYMBOL_INFO 10
+
+#define KAYA_SYMBOL_WARNING 11
+
+#define KAYA_SYMBOL_BACK 12
+
+#define KAYA_SYMBOL_FORWARD 13
+
+#define KAYA_SYMBOL_MORE 14
+
+#define KAYA_SYMBOL_COPY 15
+
+#define KAYA_SYMBOL_PASTE 16
+
+#define KAYA_SYMBOL_STAR 17
+
+#define KAYA_SYMBOL_LOCK 18
+
+#define KAYA_SYMBOL_PERSON 19
+
+#define KAYA_SYMBOL_HOME 20
 
 /**
  * set_property sources. SOURCE_ELEMENT is valid only inside a template.

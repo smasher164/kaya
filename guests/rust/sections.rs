@@ -37,8 +37,17 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("sections")
             .sections_presentation(kaya::SectionsPresentation::Bar);
-        let feed = tx.add_section(FEED).title("Feed").id();
-        let archive = tx.add_section(ARCHIVE).title("Archive").id();
+        // THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar
+        // without icons is not the platform's real thing, and the
+        // glyph that means `home` differs per platform — SF Symbols
+        // spells it `house`, and no shared asset would be legal
+        // anyway (SF Symbols are licensed to Apple platforms only).
+        let feed = tx.add_section(FEED).title("Feed").symbol(kaya::Symbol::Home).id();
+        let archive = tx
+            .add_section(ARCHIVE)
+            .title("Archive")
+            .symbol(kaya::Symbol::Star)
+            .id();
         msgs.on_section_selected(archive, Msg::ArchiveShown);
 
         let feed_root = tx
@@ -82,8 +91,18 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.create_window(LIBRARY)
                         .title("library")
                         .sections_presentation(kaya::SectionsPresentation::Sidebar);
-                    let shelves = tx.add_section_in(LIBRARY, SHELVES).title("Shelves").id();
-                    let loans = tx.add_section_in(LIBRARY, LOANS).title("Loans").id();
+                    // The SIDEBAR arm carries symbols too: the source
+                    // list is where a mac app most wants them.
+                    let shelves = tx
+                        .add_section_in(LIBRARY, SHELVES)
+                        .title("Shelves")
+                        .symbol(kaya::Symbol::Search)
+                        .id();
+                    let loans = tx
+                        .add_section_in(LIBRARY, LOANS)
+                        .title("Loans")
+                        .symbol(kaya::Symbol::Lock)
+                        .id();
                     let shelves_root = tx
                         .column(|tx| {
                             let l = tx.signal("shelves ready");

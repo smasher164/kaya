@@ -1073,6 +1073,14 @@ pub enum MenuProp {
     /// item in the application menu, every other host leaves it where
     /// the app put it.
     Role,
+    /// The item's SEMANTIC ICON NAME (I64-valued, the spec's "symbol"
+    /// enum; docs/styling-plan.md D6). A concept, never bytes: each
+    /// backend maps it to its own platform's symbol set, because the
+    /// platforms draw the same concept differently and their symbol
+    /// sets metric-match the label beside them. Const-only, and it
+    /// sits BESIDE `Icon` rather than replacing it — a blob is still
+    /// the right primitive for app-specific art.
+    Symbol,
 }
 
 /// Which materialized attachment a backend's menu native belongs to:
@@ -1336,6 +1344,12 @@ pub enum SectionProp {
     /// icons (the phones' tab bars, NavigationView); a desktop
     /// switcher without icon slots ignores it.
     Icon,
+    /// The switcher item's SEMANTIC ICON NAME (I64-valued, the spec's
+    /// "symbol" enum; docs/styling-plan.md D6) — the names-not-bytes
+    /// half of the same slot. A tab bar wants `home`, and the glyph
+    /// that means home differs per platform; the vocabulary is
+    /// uniform and only the drawing varies.
+    Symbol,
 }
 
 /// Navigation-entry property keys — their own typed table (see

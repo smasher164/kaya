@@ -228,6 +228,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "a kaya_blob_register handle, consumed by the next submit",
                 "_enc.value(BlobHandle(handle))".to_string(),
             ),
+            PropKind::Enum(_) => (*prop, "int", format!("_enc.value(int({prop}))")),
             other => unreachable!("no section prop carries {other:?}"),
         };
         c.line("");
@@ -310,7 +311,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
                 "a kaya_blob_register handle, consumed by the next submit",
                 "_enc.value(BlobHandle(handle))".to_string(),
             ),
-            other => unreachable!("no menu prop carries {other:?}"),
+            PropKind::Enum(_) => (*prop, "int", format!("_enc.value(int({prop}))")),
         };
         c.line("");
         c.line("");

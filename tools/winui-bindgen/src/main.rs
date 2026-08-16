@@ -362,6 +362,35 @@ fn main() {
         "Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.IToggleProvider".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.IExpandCollapseProvider".to_string(),
+        // THE SEMANTIC ICONS (docs/styling-plan.md D6). Before these four
+        // entries this backend could not construct an icon at all, and the
+        // reason was the transitivity trap wearing its usual disguise:
+        // `Icon`/`SetIcon` DO exist in the metadata on IMenuFlyoutItem,
+        // IMenuFlyoutSubItem and INavigationViewItem, but IconElement was
+        // unfiltered, so windows-bindgen dropped all three accessors and
+        // left `usize` pads in their vtable slots. Reading the generated
+        // file then says "WinUI menu items have no icon", which is false.
+        //
+        // Both routes are needed, and the second is not optional: the
+        // `Symbol` enum covers 17 of kaya's 20 concepts and the other
+        // three — info, warning, lock — have no enum member at all, so
+        // they can only be spelled as Segoe Fluent Icons codepoints
+        // through FontIcon (styling/symbols-fluent.md).
+        //   IconElement — the base BOTH routes return and the type every
+        //     Icon setter takes; without it nothing else here helps.
+        //   Symbol      — the enum. An unfiltered enum takes its setter
+        //     down with it (the FocusState precedent above).
+        //   SymbolIcon  — route 1, the stable API-name spelling: kaya
+        //     writes `Symbol::Copy`, never a codepoint.
+        //   FontIcon    — route 2. Neither route sets a FontFamily: both
+        //     resolve through the SymbolThemeFontFamily theme resource,
+        //     which is also what makes the Windows 10 fallback to Segoe
+        //     MDL2 Assets free (all codepoints kaya uses are in both
+        //     catalogs — checked mechanically, 33/33).
+        "Microsoft.UI.Xaml.Controls.IconElement".to_string(),
+        "Microsoft.UI.Xaml.Controls.Symbol".to_string(),
+        "Microsoft.UI.Xaml.Controls.SymbolIcon".to_string(),
+        "Microsoft.UI.Xaml.Controls.FontIcon".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);

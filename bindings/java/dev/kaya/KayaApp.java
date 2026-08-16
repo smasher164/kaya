@@ -138,6 +138,68 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
+     * docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
+     *
+     * <p>An app names a CONCEPT and each backend draws its own platform's
+     * glyph for it: {@code COPY} is {@code doc.on.doc} on Apple,
+     * {@code content_copy} on Material, {@code edit-copy-symbolic} on
+     * Adwaita, and no single asset is right on all three — SF Symbols are
+     * license-locked to Apple platforms, so a shared one is not even
+     * legal. The platform sets also metric-match the text beside them
+     * (weight, baseline) while a blob cannot. The blob {@code icon} slot
+     * stays for genuinely app-specific art.
+     *
+     * <p>Closed, and small on purpose — the {@link Role} trick one tier
+     * over. Apple keeps its own semantic set to fifteen entries. Growing
+     * it is a spec change with its gates, never a per-app escape hatch.
+     *
+     * <p>THE WIRE VALUES ARE APPEND-ONLY. A new concept takes 21;
+     * renumbering silently redraws every shipped app's menus. They are
+     * read off the generated {@code KayaWire.SYMBOL_*} constants rather
+     * than written out here, so this file cannot hold a number the spec
+     * has moved.
+     */
+    public enum Symbol {
+        ADD(KayaWire.SYMBOL_ADD),
+        REMOVE(KayaWire.SYMBOL_REMOVE),
+        /** Destroying something, the wastebasket idiom — distinct from
+         * {@link #REMOVE}, which takes an item out of a list. */
+        DELETE(KayaWire.SYMBOL_DELETE),
+        EDIT(KayaWire.SYMBOL_EDIT),
+        /** Confirmation, the checkmark idiom. */
+        DONE(KayaWire.SYMBOL_DONE),
+        /** Dismissal, the ✕ idiom — not {@link #DELETE}. */
+        CLOSE(KayaWire.SYMBOL_CLOSE),
+        SEARCH(KayaWire.SYMBOL_SEARCH),
+        SETTINGS(KayaWire.SYMBOL_SETTINGS),
+        REFRESH(KayaWire.SYMBOL_REFRESH),
+        INFO(KayaWire.SYMBOL_INFO),
+        WARNING(KayaWire.SYMBOL_WARNING),
+        /** The direction-relative pair: every platform mirrors these
+         * under a right-to-left layout, so they mean BACKWARD and
+         * FORWARD in reading order, never "left" and "right". */
+        BACK(KayaWire.SYMBOL_BACK),
+        FORWARD(KayaWire.SYMBOL_FORWARD),
+        /** The overflow affordance (the ellipsis idiom). */
+        MORE(KayaWire.SYMBOL_MORE),
+        COPY(KayaWire.SYMBOL_COPY),
+        PASTE(KayaWire.SYMBOL_PASTE),
+        /** Favourite. */
+        STAR(KayaWire.SYMBOL_STAR),
+        LOCK(KayaWire.SYMBOL_LOCK),
+        /** A person or account. */
+        PERSON(KayaWire.SYMBOL_PERSON),
+        HOME(KayaWire.SYMBOL_HOME);
+
+        final long wire;
+
+        Symbol(long wire) {
+            this.wire = wire;
+        }
+    }
+
     // Which per-appearance brand overrides ride the set_brand_accent
     // record (Tx.brandAccent packs them). HAND-WRITTEN, because the
     // mask bits are the one part of that record the generator emits no
@@ -1346,6 +1408,15 @@ public final class KayaApp {
             return this;
         }
 
+        /** The item's SEMANTIC ICON ({@link Symbol}): the closed concept
+         * vocabulary each backend maps to its own platform's symbol set.
+         * Beside {@link #icon(byte[])}, not instead of it — app-specific
+         * art still rides the blob. Const-only. */
+        public MenuItem symbol(Symbol symbol) {
+            chain().emit(KayaWire.txSetMenuSymbol(id, symbol.wire));
+            return this;
+        }
+
         /** The phone-bar promotion hint (actions only — root-checked).
          * Flipping it recomputes the promoted set deterministically;
          * INERT on desktops — not a toolbar grammar. Const-only. */
@@ -1602,6 +1673,15 @@ public final class KayaApp {
         /** The switcher item's label — the tab title everywhere. */
         public SectionRef title(String title) {
             tx.emit(KayaWire.txSetSectionTitle(id, title));
+            return this;
+        }
+
+        /** The switcher item's SEMANTIC ICON ({@link Symbol}): a concept
+         * each backend draws in its own platform's symbol set — a tab bar
+         * without icons is not the platform's real thing, and a blob is
+         * the wrong primitive for a STANDARD one. */
+        public SectionRef symbol(Symbol symbol) {
+            tx.emit(KayaWire.txSetSectionSymbol(id, symbol.wire));
             return this;
         }
 
