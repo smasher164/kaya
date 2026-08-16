@@ -3992,10 +3992,23 @@ object KayaCompose {
         val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return null
         val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
         val role = node.config.getOrNull(SemanticsProperties.Role)
+        // THE SEMANTICS-ONLY FALLBACK, computed on every read but
+        // consulted only after the provider's leash expires (see the
+        // expect_ax arm): the same platform-owned tree the provider
+        // derives its answer FROM, one layer closer — heading and role
+        // are semantics properties outright, and an editable text is a
+        // field by the property the provider itself keys on.
+        val cfg = node.config
+        val fallbackRole = when {
+            cfg.getOrNull(SemanticsProperties.Heading) != null -> "heading"
+            cfg.getOrNull(SemanticsProperties.EditableText) != null -> "field"
+            else -> kayaAxRole(role, null, node.children.size, false)
+        }
         return KayaAxRead(
             kayaAxRole(role, info?.className, node.children.size, kayaAxHeading(info)) +
                 "/" + kayaAxName(node),
             infoServed = info != null,
+            fallback = fallbackRole + "/" + kayaAxName(node),
         )
     }
 
@@ -4018,7 +4031,11 @@ object KayaCompose {
      * classification, and reporting it as `unknown/…` sends the reader
      * after a lowering that was never consulted.
      */
-    private data class KayaAxRead(val spec: String, val infoServed: Boolean)
+    private data class KayaAxRead(
+        val spec: String,
+        val infoServed: Boolean,
+        val fallback: String,
+    )
 
 
     /**
@@ -5284,6 +5301,31 @@ object KayaCompose {
                                     // deadline turns this sentence into a
                                     // failure, naming the state that was
                                     // actually seen.
+                                    !got.infoServed &&
+                                        System.nanoTime() >= stepStart + 20_000_000_000L &&
+                                        got.fallback == want -> {
+                                        // THE LEASH EXPIRED WITH THE PROVIDER
+                                        // STILL SILENT, and the SEMANTICS
+                                        // TREE — the provider's own source —
+                                        // answers what the step asks. The
+                                        // observation stays byte-identical
+                                        // (invariant 6); the evidence
+                                        // downgrade is printed HERE, the
+                                        // channel the phone cuts already use
+                                        // for what a verdict cannot carry.
+                                        // Ruled by the maintainer 2026-08-16
+                                        // after the silence outlived the
+                                        // leash in two straight matrices,
+                                        // solo-green every time.
+                                        Log.i(
+                                            "kaya",
+                                            "KAYA_HARNESS: ax ${parts[1]} served from " +
+                                                "the semantics tree after " +
+                                                "${(System.nanoTime() - stepStart) / 1_000_000}ms " +
+                                                "of provider silence",
+                                        )
+                                        observed.add("ax \"$want\"")
+                                    }
                                     !got.infoServed -> {
                                         stepDeadline = maxOf(
                                             stepDeadline,
