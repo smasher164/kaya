@@ -844,6 +844,29 @@ check_styling_point role \
     'Role :: Role -> Attr' \
     'let (label|button) [^=]*\?role|let set_role \(Widget id\)'
 
+# A SECTION INTO A NAMED WINDOW, in all eight. add_section grew up
+# primary-only, and six bindings gained a window target while two kept
+# the hardcoded 0 — which no gate swept, so the divergence surfaced
+# only when the sidebar-coverage scene put sections in an aux window
+# and Python and Haskell could not say so (2026-08-15, both proven
+# through the apply stream: the records went silently to window 0).
+# Idiom decides the spelling — a second name where there are no
+# optional arguments, a window argument where there are — and each
+# pattern is keyed on the window-carrying form, so the primary-only
+# spelling cannot satisfy it — except Swift's, whose wrapped signature
+# puts the window parameter on its own line where a line-based grep
+# cannot key on it; its row pins presence and the compiler holds the
+# parameter (the guest calls addSection(window:)).
+check_styling_point 'sectioned aux window' \
+    'pub fn add_section_in\(' \
+    'def add_section\(self, [^)]*window=' \
+    'func \(tx \*Tx\) AddSectionIn\(' \
+    'AddSection\([^)]*window' \
+    'public SectionRef addSectionIn\(|addSectionIn\(' \
+    'func addSection\(' \
+    '^addSectionIn ::' \
+    'add_section \?\(window'
+
 # THE CONTAINER INSET (docs/styling-plan.md D3 one level down, landed
 # 2026-08-12 — the prop the full-bleed editor forced). EVERY ROW IS
 # KEYED PAST ITS WINDOW-INSET TWIN, which shares the bare name in all

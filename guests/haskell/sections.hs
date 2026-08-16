@@ -16,6 +16,17 @@ feedId, archiveId :: Word64
 feedId = 7
 archiveId = 8
 
+-- The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
+-- shared scene covers BOTH arms: the primary stays `bar`, and this
+-- window opens from a handler only the desktop tail's click reaches —
+-- the phone runners cut the tail, the click never fires, and
+-- 'createWindow' never runs where the capability is absent. No
+-- capability read needed: reachability is the gate.
+libraryId, shelvesId, loansId :: Word64
+libraryId = 1
+shelvesId = 2
+loansId = 3
+
 main :: IO ()
 main = kayaMain $ \app -> do
   visitTally <- newIORef (0 :: Int)
@@ -48,7 +59,32 @@ main = kayaMain $ \app -> do
             -- Programmatic selection: configuration, no echo —
             -- 'SOnSelected' must NOT fire (the scene asserts the
             -- count holds).
-            buildTx app (selectSection archiveId) -- button#0
+            buildTx app (selectSection archiveId), -- button#0
+          buttonOn "open library" $ -- button#1
+            -- The window's attributes ride its 'createWindow' exactly
+            -- as the primary's ride 'window'; the sections carry no
+            -- 'SOnSelected', since the tail reads the presentation the
+            -- render body stamped and never switches them.
+            buildTx app $ do
+              createWindow libraryId [WTitle "library", WSectionsPresentation 2]
+              addSectionIn libraryId shelvesId [STitle "Shelves"]
+              addSectionIn libraryId loansId [STitle "Loans"]
+              shelvesRoot <-
+                column
+                  []
+                  [ do
+                      ready <- signal (VStr "shelves ready")
+                      labelBound ready -- label#2
+                  ]
+              mountIn shelvesId shelvesRoot
+              loansRoot <-
+                column
+                  []
+                  [ do
+                      ready <- signal (VStr "loans ready")
+                      labelBound ready -- label#3
+                  ]
+              mountIn loansId loansRoot
         ]
     mountIn feedId feedRoot
     archiveRoot <- column [] [labelBound visits] -- label#1

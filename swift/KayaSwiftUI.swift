@@ -314,6 +314,12 @@ final class KayaWindowModel: Identifiable {
     /// never catch the defect; that is the lesson menuPresentation
     /// already paid for.
     var splitPresentation = "stacked"
+    /// THE ARM THE SECTIONS RENDER ACTUALLY TOOK — "bar" or "sidebar",
+    /// stamped by the body that rendered (the splitPresentation /
+    /// stamped-observation rule): expect_sections_presentation may
+    /// never be derived from the declared prop, or it agrees with the
+    /// lowering by construction and can never catch the defect.
+    var sectionsRendered = ""
     /// The ADVISORY presentation hint (wprop 5): auto | bar | sidebar.
     var sectionsPresentation: Int64 = 0
     /// The window's command catalog (DESIGN.md, Menus): top-level
@@ -3539,8 +3545,24 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 }
                 if let section = kayaScene.sectionsById[wid] {
                     // A section presents in-window too: added to the
-                    // set already; the mount fills its pane.
+                    // set already; the mount fills its pane. BUT THE
+                    // WINDOW IT LIVES IN may itself be an auxiliary
+                    // that nothing has presented: a sections window
+                    // mounts into its SECTIONS and never into a root,
+                    // so the root-mount trigger below can never fire
+                    // for it — sections-on-an-aux-window sat
+                    // unmaterializable until the sidebar-coverage
+                    // scene ran it (2026-08-15). The section's mount
+                    // is that window's "mounting presents" moment.
                     section.root = kayaScene.nodes[root]
+                    if let owner = kayaScene.sectionWindow[wid], owner != 0 {
+                        if let open = kayaOpenWindow {
+                            kayaEnsureOpen(owner, open)
+                        } else {
+                            kayaDiag("mount parked wid=\(owner) (no openWindow yet)")
+                            kayaPendingOpens.append(owner)
+                        }
+                    }
                     break
                 }
                 kayaScene.windows[wid]?.root = kayaScene.nodes[root]
@@ -6599,6 +6621,31 @@ private func kayaRunScript(_ script: String) {
                     failures.append(
                         "resize_window: this host does not command window size")
                 #endif
+            case "expect_sections_presentation":
+                // THE ARM THE SECTIONS RENDER TOOK — "bar" or
+                // "sidebar", read off the stamp the render body wrote
+                // (the expect_split rule: never derived from the
+                // declared prop, which would agree with the lowering by
+                // construction). window#N addresses an aux window; the
+                // implicit form is the primary.
+                let (spWid, spExplicit, spRest) = kayaWindowTarget(Array(parts[1...]))
+                let wantArm = kayaQuoted(spRest)
+                let armPrefix = spExplicit ? "window#\(spWid) " : ""
+                let gotArm = DispatchQueue.main.sync { () -> String in
+                    guard let window = kayaScene.windows[spWid] else {
+                        return "no such window"
+                    }
+                    guard !window.sectionsRendered.isEmpty else {
+                        return "nothing stamped — no sections body rendered"
+                    }
+                    return window.sectionsRendered
+                }
+                if gotArm == wantArm {
+                    observed.append("sections \(armPrefix)\(wantArm)")
+                } else {
+                    failures.append(
+                        "sections \(armPrefix)presentation \(gotArm), wanted \(wantArm)")
+                }
             case "expect_split":
                 // `<size class>/<presentation>`. BOTH halves off the
                 // window model, where the view layer stamped the
@@ -11756,11 +11803,14 @@ struct KayaSectionsView: View {
                     } detail: {
                         KayaSectionPane(sectionId: selection.wrappedValue)
                     }
+                    .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "sidebar" }
                 } else {
                     tabBody(window)
+                        .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "bar" }
                 }
             #else
                 tabBody(window)
+                    .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "bar" }
             #endif
         }
     }

@@ -1008,6 +1008,13 @@ struct CoreState {
     /// The assembled chrome per window: (presentation it was built
     /// for, the container) — rebuilt only when the hint changes.
     section_chrome: HashMap<u64, (i64, gtk4::Box)>,
+    /// The arm that ACTUALLY assembled that chrome, per window —
+    /// stamped inside each branch of refresh_sections, never derived
+    /// from the hint below, so expect_sections_presentation cannot
+    /// agree with the lowering by construction (the split_presentation
+    /// rule, one construct over). The read pairs it with the widget the
+    /// branch left behind; see rendered_sections_arm.
+    sections_rendered: HashMap<u64, &'static str>,
     selected_sections: HashMap<u64, u64>,
     sections_presentation: HashMap<u64, i64>,
     /// The window's OWN mounted root and title, restored on pop.
@@ -1643,6 +1650,10 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
             sidebar.set_stack(&stack);
             container.append(&sidebar);
             container.append(&stack);
+            // THE ARM STAMPS ITSELF, here and in the peer below: the
+            // observation is what RENDERED, so both branches record it
+            // and neither reader may consult the hint.
+            core.sections_rendered.insert(window, "sidebar");
             container
         } else {
             // auto/bar: the header switcher, GTK's dominant idiom.
@@ -1652,6 +1663,7 @@ fn refresh_sections(core: &mut CoreState, window: u64) {
             switcher.set_halign(gtk4::Align::Center);
             container.append(&switcher);
             container.append(&stack);
+            core.sections_rendered.insert(window, "bar");
             container
         };
         core.section_chrome.insert(window, (hint, chrome));
@@ -4187,6 +4199,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
             core.section_stacks.remove(&window.0);
             core.section_chrome.remove(&window.0);
+            core.sections_rendered.remove(&window.0);
             core.selected_sections.remove(&window.0);
             core.sections_presentation.remove(&window.0);
             // ... and its menu chrome. The registry keeps the items
@@ -5520,6 +5533,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.section_pages.get_mut(&window.0).unwrap().root =
                     Some(root_widget);
                 refresh_section_pane(core, window.0);
+                // ... AND SO DOES ITS WINDOW, when that window is an
+                // auxiliary. A window that presents sections mounts
+                // into its SECTIONS and never into a root, so the
+                // "mounting presents" arm below cannot fire for it: the
+                // window was built, filled and titled, and nothing ever
+                // showed it. Sections on an aux window were
+                // unmaterializable here until the sidebar-coverage
+                // scene asked for one (2026-08-15; the SwiftUI
+                // interpreter had the same hole, found the same day).
+                // A section's mount is that window's mounting-presents
+                // moment.
+                let owner = core.section_pages[&window.0].window;
+                if owner != 0 {
+                    use gtk4::prelude::GtkWindowExt;
+                    core.aux_windows
+                        .get(&owner)
+                        .expect("scene validated the section's window")
+                        .present();
+                }
             } else if let Some(entry) = core.nav_entries.get_mut(&window.0) {
                 entry.root = Some(root_widget);
                 let host = entry.window;
@@ -5887,6 +5919,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 section_pages: HashMap::new(),
                 section_stacks: HashMap::new(),
                 section_chrome: HashMap::new(),
+                sections_rendered: HashMap::new(),
                 selected_sections: HashMap::new(),
                 sections_presentation: HashMap::new(),
                 window_roots: HashMap::new(),
@@ -8111,6 +8144,16 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn sections_presentation(&self, window: u64) -> String {
+        // The pump is container_inset's: chrome assembled in this same
+        // drain has not been allocated or mapped until the loop turns,
+        // and mapping is half of what rendered_sections_arm asks.
+        Self::on_main(move |core| {
+            while glib::MainContext::default().iteration(false) {}
+            rendered_sections_arm(core, window)
+        })
+    }
+
     fn section_count(&self) -> usize {
         // The REAL switcher's page model, never the section map.
         Self::on_main(|core| {
@@ -8177,6 +8220,79 @@ impl crate::harness::Stage for GtkStage {
         // request_exit reads the main thread's CORE; hop before asking.
         Self::on_main(move |_| request_exit(code));
     }
+}
+
+/// The sections arm a window ACTUALLY rendered — what
+/// `expect_sections_presentation` believes.
+///
+/// NEVER the declared hint (wprop 5, `core.sections_presentation`): a
+/// read that consults the prop agrees with the lowering by construction
+/// and cannot fail when the lowering is wrong. That is the expect_split
+/// rule, at the sections construct. Two independent things have to
+/// hold, and the sentence names the one that did not:
+///
+/// - the branch that assembled the chrome stamped its own name on the
+///   window (`sections_rendered`), and
+/// - the widget that branch left behind is the one that name claims,
+///   wired to THIS window's stack, and MAPPED.
+///
+/// The mapped clause is what makes an auxiliary window honest on this
+/// backend. GTK builds its widget tree eagerly, so a chrome merely
+/// EXISTING proves that refresh_sections ran and nothing more — not
+/// that any window ever presented it. The SwiftUI interpreter gets that
+/// for free (its stamp rides the body's appearance and an unshown body
+/// writes nothing); this is the same guarantee spelled for a toolkit
+/// that builds first and shows later, and it is what holds the
+/// aux-window fix in ApplyOp::Mount in place.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn rendered_sections_arm(core: &CoreState, window: u64) -> String {
+    use gtk4::prelude::{Cast, ObjectExt, WidgetExt};
+    let Some((_, chrome)) = core.section_chrome.get(&window) else {
+        return format!("window#{window} has no sections chrome");
+    };
+    // What the chrome REALLY holds: the switchers driving this window's
+    // own stack, plus every child by GType name — so a chrome that
+    // holds no switcher at all reports what it does hold instead of a
+    // bare absence.
+    let stack = core.section_stacks.get(&window);
+    let mut built: Vec<&'static str> = Vec::new();
+    let mut kinds: Vec<String> = Vec::new();
+    let mut child = chrome.first_child();
+    while let Some(widget) = child {
+        if let Some(sidebar) = widget.downcast_ref::<gtk4::StackSidebar>() {
+            if sidebar.stack().as_ref() == stack {
+                built.push("sidebar");
+            }
+        } else if let Some(switcher) = widget.downcast_ref::<gtk4::StackSwitcher>() {
+            if switcher.stack().as_ref() == stack {
+                built.push("bar");
+            }
+        }
+        kinds.push(widget.type_().name().to_owned());
+        child = widget.next_sibling();
+    }
+    if built.len() != 1 {
+        return format!(
+            "window#{window} sections chrome drives its stack from {} switchers (children: {})",
+            built.len(),
+            kinds.join(", ")
+        );
+    }
+    let arm = built[0];
+    let stamp = core.sections_rendered.get(&window).copied();
+    if stamp != Some(arm) {
+        return format!(
+            "window#{window} stamped {} but its chrome holds a {arm} switcher",
+            stamp.unwrap_or("nothing")
+        );
+    }
+    if !chrome.is_mapped() {
+        // Built, filled and never shown. Named that way and not "not
+        // mapped", which reads like a timing answer: the poll has been
+        // retrying for the deadline by the time this is the verdict.
+        return format!("window#{window} {arm} chrome was built but never shown");
+    }
+    arm.to_owned()
 }
 
 /// The inset MEASURED on a widget's own CSS box: the offset from its

@@ -730,6 +730,14 @@ print(";".join(prefix) + ";")
 PY
 }
 
+# The sections tail opens an aux window this host rejects by
+# capability; the cut boundary is the tail's own first verb
+# (expect_windows appears nowhere above it), and the keep guard holds
+# every expect_section above the cut. Assigned HERE, not inline: a
+# refused cut must kill the lane, not run an empty script — measured
+# 2026-08-16, three legs green-on-nothing ("script has no expects").
+SECTIONS_CUT="$(scene_script_cut sections expect_windows expect_section)" || exit 1
+
 # The Compose interpreter carries the id of the sources it was compiled
 # from, the same contract libkaya and the SwiftUI dylib have. Written
 # before gradle so it is compiled in; the apk is asked afterwards
@@ -995,7 +1003,7 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     run_apk sections-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity sections \
-        --es KAYA_SELFTEST_SCRIPT "'$(scene_script sections)'"
+        --es KAYA_SELFTEST_SCRIPT "'$SECTIONS_CUT'"
     # The menus scene: the command catalog in the top bar's overflow,
     # promoted primaries as bar actions, long-press context menus, and
     # the shortcut verb through the interpreter's dispatch table.
@@ -1297,7 +1305,7 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     run_apk sections-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity sections \
-        --es KAYA_SELFTEST_SCRIPT "'$(scene_script sections)'"
+        --es KAYA_SELFTEST_SCRIPT "'$SECTIONS_CUT'"
     # The menus scene through the JVM binding (see the compose leg);
     # this host carries the same dispatchKeyShortcutEvent override, so
     # the chord reaches the catalog identically in both languages.
@@ -1532,7 +1540,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     run_apk sections-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity sections \
-        --es KAYA_SELFTEST_SCRIPT "'$(scene_script sections)'"
+        --es KAYA_SELFTEST_SCRIPT "'$SECTIONS_CUT'"
     # The menus scene through the Go binding: this host carries the same
     # dispatchKeyShortcutEvent override, so the chord reaches the catalog
     # identically in all three languages.

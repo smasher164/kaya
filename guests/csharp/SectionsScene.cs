@@ -11,6 +11,15 @@ static class SectionsScene
 {
     const ulong Feed = 7;
     const ulong Archive = 8;
+    // The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
+    // shared scene covers BOTH arms: the primary stays `bar`, and this
+    // window opens from a handler only the desktop tail's click reaches —
+    // the phone runners cut the tail, the click never fires, and
+    // CreateWindow never runs where the capability is absent. No
+    // capability read needed: reachability is the gate.
+    const ulong Library = 1;
+    const ulong Shelves = 2;
+    const ulong Loans = 3;
 
     public static void Run()
     {
@@ -45,6 +54,31 @@ static class SectionsScene
                     // — onSelected must NOT fire (the scene asserts
                     // the count holds).
                     inner.SelectSection(Archive);
+                });
+                tx.Button("open library", onClick: inner => // button#1
+                {
+                    // The window's attributes ride its one construct, so
+                    // the presentation goes on CreateWindow exactly as the
+                    // primary's goes on Window.
+                    inner.CreateWindow(Library, title: "library",
+                        sectionsPresentation: KayaWire.SectionsPresentationSidebar);
+                    // window: is the add-into-a-window spelling; the
+                    // default 0 above is the primary.
+                    inner.AddSection(Shelves, title: "Shelves", window: Library);
+                    inner.AddSection(Loans, title: "Loans", window: Library);
+
+                    var shelvesRoot = inner.Column(() =>
+                    {
+                        var ready = inner.Signal("shelves ready");
+                        inner.Label(bind: ready); // label#2
+                    });
+                    inner.MountIn(Shelves, shelvesRoot);
+                    var loansRoot = inner.Column(() =>
+                    {
+                        var ready = inner.Signal("loans ready");
+                        inner.Label(bind: ready); // label#3
+                    });
+                    inner.MountIn(Loans, loansRoot);
                 });
             });
             tx.MountIn(Feed, feedRoot);

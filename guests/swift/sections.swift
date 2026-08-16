@@ -11,6 +11,15 @@ import Foundation
 
 let FEED: UInt64 = 7
 let ARCHIVE: UInt64 = 8
+// The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
+// shared scene covers BOTH arms: the primary stays `bar`, and this
+// window opens from a handler only the desktop tail's click reaches —
+// the phone runners cut the tail, the click never fires, and
+// createWindow never runs where the capability is absent. No
+// capability read needed: reachability is the gate.
+let LIBRARY: UInt64 = 1
+let SHELVES: UInt64 = 2
+let LOANS: UInt64 = 3
 
 let app = KayaApp()
 
@@ -45,6 +54,25 @@ app.build { tx in
                 // onSelected must NOT fire (the scene asserts the
                 // count holds).
                 inner.selectSection(ARCHIVE)
+            })
+        tx.button(
+            "open library",
+            onClick: { inner in  // button#1
+                inner.createWindow(
+                    LIBRARY, title: "library",
+                    sectionsPresentation: Int64(KAYA_SECTIONS_PRESENTATION_SIDEBAR))
+                inner.addSection(SHELVES, title: "Shelves", window: LIBRARY)
+                inner.addSection(LOANS, title: "Loans", window: LIBRARY)
+                let shelvesRoot = inner.column {
+                    let l = inner.signal(.str("shelves ready"))
+                    inner.label(bind: l)  // label#2
+                }
+                inner.mountIn(SHELVES, shelvesRoot)
+                let loansRoot = inner.column {
+                    let l = inner.signal(.str("loans ready"))
+                    inner.label(bind: l)  // label#3
+                }
+                inner.mountIn(LOANS, loansRoot)
             })
     }
     tx.mountIn(FEED, feedRoot)

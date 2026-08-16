@@ -2922,7 +2922,7 @@ class _TxScope:
                  list_detail=None,
                  sections_presentation=None, inset=None, push=False,
                  intercept_back=None, on_popped=None, on_back=None,
-                 section=False, on_selected=None):
+                 section=False, on_selected=None, host_window=0):
         # FIRST, so __del__ below can read them even if this __init__
         # raises on one of its own conversions.
         self._entered = False
@@ -2932,6 +2932,12 @@ class _TxScope:
         self._width = width
         self._height = height
         self._window = int(window)
+        # The window a SECTION scope adds its section into — 0 for the
+        # primary, an aux window's id otherwise. The other six bindings
+        # already spell this (add_section_in / a window: argument); it
+        # arrived here when the sidebar-coverage scene put sections in
+        # an aux window and this binding could not say so (2026-08-15).
+        self._host_window = int(host_window)
         self._create = create
         self._veto_close = veto_close
         self._dirty = dirty
@@ -2987,7 +2993,7 @@ class _TxScope:
             self._outer = (_recording, _pending_root)
             _recording = True
             _pending_root = None
-            _records().append(wire.tx_add_section(0, self._window))
+            _records().append(wire.tx_add_section(self._host_window, self._window))
             if self._title is not None:
                 _records().append(
                     wire.tx_set_section_title(self._window, str(self._title)))
@@ -3340,7 +3346,7 @@ class App:
             title=title, intercept_back=intercept_back,
             on_popped=on_popped, on_back=on_back)
 
-    def add_section(self, section_id, title=None, on_selected=None):
+    def add_section(self, section_id, title=None, on_selected=None, window=0):
         """A section's scene scope (DESIGN.md, Sections): add_section
         into the primary window plus the section's props, and the
         single top-level container mounts INTO IT on exit. Section
@@ -3355,7 +3361,7 @@ class App:
         kaya.select_section does not fire it (the echo doctrine)."""
         return _TxScope(
             self, mount_on_exit=True, window=section_id, section=True,
-            title=title, on_selected=on_selected)
+            title=title, on_selected=on_selected, host_window=window)
 
     def menu(self, label, enabled=None, icon=None, window=0):
         """A top-level menu in `window`'s command catalog — the

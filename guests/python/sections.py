@@ -15,6 +15,9 @@ app = kaya.App()
 
 FEED = 7
 ARCHIVE = 8
+LIBRARY = 1
+SHELVES = 2
+LOANS = 3
 
 visit_count = 0
 
@@ -31,6 +34,28 @@ def go_archive():
     kaya.select_section(ARCHIVE)
 
 
+def open_library():
+    # THE SIDEBAR HALF of the presentation enum, in an aux window, so
+    # one shared scene covers BOTH arms. Reachability is the gate: only
+    # the desktop tail's click lands here, so the phones never see a
+    # create_window their host would reject — the guest reads no
+    # capability. `window=` on add_section is the spelling this scene
+    # forced into the binding: the other six already targeted a window
+    # while Python's section scope hardcoded the primary (2026-08-15).
+    kaya.create_window(LIBRARY)
+    app.window(
+        window_id=LIBRARY, title="library",
+        sections_presentation=kaya.SECTIONS_SIDEBAR)
+    with app.add_section(SHELVES, title="Shelves", window=LIBRARY):
+        shelves_ready = kaya.signal("shelves ready")
+        with kaya.column():
+            kaya.label(bind=shelves_ready)  # label#2
+    with app.add_section(LOANS, title="Loans", window=LIBRARY):
+        loans_ready = kaya.signal("loans ready")
+        with kaya.column():
+            kaya.label(bind=loans_ready)  # label#3
+
+
 # The window's attributes ride the window construct (the unification
 # rule). With sections the window has no root of its own — the
 # switcher IS the window content — so the scope's body carries only
@@ -45,6 +70,7 @@ with app.add_section(FEED, title="Feed"):
     with kaya.column():
         kaya.label(bind=ready)  # label#0
         kaya.button("to archive", on_click=go_archive)  # button#0
+        kaya.button("open library", on_click=open_library)  # button#1
 
 with app.add_section(ARCHIVE, title="Archive", on_selected=archive_shown):
     with kaya.column():

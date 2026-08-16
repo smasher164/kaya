@@ -1976,7 +1976,13 @@ fn refresh_sections(core: &mut CoreState, window: u64) -> windows_core::Result<(
         .get(&window)
         .copied()
         .unwrap_or(0);
-    nav.SetPaneDisplayMode(if hint == 1 {
+    // The number comes from the spec's enum rather than a literal:
+    // renumber `sections_presentation` and every generated surface
+    // moves while a hand-typed 1 would quietly start meaning `sidebar`.
+    // Nothing mirrors this decision for the harness — the observation
+    // reads the property back off the live control, below.
+    let bar_hint = i64::from(crate::wire::SECTIONS_PRESENTATION_BAR);
+    nav.SetPaneDisplayMode(if hint == bar_hint {
         NavigationViewPaneDisplayMode::Top
     } else {
         NavigationViewPaneDisplayMode::Left
@@ -7581,10 +7587,23 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // presents its window.
             if core.section_panes.contains_key(&window.0) {
                 // A section presents in-window: added to the set
-                // already; the mount fills its pane.
+                // already; the mount fills its pane. BUT THE WINDOW IT
+                // SITS IN MAY BE AN AUXILIARY NOTHING HAS PRESENTED: a
+                // sections window mounts into its SECTIONS and never
+                // into a root, so the "Mounting presents" Activate
+                // below could not fire for it and CreateWindow's
+                // materializes-hidden became permanent — a window the
+                // app opened and the user never saw, with every
+                // observation still passing. The section's mount is
+                // that window's presentation moment (the same hole the
+                // mac depth found, 2026-08-15).
+                let owner = core.section_panes[&window.0].window;
                 core.section_panes.get_mut(&window.0).unwrap().root =
                     Some(element);
                 refresh_section_pane(core, window.0)?;
+                if owner != 0 {
+                    winui_window(core, owner)?.Activate()?;
+                }
             } else if core.nav_entries.contains_key(&window.0) {
                 mount_entry(core, window.0, element)?;
             } else if window.0 == 0 {
@@ -10773,6 +10792,47 @@ impl crate::harness::Stage for WinUiStage {
                     )
                 },
             )
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn sections_presentation(&self, window: u64) -> String {
+        // THE CONTROL'S OWN ANSWER, the way split_presentation asks
+        // TwoPaneView for its Mode: the pane position IS a property of
+        // the live NavigationView, so the honest reading of which arm
+        // rendered is to ask the control. A mirror written beside the
+        // SetPaneDisplayMode call would agree with that call by
+        // construction and could never fail — the declared-prop trap
+        // one indirection along.
+        //
+        // WHAT IT MEASURES: where the pane is PUT, not where it landed
+        // — enough to tell the two arms apart, and it also catches a
+        // window whose nav was never built and a hint change that never
+        // re-ran the arm, which is this verb's whole failure class.
+        Self::on_ui_read(move |core| {
+            let Some(nav) = core.section_navs.get(&window) else {
+                // Never a default arm: this window has no sections
+                // chrome at all, and the harness polls.
+                return Ok(format!("no sections chrome on window#{window}"));
+            };
+            Ok(match nav.PaneDisplayMode()? {
+                NavigationViewPaneDisplayMode::Top => "bar".to_owned(),
+                // Every LEFT spelling is the design's `sidebar`: the
+                // compact rail and the minimal hamburger are the same
+                // leading-edge pane in less width. The arm asks for
+                // plain Left today, so those two are unreached; they
+                // are here so a later adaptive arm reads correctly
+                // rather than falling into the unnamed branch.
+                NavigationViewPaneDisplayMode::Left
+                | NavigationViewPaneDisplayMode::LeftCompact
+                | NavigationViewPaneDisplayMode::LeftMinimal => "sidebar".to_owned(),
+                // Auto is the control's construction default and
+                // neither arm sets it, so a nav still wearing one never
+                // reached SetPaneDisplayMode. Only the mode itself is
+                // printed — that is what was read.
+                NavigationViewPaneDisplayMode::Auto => "pane display mode auto".to_owned(),
+                other => format!("pane display mode {}", other.0),
+            })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }

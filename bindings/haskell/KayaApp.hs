@@ -110,6 +110,7 @@ module KayaApp
     createWindow,
     pushEntry,
     addSection,
+    addSectionIn,
     selectSection,
     window,
     SectionAttr (..),
@@ -1155,8 +1156,16 @@ popEntry = emitB (W.txPopEntry 0)
 -- it — post-fact and NOT one-shot; a programmatic 'selectSection'
 -- does not fire it (the echo doctrine).
 addSection :: Word64 -> [SectionAttr] -> Build ()
-addSection n attrs = do
-  emitB (W.txAddSection 0 n)
+addSection = addSectionIn 0
+
+-- | 'addSection' with the HOST WINDOW said out loud — 0 is the
+-- primary, an aux window's id otherwise. The rust\/go\/java name for
+-- the same spelling; it arrived here when the sidebar-coverage scene
+-- put sections in an aux window and this binding could not say so
+-- (2026-08-15; the primary-only form silently added to window 0).
+addSectionIn :: Word64 -> Word64 -> [SectionAttr] -> Build ()
+addSectionIn w n attrs = do
+  emitB (W.txAddSection w n)
   mapM_ apply attrs
   where
     apply (STitle t) = emitB (W.txSetSectionTitle n t)

@@ -13,6 +13,16 @@ open Kaya_app
 let feed = 7L
 let archive = 8L
 
+(* The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
+   shared scene covers BOTH arms: the primary stays `bar`, and this
+   window opens from a handler only the desktop tail's click reaches —
+   the phone runners cut the tail, the click never fires, and
+   [create_window] never runs where the capability is absent. No
+   capability read needed: reachability is the gate. *)
+let library = 1L
+let shelves = 2L
+let loans = 3L
+
 let () =
   let app = Kaya_app.create () in
 
@@ -43,12 +53,29 @@ let () =
           holds). *)
        select_section archive
      in
+     let open_library () =
+       create_window ~title:"library"
+         ~sections_presentation:
+           (Int64.of_int Kaya_wire.sections_presentation_sidebar)
+         library;
+       add_section ~window:library ~title:"Shelves" shelves;
+       add_section ~window:library ~title:"Loans" loans;
+       let shelves_ready = signal (Str "shelves ready") in
+       let shelves_root =
+         column [ label ~bind:shelves_ready (* label#2 *) ] ()
+       in
+       mount_in shelves shelves_root;
+       let loans_ready = signal (Str "loans ready") in
+       let loans_root = column [ label ~bind:loans_ready (* label#3 *) ] () in
+       mount_in loans loans_root
+     in
      let ready = signal (Str "feed ready") in
      let feed_root =
        column
          [
            label ~bind:ready (* label#0 *);
            button ~text:"to archive" ~on_click:go_archive (* button#0 *);
+           button ~text:"open library" ~on_click:open_library (* button#1 *);
          ]
          ()
      in

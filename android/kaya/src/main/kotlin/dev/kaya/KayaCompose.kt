@@ -552,6 +552,14 @@ object KayaSceneModel {
     val sectionIndex = HashMap<Long, KayaSection>()
     var selectedSection by mutableStateOf<Long?>(null)
     var sectionsPresentation: Long = 0
+    /// The sections arm that ACTUALLY rendered, "bar" or "sidebar" —
+    /// stamped by the body that ran, never derived from
+    /// `sectionsPresentation` or the width, so
+    /// expect_sections_presentation cannot agree with the lowering by
+    /// construction (the expect_split rule, docs/traps.md). Empty
+    /// means no sections body has rendered at all, which is a
+    /// different answer from either arm and is reported as one.
+    var sectionsRendered = ""
     // The window's command catalog (window 0 — this host's one
     // surface) in menubar-append order, plus every menu item by id.
     // Menu items are their OWN id space (c_menu_item), never widget,
@@ -4209,6 +4217,40 @@ object KayaCompose {
                         }
                         if (got == want) observed.add("section \"$want\"")
                         else failures.add("section \"$got\", wanted \"$want\"")
+                    }
+                    "expect_sections_presentation" -> {
+                        // THE ARM THE SECTIONS RENDER TOOK, off the
+                        // stamp the render body wrote — never derived
+                        // from the declared prop, which would agree
+                        // with the lowering by construction (the
+                        // expect_split rule). window#N addresses an aux
+                        // window; the implicit form is the primary.
+                        val target = parts.getOrNull(1) ?: ""
+                        val explicit = target.startsWith("window#")
+                        val wid =
+                            if (explicit) target.removePrefix("window#").toLongOrNull() ?: -1
+                            else 0L
+                        val prefix = if (explicit) "window#$wid " else ""
+                        val want = quoted(parts.drop(if (explicit) 2 else 1))
+                        val got = onUi(activity) {
+                            when {
+                                // window 0 is the one surface this host
+                                // has (the core rejects create_window),
+                                // so a named aux window is UNREADABLE —
+                                // never an arm name, or a sidebar
+                                // assertion could pass off a window
+                                // that does not exist.
+                                wid != 0L -> "no such window"
+                                KayaSceneModel.sectionsRendered.isEmpty() ->
+                                    "nothing stamped — no sections body rendered"
+                                else -> KayaSceneModel.sectionsRendered
+                            }
+                        }
+                        if (got == want) {
+                            observed.add("${prefix}sections $want")
+                        } else {
+                            failures.add("${prefix}sections presentation $got, wanted $want")
+                        }
                     }
                     "select_section" -> {
                         val index = parts[1].toInt()
@@ -7968,6 +8010,14 @@ internal fun scrollTarget(spec: String): KayaNode? {
  * the model quietly. Each pane renders its own stack's top. */
 @Composable
 fun KayaSectionsScaffold(active: KayaSection) {
+    // THE STAMP, written by the arm that runs — there is exactly one
+    // here, so it is unconditionally "bar" (a phone has no leading
+    // sidebar to give the hint; physics decides). Written where the
+    // bar is BUILT rather than computed from `sectionsPresentation`,
+    // which is the whole point: a lowering that stopped honoring the
+    // hint must be able to disagree with the app's declaration. A
+    // second arm, if this host ever grows one, stamps its own name.
+    KayaSceneModel.sectionsRendered = "bar"
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {
             val top = active.entries.lastOrNull()

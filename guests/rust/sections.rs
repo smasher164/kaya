@@ -12,10 +12,20 @@ use kaya::WindowId;
 enum Msg {
     ArchiveShown,
     GoArchive,
+    OpenLibrary,
 }
 
 const FEED: WindowId = WindowId(7);
 const ARCHIVE: WindowId = WindowId(8);
+// The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
+// shared scene covers BOTH arms: the primary stays `bar`, and this
+// window opens from a handler only the desktop tail's click reaches —
+// the phone runners cut the tail, the click never fires, and
+// create_window never runs where the capability is absent. No
+// capability read needed: reachability is the gate.
+const LIBRARY: WindowId = WindowId(1);
+const SHELVES: WindowId = WindowId(2);
+const LOANS: WindowId = WindowId(3);
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
@@ -37,6 +47,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.label(ready); // label#0
                 let go = tx.button("to archive").id(); // button#0
                 msgs.on_click(go, Msg::GoArchive);
+                let open = tx.button("open library").id(); // button#1
+                msgs.on_click(open, Msg::OpenLibrary);
             })
             .id();
         tx.mount_in(feed, feed_root);
@@ -63,6 +75,29 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::GoArchive => {
                 ctx.apply(|tx| {
                     tx.select_section(ARCHIVE);
+                });
+            }
+            Msg::OpenLibrary => {
+                ctx.apply(|tx| {
+                    tx.create_window(LIBRARY)
+                        .title("library")
+                        .sections_presentation(kaya::SectionsPresentation::Sidebar);
+                    let shelves = tx.add_section_in(LIBRARY, SHELVES).title("Shelves").id();
+                    let loans = tx.add_section_in(LIBRARY, LOANS).title("Loans").id();
+                    let shelves_root = tx
+                        .column(|tx| {
+                            let l = tx.signal("shelves ready");
+                            tx.label(l); // label#2
+                        })
+                        .id();
+                    tx.mount_in(shelves, shelves_root);
+                    let loans_root = tx
+                        .column(|tx| {
+                            let l = tx.signal("loans ready");
+                            tx.label(l); // label#3
+                        })
+                        .id();
+                    tx.mount_in(loans, loans_root);
                 });
             }
         }

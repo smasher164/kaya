@@ -16,6 +16,15 @@ import dev.kaya.KayaWire;
 final class Sections {
     private static final long FEED = 7;
     private static final long ARCHIVE = 8;
+    // The SIDEBAR half of the presentation enum, in an AUX WINDOW so
+    // one shared scene covers BOTH arms: the primary stays `bar`, and
+    // this window opens from a handler only the desktop tail's click
+    // reaches — the phone runners cut the tail, the click never fires,
+    // and createWindow never runs where the capability is absent. No
+    // capability read needed: reachability is the gate.
+    private static final long LIBRARY = 1;
+    private static final long SHELVES = 2;
+    private static final long LOANS = 3;
 
     private static int visitCount = 0;
 
@@ -49,6 +58,25 @@ final class Sections {
                     // — onSelected must NOT fire (the scene asserts
                     // the count holds).
                     inner.selectSection(ARCHIVE);
+                });
+                tx.button("open library", inner -> { // button#1
+                    inner.createWindow(LIBRARY)
+                            .title("library")
+                            .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_SIDEBAR);
+                    long shelves = inner.addSectionIn(LIBRARY, SHELVES).title("Shelves").id();
+                    long loans = inner.addSectionIn(LIBRARY, LOANS).title("Loans").id();
+
+                    KayaApp.Widget shelvesRoot = inner.column(() -> {
+                        KayaApp.Signal<String> shelvesReady = inner.signal("shelves ready");
+                        inner.label(shelvesReady); // label#2
+                    });
+                    inner.mountIn(shelves, shelvesRoot);
+
+                    KayaApp.Widget loansRoot = inner.column(() -> {
+                        KayaApp.Signal<String> loansReady = inner.signal("loans ready");
+                        inner.label(loansReady); // label#3
+                    });
+                    inner.mountIn(loans, loansRoot);
                 });
             });
             tx.mountIn(feed, feedRoot);

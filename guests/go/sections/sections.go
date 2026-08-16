@@ -17,6 +17,16 @@ import (
 const (
 	feed    = 7
 	archive = 8
+
+	// The SIDEBAR half of the presentation enum, in an AUX WINDOW so
+	// one shared scene covers BOTH arms: the primary stays `bar`, and
+	// this window opens from a handler only the desktop tail's click
+	// reaches — the phone runners cut the tail, the click never fires,
+	// and CreateWindow never runs where the capability is absent. No
+	// capability read needed: reachability is the gate.
+	library = 1
+	shelves = 2
+	loans   = 3
 )
 
 // App builds the scene and hands it back ready to be served.
@@ -59,6 +69,26 @@ func App() *kaya.App {
 				// OnSelected must NOT fire (the scene asserts the
 				// count holds).
 				tx.SelectSection(archive)
+			})
+			tx.Button("open library", func(tx *kaya.Tx) { // button#1
+				tx.CreateWindow(library).
+					Title("library").
+					SectionsPresentation(kaya.SectionsPresentationSidebar)
+
+				shelvesSection := tx.AddSectionIn(library, shelves).Title("Shelves").Id()
+				loansSection := tx.AddSectionIn(library, loans).Title("Loans").Id()
+
+				shelvesRoot := tx.Column(func() {
+					ready := tx.Signal("shelves ready")
+					tx.Label(ready) // label#2
+				})
+				tx.MountIn(shelvesSection, shelvesRoot)
+
+				loansRoot := tx.Column(func() {
+					ready := tx.Signal("loans ready")
+					tx.Label(ready) // label#3
+				})
+				tx.MountIn(loansSection, loansRoot)
 			})
 		})
 		tx.MountIn(feedSection, feedRoot)

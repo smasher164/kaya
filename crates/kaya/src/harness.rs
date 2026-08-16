@@ -312,6 +312,12 @@ pub enum Step {
     /// single-window spelling; Some(n) prefixes the observation with
     /// `window#n `.
     ExpectTitle(Option<u64>, String),
+    /// The ARM the sections render took ("bar"/"sidebar"), read off
+    /// the backend's own stamp — the expect_split rule at the sections
+    /// construct: never derived from the declared prop, which would
+    /// agree with the lowering by construction. None = the primary;
+    /// Some(n) prefixes the observation with `window#n `.
+    ExpectSectionsPresentation(Option<u64>, String),
     /// The primary window's section count, from the REAL switcher.
     ExpectSections(usize),
     /// The ACTIVE section's title, from the platform's own selection
@@ -581,6 +587,7 @@ impl Step {
             Step::ExpectTitle { .. } => true,
             Step::ExpectSections { .. } => true,
             Step::ExpectSection { .. } => true,
+            Step::ExpectSectionsPresentation { .. } => true,
             Step::SelectSection { .. } => false,
             Step::ExpectWindowSize { .. } => true,
             Step::ExpectDirty { .. } => true,
@@ -998,6 +1005,12 @@ pub trait Stage: Send + 'static {
     /// The ACTIVE section's title, from the platform's own selection
     /// state. No default.
     fn active_section_title(&self) -> String;
+    /// The ARM the sections render actually took, "bar" or "sidebar",
+    /// for the given window — stamped by the render body, never
+    /// derived from the declared prop (the expect_split rule). No
+    /// default: a backend that forgets it fails to compile rather
+    /// than passing the leg vacuously.
+    fn sections_presentation(&self, window: u64) -> String;
     /// Drive the switcher to the section at `index` (add order)
     /// through the platform's real switching path — the user's route,
     /// so it emits section_selected (choose/toggle precedent). No
@@ -1249,6 +1262,10 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .map_err(|_| format!("expect_sections wants a count: {line:?}"))?,
             ),
             "expect_section" => Step::ExpectSection(parse_string(rest)?),
+            "expect_sections_presentation" => {
+                let (window, rest) = parse_window_target(rest);
+                Step::ExpectSectionsPresentation(window, parse_string(rest)?)
+            }
             "select_section" => Step::SelectSection(
                 rest.trim()
                     .parse::<usize>()
@@ -2628,6 +2645,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     }
                 }))
             }
+            Step::ExpectSectionsPresentation(window, want) => {
+                let id = window.unwrap_or(0);
+                let prefix = match window {
+                    Some(n) => format!("window#{n} "),
+                    None => String::new(),
+                };
+                Some(poll(|| {
+                    let got = stage.sections_presentation(id);
+                    if got == *want {
+                        Ok(format!("{prefix}sections {want}"))
+                    } else {
+                        Err(format!("{prefix}sections presentation {got}, wanted {want}"))
+                    }
+                }))
+            }
             Step::ExpectWindowSize(window, w, h) => {
                 // The surface's REAL content extent against the
                 // advisory request, within 2 device units.
@@ -3576,6 +3608,9 @@ mod tests {
         fn section_count(&self) -> usize {
             0
         }
+        fn sections_presentation(&self, _window: u64) -> String {
+            "bar".into()
+        }
         fn active_section_title(&self) -> String {
             String::new()
         }
@@ -3813,6 +3848,9 @@ mod tests {
         fn section_count(&self) -> usize {
             0
         }
+        fn sections_presentation(&self, _window: u64) -> String {
+            "bar".into()
+        }
         fn active_section_title(&self) -> String {
             String::new()
         }
@@ -3985,6 +4023,9 @@ mod tests {
         }
         fn section_count(&self) -> usize {
             0
+        }
+        fn sections_presentation(&self, _window: u64) -> String {
+            "bar".into()
         }
         fn active_section_title(&self) -> String {
             String::new()

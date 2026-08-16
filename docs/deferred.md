@@ -2301,6 +2301,22 @@ interpreter carries slice 1's one real brand lowering
 
 ## Styling follow-ups the fan-out surfaced (2026-08-12, none blocking)
 
+- **GTK's and WinUI's window resolvers panic on a not-yet-materialized
+  aux window** (gtk.rs `gtk_window` "harness targeted an unknown
+  window"; winui/mod.rs "scene validated the window id" — the comment's
+  assumption is exactly the bug: the scene DID validate the id, but
+  materialization is async, so a harness read racing the apply dies
+  instead of polling). Measured 2026-08-16: the sidebar tail's
+  click-then-expect_title killed five language legs on linux and two on
+  windows while rust/go squeaked by on timing. The sections scene now
+  carries an `expect_windows 2` barrier (its count read is panic-free
+  and reads the same map, so the panic path is unreachable there), but
+  the landmine holds for any future scene that asserts on an aux window
+  without a count barrier. Fix shape: the resolvers return Option, the
+  Stage reads map None to a pollable "window N not materialized yet"
+  miss, and the APPLY-side callers keep the panic (same-batch ordering
+  really does validate those).
+
 - **The per-platform accent VALUE map is spelled in no binding, and
   cannot be until the core carries a platform id.** D1's grammar admits
   `{<platform>: Accent}` resolved binding-side at runtime; all eight

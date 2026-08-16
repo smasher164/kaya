@@ -1375,6 +1375,13 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
         if [ "$guest" = milestone2 ]; then
             queue_leg run_swiftui_on swift "$APP" dev.kaya.milestone2swift swift 1 milestone2
+        elif [ "$guest" = sections ]; then
+            # THE PHONE-EXPRESSIBLE PREFIX (the dirty-cut shape): the
+            # sections tail opens an aux window this host rejects by
+            # capability, so the leg runs everything above the click
+            # that opens it — and the keep guard holds the section
+            # asserts above the cut.
+            queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest" "" expect_windows expect_section
         else
             queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest"
         fi
@@ -1468,6 +1475,9 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
         if [ "$guest" = milestone2 ]; then
             queue_leg run_swiftui_on go "$APP" dev.kaya.milestone2go go 1 milestone2
+        elif [ "$guest" = sections ]; then
+            # The same phone-expressible prefix as the swift leg above.
+            queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest" "" expect_windows expect_section
         else
             queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest"
         fi

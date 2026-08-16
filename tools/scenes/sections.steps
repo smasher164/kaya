@@ -7,6 +7,11 @@
 # (visits hold). The count surviving round trips is the retention
 # proof: covered roots stay alive.
 expect_sections 2
+# THE ARM THAT RENDERED, never the declared prop (the expect_split
+# rule): the primary declares `bar`, and every lane asserts the arm its
+# backend actually took — the desktops' horizontal spelling and the
+# phones' bottom bar are one "bar" answer, so this line runs everywhere.
+expect_sections_presentation "bar"
 expect_section "Feed"
 expect label#0 "feed ready"
 select_section 1
@@ -20,3 +25,14 @@ expect label#1 "archive: 1 visits"
 select_section 0
 select_section 1
 expect label#1 "archive: 2 visits"
+# THE SIDEBAR ARM, in an aux window, so ONE scene covers BOTH values of
+# the presentation enum (flipping the primary would only relocate the
+# coverage hole). The window opens from a handler only this tail's
+# click reaches: the phone runners cut here (their host rejects
+# create_window by capability, and reachability is the gate — the guest
+# reads no capability), so everything below is the desktops' tail.
+expect_windows 1
+click button#1
+expect_windows 2
+expect_title window#1 "library"
+expect_sections_presentation window#1 "sidebar"
