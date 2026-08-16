@@ -10485,6 +10485,9 @@ struct KayaAuxRoot: View {
         }
         }
         .onAppear { kayaDiag("auxRoot appear wid=\(windowId)") }
+        // The brand rides every scene root, not window 0's alone (the
+        // Phase A finding — see KayaRoot's tint note).
+        .tint(kayaBrandTint())
         #if os(macOS)
             .background(KayaWindowAccessor(windowId: windowId))
         #endif
@@ -10543,6 +10546,8 @@ struct KayaSplitRoot: View {
         }
         .onAppear { record() }
         .onChange(of: scene.windows[windowId]?.entries.count ?? 0) { record() }
+        // The brand rides every scene root (see KayaRoot's tint note).
+        .tint(kayaBrandTint())
     }
 
     /// Stamp the arm THIS BODY TOOK. Never derived from listDetail or
@@ -11800,17 +11805,28 @@ struct KayaSectionsView: View {
                         ) { section in
                             Text(section.title).tag(section.id)
                         }
+                        // EXPLICIT, not inherited: the sidebar style is
+                        // what NavigationSplitView's sidebar column
+                        // defaults to on macOS today, and the modern-mac
+                        // pass depends on it (the source-list material,
+                        // the rounded selection) — a default that
+                        // changed under an SDK bump would silently
+                        // de-modernize every sectioned window.
+                        .listStyle(.sidebar)
                     } detail: {
                         KayaSectionPane(sectionId: selection.wrappedValue)
                     }
                     .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "sidebar" }
+                    .tint(kayaBrandTint())
                 } else {
                     tabBody(window)
                         .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "bar" }
+                        .tint(kayaBrandTint())
                 }
             #else
                 tabBody(window)
                     .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "bar" }
+                    .tint(kayaBrandTint())
             #endif
         }
     }
@@ -11931,12 +11947,13 @@ struct KayaRoot: View {
         .navigationTitle(scene.windowTitle)
         // THE BRAND ACCENT, applied as .tint of the current
         // appearance's derived FILL — a value the core computed, never
-        // re-derived here (docs/styling-plan.md D1). And a REQUEST
-        // (D2): on macOS a user who chose a system accent color wins —
-        // kayaBrandTint reads that preference and yields, which is the
-        // uniform semantics ("a platform may let its user override")
-        // rather than a macOS carve-out. On iOS there is no such
-        // preference and the brand applies as written.
+        // re-derived here (docs/styling-plan.md D1). A DECLARED BRAND
+        // WINS on every platform (D2 as revised 2026-08-12); a
+        // brandless app gets the environment default, which on macOS
+        // is the user's own accent. The same tint rides the aux, the
+        // sections and the split roots below — they are SIBLING scene
+        // roots, not descendants of this one, and the brand reaching
+        // window 0 alone was Phase A's first finding (2026-08-16).
         .tint(kayaBrandTint())
         // The window's command catalog rides the window construct: on
         // iOS this is the trailing More menu + promoted bar actions

@@ -2301,6 +2301,26 @@ interpreter carries slice 1's one real brand lowering
 
 ## Styling follow-ups the fan-out surfaced (2026-08-12, none blocking)
 
+- **The window chrome knob is DEFERRED (maintainer, 2026-08-16)** —
+  docs/chrome-plan.md C1/C1b, drafted and held before ratification.
+  `chrome: extended` (content under a transparent title bar) is the
+  one piece of the modern-mac look that is HARD to extend across
+  platforms and easy to break apps with: the content's top band slides
+  under the traffic lights (every current scene puts real content
+  there), the drag region fights the top row's clicks (WinUI requires
+  an explicit drag region or the window cannot be moved), and a
+  default flip would change every app's geometry overnight. The safe
+  cases ALREADY auto-extend: a sidebar window gets the full-height
+  treatment from the platform today, and a toolbar-carrying window
+  would get the tall unified bar with the toolbar itself. What the
+  knob alone buys is extended-without-chrome (the Zed-shaped editor),
+  which only the app can promise its top edge tolerates. REOPENS when
+  an app actually wants that shape; the cleaner rule to consider then:
+  extended is DERIVED (toolbar or sidebar present), and the knob
+  exists only for the chrome-less case. The toolbar construct (C2, the
+  promotion list over the command catalog) is a separate question and
+  stays in the draft awaiting its own ratification.
+
 - **GTK's and WinUI's window resolvers panic on a not-yet-materialized
   aux window** (gtk.rs `gtk_window` "harness targeted an unknown
   window"; winui/mod.rs "scene validated the window id" — the comment's
