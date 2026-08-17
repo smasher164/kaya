@@ -108,6 +108,12 @@ GATES = {
     # is that naming too much costs a re-run nobody notices while naming
     # too little hands back a PASS about a file that changed.
     "check-gates": ["CLAUDE.md", "AGENTS.md"],
+    # The ledger's internal agreement. It reads ONE file, and docs/ whole
+    # rather than that file follows this table's over-approximate rule —
+    # it survives the ledger splitting in two, and the cost of naming too
+    # much is a re-run nobody notices. tools/ rides every key, which is
+    # where the gate itself lives.
+    "check-ledger": ["docs"],
     # bindings/ joined this set when the gate grew its go-android clause.
     # That clause cross-builds a single-main fixture against
     # bindings/go — the only thing anywhere that compiles

@@ -113,6 +113,19 @@ in docs/deferred.md.
 8. **A duration anomaly is a bug signal.** If something is unexpectedly
    slow, investigate immediately — sample the interim state right then;
    never queue more work behind it.
+9. **The ledger is not append-only.** Closing a deferred entry means
+   striking the headline WITH its resolution — the strike and the note
+   are one edit, never two — and then grepping the entry's key nouns
+   across docs/ and the code comments and updating every hit. A fix
+   recorded in a neighbouring entry is not recorded, and a headline
+   nobody struck is what the next reader believes: two entries headlined
+   "GAP — … cannot / is not implemented" carried "COMPLETE … matrix ALL
+   PASS" in their own bodies for three weeks, and a survey reported a
+   solved problem as the largest open one. So new entries carry a
+   `KEY:` line naming the greppable nouns they will have to be swept
+   for — the entry describes its own closing sweep, rather than leaving
+   the next person to guess what to search. `tools/check-ledger.sh`
+   holds the strike-and-note half; the sweep is yours.
 
 ## The validation ladder (in order; "done" means the top rung)
 
@@ -164,6 +177,25 @@ in docs/deferred.md.
    gates.sh's EXCLUDED table WITH A REASON — and it is what would have
    caught the four gates this paragraph was missing while the lane ran
    them),
+   `tools/check-ledger.sh` (docs/deferred.md may not disagree with
+   itself: an UNSTRUCK headline over an entry that records a terminal
+   resolution, or a STRUCK one with no resolution note. Two entries
+   headlined "GAP — … cannot / is not implemented" carried "COMPLETE …
+   matrix ALL PASS" in their own bodies for three weeks, and a survey
+   that read the headlines reported a solved problem as the largest open
+   item. The discriminator is calibrated, not guessed — this ledger
+   spells LANDED, FIXED and CLOSED at SLICE scope routinely, so COMPLETE
+   is the only whole-entry word available and the gate says out loud
+   what that means it cannot see. Takes a path argument, which is how it
+   was calibrated against the stale revision),
+   `tools/check-doc-refs.sh` (the other half: every path-shaped
+   reference in every tracked .md must exist. Globs are resolved and
+   must match something, brace groups are expanded member by member, and
+   a `<placeholder>` names a family rather than a file. A sentence that
+   must name what the tree no longer has says so ONE way — struck,
+   quoted inside a fenced block, or marked `(gone)` — and the exemption
+   counts are printed on every run, with a refusal if they ever
+   outnumber the checks),
    `tools/check-case.sh` (every tracked path matches the filesystem's
    case exactly. macOS is case-insensitive and Linux is not, so a Haskell
    guest created as `Background.hs` against a cabal stanza reading

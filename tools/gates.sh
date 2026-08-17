@@ -113,6 +113,19 @@ GATES = [
     ("check-shell", ["tools/check-shell.sh"], True, ""),
     ("check-mirror", ["tools/check-mirror.sh"], True, ""),
     ("check-gates", ["tools/check-gates.sh"], True, ""),
+    # The ledger may not disagree with itself: an unstruck headline over
+    # a body that records the work COMPLETE is what sent a survey after
+    # a solved problem three weeks after it was solved. Pure prose scan
+    # over docs/; its four self-tests run first, inside it.
+    ("check-ledger", ["tools/check-ledger.sh"], True, ""),
+    # The other half of that failure: a doc citing a path the tree does
+    # not have. Same doctrine-hygiene cluster, one question over — the
+    # ledger's claims about itself, then every doc's claims about the
+    # tree.
+    ("check-doc-refs", ["tools/check-doc-refs.sh"], False,
+     "its input is the EXISTENCE of every path any doc names, so a rename or "
+     "a delete anywhere in the tree is a real input — check-case's shape, and "
+     "a key that cheap to invalidate is a cache that never hits"),
     ("check-case", ["tools/check-case.sh"], False,
      "its input is every tracked path plus the directory listings around "
      "them, so any add, delete or rename is a real input; a cache key that "

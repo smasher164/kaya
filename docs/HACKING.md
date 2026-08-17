@@ -13,7 +13,8 @@ architecture). This file is the how-to layer: the recipes that repeat.
   per backend (`gtk.rs`, `winui/`, the SwiftUI/Compose interpreters,
   `android.rs`), `swiftui_host.rs` (the vtable the SwiftUI dylib gets),
   `ring.rs` (the occurrence ring).
-- `swift/KayaSwiftUI.swift`, `android/kaya/.../KayaCompose.kt` — the two
+- `swift/KayaSwiftUI.swift` and
+  `android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt` — the two
   interpreter backends (own their node trees across the C ABI).
 - `tools/kaya-bindgen/` — emits the 8 generated wire files
   (bindings/<lang>/...wire...) from spec.rs.
