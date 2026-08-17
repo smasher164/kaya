@@ -234,27 +234,54 @@ private let valueBlob: UInt32 = 5
 /// `name_availability.plist` — every name's introduction year against
 /// the declared floor — which is a static gate, not a scene step. See
 /// styling/check-symbols.sh; it belongs at tools/check-symbols.sh.
-let kayaSymbolTable: [(value: Int64, name: String, sf: String)] = [
-    (symbolAdd, "add", "plus"),
-    (symbolRemove, "remove", "minus"),
-    (symbolDelete, "delete", "trash"),
-    (symbolEdit, "edit", "pencil"),
-    (symbolDone, "done", "checkmark"),
-    (symbolClose, "close", "xmark"),
-    (symbolSearch, "search", "magnifyingglass"),
-    (symbolSettings, "settings", "gearshape"),
-    (symbolRefresh, "refresh", "arrow.clockwise"),
-    (symbolInfo, "info", "info.circle"),
-    (symbolWarning, "warning", "exclamationmark.triangle"),
-    (symbolBack, "back", "chevron.backward"),
-    (symbolForward, "forward", "chevron.forward"),
-    (symbolMore, "more", "ellipsis.circle"),
-    (symbolCopy, "copy", "doc.on.doc"),
-    (symbolPaste, "paste", "doc.on.clipboard"),
-    (symbolStar, "star", "star"),
-    (symbolLock, "lock", "lock"),
-    (symbolPerson, "person", "person"),
-    (symbolHome, "home", "house"),
+///
+/// THE `rendered` COLUMN IS THE OTHER HALF OF THAT SAME TRAP, and it is
+/// what a READ meets rather than a lowering. `sf` is what kaya ASKS FOR;
+/// SwiftUI resolves the alias before UIKit sees the image, so the glyph
+/// on screen publishes the CANONICAL name on its UIImageView's
+/// accessibility identifier — kaya asks `doc.on.doc` and the bar renders
+/// `document.on.document`. Any read that inverts a rendered glyph back
+/// to this vocabulary therefore matches THE REQUEST OR THE RENDERED
+/// NAME (kayaToolbarIOSSemantic), and this column is nil wherever the
+/// two agree.
+///
+/// MEASURED, ALL 20, NOT RECALLED: a probe rendered every row the way
+/// the promoted bar does — `Label(name, systemImage: sf)` in a
+/// `ToolbarItemGroup(.primaryAction)` inside a NavigationStack, one row
+/// per pass in a fresh hosting controller — and read the identifier back
+/// through kayaToolbarIOSButtons' own walk (iOS 26.5, 2026-08-17;
+/// scratchpad/chrome/sf-rendered-names.md holds the 20-row table, the
+/// probe and its canaries). EXACTLY TWO ROWS DIFFER, and they are the
+/// `doc.*` -> `document.*` family SF Symbols 6 renamed. The rename is
+/// not a relabeling: the rendered image is a DIFFERENT UIImage object
+/// from the one `UIImage(systemName: sf)` returns, which is why the two
+/// are not `isEqual` and why no runtime route reconciles them.
+///
+/// A row here is this OS's answer. An older OS renders the asked
+/// spelling and inverts through `sf`; a newer one that renames another
+/// family adds a row — and the read that meets it says which glyph it
+/// measured, so the next reader is told rather than left hunting.
+let kayaSymbolTable: [(value: Int64, name: String, sf: String, rendered: String?)] = [
+    (symbolAdd, "add", "plus", nil),
+    (symbolRemove, "remove", "minus", nil),
+    (symbolDelete, "delete", "trash", nil),
+    (symbolEdit, "edit", "pencil", nil),
+    (symbolDone, "done", "checkmark", nil),
+    (symbolClose, "close", "xmark", nil),
+    (symbolSearch, "search", "magnifyingglass", nil),
+    (symbolSettings, "settings", "gearshape", nil),
+    (symbolRefresh, "refresh", "arrow.clockwise", nil),
+    (symbolInfo, "info", "info.circle", nil),
+    (symbolWarning, "warning", "exclamationmark.triangle", nil),
+    (symbolBack, "back", "chevron.backward", nil),
+    (symbolForward, "forward", "chevron.forward", nil),
+    (symbolMore, "more", "ellipsis.circle", nil),
+    (symbolCopy, "copy", "doc.on.doc", "document.on.document"),
+    (symbolPaste, "paste", "doc.on.clipboard", "document.on.clipboard"),
+    (symbolStar, "star", "star", nil),
+    (symbolLock, "lock", "lock", nil),
+    (symbolPerson, "person", "person", nil),
+    (symbolHome, "home", "house", nil),
 ]
 
 /// The SEMANTIC NAME of a wire symbol value. The root already refused
@@ -480,33 +507,15 @@ final class KayaWindowModel: Identifiable {
     /// make the harness verb agree with the lowering by construction,
     /// and the defect being gated is precisely the two disagreeing.
     var menuPresentation: KayaMenuPresentation = .none
-    /// WHAT THE PROMOTED BAR ACTUALLY DREW, per promoted item id —
-    /// written by the arm of the button's label that rendered, never
-    /// derived from the item's props (the sectionsRendered /
-    /// splitPresentation rule). The value is the SEMANTIC NAME when the
-    /// symbol arm drew, and otherwise a sentence naming what that
-    /// button drew instead, so expect_menu_symbol can byte-compare the
-    /// good case and print a measured answer for every other one.
-    ///
-    /// Written on iOS only, because the promoted bar exists only there:
-    /// macOS answers the same verb off the REAL NSMenuItem's image,
-    /// which is a stronger read than any view could record. (So this
-    /// field is deliberately NOT in check-verbs' STAMPED list, which
-    /// demands a write outside every platform conditional — the same
-    /// reason sectionsRendered is not.)
-    ///
-    /// STILL THE STAMP, AND ONLY HERE. expect_toolbar_item moved off it
-    /// onto the rendered glyph (kayaToolbarIOSSymbolOf); this verb could
-    /// not follow, because the one symbol the menus scene asserts is
-    /// `copy` and this OS renames its spelling under the table, so the
-    /// glyph read cannot invert it. The measurement and the two dead
-    /// ends are in scratchpad/chrome/toolbar-ios-arm.md §1.3.
-    ///
-    /// An entry means "this is what that button drew when it last
-    /// rendered". An item that leaves the promotion set keeps its last
-    /// stamp, so the reader gates on CURRENT promotion before
-    /// consulting one.
-    var promotedRendered: [UInt64: String] = [:]
+    // THE PROMOTED-BAR STAMP LIVED HERE AND IS RETIRED (2026-08-17).
+    // `promotedRendered` recorded, per promoted item id, which arm of
+    // the button's label had rendered — because on iOS neither verb
+    // could read the picture itself. Both can now: expect_toolbar_item
+    // and expect_menu_symbol's promoted half share
+    // kayaToolbarIOSSymbolOf, which asks UIKit's own image view what
+    // glyph it is drawing and inverts it through kayaSymbolTable's
+    // request AND rendered columns. A stamp records which arm ran; the
+    // tree records what was drawn, and nothing reads the stamp any more.
 
     init(id: UInt64, title: String = "") {
         self.id = id
@@ -10240,24 +10249,23 @@ func kayaModelMenuState(_ item: KayaMenuItemModel, _ aspect: KayaMenuAspect) -> 
 /// RENDERED — never by the item's props.
 ///
 ///  - THE RENDERED HALF: an item the promoted bar is carrying right now
-///    was drawn by KayaPromotedLabel, which stamped the arm it took on
-///    the window model. This read returns that stamp verbatim, so an
-///    arm that stopped drawing the symbol answers with what it drew
-///    instead and the assertion goes red. Before the stamp existed BOTH
-///    halves came from the model, and the shipped bar drew
-///    `Text(item.label)` for a symbol-carrying promoted item while this
-///    read answered with the concept the app had declared — the whole
-///    reason this function was rewritten.
+///    is a REAL BAR BUTTON, and this read asks UIKit's own objects what
+///    that button is drawing — the same walk and the same answer as
+///    expect_toolbar_item, through the shared kayaToolbarIOSSymbolOf, so
+///    the two verbs cannot disagree about one button. The glyph decides:
+///    an arm that stopped drawing the symbol answers with what it drew
+///    instead and the assertion goes red, and an arm drawing a picture
+///    this vocabulary does not describe goes red naming the glyph.
 ///
-///    IT IS THE WEAKER OF THE TWO IOS READS, and knowingly so. Its
-///    sibling verb expect_toolbar_item now asks the RENDERED GLYPH what
-///    it is (kayaToolbarIOSSymbolOf), which the stamp cannot: a stamp
-///    records which arm ran, not what UIKit drew. This verb could not
-///    follow, because the one symbol the menus scene asserts is `copy`,
-///    whose spelling this OS renames under the table — the glyph read
-///    would report `document.on.document` for a correct button. The
-///    measurement, and the routes tried and rejected, are in
-///    scratchpad/chrome/toolbar-ios-arm.md §1.3.
+///    IT USED TO BE THE STAMP, and the stamp is now retired. What held
+///    it back was the rename — the one symbol this scene asserts here is
+///    `copy`, whose spelling SwiftUI normalizes to
+///    `document.on.document` before UIKit sees it, so the glyph read
+///    reported an unknown glyph for a correct button. kayaSymbolTable's
+///    `rendered` column measured that for all 20 rows (exactly two
+///    differ), the inversion now matches request OR rendered, and a
+///    stamp — which records which ARM ran, never what UIKit DREW — has
+///    nothing left to say that the tree does not say better.
 ///  - THE UNRENDERED HALF: an unpromoted item, and every item on a
 ///    regular-width window, where the catalog goes into the system menu
 ///    bar instead of a promoted bar. There is nothing to read there —
@@ -10306,19 +10314,20 @@ func kayaMenuSymbolRead(_ path: String) -> String {
         // THE RENDERED HALF. Both gate conditions are observations, not
         // derivations: `.overflow` is stamped by the chrome body that
         // took the compact arm, and promotion is recomputed from the
-        // same helper the bar itself consumes.
+        // same helper the bar itself consumes. What answers, though, is
+        // neither of them — it is the real bar, walked by the toolbar
+        // arm's own reader.
         if let window = kayaScene.windows[0], window.menuPresentation == .overflow,
             kayaPromotedActions(window).contains(where: { $0.id == item.id })
         {
-            guard let drew = window.promotedRendered[item.id] else {
-                // WHAT THIS MEASURED: the compact chrome stamped itself,
-                // this item is in the promoted set that chrome renders,
-                // and no button of it has ever recorded what it drew.
-                // Deliberately NOT a fall-back to the model — the model
-                // is what agreed with itself here for four milestones.
-                return "promoted into the bar, and no button stamped what it drew"
-            }
-            return drew
+            // THE TOOLBAR VERB'S READ, CALLED — not copied. Addressing
+            // the button by the label UIKit publishes, the automation
+            // switch, the trace, the outermost-button walk, the glyph
+            // and the sentences for a bar that is missing or carries
+            // other buttons are all one implementation, so a promoted
+            // item cannot read one way through expect_toolbar_item and
+            // another through here.
+            return kayaToolbarIOSItemRead(0, item.label, "symbol")
         }
         // THE UNRENDERED HALF.
         guard item.symbol != 0 else { return "no symbol on the item" }
@@ -10716,17 +10725,21 @@ func kayaToolbarChromeFits(_ spelling: String) -> String? {
     /// row of this interpreter's table resolves to that glyph, which the
     /// caller reports as what it measured rather than as an absence.
     ///
-    /// WHAT IT CANNOT INVERT, stated because the next reader will meet
-    /// it: a spelling THIS OS HAS RENAMED. The table ships the
-    /// deployment-floor name on purpose (see the comment above it) and
-    /// SwiftUI normalizes to the canonical one before UIKit sees the
-    /// image — kaya asks for `doc.on.doc`, the rendered view reports
-    /// `document.on.document` (measured 2026-08-17 on the menus scene's
-    /// `copy`). No public route reconciles the two: `UIImage(systemName:)`
-    /// keeps the ASKED spelling on both its identifier and its
-    /// description, the two images are not `isEqual`, and UIImage is not
-    /// KVC-compliant for `symbolName`. Such a glyph returns nil here and
-    /// the caller reports the name it measured.
+    /// TWO SPELLINGS PER ROW, because the name kaya asks for is not
+    /// always the name that renders: SwiftUI resolves an aliased SF name
+    /// to its canonical one before UIKit builds the image, so the bar
+    /// publishes `document.on.document` for the `doc.on.doc` this table
+    /// ships (measured on all 20 rows, iOS 26.5 — exactly two differ;
+    /// scratchpad/chrome/sf-rendered-names.md). A row therefore matches
+    /// on its REQUEST or on its RENDERED name, and the rendered column is
+    /// nil wherever the two agree. Without it this read reported a
+    /// correct button as an unknown glyph, which is why
+    /// expect_menu_symbol's promoted half could not use it.
+    ///
+    /// STILL nil FOR A GLYPH NO ROW SPELLS, and that is the point: a
+    /// name that is neither a request nor a measured rendering is a
+    /// picture this vocabulary does not describe. The caller reports
+    /// what it measured rather than calling it an absence.
     ///
     /// THERE IS DELIBERATELY NO FALL-BACK to the identifier kaya's own
     /// arm published. It would close this gap and open a worse one: an
@@ -10735,7 +10748,7 @@ func kayaToolbarChromeFits(_ spelling: String) -> String? {
     /// passing while the wrong picture is on screen, which is the exact
     /// defect this slice replaced.
     func kayaToolbarIOSSemantic(_ rendered: String) -> String? {
-        kayaSymbolTable.first { $0.sf == rendered }?.name
+        kayaSymbolTable.first { $0.sf == rendered || $0.rendered == rendered }?.name
     }
 
     /// The symbol aspect of one real bar button, or a sentence saying
@@ -10756,13 +10769,15 @@ func kayaToolbarChromeFits(_ spelling: String) -> String? {
         }
         guard let semantic = kayaToolbarIOSSemantic(sf) else {
             // WHAT THIS MEASURED: a real glyph, and a spelling no row of
-            // the table carries. Two causes it CANNOT tell apart and so
-            // does not try to: an arm drawing something off the table,
-            // and a table row this OS has renamed under it. Both are
-            // named here so the reader chases the right one.
+            // the table carries in EITHER column. Two causes it CANNOT
+            // tell apart and so does not try to: an arm drawing
+            // something outside this vocabulary, and a row this OS
+            // renames to a spelling the rendered column has not measured
+            // yet. Both are named here so the reader chases the right
+            // one, and the glyph is printed either way.
             return "the toolbar button \(button.name) renders the glyph \(sf), which no row "
-                + "of this interpreter's table spells (an off-table glyph, or a row this OS "
-                + "has renamed)"
+                + "of this interpreter's table spells (a glyph outside the vocabulary, or a "
+                + "row this OS renames to a spelling the table has not measured)"
         }
         return semantic
     }
@@ -12016,33 +12031,6 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
         }
     }
 
-    /// WHAT THIS ARM DREW, published TWICE — onto the real element as an
-    /// accessibility identifier, and onto the window model as a stamp.
-    ///
-    /// In onAppear/onChange rather than in `body`, the
-    /// KayaFormFactorRecorder rule — a write during body evaluation is a
-    /// mutation inside the render pass. onChange is not optional here:
-    /// switching arms gives the label a new view identity and re-fires
-    /// onAppear, but a symbol changing WITHIN the symbol arm does not,
-    /// and a stamp that cannot follow that is a stamp that goes stale
-    /// while still being believed.
-    struct KayaPromotedStamp: ViewModifier {
-        let windowId: UInt64
-        let item: UInt64
-        let drew: String
-
-        func body(content: Content) -> some View {
-            content
-                .accessibilityIdentifier(kayaToolbarSymbolIdent + drew)
-                .onAppear { record() }
-                .onChange(of: drew) { record() }
-        }
-
-        private func record() {
-            kayaScene.windows[windowId]?.promotedRendered[item] = drew
-        }
-    }
-
     /// One promoted primary's label — and the arm's own account of what
     /// it drew.
     ///
@@ -12059,25 +12047,23 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
     /// the claim kayaSymbolImage makes on macOS, where the semantic name
     /// rides the image as its accessibility description.
     ///
-    /// BOTH PUBLICATIONS HAPPEN INSIDE EACH ARM, by the view that arm
-    /// renders — never from a decision computed once and used twice.
-    /// They are not equals:
+    /// THE ARM PUBLISHES WHAT IT DREW, on the real element and inside
+    /// the arm that drew it — never from a decision computed once and
+    /// used twice. There used to be a second publication, a stamp on the
+    /// window model, and it is retired: BOTH iOS symbol verbs now read
+    /// the glyph itself (see KayaWindowModel where the field was).
     ///
-    ///  - THE IDENTIFIER is a DIAGNOSTIC, not the symbol answer. UIKit
-    ///    publishes the SF name on the image view this arm's `Label`
-    ///    produces, so expect_toolbar_item asks the GLYPH what it is
-    ///    (kayaToolbarIOSSymbolOf) and turns to this string only when
-    ///    there is no glyph — where it says which of the three text arms
-    ///    drew, and why. That ordering closes the gap the first fix left
-    ///    open: a `Label` swapped for a `Text` inside this same arm
-    ///    keeps the identifier and loses the image, and the read follows
-    ///    the image.
-    ///  - THE STAMP is what expect_menu_symbol still reads, because that
-    ///    verb's one asserted symbol is renamed by this OS and cannot be
-    ///    inverted from the glyph (see promotedRendered's comment).
+    /// THE IDENTIFIER IS A DIAGNOSTIC, not the symbol answer. UIKit
+    /// publishes the SF name on the image view this arm's `Label`
+    /// produces, so expect_toolbar_item and expect_menu_symbol both ask
+    /// the GLYPH what it is (kayaToolbarIOSSymbolOf) and turn to this
+    /// string only when there is no glyph — where it says which of the
+    /// three text arms drew, and why. That ordering is what closes the
+    /// gap the first fix left open: a `Label` swapped for a `Text`
+    /// inside this same arm keeps the identifier and loses the image,
+    /// and the read follows the image.
     struct KayaPromotedLabel: View {
         let item: KayaMenuItemModel
-        let windowId: UInt64
 
         var body: some View {
             if item.symbol != 0 {
@@ -12085,30 +12071,25 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
                     UIImage(systemName: sf) != nil
                 {
                     Label(item.label, systemImage: sf)
-                        .modifier(
-                            KayaPromotedStamp(windowId: windowId, item: item.id, drew: name))
+                        .accessibilityIdentifier(kayaToolbarSymbolIdent + name)
                 } else {
                     // A declared symbol this host cannot draw. The
-                    // button stays usable as text, and both publications
-                    // say which of the two causes was measured.
+                    // button stays usable as text, and the identifier
+                    // says which of the two causes was measured.
                     Text(item.label)
-                        .modifier(
-                            KayaPromotedStamp(
-                                windowId: windowId, item: item.id,
-                                drew: kayaPromotedSymbolWhyNot(item.symbol)))
+                        .accessibilityIdentifier(
+                            kayaToolbarSymbolIdent + kayaPromotedSymbolWhyNot(item.symbol))
                 }
             } else if let icon = item.icon {
                 Image(uiImage: icon)
-                    .modifier(
-                        KayaPromotedStamp(
-                            windowId: windowId, item: item.id,
-                            drew: "the promoted button drew the app's icon bytes, no symbol"))
+                    .accessibilityIdentifier(
+                        kayaToolbarSymbolIdent
+                            + "the promoted button drew the app's icon bytes, no symbol")
             } else {
                 Text(item.label)
-                    .modifier(
-                        KayaPromotedStamp(
-                            windowId: windowId, item: item.id,
-                            drew: "the promoted button drew its label as text, no icon"))
+                    .accessibilityIdentifier(
+                        kayaToolbarSymbolIdent
+                            + "the promoted button drew its label as text, no icon")
             }
         }
     }
@@ -12132,7 +12113,7 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
                             Button {
                                 kayaMenuUserActivate(item)
                             } label: {
-                                KayaPromotedLabel(item: item, windowId: windowId)
+                                KayaPromotedLabel(item: item)
                             }
                             .disabled(!kayaMenuEffectiveEnabled(item))
                         }
