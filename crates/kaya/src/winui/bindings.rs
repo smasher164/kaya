@@ -22262,6 +22262,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -25332,6 +25356,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -29137,6 +29185,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -32583,6 +32655,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -35598,6 +35694,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -39045,6 +39165,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -42017,6 +42161,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -45072,6 +45240,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -51287,8 +51479,16 @@ pub mod Microsoft {
                         f64,
                     )
                         -> windows_core::HRESULT,
-                    FontFamily: usize,
-                    SetFontFamily: usize,
+                    pub FontFamily: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFontFamily: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     FontWeight: usize,
                     SetFontWeight: usize,
                     FontStyle: usize,
@@ -51632,8 +51832,16 @@ pub mod Microsoft {
                         f64,
                     )
                         -> windows_core::HRESULT,
-                    FontFamily: usize,
-                    SetFontFamily: usize,
+                    pub FontFamily: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFontFamily: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     FontWeight: usize,
                     SetFontWeight: usize,
                     FontStyle: usize,
@@ -55489,8 +55697,16 @@ pub mod Microsoft {
                         f64,
                     )
                         -> windows_core::HRESULT,
-                    FontFamily: usize,
-                    SetFontFamily: usize,
+                    pub FontFamily: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFontFamily: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     FontWeight: usize,
                     SetFontWeight: usize,
                     FontStyle: usize,
@@ -62021,6 +62237,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -65295,6 +65535,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -68254,6 +68518,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -71711,6 +71999,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -74791,6 +75103,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -77706,6 +78042,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -80664,6 +81024,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -83712,6 +84096,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -87611,6 +88019,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -90827,6 +91259,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -96456,6 +96912,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -99653,6 +100133,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -102797,6 +103301,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -105964,6 +106492,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -110045,6 +110597,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -114547,6 +115123,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -121510,6 +122110,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = self;
                         unsafe {
@@ -123530,6 +124154,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -127760,6 +128408,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -130857,6 +131529,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetFontSize)(
                                 windows_core::Interface::as_raw(this),
                                 value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontFamily(&self) -> windows_core::Result<super::Media::FontFamily> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::FontFamily>,
+                    {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }
@@ -134830,6 +135526,33 @@ pub mod Microsoft {
                                 (windows_core::Interface::vtable(this).SetFontSize)(
                                     windows_core::Interface::as_raw(this),
                                     value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn FontFamily(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::FontFamily>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::FontFamily>,
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
                                 )
                                 .ok()
                             }
@@ -142668,6 +143391,33 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn FontFamily(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::FontFamily>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::FontFamily>,
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                             let this = &windows_core::Interface::cast::<super::IControl>(self)?;
                             unsafe {
@@ -146318,6 +147068,33 @@ pub mod Microsoft {
                                 (windows_core::Interface::vtable(this).SetFontSize)(
                                     windows_core::Interface::as_raw(this),
                                     value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn FontFamily(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::FontFamily>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::FontFamily>,
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
                                 )
                                 .ok()
                             }
@@ -150150,6 +150927,33 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn FontFamily(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::FontFamily>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::FontFamily>,
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                             let this = &windows_core::Interface::cast::<super::IControl>(self)?;
                             unsafe {
@@ -153575,6 +154379,33 @@ pub mod Microsoft {
                                 (windows_core::Interface::vtable(this).SetFontSize)(
                                     windows_core::Interface::as_raw(this),
                                     value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn FontFamily(
+                            &self,
+                        ) -> windows_core::Result<super::super::Media::FontFamily>
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn SetFontFamily<P0>(&self, value: P0) -> windows_core::Result<()>
+                        where
+                            P0: windows_core::Param<super::super::Media::FontFamily>,
+                        {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontFamily)(
+                                    windows_core::Interface::as_raw(this),
+                                    value.param().abi(),
                                 )
                                 .ok()
                             }
@@ -158780,6 +159611,89 @@ pub mod Microsoft {
                 unsafe impl Sync for Brush {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct FontFamily(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    FontFamily,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl FontFamily {
+                    pub fn Source(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Source)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn CreateInstanceWithName(
+                        familyname: &windows_core::HSTRING,
+                    ) -> windows_core::Result<FontFamily> {
+                        Self::IFontFamilyFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstanceWithName)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(familyname),
+                                core::ptr::null_mut(),
+                                &mut core::ptr::null_mut(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    pub fn XamlAutoFontFamily() -> windows_core::Result<FontFamily> {
+                        Self::IFontFamilyStatics(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).XamlAutoFontFamily)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn IFontFamilyFactory<
+                        R,
+                        F: FnOnce(&IFontFamilyFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            FontFamily,
+                            IFontFamilyFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    fn IFontFamilyStatics<
+                        R,
+                        F: FnOnce(&IFontFamilyStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            FontFamily,
+                            IFontFamilyStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for FontFamily {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IFontFamily>();
+                }
+                unsafe impl windows_core::Interface for FontFamily {
+                    type Vtable = <IFontFamily as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID = <IFontFamily as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for FontFamily {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Media.FontFamily";
+                }
+                unsafe impl Send for FontFamily {}
+                unsafe impl Sync for FontFamily {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct GeneralTransform(windows_core::IUnknown);
                 windows_core::imp::interface_hierarchy!(
                     GeneralTransform,
@@ -159029,6 +159943,66 @@ pub mod Microsoft {
                     OpacityProperty: usize,
                     TransformProperty: usize,
                     RelativeTransformProperty: usize,
+                }
+                windows_core::imp::define_interface!(
+                    IFontFamily,
+                    IFontFamily_Vtbl,
+                    0x18fa5bc1_7294_527c_bb02_b213e0b3a2a3
+                );
+                impl windows_core::RuntimeType for IFontFamily {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IFontFamily_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Source: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IFontFamilyFactory,
+                    IFontFamilyFactory_Vtbl,
+                    0x61b88a77_d0f9_5e9e_8c28_eda01fede22e
+                );
+                impl windows_core::RuntimeType for IFontFamilyFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IFontFamilyFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateInstanceWithName: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IFontFamilyStatics,
+                    IFontFamilyStatics_Vtbl,
+                    0xb3eadceb_c471_58fe_93d0_d71b04a7fd54
+                );
+                impl windows_core::RuntimeType for IFontFamilyStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IFontFamilyStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub XamlAutoFontFamily: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
                     IGeneralTransform,

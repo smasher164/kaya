@@ -132,6 +132,9 @@ public final class Main {
             case "styling":
                 app = Styling::app;
                 break;
+            case "typeface":
+                app = Typeface::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

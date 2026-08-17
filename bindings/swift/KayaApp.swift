@@ -174,6 +174,29 @@ enum KayaRole: Int64 {
     case heading = 3
 }
 
+/// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the `platform` spec
+/// enum; docs/styling-plan.md Slice 2b): one entry per backend roster
+/// row, closed.
+///
+/// AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
+/// `KayaPlatform.current` and there will not be: a binding cannot answer
+/// that question, and it does not have to — every row travels to every
+/// backend on the wire, and each backend picks its own. Swift is where
+/// the temptation is sharpest, because ONE guest source compiles for
+/// macOS and for iOS: `#if os(macOS)` in a guest would ship different
+/// code per platform, which is the thing kaya exists to not do. Name the
+/// rows instead and let both lowerings read the same transaction.
+///
+/// THE RAW VALUES ARE WIRE VALUES (`PLATFORM_MAC` … `PLATFORM_ANDROID`
+/// in crates/kaya/include/kaya.h) and are append-only.
+enum KayaPlatform: Int64 {
+    case mac = 1
+    case ios = 2
+    case linux = 3
+    case windows = 4
+    case android = 5
+}
+
 /// THE SEMANTIC ICON VOCABULARY (the `symbol` spec enum;
 /// docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
 ///
@@ -2912,6 +2935,71 @@ final class KayaAppTx {
         if light != nil { mask |= 1 }
         if dark != nil { mask |= 2 }
         tx.setBrandAccent(seed, mask, light ?? 0, dark ?? 0)
+    }
+
+    /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
+    /// one family name is the whole call, and every platform that has
+    /// that family installed uses it. One name covers the plain and the
+    /// per-platform forms, the defaulted-argument shape `brandAccent`
+    /// and the window construct already use.
+    ///
+    /// THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights,
+    /// metrics and the whole type ramp stay the platform's. There is
+    /// nowhere here to put a size, deliberately — emphasis is the role
+    /// tier's job (`role: .heading`), and that is what makes a family
+    /// swap safe.
+    ///
+    /// SET ONCE, BEFORE THE FIRST MOUNT: the accent's wall verbatim, and
+    /// for its reason — a slot that could flip at runtime would promise
+    /// the theme-switching surface the vocabulary deliberately lacks.
+    ///
+    /// `platforms:` overrides that default for the platforms that name
+    /// themselves — `[.mac: "Georgia", .linux: "DejaVu Serif"]` — and
+    /// THE PAIRS TRAVEL UNRESOLVED, unlike the accent's per-appearance
+    /// values. That asymmetry is the design: this binding cannot know
+    /// which platform it is running on, but every LOWERING is one, so
+    /// each backend picks its own row out of the list. It is
+    /// `KeyValuePairs` rather than a `Dictionary` for two measured
+    /// reasons: a Dictionary is unordered, so the same guest would write
+    /// different bytes on different runs, and it would swallow a
+    /// repeated platform in Swift's own words, where the root refuses it
+    /// in kaya's — the sentence the other seven bindings print.
+    ///
+    /// `font:` ships a FONT FILE's bytes on the blob channel,
+    /// register-then-resolve: the backend hands them to its platform's
+    /// app-font API, reads back the family that registration named, and
+    /// prefers it to any name above. The bytes are copied out at the
+    /// call, so the `Data` is yours again the moment this returns.
+    ///
+    /// A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own
+    /// typeface in place, deliberately and silently: every font API
+    /// renders SOMETHING for a name it cannot match (Apple's falls
+    /// through to Helvetica — measured), so each lowering gates on the
+    /// family being installed rather than letting the platform pick a
+    /// stranger. An app that wants the system typeface declares none at
+    /// all, which is also the only way to ask for it: `SF Pro` and `New
+    /// York` are not reachable by family name.
+    func brandTypeface(
+        _ family: String,
+        platforms: KeyValuePairs<KayaPlatform, String> = [:],
+        font: Data? = nil
+    ) {
+        // Flat pairs — the file dialog's filter encoding one tier over:
+        // the platform tag, then that platform's family, read in twos by
+        // the root, which is also where an odd count or a tag outside
+        // the vocabulary dies.
+        var pairs: [KayaValue] = []
+        for (platform, name) in platforms {
+            pairs.append(.i64(platform.rawValue))
+            pairs.append(.str(name))
+        }
+        // The font SLOT rides either way and the mask is what says
+        // whether it means anything — the accent mask's discipline, and
+        // the reason this record's field count never varies with the
+        // payload.
+        tx.setBrandTypeface(
+            font == nil ? 0 : 1, .str(family), pairs,
+            font.map { .blob(kayaRegisterBlob($0)) } ?? .str(""))
     }
 
     /// Create an auxiliary window (capability-gated: phone hosts

@@ -24,7 +24,7 @@ use crate::protocol::{
     AlertChoice, AlertId, AlertSpec,
     CollectionId, CommandKind, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind, MenuProp,
     Occurrence, Path, Prop, PropValue,
-    Record, SectionProp, SignalId, WindowId, WindowProp,
+    Record, SectionProp, SignalId, TypefaceRequest, WindowId, WindowProp,
     TemplateNodeId, TextRange, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
@@ -1387,6 +1387,51 @@ impl<'a> Tx<'a> {
     /// leave unstated (D1's grammar).
     pub fn brand_accent_with(&mut self, seed: u32, light: Option<u32>, dark: Option<u32>) {
         self.ops.push(TxOp::SetBrandAccent { seed, light, dark });
+    }
+
+    /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
+    /// one family name is the whole call, and every platform that has
+    /// that family installed uses it. THE FAMILY, NEVER THE SCALE —
+    /// sizes, weights and the whole type ramp stay the platform's.
+    /// Set ONCE, before the first mount, the accent's wall verbatim.
+    ///
+    /// A family a platform does not have leaves that platform's own
+    /// typeface in place, deliberately and silently: every font API
+    /// renders SOMETHING for a name it cannot match, so the lowerings
+    /// gate on the family being installed rather than letting the
+    /// platform pick a stranger.
+    pub fn brand_typeface(&mut self, family: &str) {
+        self.ops.push(TxOp::SetBrandTypeface(TypefaceRequest {
+            family: family.to_string(),
+            platforms: Vec::new(),
+            font: None,
+        }));
+    }
+
+    /// The per-platform form, plus the font-BYTES form: `family` is the
+    /// default and `platforms` overrides it for the platforms that name
+    /// themselves — `&[(Platform::Linux, "DejaVu Serif")]` — while
+    /// `font` ships a font file whose bytes the backend registers with
+    /// its platform's app-font API, taking the family that registration
+    /// names in preference to any name above.
+    ///
+    /// THE PAIRS TRAVEL UNRESOLVED, unlike the accent's per-platform
+    /// values, and that asymmetry is the design: this binding cannot
+    /// know its platform, but every lowering IS one.
+    pub fn brand_typeface_with(
+        &mut self,
+        family: &str,
+        platforms: &[(Platform, &str)],
+        font: Option<&[u8]>,
+    ) {
+        self.ops.push(TxOp::SetBrandTypeface(TypefaceRequest {
+            family: family.to_string(),
+            platforms: platforms
+                .iter()
+                .map(|(tag, f)| (*tag as u32, (*f).to_string()))
+                .collect(),
+            font: font.map(|bytes| crate::protocol::Blob(bytes.into())),
+        }));
     }
 
     pub fn window(&mut self, window: WindowId) -> WindowRef<'_, 'a> {
@@ -4332,6 +4377,26 @@ pub enum Role {
     /// A text hierarchy heading — the platform's heading text style AND
     /// the accessibility heading trait assistive users skim by.
     Heading = 3,
+}
+
+/// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
+/// "platform"; docs/styling-plan.md Slice 2b): one entry per backend
+/// roster row, closed.
+///
+/// AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
+/// `Platform::current()` and there will not be: a binding cannot answer
+/// that question (the JVM says "Linux" on Android), and it does not have
+/// to — every row travels to every backend, and each backend picks its
+/// own. A guest that branched on its platform would also be a guest that
+/// ships different code per platform, which is the thing kaya exists to
+/// not do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    Mac = 1,
+    Ios = 2,
+    Linux = 3,
+    Windows = 4,
+    Android = 5,
 }
 
 /// THE SEMANTIC ICON VOCABULARY (spec enum "symbol";

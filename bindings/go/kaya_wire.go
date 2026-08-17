@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xf84da2a3fe758bc7
+	SpecHash uint64 = 0x7c7a23e2127c3801
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -94,6 +94,11 @@ const (
 	FileModeRead = 0
 	FileModeWrite = 1
 	FileModeReadWrite = 2
+	PlatformMac = 1
+	PlatformIos = 2
+	PlatformLinux = 3
+	PlatformWindows = 4
+	PlatformAndroid = 5
 	AlignStart = 0
 	AlignCenter = 1
 	AlignEnd = 2
@@ -174,6 +179,7 @@ const (
 	txRevealRange = 40
 	txShowSaveDialog = 41
 	txSetBrandAccent = 42
+	txSetBrandTypeface = 43
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -206,6 +212,7 @@ const (
 	applyRevealRange = 30
 	applyPresentSaveDialog = 31
 	applySetBrand = 32
+	applySetTypeface = 33
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -671,6 +678,17 @@ func TxSetBrandAccent(seed uint32, mask uint32, light uint32, dark uint32) []byt
 	b = binary.LittleEndian.AppendUint32(b, mask)
 	b = binary.LittleEndian.AppendUint32(b, light)
 	b = binary.LittleEndian.AppendUint32(b, dark)
+	return endRecord(b)
+}
+
+// TxSetBrandTypeface: REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request.
+func TxSetBrandTypeface(mask uint32, family any, platforms []any, font any) []byte {
+	b := beginRecord(txSetBrandTypeface)
+	b = binary.LittleEndian.AppendUint32(b, mask)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValue(b, family)
+	b = encodeValues(b, platforms)
+	b = encodeValue(b, font)
 	return endRecord(b)
 }
 

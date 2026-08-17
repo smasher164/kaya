@@ -57,6 +57,7 @@ import (
 	"dev.kaya/guests/go/styling"
 	"dev.kaya/guests/go/textarea"
 	"dev.kaya/guests/go/todos"
+	"dev.kaya/guests/go/typeface"
 	"dev.kaya/guests/go/undo"
 	"dev.kaya/guests/go/window"
 )
@@ -130,6 +131,7 @@ var scenes = map[string]func() *kaya.App{
 	"styling":    styling.App,
 	"textarea":   textarea.App,
 	"todos":      todos.App,
+	"typeface":   typeface.App,
 	"undo":       undo.App,
 	"window":     window.App,
 }

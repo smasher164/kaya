@@ -1185,6 +1185,57 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   derives a full role scheme from it, and kaya defers to the \
                   platform's derivation where one exists.",
         },
+        Record {
+            kind: 43,
+            name: "set_brand_typeface",
+            fields: &[
+                f("mask", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("family", FieldTy::Value),
+                f("platforms", FieldTy::Values),
+                f("font", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "REQUEST the app's brand typeface (docs/styling-plan.md D6, \
+                  Slice 2b). `family` is the default family name every \
+                  platform falls back to; `platforms` carries the optional \
+                  per-platform overrides as PAIRS — an I64 platform tag from \
+                  the `platform` enum, then that platform's family as a Str — \
+                  and `mask` bit 0 says a `font` BLOB is present (an empty \
+                  Str rides in its slot when it is not).\n\n\
+                  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, \
+                  weights, metrics and the whole type ramp stay the \
+                  platform's. Substituting a family into the platform's own \
+                  ramp is what makes the swap safe, and it is the role tier — \
+                  not a font size — that carries emphasis.\n\n\
+                  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and \
+                  the asymmetry is the design (Slice 2b): a BINDING cannot \
+                  know its platform — the JVM says \"Linux\" on Android — but \
+                  a LOWERING is its platform, so each backend picks its own \
+                  row out of `platforms` and no platform id is ever needed on \
+                  the guest side. A colour resolves to one number a binding \
+                  can compute anywhere; a family name has to survive to the \
+                  backend that will look it up.\n\n\
+                  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: \
+                  when `font` carries bytes the backend hands them to its \
+                  platform's app-font API (CTFontManager, fontconfig, the \
+                  Compose/DWrite routes), reads back the family name the \
+                  registration produced, and the NAME machinery takes over \
+                  unchanged — one resolution, one observation, one fallback \
+                  for both forms. A registered blob's own family wins over \
+                  `family` on the backend that registered it.\n\n\
+                  SET ONCE, before the first mount — the accent's wall \
+                  verbatim, and for its reason: a typeface that could flip at \
+                  runtime would promise the theme-switching surface the \
+                  vocabulary deliberately does not have.\n\n\
+                  THE RISK IS THE SILENT FALLBACK. Every platform's font API \
+                  renders SOMETHING for a family it does not have, so a typo \
+                  is invisible to every other observation: each backend gates \
+                  on the family being PRESENT and otherwise leaves the \
+                  platform default in place, and `expect_typeface` reads the \
+                  RESOLVED family off the real views rather than echoing the \
+                  request.",
+        },
     ],
     apply: &[
         Record {
@@ -1646,6 +1697,44 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   Material builds its role scheme from the seed. Emitted \
                   once, before the first mount; a backend never sees a \
                   brand it must un-apply.",
+        },
+        Record {
+            kind: 33,
+            name: "set_typeface",
+            fields: &[
+                f("mask", FieldTy::U32),
+                f("platform", FieldTy::U32),
+                f("family", FieldTy::Value),
+                f("platforms", FieldTy::Values),
+                f("font", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "The brand typeface, as REQUESTED (docs/styling-plan.md D6, \
+                  Slice 2b). The tx record's body verbatim — the default \
+                  family, every per-platform pair, and the font blob when one \
+                  was sent — because THE LOWERING IS WHAT RESOLVES IT: a \
+                  backend picks its own row out of `platforms` (falling back \
+                  to `family`), registers `font` with its platform's app-font \
+                  API when present and prefers the family that registration \
+                  named, then gates on the family being installed and applies \
+                  it into its platform's own type ramp. The core resolves \
+                  nothing here, which is the opposite of set_brand and for \
+                  the reason Slice 2b gives: a colour is a number every \
+                  platform means the same way, a family name is a lookup only \
+                  the platform can do.\n\n\
+                  `platform` IS THE ONE WORD THE CORE FILLS: the tag of the \
+                  platform this core was compiled for, so a lowering asks \
+                  \"is this row mine?\" without carrying a copy of the \
+                  vocabulary. The two INTERPRETER backends are not Rust and \
+                  cannot read the spec's constants, and a private copy in \
+                  Swift and another in Kotlin is the CLIP_* mirror trap — a \
+                  drifted value picking the wrong row with nothing pinning \
+                  either side. The core may answer this where a BINDING may \
+                  not: a guest cannot tell (the JVM says \"Linux\" on \
+                  Android) while this crate is compiled once per target.\n\n\
+                  Emitted once, before the first mount's ops, by the root's \
+                  set-once arm — a backend never sees a typeface it must \
+                  un-apply.",
         },
     ],
     occurrence: &[
@@ -2152,6 +2241,31 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             variants: &[("read", 0), ("write", 1), ("read_write", 2)],
         },
         EnumSpec {
+            // WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR
+            // (docs/styling-plan.md Slice 2b). Closed, and one entry per
+            // BACKEND ROSTER row rather than per operating system: the
+            // roster is what resolves these (SwiftUI serves mac and ios,
+            // Compose android, GTK linux, WinUI windows), so a tag with
+            // no backend to read it would be a value no lowering could
+            // ever pick.
+            //
+            // A TAG NEVER REACHES A GUEST'S PLATFORM QUESTION. The
+            // binding does not resolve it — it cannot, the JVM says
+            // "Linux" on Android — it just carries every pair through to
+            // the backends, and each backend knows which row is its own.
+            //
+            // The ids are append-only for the symbol vocabulary's reason:
+            // they are wire values in eight generated bindings.
+            name: "platform",
+            variants: &[
+                ("mac", 1),
+                ("ios", 2),
+                ("linux", 3),
+                ("windows", 4),
+                ("android", 5),
+            ],
+        },
+        EnumSpec {
             name: "align",
             variants: &[
                 ("start", 0),
@@ -2233,8 +2347,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
 mod tests {
     use super::*;
     use crate::protocol::{
-        AlertId, AlertSpec, CollectionId, CommandKind, MenuItemId, MenuItemKind, MenuProp, Prop,
-        PropValue, SignalId, TemplateNodeId, TextRange, TxOp, Value, ValueType, WidgetId,
+        AlertId, AlertSpec, Blob, CollectionId, CommandKind, MenuItemId, MenuItemKind, MenuProp,
+        Prop, PropValue, SignalId, TemplateNodeId, TextRange, TxOp, Value, ValueType, WidgetId,
         WidgetKind, WindowId,
     };
     use crate::wire;
@@ -2382,6 +2496,7 @@ mod tests {
             ("reveal_range", wire::TX_REVEAL_RANGE),
             ("show_save_dialog", wire::TX_SHOW_SAVE_DIALOG),
             ("set_brand_accent", wire::TX_SET_BRAND_ACCENT),
+            ("set_brand_typeface", wire::TX_SET_BRAND_TYPEFACE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -2427,6 +2542,7 @@ mod tests {
                 ("reveal_range", wire::APPLY_REVEAL_RANGE),
                 ("present_save_dialog", wire::APPLY_PRESENT_SAVE_DIALOG),
             ("set_brand", wire::APPLY_SET_BRAND),
+            ("set_typeface", wire::APPLY_SET_TYPEFACE),
             ]
         );
         // THE SAME TABLE SHAPE AS THE TWO ABOVE, and it was not always:
@@ -2763,6 +2879,11 @@ mod tests {
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
+                    ("platform", "mac") => wire::PLATFORM_MAC,
+                    ("platform", "ios") => wire::PLATFORM_IOS,
+                    ("platform", "linux") => wire::PLATFORM_LINUX,
+                    ("platform", "windows") => wire::PLATFORM_WINDOWS,
+                    ("platform", "android") => wire::PLATFORM_ANDROID,
                     other => panic!("unpinned enum variant {other:?}"),
                 };
                 assert_eq!(*value, expected, "{}::{}", e.name, name);
@@ -2942,6 +3063,28 @@ mod tests {
         w.record(tx_record("select_range"), &[Arg::U64(2), Arg::U64(20), Arg::U64(25)]);
         w.record(tx_record("reveal_range"), &[Arg::U64(2), Arg::U64(20), Arg::U64(25)]);
 
+        // The brand typeface: a default family, two per-platform rows as
+        // (tag, family) PAIRS through the Values list, and the font slot
+        // carrying an empty Str because mask bit 0 is clear. The pair
+        // shape is what this proves — the spec says `platforms` is one
+        // Values field and wire.rs reads it in twos, and nothing but a
+        // round trip holds those two readings together.
+        w.record(
+            tx_record("set_brand_typeface"),
+            &[
+                Arg::U32(0),
+                Arg::U32(0),
+                Arg::Value(Value::from("Georgia")),
+                Arg::Values(vec![
+                    Value::I64(i64::from(wire::PLATFORM_LINUX)),
+                    Value::from("DejaVu Serif"),
+                    Value::I64(i64::from(wire::PLATFORM_ANDROID)),
+                    Value::from("serif"),
+                ]),
+                Arg::Value(Value::from("")),
+            ],
+        );
+
         let ops = wire::decode_transaction(&w.buf);
         let expected: Vec<TxOp> = vec![
             TxOp::CreateSignal {
@@ -3054,6 +3197,14 @@ mod tests {
                 widget: WidgetId(2),
                 range: TextRange::new(20, 25),
             },
+            TxOp::SetBrandTypeface(crate::protocol::TypefaceRequest {
+                family: "Georgia".into(),
+                platforms: vec![
+                    (wire::PLATFORM_LINUX, "DejaVu Serif".into()),
+                    (wire::PLATFORM_ANDROID, "serif".into()),
+                ],
+                font: None,
+            }),
         ];
         assert_eq!(ops.len(), expected.len());
         for (a, b) in ops.iter().zip(expected.iter()) {
@@ -3090,5 +3241,33 @@ mod tests {
             }
             other => panic!("wrong op: {other:?}"),
         }
+    }
+
+    /// THE MASK AND THE SLOT MAY NOT DISAGREE (found by the java arm's
+    /// review, 2026-08-16): a clear mask bit with a real blob riding in
+    /// the font slot used to decode as `font: None` — the brand's
+    /// licensed face silently dropped, no error anywhere. wire.rs now
+    /// dies on the disagreement, and this is the watched negative that
+    /// keeps it dying: the record below is exactly what a buggy binding
+    /// encoder would emit.
+    #[test]
+    #[should_panic(expected = "carries a font blob but its mask")]
+    fn typeface_mask_slot_disagreement_is_loud() {
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
+        w.record(
+            tx_record("set_brand_typeface"),
+            &[
+                Arg::U32(0), // mask bit 0 CLEAR: "no font present"
+                Arg::U32(0),
+                Arg::Value(Value::from("Sora")),
+                Arg::Values(vec![]),
+                // ...while the always-written slot carries a real blob.
+                Arg::Value(Value::Blob(Blob::from(&b"not a font"[..]))),
+            ],
+        );
+        let blobs = w.blobs.clone();
+        wire::decode_transaction_with_blobs(&w.buf, &move |h| {
+            blobs.get(h as usize - 1).cloned()
+        });
     }
 }

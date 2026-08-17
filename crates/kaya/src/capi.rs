@@ -241,6 +241,8 @@ pub const KAYA_TX_SHOW_SAVE_DIALOG: u16 = 41;
 const _: () = assert!(KAYA_TX_SHOW_SAVE_DIALOG == wire::TX_SHOW_SAVE_DIALOG);
 pub const KAYA_TX_SET_BRAND_ACCENT: u16 = 42;
 const _: () = assert!(KAYA_TX_SET_BRAND_ACCENT == wire::TX_SET_BRAND_ACCENT);
+pub const KAYA_TX_SET_BRAND_TYPEFACE: u16 = 43;
+const _: () = assert!(KAYA_TX_SET_BRAND_TYPEFACE == wire::TX_SET_BRAND_TYPEFACE);
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -432,6 +434,8 @@ pub const KAYA_APPLY_PRESENT_SAVE_DIALOG: u16 = 31;
 const _: () = assert!(KAYA_APPLY_PRESENT_SAVE_DIALOG == wire::APPLY_PRESENT_SAVE_DIALOG);
 pub const KAYA_APPLY_SET_BRAND: u16 = 32;
 const _: () = assert!(KAYA_APPLY_SET_BRAND == wire::APPLY_SET_BRAND);
+pub const KAYA_APPLY_SET_TYPEFACE: u16 = 33;
+const _: () = assert!(KAYA_APPLY_SET_TYPEFACE == wire::APPLY_SET_TYPEFACE);
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
         && KAYA_APPLY_READ_CLIPBOARD == wire::APPLY_READ_CLIPBOARD
@@ -2926,6 +2930,7 @@ mod tests {
             ("reveal_range", KAYA_TX_REVEAL_RANGE),
             ("show_save_dialog", KAYA_TX_SHOW_SAVE_DIALOG),
             ("set_brand_accent", KAYA_TX_SET_BRAND_ACCENT),
+            ("set_brand_typeface", KAYA_TX_SET_BRAND_TYPEFACE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -2960,6 +2965,7 @@ mod tests {
             ("reveal_range", KAYA_APPLY_REVEAL_RANGE),
             ("present_save_dialog", KAYA_APPLY_PRESENT_SAVE_DIALOG),
             ("set_brand", KAYA_APPLY_SET_BRAND),
+            ("set_typeface", KAYA_APPLY_SET_TYPEFACE),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

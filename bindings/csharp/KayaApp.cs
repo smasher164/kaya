@@ -439,6 +439,34 @@ enum Symbol : long
     Home = KayaWire.SymbolHome,
 }
 
+/// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the spec's
+/// `platform` enum; docs/styling-plan.md Slice 2b): one entry per
+/// backend roster row, closed.
+///
+/// AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
+/// Platform.Current() and there will not be: this binding cannot answer
+/// that question — the JVM says "Linux" on Android, and a .NET
+/// RuntimeInformation check would be just as wrong on the platforms
+/// kaya targets through a host — and it does not have to. Every row
+/// travels to every backend and each LOWERING picks its own, because a
+/// lowering IS its platform. A guest that branched on its platform
+/// would also be a guest that ships different code per platform, which
+/// is the thing kaya exists to not do.
+///
+/// The members' values are the WIRE values (they come from the
+/// generated KayaWire constants, so this enum cannot drift from the
+/// spec), and the root refuses a tag outside the set at declare time —
+/// a row no lowering serves reads exactly like a platform that chose
+/// the default, so it is refused rather than dropped.
+enum Platform : long
+{
+    Mac = KayaWire.PlatformMac,
+    Ios = KayaWire.PlatformIos,
+    Linux = KayaWire.PlatformLinux,
+    Windows = KayaWire.PlatformWindows,
+    Android = KayaWire.PlatformAndroid,
+}
+
 sealed class KayaInstance
 {
     internal readonly List<object> Path;
@@ -2093,6 +2121,75 @@ sealed class Tx
         // 0x000000 override is not read as absence.
         uint mask = (light is null ? 0u : 1u) | (dark is null ? 0u : 2u);
         Records.Add(KayaWire.TxSetBrandAccent(seed, mask, light ?? 0, dark ?? 0));
+    }
+
+    /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b).
+    /// One family name is the whole call — tx.BrandTypeface("Georgia") —
+    /// and every platform that HAS that family installed uses it.
+    ///
+    /// THE FAMILY, NEVER THE SCALE: sizes, weights, metrics and the
+    /// whole type ramp stay the platform's. Substituting a family into
+    /// the platform's own ramp is what makes the swap safe, and it is
+    /// the role tier one surface over — not a font size — that carries
+    /// emphasis.
+    ///
+    /// SET ONCE, BEFORE THE FIRST MOUNT: the accent's wall verbatim and
+    /// for its reason — brand is identity, not state, and a slot that
+    /// could flip at runtime would promise the theme-switching surface
+    /// the vocabulary deliberately does not have. The root refuses a
+    /// second write and a late one, in its own words, in every language
+    /// at once.
+    ///
+    /// A family a platform does not have leaves that platform's own
+    /// typeface in place, deliberately and silently: every font API
+    /// renders SOMETHING for a name it cannot match, so each lowering
+    /// gates on the family being INSTALLED rather than letting the
+    /// platform pick a stranger.
+    ///
+    /// platforms: the per-platform overrides, as pairs —
+    /// new[] { (Platform.Linux, "DejaVu Serif") } — with `family` the
+    /// default every platform that names no row of its own gets. THE
+    /// PAIRS TRAVEL UNRESOLVED, unlike the accent's per-appearance
+    /// values, and that asymmetry is the design: this binding cannot
+    /// know which platform it is running on (the JVM says "Linux" on
+    /// Android), but every LOWERING is its platform, so each backend
+    /// picks its own row and no platform id is ever needed here. A
+    /// colour resolves to one number a binding can compute anywhere; a
+    /// family name has to survive to the backend that will look it up.
+    ///
+    /// font: a font FILE, as bytes, on the same blob channel an image
+    /// rides. Register-then-resolve: the backend hands the bytes to its
+    /// platform's app-font API, reads back the family that registration
+    /// produced, and the NAME machinery above takes over unchanged — one
+    /// resolution, one observation, one fallback for both forms. A
+    /// registered blob's own family wins over `family` on the backend
+    /// that registered it.
+    public void BrandTypeface(
+        string family,
+        (Platform Platform, string Family)[]? platforms = null,
+        byte[]? font = null)
+    {
+        // The mask says whether the font slot means anything; the slot
+        // is written EITHER WAY (an empty Str when it does not), so the
+        // record's field count never varies with the payload — the
+        // accent's mask discipline verbatim.
+        uint mask = font is null ? 0u : 1u;
+        var pairs = new List<object>();
+        foreach (var (platform, perPlatform) in
+                 platforms ?? Array.Empty<(Platform, string)>())
+        {
+            // An I64 platform tag then that platform's family, read in
+            // twos by the core: the file dialog's filter encoding one
+            // surface over, and the same odd-count refusal.
+            pairs.Add((long)platform);
+            pairs.Add(perPlatform);
+        }
+        Records.Add(KayaWire.TxSetBrandTypeface(
+            mask, family, pairs.ToArray(),
+            // The bytes go to the core ONCE, by handle, exactly as an
+            // image's do — the record carries the handle, never the
+            // font itself.
+            font is null ? (object)"" : new KayaWire.BlobHandle(Kaya.RegisterBlob(font))));
     }
 
     /// Mount into the default window; per-window targets arrive with

@@ -110,6 +110,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 // Material 3 adaptive: Android's OWN list-detail container and the
@@ -174,6 +175,12 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.DeviceFontFamilyName
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import java.nio.ByteBuffer
@@ -496,11 +503,11 @@ var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
  * harness asserts (docs/styling-plan.md D3). */
 var kayaOuterSize = androidx.compose.ui.unit.IntSize.Zero
 
-// THE DEPTH-STUB HELPER IS GONE AGAIN, the sixth time it has come and
-// gone — it came back for the text-ranges slice and leaves with it, now
-// that this backend has the three range primitives and the android
-// runner carries the legs. Dead code kept "for later" is what a reader
-// has to reason about for nothing.
+// THE DEPTH-STUB HELPER IS GONE AGAIN, the seventh time it has come and
+// gone — it came back for the typeface slice (docs/styling-plan.md Slice
+// 2b) and leaves with it, now that this backend applies a brand typeface
+// and reads the resolved family back off the shaper. Dead code kept "for
+// later" is what a reader has to reason about for nothing.
 //
 // The next Compose depth slice re-adds it, in exactly this shape — a
 // CALL and not a sentence, because tools/check-stubs.sh and
@@ -562,6 +569,38 @@ object KayaSceneModel {
      * un-apply a brand.
      */
     var brandSeed by mutableStateOf<Int?>(null)
+
+    // THE REQUESTED FAMILY IS NOT STORED, and its absence is the point
+    // (docs/styling-plan.md Slice 2b). It existed here while the record
+    // decoded into a backend that could not apply it; now that the arm
+    // resolves, a field holding the REQUEST is a loaded gun pointed at
+    // the observation — the one read `expect_typeface` must never make
+    // is the one that would be easiest to make from here. The arm's own
+    // diagnostics carry the asked-for name inline, where it cannot be
+    // mistaken for a resolution.
+
+    /**
+     * THE BRAND TYPEFACE AS RESOLVED — the `FontFamily` the theme hands
+     * to both of its writes, or null for "no typeface is in force",
+     * which is what a brandless app and a family this device does not
+     * have both get.
+     *
+     * A FontFamily OBJECT and not a name, and the probe is what settled
+     * that (styling/typeface-compose.md §6.2): Android has NO app-font
+     * registry, so the plan's "register the blob, then let the name
+     * machinery take over" cannot hold here — after the bytes are loaded
+     * and rendering, `Typeface.create("Noto Serif", …)` still returns
+     * Roboto, both through the platform and through Compose. So the two
+     * wire forms converge one layer lower than on Apple: at the
+     * FontFamily the theme holds. One resolution, one observation, one
+     * fallback — just not at a name.
+     *
+     * Composition STATE, brandSeed's reason exactly: the typeface
+     * arrives in an apply batch, which is after the first composition on
+     * any scene that mounts before it, and a plain field would leave the
+     * ramp at Material's baseline until something unrelated recomposed.
+     */
+    var typefaceFamily by mutableStateOf<FontFamily?>(null)
     /// A counter bumped whenever what the system clipboard OFFERS may
     /// have moved (a copy went out, a foreign seed landed). It carries
     /// no information; reading it is what SUBSCRIBES a composition to
@@ -865,7 +904,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0xf84da2a3fe758bc7uL
+    private const val SPEC_HASH: ULong = 0x7c7a23e2127c3801uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -889,6 +928,7 @@ object KayaCompose {
      */
     private const val APPLY_PRESENT_SAVE_DIALOG = 31
     private const val APPLY_SET_BRAND = 32
+    private const val APPLY_SET_TYPEFACE = 33
 
     /** The clipboard pair: a copy going out, and the privileged read
      * asking for one back. */
@@ -1331,6 +1371,35 @@ object KayaCompose {
                     // Values self-pad to 8 (wire.rs, write_value).
                     at += 8 + len
                     if (at % 8 != 0) at += 8 - at % 8
+                }
+            }
+            // SET_TYPEFACE CARRIES A BLOB TOO — the font file's bytes,
+            // which ride the same batch-local table as an image's and
+            // die with the batch just as fast (docs/styling-plan.md
+            // Slice 2b: "a font is one vector file whose bytes arrive in
+            // the first build transaction"). Without this arm the handle
+            // resolves to null on the UI thread and the app silently
+            // falls back to the NAME, which is the miss class this whole
+            // slice is about.
+            //
+            // The slot sits after two variable-length fields, so the
+            // walk is the record's own — skip mask+stamp, skip the
+            // family, skip the pair list, and the font is what is left.
+            // Absolute reads, so the record cursor is untouched.
+            if (kind == APPLY_SET_TYPEFACE) {
+                var at = start + 8 + 8
+                fun skipAt() {
+                    val len = b.getInt(at + 4)
+                    at += 8 + len
+                    if (at % 8 != 0) at += 8 - at % 8
+                }
+                skipAt() // the default family
+                val pairs = b.getInt(at)
+                at += 8
+                repeat(pairs) { skipAt() } // tag, family, tag, family …
+                if (b.getInt(at) == VALUE_BLOB) {
+                    val handle = b.getLong(at + 8)
+                    KayaPresent.blobData(handle)?.let { blobs[handle] = it }
                 }
             }
             b.position(start + size)
@@ -1977,6 +2046,46 @@ object KayaCompose {
                     // ten words are skipped by the record cursor at the
                     // bottom of this loop.
                     KayaSceneModel.brandSeed = b.int
+                APPLY_SET_TYPEFACE -> {
+                    // { u32 mask; u32 platform } then the default
+                    // family, the per-platform pairs, and the font slot
+                    // — the request UNRESOLVED, because resolving it is
+                    // THIS side's job: a lowering is its platform, which
+                    // is why the pairs travel at all
+                    // (docs/styling-plan.md Slice 2b).
+                    val mask = b.int
+                    // WHICH ROW IS MINE, stamped by the core: the tag of
+                    // the platform it was compiled for. This file keeps
+                    // NO copy of the platform vocabulary — a private
+                    // copy here and another in Swift is the CLIP_*
+                    // mirror trap, a drifted value picking the wrong row
+                    // with nothing pinning either side.
+                    val mine = b.int
+                    val defaultFamily = readString(b)
+                    val pairCount = b.int
+                    b.int // reserved
+                    var picked: String? = null
+                    repeat(pairCount / 2) {
+                        val tag = readI64(b)
+                        val family = readString(b)
+                        // FIRST MATCH WINS, and the root refuses a
+                        // repeated platform so there is never a second.
+                        if (tag.toInt() == mine && picked == null) {
+                            picked = family
+                        }
+                    }
+                    // The font slot is always written; the mask says
+                    // whether it means anything.
+                    val fontBytes =
+                        if (mask and 1 != 0) {
+                            blobs[readBlobHandle(b)]
+                        } else {
+                            skipValue(b)
+                            null
+                        }
+                    kayaApplyTypeface(
+                        mountedActivity, defaultFamily, picked, fontBytes)
+                }
                 else -> error("kaya: unknown apply record kind $kind")
             }
             b.position(start + size)
@@ -5365,6 +5474,29 @@ object KayaCompose {
                             failures.add("${prefix}title \"$got\", wanted \"$want\"")
                         }
                     }
+                    "expect_typeface" -> {
+                        // THE RESOLVED FAMILY, off the real text nodes:
+                        // the font the SHAPER picked, named by its own
+                        // file's OpenType name table. Never the request
+                        // — on this backend the two reads that look
+                        // right both echo it
+                        // (styling/typeface-compose.md §2.1), and an
+                        // echo would report a perfect swap for a family
+                        // the device does not have, which is the whole
+                        // failure this slice exists to catch.
+                        //
+                        // The family is a QUOTED string in the grammar
+                        // and the observation is byte-compared against
+                        // harness.rs ("typeface Georgia"), so the quotes
+                        // come off here and stay off in both sentences.
+                        val want = quoted(parts.drop(1))
+                        val got = onUi(activity) { kayaResolvedTypeface() }
+                        if (got == want) {
+                            observed.add("typeface $want")
+                        } else {
+                            failures.add("typeface $got, wanted $want")
+                        }
+                    }
                     "expect_window_size" -> {
                         // The surface's REAL extent against the
                         // advisory request. Android never honors a
@@ -6946,7 +7078,12 @@ private fun KayaRenderCore(
             when (node.role) {
                 KayaCompose.ROLE_PROMINENT ->
                     Button(onClick = { KayaPresent.emitClicked(node.tag) }, modifier = a11y) {
-                        Text(node.text)
+                        // A button's label is Material's OWN rung —
+                        // `Button` provides labelLarge internally — so
+                        // this is the ramp route sampled through a
+                        // component kaya never styles (see
+                        // kayaTypefaceSites).
+                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
                 KayaCompose.ROLE_DESTRUCTIVE ->
                     Button(
@@ -6957,14 +7094,14 @@ private fun KayaRenderCore(
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,
                         ),
                     ) {
-                        Text(node.text)
+                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
                 else ->
                     OutlinedButton(
                         onClick = { KayaPresent.emitClicked(node.tag) },
                         modifier = a11y,
                     ) {
-                        Text(node.text)
+                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
             }
         KayaCompose.KIND_ROW ->
@@ -7037,10 +7174,22 @@ private fun KayaRenderCore(
                 Text(
                     node.text,
                     style = MaterialTheme.typography.titleLarge,
+                    // A SAMPLE OF THE RAMP ROUTE for expect_typeface's
+                    // read (see kayaTypefaceSites): this label is the
+                    // one that takes its style from `typography`, so it
+                    // is the site that goes on reading the platform face
+                    // if the theme's first write is missing.
+                    onTextLayout = { kayaTypefaceSites["heading"] = it },
                     modifier = a11y.semantics { heading() },
                 )
             } else {
-                Text(node.text, modifier = a11y)
+                // And the AMBIENT route's sample: a plain label reads
+                // LocalTextStyle, the write the ramp cannot stand in for.
+                Text(
+                    node.text,
+                    onTextLayout = { kayaTypefaceSites["label"] = it },
+                    modifier = a11y,
+                )
             }
         KayaCompose.KIND_CHECKBOX ->
             // Uncontrolled toward the app, the entry's shape: the node
@@ -7679,6 +7828,465 @@ internal object KayaColorSchemes {
     }
 }
 
+// --- THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b) --------------
+//
+// Measured before written (styling/typeface-compose.md, on the lane's
+// own API 35 image), and three of those findings decide the shape of
+// everything below.
+//
+// ONE WRITE IS NOT ENOUGH — this backend needs TWO, and the measurement
+// is what says so. `MaterialTheme`'s `typography` argument brands
+// Material's OWN components; kaya's labels and text fields never read
+// it, because KayaTheme deliberately holds `LocalTextStyle` at its
+// PRE-theme value (see its note) and that local is what
+// `KIND_LABEL -> Text(…)` and `textStyle = LocalTextStyle.current…`
+// read. Measured with `typography` alone: the Button moved to Noto Serif
+// while the plain label stayed on ROBOTO at exactly its unbranded width
+// — a half-branded window that still looks branded, which is the state a
+// coarse observation calls applied.
+//
+// THE READS THAT LOOK RIGHT ARE ECHOES OF THE REQUEST.
+// `layoutInput.style.fontFamily` is the request by construction, and
+// `Typeface.getSystemFontFamilyName()` — which has the right type and
+// reads like a resolved-face read — returns the KEY the Typeface was
+// created with: `georgia` for a font that shaped as Noto Serif,
+// `courier new` for one that shaped as Cutive Mono, and null for a face
+// loaded from bytes. The honest read is the shaped glyph run's own font
+// FILE, named out of that file's OpenType `name` table; nothing in that
+// chain can carry the requested string.
+//
+// THE FALLBACK IS TOTAL AND SILENT. A family this device does not have
+// renders as Roboto, pixel-identical to declaring no brand at all (three
+// screenshots sharing one md5), and `FontFamily.Resolver.preload` — the
+// API that documents itself as throwing for a font that cannot load —
+// returned ok for every nonsense name. The sentinel probe below is what
+// actually detects it.
+
+/**
+ * The string the resolved-face reads shape. Latin, because every UI face
+ * on every lane covers it: a probe the resolved font lacks would be
+ * shaped by a FALLBACK font and report the fallback's family, which is a
+ * true answer to the wrong question.
+ */
+private const val KAYA_TYPEFACE_PROBE = "Handgloves"
+
+/**
+ * TWO SENTINELS, which is what makes the apply-time miss detector
+ * device-independent.
+ *
+ * The mechanism (styling/typeface-compose.md §3.2): Compose's
+ * `DeviceFontFamilyName` loader returns null for a family the device
+ * does not have, and the FontFamily then falls through to the next font
+ * in its list — so landing on a sentinel IS the miss. ONE sentinel would
+ * need a name-vs-face comparison to spot the landing, and would
+ * misreport the app that asks for the sentinel's own family; two need
+ * neither. Resolve the requested name with A appended, and again with B
+ * appended: if the name loads, both shape in the SAME face; if it does
+ * not, one shapes as A and the other as B.
+ *
+ * They are two of the four AOSP-baseline generic names, the only font
+ * vocabulary Android guarantees on an arbitrary device — and the
+ * detector still refuses a verdict rather than assuming it, by checking
+ * HERE that A and B are different faces (a device resolving both to one
+ * face would otherwise make every family look present).
+ */
+private const val KAYA_TYPEFACE_SENTINEL_A = "cursive"
+private const val KAYA_TYPEFACE_SENTINEL_B = "monospace"
+
+/** A resolved face as the shaper reports it: the family out of the
+ *  font's own `name` table, the file it came from, and the variation
+ *  axes that pick the instance. The family ALONE cannot always tell two
+ *  device families apart — Android 15 ships Roboto as a variable font,
+ *  so `sans-serif` and `sans-serif-condensed` are one FILE at wdth=100
+ *  and wdth=75 — so the identity carries all three: the observation
+ *  reports the family, and the rest is logged beside it. */
+internal class KayaFace(val family: String, val file: String, val axes: String) {
+    override fun toString(): String = "$family (file=$file axes=[$axes])"
+}
+
+/**
+ * The FAMILY NAME out of a font file's OpenType `name` table.
+ *
+ * This is the link in the read that cannot echo: the buffer is the file
+ * the shaper picked, and the name comes out of that file's own bytes.
+ * nameID 16 (typographic family) when the font has one, else nameID 1
+ * (font family) — 16 is what groups a family whose weights carry their
+ * own nameID 1 ("Roboto Condensed Light"). Windows and Unicode records
+ * are UTF-16BE; the Macintosh record is a byte encoding whose ASCII
+ * range is all a family name uses in practice.
+ *
+ * Null when the buffer is not a font this parser can walk, which is a
+ * real answer and reads as a mismatch rather than as a pass.
+ */
+private fun kayaFontFamilyName(buffer: java.nio.ByteBuffer, ttcIndex: Int): String? {
+    val b = buffer.duplicate().order(ByteOrder.BIG_ENDIAN)
+    fun u16(at: Int) = b.getShort(at).toInt() and 0xffff
+    return try {
+        var base = 0
+        // A collection: 'ttcf', then version, count, and the offsets.
+        if (b.limit() >= 16 && b.getInt(0) == 0x74746366) {
+            if (ttcIndex >= b.getInt(8)) return null
+            base = b.getInt(12 + 4 * ttcIndex)
+        }
+        var nameAt = -1
+        for (i in 0 until u16(base + 4)) {
+            val rec = base + 12 + 16 * i
+            if (b.getInt(rec) == 0x6e616d65) { // 'name'
+                nameAt = b.getInt(rec + 8)
+                break
+            }
+        }
+        if (nameAt < 0) return null
+        val count = u16(nameAt + 2)
+        val storage = nameAt + u16(nameAt + 4)
+        var best: String? = null
+        var bestScore = -1
+        for (i in 0 until count) {
+            val rec = nameAt + 6 + 12 * i
+            val platform = u16(rec)
+            val nameId = u16(rec + 6)
+            if (nameId != 1 && nameId != 16) continue
+            // Preference, highest first: the typographic family over the
+            // plain one, a Unicode-encoded record over a byte one.
+            val unicode = platform == 3 || platform == 0
+            val score = (if (nameId == 16) 2 else 0) + (if (unicode) 1 else 0)
+            if (score <= bestScore) continue
+            val len = u16(rec + 8)
+            val at = storage + u16(rec + 10)
+            val bytes = ByteArray(len)
+            for (j in 0 until len) bytes[j] = b.get(at + j)
+            best = String(bytes, if (unicode) Charsets.UTF_16BE else Charsets.ISO_8859_1)
+            bestScore = score
+        }
+        best
+    } catch (e: IndexOutOfBoundsException) {
+        // A truncated or malformed table, said rather than crashed. The
+        // caller turns null into a sentence no scene can assert.
+        Log.w("kaya", "kaya: the font's name table could not be read: $e")
+        null
+    }
+}
+
+/**
+ * THE HONEST READ, one face: shape [KAYA_TYPEFACE_PROBE] with a resolved
+ * `Typeface` and ask the resulting glyph run which FONT it came from
+ * (styling/typeface-compose.md §2.2).
+ *
+ * `TextRunShaper` is API 31. Below that the platform offers no supported
+ * way to ask which font a run used, and the honest answer is null —
+ * which the callers turn into a sentence naming the API level, never
+ * into a family name nobody measured.
+ */
+private fun kayaShapedFace(typeface: android.graphics.Typeface): KayaFace? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+    val paint = android.graphics.Paint().apply {
+        this.typeface = typeface
+        textSize = 100f
+    }
+    val glyphs = android.graphics.text.TextRunShaper.shapeTextRun(
+        KAYA_TYPEFACE_PROBE, 0, KAYA_TYPEFACE_PROBE.length,
+        0, KAYA_TYPEFACE_PROBE.length, 0f, 0f, false, paint,
+    )
+    if (glyphs.glyphCount() == 0) return null
+    val font = glyphs.getFont(0)
+    val axes = font.axes?.joinToString(" ") { "${it.tag}=${it.styleValue}" } ?: ""
+    val family = kayaFontFamilyName(font.buffer, font.ttcIndex)
+    return KayaFace(
+        family ?: "the font's name table could not be read",
+        font.file?.path ?: "<in memory>",
+        axes,
+    )
+}
+
+/** The face a `FontFamily` resolves to through [resolver], shaped and
+ *  identified — the same two steps the read below takes, but against a
+ *  resolver of this process's own rather than a render's, because the
+ *  question here is about the DEVICE and not about a composition. */
+private fun kayaResolveFace(resolver: FontFamily.Resolver, family: FontFamily): KayaFace? {
+    val typeface = resolver.resolve(family, FontWeight.Normal, FontStyle.Normal).value
+        as? android.graphics.Typeface ?: return null
+    return kayaShapedFace(typeface)
+}
+
+/**
+ * What the presence detector below can answer. TWO ways of not knowing,
+ * kept apart on purpose: a diagnostic may only print what it measured,
+ * and a single "cannot tell" would make the arm name one cause for a
+ * state produced by the other. (Caught by the negative that forced this
+ * branch to print: it blamed the API level for a device whose sentinels
+ * had collided.)
+ */
+private enum class KayaPresence { PRESENT, ABSENT, NO_SHAPED_READ, SENTINELS_ALIKE }
+
+/**
+ * DOES THIS DEVICE HAVE THIS FAMILY? — asked at the moment the lowering
+ * applies it, which is the wall invariant 3 asks for: not one more thing
+ * to remember to assert in a scene, but a fact the code establishes on
+ * the path nobody can avoid.
+ *
+ * The two not-knowing answers are real answers rather than a shrug: this
+ * device cannot be asked at all (below API 31 there is no shaped-run
+ * read), or the detector's own precondition does not hold here (the two
+ * sentinels resolve to one face, so every family would look present). A
+ * detector that guessed in either case would be printing a verdict it
+ * never measured.
+ *
+ * NOT `preload`, which returned ok for every nonsense family, and NOT
+ * `getSystemFontFamilyName()`, which is a string comparison against the
+ * request (styling/typeface-compose.md §3.2).
+ */
+private fun kayaDeviceFamilyPresent(
+    context: android.content.Context,
+    name: String,
+): KayaPresence {
+    val resolver = createFontFamilyResolver(context)
+    fun face(vararg names: String): KayaFace? =
+        kayaResolveFace(resolver, FontFamily(names.map { Font(DeviceFontFamilyName(it)) }))
+    val sentinelA = face(KAYA_TYPEFACE_SENTINEL_A) ?: return KayaPresence.NO_SHAPED_READ
+    val sentinelB = face(KAYA_TYPEFACE_SENTINEL_B) ?: return KayaPresence.NO_SHAPED_READ
+    if (sentinelA.toString() == sentinelB.toString()) return KayaPresence.SENTINELS_ALIKE
+    val withA = face(name, KAYA_TYPEFACE_SENTINEL_A) ?: return KayaPresence.NO_SHAPED_READ
+    val withB = face(name, KAYA_TYPEFACE_SENTINEL_B) ?: return KayaPresence.NO_SHAPED_READ
+    return if (withA.toString() == withB.toString()) {
+        KayaPresence.PRESENT
+    } else {
+        KayaPresence.ABSENT
+    }
+}
+
+/**
+ * The BYTES form: the blob to an app-private file, and a `FontFamily`
+ * over that file. Null when the bytes are not a font.
+ *
+ * WHY THE CHECK IS `Typeface.Builder`, MEASURED: a corrupt blob makes
+ * Compose's own `Font(File)` THROW `IllegalStateException` at RESOLVE —
+ * that is, inside composition, taking the app down — while
+ * `Typeface.Builder(file).build()` returns null for the same bytes
+ * (styling/typeface-compose.md §6.3). So the platform's non-throwing
+ * check runs first and Compose never sees a file it would die on. The
+ * two request forms then fail the same way: a bad name and bad bytes
+ * both fall back, neither is fatal.
+ */
+private fun kayaFontFromBytes(context: android.content.Context, bytes: ByteArray): FontFamily? {
+    return try {
+        // ONE FILE, overwritten: the brand is set once before the first
+        // mount, so there is never a second font in flight.
+        val file = java.io.File(context.filesDir, "kaya-brand-font")
+        file.writeBytes(bytes)
+        if (android.graphics.Typeface.Builder(file).build() == null) {
+            Log.w("kaya", "kaya: the brand typeface's ${bytes.size} bytes are not " +
+                "a font this platform can load — falling back to the family name")
+            null
+        } else {
+            FontFamily(Font(file))
+        }
+    } catch (e: java.io.IOException) {
+        Log.w("kaya", "kaya: the brand typeface's bytes could not be staged: $e")
+        null
+    }
+}
+
+/**
+ * The brand typeface, RESOLVED and applied (apply 33). Both wire forms
+ * land here, and on this backend they converge on the `FontFamily`
+ * OBJECT rather than on a name: Android has no app-font registry at all,
+ * so the plan's "register the bytes, then let the name machinery take
+ * over" cannot hold here — after a blob is loaded and rendering,
+ * `Typeface.create(itsFamilyName, …)` still answers Roboto
+ * (styling/typeface-compose.md §6.2). One resolution, one observation,
+ * one fallback; just one layer lower than on Apple.
+ *
+ * PRECEDENCE IS THE APPLE ARM'S, to the word: the bytes, then this
+ * platform's row, then the default family. Bytes that are not a font
+ * fall through to the name, exactly as a registration that failed does
+ * there.
+ */
+internal fun kayaApplyTypeface(
+    context: android.content.Context?,
+    defaultFamily: String,
+    picked: String?,
+    fontBytes: ByteArray?,
+) {
+    val wanted = picked ?: defaultFamily
+    if (context == null) {
+        // mount() sets the activity before the pump starts, so this is
+        // unreachable through it. Said rather than assumed: the
+        // alternative is a brandless render with nothing anywhere naming
+        // a cause.
+        Log.w("kaya", "kaya: typeface $wanted arrived before the activity was " +
+            "mounted — the platform ramp stands")
+        KayaSceneModel.typefaceFamily = null
+        return
+    }
+    if (fontBytes != null) {
+        val fromBytes = kayaFontFromBytes(context, fontBytes)
+        if (fromBytes != null) {
+            KayaSceneModel.typefaceFamily = fromBytes
+            return
+        }
+    }
+    // THE PRESENCE GATE: the Apple arm's semantics on Android's
+    // mechanics. A family this device does not have leaves the
+    // platform's own ramp standing, and says so. Both branches render
+    // the SAME pixels here — Compose's fallback for a missing family is
+    // the platform default, which is what "the ramp stands" means too —
+    // so what the gate buys is the sentence, on the one platform where a
+    // wrong family is otherwise undetectable from inside the app.
+    val present = kayaDeviceFamilyPresent(context, wanted)
+    if (present == KayaPresence.ABSENT) {
+        KayaSceneModel.typefaceFamily = null
+        Log.w("kaya", "kaya: typeface $wanted is not installed — the platform ramp stands")
+        return
+    }
+    // Every other answer APPLIES the family, including the two that
+    // could not check it: applying is the app's instruction, and
+    // refusing on a measurement nobody could take would be this file
+    // inventing a policy. What each of those two says is what it
+    // MEASURED, never one sentence for both states.
+    KayaSceneModel.typefaceFamily = FontFamily(Font(DeviceFontFamilyName(wanted)))
+    when (present) {
+        KayaPresence.NO_SHAPED_READ -> Log.w("kaya",
+            "kaya: typeface $wanted applied unverified — this device (API " +
+                "${Build.VERSION.SDK_INT}) has no shaped-run read (TextRunShaper is " +
+                "API 31), so a family it does not have would fall back with nothing " +
+                "able to say so")
+        KayaPresence.SENTINELS_ALIKE -> Log.w("kaya",
+            "kaya: typeface $wanted applied unverified — the fallback probe's two " +
+                "sentinels ($KAYA_TYPEFACE_SENTINEL_A, $KAYA_TYPEFACE_SENTINEL_B) " +
+                "resolve to ONE face on this device, so a missing family is " +
+                "indistinguishable from a present one here")
+        else -> Unit
+    }
+}
+
+/**
+ * WHERE THE READ TAKES ITS SAMPLES: one real laid-out text per ROUTE
+ * into the theme, keyed by the site that produced it.
+ *
+ * A ROUTE and not a widget, because the two writes are what can come
+ * apart: `label` and the text fields read `LocalTextStyle`, while
+ * `heading` and `button` read the typography ramp (Material's own
+ * components provide their rung internally). A read that sampled one
+ * side would call a half-applied lowering applied — the measured failure
+ * mode the two writes exist for.
+ *
+ * Written during LAYOUT, so a plain map like [kayaTextLayouts] and not
+ * snapshot state: a snapshot write in the layout pass invalidates the
+ * pass that wrote it.
+ *
+ * A sample can OUTLIVE the node that made it — nothing removes an entry
+ * when a label leaves the tree — and that is safe here for a reason
+ * worth stating rather than assuming: the key is a ROUTE, not a widget,
+ * and the brand typeface is set ONCE before the first mount, so every
+ * sample a route ever produces in this process carries that route's one
+ * answer. The residual case (a sample taken before the brand applied,
+ * from a node since removed) can only ever manufacture a DISAGREEMENT,
+ * which fails loudly — never a false agreement, which would pass.
+ */
+val kayaTypefaceSites = HashMap<String, androidx.compose.ui.text.TextLayoutResult>()
+
+/** The last face identity this process printed, so the read below logs
+ *  ONE LINE PER STATE CHANGE. `expect_typeface` is a bounded retry like
+ *  every observation, so a line per read is a thousand lines per failing
+ *  leg — which buries the one line that says what changed. (The GTK arm
+ *  landed the same rule for the same reason.) */
+private var kayaTypefaceSaid: String? = null
+
+/**
+ * THE HONEST READ, for `expect_typeface`: the family the TEXT SYSTEM
+ * ended up with, off the real text on screen.
+ *
+ * NEVER THE MODEL AND NEVER THE REQUEST. Each sample is a
+ * `TextLayoutResult` a real layout pass produced, and BOTH halves of the
+ * resolution come out of it — the style that layout used, and the
+ * `fontFamilyResolver` that layout used — so the answer is about the
+ * render rather than about `KayaSceneModel`. From there the face is
+ * shaped and named out of the font file's own name table.
+ *
+ * THE SITES MUST AGREE, for [kayaTypefaceSites]' reason: reporting the
+ * first one found would hide a lowering that reached the typography ramp
+ * and not the ambient style, which on this backend is one missing line
+ * rather than an exotic failure. A disagreement is reported AS a
+ * disagreement, naming each site — a string no scene can assert.
+ */
+internal fun kayaResolvedTypeface(): String {
+    val samples = LinkedHashMap<String, androidx.compose.ui.text.TextLayoutResult>()
+    samples.putAll(kayaTypefaceSites)
+    // The two editable kinds read the ambient style as a label does, but
+    // through a different composable — and their layout is already
+    // published, for the range verbs.
+    for (node in KayaSceneModel.entryWidgets) {
+        kayaTextLayouts[node.id]?.invoke()?.let { samples["entry"] = it }
+    }
+    for (node in KayaSceneModel.textareas) {
+        kayaTextLayouts[node.id]?.invoke()?.let { samples["textarea"] = it }
+    }
+    if (samples.isEmpty()) {
+        // A REAL ANSWER, not an empty string: no text has laid out to
+        // read, which is a different thing from a font that failed to
+        // apply, and the sentence says which one it is.
+        return "no laid-out text on screen"
+    }
+    val families = sortedSetOf<String>()
+    val bySite = ArrayList<String>()
+    val identities = ArrayList<String>()
+    for ((site, layout) in samples.entries.sortedBy { it.key }) {
+        val input = layout.layoutInput
+        val typeface = input.fontFamilyResolver.resolve(
+            input.style.fontFamily,
+            input.style.fontWeight ?: FontWeight.Normal,
+            input.style.fontStyle ?: FontStyle.Normal,
+        ).value as? android.graphics.Typeface
+            ?: return "$site resolved to no platform typeface"
+        val face = kayaShapedFace(typeface)
+            ?: return "the shaped font cannot be read on API " +
+                "${Build.VERSION.SDK_INT} (TextRunShaper is API 31)"
+        families.add(face.family)
+        bySite.add("$site=${face.family}")
+        identities.add("$site $face")
+    }
+    // The WHOLE identity in the transcript, because the answer is the
+    // family name alone and a family name cannot always tell two device
+    // families apart: `sans-serif` and `sans-serif-condensed` are one
+    // file at two widths. What the read measured is here; what it
+    // asserts is returned. One line per state CHANGE (kayaTypefaceSaid).
+    val identity = identities.joinToString("; ")
+    if (identity != kayaTypefaceSaid) {
+        kayaTypefaceSaid = identity
+        Log.i("kaya", "KAYA_TYPEFACE: $identity")
+    }
+    if (families.size > 1) return "sites disagree: " + bySite.joinToString(", ")
+    return families.first()
+}
+
+/**
+ * Material's ramp with the FAMILY swapped and nothing else touched.
+ *
+ * `copy` moves one field, so `fontSize`, `lineHeight`, `fontWeight` and
+ * `letterSpacing` stay exactly what Material set. That is the whole of
+ * "the family swaps, the ramp never does" (DESIGN.md), and it was
+ * checked rather than asserted: all fifteen rungs read byte-identical
+ * across the unbranded, `serif` and `cursive` legs, and the rendered
+ * line boxes with them (styling/typeface-compose.md §1.3).
+ */
+private fun Typography.kayaWithFamily(f: FontFamily) = Typography(
+    displayLarge = displayLarge.copy(fontFamily = f),
+    displayMedium = displayMedium.copy(fontFamily = f),
+    displaySmall = displaySmall.copy(fontFamily = f),
+    headlineLarge = headlineLarge.copy(fontFamily = f),
+    headlineMedium = headlineMedium.copy(fontFamily = f),
+    headlineSmall = headlineSmall.copy(fontFamily = f),
+    titleLarge = titleLarge.copy(fontFamily = f),
+    titleMedium = titleMedium.copy(fontFamily = f),
+    titleSmall = titleSmall.copy(fontFamily = f),
+    bodyLarge = bodyLarge.copy(fontFamily = f),
+    bodyMedium = bodyMedium.copy(fontFamily = f),
+    bodySmall = bodySmall.copy(fontFamily = f),
+    labelLarge = labelLarge.copy(fontFamily = f),
+    labelMedium = labelMedium.copy(fontFamily = f),
+    labelSmall = labelSmall.copy(fontFamily = f),
+)
+
 /**
  * THE THEME ROOT — the one place this backend's appearance is decided.
  *
@@ -7734,15 +8342,42 @@ internal object KayaColorSchemes {
  */
 @Composable
 internal fun KayaTheme(content: @Composable () -> Unit) {
-    // Read BEFORE the theme, which is what makes it the pre-theme value:
-    // inside MaterialTheme this local is already bodyLarge.
+    // Read BEFORE the theme, which is what makes them the pre-theme
+    // values: inside MaterialTheme this local is already bodyLarge, and
+    // the ramp is already whatever this call passed.
     val ambientTextStyle = LocalTextStyle.current
+    val baseTypography = MaterialTheme.typography
     val dark = isSystemInDarkTheme()
     val contrast = kayaSystemContrast()
     val seed = KayaSceneModel.brandSeed
     val scheme = remember(seed, dark, contrast) { KayaColorSchemes.of(seed, dark, contrast) }
-    MaterialTheme(colorScheme = scheme) {
-        CompositionLocalProvider(LocalTextStyle provides ambientTextStyle) {
+    // THE BRAND TYPEFACE'S FIRST WRITE (docs/styling-plan.md Slice 2b):
+    // Material's own ramp, family swapped, everything else Material's.
+    // It is what every M3 component picks its rung out of — a Button
+    // does its own ProvideTextStyle(labelLarge) internally — and the
+    // `heading` role's titleLarge is kaya's one direct read of it.
+    val family = KayaSceneModel.typefaceFamily
+    val typography = remember(family, baseTypography) {
+        if (family == null) baseTypography else baseTypography.kayaWithFamily(family)
+    }
+    MaterialTheme(colorScheme = scheme, typography = typography) {
+        // AND THE SECOND WRITE, which is the one a reader would not
+        // predict and the probe measured: kaya's own labels and text
+        // fields read this local and NOT the ramp, so a lowering that
+        // set `typography` alone would brand Material's components and
+        // leave every kaya label on the platform face — half branded,
+        // and still branded-looking enough to pass a coarse look.
+        //
+        // FAMILY ONLY. The size stays Unspecified, which is this local's
+        // whole reason for being held at its pre-theme value: a brand
+        // typeface substitutes the family and never the scale
+        // (DESIGN.md), so the note above survives the typeface slice
+        // rather than being spent by it.
+        CompositionLocalProvider(
+            LocalTextStyle provides
+                if (family == null) ambientTextStyle
+                else ambientTextStyle.copy(fontFamily = family)
+        ) {
             // The page itself, in the scheme's own colours: `Surface`
             // paints `background` AND provides the content colour that
             // goes with it, which is the pair every label and field in

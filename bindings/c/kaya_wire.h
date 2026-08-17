@@ -141,7 +141,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     memcpy(tx->buf + start, &size, 4);
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xf84da2a3fe758bc7ULL
+#define KAYA_SPEC_HASH 0x7c7a23e2127c3801ULL
 
 
 /* Create a signal holding `initial`. */
@@ -507,6 +507,17 @@ static inline void kaya_tx_set_brand_accent(KayaTx *tx, uint32_t seed, uint32_t 
     kaya_wire_u32(tx, mask);
     kaya_wire_u32(tx, light);
     kaya_wire_u32(tx, dark);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request. */
+static inline void kaya_tx_set_brand_typeface(KayaTx *tx, uint32_t mask, KayaVal family, const KayaVal *platforms, uint32_t platforms_len, KayaVal font) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_BRAND_TYPEFACE);
+    kaya_wire_u32(tx, mask);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_value(tx, family);
+    kaya_wire_values(tx, platforms, platforms_len);
+    kaya_wire_value(tx, font);
     kaya_wire_end(tx, kaya_at);
 }
 

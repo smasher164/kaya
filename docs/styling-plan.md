@@ -254,3 +254,55 @@ Slice 1 — the accent + roles + inset core:
 Slice 2 — typeface + icons, on D6's facts, after slice 1's matrix is
 green. Its plan section is this document's D6 plus whatever slice 1
 taught.
+
+### Slice 2b — the typeface (drafted 2026-08-16, icons shipped first)
+
+**Grammar: a FAMILY REQUEST with per-platform values, resolved at the
+LOWERING — and FONT BYTES ride the existing wire blob channel**
+(maintainer, 2026-08-16: an asset pipeline offers fonts nothing the
+blob channel lacks — density variants and OS packaging are raster-art
+concerns; a font is one vector file whose bytes arrive in the first
+build transaction, exactly when the brand applies). The bytes form is
+register-then-resolve: the blob registers with the platform's app-font
+API at startup, its family name is extracted, and the name machinery
+takes over unchanged — so both forms share one resolution, one
+observation, one fallback negative. Registration routes to MEASURE at
+depth: CTFontManager (Apple), app-font file routes (Compose,
+fontconfig), and WinUI's two candidates (the unpackaged path#family
+FontFamily spelling vs a DWrite in-memory loader via bindgen).** `brand_typeface` carries a default family name plus
+optional per-platform pairs on the wire; each BACKEND picks its own
+row. This is the design unlock the accent's per-platform ledger entry
+was missing: a binding cannot know its platform (the JVM says "Linux"
+on Android), but a lowering IS its platform — so per-platform values
+need no platform id anywhere. Set once before mount, the brand
+set-once wall's sibling. Family only: size, weight, metrics and the
+ramp stay the platform's (ratified DESIGN.md — the role tier is what
+makes a family swap safe).
+
+**The SCENE rides the BUNDLED FONT (maintainer, 2026-08-16):** the
+shared typeface scene requests a vendored OFL font's BYTES, so the
+resolved family is one string on every lane — expect_typeface stays
+byte-frozen with no per-lane expectation machinery, the blob path gets
+exercised on all five platforms, and the fallback can never equal the
+expectation by construction (no platform ships the vendored family).
+The per-platform NAME grammar remains covered by the core walls and
+each backend's watched negatives.
+
+**The whole risk is the SILENT FALLBACK** (research §type): every
+platform's font API renders SOMETHING for an unknown family — Apple's
+Font.custom falls back without error, Compose fontFamily likewise,
+Pango substitutes, WinUI falls through the ramp — so a typo'd or
+missing family is invisible to every existing observation. The slice
+therefore does not land until each backend has a MEASURED
+did-it-apply read (the resolved family name off the real render/text
+system, never the request echoed back), an `expect_typeface`
+observation on it, and a watched negative (a nonsense family must
+report the FALLBACK's name, not the request).
+
+**Known per-platform work, from D6's facts:** WinUI must override the
+ramp resources (XamlAutoFontFamily — the accent trap's twin); Apple
+loses SF Symbols' metric matching and Bold Text response under a
+custom family (record as the stated cost, not a surprise); Android's
+scale stays sp. Probes-before-arms, the winui-research pattern:
+nothing is built until each platform's substitution mechanics and
+read-back are measured.

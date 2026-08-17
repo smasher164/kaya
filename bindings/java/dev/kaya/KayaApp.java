@@ -200,6 +200,38 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
+     * "platform"; docs/styling-plan.md Slice 2b): one entry per backend
+     * roster row, closed.
+     *
+     * <p>AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
+     * {@code Platform.current()} and there will not be — and Java is the
+     * binding that proves why: the JVM reports {@code os.name = Linux}
+     * on Android, so a guest resolving its own platform here would
+     * silently ship the linux family to every phone. It does not have to
+     * ask: every row travels to every backend on the wire, and each
+     * backend picks its own, because a LOWERING is its platform even
+     * though a binding is not.
+     *
+     * <p>The wire values are read off the generated {@code
+     * KayaWire.PLATFORM_*} constants rather than written out here, so
+     * this file cannot hold a number the spec has moved.
+     */
+    public enum Platform {
+        MAC(KayaWire.PLATFORM_MAC),
+        IOS(KayaWire.PLATFORM_IOS),
+        LINUX(KayaWire.PLATFORM_LINUX),
+        WINDOWS(KayaWire.PLATFORM_WINDOWS),
+        ANDROID(KayaWire.PLATFORM_ANDROID);
+
+        final long wire;
+
+        Platform(long wire) {
+            this.wire = wire;
+        }
+    }
+
     // Which per-appearance brand overrides ride the set_brand_accent
     // record (Tx.brandAccent packs them). HAND-WRITTEN, because the
     // mask bits are the one part of that record the generator emits no
@@ -208,6 +240,11 @@ public final class KayaApp {
     // call.
     private static final int BRAND_MASK_LIGHT = 1;
     private static final int BRAND_MASK_DARK = 2;
+    // The same for set_brand_typeface's one mask bit: it says a font
+    // BLOB rides in the record's last slot (an empty string rides there
+    // when it does not, so the field count never varies with the
+    // payload).
+    private static final int TYPEFACE_MASK_FONT = 1;
 
     private long signals, widgets, collections, nodes, menuItems;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
@@ -3740,6 +3777,89 @@ public final class KayaApp {
                     | (dark != null ? BRAND_MASK_DARK : 0);
             emit(KayaWire.txSetBrandAccent(
                     seed, mask, light != null ? light : 0, dark != null ? dark : 0));
+        }
+
+        /**
+         * REQUEST the app's brand typeface (docs/styling-plan.md D6,
+         * Slice 2b): one family name is the whole call, and every
+         * platform that has that family installed uses it.
+         *
+         * <p>THE FAMILY, NEVER THE SCALE. Sizes, weights, metrics and
+         * the whole type ramp stay the platform's — substituting a
+         * family into the platform's own ramp is what makes the swap
+         * safe, and it is the {@link Role} tier, not a font size, that
+         * carries emphasis.
+         *
+         * <p>A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's
+         * own typeface in place, deliberately: every font API renders
+         * SOMETHING for a name it cannot match, so each lowering gates
+         * on the family being installed rather than letting the platform
+         * pick a stranger, and the scene reads back the RESOLVED family
+         * off the real views rather than the request.
+         *
+         * <p>SET ONCE, BEFORE THE FIRST MOUNT — the accent's wall
+         * verbatim, and for its reason: brand is identity, not state,
+         * and a slot that could flip at runtime would promise the
+         * theme-switching surface the vocabulary does not have.
+         */
+        public void brandTypeface(String family) {
+            brandTypeface(family, null, null);
+        }
+
+        /**
+         * The per-platform form, plus the font-BYTES form: {@code
+         * family} is the default, {@code platforms} overrides it for the
+         * platforms that name themselves, and {@code font} ships a font
+         * file whose bytes the backend registers with its platform's
+         * app-font API — taking the family that registration names in
+         * preference to any name above. Either may be {@code null}, the
+         * unstated spelling {@link #brandAccent(int, Integer, Integer)}
+         * already uses.
+         *
+         * <p>THE PAIRS TRAVEL UNRESOLVED, unlike the accent's
+         * per-platform values, and that asymmetry is the design: a
+         * colour is a number this binding could resolve anywhere, a
+         * family name is a lookup only the platform can do. Java is the
+         * binding that shows why it must not try — the JVM reports
+         * {@code os.name = Linux} on Android — so every row rides the
+         * wire and each backend picks its own ({@link Platform}).
+         *
+         * <p>A {@code Map} rather than a list of pairs, which Java has
+         * no type for: it also makes the root's duplicate-platform
+         * refusal unreachable from here, a key being able to appear
+         * once. The wire order is the ENUM's, not the map's, so a
+         * {@code HashMap} and an {@code EnumMap} of the same rows emit
+         * the same record. A {@code null} family — the map value or the
+         * argument — travels as the empty string it means, so the answer
+         * comes from the root's own refusal ("an app that wants the
+         * platform's own typeface declares none at all") in the words
+         * every other language gets, rather than from the wire encoder.
+         */
+        public void brandTypeface(String family, Map<Platform, String> platforms, byte[] font) {
+            java.util.List<Object> pairs = new java.util.ArrayList<>();
+            if (platforms != null) {
+                for (Platform platform : Platform.values()) {
+                    if (!platforms.containsKey(platform)) {
+                        continue;
+                    }
+                    String row = platforms.get(platform);
+                    // A Long and a String, in that order: the record's
+                    // pair encoding is the file dialog's filters one
+                    // tier over, read in twos by the root.
+                    pairs.add(platform.wire);
+                    pairs.add(row == null ? "" : row);
+                }
+            }
+            // ONE COPY INTO CORE MEMORY, the handle consumed by this
+            // transaction's submit — setSource's registration
+            // semantics, which is the channel a font shares.
+            emit(KayaWire.txSetBrandTypeface(
+                    font != null ? TYPEFACE_MASK_FONT : 0,
+                    family == null ? "" : family,
+                    pairs.toArray(),
+                    font != null
+                            ? new KayaWire.BlobHandle(KayaRing.blobRegister(font))
+                            : ""));
         }
 
         public WindowRef createWindow(long id) {

@@ -3471,3 +3471,81 @@ This is the second time cabal's caching has cost a debugging round
 here; the first is the never-relinking one two sections up. Both have
 the same shape — cabal trusts a cache over the world — and neither is
 visible in the error message.
+
+## A per-app font is never in the system font collection, and the read
+## believed the collection
+
+Measured 2026-08-16, cost the windows lane five legs of a five-lane
+matrix — four lanes green, the same five typeface legs red on windows,
+with the font rendering correctly on screen the whole time.
+
+The typeface scene ships a VENDORED font as bytes. On WinUI those bytes
+become a file under the app root and a `FontFamily` source naming it,
+`ms-appx:///kaya-fonts/brand-<hash>.ttf#Sora` (`register_font_blob`) —
+the register-then-resolve route a brand's licensed font takes. XAML
+resolves it, lays text out in it, and the harness read's own fingerprint
+measurement PROVED that: the laid-out width and baseline differed from
+the fallback's.
+
+The read then printed
+
+    KAYA_SELFTEST: FAILED (typeface Sora (XAML lays it out, but it is
+    not one of this machine's 81 font families), wanted Sora)
+
+because its third answer asked `IDWriteFontCollection::FindFamilyName`
+against the SYSTEM font collection. A per-app font file's family is not
+in that collection — that is what per-app means — so the question has a
+permanent "no" in it, the answer could never be the bare family name,
+and the scene could never pass on this backend. The verdict claimed
+LESS than the measurement supported, which is the mirror image of the
+usual diagnostic failure and just as misleading: every reader of that
+sentence goes looking at the machine's installed fonts.
+
+The rule that comes out of it: A PRESENCE QUESTION FOLLOWS THE SOURCE.
+A bare family name is the system collection's question. A `path#family`
+source is the FILE's question — is the file there, and does its own
+name table declare that family — which is the inverse of what the
+registration wrote, and is now `typeface_availability`, shared by both
+sentence sites so they cannot answer differently.
+
+### The second half: Windows will not overwrite a MAPPED file
+
+Found the same day by the test written for the above.
+`register_font_blob` rewrote its file on every launch. DirectWrite (and
+XAML behind it) memory-maps a font file it has open, and Windows
+refuses to write a mapped file:
+
+    C:\kaya\kaya-fonts\brand-e67019d22467d0da.ttf could not be written:
+    The requested operation cannot be performed on a file with a
+    user-mapped section open. (os error 1224)
+
+The caller turns that into a panic, and the windows lane runs four
+guests at once with two of them (the rust and go legs) sharing one app
+directory — so this was a startup crash waiting for the right
+interleaving, on a scene that had never been green long enough to flake.
+The file is named by the hash of its own content, so the fix is not to
+write it when the bytes on disk are already the bytes asked for.
+
+### The third half: POSIX will — and that is worse
+
+Found hours later by the matrix rerun: linux went red where it had been
+green, one leg (typeface-java-wayland), one second in, SIGBUS inside
+libfreetype. The GTK arm has the same shared, content-named file
+(`/tmp/kaya-font-<hash>`, `register_font_blob` in gtk.rs) and rewrote
+it the same way — but POSIX PERMITS truncating a file another process
+has mapped, so instead of a loud os error 1224 there, the reader
+crashes: `fs::write` is open(O_TRUNC), the file is momentarily zero
+length, and the neighbor that mapped it dies with BUS_ADRERR the next
+time freetype touches a page past the new EOF. The linux lane runs its
+legs in a parallel pool, so two typeface guests really are in flight at
+once; the hs_err file's memory map named the faulting mapping and
+closed the case.
+
+The rule, now with both halves: NEVER REWRITE A SHARED FONT PATH IN
+PLACE. Skip the write when the bytes are already there (both arms), and
+when a write is needed, write a unique staged name and rename() it in
+(the gtk arm) — the directory entry flips atomically and a mapped old
+inode stays alive under every process reading it. Windows turns the
+in-place rewrite into a crash in the WRITER; POSIX turns it into a
+crash in the READER, later, in a different process, with a stack that
+points at freetype instead of at the write.

@@ -1221,6 +1221,30 @@ struct CoreState {
     /// plain field.
     brand: Rc<RefCell<Option<crate::brand::BrandAccent>>>,
     brand_css: gtk4::CssProvider,
+    /// THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b), in the two
+    /// pieces this backend's arm needs.
+    ///
+    /// ITS OWN PROVIDER, and never `brand_css`: `load_kaya_css` replaces
+    /// a provider's ENTIRE content, and `brand_css` is rewritten from
+    /// scratch by the appearance notify handler above, out of
+    /// `brand_css_for()` alone. A `font-family` parked in that provider
+    /// would vanish the first time the session flipped light/dark, with
+    /// no error anywhere — the silent failure this slice exists to
+    /// prevent (scratchpad/styling/typeface-gtk.md §1).
+    typeface_css: gtk4::CssProvider,
+    /// The family THIS platform asked for (the `linux` row of the
+    /// request, or its default), kept because the read needs BOTH
+    /// numbers to tell its two causes apart: a resolved family that is
+    /// not the request means either "the rule applied and fontconfig has
+    /// no such family" or "the rule never reached the widget", and the
+    /// resolved family alone is the same string in both (probe §3).
+    typeface_request: Option<String>,
+    /// The last typeface diagnosis this process printed. `expect_typeface`
+    /// polls for 15 seconds at 20ms, so an undeduplicated diagnosis would
+    /// bury the failing verdict under ~750 identical lines; what is worth
+    /// printing is a CHANGE of state.
+    #[cfg(feature = "harness")]
+    typeface_said: RefCell<Option<String>>,
     /// Where kaya's own stylesheets report their parse errors, read by
     /// `load_kaya_css` immediately after each load.
     css_error: Rc<RefCell<Option<String>>>,
@@ -2703,6 +2727,180 @@ fn first_label_text(root: &gtk4::Widget) -> Option<String> {
         child = w.next_sibling();
     }
     None
+}
+
+/// What the typeface walk found: the families the text system RESOLVED,
+/// the CSS-computed requests behind them, and the resolved family keyed
+/// by widget type for the disagreement sentence.
+#[cfg(feature = "harness")]
+#[derive(Default)]
+struct TypefaceSeen {
+    families: BTreeSet<String>,
+    requests: BTreeSet<String>,
+    by_class: BTreeSet<String>,
+}
+
+/// ONE WIDGET'S TWO FONT NUMBERS: the CSS-computed REQUEST, and the
+/// family Pango RESOLVED it to.
+///
+/// `pango_context().font_description()` IS THE REQUEST AND IT LIES —
+/// measured: an unbranded label's context says `Sans` while the text
+/// system is using `DejaVu Sans`, and a branded one echoes
+/// `KayaNoSuchFamily-9x` back verbatim for a family this image does not
+/// have (scratchpad/styling/typeface-gtk.md §2). The honest number comes
+/// from LOADING that request and asking the FONT what it is.
+///
+/// Both are returned because the diagnosis needs both: the resolved
+/// family alone is the same string whether the rule applied to a family
+/// nobody has installed or never reached the widget at all.
+///
+/// The face name is cross-checked against the description's (R3 against
+/// R2 in the probe, which measured them agreeing in every pass). A
+/// disagreement is reported AS one, in a string no scene can assert.
+#[cfg(feature = "harness")]
+fn widget_typeface(widget: &gtk4::Widget) -> Option<(String, String)> {
+    use gtk4::pango::prelude::{FontExt, FontFaceExt, FontFamilyExt};
+    use gtk4::prelude::WidgetExt;
+    let ctx = widget.pango_context();
+    let request = ctx.font_description()?;
+    let font = ctx.load_font(&request)?;
+    let described = font.describe().family()?.to_string();
+    let resolved = match font.face().map(|face| face.family().name().to_string()) {
+        Some(face) if face != described => {
+            format!("font and face disagree: {described} vs {face}")
+        }
+        _ => described,
+    };
+    Some((request.family().map(|f| f.to_string()).unwrap_or_default(), resolved))
+}
+
+/// Every text-bearing widget under the app's windows, read the honest
+/// way.
+///
+/// THE WIDGETS AND NOT THE MODEL, for the reason the whole slice exists:
+/// every font API renders SOMETHING for a family it cannot match, so a
+/// read that reported what kaya asked for would report a perfect swap for
+/// a family that was never installed.
+///
+/// THE LABELS ARE WHERE THE ANSWER IS. A GtkButton's title is a GtkLabel
+/// child and a GtkEntry's editable is a GtkText, so walking to the
+/// text-bearing leaf covers every kind the scene puts on screen without
+/// naming any of them; a GtkBox's own context would resolve too, and mean
+/// nothing.
+///
+/// `.monospace` IS SKIPPED, DELIBERATELY. It is the one slot libadwaita's
+/// stylesheet claims a family for, and `:root` is chosen precisely so
+/// that it keeps it (a `*` rule would swap the editor's face). A
+/// monospace surface resolving to DejaVu Sans Mono under a serif brand is
+/// the design working, so counting it would report a disagreement that
+/// kaya chose.
+#[cfg(feature = "harness")]
+fn walk_typefaces(core: &CoreState) -> TypefaceSeen {
+    use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
+    fn walk(widget: &gtk4::Widget, seen: &mut TypefaceSeen) {
+        let mut child = widget.first_child();
+        while let Some(w) = child {
+            let reads_text = w.is::<gtk4::Label>()
+                || w.is::<gtk4::Text>()
+                || w.is::<gtk4::TextView>()
+                || w.is::<gtk4::EditableLabel>();
+            if reads_text && !w.has_css_class("monospace") {
+                if let Some((request, resolved)) = widget_typeface(&w) {
+                    seen.requests.insert(request);
+                    seen.by_class.insert(format!("{}={resolved}", w.type_().name()));
+                    seen.families.insert(resolved);
+                }
+            }
+            walk(&w, seen);
+            child = w.next_sibling();
+        }
+    }
+    let mut seen = TypefaceSeen::default();
+    // The CONTENT, not the window: a window's own chrome (the header bar
+    // kaya installs, its title) is not the scene's, exactly as the mac
+    // read walks the content view and not the title bar.
+    for window in std::iter::once(&core.window).chain(core.aux_windows.values()) {
+        if let Some(root) = window.child() {
+            walk(root.upcast_ref::<gtk4::Widget>(), &mut seen);
+        }
+    }
+    seen
+}
+
+/// The answer `expect_typeface` compares, and — when it is not the one
+/// the app asked for — a diagnosis printed beside it.
+///
+/// THE DIAGNOSIS PRINTS ONLY WHAT THIS PROCESS MEASURED, and it exists
+/// because the resolved family ALONE cannot tell the two causes apart
+/// (invariant 3; the `kayaOpenPanelWhyNot` shape). On this image both
+/// failures answer `DejaVu Sans`:
+///
+/// ```text
+/// asked "KayaNoSuchFamily-9x", css "KayaNoSuchFamily-9x", resolved "DejaVu Sans"
+///     -> the rule applied; fontconfig has no such family
+/// asked "DejaVu Serif",        css "Sans",                resolved "DejaVu Sans"
+///     -> the rule never reached the widget
+/// ```
+///
+/// A sentence naming only the resolved family is a sentence printed for
+/// both, and the reader would chase whichever it named.
+#[cfg(feature = "harness")]
+fn typeface_verdict(core: &CoreState, seen: &TypefaceSeen) -> String {
+    let answer = match seen.families.len() {
+        // A REAL ANSWER AND NOT AN EMPTY STRING: no text-bearing widget
+        // is on screen to read, which is a different state from a font
+        // that failed to apply, and the sentence says which.
+        0 => "no text widget on screen".to_owned(),
+        1 => seen.families.iter().next().cloned().unwrap_or_default(),
+        // Reporting the first would hide a rule that reached one widget
+        // and not another, so a disagreement is reported AS one, naming
+        // each widget type — a string no scene can assert.
+        _ => format!(
+            "widgets disagree: {}",
+            seen.by_class.iter().cloned().collect::<Vec<_>>().join(", ")
+        ),
+    };
+    let Some(asked) = core.typeface_request.as_deref() else {
+        // Brandless: the platform's own family is the correct answer and
+        // there is nothing to diagnose.
+        return answer;
+    };
+    if answer == asked {
+        return answer;
+    }
+    let css: Vec<String> = seen.requests.iter().cloned().collect();
+    let delivered = css.join(", ");
+    // EMPTINESS IS TESTED FIRST, and the order is not a style choice:
+    // `all()` over an empty set is TRUE, so with this clause second the
+    // "nothing was measured" state printed a confident story about
+    // fontconfig having no such family — a sentence about a lookup that
+    // never happened. Measured by making the branch print (the
+    // empty-walk negative), which is the only way that class of bug is
+    // ever seen; it is the `kayaOpenPanelWhyNot` shape exactly.
+    let cause = if seen.requests.is_empty() {
+        "no text widget was there to be asked — nothing was measured about the rule, \
+         and this sentence says only that"
+    } else if seen.requests.iter().all(|r| r == asked) {
+        "the rule applied and fontconfig has no such family — `fc-match` on this image \
+         predicts exactly this substitution, and the platform's ramp stands"
+    } else {
+        "the :root rule never reached the widget — kaya's typeface provider is not on \
+         this display, or a higher-priority sheet (a user's ~/.config/gtk-4.0/gtk.css \
+         sits above APPLICATION) overrides it"
+    };
+    let said = format!(
+        "KAYA_DIAG brand typeface: asked {asked:?}, css delivered {delivered:?}, \
+         pango resolved {answer:?} — {cause}"
+    );
+    // ONE LINE PER STATE CHANGE. expect_typeface polls for 15 seconds at
+    // 20ms, and 750 copies of one sentence would bury the verdict it is
+    // there to explain.
+    let mut last = core.typeface_said.borrow_mut();
+    if last.as_deref() != Some(said.as_str()) {
+        eprintln!("{said}");
+        *last = Some(said);
+    }
+    answer
 }
 
 /// Rebuild one context attachment's model from its root list.
@@ -5145,6 +5343,38 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // are what keep the direction.
             buffer.select_range(&stop, &start);
         }
+        ApplyOp::SetTypeface(request) => {
+            // THE BRAND TYPEFACE, GTK's half (docs/styling-plan.md Slice
+            // 2b): one `:root { font-family }` rule in kaya's own
+            // provider at APPLICATION priority. Every mechanic here was
+            // measured on the lane image, both display backends
+            // (scratchpad/styling/typeface-gtk.md).
+            //
+            // THE ROW IS PICKED HERE because a LOWERING IS ITS PLATFORM
+            // while a binding is not (the JVM says "Linux" on Android).
+            // `family_for` walks the pairs once for every backend, and
+            // `this_platform()` is the compiler's own answer to which
+            // row is ours.
+            let family = request.family_for(crate::wire::this_platform()).to_owned();
+            // FONT BYTES: registered with the live text system BEFORE
+            // the name machinery runs, and the family that registration
+            // named is what the rule then asks for —
+            // register-then-resolve, so both forms of the request share
+            // one lowering, one observation and one fallback (the plan's
+            // Slice 2b paragraph). NOT fontconfig's app-font API, which
+            // this position cannot use at all: see register_font_blob.
+            let family = match &request.font {
+                Some(blob) => register_font_blob(core, &blob.0, &family).unwrap_or(family),
+                None => family,
+            };
+            core.typeface_request = Some(family.clone());
+            load_kaya_css(
+                &core.typeface_css,
+                "brand typeface",
+                &typeface_css_for(&family),
+                &core.css_error,
+            );
+        }
         ApplyOp::SetBrand { accent } => {
             // libadwaita's documented app override, written into kaya's
             // own provider (brand_css_for carries the spelling and the
@@ -6216,6 +6446,192 @@ fn brand_css_for(accent: crate::brand::BrandAccent, dark: bool) -> String {
     )
 }
 
+/// THE BRAND TYPEFACE, GTK's half (docs/styling-plan.md Slice 2b): one
+/// inherited `font-family`, and nothing else in the sheet.
+///
+/// `:root`, NEVER `*`, and the two are not interchangeable. `*` matches
+/// the `.monospace` element itself and beats libadwaita's own rule for
+/// it, so a brand family would swap the face of every monospace surface —
+/// kaya's own text editor among them. `:root` sets an INHERITED value
+/// that the theme overrides exactly where it means to: extracting
+/// libadwaita 1.7's compiled stylesheet shows `.monospace` and its four
+/// row variants are the ONLY selectors in the whole theme that declare a
+/// font-family, and GTK's built-in Adwaita declares none at all
+/// (scratchpad/styling/typeface-gtk.md §1, measured both ways).
+///
+/// THE FAMILY AND NOT THE SCALE, which is what makes this route the right
+/// one: nine surfaces across the type ramp were measured identical in
+/// size and weight to the pixel, branded and unbranded. The rejected
+/// alternative — `GtkSettings:gtk-font-name` — moves every size with the
+/// family, because the theme's ramp is relative to the settings font
+/// size, and it stomps a session-global setting from inside an app.
+fn typeface_css_for(family: &str) -> String {
+    format!(":root {{\n  font-family: {};\n}}\n", css_string(family))
+}
+
+/// A family name as a CSS string token.
+///
+/// The name is the APP's, so it is the one string in kaya's stylesheets
+/// that this process did not write, and an unescaped `"` in it would end
+/// the token and let the rest of the name become declarations. CSS's own
+/// escape rules answer it: a backslash before `"` and `\`, and a
+/// `\<hex><space>` for anything a CSS string cannot carry literally.
+///
+/// A family kaya cannot escape correctly does not fail quietly here: the
+/// resulting sheet goes through `load_kaya_css`, whose `parsing-error`
+/// watcher panics naming the stylesheet. Absence is the other half —
+/// a family that is merely NOT INSTALLED is perfectly valid CSS and
+/// raises nothing at all, which is what the resolved-family read is for.
+fn css_string(family: &str) -> String {
+    let mut out = String::with_capacity(family.len() + 2);
+    out.push('"');
+    for c in family.chars() {
+        match c {
+            '"' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+                out.push_str(&format!("\\{:x} ", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// FONT BYTES, GTK's half: register the blob with the live text system
+/// and answer with the family it registered under, so the name machinery
+/// above takes over unchanged (register-then-resolve, the plan's Slice 2b
+/// paragraph). `None` when the file added nothing this process can name,
+/// and the caller then asks for the family the app itself named.
+///
+/// PANGO'S ROUTE AND NOT FONTCONFIG'S, and the difference is measured
+/// rather than stylistic. `FcConfigAppFontAddFile` — the documented
+/// app-font API, and the one the probe brief expected — RETURNS SUCCESS
+/// AND DOES NOTHING once GTK has started: registered before
+/// `Application::run`, the family joins the map and resolves; registered
+/// anywhere after it (inside `activate`, right after `present()`, or a
+/// frame later) the call still returns 1, the family never appears in the
+/// realized `PangoFontMap`, and the request falls back to DejaVu Sans.
+/// `pango_font_map_changed()` does not help. Measured three ways this
+/// session; the whole apply path sits on the wrong side of that line,
+/// because a typeface arrives in the first transaction, which is drained
+/// after `activate`.
+///
+/// `pango_font_map_add_font_file()` (Pango 1.56, the lane image's 1.56.3)
+/// adds the file to the realized `PangoCairoFcFontMap` GTK is already
+/// using, at any time: measured HIT in the same position where the
+/// fontconfig route silently missed. That is why this crate names pango
+/// directly and asks for `v1_56` (see crates/kaya/Cargo.toml).
+///
+/// THE FILE, not the bytes: Pango's API takes a path, so the blob is
+/// written to a temp file named after its own content — same bytes, same
+/// path, so repeated runs reuse one file rather than piling up — and left
+/// there for the process's life, because the text system keeps reading
+/// it.
+fn register_font_blob(core: &CoreState, bytes: &[u8], named: &str) -> Option<String> {
+    use gtk4::pango::prelude::{FontFamilyExt, FontMapExt};
+    use gtk4::prelude::WidgetExt;
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let path = std::env::temp_dir().join(format!("kaya-font-{hash:016x}"));
+    // NEVER TRUNCATE THE SHARED NAME IN PLACE. The path is content-named
+    // and shared by every process shipping these bytes, and freetype
+    // MAPS it: an `fs::write` here is open(O_TRUNC), which drops the
+    // file to zero length under any process that already has it mapped,
+    // and that process then dies of SIGBUS (BUS_ADRERR — a page past the
+    // truncated EOF) the next time Pango touches a cold page. Measured
+    // 2026-08-16: the linux lane runs its legs in a parallel pool, and
+    // typeface-java-wayland crashed inside libfreetype exactly this way
+    // while a sibling leg re-wrote the file (hs_err mapped the faulting
+    // address to /tmp/kaya-font-e67019d22467d0da). So: skip when the
+    // bytes are already there, and otherwise write a UNIQUE temp name
+    // and rename() it in — the directory entry flips atomically and the
+    // old inode stays alive for every process that mapped it. The winui
+    // arm learned the same lesson the same day (Windows refuses the
+    // overwrite outright, os error 1224); POSIX permits it, which is
+    // worse, because it turns the collision into a crash in whoever got
+    // there first.
+    let already = std::fs::read(&path).is_ok_and(|have| have == bytes);
+    if !already {
+        let staged = path.with_extension(format!("stage-{}", std::process::id()));
+        let write_then_rename = std::fs::write(&staged, bytes)
+            .and_then(|()| std::fs::rename(&staged, &path));
+        if let Err(why) = write_then_rename {
+            // A DIAGNOSIS AND NOT A PANIC: the app's brand is chrome,
+            // and a read-only temp directory is the host's problem, not
+            // a reason to refuse to start. The sentence names the path
+            // and the OS error, and the resolved-family read still
+            // reports the truth.
+            let _ = std::fs::remove_file(&staged);
+            eprintln!(
+                "KAYA_DIAG brand typeface: {} bytes could not be written to {} ({why}) \
+                 — the family name is all this platform has left to go on",
+                bytes.len(),
+                path.display()
+            );
+            return None;
+        }
+    }
+    // THE MAP COMES FROM THE CALLER'S `core`, never from a fresh
+    // `CORE.with_borrow`: this runs inside an apply, which already holds
+    // that RefCell mutably, and a nested borrow is a panic.
+    let map = core.window.pango_context().font_map()?;
+    let before: std::collections::BTreeSet<String> =
+        map.list_families().iter().map(|f| f.name().to_string()).collect();
+    if let Err(why) = map.add_font_file(&path) {
+        eprintln!(
+            "KAYA_DIAG brand typeface: pango refused {} ({} bytes): {why}",
+            path.display(),
+            bytes.len()
+        );
+        return None;
+    }
+    let after: std::collections::BTreeSet<String> =
+        map.list_families().iter().map(|f| f.name().to_string()).collect();
+    // WHICH FAMILY DID THE FILE BRING? Three answers, and each says which
+    // it is rather than guessing:
+    //   1. the app's own family row, if the file put it in the map — the
+    //      app named the face inside its own file, which is the only
+    //      unambiguous answer for a file carrying several;
+    //   2. the one family that appeared, when the app named none;
+    //   3. nothing nameable, and the caller falls back to the app's name
+    //      with the numbers printed.
+    if after.contains(named) && !before.contains(named) {
+        return Some(named.to_owned());
+    }
+    let mut fresh = after.difference(&before);
+    match (fresh.next(), fresh.next()) {
+        (Some(one), None) => Some(one.clone()),
+        (Some(one), Some(two)) => {
+            eprintln!(
+                "KAYA_DIAG brand typeface: {} added {} families ({one}, {two}, …) and the \
+                 request names {named:?}, which is not among them — kaya asks for {named:?} \
+                 and the resolved-family read reports what the text system does with it",
+                path.display(),
+                after.difference(&before).count()
+            );
+            None
+        }
+        (None, _) => {
+            eprintln!(
+                "KAYA_DIAG brand typeface: pango accepted {} ({} bytes) and the font map's \
+                 {} families did not change — the file carries a family this process \
+                 already had, or none it could read",
+                path.display(),
+                bytes.len(),
+                after.len()
+            );
+            None
+        }
+    }
+}
+
 fn request_exit(code: i32) {
     EXIT_CODE.store(code, Ordering::Relaxed);
     CORE.with_borrow(|core| {
@@ -6274,6 +6690,17 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // is that override.
         let brand_css = gtk4::CssProvider::new();
         watch_css_errors(&brand_css, &css_error);
+        // The brand TYPEFACE's provider, EMPTY until a SetTypeface
+        // arrives, for the accent's reason and one more of its own: an
+        // app that requests no family must leave the platform's face
+        // alone, and this provider is ADDED ONCE and rewritten in place
+        // rather than replaced. The probe measured the alternative —
+        // create-and-swap a provider per change — silently failing to
+        // apply on one pass of a seven-pass sequence, reproducibly, with
+        // `parsing-error` never firing (typeface-gtk.md §1, "the
+        // provider lifecycle").
+        let typeface_css = gtk4::CssProvider::new();
+        watch_css_errors(&typeface_css, &css_error);
         // The container inset's provider, EMPTY until some container
         // asks for one — a scene where nothing is inset contributes no
         // rule at all (see set_container_inset).
@@ -6293,6 +6720,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &container_inset_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &typeface_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
         }
@@ -6392,6 +6824,10 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 container_insets: BTreeSet::new(),
                 brand,
                 brand_css,
+                typeface_css,
+                typeface_request: None,
+                #[cfg(feature = "harness")]
+                typeface_said: RefCell::new(None),
                 css_error,
                 dirty_markers: {
                     let mut markers = HashMap::new();
@@ -8695,6 +9131,14 @@ impl crate::harness::Stage for GtkStage {
                     height,
                 )
             }
+        })
+    }
+
+    fn typeface(&self) -> String {
+        Self::on_main(move |core| {
+            while glib::MainContext::default().iteration(false) {}
+            let seen = walk_typefaces(core);
+            typeface_verdict(core, &seen)
         })
     }
 

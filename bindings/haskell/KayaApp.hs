@@ -121,6 +121,9 @@ module KayaApp
     WindowAttr (..),
     brandAccent,
     BrandAttr (..),
+    brandTypeface,
+    TypefaceAttr (..),
+    Platform (..),
     AlertAttr (..),
     showAlert,
     PickedFile (..),
@@ -153,6 +156,7 @@ module KayaApp
     LeafArgs,
     BothZones,
     BrandArgs,
+    TypefaceArgs,
     row,
     column,
     scroll,
@@ -981,6 +985,128 @@ emitBrand seed attrs = emitB (W.txSetBrandAccent seed mask (pack light) (pack da
     -- fills it from the seed.
     mask = maybe 0 (const 1) light + maybe 0 (const 2) dark
     pack = fromMaybe 0
+
+-- | WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
+-- @platform@; docs/styling-plan.md Slice 2b): one entry per backend
+-- roster row, closed.
+--
+-- AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
+-- @currentPlatform@ here and there will not be: this binding cannot
+-- answer that question — GHC's @System.Info.os@ reports the compile
+-- target and says @darwin@ for both macOS and iOS — and it does not have
+-- to. Every row travels to every backend and each backend picks its own,
+-- which is the asymmetry with 'brandAccent': a colour resolves to one
+-- number anywhere, a family name has to survive to the lowering that
+-- will look it up.
+--
+-- CONSTRUCTORS ARE PREFIXED, the 'Align' and 'Symbol' spelling rather
+-- than 'Role's, on this module's stated criterion — prefix a word a
+-- scene is likely to claim. @Windows@ bare is that word in a GUI
+-- toolkit whose flat namespace a guest imports unqualified, and the
+-- prefix also matches the generated wire names ('W.platformMac' and
+-- friends) constructor for constructor, so the two spellings of one
+-- vocabulary read alike.
+data Platform
+  = PlatformMac
+  | PlatformIos
+  | PlatformLinux
+  | PlatformWindows
+  | PlatformAndroid
+  deriving (Eq, Show)
+
+-- The wire tags, from the generated table rather than from literals —
+-- 'symbolWire's reason verbatim: the discriminants are spec facts, and a
+-- hand-typed 1..5 here would be a second copy of them to drift.
+platformWire :: Platform -> Int64
+platformWire p = fromIntegral $ case p of
+  PlatformMac -> W.platformMac
+  PlatformIos -> W.platformIos
+  PlatformLinux -> W.platformLinux
+  PlatformWindows -> W.platformWindows
+  PlatformAndroid -> W.platformAndroid
+
+-- | The optional halves of a brand typeface request, for an app whose
+-- default family is not the right name on every platform, or which
+-- ships the font itself.
+data TypefaceAttr
+  = -- | The family to use ON one platform, overriding the default name
+    -- for that platform alone: @TFor PlatformLinux "DejaVu Serif"@.
+    TFor Platform String
+  | -- | A font FILE, as bytes: the backend hands them to its platform's
+    -- app-font API, reads back the family that registration named, and
+    -- uses it in preference to any name above. One vector file, arriving
+    -- in the first build transaction — which is exactly when the brand
+    -- applies, and why fonts need no asset pipeline.
+    TFont BS.ByteString
+
+-- | REQUEST this app's brand typeface (docs/styling-plan.md Slice 2b):
+-- one family name is the whole call — @brandTypeface "Georgia"@ — and
+-- every platform that has that family installed uses it.
+--
+-- THE FAMILY, NEVER THE SCALE (ratified DESIGN.md). Sizes, weights,
+-- metrics and the whole type ramp stay the platform's; substituting a
+-- family into the platform's own ramp is what makes the swap safe, and
+-- it is the role tier ('Role'), not a font size, that carries emphasis.
+--
+-- SET ONCE, BEFORE THE FIRST MOUNT — 'brandAccent''s two walls verbatim
+-- and for its reason: brand is identity, not state, and a slot that
+-- could flip at runtime would promise the theme-switching surface the
+-- vocabulary deliberately does not have. The root refuses a second write
+-- and a late one, in its own words, in all eight languages.
+--
+-- A FAMILY A PLATFORM DOES NOT HAVE LEAVES THAT PLATFORM'S OWN TYPEFACE
+-- IN PLACE, deliberately and silently: every font API renders SOMETHING
+-- for a name it cannot match, so each lowering gates on the family being
+-- installed rather than letting the platform pick a stranger.
+--
+-- ONE NAME, BOTH ARITIES, and the attribute list is where the
+-- per-platform names and the font bytes ride:
+--
+-- @
+-- brandTypeface "Georgia"
+-- brandTypeface "Georgia" [TFor PlatformLinux "DejaVu Serif"]
+-- brandTypeface "Georgia" [TFor PlatformWindows "Georgia Pro", TFont bytes]
+-- @
+brandTypeface :: (TypefaceArgs r) => String -> r
+brandTypeface = typefacish
+
+class TypefaceArgs r where
+  typefacish :: String -> r
+
+instance (a ~ ()) => TypefaceArgs (Build a) where
+  typefacish family = emitTypeface family []
+
+instance (a ~ TypefaceAttr, r ~ Build ()) => TypefaceArgs ([a] -> r) where
+  typefacish = emitTypeface
+
+emitTypeface :: String -> [TypefaceAttr] -> Build ()
+emitTypeface family attrs =
+  emitBIO (W.txSetBrandTypeface mask (W.VStr family) rows <$> slot)
+  where
+    -- THE ROWS ARE A LIST AND THE FONT IS A CELL, and the two obey
+    -- different rules on purpose. A repeated 'TFont' is last-wins, like
+    -- every other attribute in this module ('BLight' one construct up) —
+    -- there is one font slot on the wire. The 'TFor' rows are NOT folded
+    -- and NOT deduplicated: they travel in the order written, so a
+    -- platform named twice reaches the root and dies there, with the
+    -- root's sentence, exactly as it does from Rust. Folding them here
+    -- would make that wall unreachable from Haskell alone, which is
+    -- invariant-1 divergence hidden inside a convenience.
+    rows =
+      concatMap
+        ( \a -> case a of
+            TFor p f -> [W.VI64 (platformWire p), W.VStr f]
+            TFont _ -> []
+        )
+        attrs
+    font = foldl (\held a -> case a of TFont b -> Just b; _ -> held) Nothing attrs
+    -- The wire's presence mask: bit 0 says a font blob rides the slot.
+    mask = maybe 0 (const 1) font
+    -- The slot is written either way — an empty Str stands in when there
+    -- are no bytes, which is why this is the one brand write that needs
+    -- IO: real bytes register through the blob channel first (the menu
+    -- icon's mechanism) and travel as a handle.
+    slot = maybe (pure (W.VStr "")) (fmap W.VBlob . registerBlob) font
 
 -- | Mount into the default window; per-window targets arrive with the
 -- window vocabulary.

@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0xf84da2a3fe758bc7
+let kayaSpecHash: UInt64 = 0x7c7a23e2127c3801
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -60,6 +60,7 @@ private let applySelectRange: UInt16 = 29
 private let applyRevealRange: UInt16 = 30
 private let applyPresentSaveDialog: UInt16 = 31
 private let applySetBrand: UInt16 = 32
+private let applySetTypeface: UInt16 = 33
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
@@ -615,6 +616,19 @@ final class KayaSceneModel {
     /// multicolor, and that is macOS's call to make, not kaya's to
     /// fight.
     var brand: [UInt32]?
+    /// The RESOLVED brand typeface family (apply 33), or nil — which is
+    /// both "no app asked" and "this platform has not got that family",
+    /// deliberately one state: in either case the platform's own ramp
+    /// stands and nothing here substitutes (docs/styling-plan.md Slice
+    /// 2b). Written ONCE, by the apply arm, after the blob registration
+    /// and the presence gate have both had their say; every font this
+    /// interpreter builds reads it.
+    var typefaceFamily: String?
+    /// What the app ASKED for, kept only so a failed resolution can say
+    /// so out loud. NEVER read by a lowering and never by the
+    /// observation — the whole risk of a family swap is that a request
+    /// echoed back looks exactly like a swap that happened.
+    var typefaceRequested: String?
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     var buttons: [KayaNode] = []
@@ -3151,6 +3165,26 @@ private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
                     if vat % 8 != 0 { vat += 8 - vat % 8 }
                 }
             }
+            // SET_TYPEFACE's font blob (apply 33). Its slot sits after
+            // two variable-length fields, so the walk is the record's
+            // own: skip mask+reserved, skip the family value, skip the
+            // pair list, and the font is what is left.
+            if kind == applySetTypeface {
+                var vat = at + 8 + 8
+                func skip() {
+                    let len = Int(raw.loadUnaligned(fromByteOffset: vat + 4, as: UInt32.self))
+                    vat += 8 + len
+                    if vat % 8 != 0 { vat += 8 - vat % 8 }
+                }
+                skip()  // family
+                let pairCount = Int(raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self))
+                vat += 8
+                for _ in 0..<pairCount { skip() }
+                if raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self) == valueBlob {
+                    let handle = raw.loadUnaligned(fromByteOffset: vat + 8, as: UInt64.self)
+                    blobs[handle] = KayaHost.blobData(handle)
+                }
+            }
             at += size
         }
     }
@@ -3448,6 +3482,74 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                         raw.loadUnaligned(fromByteOffset: body + i * 4, as: UInt32.self))
                 }
                 kayaScene.brand = brand
+            case applySetTypeface:
+                // THE REQUEST, UNRESOLVED: mask, the core's platform
+                // stamp, the default family, the per-platform pairs,
+                // then the font slot. Resolving it is THIS SIDE's job —
+                // a lowering is its platform, which is why the pairs
+                // travel at all (docs/styling-plan.md Slice 2b).
+                var tat = body + 8
+                func nextTypefaceValue() -> (UInt32, Int, Int) {
+                    let type = raw.loadUnaligned(fromByteOffset: tat, as: UInt32.self)
+                    let len = Int(raw.loadUnaligned(fromByteOffset: tat + 4, as: UInt32.self))
+                    let at = tat + 8
+                    tat += 8 + len
+                    if tat % 8 != 0 { tat += 8 - tat % 8 }
+                    return (type, at, len)
+                }
+                func nextTypefaceStr() -> String {
+                    let (_, at, len) = nextTypefaceValue()
+                    return String(decoding: raw[at..<(at + len)], as: UTF8.self)
+                }
+                let mask = raw.loadUnaligned(fromByteOffset: body, as: UInt32.self)
+                // WHICH ROW IS MINE, stamped by the core: the tag of the
+                // platform it was compiled for. This file serves macOS
+                // AND iOS, and it carries NO copy of the platform
+                // vocabulary — a private copy here and another in Kotlin
+                // is the CLIP_* mirror trap, where a drifted value picks
+                // the wrong row with nothing pinning either side.
+                let mine = Int64(raw.loadUnaligned(fromByteOffset: body + 4, as: UInt32.self))
+                let defaultFamily = nextTypefaceStr()
+                let pairCount = Int(raw.loadUnaligned(fromByteOffset: tat, as: UInt32.self))
+                tat += 8
+                var picked: String?
+                for _ in 0..<(pairCount / 2) {
+                    let (_, tagAt, _) = nextTypefaceValue()
+                    let tag = raw.loadUnaligned(fromByteOffset: tagAt, as: Int64.self)
+                    let family = nextTypefaceStr()
+                    // FIRST MATCH WINS, and the root refuses a repeated
+                    // platform so there is never a second.
+                    if tag == mine, picked == nil { picked = family }
+                }
+                // The font slot is always written; the mask says
+                // whether it means anything.
+                let (fontType, fontAt, _) = nextTypefaceValue()
+                var registered: String?
+                if mask & 1 != 0, fontType == valueBlob {
+                    let handle = raw.loadUnaligned(fromByteOffset: fontAt, as: UInt64.self)
+                    if let data = blobs[handle] {
+                        // REGISTER, THEN RESOLVE: the bytes join this
+                        // process's font list and hand back a family
+                        // name, and from there the name machinery is
+                        // the same one a named request uses — one
+                        // resolution, one observation, one fallback.
+                        registered = kayaRegisterFont(data)
+                    }
+                }
+                let wanted = registered ?? picked ?? defaultFamily
+                kayaScene.typefaceRequested = wanted
+                // THE PRESENCE GATE. Without it a family this device
+                // does not have would still render — CoreText's
+                // forgiving door hands back Helvetica and SwiftUI's
+                // Font.custom goes through it — and a typo would look
+                // exactly like a brand. Refusing here leaves the
+                // platform's own ramp standing, which is what the
+                // negative test pins.
+                kayaScene.typefaceFamily = kayaFamilyPresent(wanted) ? wanted : nil
+                if kayaScene.typefaceFamily == nil {
+                    kayaDiag(
+                        "typeface \(wanted) is not installed — the platform ramp stands")
+                }
             case applyPresentSaveDialog:
                 // The platform's REAL save dialog (NSSavePanel), answered
                 // exactly once through kaya_emit_save_dialog_result — one
@@ -6293,6 +6395,32 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("alerts \(got), wanted \(want)")
                 }
+            case "expect_typeface":
+                // THE RESOLVED FAMILY, off the real views. Never the
+                // request: every font API on this platform renders
+                // SOMETHING for a family it does not have, so an echo
+                // would report a perfect swap for a font that was never
+                // installed (docs/styling-plan.md Slice 2b).
+                #if os(macOS)
+                    // The family is a QUOTED string in the grammar, and
+                    // the observation is byte-compared against harness.rs
+                    // ("typeface Georgia"), so the quotes come off here
+                    // and stay off in both sentences below.
+                    let wantFamily = kayaQuoted(Array(parts[1...]))
+                    let gotFamily = DispatchQueue.main.sync { kayaResolvedTypeface() }
+                    if gotFamily == wantFamily {
+                        observed.append("typeface \(wantFamily)")
+                    } else {
+                        failures.append("typeface \(gotFamily), wanted \(wantFamily)")
+                    }
+                #else
+                    // THE APPLY SIDE IS LIVE ON iOS — the same
+                    // substitution, through UIFontMetrics — but the
+                    // OBSERVATION has not been proven on a device, so
+                    // the iOS runner wires no typeface legs and this
+                    // says so where a reader will meet it.
+                    kayaDepthStub("typeface", on: "ios")
+                #endif
             case "expect_inset":
                 // The content inset, MEASURED as the halved gap between
                 // the padding container's outer extent and the offer
@@ -7558,6 +7686,282 @@ private func kayaBrandTint() -> Color? {
         blue: Double(fill & 0xFF) / 255.0)
 }
 
+// --- THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b) --------------
+//
+// Built from a measured probe, not from the documentation, and the
+// difference matters: the route every blog post and half of Apple's own
+// docs suggest — take `preferredFont(forTextStyle:)`'s descriptor and
+// `withFamily` it — IS A SILENT NO-OP on both Apple platforms. The
+// system font's descriptor carries NSCTFontUIUsageAttribute, that
+// attribute outranks the family, and the family is accepted onto the
+// descriptor and then discarded at resolution. Measured: the first
+// render through that route reported 0.0000 differing pixels on all
+// twelve widget rows for Georgia, for Menlo, for Helvetica and for a
+// nonsense family alike — a completely unbranded window with nothing
+// anywhere saying so (scratchpad/styling/typeface-swiftui.md finding 1).
+//
+// What works is a FRESH descriptor carrying the family plus the ramp's
+// own weight, resolved at the ramp's own pointSize. It keeps the
+// platform's scale (the whole design: the family swaps, the ramp never
+// does) and it selects the family's matching face — Georgia@13 for
+// .body, Georgia-Bold@13 for .headline's weight 0.40.
+
+#if os(macOS)
+    typealias KayaPlatformFont = NSFont
+    typealias KayaPlatformTextStyle = NSFont.TextStyle
+    typealias KayaPlatformFontDescriptor = NSFontDescriptor
+#else
+    typealias KayaPlatformFont = UIFont
+    typealias KayaPlatformTextStyle = UIFont.TextStyle
+    typealias KayaPlatformFontDescriptor = UIFontDescriptor
+#endif
+
+/// Is this family installed on THIS device?
+///
+/// ONE GATE FOR BOTH APPLE PLATFORMS, and it is not the obvious one.
+/// `NSFont(descriptor:size:)` returns nil for a family macOS does not
+/// have, so on the mac the construction itself is a refusal — but
+/// `UIFont(descriptor:size:)` is NON-OPTIONAL and silently hands back
+/// Helvetica, so the identical route has different failure semantics on
+/// the two platforms (measured, typeface-swiftui.md iOS finding 3).
+/// Left alone that is an invariant-1 divergence inside one file.
+/// CTFontDescriptorCreateMatchingFontDescriptor answers the same way on
+/// both — nil for absent, non-nil for present — so the gate goes in
+/// FRONT of the substitution and both platforms fall back to their own
+/// ramp, which is the one observable semantics the negative test pins.
+func kayaFamilyPresent(_ family: String) -> Bool {
+    let wanted = CTFontDescriptorCreateWithAttributes(
+        [kCTFontFamilyNameAttribute: family as CFString] as CFDictionary)
+    let mandatory = NSSet(array: [kCTFontFamilyNameAttribute]) as CFSet
+    return CTFontDescriptorCreateMatchingFontDescriptor(wanted, mandatory) != nil
+}
+
+/// The platform's ramp for `style`, with the family swapped and nothing
+/// else touched. nil when no typeface is in force.
+@MainActor func kayaPlatformFont(_ style: KayaPlatformTextStyle) -> KayaPlatformFont? {
+    guard let family = kayaScene.typefaceFamily else { return nil }
+    // The ramp: this platform's own pointSize and weight for the style.
+    // macOS's .headline is 13pt/0.40, iOS's is 17pt/0.30 — the two
+    // ramps differ in every row, which is exactly why the design
+    // substitutes the family and leaves the scale alone.
+    #if os(macOS)
+        let base = NSFont.preferredFont(forTextStyle: style)
+    #else
+        // The UNSCALED base — the size at content-size category
+        // .large — because UIFontMetrics scales from there. Feeding it
+        // an already-scaled size would apply Dynamic Type twice.
+        let base = UIFont.preferredFont(
+            forTextStyle: style,
+            compatibleWith: UITraitCollection(preferredContentSizeCategory: .large))
+    #endif
+    let traits =
+        base.fontDescriptor.object(forKey: .traits)
+        as? [KayaPlatformFontDescriptor.TraitKey: Any]
+    var weight = (traits?[.weight] as? NSNumber)?.doubleValue ?? 0
+    #if !os(macOS)
+        // BOLD TEXT, CORRECTED — the one accessibility affordance a
+        // family swap silently drops. The system font moves
+        // Regular -> Semibold when the user turns Bold Text on; a
+        // substituted family does not move at all (measured,
+        // typeface-swiftui.md iOS finding 6), so a branded app would
+        // quietly stop answering the setting. The interpreter adds the
+        // same step the system does. Lowering-internal and invisible to
+        // apps — DESIGN.md's tier-2 escape.
+        //
+        // macOS has no Bold Text switch at all, which is why this is
+        // inside the platform conditional rather than a trait read that
+        // is false forever on one side.
+        if UITraitCollection.current.legibilityWeight == .bold {
+            weight += 0.30
+        }
+    #endif
+    let descriptor = KayaPlatformFontDescriptor(fontAttributes: [
+        .family: family,
+        .traits: [KayaPlatformFontDescriptor.TraitKey.weight: weight],
+    ])
+    #if os(macOS)
+        return NSFont(descriptor: descriptor, size: base.pointSize)
+    #else
+        let substituted = UIFont(descriptor: descriptor, size: base.pointSize)
+        // Dynamic Type. macOS has none (per Apple DTS); iOS does, and
+        // the raw substituted font does NOT scale — it must run through
+        // UIFontMetrics. The swapped ramp tracks the system's without
+        // matching it (53pt vs 48pt at accessibilityXXXL): metrics
+        // scales the family's own base by the category ratio rather
+        // than reproducing SF's optical-size curve, which is inherent
+        // to substituting a family.
+        return UIFontMetrics(forTextStyle: style).scaledFont(for: substituted)
+    #endif
+}
+
+/// The same font as SwiftUI's own type, or nil to leave the platform's
+/// in place. `nil` is what a brandless app gets everywhere, so a
+/// `.font(kayaBrandFont())` on a scene root is a no-op until an app
+/// asks for a typeface.
+@MainActor func kayaBrandFont(_ style: KayaPlatformTextStyle = .body) -> Font? {
+    guard let font = kayaPlatformFont(style) else { return nil }
+    return Font(font as CTFont)
+}
+
+/// Register a font file's bytes with this process's font manager and
+/// return the FAMILY NAME the registration produced.
+///
+/// IN-PROCESS SCOPE: the font joins this process's font list and
+/// nothing else's — kaya never installs anything on a user's machine.
+/// After this the family is present exactly as a system-supplied one
+/// is, so the name machinery below takes over unchanged: one
+/// resolution, one observation, one fallback for both forms of the
+/// request (Slice 2b's register-then-resolve).
+func kayaRegisterFont(_ bytes: Data) -> String? {
+    guard
+        let descriptors = CTFontManagerCreateFontDescriptorsFromData(bytes as CFData)
+            as? [CTFontDescriptor],
+        let first = descriptors.first
+    else {
+        return nil
+    }
+    // Enabled at register, because the descriptors must be usable in
+    // this same launch — the typeface applies before the first mount.
+    //
+    // THE CALL'S OWN VERDICT IS NOT CONSULTED, and that is deliberate
+    // rather than sloppy: it reports through a registration handler and
+    // this file already owns a stronger question. The family name comes
+    // back here, the presence gate then asks CoreText whether that
+    // family can be matched, and a registration that failed answers NO
+    // there — one gate for "the bytes were not a font", "the bytes were
+    // a font that would not register" and "the name is not installed",
+    // which is the same fallback the named form takes.
+    // FILE-BACKED ON PURPOSE, measured 2026-08-16: descriptors created
+    // FROM DATA carry no URL attribute, and RegisterFontDescriptors
+    // wants file-backed descriptors — it handed back all seven of the
+    // variable font's named instances and registered none of them
+    // (CTFontManagerError 303, watched via the probe diag). Writing
+    // the bytes to a temp file and registering the URL is the route
+    // that holds for static AND variable fonts on both Apple
+    // platforms; the file must outlive the registration, so it stays
+    // for the process's lifetime and the OS owns the temp dir's
+    // cleanup.
+    let dir = FileManager.default.temporaryDirectory
+    let url = dir.appendingPathComponent("kaya-brand-font-\(ProcessInfo.processInfo.processIdentifier).ttf")
+    do {
+        try bytes.write(to: url)
+    } catch {
+        kayaDiag("typeface blob could not be staged for registration: \(error)")
+        return nil
+    }
+    var cfError: Unmanaged<CFError>?
+    if !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &cfError) {
+        kayaDiag(
+            "typeface blob registration failed: "
+                + String(describing: cfError?.takeRetainedValue()))
+        return nil
+    }
+    return CTFontDescriptorCopyAttribute(first, kCTFontFamilyNameAttribute) as? String
+}
+
+/// THE HONEST READ, for `expect_typeface`: the family the TEXT SYSTEM
+/// ended up with, off the AppKit/UIKit text views living in the
+/// on-screen hierarchy.
+///
+/// NEVER THE MODEL AND NEVER THE REQUEST. Every font API on both Apple
+/// platforms renders SOMETHING for a family it cannot match, so a read
+/// that echoed `kayaScene.typefaceRequested` would report a perfect
+/// swap for a family that was never installed — which is the entire
+/// failure this slice exists to catch. These are the four reads the
+/// probe measured on a real window (NSTextView.font, its
+/// typingAttributes, its textStorage attributes, NSTextField.font); the
+/// two view classes are the ones a scene can put on screen.
+///
+/// THE VIEWS MUST AGREE. Reporting the first one found would hide a
+/// lowering that reached the textarea and not the field, so a
+/// disagreement is reported AS a disagreement — a string no scene can
+/// assert, naming both families.
+///
+/// A BUTTON IS READ AT THE BUTTON, NOT AT ITS TITLE VIEW. AppKit hosts a
+/// button's title in a private `NSButtonTextField` subview, and that
+/// view's `font` is NOT the one the title renders with: measured on this
+/// scene, with the mac button's font set to Georgia, the button reported
+/// `Georgia` and its inner NSButtonTextField reported
+/// `.AppleSystemUIFont` in the same walk. So the walk reads the NSButton
+/// and does not descend into it for text — descending would report a
+/// disagreement that is AppKit's bookkeeping rather than a defect.
+///
+/// EXCEPT NSPopUpButton, which `Picker(.menu)` is: the design
+/// deliberately leaves the popup's own font alone and carries the swap
+/// on the option `Text` (measured, 0.0540 differing pixels against
+/// 0.0000 for the font on the Picker itself), so reading it would report
+/// a mismatch the lowering chose on purpose.
+@MainActor func kayaResolvedTypeface() -> String {
+    var families: Set<String> = []
+    // The same reads keyed by the VIEW CLASS, for the disagreement
+    // sentence alone. A bare list of families says two things resolved
+    // differently; this says WHICH view kept the system font, which is
+    // the difference between "the lowering is missing" and "one route
+    // into it is".
+    var byClass: Set<String> = []
+    #if os(macOS)
+        func walk(_ view: NSView) {
+            var seen: String?
+            if view is NSPopUpButton {
+                // Read nothing here and nothing under it — see the note.
+                return
+            } else if let button = view as? NSButton {
+                seen = button.font?.familyName ?? "<no family>"
+                if let family = seen {
+                    families.insert(family)
+                    byClass.insert("\(type(of: view))=\(family)")
+                }
+                // NOT into its subviews: the title view's font is
+                // AppKit's own bookkeeping, measured to disagree with
+                // the font the title actually renders in.
+                return
+            } else if let text = view as? NSTextView, let font = text.font {
+                seen = font.familyName ?? "<no family>"
+            } else if let field = view as? NSTextField, let font = field.font {
+                seen = font.familyName ?? "<no family>"
+            }
+            if let family = seen {
+                families.insert(family)
+                byClass.insert("\(type(of: view))=\(family)")
+            }
+            for sub in view.subviews { walk(sub) }
+        }
+        // The CONTENT view, not the window: the titlebar's own controls
+        // are not the scene's.
+        for window in kayaNSWindows.values {
+            if let content = window.contentView { walk(content) }
+        }
+    #else
+        func walk(_ view: UIView) {
+            var seen: String?
+            if let text = view as? UITextView, let font = text.font {
+                seen = font.familyName
+            } else if let field = view as? UITextField, let font = field.font {
+                seen = font.familyName
+            }
+            if let family = seen {
+                families.insert(family)
+                byClass.insert("\(type(of: view))=\(family)")
+            }
+            for sub in view.subviews { walk(sub) }
+        }
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows { walk(window) }
+        }
+    #endif
+    if families.isEmpty {
+        // A REAL ANSWER, not an empty string: no text view is on screen
+        // to read, which is a different thing from a font that failed
+        // to apply, and the sentence says which one it is.
+        return "no text view on screen"
+    }
+    if families.count > 1 {
+        return "views disagree: " + byClass.sorted().joined(separator: ", ")
+    }
+    return families.first!
+}
+
 private struct KayaButtonStyle: PrimitiveButtonStyle {
     let prominent: Bool
     func makeBody(configuration: Configuration) -> some View {
@@ -7754,7 +8158,15 @@ struct KayaRender: View {
             // heading trait, which is what assistive users skim by and
             // the half the styling scene can freeze on every lane.
             Text(node.text)
-                .font(node.role == roleHeading ? .headline : nil)
+                // THE SWAPPED .headline, not the platform's: a text
+                // style set here OVERRIDES the root font, so a heading
+                // in a branded app would be the one label still in the
+                // system face (measured: the root apply reaches plain
+                // Text, and an explicit .font on top of it wins).
+                // Non-headings pass nil and inherit the root's.
+                .font(
+                    node.role == roleHeading
+                        ? (kayaBrandFont(.headline) ?? .headline) : nil)
                 .accessibilityAddTraits(
                     node.role == roleHeading ? .isHeader : [])
                 .alignmentGuide(.top) { d in
@@ -7826,7 +8238,15 @@ struct KayaRender: View {
                     })
             ) {
                 ForEach(Array(node.children.enumerated()), id: \.element.id) { index, option in
-                    Text(option.text).tag(index)
+                    // ON THE OPTION TEXT, NOT ON THE PICKER. Measured
+                    // both ways: the font on the option changes the
+                    // rendering (0.0540 differing pixels), the font on
+                    // the Picker changes nothing at all (0.0000) — it
+                    // is an NSPopUpButton, and the AppKit-backed
+                    // widgets are exactly the ones the root font does
+                    // not reach. The radio group takes the same line
+                    // for the same reason.
+                    Text(option.text).font(kayaBrandFont()).tag(index)
                 }
             }
             .pickerStyle(.menu)
@@ -7886,7 +8306,15 @@ struct KayaRender: View {
                     })
             ) {
                 ForEach(Array(node.children.enumerated()), id: \.element.id) { index, option in
-                    Text(option.text).tag(index)
+                    // ON THE OPTION TEXT, NOT ON THE PICKER. Measured
+                    // both ways: the font on the option changes the
+                    // rendering (0.0540 differing pixels), the font on
+                    // the Picker changes nothing at all (0.0000) — it
+                    // is an NSPopUpButton, and the AppKit-backed
+                    // widgets are exactly the ones the root font does
+                    // not reach. The radio group takes the same line
+                    // for the same reason.
+                    Text(option.text).font(kayaBrandFont()).tag(index)
                 }
             }
             #if os(macOS)
@@ -8016,6 +8444,18 @@ struct KayaRender: View {
             // exactly what a dialog's primary action gets).
             button.hasDestructiveAction = role == roleDestructive
             button.keyEquivalent = role == roleProminent ? "\r" : ""
+            // THE TYPEFACE'S PIPE INTO APPKIT, and it is the tint
+            // finding's exact twin: an NSButton never reads SwiftUI's
+            // `.font` any more than it reads `.tint`, so the root apply
+            // reached every SwiftUI control and no mac button —
+            // measured, with "Save" and "Cancel" left in SF in a window
+            // where every label, field and toggle had swapped
+            // (typeface-swiftui.md finding 4). `button.font`, never
+            // `attributedTitle`: both change the pixels identically,
+            // but after the attributedTitle route `button.font` still
+            // reads the system font, so the honest read would lie about
+            // a substitution that did happen (finding 5).
+            if let font = kayaPlatformFont(.body) { button.font = font }
             // THE BRAND'S ONE PIPE INTO APPKIT. This bridge exists for
             // the SDK-stamp bezel bug, and it took the brand out with
             // it: an NSButton never reads SwiftUI's `.tint`
@@ -10745,6 +11185,7 @@ struct KayaAuxRoot: View {
         // The brand rides every scene root, not window 0's alone (the
         // Phase A finding — see KayaRoot's tint note).
         .tint(kayaBrandTint())
+        .font(kayaBrandFont())
         #if os(macOS)
             .background(KayaWindowAccessor(windowId: windowId))
         #endif
@@ -10805,6 +11246,7 @@ struct KayaSplitRoot: View {
         .onChange(of: scene.windows[windowId]?.entries.count ?? 0) { record() }
         // The brand rides every scene root (see KayaRoot's tint note).
         .tint(kayaBrandTint())
+        .font(kayaBrandFont())
     }
 
     /// Stamp the arm THIS BODY TOOK. Never derived from listDetail or
@@ -11261,7 +11703,10 @@ private struct KayaMacTextarea: NSViewRepresentable {
         // Without this the native tier has nothing to delegate to
         // and Edit>Undo would only ever reach the core's ledger.
         view.allowsUndo = true
-        view.font = .preferredFont(forTextStyle: .body)
+        // The textarea names its own ramp rung, so the swap is spelled
+        // here rather than inherited. This view is also the best
+        // read-back site on the platform, and expect_typeface reads it.
+        view.font = kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body)
         view.textContainerInset = CGSize(width: 2, height: 2)
         view.isVerticallyResizable = true
         view.isHorizontallyResizable = false
@@ -11655,7 +12100,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             // for exactly that reason.
             let view = UITextView()
             view.delegate = context.coordinator
-            view.font = UIFont.preferredFont(forTextStyle: .body)
+            view.font = kayaPlatformFont(.body) ?? UIFont.preferredFont(forTextStyle: .body)
             view.adjustsFontForContentSizeCategory = true
             view.backgroundColor = .clear
             view.contentInsetAdjustmentBehavior = .never
@@ -12086,15 +12531,18 @@ struct KayaSectionsView: View {
                     }
                     .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "sidebar" }
                     .tint(kayaBrandTint())
+                    .font(kayaBrandFont())
                 } else {
                     tabBody(window)
                         .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "bar" }
                         .tint(kayaBrandTint())
+                        .font(kayaBrandFont())
                 }
             #else
                 tabBody(window)
                     .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "bar" }
                     .tint(kayaBrandTint())
+                    .font(kayaBrandFont())
             #endif
         }
     }
@@ -12232,6 +12680,7 @@ struct KayaRoot: View {
         // roots, not descendants of this one, and the brand reaching
         // window 0 alone was Phase A's first finding (2026-08-16).
         .tint(kayaBrandTint())
+        .font(kayaBrandFont())
         // The window's command catalog rides the window construct: on
         // iOS this is the trailing More menu + promoted bar actions
         // (a no-op on macOS, where the NSMenu segment owns the bar).

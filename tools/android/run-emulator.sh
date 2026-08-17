@@ -314,9 +314,69 @@ cliphelper_prepare() { # serial
     echo "  answer null, which is what an empty clipboard answers too" >&2
     return 1
 }
+# THE TYPEFACE SCENE'S FONT, ON EVERY POOL DEVICE BEFORE ANY LEG RUNS.
+# The scene asks for the VENDORED font's BYTES rather than a family name
+# (guests/assets/fonts/sora-wght.ttf, OFL): "Sora" is a family no
+# platform preinstalls, so a registration that failed reads as the real
+# fallback instead of a false pass — tools/scenes/typeface.steps argues
+# it at length. The guests' default path for those bytes is
+# repo-relative, which is a path no device has, so the file is pushed
+# here and every typeface leg names the pushed copy in KAYA_FONT_FILE;
+# MainActivity maps KAYA_* extras to environment variables, so it reaches
+# the guest exactly the way KAYA_SELFTEST does.
+#
+# /data/local/tmp, AND THAT WAS MEASURED FROM THE APP rather than
+# assumed. SELinux stops untrusted_app reading shell_data_file on many
+# images, and `run-as` CANNOT answer the question — it runs as
+# runas_app, a domain that may read what the app itself may not, so a
+# green run-as check would have been evidence about the wrong process.
+# The proof is the scene's own verdict on emulator-5554 (android-35
+# google_apis arm64), with the font pushed here and nowhere else:
+#
+#   kaya: KAYA_SELFTEST: OK (typeface, typeface Sora, clicked hi,
+#                            ax "heading/typeface")
+#
+# and the control, the same leg with KAYA_FONT_FILE pointing one path
+# over, which dies in the guest naming the variable:
+#
+#   log_panics: thread 'kaya-app' panicked at 'kaya: the typeface scene
+#   needs the vendored font at /data/local/tmp/kaya-no-such-font.ttf
+#   (set KAYA_FONT_FILE or run from the repo root): No such file or
+#   directory (os error 2)'
+#
+# That panic is why this push needs no verified-delivery dance the way
+# the helper above does: a font that did not arrive stops the guest
+# before it mounts, naming the path and the variable. What it cannot
+# catch is a SHORT file — corrupt bytes are not fatal on this backend
+# (KayaCompose falls back to the family name and logs), and the leg would
+# then fail with a family that is not Sora, three removes from a
+# half-finished push. So the size is compared here, where the cause is.
+FONT_SRC="$ROOT/guests/assets/fonts/sora-wght.ttf"
+FONT_ON_DEVICE=/data/local/tmp/kaya-sora-wght.ttf
+font_prepare() { # serial
+    local serial="$1" want got
+    want="$(wc -c <"$FONT_SRC" | tr -d ' ')"
+    if ! adb -s "$serial" push "$FONT_SRC" "$FONT_ON_DEVICE" >/dev/null; then
+        echo "run-emulator: could not push $FONT_SRC to $serial" >&2
+        return 1
+    fi
+    # World-readable on purpose: the file is pushed by the SHELL user and
+    # opened by the app's, which share nothing but the other bits.
+    adb -s "$serial" shell chmod 644 "$FONT_ON_DEVICE" >/dev/null || true
+    got="$(adb -s "$serial" shell stat -c %s "$FONT_ON_DEVICE" 2>/dev/null | tr -d '\r')"
+    if [ "$got" != "$want" ]; then
+        echo "run-emulator: the typeface font on $serial is ${got:-no} bytes, and the" >&2
+        echo "  repo's is $want — a short blob is not fatal on this backend (the" >&2
+        echo "  interpreter falls back to the family name), so the typeface legs" >&2
+        echo "  would report a resolved family that is not Sora instead of a push" >&2
+        echo "  that half landed" >&2
+        return 1
+    fi
+}
 for serial in "${SERIALS[@]}"; do
     cliphelper_prepare "$serial" || exit 1
     CLIPHELPER_IME_ON+=("$serial")
+    font_prepare "$serial" || exit 1
 done
 timing cliphelper
 
@@ -1067,6 +1127,23 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity styling \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script styling)'"
+    # THE TYPEFACE SCENE (docs/styling-plan.md Slice 2b), the styling
+    # scene's sibling one tier over: the brand typeface swaps the FAMILY
+    # and leaves the platform's ramp alone. It exists for the SILENT
+    # FALLBACK — every font API on every platform renders something for a
+    # family it has not got, so a typo, a stale lowering and a working
+    # swap are indistinguishable to every other observation kaya owns.
+    # Only `expect_typeface`, which reads the family the text system
+    # ENDED UP WITH off the real views, tells them apart
+    # (tools/scenes/typeface.steps opens with the argument). The font
+    # itself rides KAYA_FONT_FILE because the guest's default path is
+    # repo-relative and a device has no repo; font_prepare pushed it to
+    # every pool device above, and that path was measured from the app.
+    run_apk typeface-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity typeface \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script typeface)'" \
+        --es KAYA_FONT_FILE "$FONT_ON_DEVICE"
     # The clipboard scene: one clip in several representations, the
     # privileged read, the paste split, and Paste as a standard command.
     # The foreign process on the other side of every assertion is
@@ -1349,6 +1426,17 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity styling \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script styling)'"
+    # The typeface scene through the JVM binding (see the compose leg for
+    # what the scene is for). What this arm adds is the Java binding's
+    # three-argument `brandTypeface` — the BYTES form, the one a brand
+    # book's licensed font takes — on the tier that shares its guest with
+    # the desktop lanes, and `Files.readAllBytes` reading the pushed file
+    # under this module's minSdk.
+    run_apk typeface-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity typeface \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script typeface)'" \
+        --es KAYA_FONT_FILE "$FONT_ON_DEVICE"
     drain
     timing legs-jvm
 fi
@@ -1463,6 +1551,19 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity styling \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script styling)'"
+    # The typeface scene through the Go binding (see the compose leg).
+    # This is the one host where KAYA_FONT_FILE crosses the environment
+    # trap this suite exists to keep honest: the guest reads it with
+    # kaya.Env and never os.Getenv, which under the JNI attach answers ""
+    # forever — and "" here is not an error, it is the guest's
+    # repo-relative default, so a wrong spelling would look like a device
+    # that lost the font rather than like the env bug it is
+    # (tools/check-go-env.sh is the static half).
+    run_apk typeface-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity typeface \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script typeface)'" \
+        --es KAYA_FONT_FILE "$FONT_ON_DEVICE"
     run_apk entry-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity entry \

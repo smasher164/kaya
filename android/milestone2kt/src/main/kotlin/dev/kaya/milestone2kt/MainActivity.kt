@@ -89,6 +89,18 @@ class MainActivity : ComponentActivity() {
             // silently running milestone2 against the ranges script.
             "ranges" -> Ranges::app
             "styling" -> Styling::app
+            // The typeface scene: the JVM guest is language-complete,
+            // the Compose arm applies a brand typeface and reads the
+            // resolved family back (2026-08-16), and the scene now
+            // requests the VENDORED font's bytes — "Sora", a family no
+            // platform preinstalls — so nothing holds the legs off and
+            // tools/android/run-emulator.sh runs them. The one thing
+            // this host supplies from outside is the FILE: the guest's
+            // default path is repo-relative and a device has no repo, so
+            // the leg pushes the font and names it in KAYA_FONT_FILE,
+            // which arrives as an extra and reaches the guest through
+            // the Os.setenv loop above.
+            "typeface" -> Typeface::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

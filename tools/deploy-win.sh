@@ -118,11 +118,70 @@ for arg in "$@"; do
         # loop is the only practical way to characterise a rare flake.
         background_rust|background_python|background_go|background_csharp|background_java) SUITE="$arg" ;;
         stall_rust|stall_python|stall_go|stall_csharp|stall_java) SUITE="$arg" ;;
+        a11yrows_rust|a11yrows_python|a11yrows_go|a11yrows_csharp|a11yrows_java) SUITE="$arg" ;;
+        styling_rust|styling_python|styling_go|styling_csharp|styling_java) SUITE="$arg" ;;
+        typeface_rust|typeface_python|typeface_go|typeface_csharp|typeface_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
 done
+
+# EVERY LEG THIS SCRIPT RUNS CAN BE RUN ON ITS OWN, and that is checked
+# here rather than remembered. The arms above and the `run_suite` calls
+# in the `all` case are two hand-written lists of one thing; when they
+# drift, the missing half is discovered by someone who needs a SINGLE
+# leg — mid-debugging, with a five-lane matrix behind them, being told
+# "unknown argument" by the script that just ran that very leg. The
+# three families this caught the day it landed (a11yrows_*, styling_*,
+# typeface_*) had been wired for a milestone each; the file already
+# carried the same regret in prose above background_*/stall_*.
+if ! python3 - "$0" <<'PY'
+import pathlib
+import re
+import sys
+
+
+def audit(text):
+    """Suite names `run_suite` runs that no case arm accepts."""
+    run = re.findall(r"(?m)^\s*run_suite (\w+)$", text)
+    arms = set()
+    for m in re.finditer(r"(?m)^\s*([\w|=*-]+)\) SUITE=", text):
+        arms.update(m.group(1).split("|"))
+    # `all` is the arm that runs them; a name it reaches needs an arm of
+    # its own to be reachable alone.
+    return sorted({name for name in run if name not in arms})
+
+
+# THE SELF-TEST FIRST: a checker that cannot see the drift it exists for
+# reports OK on every tree, including the one this fixed.
+#
+# The fixtures are COMPOSED rather than written out, and that is not
+# style: tools/check-steps.sh greps this file for `run_suite <name>` to
+# pair every leg with its launcher, and a fixture spelled in full is a
+# leg it would go looking for a run_x_rust.cmd for. Caught by that gate
+# the day this landed — two guards reading one file, which is the point
+# of both.
+call = "run_suite"
+drifted = f'x_rust) SUITE="$arg" ;;\n    all)\n        {call} x_rust\n        {call} y_go\n'
+if audit(drifted) != ["y_go"]:
+    sys.exit("deploy-win: SELF-TEST FAIL (a leg with no arm of its own was not seen)")
+if audit(f'y_go|x_rust) SUITE="$arg" ;;\n    {call} y_go\n    {call} x_rust\n'):
+    sys.exit("deploy-win: SELF-TEST FAIL (an arm'd leg was reported as unreachable)")
+
+missing = audit(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if missing:
+    sys.exit(
+        "deploy-win: these legs run in the `all` case but no argument arm "
+        f"accepts them, so none can be re-run alone: {', '.join(missing)}. "
+        "Add each to the `case \"$arg\"` list above (one line per scene "
+        "family) — the one-leg-repeatedly loop is how a flake gets "
+        "characterised, and it is unavailable exactly when it is needed."
+    )
+PY
+then
+    exit 1
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET="$ROOT/target/aarch64-pc-windows-msvc/release"
@@ -230,7 +289,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -427,7 +486,26 @@ run_ssh 'cmd /c if not exist C:\kaya\scenes mkdir C:\kaya\scenes'
 scp -q "$ROOT"/tools/scenes/*.steps "$HOST:C:/kaya/scenes/"
 # Set once for the machine rather than in forty checked-in .cmd files:
 # every leg runs through schtasks, which inherits the user environment.
-run_ssh 'setx KAYA_SCENES_DIR C:\kaya\scenes >nul' 
+run_ssh 'setx KAYA_SCENES_DIR C:\kaya\scenes >nul'
+
+# THE VENDORED FONT, for the same reason and by the same rule: the
+# typeface scene's guests hand the backend the font's BYTES (the
+# register-then-resolve path a brand's licensed font takes), so a guest
+# that cannot open the file cannot run the scene at all — it panics
+# naming KAYA_FONT_FILE. Shipped EVERY run, outside the deploy stamp,
+# exactly like the .steps above: an asset edit that a stamp skip
+# swallows is the same defect as a scene edit that never arrives.
+#
+# INTO THE REPO-MIRROR PATH. C:\kaya is already the repo root as far as
+# the guests are concerned — go.mod ships to C:\kaya and guests/go to
+# C:\kaya\guests\go below — so guests/assets/fonts lands at
+# C:\kaya\guests\assets\fonts and the guests' DEFAULT relative path
+# resolves for anything run from C:\kaya (probe.cmd included). The five
+# launchers still name it absolutely: the C# leg's cwd is C:\kaya\cs,
+# where the default would miss, and one spelling in all five beats four
+# legs that work by cwd and one that does not.
+run_ssh 'cmd /c if not exist C:\kaya\guests\assets\fonts mkdir C:\kaya\guests\assets\fonts'
+scp -q "$ROOT"/guests/assets/fonts/*.ttf "$HOST:C:/kaya/guests/assets/fonts/"
 
 
 # EXTENSIONS MUST BE VISIBLE, and this is not cosmetic. Explorer ships
@@ -834,27 +912,63 @@ timing deploy
 # clipboard seed naming `/nope/kaya-missing.txt`) rather than anything
 # about Windows in the core. Widening this filter to the whole suite is
 # one edit the day those three are fixed, and it is the widening to make.
-unit_tests_on_windows() {
-    echo "== unit tests on the guest (aarch64-pc-windows-msvc) =="
-    local want exe out rc built json
-    want=$(python3 - "$ROOT/crates/kaya/src/capi.rs" <<'PY'
+# ONE MODULE of the core's unit tests, run on the guest with its own
+# count rule: the filter selects it, the source file says how many
+# `#[test]`s it declares, and the two numbers must agree — a filter that
+# matches nothing exits 0 saying "0 passed", which is a green phase that
+# ran no code.
+guest_unit_module() {
+    local file="$1" module="$2" filter="$3" blurb="$4" hint="$5"
+    local want out rc passed
+    want=$(python3 - "$file" "$module" <<'PY'
 import pathlib
 import re
 import sys
 
-text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-m = re.search(r"(?m)^mod picked_tests \{", text)
+path, module = sys.argv[1], sys.argv[2]
+text = pathlib.Path(path).read_text(encoding="utf-8")
+m = re.search(rf"(?m)^mod {re.escape(module)} \{{", text)
 if not m:
-    sys.exit("deploy-win: crates/kaya/src/capi.rs has no `mod picked_tests` — "
-             "the module this lane runs on the guest moved or was renamed, and "
-             "a filter that matches nothing would report a clean run")
+    sys.exit(f"deploy-win: {path} has no `mod {module}` — the module this lane "
+             "runs on the guest moved or was renamed, and a filter that matches "
+             "nothing would report a clean run")
 end = text.index("\n}", m.end())
 count = text.count("#[test]", m.end(), end)
 if count < 1:
-    sys.exit("deploy-win: `mod picked_tests` declares no #[test] at all")
+    sys.exit(f"deploy-win: `mod {module}` declares no #[test] at all")
 print(count)
 PY
-    ) || exit 1
+    ) || return 1
+    rc=0
+    out=$(run_ssh "cmd /c \"cd /d C:\\kaya && kaya-unittests.exe $filter --test-threads=1\"" 2>&1) || rc=$?
+    echo "$out"
+    if [ "$rc" -ne 0 ]; then
+        echo "deploy-win: the core's $filter unit tests FAILED on the guest (rc=$rc)." >&2
+        echo "  $hint" >&2
+        return 1
+    fi
+    passed=$(printf '%s' "$out" | python3 -c '
+import re
+import sys
+
+m = re.search(r"(\d+) passed", sys.stdin.read())
+print(m.group(1) if m else -1)')
+    if [ "$passed" != "$want" ]; then
+        echo "deploy-win: the guest ran $passed of the $want tests in" >&2
+        echo "  $filter. A filter that selects nothing exits 0 with" >&2
+        echo "  \"0 passed\", so the count is what makes this phase mean" >&2
+        echo "  something — fix the filter or the module name, do not lower" >&2
+        echo "  the count. (The count is every #[test] the module declares;" >&2
+        echo "  this phase builds --features harness, so a harness-gated test" >&2
+        echo "  counts and runs.)" >&2
+        return 1
+    fi
+    echo "deploy-win: $passed/$want unit tests passed on the guest ($filter — $blurb)"
+}
+
+unit_tests_on_windows() {
+    echo "== unit tests on the guest (aarch64-pc-windows-msvc) =="
+    local exe built json ran
     json="$ROOT/target/win-unit-tests.json"
     built=0
     (cd "$ROOT" && cargo xwin test --locked --features harness --release \
@@ -888,39 +1002,31 @@ PY
     ) || exit 1
     rm -f "$json"
     scp -q "$exe" "$HOST:C:/kaya/kaya-unittests.exe"
-    rc=0
-    out=$(run_ssh 'cmd /c "cd /d C:\kaya && kaya-unittests.exe capi::picked_tests --test-threads=1"' 2>&1) || rc=$?
+    ran=0
+    # THE HANDLE ARMS, which no unix run compiles.
+    guest_unit_module "$ROOT/crates/kaya/src/capi.rs" picked_tests capi::picked_tests \
+        "the file-handle redemption, including the WRITE half and a save destination's create-and-truncate" \
+        "These are the same tests rung 1 runs on mac; a failure here and not there is Windows-only code — the HANDLE arms of protocol.rs's raw_handle/file_from_raw, or an OpenOptions combination that means something else on this OS." ||
+        ran=1
+    # THE WINUI BACKEND'S OWN TESTS, which no unix run compiles either —
+    # and which nothing ran ANYWHERE until 2026-08-16: they were built by
+    # the --no-run above (so they could not rot into non-compiling code)
+    # and then filtered out of the only invocation that runs anything.
+    # Four of them had never executed. They need this machine because
+    # they measure this machine: DirectWrite's system font collection,
+    # and a font file written under the app root and read back through
+    # its own name table (the typeface blob route, both directions).
+    guest_unit_module "$ROOT/crates/kaya/src/winui/mod.rs" tests winui::tests \
+        "the brand dictionary's crossed stops, the a11y role ladder, and the typeface blob route read back off its own file" \
+        "This is the WinUI backend measured against the real DirectWrite on this guest: a per-app font file written under the app root and read back through its name table, the system font collection's answer for a bare family, and the pure lowerings beside them." ||
+        ran=1
     # The binary goes whatever the verdict is: it is a transient of this
     # phase, not a deployed artifact, and one left behind would be the
-    # next run's stale exe waiting for a build that failed.
+    # next run's stale exe waiting for a build that failed. Which is why
+    # both modules above RETURN rather than exit — a failure that skipped
+    # this line would leave that exe on the guest.
     run_ssh 'cmd /c "del C:\kaya\kaya-unittests.exe 2>nul & exit /b 0"' || true
-    echo "$out"
-    if [ "$rc" -ne 0 ]; then
-        echo "deploy-win: the core's unit tests FAILED on the guest (rc=$rc)." >&2
-        echo "  These are the same tests rung 1 runs on mac; a failure here and" >&2
-        echo "  not there is Windows-only code — the HANDLE arms of" >&2
-        echo "  protocol.rs's raw_handle/file_from_raw, or an OpenOptions" >&2
-        echo "  combination that means something else on this OS." >&2
-        exit 1
-    fi
-    local passed
-    passed=$(printf '%s' "$out" | python3 -c '
-import re
-import sys
-
-m = re.search(r"(\d+) passed", sys.stdin.read())
-print(m.group(1) if m else -1)')
-    if [ "$passed" != "$want" ]; then
-        echo "deploy-win: the guest ran $passed of the $want tests in" >&2
-        echo "  capi::picked_tests. A filter that selects nothing exits 0 with" >&2
-        echo "  \"0 passed\", so the count is what makes this phase mean" >&2
-        echo "  something — fix the filter or the module name, do not lower" >&2
-        echo "  the count." >&2
-        exit 1
-    fi
-    echo "deploy-win: $passed/$want unit tests passed on the guest" \
-        "(capi::picked_tests — the file-handle redemption, including the WRITE" \
-        "half and a save destination's create-and-truncate)"
+    [ "$ran" -eq 0 ] || exit 1
 }
 unit_tests_on_windows
 timing unit-tests
@@ -1571,6 +1677,26 @@ case "$SUITE" in
         run_suite styling_go
         run_suite styling_csharp
         run_suite styling_java
+        # THE TYPEFACE SCENE (docs/styling-plan.md Slice 2b): the brand
+        # font's BYTES reach the text system and the FAMILY swaps, while
+        # sizes, weights and metrics stay the platform's. It exists
+        # because a typeface fails SILENTLY — DirectWrite, like every
+        # other font stack, renders a family it does not have in
+        # something else — so a typo, a stale lowering and a working swap
+        # all look identical to every other observation kaya owns, and
+        # only `expect_typeface`, which reads the family the text system
+        # actually resolved off the real TextBlocks, can tell them apart
+        # (tools/scenes/typeface.steps' header carries the reasoning, and
+        # why the font is vendored rather than installed). Pooled with
+        # the styling family: no typed input, no window close, nothing
+        # foreground-sensitive. The vendored font reaches these guests
+        # through the ship near the top of this script and the
+        # KAYA_FONT_FILE line in each launcher.
+        run_suite typeface_rust
+        run_suite typeface_python
+        run_suite typeface_go
+        run_suite typeface_csharp
+        run_suite typeface_java
         drain_suites
         # The ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one
         # (docs/ranges-plan.md D1), plus the two rules that make those

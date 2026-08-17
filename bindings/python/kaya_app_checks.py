@@ -1338,14 +1338,18 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     brand = [r for r in kaya._tx[before:]
              if _rec_kind(r) == kaya.wire.TX_SET_BRAND_ACCENT]
     check("brand_accent reaches the records", len(brand) == 1)
-    if brand:
-        seed, mask, light, dark = (
-            int.from_bytes(brand[0][8 + 4 * i:12 + 4 * i], "little")
-            for i in range(4)
-        )
-        check("the seed rides as one packed sRGB word", seed == 0x3584E4)
-        check("and an unstated appearance sets no mask bit",
-              (mask, light, dark) == (0, 0, 0))
+    # NOT `if brand:` — the typeface clauses below learned this under a
+    # watched perturbation: behind the guard, a missing record makes the
+    # two field clauses VANISH instead of going red (the harness-feature
+    # failure shape, 194 -> 172). A missing record answers the sentinel
+    # and both clauses fail.
+    seed, mask, light, dark = (
+        tuple(int.from_bytes(brand[0][8 + 4 * i:12 + 4 * i], "little")
+              for i in range(4))
+        if len(brand) == 1 else (None, None, None, None))
+    check("the seed rides as one packed sRGB word", seed == 0x3584E4)
+    check("and an unstated appearance sets no mask bit",
+          (mask, light, dark) == (0, 0, 0))
     _rewind(before)
 
     # THE MASK IS THE ONE THING THIS CALL CAN GET SILENTLY WRONG: swap
@@ -1413,6 +1417,183 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     check("an in-u32 ARGB word passes through for the ROOT's wall to refuse",
           len(argb) == 1
           and int.from_bytes(argb[0][8:12], "little") == 0xFF3584E4)
+    _rewind(before)
+
+    # THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b), the accent's
+    # twin one slot over — and the half that cannot be seen any other
+    # way. Every platform's font API renders SOMETHING for a family it
+    # does not have, so a per-platform row that never left this guest is
+    # indistinguishable, on every observation kaya owns, from a lowering
+    # that applied: `expect_typeface` reads a RESOLVED family, and a
+    # dropped row reads as the default the platform would have used.
+    # That is the `spacing=` lesson with a font on it.
+
+    # THE CLASS IS HAND-WRITTEN AND THE CONSTANTS ARE GENERATED, so the
+    # first clause is the census that holds them together — the
+    # kaya.Symbol shape one vocabulary over. Add a platform to
+    # crates/kaya/src/spec.rs, regenerate, and this goes red until
+    # kaya.Platform grows the name, instead of leaving Python the one
+    # binding that cannot address the new backend (invariant 2).
+    generated_platforms = {
+        name[len("PLATFORM_"):].lower(): value
+        for name, value in vars(kaya.wire).items()
+        if name.startswith("PLATFORM_") and isinstance(value, int)
+    }
+    authored_platforms = {
+        name.lower(): value
+        for name, value in vars(kaya.Platform).items()
+        if name.isupper()
+    }
+    check("kaya.Platform is exactly the generated vocabulary, name for name",
+          authored_platforms == generated_platforms
+          and len(authored_platforms) == 5)
+    check("and the platform name spelling is derived from it, not typed twice",
+          kaya._PLATFORM_NAMES == generated_platforms)
+    check("and the tag->name table is that one reversed",
+          kaya._PLATFORM_NAME_OF
+          == {v: k for k, v in generated_platforms.items()})
+
+    def _typeface(rec):
+        """The TX_SET_BRAND_TYPEFACE record, field by field:
+        8 header, u32 mask, u32 reserved, the family value, a counted
+        value list (tag, family, tag, family, ...), then the font slot.
+        Answers (mask, family, pairs, font_value_kind)."""
+        def one(off):
+            kind = int.from_bytes(rec[off:off + 4], "little")
+            length = int.from_bytes(rec[off + 4:off + 8], "little")
+            body = rec[off + 8:off + 8 + length]
+            nxt = off + 8 + (length + 7) // 8 * 8
+            if kind == kaya.wire.VALUE_I64:
+                return kind, int.from_bytes(body, "little"), nxt
+            if kind == kaya.wire.VALUE_STR:
+                return kind, body.decode(), nxt
+            return kind, body, nxt
+        mask = int.from_bytes(rec[8:12], "little")
+        _k, family, off = one(16)
+        count = int.from_bytes(rec[off:off + 4], "little")
+        off += 8
+        flat = []
+        for _ in range(count):
+            _k, v, off = one(off)
+            flat.append(v)
+        font_kind, _v, _off = one(off)
+        return mask, family, list(zip(flat[::2], flat[1::2])), font_kind
+
+    def _typeface_records(records):
+        return [r for r in records
+                if _rec_kind(r) == kaya.wire.TX_SET_BRAND_TYPEFACE]
+
+    before = len(kaya._tx)
+    kaya.brand_typeface("Georgia")
+    typefaces = _typeface_records(kaya._tx[before:])
+    check("brand_typeface reaches the records", len(typefaces) == 1)
+    # NOT `if typefaces:`, and the difference was measured rather than
+    # reasoned: under a perturbation that queued the record and dropped
+    # it on the floor, the two clauses below VANISHED instead of going
+    # red — the harness-feature failure shape exactly (22 tests that
+    # silently disappeared, 194 -> 172, rather than failing). A missing
+    # record now answers the sentinel and both clauses fail.
+    mask, family, pairs, font_kind = (
+        _typeface(typefaces[0]) if len(typefaces) == 1
+        else (None, None, None, None))
+    # THE MASK AND THE SLOT ARE THE PAIR THIS CALL CAN GET SILENTLY
+    # WRONG, exactly as the accent's appearance bits are: the convention
+    # is the CORE's (crates/kaya/src/wire.rs writes bit 0 for a font blob
+    # and an EMPTY STR in the slot when there is none), and a binding
+    # that set the bit without the blob would send every backend to
+    # register nothing.
+    check("with the family as a Str, no rows, and bit 0 clear",
+          (mask, family, pairs) == (0, "Georgia", []))
+    check("and the font slot written anyway, as the empty Str",
+          font_kind == kaya.wire.VALUE_STR)
+    _rewind(before)
+
+    # THE ROWS RIDE IN DECLARATION ORDER AND BOTH SPELLINGS RESOLVE, in
+    # one clause because they fail together: a lowering picks the FIRST
+    # row it matches, so an order this binding reshuffles is a family
+    # silently swapped between two platforms.
+    before = len(kaya._tx)
+    kaya.brand_typeface("Georgia",
+                        {kaya.Platform.LINUX: "DejaVu Serif",
+                         "windows": "Constantia",
+                         kaya.Platform.ANDROID: "Noto Serif"},
+                        font=b"\x00\x01\x00\x00sfnt-ish")
+    rows = _typeface_records(kaya._tx[before:])
+    check("per-platform rows reach the wire in declaration order",
+          len(rows) == 1
+          and _typeface(rows[0])[2] == [
+              (kaya.wire.PLATFORM_LINUX, "DejaVu Serif"),
+              (kaya.wire.PLATFORM_WINDOWS, "Constantia"),
+              (kaya.wire.PLATFORM_ANDROID, "Noto Serif")])
+    check("and font= sets bit 0 with a Blob in the slot",
+          len(rows) == 1
+          and _typeface(rows[0])[0] == 1
+          and _typeface(rows[0])[3] == kaya.wire.VALUE_BLOB)
+    _rewind(before)
+
+    # THE CLOSED SET AND THE TWO TYPES, said out loud where the other
+    # seven bindings have `Platform`, `&str` and `Option<&[u8]>`. The
+    # bool key is the coercion that would otherwise pass: `{True: ...}`
+    # reads as platform 1, mac, out of a key that meant nothing.
+    for what, kwargs, kind, fragment in (
+        ("an unknown platform name",
+         {"family": "Georgia", "platforms": {"bsd": "Charter"}},
+         ValueError, "is not a platform"),
+        ("a platform tag outside the vocabulary",
+         {"family": "Georgia", "platforms": {6: "Charter"}},
+         ValueError, "is not a platform"),
+        ("a bool platform key",
+         {"family": "Georgia", "platforms": {True: "Charter"}},
+         TypeError, "not bool"),
+        ("platforms= that is not a mapping",
+         {"family": "Georgia", "platforms": [("linux", "Charter")]},
+         TypeError, "takes a mapping"),
+        ("a family that is not a str", {"family": b"Georgia"},
+         TypeError, "takes a family NAME as str"),
+        ("a family that is not a str on a ROW",
+         {"family": "Georgia", "platforms": {"linux": 12}},
+         TypeError, "takes a family NAME as str"),
+        ("font= that is not bytes",
+         {"family": "Georgia", "font": "/fonts/kaya.ttf"},
+         TypeError, "takes a font FILE's bytes"),
+    ):
+        before_bad = len(kaya._tx)
+        try:
+            kaya.brand_typeface(**kwargs)
+            ok = False
+        except Exception as exc:
+            ok = isinstance(exc, kind) and fragment in str(exc)
+        _rewind(before_bad)
+        check(f"brand_typeface refuses {what}", ok)
+
+    # A refusal NAMES the vocabulary: with no enum to read it off, "not a
+    # platform" leaves the reader's next question unanswered.
+    try:
+        kaya.brand_typeface("Georgia", {"bsd": "Charter"})
+        named = False
+    except ValueError as exc:
+        named = all(f"'{n}'" in str(exc) for n in sorted(kaya._PLATFORM_NAMES))
+    check("and the platform refusal lists the whole vocabulary", named)
+
+    # WHAT IS DELIBERATELY NOT REFUSED HERE, pinned so a later edit
+    # cannot quietly add it: an empty family, an empty family on a row
+    # and one platform named twice are all the ROOT's, in one sentence
+    # every language reads (crates/kaya/src/scene.rs). The accent's
+    # 24-bit rule is why — this file's copy of a root wall was once the
+    # only wall in eight (invariant 1).
+    before = len(kaya._tx)
+    passed_through = 0
+    for kwargs in ({"family": ""},
+                   {"family": "Georgia", "platforms": {"linux": ""}},
+                   {"family": "Georgia",
+                    "platforms": {kaya.Platform.LINUX: "A", "linux": "B"}}):
+        try:
+            kaya.brand_typeface(**kwargs)
+            passed_through += 1
+        except Exception:
+            pass
+    check("an empty family, an empty row and a duplicated platform all "
+          "pass through for the ROOT to refuse", passed_through == 3)
     _rewind(before)
 
     with kaya.column():

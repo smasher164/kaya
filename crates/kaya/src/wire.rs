@@ -78,6 +78,12 @@ pub const TX_REVEAL_RANGE: u16 = 40;
 /// differ for a guest either.
 pub const TX_SHOW_SAVE_DIALOG: u16 = 41;
 pub const TX_SET_BRAND_ACCENT: u16 = 42;
+/// The brand typeface REQUEST (docs/styling-plan.md Slice 2b). Its
+/// per-platform pairs ride the wire where the accent's never do: a
+/// binding cannot resolve its platform (the JVM says "Linux" on
+/// Android) but a lowering IS its platform, so the rows travel and each
+/// backend picks its own.
+pub const TX_SET_BRAND_TYPEFACE: u16 = 43;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -117,6 +123,9 @@ pub const APPLY_SELECT_RANGE: u16 = 29;
 pub const APPLY_REVEAL_RANGE: u16 = 30;
 pub const APPLY_PRESENT_SAVE_DIALOG: u16 = 31;
 pub const APPLY_SET_BRAND: u16 = 32;
+/// The brand typeface, unresolved: the request's body verbatim, because
+/// the LOWERING is what resolves a family name (Slice 2b).
+pub const APPLY_SET_TYPEFACE: u16 = 33;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -249,6 +258,87 @@ pub const ALIGN_CENTER: u32 = 1;
 pub const ALIGN_END: u32 = 2;
 pub const ALIGN_STRETCH: u32 = 3;
 pub const ALIGN_BASELINE: u32 = 4;
+
+/// Which platform a per-platform brand value is for (spec enum
+/// "platform"). ONE ENTRY PER BACKEND ROSTER ROW, not per operating
+/// system: the roster is what reads these, so a tag no backend serves
+/// would be a value no lowering could pick.
+pub const PLATFORM_MAC: u32 = 1;
+pub const PLATFORM_IOS: u32 = 2;
+pub const PLATFORM_LINUX: u32 = 3;
+pub const PLATFORM_WINDOWS: u32 = 4;
+pub const PLATFORM_ANDROID: u32 = 5;
+
+/// The platform vocabulary as one table, in wire order: `(id, name)`.
+/// SYMBOLS' shape and SYMBOLS' reason — the NAME is what the root's
+/// wall prints when a guest sends a tag nobody serves, so the sentence
+/// comes from the same place the values do.
+pub const PLATFORMS: &[(u32, &str)] = &[
+    (PLATFORM_MAC, "mac"),
+    (PLATFORM_IOS, "ios"),
+    (PLATFORM_LINUX, "linux"),
+    (PLATFORM_WINDOWS, "windows"),
+    (PLATFORM_ANDROID, "android"),
+];
+
+/// WHICH PLATFORM THIS CORE IS, as a tag.
+///
+/// The reason this exists rather than a constant copied into each
+/// backend: the two INTERPRETER backends are not Rust, so a per-platform
+/// row would have to be matched against a private copy of this
+/// vocabulary in Swift and in Kotlin — the CLIP_* mirror trap exactly,
+/// where a drifted value ships a wrong answer with nothing pinning
+/// either copy. The apply record carries this number instead, so a
+/// lowering asks "is this row mine?" without knowing any tag at all.
+///
+/// And the core may answer it where a BINDING may not: a guest binding
+/// genuinely cannot tell (the JVM says "Linux" on Android), while this
+/// crate is compiled once per target and cfg! is the compiler's own
+/// answer.
+pub fn this_platform() -> u32 {
+    #[cfg(target_os = "macos")]
+    {
+        PLATFORM_MAC
+    }
+    #[cfg(target_os = "ios")]
+    {
+        PLATFORM_IOS
+    }
+    #[cfg(target_os = "linux")]
+    {
+        PLATFORM_LINUX
+    }
+    #[cfg(target_os = "windows")]
+    {
+        PLATFORM_WINDOWS
+    }
+    #[cfg(target_os = "android")]
+    {
+        PLATFORM_ANDROID
+    }
+    // No other target builds a backend; the compile-time assertion is
+    // the cfg set above being exhaustive over the roster.
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "android"
+    )))]
+    {
+        compile_error!(
+            "kaya: this_platform has no tag for this target — the platform \
+             vocabulary is one entry per backend roster row"
+        )
+    }
+}
+
+/// The tag's name, or None when nothing in the vocabulary carries it.
+pub fn platform_name(tag: i64) -> Option<&'static str> {
+    u32::try_from(tag)
+        .ok()
+        .and_then(|t| PLATFORMS.iter().find(|(id, _)| *id == t).map(|(_, n)| *n))
+}
 
 pub const ROLE_DESTRUCTIVE: u32 = 1;
 pub const ROLE_PROMINENT: u32 = 2;
@@ -866,6 +956,85 @@ pub fn decode_transaction_with_blobs(
                     light: (mask & 1 != 0).then_some(light_raw),
                     dark: (mask & 2 != 0).then_some(dark_raw),
                 }
+            }
+            TX_SET_BRAND_TYPEFACE => {
+                let mask = r.u32();
+                // The apply record's platform stamp sits here; on the tx
+                // side it is reserved, because a guest cannot name its
+                // platform and is never asked to.
+                let _reserved = r.u32();
+                let family = match r.value() {
+                    Value::Str(s) => s,
+                    other => panic!(
+                        "kaya: set_brand_typeface family is {other:?}, wanted a string"
+                    ),
+                };
+                // The filters' pair encoding, one tier over: an I64
+                // platform tag then that platform's family, read in
+                // twos. Same shape, so the same odd-count refusal.
+                let flat = r.record();
+                assert!(
+                    flat.len() % 2 == 0,
+                    "kaya: set_brand_typeface carries {} platform values (pairs of \
+                     platform tag and family, so an even count)",
+                    flat.len()
+                );
+                let platforms = flat
+                    .chunks_exact(2)
+                    .map(|pair| {
+                        let tag = match &pair[0] {
+                            Value::I64(v) => *v,
+                            other => panic!(
+                                "kaya: set_brand_typeface platform tag is {other:?}, \
+                                 wanted one of the platform enum's values"
+                            ),
+                        };
+                        let family = match &pair[1] {
+                            Value::Str(s) => s.clone(),
+                            other => panic!(
+                                "kaya: set_brand_typeface per-platform family is \
+                                 {other:?}, wanted a string"
+                            ),
+                        };
+                        let tag = u32::try_from(tag).unwrap_or_else(|_| {
+                            panic!(
+                                "kaya: set_brand_typeface platform tag {tag} is not in \
+                                 the platform vocabulary (mac/ios/linux/windows/android)"
+                            )
+                        });
+                        (tag, family)
+                    })
+                    .collect();
+                // THE FONT SLOT IS ALWAYS WRITTEN, and the mask is what
+                // says whether it means anything: an absent font rides
+                // as an empty Str, so the record's field count never
+                // varies with the payload (the accent's mask, verbatim).
+                let font = match (mask & 1 != 0, r.value()) {
+                    (true, Value::Blob(b)) => Some(b),
+                    (true, other) => panic!(
+                        "kaya: set_brand_typeface says a font blob is present but \
+                         carries {other:?}"
+                    ),
+                    // THE OTHER DIRECTION IS LOUD TOO (the java arm's
+                    // finding, 2026-08-16): a clear mask bit with a real
+                    // blob in the slot was accepted silently — the font
+                    // dropped, the blob table stayed empty, and a brand
+                    // book's licensed face vanished with no error
+                    // anywhere. A disagreement between the mask and the
+                    // slot is an encoder bug in whichever binding wrote
+                    // it, and it dies here naming itself.
+                    (false, Value::Blob(_)) => panic!(
+                        "kaya: set_brand_typeface carries a font blob but its mask \
+                         bit says none is present — the encoding disagrees with \
+                         itself and the font would be silently dropped"
+                    ),
+                    (false, _) => None,
+                };
+                TxOp::SetBrandTypeface(crate::protocol::TypefaceRequest {
+                    family,
+                    platforms,
+                    font,
+                })
             }
             TX_SHOW_SAVE_DIALOG => {
                 let window = WindowId(r.u64());
@@ -1804,6 +1973,16 @@ impl Writer {
                     write_value(b, &Value::Str(accepting.clone()), blobs);
                 })
             }
+            ApplyOp::SetTypeface(req) => self.record(APPLY_SET_TYPEFACE, |b, blobs| {
+                // THE REQUEST'S BODY, one writer for both channels: the
+                // core resolves the FAMILY nowhere (docs/styling-plan.md
+                // Slice 2b), so two writers would be two chances to
+                // disagree about a shape neither side transforms. The
+                // one word it does fill is which platform this core is,
+                // which is the fact an interpreter cannot get any other
+                // way without copying the vocabulary.
+                write_typeface(b, req, this_platform(), blobs);
+            }),
             ApplyOp::ClearUndo { window } => self.record(APPLY_CLEAR_UNDO, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
             }),
@@ -2155,6 +2334,9 @@ impl Writer {
                     b.extend_from_slice(&dark.unwrap_or(0).to_le_bytes());
                 })
             }
+            TxOp::SetBrandTypeface(req) => self.record(TX_SET_BRAND_TYPEFACE, |b, blobs| {
+                write_typeface(b, req, 0, blobs);
+            }),
             TxOp::ShowSaveDialog(spec) => self.record(TX_SHOW_SAVE_DIALOG, |b, blobs| {
                 b.extend_from_slice(&spec.window.0.to_le_bytes());
                 b.extend_from_slice(&spec.dialog.0.to_le_bytes());
@@ -2310,6 +2492,37 @@ fn write_path(b: &mut Vec<u8>, path: &Path, blobs: &mut Vec<Arc<[u8]>>) {
     b.extend_from_slice(&0u32.to_le_bytes());
     for key in path {
         write_value(b, key, blobs);
+    }
+}
+
+/// A typeface request's body: mask, the second word, family, the
+/// platform pairs, and the font slot. Both channels' arms call this;
+/// they differ in ONE word, and `second` is it — the tx record has
+/// nothing to say there (a guest cannot name its platform) while the
+/// apply record stamps WHICH platform this core is, so a lowering can
+/// pick its row without carrying a copy of the vocabulary.
+fn write_typeface(
+    b: &mut Vec<u8>,
+    req: &crate::protocol::TypefaceRequest,
+    second: u32,
+    blobs: &mut Vec<Arc<[u8]>>,
+) {
+    b.extend_from_slice(&u32::from(req.font.is_some()).to_le_bytes());
+    b.extend_from_slice(&second.to_le_bytes());
+    write_value(b, &Value::Str(req.family.clone()), blobs);
+    // The pair list, written out rather than through write_values:
+    // that helper is test-only (the tx encoder is), and this writer
+    // serves the APPLY channel, which ships.
+    b.extend_from_slice(&((req.platforms.len() * 2) as u32).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    for (tag, family) in &req.platforms {
+        write_value(b, &Value::I64(i64::from(*tag)), blobs);
+        write_value(b, &Value::Str(family.clone()), blobs);
+    }
+    // The slot is written either way; see the decoder's note.
+    match &req.font {
+        Some(bytes) => write_value(b, &Value::Blob(bytes.clone()), blobs),
+        None => write_value(b, &Value::Str(String::new()), blobs),
     }
 }
 

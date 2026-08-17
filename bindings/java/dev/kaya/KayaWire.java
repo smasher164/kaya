@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xf84da2a3fe758bc7L;
+    public static final long SPEC_HASH = 0x7c7a23e2127c3801L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -93,6 +93,11 @@ public final class KayaWire {
     public static final int FILE_MODE_READ = 0;
     public static final int FILE_MODE_WRITE = 1;
     public static final int FILE_MODE_READ_WRITE = 2;
+    public static final int PLATFORM_MAC = 1;
+    public static final int PLATFORM_IOS = 2;
+    public static final int PLATFORM_LINUX = 3;
+    public static final int PLATFORM_WINDOWS = 4;
+    public static final int PLATFORM_ANDROID = 5;
     public static final int ALIGN_START = 0;
     public static final int ALIGN_CENTER = 1;
     public static final int ALIGN_END = 2;
@@ -173,6 +178,7 @@ public final class KayaWire {
     public static final short TX_KIND_REVEAL_RANGE = 40;
     public static final short TX_KIND_SHOW_SAVE_DIALOG = 41;
     public static final short TX_KIND_SET_BRAND_ACCENT = 42;
+    public static final short TX_KIND_SET_BRAND_TYPEFACE = 43;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -205,6 +211,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_REVEAL_RANGE = 30;
     public static final short APPLY_KIND_PRESENT_SAVE_DIALOG = 31;
     public static final short APPLY_KIND_SET_BRAND = 32;
+    public static final short APPLY_KIND_SET_TYPEFACE = 33;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -644,6 +651,17 @@ public final class KayaWire {
         b.putInt(mask);
         b.putInt(light);
         b.putInt(dark);
+        return finish(b);
+    }
+
+    /** REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request. */
+    public static byte[] txSetBrandTypeface(int mask, Object family, Object[] platforms, Object font) {
+        ByteBuffer b = begin(TX_KIND_SET_BRAND_TYPEFACE);
+        b.putInt(mask);
+        b.putInt(0);
+        encodeValue(b, family);
+        encodeValues(b, platforms);
+        encodeValue(b, font);
         return finish(b);
     }
 

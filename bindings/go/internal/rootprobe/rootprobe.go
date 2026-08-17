@@ -1,4 +1,5 @@
-// The presentation pump, for NEGATIVE TESTS ONLY.
+// The presentation pump, FOR TESTS ONLY: the root's walls, and the
+// stream on the far side of them.
 //
 // A binding's declare-time guards are not the binding's: they are the
 // ROOT'S, and the root only sees a transaction when something resolves
@@ -8,6 +9,16 @@
 // from an ordinary `go test`. This package makes it reachable: submit,
 // then play the pump for exactly one transaction and let the root
 // answer.
+//
+// AND THE SAME PUMP ANSWERS THE POSITIVE QUESTION, which is why this
+// package no longer says "negative tests only": a wall that refuses is
+// half the guard, and the other half is that what SURVIVES the root is
+// what the app asked for. PumpBatch hands back the apply records
+// themselves, so a test can read the request as the BACKEND will get it
+// (family, per-platform rows, the core's platform stamp) rather than as
+// the binding believes it queued — the same doctrine that keeps the
+// styling surface from ever reading a write back through the API that
+// made it.
 //
 // WHY IT LIVES UNDER internal/. Go refuses cgo in _test.go files
 // outright ("use of cgo in test ... not supported"), so the C call
@@ -40,10 +51,36 @@ import "unsafe"
 // it applied resolved to no commands at all (0 means shutdown to every
 // pump, so the core never returns it for an empty batch). Callers mount
 // something.
-func Pump() int {
+func Pump() int { return len(PumpBatch()) }
+
+// PumpBatch is Pump with the bytes kept: one transaction resolved, the
+// batch's apply records copied into Go memory. Pump is its length, so
+// the two cannot drift about what "one transaction" means.
+//
+// THE BLOB PAYLOADS ARE NOT IN HERE. A blob value in a record is a
+// 1-based index into the batch's own table, which BlobData resolves and
+// which the NEXT pump replaces — so read what you need before pumping
+// again (the pump contract, kaya.h).
+func PumpBatch() []byte {
 	// The pump's documented budget: at least 64 KiB, and an overflowing
 	// batch fails loudly rather than truncating.
 	buf := make([]byte, 64*1024)
-	return int(C.kaya_next_commands(
+	n := int(C.kaya_next_commands(
 		(*C.uint8_t)(unsafe.Pointer(&buf[0])), C.uintptr_t(len(buf))))
+	return buf[:n:n]
+}
+
+// BlobData fetches the bytes an apply record's blob value named, copied
+// into Go memory. An unknown handle — or one from a superseded batch —
+// reads as nil, which is what a stale read looks like rather than a
+// crash.
+func BlobData(handle uint64) []byte {
+	var n C.uintptr_t
+	p := C.kaya_blob_data(C.uint64_t(handle), &n)
+	if p == nil {
+		return nil
+	}
+	// COPY, do not alias: the pointer borrows core memory that the next
+	// pump frees for reuse.
+	return C.GoBytes(unsafe.Pointer(p), C.int(n))
 }

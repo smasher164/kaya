@@ -371,6 +371,45 @@ pub struct SaveDialogSpec {
     pub filters: Vec<(String, String)>,
 }
 
+/// A brand-typeface request, carried UNRESOLVED from the guest to every
+/// backend (docs/styling-plan.md Slice 2b).
+///
+/// `family` is the default; `platforms` are the per-platform overrides
+/// as `(tag, family)` pairs over the spec's `platform` enum; `font` is
+/// an optional font file's bytes. Nothing here is resolved by the core,
+/// and that is the design: a colour is one number every platform means
+/// the same way, while a family NAME is a lookup only the platform can
+/// do — and a binding cannot even name its own platform (the JVM says
+/// "Linux" on Android), where a lowering IS one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypefaceRequest {
+    pub family: String,
+    pub platforms: Vec<(u32, String)>,
+    pub font: Option<Blob>,
+}
+
+impl TypefaceRequest {
+    /// The family THIS platform asked for: its own row if it has one,
+    /// the default otherwise. Every backend calls this rather than
+    /// re-walking the pairs, so "which row is mine" is answered once —
+    /// paired with `wire::this_platform()`, which says which row that
+    /// is.
+    ///
+    /// The two Rust-native backends (gtk.rs, winui/mod.rs) call this;
+    /// the two interpreter backends are not Rust and answer the same
+    /// question against the apply record's platform stamp, so no copy of
+    /// the vocabulary lives in Swift or Kotlin. `allow(dead_code)`
+    /// because a host build compiling neither backend still compiles
+    /// this file — mac builds the SwiftUI interpreter, not gtk.
+    #[allow(dead_code)]
+    pub fn family_for(&self, platform: u32) -> &str {
+        self.platforms
+            .iter()
+            .find(|(tag, _)| *tag == platform)
+            .map_or(self.family.as_str(), |(_, f)| f.as_str())
+    }
+}
+
 /// One clip, offered in several representations at once.
 ///
 /// A RECORD AND NOT A LIST, which is the whole shape: every platform
@@ -1489,6 +1528,12 @@ pub enum TxOp {
         light: Option<u32>,
         dark: Option<u32>,
     },
+    /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
+    /// a default family, the per-platform overrides, and optionally a
+    /// font file's bytes. Set once, before the first mount — the
+    /// accent's wall verbatim. The core resolves NOTHING; every backend
+    /// picks its own row and looks the family up itself.
+    SetBrandTypeface(TypefaceRequest),
     /// Put one clip on the system clipboard.
     Copy(Clip),
     /// Read the clipboard outside any paste gesture — the privileged
@@ -1726,6 +1771,12 @@ pub enum ApplyOp {
     SetBrand {
         accent: crate::brand::BrandAccent,
     },
+    /// The brand typeface, as requested and unresolved (Slice 2b): the
+    /// backend picks its platform's row, registers the blob with its
+    /// platform's app-font API when one rode along, gates on the family
+    /// being installed, and substitutes it into its own type ramp.
+    /// Emitted once, before the first mount's ops.
+    SetTypeface(TypefaceRequest),
 }
 
 /// Where occurrences go: the Rust API consumes over mpsc, the C ABI over

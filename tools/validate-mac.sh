@@ -54,7 +54,11 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # arrive, when they move into SCENES. Empty today: styling graduated
 # 2026-08-12 when its fan-out landed all eight guests and the real
 # brand lowerings (winui's heading arm was the last stub out).
-DEPTH_SCENES=""
+# The typeface (docs/styling-plan.md Slice 2b) is the depth slice in
+# flight: protocol + SwiftUI + the Rust binding, mac only. The other
+# three backends decode the record and refuse through depth_stub, which
+# is what holds their lanes' legs off in check-steps and check-stubs.
+DEPTH_SCENES="typeface"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1113,6 +1117,17 @@ run styling-haskell-swiftui env KAYA_SELFTEST=styling "$(hs_bin styling)"
 run styling-java-swiftui env KAYA_SELFTEST=styling KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 run styling-c-swiftui env KAYA_SELFTEST=styling target/c-guests/styling
+drain
+
+# The typeface scene: the brand typeface swaps the FAMILY and nothing
+# else. A DEPTH slice — rust only, mac only — and the one assertion that
+# matters reads the RESOLVED family off the real NSTextField and
+# NSTextView, never the request: every font API on this platform renders
+# something for a family it does not have, so an echo would report a
+# perfect swap for a font that was never installed.
+KAYA_SELFTEST_SCRIPT="$(scene_script typeface)"
+export KAYA_SELFTEST_SCRIPT
+run typeface-rust-swiftui env KAYA_SELFTEST=typeface "$RUST_GUESTS"/typeface
 drain
 
 # The clipboard scene: one clip in several representations, and the

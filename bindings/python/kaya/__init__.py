@@ -2375,6 +2375,190 @@ def brand_accent(seed, light=None, dark=None):
     ))
 
 
+class Platform:
+    """WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
+    "platform"; docs/styling-plan.md Slice 2b): one entry per backend
+    roster row, closed. `brand_typeface` takes these as plain names too
+    — `{"linux": "DejaVu Serif"}` — the `role("heading")` /
+    `align="center"` spelling this binding uses for every closed set.
+
+    AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
+    `Platform.current()` and there will not be: a binding cannot answer
+    that question — `sys.platform` reads "linux" on Android exactly as
+    the JVM says "Linux" there — and it does not have to. Every row
+    travels to every backend and each backend picks its own, so the
+    question never arises on this side of the wire. A guest that branched
+    on its platform would also be a guest that ships different code per
+    platform, which is the thing kaya exists to not do.
+    """
+
+    MAC = wire.PLATFORM_MAC
+    IOS = wire.PLATFORM_IOS
+    LINUX = wire.PLATFORM_LINUX
+    WINDOWS = wire.PLATFORM_WINDOWS
+    ANDROID = wire.PLATFORM_ANDROID
+
+
+#: The name spelling of the same five, DERIVED from the class rather than
+#: typed a second time — `_SYMBOL_NAMES`' discipline one vocabulary over:
+#: two hand-written tables are two things to keep in step, and a drifted
+#: one hands a platform's family to a DIFFERENT platform with nothing
+#: raised anywhere and no lane able to see it (each backend reads only
+#: its own row). `sorted()` of this is what the refusals print, so an app
+#: that mistypes is told what it may say.
+_PLATFORM_NAMES = {
+    name.lower(): value
+    for name, value in vars(Platform).items()
+    if name.isupper()
+}
+
+#: Tag -> name, so a refusal that has only a tag in hand can still say it
+#: in the app's own words. Derived from the table above, not typed again.
+_PLATFORM_NAME_OF = {value: name for name, value in _PLATFORM_NAMES.items()}
+
+
+def _platform_value(platform):
+    """One platform tag, from either spelling, refused here if it is
+    neither — the `_role_value` wall one vocabulary over, and this
+    binding's spelling of what the other seven get from an enum TYPE at
+    compile time.
+
+    WHAT STAYS THE ROOT'S, deliberately: naming one platform TWICE (two
+    spellings of the same row are two distinct dict keys, so a mapping
+    does not close that door) and an empty family on a row. Both die in
+    the root's own words, the same sentence all eight languages get.
+    """
+    if isinstance(platform, str):
+        try:
+            return _PLATFORM_NAMES[platform]
+        except KeyError:
+            raise ValueError(
+                f"kaya: brand_typeface: {platform!r} is not a platform — the "
+                f"vocabulary is {sorted(_PLATFORM_NAMES)}"
+            ) from None
+    # bool BEFORE int, which it subclasses: `{True: "Georgia"}` would
+    # otherwise read as platform 1 — mac — out of a key that meant
+    # nothing at all.
+    if isinstance(platform, bool) or not isinstance(platform, int):
+        raise TypeError(
+            f"kaya: brand_typeface: a per-platform key is kaya.Platform.LINUX "
+            f"or its name, not {type(platform).__name__} — an app names the "
+            "platforms it has a family for; it never asks which one it is"
+        )
+    if platform not in _PLATFORM_NAMES.values():
+        raise ValueError(
+            f"kaya: brand_typeface: {platform} is not a platform — the "
+            f"vocabulary is {sorted(_PLATFORM_NAMES)} "
+            "(kaya.Platform.MAC/IOS/LINUX/WINDOWS/ANDROID)"
+        )
+    return platform
+
+
+def _typeface_family(what, family):
+    """The wire field's domain and NOTHING SEMANTIC: this binding's
+    spelling of the `&str` the other seven take at compile time.
+
+    THE EMPTY FAMILY IS DELIBERATELY NOT REFUSED HERE, and neither is a
+    family nothing has installed. The first is a real author error with
+    a real sentence, and that sentence is the ROOT's ("an app that wants
+    the platform's own typeface declares none at all") so all eight
+    languages read the same one — a binding-local copy of a root wall was
+    measured as the only wall in eight for the accent's 24-bit rule
+    (invariant 1), and this file does not repeat that. The second is not
+    answerable here at all: whether "Georgia" exists is a question about
+    the machine the app will RUN on, which the backend asks at lowering
+    time and reports through `expect_typeface`'s resolved read.
+    """
+    if not isinstance(family, str):
+        raise TypeError(
+            f"kaya: brand_typeface {what} takes a family NAME as str "
+            f"('Georgia'), not {type(family).__name__} — a font FILE's bytes "
+            "ride the font= slot, which is a different thing"
+        )
+    return family
+
+
+def brand_typeface(family, platforms=None, font=None):
+    """REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
+    one family name is the whole call, and every platform that has that
+    family installed uses it.
+
+        kaya.brand_typeface("Georgia")
+        kaya.brand_typeface("Georgia", {kaya.Platform.LINUX: "DejaVu Serif"})
+        kaya.brand_typeface("Kaya Sans", font=FONT_TTF_BYTES)
+
+    ONE FUNCTION WHERE RUST HAS TWO (`brand_typeface` and
+    `brand_typeface_with`), which is `brand_accent`'s precedent verbatim:
+    optional keyword arguments are how Python spells an optional record,
+    and the semantics is the one Rust's second function has.
+
+    THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights,
+    metrics and the whole type ramp stay the platform's. Substituting a
+    family INTO the platform's own ramp is what makes the swap safe, and
+    it is the role tier — `.role(kaya.Role.HEADING)` — that carries
+    emphasis, never a font size.
+
+    THE PER-PLATFORM ROWS TRAVEL UNRESOLVED, unlike the accent's
+    per-platform values, and that asymmetry is the design: this binding
+    cannot know its platform, but every lowering IS one, so each backend
+    picks its own row out of the mapping and no platform id is ever
+    needed on this side. Rows are keyed by `kaya.Platform` members or
+    their names; an unnamed platform falls back to `family`.
+
+    FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: `font=`
+    takes a font FILE's bytes (one copy into core memory, the handle
+    consumed by the next submit, exactly like `kaya.image(source=...)`).
+    The backend hands them to its platform's app-font API, reads back the
+    family name the registration produced, and the NAME machinery takes
+    over unchanged — so both forms share one resolution, one observation
+    and one fallback. A registered blob's own family wins over `family`
+    on the backend that registered it.
+
+    SET ONCE, BEFORE THE FIRST MOUNT: declare it inside the scene scope
+    (`with app.window():`) before the container that mounts. The root
+    refuses a second write and a late one — brand is identity, not
+    state, and a slot that could flip at runtime would promise the
+    theme-switching surface the vocabulary deliberately does not have.
+
+    THE RISK IS THE SILENT FALLBACK, which is why nothing here promises
+    the pixels: every platform's font API renders SOMETHING for a family
+    it does not have, so a typo is invisible to every other observation
+    kaya owns. Each backend gates on the family being PRESENT and
+    otherwise leaves the platform's own typeface in place, and
+    `expect_typeface` reads the RESOLVED family off the real text system
+    rather than echoing this request back.
+    """
+    pairs = []
+    if platforms is not None:
+        if not isinstance(platforms, dict):
+            raise TypeError(
+                f"kaya: brand_typeface platforms= takes a mapping of platform "
+                f"to family — {{kaya.Platform.LINUX: 'DejaVu Serif'}} — not "
+                f"{type(platforms).__name__}"
+            )
+        for key, value in platforms.items():
+            tag = _platform_value(key)
+            pairs.append(tag)
+            pairs.append(_typeface_family(
+                f"family for {_PLATFORM_NAME_OF.get(tag, tag)}", value))
+    if font is not None and not isinstance(font, (bytes, bytearray,
+                                                  memoryview)):
+        raise TypeError(
+            f"kaya: brand_typeface font= takes a font FILE's bytes, not "
+            f"{type(font).__name__} — a family NAME is the first argument, "
+            "and a path is the app's to read"
+        )
+    _records().append(wire.tx_set_brand_typeface(
+        # Bit 0 says a blob rides; the slot is written either way, as an
+        # empty Str when it does not (the record's shape is fixed).
+        1 if font is not None else 0,
+        _typeface_family("family", family),
+        pairs,
+        wire.BlobHandle(runtime.register_blob(font)) if font is not None
+        else "",
+    ))
+
+
 #: The undo-group record's kind, in the two header bytes `record()`
 #: frames it with — how `undoable` recognises a marker it already put at
 #: the head, without unpacking anything.

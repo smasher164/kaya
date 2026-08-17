@@ -367,6 +367,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
         TxOp::SetBrandAccent { .. } => UndoVerdict::Refused("set_brand_accent"),
+        TxOp::SetBrandTypeface(_) => UndoVerdict::Refused("set_brand_typeface"),
         TxOp::Copy(_) => UndoVerdict::Refused("copy"),
         TxOp::ReadClipboard { .. } => UndoVerdict::Refused("read_clipboard"),
         TxOp::PushEntry { .. } => UndoVerdict::Refused("push_entry"),
@@ -395,6 +396,11 @@ pub(crate) struct Scene {
     /// the arm below refuses a second write and a post-mount one, and
     /// this Option is the whole record of it.
     brand_accent: Option<crate::brand::BrandAccent>,
+    /// The brand typeface, once set — the accent's twin, same set-once
+    /// and pre-mount walls, same reason. The REQUEST is kept rather
+    /// than anything derived: the core resolves nothing here, so there
+    /// is nothing else to keep (docs/styling-plan.md Slice 2b).
+    brand_typeface: Option<crate::protocol::TypefaceRequest>,
     signals: HashMap<SignalId, Value>,
     /// signal -> the (widget, property) pairs it feeds (live and stamped).
     bindings: HashMap<SignalId, Vec<(WidgetId, Prop)>>,
@@ -1653,6 +1659,88 @@ impl Scene {
                     let accent = crate::brand::derive(seed, light, dark);
                     self.brand_accent = Some(accent);
                     out.push(ApplyOp::SetBrand { accent });
+                }
+                TxOp::SetBrandTypeface(req) => {
+                    // THE ACCENT'S TWO WALLS, VERBATIM, and for the
+                    // accent's reasons: brand is identity, not state,
+                    // and a post-mount write would promise the runtime
+                    // theme-switching surface the vocabulary does not
+                    // have (docs/styling-plan.md §2). Both die here, in
+                    // the root's words, in every language at once.
+                    assert!(
+                        self.brand_typeface.is_none(),
+                        "kaya: set_brand_typeface called twice — brand is set once, \
+                         at startup; a slot that could flip at runtime would be a \
+                         theme-switching surface, which the vocabulary does not \
+                         promise (docs/styling-plan.md)"
+                    );
+                    assert!(
+                        self.mounted_windows.is_empty(),
+                        "kaya: set_brand_typeface after a mount — brand is set once, \
+                         BEFORE the first mount, so no backend ever shows an \
+                         unbranded frame it must repaint"
+                    );
+                    // A FAMILY NAME IS THE WHOLE REQUEST, so an empty
+                    // one is an author who filled no field rather than
+                    // a request for the platform default: every
+                    // platform's font API renders SOMETHING for a name
+                    // it cannot match, so an empty string would sail
+                    // through four lowerings and land as the system
+                    // font — indistinguishable, on every observation
+                    // this slice has, from a typeface that applied.
+                    // Declaring no typeface at all is what asks for the
+                    // platform's own (and is how an app asks for SF,
+                    // which is not reachable by family name anyway).
+                    assert!(
+                        !req.family.is_empty(),
+                        "kaya: set_brand_typeface has an empty family — an app that \
+                         wants the platform's own typeface declares none at all \
+                         (docs/styling-plan.md Slice 2b)"
+                    );
+                    // THE PLATFORM TAGS ARE A CLOSED VOCABULARY and the
+                    // wall is here for the seed's reason: a tag nobody
+                    // serves is silently ignored by all four lowerings —
+                    // each picks its own row and finds none — so a
+                    // mistyped constant reads exactly like a platform
+                    // that chose the default. One refusal here is the
+                    // same answer in all eight languages.
+                    let mut seen: Vec<u32> = Vec::new();
+                    for (tag, family) in &req.platforms {
+                        assert!(
+                            crate::wire::platform_name(i64::from(*tag)).is_some(),
+                            "kaya: set_brand_typeface names platform {tag}, which is \
+                             not in the vocabulary (mac/ios/linux/windows/android) — \
+                             no lowering would ever pick that row"
+                        );
+                        assert!(
+                            !family.is_empty(),
+                            "kaya: set_brand_typeface has an empty family for \
+                             platform {}, which reads as the platform default rather \
+                             than as the omission it is — leave the row out",
+                            crate::wire::platform_name(i64::from(*tag)).unwrap_or("?")
+                        );
+                        assert!(
+                            !seen.contains(tag),
+                            "kaya: set_brand_typeface names platform {} twice — a \
+                             lowering picks the FIRST row it matches, so the second \
+                             would be silently dropped",
+                            crate::wire::platform_name(i64::from(*tag)).unwrap_or("?")
+                        );
+                        seen.push(*tag);
+                    }
+                    // THE BYTES ARE NOT INSPECTED HERE. Whether a blob
+                    // is a font, and what family it declares, is a
+                    // question only the platform's own font manager can
+                    // answer — the core would have to parse sfnt tables
+                    // to guess, and a guess that disagreed with the
+                    // registration would be worse than no answer. Each
+                    // backend registers, reads the family back, and
+                    // says so; the observation reads the RESOLVED
+                    // family either way, so a blob that registers as
+                    // nothing fails exactly like a family that is not
+                    // installed.
+                    self.brand_typeface = Some(req.clone());
+                    out.push(ApplyOp::SetTypeface(req));
                 }
                 TxOp::ShowSaveDialog(spec) => {
                     assert!(
@@ -5428,6 +5516,119 @@ mod tests {
         assert_eq!(brands[0].seed, 0x3584E4, "the seed rides along for Material");
         // Adwaita blue takes white — the derivation's empirical anchor.
         assert_eq!(brands[0].light.on_fill, 0xFFFFFF);
+    }
+
+    fn typeface(family: &str) -> crate::protocol::TypefaceRequest {
+        crate::protocol::TypefaceRequest {
+            family: family.to_string(),
+            platforms: Vec::new(),
+            font: None,
+        }
+    }
+
+    /// THE TYPEFACE'S SET-ONCE WALLS — the accent's, verbatim, because
+    /// it is the same slot rule (docs/styling-plan.md Slice 2b) and a
+    /// second copy of a rule is a second chance to get it wrong.
+    #[test]
+    #[should_panic(expected = "set_brand_typeface called twice")]
+    fn a_second_typeface_write_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetBrandTypeface(typeface("Georgia"))]);
+        scene.apply(vec![TxOp::SetBrandTypeface(typeface("Palatino"))]);
+    }
+
+    #[test]
+    #[should_panic(expected = "set_brand_typeface after a mount")]
+    fn a_post_mount_typeface_write_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        scene.apply(vec![TxOp::SetBrandTypeface(typeface("Georgia"))]);
+    }
+
+    /// AN EMPTY FAMILY IS THE SILENT-FALLBACK BUG SPELLED BY THE APP:
+    /// it would reach four lowerings, match nothing, and render as the
+    /// system font — which every observation in this slice reports the
+    /// same way a working default does.
+    #[test]
+    #[should_panic(expected = "empty family")]
+    fn an_empty_family_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetBrandTypeface(typeface(""))]);
+    }
+
+    /// A TAG NO BACKEND SERVES is silently ignored by every lowering —
+    /// each looks for its own row and finds none — so it reads exactly
+    /// like a platform that took the default.
+    #[test]
+    #[should_panic(expected = "names platform 9")]
+    fn an_unknown_platform_tag_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetBrandTypeface(crate::protocol::TypefaceRequest {
+            family: "Georgia".into(),
+            platforms: vec![(9, "Georgia".into())],
+            font: None,
+        })]);
+    }
+
+    #[test]
+    #[should_panic(expected = "names platform mac twice")]
+    fn a_repeated_platform_row_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetBrandTypeface(crate::protocol::TypefaceRequest {
+            family: "Georgia".into(),
+            platforms: vec![
+                (crate::wire::PLATFORM_MAC, "Georgia".into()),
+                (crate::wire::PLATFORM_MAC, "Palatino".into()),
+            ],
+            font: None,
+        })]);
+    }
+
+    #[test]
+    #[should_panic(expected = "empty family for platform linux")]
+    fn an_empty_per_platform_family_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetBrandTypeface(crate::protocol::TypefaceRequest {
+            family: "Georgia".into(),
+            platforms: vec![(crate::wire::PLATFORM_LINUX, String::new())],
+            font: None,
+        })]);
+    }
+
+    /// THE CLEAN PATH: one SetTypeface out, carrying the request
+    /// UNRESOLVED — every pair and the blob — because the lowering is
+    /// what resolves a family name. And `family_for` is the one answer
+    /// to "which row is mine", so every backend asks it the same way.
+    #[test]
+    fn the_typeface_rides_out_unresolved() {
+        let mut scene = Scene::new();
+        let req = crate::protocol::TypefaceRequest {
+            family: "Georgia".into(),
+            platforms: vec![
+                (crate::wire::PLATFORM_LINUX, "DejaVu Serif".into()),
+                (crate::wire::PLATFORM_ANDROID, "serif".into()),
+            ],
+            font: Some(crate::protocol::Blob(vec![1u8, 2, 3].into())),
+        };
+        let ops = scene.apply(vec![TxOp::SetBrandTypeface(req.clone())]);
+        let out: Vec<_> = ops
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetTypeface(r) => Some(r),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(out.len(), 1, "one SetTypeface out");
+        assert_eq!(out[0], &req, "carried verbatim — the core resolves nothing");
+        assert_eq!(out[0].family_for(crate::wire::PLATFORM_LINUX), "DejaVu Serif");
+        assert_eq!(
+            out[0].family_for(crate::wire::PLATFORM_MAC),
+            "Georgia",
+            "a platform with no row of its own takes the default"
+        );
     }
 
     #[test]

@@ -2299,7 +2299,138 @@ interpreter carries slice 1's one real brand lowering
   (d) leave it — the accent family is what every other backend brands
   too. Nothing here is urgent and (d) is a real answer.
 
+## The typeface scene's depth stubs (Slice 2b mid-flight, expected to close with the fan-out)
+
+The depth landed 2026-08-16: spec (`set_brand_typeface` / `set_typeface`,
+the `platform` enum) + the SwiftUI mac arm + the Rust binding
+(`brand_typeface` / `brand_typeface_with`) + the `typeface` scene, mac
+only. Four backends decode the record and refuse through the depth-stub
+helper, which is what holds the other lanes' legs off in check-steps and
+check-stubs (docs/styling-plan.md Slice 2b — depth then breadth, the
+standing pattern):
+
+- **DEPTH STUB: typeface on swiftui/ios** — the APPLY side is already
+  live on iOS (the same fresh-descriptor route, plus UIFontMetrics for
+  Dynamic Type and the Bold Text weight step the probe measured a
+  substituted family dropping). What is not proven is the OBSERVATION:
+  `expect_typeface`'s read has been measured on a real macOS window and
+  never on a device, so the iOS runner wires no typeface legs. Closing
+  it is the same UITextView/UITextField walk run in the simulator, with
+  the presence gate's negative watched there too.
+- ~~**DEPTH STUB: typeface on gtk**~~ — LANDED 2026-08-16. `:root {
+  font-family }` in kaya's own provider at APPLICATION priority (never
+  `*`, which would take the monospace slot the editor lives in), the
+  resolved-family read through `ctx.load_font(...).describe().family()`,
+  and the font-BYTES form through `pango_font_map_add_font_file`. Green
+  on BOTH display legs, hand-run, with the fallback negative watched
+  going red. TWO findings the probe did not have:
+  fontconfig's `FcConfigAppFontAddFile` — the documented app-font route —
+  RETURNS SUCCESS AND DOES NOTHING once GTK has initialised, which is
+  every position a kaya apply can occupy (measured three ways); and
+  `Georgia` is not an unmatched name on that image but an ALIASED one,
+  which fontconfig resolves to DejaVu Serif rather than to the default
+  sans. The trap the probe DID measure stands and is why the read is the
+  only observation: a genuinely unmatched family renders byte-identically
+  to the unbranded window.
+  The LEG is closed too, 2026-08-16: the blocker was that no INSTALLED
+  family resolves to one byte-frozen string on every lane (mac/windows
+  resolved `Georgia`, linux `DejaVu Serif`, android `Noto Serif`), and
+  the vendored font answers it — the guests ship the OFL Sora bytes
+  through the blob channel and every lane resolves `Sora`. So
+  `tools/linux/run-suites.sh` now wires seven `typeface` legs on both
+  display protocols, styling's roster minus the C floor (which has no
+  typeface guest), each through `a11y-leg.sh` for the closing
+  `expect_ax`. No `KAYA_FONT_FILE` is set there: the guests' default path
+  is repo-relative and the container runs from `/work`, the mount. See
+  the styling plan's Slice 2b and
+  scratchpad/styling/typeface-gtk-arm.md §"the one blocker".
+- ~~**DEPTH STUB: typeface on winui**~~ — LANDED 2026-08-16, green on the
+  Windows VM. TWO writes, because the platform has two kinds of text: an
+  app-level dictionary redefining `ContentControlThemeFontFamily` (+ the
+  KeyTip/Pivot keys, never `SymbolThemeFontFamily`) for the 58 CONTROL
+  styles, and a local family on every `TextBlock` AT CONSTRUCTION. The
+  second is where the probe's proposal was improved on: a local value
+  outranks a Style setter in XAML's precedence whatever order they
+  arrive, so setting the family in a `text_block()` factory makes "a ramp
+  style applied without the family write" — the `XamlAutoFontFamily`
+  literal trap — unrepresentable, instead of pairing the two calls at
+  each site. `expect_typeface` cannot read a name on this platform (UIA's
+  Text pattern is absent in-process and an out-of-process client is
+  barred at Cargo.toml), so it reads XAML's own laid-out WIDTH and
+  BASELINE for a pinned string and names the fallback through
+  DirectWrite. Findings the probe did not have, all measured on the lane:
+  **the VM was never down** — Windows drops ICMP, so the probe's `ping`
+  test read a healthy guest as powered off (tools/probe-env.sh:31 already
+  said so); **XAML's family lookup disagrees with DirectWrite's** (`Segoe
+  UI Variable`, this SDK's `Control.FontFamily` default, is not in the
+  system collection and XAML still lays it out as its `Text` sibling), so
+  DirectWrite PROPOSES the fallback name and XAML's width confirms it;
+  **an unresolved family gets a synthetic 0.9em baseline** while its
+  glyphs still come from the fallback face, which is why the fallback is
+  confirmed on width alone; and **the blob route is `ms-appx:///`, not a
+  path** — an absolute filesystem path, a `file://` URI and
+  `AddFontResourceExW` (private AND session-wide, return value 1) all
+  render the fallback with no error, while a file under the app root
+  works. scratchpad/styling/typeface-winui-arm.md.
+  What is NOT closed is the LEG WIRING: `tools/deploy-win.sh` needs
+  `typeface` in its depth list plus `run_suite typeface_rust` and a
+  checked-in `tools/guest/run_typeface_rust.cmd`, which this arm was
+  scoped out of touching — check-steps is RED until they land, and says
+  so. Windows is the second lane (after mac) where the scene's
+  byte-frozen `Georgia` resolves, so no per-platform row is needed here.
+  Two limits of the blob route are unmeasured because no guest ships font
+  bytes: the app directory must be writable (an install under Program
+  Files is not), and for a DLL-hosted guest `current_exe` is the host
+  interpreter's binary, so the app root is its directory and not kaya's.
+- ~~**DEPTH STUB: typeface on compose**~~ — LANDED 2026-08-16. TWO
+  writes, as the probe measured: `MaterialTheme(typography = …)` for
+  Material's own components and `LocalTextStyle provides
+  ambient.copy(fontFamily = …)` for kaya's labels and fields, family
+  only, so the ambient size stays Unspecified. `expect_typeface` reads
+  the SHAPED glyph run's font file and names it out of that file's
+  OpenType `name` table, one sample per route, sites required to agree —
+  the two obvious reads on this platform (`layoutInput.style.fontFamily`,
+  `Typeface.getSystemFontFamilyName()`) both echo the request. The bytes
+  form goes to an app-private file, validated with `Typeface.Builder`
+  before Compose sees it (Compose's own `Font(File)` throws INSIDE
+  composition for a bad blob), and a family this device lacks leaves the
+  platform ramp standing and says so, detected at apply time with a
+  two-sentinel probe. Both directions of the two-write trap watched going
+  red on the lane; scratchpad/styling/typeface-compose-arm.md.
+  What is NOT closed is the LEG, the same blocker the GTK arm names one
+  bullet up: `Georgia` is absent on the emulator image (and Android's
+  family lookup is case-SENSITIVE, so no capitalisation of it hits), the
+  request falls back to Roboto and the arm says so — so
+  `tools/android/run-emulator.sh` wires no `typeface` legs and
+  check-steps says so. Android's row in a per-platform scene would be
+  `serif` (→ `Noto Serif`, metric-matched to Roboto so no line box
+  moves); a shared BLOB is the other way out, and it is the only one that
+  keeps the scene's expected family one byte-frozen string on every lane.
+- **The seven other bindings** — `brand_typeface`/`brand_typeface_with`
+  in Python, Go, C#, Java, Swift, OCaml, Haskell, plus the C floor's
+  explicit spelling, and the `typeface` scene's guest in each.
+  check-steps holds the scene rust-only until they arrive.
+- **No font FILE ships in the tree yet**, so the `typeface` scene
+  exercises the NAME form only. The bytes form is implemented and
+  reachable (`brand_typeface_with(.., font: Some(bytes))` →
+  CTFontManager, in-process scope, family name read back off the
+  registered descriptor) but nothing asserts it end to end: there is no
+  font asset in the repo and no license decision about adding one.
+  Closing it is one bundled open-licensed face plus a second scene (the
+  slot is set once per process, so the two forms cannot share a run).
+
 ## Styling follow-ups the fan-out surfaced (2026-08-12, none blocking)
+
+- **~~Font-FILE bundling waits for the asset pipeline~~ REVERSED
+  same day (maintainer, 2026-08-16): font bytes ride the existing wire
+  blob channel, IN the typeface slice.** The asset pipeline offers
+  fonts nothing the blob channel lacks — its real customers are raster
+  density variants and OS packaging (the vector-app-art entry's
+  future). Register-then-resolve: the blob registers via the
+  platform's app-font API, the family name is extracted, and the
+  name-based machinery takes over unchanged. The WinUI registration
+  route (path#family vs DWrite in-memory loader) is measured at depth,
+  not assumed.
 
 - **Sections carry symbols with no harness assertion** (2026-08-16).
   expect_menu_symbol reads menu items' icons from the real tree, but

@@ -83,6 +83,14 @@ VERB_FEATURE = {
     "expect_save_dialog": "save",
     "file_dialog_name": "save",
     "file_save": "save",
+    # The brand typeface's one observation (docs/styling-plan.md Slice
+    # 2b). Keyed on the verb for this table's whole reason: `typeface`
+    # is the scene's name TODAY, and the name-fallback below would
+    # therefore derive the feature anyway — but the day any other scene
+    # asserts a resolved family it demands the same lowering without
+    # being called after it, and a backend still declaring
+    # depth_stub("typeface") must hold those legs off too.
+    "expect_typeface": "typeface",
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is

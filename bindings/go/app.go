@@ -1590,6 +1590,126 @@ func (tx *Tx) BrandAccent(seed uint32, overrides ...AccentOverride) {
 	tx.emit(TxSetBrandAccent(seed, mask, light, dark))
 }
 
+// TypefaceOverride is one optional part of a brand typeface request,
+// made by PlatformFamily or FontBytes and passed to Tx.BrandTypeface.
+// Most apps pass none: a family name is the whole call.
+//
+// A ZERO TypefaceOverride IS NOT "UNSTATED", which is where it parts
+// company with AccentOverride. An appearance the accent does not hear
+// about has a meaning — the seed fills it — so a zero value there is
+// ignored on purpose. A platform row has no such meaning: it either
+// names a platform or it is a row the author failed to fill, so it
+// rides as it was written and the root refuses it by name ("names
+// platform 0, which is not in the vocabulary"). The wall stays in one
+// place, in one sentence, in all eight languages.
+type TypefaceOverride struct {
+	// font is the blob form and isFont is what distinguishes it from a
+	// platform row, since nil bytes are a legal (if pointless) font and
+	// would otherwise read as "no font here".
+	platform int64
+	family   string
+	font     []byte
+	isFont   bool
+}
+
+// PlatformFamily overrides the default family on ONE platform, named by
+// the generated platform constants:
+//
+//	tx.BrandTypeface("Georgia", kaya.PlatformFamily(kaya.PlatformLinux, "DejaVu Serif"))
+//
+// THE CONSTANT RATHER THAN FIVE NAMED CONSTRUCTORS (the accent's
+// LightAccent/DarkAccent shape), because the platform vocabulary is a
+// SPEC ENUM: it is generated into kaya_wire.go from crates/kaya/src/spec.rs,
+// so a platform kaya adds arrives in Go the moment the generators run.
+// Hand-written constructors would be a second copy of a closed set that
+// regenerates — the drift trap this tree spends gates on — and would
+// leave Go unable to name a new platform with nothing failing.
+//
+// The pairs travel UNRESOLVED, which is the asymmetry with the accent's
+// per-platform values and the whole design of this record: this binding
+// cannot know its platform (the JVM says "Linux" on Android), but every
+// lowering IS one, so each backend picks its own row.
+func PlatformFamily(platform int64, family string) TypefaceOverride {
+	return TypefaceOverride{platform: platform, family: family}
+}
+
+// FontBytes ships a font FILE with the app: the backend hands the bytes
+// to its platform's app-font API, reads back the family that
+// registration produced, and the name machinery takes over unchanged —
+// so a shipped font and an installed family resolve, observe and fall
+// back through one path. A registered blob's own family wins over the
+// name on the backend that registered it.
+//
+// The bytes are copied into the core at encode time (the blob channel's
+// contract, RegisterBlob); the caller's slice is free to drop.
+func FontBytes(font []byte) TypefaceOverride {
+	return TypefaceOverride{font: font, isFont: true}
+}
+
+// BrandTypeface REQUESTS the app's brand typeface (docs/styling-plan.md
+// D6, Slice 2b): one family name is the whole call, and every platform
+// that has that family installed uses it.
+//
+//	tx.BrandTypeface("Georgia")
+//	tx.BrandTypeface("Georgia", kaya.PlatformFamily(kaya.PlatformLinux, "DejaVu Serif"))
+//	tx.BrandTypeface("Inter", kaya.FontBytes(interRegular))
+//
+// THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights,
+// metrics and the whole type ramp stay the platform's. Substituting a
+// family into the platform's own ramp is what makes the swap safe, and
+// it is the role tier — Role(kaya.RoleHeading) — that carries emphasis,
+// not a font size.
+//
+// SET ONCE, BEFORE THE FIRST MOUNT, the accent's wall verbatim and for
+// its reason: brand is identity, not state, and a slot that could flip
+// at runtime would promise a theme-switching surface the vocabulary
+// deliberately does not have. The root refuses a second write and a
+// late one.
+//
+// A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own typeface
+// in place, deliberately and silently: every font API renders SOMETHING
+// for a name it cannot match, so each lowering gates on the family
+// being installed rather than letting the platform pick a stranger.
+// That is why the conformance scene reads the RESOLVED family off the
+// real text system instead of echoing this request back.
+//
+// NAMED OVERRIDES RATHER THAN A SECOND POSITIONAL METHOD, which is Go's
+// answer to Rust's brand_typeface_with: one call site spells the
+// default family, the per-platform rows and the font blob, and a caller
+// who wants none of the three writes none of them.
+func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
+	var (
+		mask      uint32
+		platforms []any
+		// The font slot is written either way — an absent font rides as
+		// an empty Str — so the record's field count never varies with
+		// the payload (the accent's mask, verbatim).
+		font any = ""
+	)
+	for _, o := range overrides {
+		if !o.isFont {
+			// FLAT PAIRS, tag then family, read back in twos: the file
+			// dialog's filter encoding one tier over. Duplicate rows and
+			// unknown tags are the ROOT's to refuse — it says which
+			// platform and why, once, for every language.
+			platforms = append(platforms, o.platform, o.family)
+			continue
+		}
+		if mask&1 != 0 {
+			// ONE BLOB SLOT ON THE WIRE, so a second font cannot ride:
+			// last-wins would ship one of the two with no error
+			// anywhere, and it would be the app's identity that vanished
+			// — the silent-write failure this whole pass is written
+			// against. The accent's duplicate-appearance refusal,
+			// exactly, and for the same reason.
+			panic("kaya: BrandTypeface got two FontBytes — one font blob rides per request, so the second would silently replace the first")
+		}
+		mask |= 1
+		font = BlobHandle(RegisterBlob(o.font))
+	}
+	tx.emit(TxSetBrandTypeface(mask, family, platforms, font))
+}
+
 // Window is the prop chain for an existing window (0 = the primary).
 func (tx *Tx) Window(id uint64) WindowRef {
 	return WindowRef{tx: tx, id: id}

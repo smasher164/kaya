@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xf84da2a3fe758bc7;
+    public const ulong SpecHash = 0x7c7a23e2127c3801;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -92,6 +92,11 @@ static class KayaWire
     public const uint FileModeRead = 0;
     public const uint FileModeWrite = 1;
     public const uint FileModeReadWrite = 2;
+    public const uint PlatformMac = 1;
+    public const uint PlatformIos = 2;
+    public const uint PlatformLinux = 3;
+    public const uint PlatformWindows = 4;
+    public const uint PlatformAndroid = 5;
     public const uint AlignStart = 0;
     public const uint AlignCenter = 1;
     public const uint AlignEnd = 2;
@@ -172,6 +177,7 @@ static class KayaWire
     public const ushort TxKindRevealRange = 40;
     public const ushort TxKindShowSaveDialog = 41;
     public const ushort TxKindSetBrandAccent = 42;
+    public const ushort TxKindSetBrandTypeface = 43;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -204,6 +210,7 @@ static class KayaWire
     public const ushort ApplyKindRevealRange = 30;
     public const ushort ApplyKindPresentSaveDialog = 31;
     public const ushort ApplyKindSetBrand = 32;
+    public const ushort ApplyKindSetTypeface = 33;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -704,6 +711,18 @@ static class KayaWire
         w.Write(light);
         w.Write(dark);
         return Finish(stream, w, TxKindSetBrandAccent);
+    }
+
+    /// REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request.
+    public static byte[] TxSetBrandTypeface(uint mask, object family, object[] platforms, object font)
+    {
+        var w = Begin(out var stream);
+        w.Write(mask);
+        w.Write(0u);
+        EncodeValue(w, family);
+        EncodeValues(w, platforms);
+        EncodeValue(w, font);
+        return Finish(stream, w, TxKindSetBrandTypeface);
     }
 
     /// set_property with a constant text value.

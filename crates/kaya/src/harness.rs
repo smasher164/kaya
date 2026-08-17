@@ -287,6 +287,22 @@ pub enum Step {
     /// window taking the status row's margin with it). Same relative
     /// measurement at both scopes.
     ExpectInset { target: Option<Target>, units: u32 },
+    /// The RESOLVED typeface family, read off the real views rather
+    /// than echoed back from the request (docs/styling-plan.md Slice
+    /// 2b). The whole risk of a family swap is the silent fallback:
+    /// every platform's font API renders SOMETHING for a family it
+    /// does not have, so a typo, a stale lowering and a working swap
+    /// are indistinguishable to every other observation this harness
+    /// owns. This step is the one that can tell them apart, and it can
+    /// only do that by asking the TEXT SYSTEM what family it ended up
+    /// with — never the model, never the wire record.
+    ///
+    /// Compared byte-for-byte across platforms like every observation,
+    /// which is why the scene names a family that exists everywhere it
+    /// runs. A backend that resolved nothing reports its platform's own
+    /// default family, which is a REAL answer and reads as a mismatch,
+    /// not as a pass.
+    ExpectTypeface(String),
     /// Expect the container's children to span its content box along
     /// the main axis — the leftover-consumption half of the grow
     /// contract, and the second blind spot shares can never see:
@@ -601,6 +617,7 @@ impl Step {
             Step::ExpectShares { .. } => true,
             Step::ExpectRootFills { .. } => true,
             Step::ExpectInset { .. } => true,
+            Step::ExpectTypeface(_) => true,
             Step::ExpectFills { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectTitle { .. } => true,
@@ -755,6 +772,20 @@ pub trait Stage: Send + 'static {
     /// one level down (its outer extent against its children's offer).
     /// No default, for inset's exact reason.
     fn container_inset(&self, target: Target) -> String;
+
+    /// The RESOLVED typeface family, read off the real text views —
+    /// what the toolkit ENDED UP WITH, never the family the app asked
+    /// for (docs/styling-plan.md Slice 2b). On a brandless app, or a
+    /// family this platform does not have, that is the platform's own
+    /// default family, and the honest answer is to say so.
+    ///
+    /// NO DEFAULT, and this one earns it more than most: every font API
+    /// on every platform renders SOMETHING for a family it cannot
+    /// match, so a Stage that answered "" or echoed the request would
+    /// pass the typeface leg while the swap never happened — the exact
+    /// failure the slice exists to catch, dressed as a green lane. A
+    /// backend without the read must fail to COMPILE.
+    fn typeface(&self) -> String;
     /// The main-axis extents of the container's children, in child
     /// order, each as a whole percentage of their sum, joined with `,`
     /// — the observation expect_shares verifies, and the only way a
@@ -1282,6 +1313,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     }
                 }
             }
+            "expect_typeface" => Step::ExpectTypeface(parse_string(rest)?),
             "expect_root_fills" => {
                 if !rest.is_empty() {
                     return Err(format!(
@@ -2657,6 +2689,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Err(format!("{label} {got}, wanted {want}"))
                 }
             })),
+            Step::ExpectTypeface(want) => Some(poll(|| {
+                let got = stage.typeface();
+                if got == *want {
+                    Ok(format!("typeface {want}"))
+                } else {
+                    // THE RESOLVED FAMILY IS THE FAILURE TEXT, because
+                    // it is the whole diagnosis: "Helvetica" says a
+                    // CoreText fallback swallowed the request, the
+                    // platform's own default says the presence gate
+                    // refused it, and the request echoed back would say
+                    // the read is wired to the model instead of the
+                    // views.
+                    Err(format!("typeface {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectRootFills => Some(poll(|| {
                 // Empty means fills; anything else is the platform's
                 // own description of the hug, for the failure text
@@ -3641,6 +3688,14 @@ mod tests {
         fn inset(&self) -> String {
             "16".into()
         }
+        /// The mock resolved no typeface, and says so with a family
+        /// NAME rather than an empty string: an empty answer would pass
+        /// an `expect_typeface ""` nobody would write, while a real name
+        /// fails every assertion a scene makes — the honest state of a
+        /// stage that applied nothing.
+        fn typeface(&self) -> String {
+            "MockSystemFont".into()
+        }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
         }
@@ -3793,6 +3848,42 @@ mod tests {
         assert!(verdict.contains("splits"), "{verdict}");
     }
 
+    /// expect_typeface takes a QUOTED family, counts as an expect, and
+    /// — the clause with the teeth — puts the RESOLVED family in its
+    /// failure text rather than the requested one.
+    ///
+    /// That is not cosmetic. Every font API on every platform renders
+    /// something for a family it does not have, so the resolved name IS
+    /// the diagnosis: the platform's own default means the presence gate
+    /// refused the request, `Helvetica` on Apple means a CoreText
+    /// fallback swallowed it, and the request echoed back would mean the
+    /// read is wired to the model instead of the views. A verdict that
+    /// only said "wanted Georgia" could not tell those apart.
+    #[test]
+    fn expect_typeface_reports_the_resolved_family() {
+        let steps = parse(r#"expect_typeface "Georgia""#).unwrap();
+        assert_eq!(steps[0], Step::ExpectTypeface("Georgia".into()));
+        assert!(parse("expect_typeface Georgia").is_err(), "the family is quoted");
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "the mock resolved nothing, so this must fail");
+        assert!(
+            verdict.contains("typeface MockSystemFont, wanted Georgia"),
+            "the failure names what the stage RESOLVED: {verdict}"
+        );
+        // And the passing spelling is the byte-compared observation
+        // every backend has to reproduce.
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse(r#"expect_typeface "MockSystemFont""#).unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (typeface MockSystemFont)");
+    }
+
     /// expect_root_fills parses bare (a target would be a lie — the
     /// mounted root is the only thing it can mean), counts as an expect
     /// for the zero-expect guard, and reads the stage's root_fills:
@@ -3887,6 +3978,14 @@ mod tests {
         }
         fn inset(&self) -> String {
             "16".into()
+        }
+        /// The mock resolved no typeface, and says so with a family
+        /// NAME rather than an empty string: an empty answer would pass
+        /// an `expect_typeface ""` nobody would write, while a real name
+        /// fails every assertion a scene makes — the honest state of a
+        /// stage that applied nothing.
+        fn typeface(&self) -> String {
+            "MockSystemFont".into()
         }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
@@ -4066,6 +4165,14 @@ mod tests {
         }
         fn inset(&self) -> String {
             "16".into()
+        }
+        /// The mock resolved no typeface, and says so with a family
+        /// NAME rather than an empty string: an empty answer would pass
+        /// an `expect_typeface ""` nobody would write, while a real name
+        /// fails every assertion a scene makes — the honest state of a
+        /// stage that applied nothing.
+        fn typeface(&self) -> String {
+            "MockSystemFont".into()
         }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()

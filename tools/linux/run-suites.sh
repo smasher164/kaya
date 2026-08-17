@@ -38,7 +38,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -669,6 +669,50 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     run "$proto" styling-c env KAYA_SELFTEST=styling \
         tools/linux/a11y-leg.sh /tmp/c-guests/styling
+    # THE TYPEFACE SCENE (docs/styling-plan.md slice 2b), styling's
+    # sibling: the brand typeface swaps the FAMILY and nothing else.
+    # WHAT IT EXISTS TO CATCH IS THE SILENT FALLBACK — Pango substitutes
+    # for a family it does not have, so a typo, a stale lowering and a
+    # working swap all draw a window that looks fine, and only
+    # `expect_typeface` tells them apart: it reads the family the TEXT
+    # SYSTEM resolved (ctx.load_font(...).describe().family() on this
+    # backend), never the request echoed back. tools/scenes/typeface.steps
+    # states it in full, including why the font is VENDORED — "Sora" is a
+    # family no platform preinstalls, so the fallback can never equal the
+    # expectation. Through a11y-leg.sh like styling's legs, for the
+    # closing expect_ax. Graduated 2026-08-16 with the gtk arm (the
+    # provider's `:root { font-family }` plus
+    # pango_font_map_add_font_file for the blob).
+    #
+    # NO KAYA_FONT_FILE ON THESE LEGS, measured rather than assumed: the
+    # guests default to the repo-relative guests/assets/fonts/
+    # sora-wght.ttf, this script runs from /work (the `cd` at the top)
+    # and /work IS the repo — the bind mount validate-linux.sh hands the
+    # container — so the default resolves here. That variable is for a
+    # runner whose guest cannot see the repo, which is a phone.
+    run "$proto" typeface-rust env KAYA_SELFTEST=typeface \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/typeface"
+    run "$proto" typeface-python env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/typeface.py
+    run "$proto" typeface-go env KAYA_SELFTEST=typeface \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" typeface-csharp env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" typeface-ocaml env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/typeface.exe
+    run "$proto" typeface-haskell env KAYA_SELFTEST=typeface \
+        tools/linux/a11y-leg.sh "$(hs_bin typeface)"
+    run "$proto" typeface-java env KAYA_SELFTEST=typeface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # AND NO C LEG, unlike styling's roster one block up: the floor has no
+    # typeface guest yet (no guests/c/typeface.c, and guests/c/Makefile's
+    # SCENES does not name one), so there is no binary to run — the
+    # clipboard block's shape further down, for the same reason. A leg
+    # naming the floor's typeface binary would fail check-steps' own
+    # C-floor sweep before it ever failed here, which is the wall that
+    # keeps this comment honest — that sweep reads the BINARY PATH out of
+    # this file, comments included, so the path is not written here even
+    # to say it is absent.
     # The confirm scene: the modal-alert grammar (gtk::AlertDialog),
     # all three answer paths through the REAL dialog button.
     # The stall diagnostic (crates/kaya/src/stall.rs): the one scene

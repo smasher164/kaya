@@ -794,6 +794,30 @@ let symbol_wire = function
   | Person -> Int64.of_int Kaya_wire.symbol_person
   | Home -> Int64.of_int Kaya_wire.symbol_home
 
+(* WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
+   "platform"; docs/styling-plan.md Slice 2b): one entry per backend
+   roster row, closed like [role] and [symbol] above.
+
+   AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS, and there is no
+   [current] in this binding for the same reason there is none in any
+   other: OCaml cannot answer that question — [Sys.os_type] is ["Unix"]
+   for macOS, Linux, iOS and Android alike — and it does not have to.
+   Every row travels to every backend on the wire and each LOWERING
+   picks its own, because a lowering IS its platform. A guest that
+   branched on its platform would also be a guest that ships different
+   code per platform, which is the thing kaya exists to not do.
+
+   The WIRE VALUES live in the generated [Kaya_wire] and are never
+   spelled here. *)
+type platform = Mac | Ios | Linux | Windows | Android
+
+let platform_wire = function
+  | Mac -> Int64.of_int Kaya_wire.platform_mac
+  | Ios -> Int64.of_int Kaya_wire.platform_ios
+  | Linux -> Int64.of_int Kaya_wire.platform_linux
+  | Windows -> Int64.of_int Kaya_wire.platform_windows
+  | Android -> Int64.of_int Kaya_wire.platform_android
+
 let bind_text (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_text id s)
 let set_checked (Widget id) checked = emit (the_tx ()) (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_checked id s)
@@ -1531,6 +1555,60 @@ let brand_accent ?light ?dark seed =
     (Kaya_wire.tx_set_brand_accent seed mask
        (Option.value light ~default:0)
        (Option.value dark ~default:0))
+
+(* REQUEST this app's brand typeface (docs/styling-plan.md Slice 2b):
+   one family name — [brand_typeface "Georgia"] — is the whole call, and
+   every platform that has that family installed uses it.
+
+   THE FAMILY, NEVER THE SCALE (ratified DESIGN.md). Sizes, weights,
+   metrics and the whole type ramp stay the platform's; substituting a
+   family INTO the platform's own ramp is what makes the swap safe, and
+   it is the role tier ([~role:Heading]) that carries emphasis, never a
+   font size. There is deliberately no size argument here to leave out.
+
+   [~platforms] is the per-platform form — [brand_typeface
+   ~platforms:[ (Linux, "DejaVu Serif") ] "Georgia"] — and the pairs
+   TRAVEL UNRESOLVED, unlike the accent's per-appearance values. That
+   asymmetry is the design: a binding cannot know its platform, but
+   every lowering is one, so each backend picks its own row and no
+   platform id is ever needed on this side. A row for a platform nobody
+   is running is simply not read.
+
+   [~font] ships a FONT FILE's bytes, on the same blob channel [~source]
+   uses for an image: the backend hands them to its platform's app-font
+   API, reads back the family that registration named, and takes that
+   name in preference to any name above — register then resolve, so both
+   forms share one resolution, one observation and one fallback.
+
+   A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own typeface
+   in place, deliberately and silently. Every font API renders SOMETHING
+   for a name it cannot match, which would make a typo indistinguishable
+   from a working swap, so each lowering gates on the family being
+   PRESENT rather than letting the platform pick a stranger.
+
+   SET ONCE, BEFORE THE FIRST MOUNT: [brand_accent]'s wall verbatim, and
+   for its reason — a typeface that could flip at runtime would promise
+   the theme-switching surface the vocabulary deliberately does not
+   have. The root refuses a second write and a late one. *)
+let brand_typeface ?(platforms = []) ?font family =
+  let pairs =
+    (* The filters' encoding one tier over: a FLAT list read in twos,
+       an I64 platform tag then that platform's family. *)
+    List.concat_map
+      (fun (p, f) -> [ Kaya_wire.I64 (platform_wire p); Kaya_wire.Str f ])
+      platforms
+  in
+  emit (the_tx ())
+    (Kaya_wire.tx_set_brand_typeface
+       (match font with Some _ -> 1 | None -> 0)
+       (Kaya_wire.Str family) pairs
+       (* THE FONT SLOT IS ALWAYS WRITTEN and the mask above is what
+          says whether it means anything: an absent font rides as an
+          empty Str, so the record's field count never varies with the
+          payload (the accent mask's discipline, verbatim). *)
+       (match font with
+       | Some bytes -> Kaya_wire.Blob (Kaya_runtime.register_blob bytes)
+       | None -> Kaya_wire.Str ""))
 
 (* Mount into the default window; per-window targets arrive with the
    window vocabulary. *)

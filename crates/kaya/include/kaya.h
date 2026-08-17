@@ -162,6 +162,15 @@
 
 #define TX_SET_BRAND_ACCENT 42
 
+/**
+ * The brand typeface REQUEST (docs/styling-plan.md Slice 2b). Its
+ * per-platform pairs ride the wire where the accent's never do: a
+ * binding cannot resolve its platform (the JVM says "Linux" on
+ * Android) but a lowering IS its platform, so the rows travel and each
+ * backend picks its own.
+ */
+#define TX_SET_BRAND_TYPEFACE 43
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -234,6 +243,12 @@
 #define APPLY_PRESENT_SAVE_DIALOG 31
 
 #define APPLY_SET_BRAND 32
+
+/**
+ * The brand typeface, unresolved: the request's body verbatim, because
+ * the LOWERING is what resolves a family name (Slice 2b).
+ */
+#define APPLY_SET_TYPEFACE 33
 
 #define VALUE_BOOL 1
 
@@ -459,6 +474,22 @@
 #define ALIGN_STRETCH 3
 
 #define ALIGN_BASELINE 4
+
+/**
+ * Which platform a per-platform brand value is for (spec enum
+ * "platform"). ONE ENTRY PER BACKEND ROSTER ROW, not per operating
+ * system: the roster is what reads these, so a tag no backend serves
+ * would be a value no lowering could pick.
+ */
+#define PLATFORM_MAC 1
+
+#define PLATFORM_IOS 2
+
+#define PLATFORM_LINUX 3
+
+#define PLATFORM_WINDOWS 4
+
+#define PLATFORM_ANDROID 5
 
 #define ROLE_DESTRUCTIVE 1
 
@@ -778,6 +809,8 @@
 
 #define KAYA_TX_SET_BRAND_ACCENT 42
 
+#define KAYA_TX_SET_BRAND_TYPEFACE 43
+
 /**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
@@ -922,6 +955,8 @@
 #define KAYA_APPLY_PRESENT_SAVE_DIALOG 31
 
 #define KAYA_APPLY_SET_BRAND 32
+
+#define KAYA_APPLY_SET_TYPEFACE 33
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply

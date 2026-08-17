@@ -15,7 +15,7 @@ type value =
   | Blob of int64
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xf84da2a3fe758bc7L
+let spec_hash = 0x7c7a23e2127c3801L
 
 let value_bool = 1
 let value_i64 = 2
@@ -95,6 +95,11 @@ let alert_choice_cancel = 4294967295
 let file_mode_read = 0
 let file_mode_write = 1
 let file_mode_read_write = 2
+let platform_mac = 1
+let platform_ios = 2
+let platform_linux = 3
+let platform_windows = 4
+let platform_android = 5
 let align_start = 0
 let align_center = 1
 let align_end = 2
@@ -175,6 +180,7 @@ let tx_kind_select_range = 39
 let tx_kind_reveal_range = 40
 let tx_kind_show_save_dialog = 41
 let tx_kind_set_brand_accent = 42
+let tx_kind_set_brand_typeface = 43
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -207,6 +213,7 @@ let apply_kind_select_range = 29
 let apply_kind_reveal_range = 30
 let apply_kind_present_save_dialog = 31
 let apply_kind_set_brand = 32
+let apply_kind_set_typeface = 33
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -563,6 +570,15 @@ let tx_set_brand_accent seed mask light dark =
       Buffer.add_int32_le b (Int32.of_int mask);
       Buffer.add_int32_le b (Int32.of_int light);
       Buffer.add_int32_le b (Int32.of_int dark))
+
+(* REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request. *)
+let tx_set_brand_typeface mask family platforms font =
+  finish tx_kind_set_brand_typeface (fun b ->
+      Buffer.add_int32_le b (Int32.of_int mask);
+      Buffer.add_int32_le b 0l;
+      encode_value b family;
+      encode_values b platforms;
+      encode_value b font)
 
 (* set_property with a constant text value. *)
 let tx_set_text widget_id text =

@@ -190,6 +190,11 @@ executable styling
   main-is: styling.hs
   build-depends: kaya-guests
 
+executable typeface
+  import: shared
+  main-is: typeface.hs
+  build-depends: kaya-guests
+
 executable encodebench
   import: shared
   main-is: encodebench.hs

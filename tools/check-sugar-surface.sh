@@ -824,6 +824,25 @@ check_styling_point brand_accent \
     '^brandAccent ::' \
     '^let brand_accent '
 
+# THE BRAND TYPEFACE (Slice 2b), the accent's sibling and the same
+# failure shape: a transaction verb no other sweep can see — not a
+# widget kind, not a window prop — so a binding shipping it wire-only
+# strands apps in that language unable to brand a family while every
+# other gate passes. Same base-name rule as the accent: the
+# per-platform/font-bytes form rides the base name (Rust's `_with`
+# sibling, keyword arguments elsewhere), so one pattern per language
+# and the override form's uniformity stays the sweep verdict's
+# business.
+check_styling_point brand_typeface \
+    'pub fn brand_typeface\(&mut self' \
+    '^def brand_typeface\(' \
+    'func \(tx \*Tx\) BrandTypeface\(' \
+    'public void BrandTypeface\(' \
+    'public void brandTypeface\(' \
+    'func brandTypeface\(' \
+    '^brandTypeface ::' \
+    '^let brand_typeface '
+
 # THREE ROWS ARE KEYED PAST THE MENU ITEM'S ROLE, which shares the
 # bare name: Rust's `role(self, role: MenuRole)`, Python's
 # `def role(self, name)` on the item class and OCaml's `let item …

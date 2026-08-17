@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xf84da2a3fe758bc7
+specHash = 0x7c7a23e2127c3801
 
 valueBool :: Word32
 valueBool = 1
@@ -182,6 +182,16 @@ fileModeWrite :: Word32
 fileModeWrite = 1
 fileModeReadWrite :: Word32
 fileModeReadWrite = 2
+platformMac :: Word32
+platformMac = 1
+platformIos :: Word32
+platformIos = 2
+platformLinux :: Word32
+platformLinux = 3
+platformWindows :: Word32
+platformWindows = 4
+platformAndroid :: Word32
+platformAndroid = 5
 alignStart :: Word32
 alignStart = 0
 alignCenter :: Word32
@@ -342,6 +352,8 @@ txKindShowSaveDialog :: Word16
 txKindShowSaveDialog = 41
 txKindSetBrandAccent :: Word16
 txKindSetBrandAccent = 42
+txKindSetBrandTypeface :: Word16
+txKindSetBrandTypeface = 43
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -406,6 +418,8 @@ applyKindPresentSaveDialog :: Word16
 applyKindPresentSaveDialog = 31
 applyKindSetBrand :: Word16
 applyKindSetBrand = 32
+applyKindSetTypeface :: Word16
+applyKindSetTypeface = 33
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -641,6 +655,10 @@ txShowSaveDialog window dialog suggestedName filters = wireRecord txKindShowSave
 -- REQUEST the app's brand accent (docs/styling-plan.md D1/D2). `seed` is one packed sRGB (0xRRGGBB) — the only value most apps write; `mask` says which per-appearance overrides are present (bit 0 = light, bit 1 = dark) and `light`/`dark` carry them when set, 0 otherwise. Per-PLATFORM values never ride the wire: the binding resolves its platform at runtime and sends one resolved trio (values may vary per platform; code and wire shape never do).  A REQUEST, uniformly: a platform may let its user override the app's accent — macOS does today (an app accent applies only while the system accent is multicolor), and the semantics does not change if another platform grows the preference. The app states a brand; the platform stays the judge of its chrome.  SET ONCE, before the first mount: the root refuses a second write and a late one — brand is identity, not state, and a slot that could flip at runtime would promise a theme- switching surface the vocabulary deliberately does not have.  The app NEVER writes a foreground and NEVER writes contrast variants; the core derives fill/on-fill/standalone and a hover/pressed ramp per appearance (the danger-band clamp, docs/styling-plan.md D1) and hands every backend VALUES. Backends do not re-derive — except Compose, which receives the SEED as well because Material 3's own documented flow derives a full role scheme from it, and kaya defers to the platform's derivation where one exists.
 txSetBrandAccent :: Word32 -> Word32 -> Word32 -> Word32 -> Builder
 txSetBrandAccent seed mask light dark = wireRecord txKindSetBrandAccent (word32LE seed <> word32LE mask <> word32LE light <> word32LE dark)
+
+-- REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request.
+txSetBrandTypeface :: Word32 -> Value -> [Value] -> Value -> Builder
+txSetBrandTypeface mask family platforms font = wireRecord txKindSetBrandTypeface (word32LE mask <> word32LE 0 <> encodeValue family <> encodeValues platforms <> encodeValue font)
 
 -- set_property with a constant text value.
 txSetText :: Word64 -> String -> Builder

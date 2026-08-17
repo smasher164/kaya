@@ -64,6 +64,10 @@ use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Style, Thickness, 
 // (`SystemFillColorCriticalBrush`), both looked up out of the
 // framework's own dictionary rather than constructed here.
 use bindings::Microsoft::UI::Xaml::Media::Brush;
+// The brand typeface's one type (docs/styling-plan.md Slice 2b). Every
+// FontFamily member was a vtable PAD until the bindgen filter learned
+// this name — see tools/winui-bindgen's entry for it.
+use bindings::Microsoft::UI::Xaml::Media::FontFamily;
 // The accessibility read's control-type vocabulary, at module scope
 // because `ax_role` names it in its signature — that function is the
 // pure half of the `ax` verb, split out so the role ladder can be tested
@@ -2234,7 +2238,7 @@ fn mount_entry(
     })?;
     defs.Append(&fill)?;
     let back = Button::new()?;
-    let caption = TextBlock::new()?;
+    let caption = text_block()?;
     caption.SetText(&HSTRING::from("\u{2190}"))?;
     back.SetContent(&caption)?;
     let host = core.nav_entries[&entry_id].window;
@@ -6280,6 +6284,938 @@ fn theme_resource<T: windows_core::Interface>(key: &str) -> windows_core::Result
     })
 }
 
+// ---------------------------------------------------------------------
+// THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b). Measured mechanics:
+// scratchpad/styling/typeface-winui.md (the resource census) and
+// typeface-winui-arm.md (the lane measurements).
+// ---------------------------------------------------------------------
+
+// The brand typeface's `FontFamily` SOURCE for this process, or `None`
+// for a brandless app.
+//
+// A SOURCE STRING RATHER THAN A FAMILY NAME, because XAML's grammar
+// here is wider than a name: `Georgia` is one spelling, a
+// comma-separated FALLBACK LIST is another (Fluent's own
+// `SymbolThemeFontFamily` is `'Segoe Fluent Icons,Segoe MDL2 Assets'`),
+// and `<path>#<family>` names a face that is not installed at all —
+// which is how a font BLOB reaches this platform (`register_font_blob`).
+// Everything here writes the source verbatim and lets XAML parse it;
+// only the harness read splits it apart again, to say which family the
+// text system ended up with.
+//
+// THREAD-LOCAL AND NOT A `CoreState` FIELD: widgets are built on the UI
+// thread inside `apply`, where `CoreState` is already mutably borrowed
+// by the caller, and `text_block` is called from exactly there. Same
+// thread, same lifetime, no second borrow.
+thread_local! {
+    static BRAND_TYPEFACE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+fn brand_typeface() -> Option<String> {
+    BRAND_TYPEFACE.with_borrow(|source| source.clone())
+}
+
+/// Every `TextBlock` this backend makes — and the only place one is made.
+///
+/// THE PAIR THAT CANNOT SPLIT, and it is the guard this arm needed most.
+/// Two separate ways a TextBlock misses the brand, both invisible (the
+/// app renders; one piece of text is quietly in the system face):
+///
+///   * A plain kaya label is a bare TextBlock under Grids, with no
+///     Control anywhere above it and — measured — no implicit style at
+///     all (0 keyless `TargetType="TextBlock"` Styles in the shipped
+///     Fluent dictionary). It inherits nothing, so the resource override
+///     that re-points 58 CONTROL styles cannot reach it. Only a local
+///     write can.
+///   * Every step of the Fluent type ramp is `BasedOn`
+///     `BaseTextBlockStyle`, which hard-codes the LITERAL string
+///     `XamlAutoFontFamily` as a Setter value — not a `{ThemeResource}`
+///     reference, so there is no key to redefine and no resource write
+///     that reaches it. kaya's `heading` role applies
+///     `SubtitleTextBlockStyle`, so under a resource-only lowering every
+///     heading in every kaya app would keep the system font while
+///     everything around it moved.
+///
+/// So the write does not sit BESIDE the style application, where the
+/// next author has to remember it. It sits in the constructor, and the
+/// style arms cannot take it back: in XAML's dependency-property
+/// precedence a LOCAL value outranks a Style setter whatever order the
+/// two arrive in, so `SetStyle` afterwards changes the size and weight
+/// and leaves the family alone. That is exactly Slice 2b's rule — the
+/// family moves, the ramp does not — falling out of the precedence
+/// instead of being maintained by hand.
+///
+/// What is left unguarded is a fifth `TextBlock::new()` appearing
+/// somewhere else; there are four callers today and all four are here.
+/// A grep gate would seal it (see this arm's report) — the type system
+/// cannot, because `TextBlock::new` is a generated projection method.
+fn text_block() -> windows_core::Result<TextBlock> {
+    let block = TextBlock::new()?;
+    if let Some(source) = brand_typeface() {
+        block.SetFontFamily(&FontFamily::CreateInstanceWithName(&HSTRING::from(source))?)?;
+    }
+    Ok(block)
+}
+
+/// The app-level dictionary that re-points the CONTROL ramp.
+///
+/// FOUR KEYS, AND A FIFTH THAT MUST NEVER JOIN THEM. `XamlAutoFontFamily`
+/// reaches Fluent's controls through `ContentControlThemeFontFamily`,
+/// referenced as `{ThemeResource}` by 58 keyed Styles plus the implicit
+/// ones — every control kaya renders is in that list (Button, TextBox,
+/// RichEditBox, CheckBox, RadioButton, ComboBox, Slider, ToolTip, the
+/// list items…). A `{ThemeResource}` reference re-resolves against the
+/// lookup chain, so an app dictionary that redefines the key wins; this
+/// is the same mechanism `apply_brand` uses for the six accent stops,
+/// with the same ordering rule (appended LAST, because merged
+/// dictionaries are searched in REVERSE).
+///
+/// `KeyTipFontFamily`, `PivotHeaderItemFontFamily` and
+/// `PivotTitleFontFamily` are the same `XamlAutoFontFamily` value behind
+/// three more keys. They are written for the accent arm's
+/// half-overridden-ramp reason: a stop left at the framework value paints
+/// the platform's own choice beside kaya's brand in any consumer this
+/// table did not enumerate.
+///
+/// **`SymbolThemeFontFamily` is NOT here and may never be.** Its value is
+/// `'Segoe Fluent Icons,Segoe MDL2 Assets'` — the icon glyph family, read
+/// by 16 Styles and 80 template sites, deliberately left unset by the
+/// icons slice so glyphs resolve on Windows 10 as well as 11. A typeface
+/// lowering that swept "every FontFamily resource" would turn every icon
+/// in the app into a box, and the failure would look like an icons bug.
+///
+/// MARKUP RATHER THAN THE OBJECT MODEL, unlike what the type would
+/// allow: `FontFamily` is a runtime class, so `ResourceDictionary::Insert`
+/// could box it where a `Color` could not — but `ResourceDictionary` has
+/// no projected constructor in the generated bindings, and this is the
+/// exact markup form Microsoft's own `generic.xaml` uses for these four
+/// keys. One proven route (the accent's) beats two.
+fn typeface_dictionary(source: &str) -> String {
+    // XML-escaped: a family name is app data, and `&` or `<` in one
+    // would otherwise be a parse failure in kaya's own markup rather
+    // than a bad request. `#` and spaces need nothing.
+    let escaped = source
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    format!(
+        "<ResourceDictionary xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+           xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">\
+           <FontFamily x:Key=\"ContentControlThemeFontFamily\">{escaped}</FontFamily>\
+           <FontFamily x:Key=\"KeyTipFontFamily\">{escaped}</FontFamily>\
+           <FontFamily x:Key=\"PivotHeaderItemFontFamily\">{escaped}</FontFamily>\
+           <FontFamily x:Key=\"PivotTitleFontFamily\">{escaped}</FontFamily>\
+         </ResourceDictionary>"
+    )
+}
+
+/// A font BLOB, made nameable to XAML — and every part of this is
+/// measured, because three of the four obvious routes silently do
+/// nothing (typeface-winui-arm.md §3).
+///
+/// WHAT DOES NOT WORK, each tried on the lane and each failing by
+/// rendering the fallback with no error anywhere:
+///   * An ABSOLUTE filesystem path, `C:\dir\face.ttf#Family` — the
+///     spelling the probe report proposed. XAML ignores it.
+///   * A `file:///C:/dir/face.ttf#Family` URI. Same.
+///   * `AddFontResourceExW`, private OR session-wide. It RETURNS 1, the
+///     font really is in this process's GDI table, and XAML still
+///     resolves the family to the fallback — GDI's table is not the
+///     collection XAML asks. (The session-wide form would also be a GUI
+///     library writing to the user's machine, which kaya will not do.)
+///   * A custom DirectWrite collection
+///     (`CreateInMemoryFontFileLoader`) — not tried on the lane and not
+///     worth trying: `FontFamily` has no API that accepts a collection,
+///     so it would produce a font this process can measure and no
+///     control can render.
+///
+/// WHAT WORKS is a file under the APP ROOT, referenced by an
+/// app-relative or `ms-appx:///` path. Measured, all four spellings
+/// resolving to the same laid-out width: `ms-appx:///face.ttf#Family`,
+/// `/face.ttf#Family`, `face.ttf#Family`, `sub/face.ttf#Family`. For an
+/// unpackaged app — which every kaya guest is — that root is the
+/// directory holding the executable, so the bytes are written there and
+/// named with the URI form, which is the one that says out loud which
+/// namespace is being addressed.
+///
+/// The family name comes OUT OF THE BYTES, never from the request:
+/// DirectWrite opens the file and reports what the face declares
+/// (measured: `Chalkduster` for a face this machine does not have
+/// installed). That is register-then-resolve, the same shape as
+/// CTFontManager on Apple, and it is why a blob that is not a font fails
+/// HERE with the bytes in hand rather than three layers later as a
+/// silent fallback.
+///
+/// TWO LIMITS THIS ROUTE HAS, stated rather than discovered later:
+/// the app directory must be writable (an app installed under Program
+/// Files is not), and for a DLL-HOSTED guest — python, go, csharp, java
+/// — `current_exe` is the HOST interpreter's binary, so the app root is
+/// its directory and not kaya's. Neither is measured, because no guest
+/// in this tree ships font bytes yet; both are in docs/deferred.md.
+#[allow(dead_code)] // reachable only through a guest that ships font bytes
+fn register_font_blob(bytes: &[u8]) -> Result<String, String> {
+    // NAMED BY CONTENT, not by process: two guests running side by side
+    // on one desktop (the lane runs four) that ship the same font write
+    // the same bytes to the same path, and two that ship different fonts
+    // cannot collide. It also means a rerun reuses the file instead of
+    // littering the app directory once per launch.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let root = app_root()?.join(FONT_DIR);
+    std::fs::create_dir_all(&root)
+        .map_err(|e| format!("{} could not be created: {e}", root.display()))?;
+    let name = format!("brand-{hash:016x}.ttf");
+    let path = root.join(&name);
+    // WRITTEN ONLY IF IT IS NOT ALREADY THERE, and that is a correctness
+    // rule rather than a saving. A font file that some process has open
+    // is MEMORY-MAPPED — DirectWrite maps it, and XAML keeps it mapped
+    // for as long as it can lay text out in it — and Windows refuses to
+    // overwrite a mapped file: `os error 1224`, "the requested operation
+    // cannot be performed on a file with a user-mapped section open".
+    // The name is this content's hash, so anything already at that path
+    // with these exact bytes IS the file this function would write, and
+    // rewriting it buys nothing while risking that refusal — which the
+    // caller turns into a panic, on a lane that runs four guests at once
+    // with two of them sharing one app directory. Measured 2026-08-16:
+    // a second registration in one process failed with 1224 against the
+    // file the first had just opened.
+    if std::fs::read(&path).map(|there| there == bytes).unwrap_or(false) {
+        // Nothing to do: the bytes on disk are the bytes asked for.
+    } else {
+        std::fs::write(&path, bytes)
+            .map_err(|e| format!("{} could not be written: {e}", path.display()))?;
+    }
+    // The family name comes out of the FILE, through the one reader this
+    // arm has — the same one the harness read runs backwards over the
+    // path below, so what is written and what is checked cannot drift.
+    let family = font_file_family(&path).map_err(|why| {
+        format!(
+            "{}: {why} (from the {} bytes the guest shipped)",
+            path.display(),
+            bytes.len()
+        )
+    })?;
+    // The APP-ROOT namespace, not the filesystem one: `ms-appx:///`
+    // is what XAML resolves, and the absolute path this function
+    // just wrote to is what it silently ignores.
+    Ok(format!("ms-appx:///{FONT_DIR}/{name}#{family}"))
+}
+
+/// The one directory `register_font_blob` writes into, and therefore the
+/// one segment the source it hands back names. Written once because the
+/// harness read resolves that source back to this file
+/// (`typeface_availability`): a second spelling of this name is a reader
+/// that quietly stops finding what the writer wrote.
+const FONT_DIR: &str = "kaya-fonts";
+
+/// The directory an UNPACKAGED app's `ms-appx:///` namespace resolves
+/// to: the one holding this process's executable
+/// (`register_font_blob`'s header carries the measurement, and the
+/// dll-hosted caveat — for python, go, csharp and java this is the HOST
+/// interpreter's directory, which is exactly where XAML looks for that
+/// process too).
+fn app_root() -> Result<std::path::PathBuf, String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("this process cannot name its own executable: {e}"))?;
+    Ok(exe
+        .parent()
+        .ok_or_else(|| format!("{} has no directory", exe.display()))?
+        .to_path_buf())
+}
+
+/// The family a font FILE declares, read out of its own name table.
+///
+/// DirectWrite opens the file and reports what the face says it is; the
+/// request never gets a vote (measured: `Chalkduster` for a face this
+/// machine does not have installed). Both directions of the blob route
+/// go through here — `register_font_blob` to NAME the file it just
+/// wrote, and the harness read to check that the file a source points at
+/// still declares that name — so a font this process cannot read is one
+/// failure with one spelling rather than two.
+///
+/// THE MESSAGES NAME NO PATH. Both callers already have the file in hand
+/// and both print it, and a sentence that names it twice reads as two
+/// files (measured, in the first sentence this printed on the VM).
+fn font_file_family(path: &std::path::Path) -> Result<String, String> {
+    use windows::Win32::Graphics::DirectWrite::*;
+    let wide: Vec<u16> = path
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)
+            .map_err(|e| format!("DirectWrite did not start: {}", e.message()))?;
+        let file = factory
+            .CreateFontFileReference(windows_core::PCWSTR(wide.as_ptr()), None)
+            .map_err(|e| format!("DirectWrite would not open it: {}", e.message()))?;
+        let mut supported = windows_core::BOOL(0);
+        let mut face_type = DWRITE_FONT_FACE_TYPE_UNKNOWN;
+        let mut file_type = DWRITE_FONT_FILE_TYPE_UNKNOWN;
+        let mut faces = 0u32;
+        file.Analyze(&mut supported, &mut file_type, Some(&mut face_type), &mut faces)
+            .map_err(|e| format!("DirectWrite could not analyze it: {}", e.message()))?;
+        if !supported.as_bool() {
+            return Err(format!(
+                "it is not a font DirectWrite can read (file type {})",
+                file_type.0
+            ));
+        }
+        let face = factory
+            .CreateFontFace(face_type, &[Some(file)], 0, DWRITE_FONT_SIMULATIONS_NONE)
+            .map_err(|e| format!("the font face would not open: {}", e.message()))?;
+        let face3: IDWriteFontFace3 = face
+            .cast()
+            .map_err(|e| format!("the face declares no family names: {}", e.message()))?;
+        localized_string(
+            &face3
+                .GetFamilyNames()
+                .map_err(|e| format!("the face's family names would not read: {}", e.message()))?,
+        )
+        .map_err(|e| format!("the face's family name would not decode: {}", e.message()))
+    }
+}
+
+/// One `IDWriteLocalizedStrings`, in en-us where it has one.
+#[allow(dead_code)] // with register_font_blob and the harness read
+fn localized_string(
+    names: &windows::Win32::Graphics::DirectWrite::IDWriteLocalizedStrings,
+) -> windows_core::Result<String> {
+    unsafe {
+        let mut index = 0u32;
+        let mut exists = windows_core::BOOL(0);
+        let en: Vec<u16> = "en-us".encode_utf16().chain(std::iter::once(0)).collect();
+        names.FindLocaleName(windows_core::PCWSTR(en.as_ptr()), &mut index, &mut exists)?;
+        if !exists.as_bool() {
+            index = 0;
+        }
+        let len = names.GetStringLength(index)? as usize;
+        let mut buf = vec![0u16; len + 1];
+        names.GetString(index, &mut buf)?;
+        Ok(String::from_utf16_lossy(&buf[..len]))
+    }
+}
+
+/// Apply the brand typeface: the control ramp by resource, every
+/// TextBlock by construction.
+///
+/// ONCE, BEFORE ANY WIDGET EXISTS — `apply_brand`'s wall for
+/// `apply_brand`'s measured reason: changing a resource VALUE at runtime
+/// does not re-theme a live WinUI tree. The core's set-once and
+/// pre-mount refusals are what make that safe, and they are also what
+/// lets `text_block` read a thread-local instead of walking the tree
+/// afterwards.
+fn apply_typeface(req: &crate::protocol::TypefaceRequest) -> windows_core::Result<()> {
+    // WHICH ROW IS MINE, asked the way every Rust-native backend asks it:
+    // the request carries per-platform families and `this_platform()` is
+    // the compiler's own answer for the target this core was built for.
+    // A binding could not answer it (the JVM says "Linux" on Android); a
+    // lowering IS its platform.
+    let family = req.family_for(crate::wire::this_platform());
+    let source = match &req.font {
+        Some(blob) => match register_font_blob(&blob.0) {
+            Ok(source) => source,
+            // REFUSED LOUDLY, and this is the one place in the arm that
+            // panics: bytes that are not a usable font would otherwise
+            // fall through to the family NAME and render as the platform
+            // default — a silent fallback, which is the single failure
+            // this whole slice exists to make impossible.
+            Err(why) => panic!(
+                "kaya: winui: the brand typeface's font bytes could not be registered: {why}"
+            ),
+        },
+        None => family.to_owned(),
+    };
+    BRAND_TYPEFACE.with_borrow_mut(|slot| *slot = Some(source.clone()));
+    let markup = typeface_dictionary(&source);
+    let loaded = match bindings::Microsoft::UI::Xaml::Markup::XamlReader::Load(&HSTRING::from(
+        markup.as_str(),
+    )) {
+        Ok(loaded) => loaded,
+        Err(e) => panic!(
+            "kaya: winui: the brand typeface's resource dictionary did not parse: {}. \
+             The family is XML-escaped before it goes in, so a parse failure is the \
+             XAML reader refusing to run in this process rather than a malformed \
+             document — the same class as the ms-appx resolution that already costs \
+             this backend XamlControlsResources in dll-hosted guests \
+             (require_control_resources).",
+            e.message()
+        ),
+    };
+    let dictionary: bindings::Microsoft::UI::Xaml::ResourceDictionary = loaded.cast()?;
+    APP.with_borrow(|app| {
+        let app = app
+            .as_ref()
+            .expect("apply runs on the UI thread, where the Application lives");
+        app.Resources()?.MergedDictionaries()?.Append(&dictionary)
+    })
+}
+
+/// A family name no machine can have, and the reference the whole
+/// typeface read turns on: whatever XAML lays this out in IS the
+/// fallback, measured rather than named.
+#[cfg(feature = "harness")]
+const TYPEFACE_ABSENT: &str = "KayaNoSuchFamily-9x";
+
+/// The pinned string every fingerprint lays out — ascenders, descenders,
+/// and a wide/narrow pair, so a serif and a sans cannot collide by
+/// accident. Measured at 24pt because the discrimination scales with the
+/// size and nothing else depends on it.
+#[cfg(feature = "harness")]
+const TYPEFACE_PROBE_TEXT: &str = "Hxg Wi1lIm";
+
+/// A XAML `FontFamily` source, split into the two things a reader can
+/// ask about: the FILE it points into, if it points into one, and the
+/// family it names.
+///
+/// The grammar has three forms and only one of them is a bare name:
+/// `path#Family` points into a file (the blob route — this is exactly
+/// what `register_font_blob` hands back), and a comma-separated list is
+/// a fallback chain, whose FIRST entry is the one a reader means.
+#[cfg(feature = "harness")]
+fn typeface_source_parts(source: &str) -> (Option<&str>, &str) {
+    let first = source.split(',').next().unwrap_or(source);
+    match first.rsplit_once('#') {
+        Some((path, family)) => (Some(path), family),
+        None => (None, first),
+    }
+}
+
+/// The family part of a XAML `FontFamily` source.
+#[cfg(feature = "harness")]
+fn typeface_family_of(source: &str) -> &str {
+    typeface_source_parts(source).1
+}
+
+/// What XAML's own text stack makes of one family source: the laid-out
+/// WIDTH of a pinned string and the BASELINE it put under it, in 1/64ths
+/// so a float never decides an equality.
+///
+/// OFF THE TREE, deliberately. The probe must carry the family under
+/// test and nothing else — a real widget's extent depends on its text,
+/// and no two of kaya's widgets share one — so this measures a
+/// throwaway block whose text, size and family are all pinned. It is
+/// still XAML doing the work: the same text stack, the same font
+/// resolution, the same DirectWrite underneath. (Measured: an
+/// unparented TextBlock measures for real; the numbers below are not
+/// zeroes.)
+///
+/// WIDTH AND BASELINE, NOT WIDTH AND HEIGHT, and the difference is a
+/// measurement rather than taste. `DesiredSize.Height` is the LINE BOX,
+/// which XAML computes differently for a family it resolved than for one
+/// it fell back on: the unknown family `KayaNoSuchFamily-9x` and
+/// `Segoe UI` lay the same string out to the same width, 7872/64ths, and
+/// to line boxes of 1856 and 2048 — same glyphs, two different boxes. A
+/// height-based fingerprint therefore reports that the fallback is not
+/// the face it plainly is. `BaselineOffset` is an ASCENT, which comes
+/// off the face, so it agrees with the width about which font ran.
+#[cfg(feature = "harness")]
+fn typeface_fingerprint(source: &str) -> windows_core::Result<(i64, i64)> {
+    // Through the factory, so this file keeps ONE TextBlock construction
+    // site; the probe then names its own family over the brand's, which
+    // is a local value replacing a local value.
+    let block = text_block()?;
+    block.SetText(&HSTRING::from(TYPEFACE_PROBE_TEXT))?;
+    block.SetFontSize(24.0)?;
+    let source = if source.is_empty() { TYPEFACE_ABSENT } else { source };
+    block.SetFontFamily(&FontFamily::CreateInstanceWithName(&HSTRING::from(source))?)?;
+    block.Measure(bindings::Windows::Foundation::Size {
+        Width: f32::INFINITY,
+        Height: f32::INFINITY,
+    })?;
+    let size = block.DesiredSize()?;
+    let baseline = block.BaselineOffset()?;
+    if trace_enabled() {
+        eprintln!(
+            "kaya: winui typeface: {source:?} w={} h={} baseline={baseline}",
+            size.Width, size.Height
+        );
+    }
+    Ok((
+        (f64::from(size.Width) * 64.0).round() as i64,
+        (baseline * 64.0).round() as i64,
+    ))
+}
+
+/// The `FontFamily.Source` each TextBlock is asking for.
+///
+/// This is the ECHO half and it is not the answer — it is the QUESTION
+/// the fingerprint then settles. For a Label it reports the local write
+/// `text_block` made; for a Control it reports what the implicit style
+/// resolved `ContentControlThemeFontFamily` to, which is a read of the
+/// resource lookup rather than of kaya's own variable.
+#[cfg(feature = "harness")]
+fn typeface_sources_of_blocks(blocks: &[TextBlock]) -> windows_core::Result<Vec<String>> {
+    blocks
+        .iter()
+        .map(|b| Ok(b.FontFamily()?.Source()?.to_string()))
+        .collect()
+}
+
+#[cfg(feature = "harness")]
+fn typeface_sources_of_controls<T: windows_core::Interface>(
+    controls: &[T],
+) -> windows_core::Result<Vec<String>> {
+    controls
+        .iter()
+        .map(|c| {
+            let control: bindings::Microsoft::UI::Xaml::Controls::Control = c.cast()?;
+            Ok(control.FontFamily()?.Source()?.to_string())
+        })
+        .collect()
+}
+
+/// What ONE view ended up with, said in the strongest terms its
+/// measurements support and no stronger.
+///
+/// Three answers, and the reason there are three is a MEASUREMENT rather
+/// than caution (typeface-winui-arm.md §2b): XAML's family lookup and
+/// DirectWrite's disagree. `Segoe UI Variable` — this SDK's default
+/// `Control.FontFamily` — is NOT in the system font collection, and XAML
+/// still lays it out differently from a family nobody has. So
+/// DirectWrite's presence answer is something this read REPORTS; it is
+/// never the verdict. The verdict is always the fingerprint, which is
+/// XAML's own text stack answering about XAML's own string.
+///
+///   * measured == the unknown-family fingerprint → the view fell back,
+///     and the name of what it fell back TO is the one thing DirectWrite
+///     can say honestly here.
+///   * measured differs, and the family is AVAILABLE by the route its
+///     source names → the name is a face this process really has and
+///     XAML laid it out as its own thing. This is the only answer that
+///     is a bare family name, and it is the one a passing scene compares
+///     against.
+///   * measured differs, and the family is NOT available by that route →
+///     XAML resolved a string this process cannot account for. Saying
+///     the bare name would claim more than was measured, so the sentence
+///     says exactly what happened.
+///
+/// WHICH ROUTE, and this is the part that shipped wrong. A per-app font
+/// file's family is NEVER in the system font collection — that is what
+/// "per-app" means — so asking the collection about the blob route's
+/// family answers "no" on a machine where everything worked, and the
+/// scene could never pass (measured 2026-08-16: all five windows
+/// typeface legs failed with "Sora (XAML lays it out, but it is not one
+/// of this machine's 81 font families)" while XAML was laying Sora out).
+/// The honest presence question follows the SOURCE: a bare name asks the
+/// system collection, a `path#family` source asks the FILE's own name
+/// table (`typeface_availability`).
+#[cfg(feature = "harness")]
+fn typeface_resolved(
+    claimed: &str,
+    measured: (i64, i64),
+    absent: (i64, i64),
+) -> windows_core::Result<String> {
+    if measured == absent {
+        return typeface_fallback_family(absent);
+    }
+    let family = typeface_family_of(claimed);
+    let availability = typeface_availability(claimed)?;
+    Ok(if availability.available() {
+        // TWO INDEPENDENT MEASUREMENTS AGREE, which is what makes the
+        // bare name printable: the file's own name table (or the system
+        // collection) says this family is here, and XAML's own layout
+        // says it laid out something other than the fallback.
+        family.to_owned()
+    } else {
+        format!(
+            "{family} (XAML lays it out, but it {})",
+            availability.measured()
+        )
+    })
+}
+
+/// Whether the family a `FontFamily` source names is really available to
+/// this process — measured by the route the SOURCE names, never by the
+/// route that happens to have a one-call answer.
+///
+/// Each variant is a different thing this process went and looked at,
+/// and `measured` says which one, because a reader who cannot tell
+/// "nobody has this font" from "the file we wrote is gone" from "the
+/// file is somebody else's font" chases the wrong one (CLAUDE.md
+/// invariant 3).
+#[cfg(feature = "harness")]
+enum TypefaceAvailability {
+    /// A bare-name source, asked of the SYSTEM font collection, out of
+    /// `families` families.
+    System { installed: bool, families: u32 },
+    /// A `path#family` source whose file is there and whose name table
+    /// declares exactly that family.
+    FileDeclares { file: String },
+    /// A `path#family` source whose file this process could not read at
+    /// all — gone, unreadable, or not a font.
+    FileUnreadable { file: String, why: String },
+    /// A `path#family` source whose file declares a DIFFERENT family:
+    /// the bytes under the name are somebody else's font.
+    FileDeclaresOther { file: String, declared: String },
+}
+
+#[cfg(feature = "harness")]
+impl TypefaceAvailability {
+    /// Is the family really available by the route its source names?
+    fn available(&self) -> bool {
+        match self {
+            Self::System { installed, .. } => *installed,
+            Self::FileDeclares { .. } => true,
+            Self::FileUnreadable { .. } | Self::FileDeclaresOther { .. } => false,
+        }
+    }
+
+    /// WHAT WAS MEASURED, as a clause whose subject is the family the
+    /// caller has just named — so both readers of this (the per-view
+    /// answer and the fallen-back note) print the same measurement in
+    /// their own sentence and cannot drift apart.
+    fn measured(&self) -> String {
+        match self {
+            Self::System { installed: true, families } => {
+                format!("IS installed among this machine's {families} font families")
+            }
+            Self::System { installed: false, families } => {
+                format!("is not one of this machine's {families} font families")
+            }
+            Self::FileDeclares { file } => {
+                format!("is the family the per-app font file {file} declares in its own name table")
+            }
+            Self::FileUnreadable { file, why } => format!(
+                "is asked for through a per-app font file, {file}, that could not be read: {why}"
+            ),
+            Self::FileDeclaresOther { file, declared } => format!(
+                "is asked for through a per-app font file, {file}, that declares the family \
+                 {declared} instead"
+            ),
+        }
+    }
+}
+
+/// THE FALLEN-BACK NOTE: a brand was declared, the text system did not
+/// use it, and this says which half broke.
+///
+/// It takes the SAME `TypefaceAvailability` the per-view answer takes,
+/// and prints it with the same vocabulary, because the two sentences
+/// answer one question about one source — and the read shipped with them
+/// disagreeing: this one asked the system collection about a per-app
+/// font file's family, which is a question with a permanent "no" in it
+/// (see `typeface_resolved`).
+///
+/// `asks_for` is the family the first view is really asking for, which
+/// is the other half of "the lowering did not reach the view".
+#[cfg(feature = "harness")]
+fn typeface_fallback_note(
+    first: &str,
+    source: &str,
+    availability: &TypefaceAvailability,
+    asks_for: &str,
+) -> String {
+    let wanted = typeface_family_of(source);
+    if availability.available() {
+        // The brand's face is REALLY here — the system collection lists
+        // it, or the per-app file this process wrote still declares it —
+        // and the view still did not get it, so what broke is between
+        // the request and the view rather than the font itself.
+        format!(
+            "{first} ({wanted} {}, so the lowering did not reach the view — it asks for \
+             {asks_for})",
+            availability.measured()
+        )
+    } else {
+        format!("{first} ({wanted} {})", availability.measured())
+    }
+}
+
+/// The presence question, asked the way the source spells it.
+///
+/// For a `path#family` source this is the INVERSE of what
+/// `register_font_blob` wrote: the `ms-appx:///` path resolves back
+/// under the app root — the same directory that function wrote into —
+/// and the file there is opened with the same reader that named it
+/// (`font_file_family`). Nothing here consults the system collection,
+/// because a per-app file is definitionally not in it.
+#[cfg(feature = "harness")]
+fn typeface_availability(source: &str) -> windows_core::Result<TypefaceAvailability> {
+    let (path, family) = typeface_source_parts(source);
+    let Some(path) = path else {
+        let (installed, families) = typeface_presence(family)?;
+        return Ok(TypefaceAvailability::System { installed, families });
+    };
+    let file = match app_font_file(path) {
+        Ok(file) => file,
+        // The app root is unnameable (a process that cannot name its own
+        // executable). That is a measurement too, and it is not "the
+        // font is missing".
+        Err(why) => {
+            return Ok(TypefaceAvailability::FileUnreadable {
+                file: path.to_owned(),
+                why,
+            })
+        }
+    };
+    let shown = file.display().to_string();
+    // IS IT THERE AT ALL is asked separately, because DirectWrite cannot
+    // answer it: its open failure says the file "does not exist or is
+    // unavailable" — one sentence for two states a reader would chase
+    // differently. The filesystem answers the first half exactly.
+    if let Err(e) = std::fs::metadata(&file) {
+        return Ok(TypefaceAvailability::FileUnreadable {
+            file: shown,
+            why: format!("it is not there: {e}"),
+        });
+    }
+    Ok(match font_file_family(&file) {
+        Err(why) => TypefaceAvailability::FileUnreadable { file: shown, why },
+        Ok(declared) if declared == family => TypefaceAvailability::FileDeclares { file: shown },
+        Ok(declared) => TypefaceAvailability::FileDeclaresOther {
+            file: shown,
+            declared,
+        },
+    })
+}
+
+/// The on-disk file an app-root path in a `FontFamily` source names —
+/// `register_font_blob`'s write, run backwards.
+///
+/// All four spellings XAML resolves are app-root-relative
+/// (`ms-appx:///face.ttf`, `/face.ttf`, `face.ttf`, `sub/face.ttf`;
+/// register_font_blob's header carries the measurement), so the inverse
+/// is: drop the `ms-appx://` scheme and any leading separator, then join
+/// the app root. An absolute path is left alone — XAML does not resolve
+/// one, but a reader that silently re-rooted it would print a sentence
+/// about a file nobody named.
+#[cfg(feature = "harness")]
+fn app_font_file(path: &str) -> Result<std::path::PathBuf, String> {
+    let rest = match path.get(..10) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("ms-appx://") => &path[10..],
+        _ => path,
+    };
+    let rest = rest.trim_start_matches(['/', '\\']);
+    let as_given = std::path::Path::new(rest);
+    if as_given.is_absolute() {
+        return Ok(as_given.to_path_buf());
+    }
+    // Segment by segment, because the URI's separator is `/` and this
+    // machine's is `\`: joining the whole string produces a path that
+    // WORKS and READS as two conventions in one line, and the reader of
+    // a failure sentence should see the path they would type.
+    let mut file = app_root()?;
+    for segment in rest.split(['/', '\\']).filter(|s| !s.is_empty()) {
+        file.push(segment);
+    }
+    Ok(file)
+}
+
+/// Is this family on this machine at all, and out of how many?
+///
+/// `IDWriteFontCollection::FindFamilyName` against the SYSTEM collection
+/// — the one binary question about fonts that has an honest single-call
+/// answer on Windows. It is what separates "the app asked for a family
+/// nobody has" from "the family is here and the lowering missed it", and
+/// those two failures look identical in every other observation.
+///
+/// IT ANSWERS FOR BARE-NAME SOURCES ONLY (`typeface_availability`): a
+/// font this process registered from bytes is not in the system
+/// collection and never will be, so asking this about one measures
+/// nothing about it.
+#[cfg(feature = "harness")]
+fn typeface_presence(family: &str) -> windows_core::Result<(bool, u32)> {
+    use windows::Win32::Graphics::DirectWrite::*;
+    unsafe {
+        let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
+        let mut collection: Option<IDWriteFontCollection> = None;
+        factory.GetSystemFontCollection(&mut collection, true)?;
+        let collection = collection.expect("S_OK carries a collection");
+        let wide: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut index = 0u32;
+        let mut exists = windows_core::BOOL(0);
+        collection.FindFamilyName(windows_core::PCWSTR(wide.as_ptr()), &mut index, &mut exists)?;
+        Ok((exists.as_bool(), collection.GetFontFamilyCount()))
+    }
+}
+
+/// The name of the face an unresolvable family actually renders in —
+/// NAMED by DirectWrite and CONFIRMED by XAML's own measurement.
+///
+/// THIS NUMBER MAY NOT BE A CONSTANT IN THIS TREE. Microsoft has never
+/// documented WinUI 3's fallback family (microsoft-ui-xaml#10709, opened
+/// August 2025, still unanswered by maintainers); it differs between
+/// WinUI 2 and 3 (#9247); and it differs for UNPACKAGED apps by locale
+/// (#8360) — which is kaya's case. So it is a property of the lane image,
+/// and the arm measures it at run time instead of shipping a guess. The
+/// obvious guess would have been wrong twice over: `Segoe UI Variable` is
+/// not an installed family at all, only its Text and Display siblings
+/// are.
+///
+/// TWO INDEPENDENT MEASUREMENTS, and the second is what makes the first
+/// safe to print. `IDWriteFontFallback::MapCharacters` names the font it
+/// mapped the text to, off the FONT rather than off the request. But that
+/// is DirectWrite answering DirectWrite's question, and XAML resolves
+/// family names its own way — measured here: DirectWrite maps
+/// `Segoe UI Variable` to `Segoe UI` while XAML lays it out in something
+/// 3% narrower (its `Text` sibling). So DirectWrite PROPOSES the name and
+/// XAML's own layout confirms or refuses it; an unconfirmed name is
+/// exactly the confident-wrong sentence a reader would chase, so it is
+/// not printed as a name at all.
+///
+/// THE CONFIRMATION IS THE WIDTH ALONE, and that is a measurement rather
+/// than a weakening. An unresolved family does not get the fallback
+/// FACE's line metrics: measured on the lane, `KayaNoSuchFamily-9x` and
+/// `Segoe UI` lay the same string out to the same 7872/64ths of width —
+/// the same glyphs, from the same face — while their baselines are 1382
+/// and 1658. 1382/64 is 21.6pt at a 24pt size, exactly 0.9em, which is
+/// a synthetic ascent XAML uses when it never resolved a family, where
+/// Segoe UI's own ascent is 1.079em. So the ADVANCES say which face drew
+/// the glyphs and the BASELINE says whether the family resolved at all;
+/// asking the fallback to match on both would be asking it to be
+/// something it definitionally is not.
+#[cfg(feature = "harness")]
+fn typeface_fallback_family(absent: (i64, i64)) -> windows_core::Result<String> {
+    let named = match typeface_directwrite_fallback() {
+        Ok(name) => name,
+        Err(e) => return Ok(format!("<the platform's own face; DirectWrite would not name it: {}>", e.message())),
+    };
+    let theirs = typeface_fingerprint(&named)?;
+    if theirs.0 == absent.0 {
+        Ok(named)
+    } else {
+        Ok(format!(
+            "<the platform's own face, {} 64ths wide; DirectWrite names {named}, which XAML \
+             lays out at {}>",
+            absent.0, theirs.0
+        ))
+    }
+}
+
+/// DirectWrite's own answer: map plain Latin text with a base family
+/// nothing can resolve, and ask the MAPPED FONT what family it belongs
+/// to.
+#[cfg(feature = "harness")]
+fn typeface_directwrite_fallback() -> windows_core::Result<String> {
+    use windows::Win32::Graphics::DirectWrite::*;
+    unsafe {
+        let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
+        let mut collection: Option<IDWriteFontCollection> = None;
+        factory.GetSystemFontCollection(&mut collection, true)?;
+        let collection = collection.expect("S_OK carries a collection");
+        let fallback = factory.cast::<IDWriteFactory2>()?.GetSystemFontFallback()?;
+        let source: IDWriteTextAnalysisSource = TypefaceRun {
+            text: TYPEFACE_PROBE_TEXT
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect(),
+            locale: "en-us".encode_utf16().chain(std::iter::once(0)).collect(),
+        }
+        .into();
+        let base: Vec<u16> = TYPEFACE_ABSENT
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut mapped_len = 0u32;
+        let mut mapped: Option<IDWriteFont> = None;
+        let mut scale = 0f32;
+        fallback.MapCharacters(
+            &source,
+            0,
+            TYPEFACE_PROBE_TEXT.encode_utf16().count() as u32,
+            &collection,
+            windows_core::PCWSTR(base.as_ptr()),
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            &mut mapped_len,
+            &mut mapped,
+            &mut scale,
+        )?;
+        match mapped {
+            Some(font) => localized_string(&font.GetFontFamily()?.GetFamilyNames()?),
+            None => Err(windows_core::Error::new(
+                windows_core::HRESULT(-1),
+                "the system fallback mapped no font",
+            )),
+        }
+    }
+}
+
+/// The smallest `IDWriteTextAnalysisSource` that can carry one run of
+/// Latin text — what `MapCharacters` reads its input through. Nothing
+/// here is a policy decision; the interface simply has five members.
+#[cfg(feature = "harness")]
+#[windows_core::implement(windows::Win32::Graphics::DirectWrite::IDWriteTextAnalysisSource)]
+struct TypefaceRun {
+    text: Vec<u16>,
+    locale: Vec<u16>,
+}
+
+#[cfg(feature = "harness")]
+impl windows::Win32::Graphics::DirectWrite::IDWriteTextAnalysisSource_Impl for TypefaceRun_Impl {
+    fn GetTextAtPosition(
+        &self,
+        textposition: u32,
+        textstring: *mut *mut u16,
+        textlength: *mut u32,
+    ) -> windows_core::Result<()> {
+        // The vector carries a trailing NUL the run does not.
+        let n = self.text.len() as u32 - 1;
+        unsafe {
+            if textposition >= n {
+                *textstring = std::ptr::null_mut();
+                *textlength = 0;
+            } else {
+                *textstring = self.text.as_ptr().add(textposition as usize) as *mut u16;
+                *textlength = n - textposition;
+            }
+        }
+        Ok(())
+    }
+    fn GetTextBeforePosition(
+        &self,
+        textposition: u32,
+        textstring: *mut *mut u16,
+        textlength: *mut u32,
+    ) -> windows_core::Result<()> {
+        unsafe {
+            if textposition == 0 {
+                *textstring = std::ptr::null_mut();
+                *textlength = 0;
+            } else {
+                *textstring = self.text.as_ptr() as *mut u16;
+                *textlength = textposition;
+            }
+        }
+        Ok(())
+    }
+    fn GetParagraphReadingDirection(
+        &self,
+    ) -> windows::Win32::Graphics::DirectWrite::DWRITE_READING_DIRECTION {
+        windows::Win32::Graphics::DirectWrite::DWRITE_READING_DIRECTION_LEFT_TO_RIGHT
+    }
+    fn GetLocaleName(
+        &self,
+        _textposition: u32,
+        textlength: *mut u32,
+        localename: *mut *mut u16,
+    ) -> windows_core::Result<()> {
+        unsafe {
+            *textlength = self.text.len() as u32 - 1;
+            *localename = self.locale.as_ptr() as *mut u16;
+        }
+        Ok(())
+    }
+    fn GetNumberSubstitution(
+        &self,
+        _textposition: u32,
+        textlength: *mut u32,
+        numbersubstitution: windows_core::OutRef<
+            windows::Win32::Graphics::DirectWrite::IDWriteNumberSubstitution,
+        >,
+    ) -> windows_core::Result<()> {
+        unsafe {
+            *textlength = self.text.len() as u32 - 1;
+        }
+        numbersubstitution.write(None)
+    }
+}
+
 fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
     // KAYA_WINUI_TRACE=1: print every op before applying it, so a
     // stowed-exception crash names its last op. The probe sets it.
@@ -6399,7 +7335,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // apply_quiet (see that field). The caption is the
                     // CheckBox's content, the same shape as Button.
                     let check = CheckBox::new()?;
-                    let caption = TextBlock::new()?;
+                    let caption = text_block()?;
                     check.SetContent(&caption)?;
                     let tag = tag.expect("checkboxes carry a tag");
                     let on_sink = core.occurrences.clone();
@@ -6456,7 +7392,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 WidgetKind::Button => {
                     let button = Button::new()?;
-                    let caption = TextBlock::new()?;
+                    let caption = text_block()?;
                     button.SetContent(&caption)?;
                     let click_sink = core.occurrences.clone();
                     // The tag is the click's identity, emitted verbatim;
@@ -6471,7 +7407,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     NativeWidget::Button { button, caption }
                 }
                 WidgetKind::Label => {
-                    let label = TextBlock::new()?;
+                    let label = text_block()?;
                     core.labels.push(label.clone());
                     NativeWidget::Label(label)
                 }
@@ -7323,6 +8259,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .TextDocument()?
                 .Selection()?
                 .SetRange(range.start as i32, range.stop as i32)?;
+        }
+        ApplyOp::SetTypeface(req) => {
+            // TWO ROUTES, BECAUSE THE PLATFORM HAS TWO KINDS OF TEXT and
+            // no single write reaches both: the CONTROLS take the family
+            // from `ContentControlThemeFontFamily`, which an app-level
+            // dictionary can redefine, while a TextBlock takes it from a
+            // local value only. See `typeface_dictionary` and
+            // `text_block` for which failure each one is against.
+            apply_typeface(&req)?;
         }
         ApplyOp::SetBrand { accent } => {
             // VALUES IN, VALUES OUT: the core derived the eleven words
@@ -11171,6 +12116,123 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui(move |core| Ok(usize::from(core.live_alert.is_some())))
     }
 
+    fn typeface(&self) -> String {
+        // THE RESOLVED FAMILY, ON A PLATFORM THAT CANNOT NAME IT.
+        //
+        // Four routes to the name were costed and three are dead here
+        // (scratchpad/styling/typeface-winui.md §2, measured):
+        //   * `FontFamily.Source` is the request handed back. It answers
+        //     "did my write land on the object", never "did the text
+        //     system find that font" — the read Slice 2b forbids.
+        //   * UIA's `FontNameAttribute` needs the Text pattern, and
+        //     WinUI's in-process automation peer for a text control
+        //     publishes none (`GetPattern(Text)` is NULL on both text
+        //     controls — this backend measured that for the a11y read
+        //     and wrote it down at the background-colour arm).
+        //   * An out-of-process UIA client is barred at
+        //     crates/kaya/Cargo.toml, deliberately: it kills the java
+        //     leg through the Shell's file dialog.
+        // So the name is not readable. What IS readable is what the text
+        // system DID, and that is the read this uses: lay a pinned
+        // string out in XAML's own text stack and take its measured
+        // extent. Two numbers for one string are a fingerprint of the
+        // face that really rendered, and — unlike every name route — a
+        // fallback cannot fake them.
+        //
+        // THE ROUTES IT COVERS, and they are different mechanisms rather
+        // than three views of one: a Label is a bare TextBlock carrying
+        // a LOCAL family (`text_block`), while an Entry and a Textarea
+        // are Controls whose family arrives through the implicit style's
+        // `ContentControlThemeFontFamily` — the app-dictionary override.
+        // A lowering that lost either would show up here as a
+        // disagreement rather than as a pass, which is the shape that
+        // caught a deleted root font on the mac arm.
+        Self::on_ui_read(move |core| {
+            let brand = brand_typeface();
+            // Pending layout is forced before anything is measured, for
+            // the reason every extent read in this file does it: a
+            // measurement taken with layout outstanding is the previous
+            // pass's answer.
+            //
+            // IT IS NOT A SETTLE, AND THAT WAS MEASURED RATHER THAN
+            // ASSUMED. A Control carries its FontFamily DP DEFAULT until
+            // the implicit style is applied, and that happens on a later
+            // turn of the message pump than this: with `UpdateLayout` in
+            // place the first poll still saw the entry asking for
+            // `Segoe UI Variable` (this SDK's default) and the second saw
+            // Georgia. What covers the window is the verb's own bounded
+            // retry — and the RACE ONLY RUNS ONE WAY, which is what makes
+            // that safe: the transient is the UNBRANDED default and the
+            // settled state is the brand, so a read that says Georgia
+            // cannot be a lucky early sample.
+            let root: FrameworkElement = core.window.Content()?.cast()?;
+            root.UpdateLayout()?;
+            // The reference the whole read turns on: what a family this
+            // machine cannot have looks like after XAML has laid it out.
+            // Every route that measures the same as this one fell back.
+            let absent = typeface_fingerprint(TYPEFACE_ABSENT)?;
+            let mut views: Vec<(String, String)> = Vec::new();
+            let mut any_fell_back = false;
+            let mut claimed_of_first = String::new();
+            for (kind, sources) in [
+                ("label", typeface_sources_of_blocks(&core.labels)?),
+                ("entry", typeface_sources_of_controls(&core.entries)?),
+                ("textarea", typeface_sources_of_controls(&core.textareas)?),
+            ] {
+                for (i, claimed) in sources.into_iter().enumerate() {
+                    if claimed_of_first.is_empty() {
+                        claimed_of_first = claimed.clone();
+                    }
+                    let measured = typeface_fingerprint(&claimed)?;
+                    any_fell_back |= measured == absent;
+                    views.push((
+                        format!("{kind}#{i}"),
+                        typeface_resolved(&claimed, measured, absent)?,
+                    ));
+                    if trace_enabled() {
+                        eprintln!("kaya: winui typeface: {kind}#{i} asks {claimed:?} -> {measured:?}");
+                    }
+                }
+            }
+            if trace_enabled() {
+                eprintln!(
+                    "kaya: winui typeface: brand={brand:?} absent-fingerprint={absent:?} views={views:?}"
+                );
+            }
+            if views.is_empty() {
+                return Ok("<no text views to read>".to_owned());
+            }
+            let first = views[0].1.clone();
+            if views.iter().any(|(_, name)| *name != first) {
+                return Ok(format!(
+                    "views disagree: {}",
+                    views
+                        .iter()
+                        .map(|(where_, name)| format!("{where_}={name}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+            // THE NOTE IS ONLY EVER FAILURE TEXT, and it is attached
+            // under one condition: a brand was DECLARED and the text
+            // system did not use it. A brandless app resolving to the
+            // platform's own face is the right answer and gets the bare
+            // name; a branded app that fell back gets the name plus the
+            // one measurement that says which half broke. Both branches
+            // print numbers this process went and got.
+            match brand {
+                Some(source) if any_fell_back => Ok(typeface_fallback_note(
+                    &first,
+                    &source,
+                    &typeface_availability(&source)?,
+                    typeface_family_of(&claimed_of_first),
+                )),
+                _ => Ok(first),
+            }
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn inset(&self) -> String {
         Self::on_ui_read(move |core| {
             // MEASURED from real layout, never read back from the
@@ -11690,6 +12752,160 @@ mod tests {
         // `ax` fires and names it. Window is one the framework really
         // does publish.
         assert_eq!(ax_role(false, AutomationControlType::Window), UNMAPPED_ROLE);
+    }
+
+    /// The vendored font the typeface scene ships, compiled in so these
+    /// tests measure a REAL name table on whatever machine runs them
+    /// (guests/assets/fonts/sora-wght.ttf, OFL — the README beside it).
+    #[cfg(feature = "harness")]
+    const VENDORED_FONT: &[u8] = include_bytes!("../../../../guests/assets/fonts/sora-wght.ttf");
+
+    /// THE ROUND TRIP, which is the whole defect in one assertion: what
+    /// `register_font_blob` WRITES, the harness read must be able to
+    /// resolve BACK to that file. It shipped unable to — the read asked
+    /// the system font collection about a per-app font file's family, a
+    /// question whose answer is "no" on a machine where everything
+    /// worked, so all five windows typeface legs failed with the font
+    /// rendering correctly on screen (2026-08-16).
+    ///
+    /// Both directions run here for real: the file is written, DirectWrite
+    /// names it, the `ms-appx:///` source is parsed, the path is resolved
+    /// back under the app root, and the file's own name table is read.
+    #[test]
+    #[cfg(feature = "harness")]
+    fn the_blob_route_can_be_read_back_off_its_own_file() {
+        let source = register_font_blob(VENDORED_FONT)
+            .expect("the vendored font registers on any machine with DirectWrite");
+        assert_eq!(
+            typeface_family_of(&source),
+            "Sora",
+            "the vendored font's name table is what names the source: {source}"
+        );
+        let availability =
+            typeface_availability(&source).expect("the availability read does not fail");
+        assert!(
+            availability.available(),
+            "the file this process just wrote did not answer for its own family: {}",
+            availability.measured()
+        );
+        // The sentence a PASSING view prints is the bare family, and
+        // that is what tools/scenes/typeface.steps compares against.
+        assert_eq!(
+            typeface_resolved(&source, (1, 1), (2, 2)).expect("the read does not fail"),
+            "Sora",
+            "a source whose file declares its family must print the BARE name"
+        );
+        // AND REGISTERING AGAINST A FILE THIS PROCESS HAS ALREADY OPENED
+        // STILL WORKS. The read above left the font MAPPED, and Windows
+        // refuses to overwrite a mapped file (os error 1224) — so a
+        // second registration used to fail, which on the lane is a
+        // second guest sharing one app directory panicking at startup.
+        assert_eq!(
+            register_font_blob(VENDORED_FONT).expect("a re-registration reuses the file"),
+            source,
+            "the second registration must name the same file, not fail on the mapped one"
+        );
+        println!("available: Sora {}", availability.measured());
+    }
+
+    /// A source whose file is NOT THERE, said as its own sentence. The
+    /// blob route's file lives beside the executable and nothing stops a
+    /// deploy, an installer or a cleaner from removing it while XAML —
+    /// which has the face open — goes on laying text out in it.
+    #[test]
+    #[cfg(feature = "harness")]
+    fn a_source_whose_file_is_gone_says_that_and_not_something_about_the_machine() {
+        let source = "ms-appx:///kaya-fonts/brand-000000000000dead.ttf#Sora";
+        let availability = typeface_availability(source).expect("the availability read does not fail");
+        assert!(!availability.available());
+        let said = availability.measured();
+        assert!(
+            said.contains("could not be read") && said.contains("brand-000000000000dead.ttf"),
+            "the missing-file sentence must name the file it looked for: {said}"
+        );
+        assert!(
+            said.contains("it is not there"),
+            "a file that is ABSENT says so — DirectWrite's own message cannot tell \
+             absent from unavailable, and the two send a reader to different places: {said}"
+        );
+        assert!(
+            !said.contains("font families"),
+            "a per-app file's absence must never be reported as the system \
+             collection's answer: {said}"
+        );
+        let sentence = typeface_resolved(source, (1, 1), (2, 2)).expect("the read does not fail");
+        println!("missing: {sentence}");
+        println!(
+            "missing (note): {}",
+            typeface_fallback_note("Segoe UI", source, &availability, "Segoe UI")
+        );
+    }
+
+    /// A source whose file declares SOMEBODY ELSE'S family — the bytes
+    /// under the name are not the font the source says they are. A
+    /// distinct sentence from the one above, because the two send a
+    /// reader to opposite places.
+    #[test]
+    #[cfg(feature = "harness")]
+    fn a_source_whose_file_declares_another_family_names_both() {
+        let source = register_font_blob(VENDORED_FONT).expect("the vendored font registers");
+        let (path, _) = typeface_source_parts(&source);
+        let lying = format!("{}#Palatino", path.expect("the blob route names a file"));
+        let availability =
+            typeface_availability(&lying).expect("the availability read does not fail");
+        assert!(!availability.available());
+        let said = availability.measured();
+        assert!(
+            said.contains("declares the family Sora"),
+            "the mismatch sentence must name what the file really declares: {said}"
+        );
+        let sentence = typeface_resolved(&lying, (1, 1), (2, 2)).expect("the read does not fail");
+        assert!(
+            sentence.starts_with("Palatino (XAML lays it out, but it"),
+            "the mismatch answer names the family that was asked for: {sentence}"
+        );
+        println!("mismatch: {sentence}");
+        println!(
+            "mismatch (note): {}",
+            typeface_fallback_note("Segoe UI", &lying, &availability, "Segoe UI")
+        );
+    }
+
+    /// AND THE BARE-NAME ARM IS UNCHANGED: a source with no `#` is still
+    /// the system font collection's question, both ways round. This is
+    /// the arm the fix must not have weakened — an installed family
+    /// still prints its bare name, and a family nobody has still gets
+    /// the sentence that says so.
+    #[test]
+    #[cfg(feature = "harness")]
+    fn a_bare_family_is_still_the_system_collections_question() {
+        let installed =
+            typeface_availability("Segoe UI").expect("the availability read does not fail");
+        assert!(
+            installed.available(),
+            "Segoe UI is on every Windows this tree supports: {}",
+            installed.measured()
+        );
+        assert_eq!(
+            typeface_resolved("Segoe UI", (1, 1), (2, 2)).expect("the read does not fail"),
+            "Segoe UI"
+        );
+        println!("bare, installed: Segoe UI {}", installed.measured());
+
+        let nobodys =
+            typeface_availability(TYPEFACE_ABSENT).expect("the availability read does not fail");
+        assert!(!nobodys.available());
+        let sentence =
+            typeface_resolved(TYPEFACE_ABSENT, (1, 1), (2, 2)).expect("the read does not fail");
+        assert!(
+            sentence.contains("font families"),
+            "a bare family nobody has is still answered by the collection: {sentence}"
+        );
+        println!("bare, absent: {sentence}");
+        println!(
+            "bare, absent (note): {}",
+            typeface_fallback_note("Segoe UI", TYPEFACE_ABSENT, &nobodys, "Segoe UI")
+        );
     }
 
     /// The two keys this lowering must NEVER write, each for its own

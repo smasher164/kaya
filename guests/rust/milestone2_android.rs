@@ -87,6 +87,9 @@ mod ranges;
 #[path = "styling.rs"]
 mod styling;
 
+#[path = "typeface.rs"]
+mod typeface;
+
 /// One APK hosts every scene: Android has one example app rather than
 /// one binary per scene, so the selftest script doubles as the scene
 /// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
@@ -162,6 +165,16 @@ fn app(ctx: kaya::AppCtx) {
         // SEED drives Material's own scheme derivation and `heading` is
         // Compose heading() semantics — what the expect_ax step reads.
         Ok("styling") => styling::app(ctx),
+        // The typeface scene: the brand typeface swaps the FAMILY and
+        // leaves the ramp alone (docs/styling-plan.md Slice 2b). The
+        // same guest the mac lane runs, with one thing supplied from
+        // outside — the scene reads the vendored font's BYTES, and its
+        // default path is repo-relative, which is a path no device has.
+        // The leg pushes the file and names it in KAYA_FONT_FILE
+        // (tools/android/run-emulator.sh); the guest panics naming that
+        // variable if the file is not there, so a delivery that failed
+        // cannot read as a font that did not apply.
+        Ok("typeface") => typeface::app(ctx),
         // The milestone-2 scene is the DEFAULT and says so: its leg
         // passes "1" (the selftest flag's original spelling, from
         // before the value doubled as a scene selector), and a build

@@ -224,6 +224,17 @@ fn main() {
         "Microsoft.UI.Xaml.Media.ImageSource".to_string(),
         "Microsoft.UI.Xaml.Media.Imaging.BitmapSource".to_string(),
         "Microsoft.UI.Xaml.Media.Imaging.BitmapImage".to_string(),
+        // THE BRAND TYPEFACE (docs/styling-plan.md Slice 2b). The
+        // transitivity trap in its usual disguise: `FontFamily` appeared
+        // nine times in the generated file before this line and every one
+        // was a vtable PAD — `IControl_Vtbl { FontFamily: usize,
+        // SetFontFamily: usize }`, the same on ITextBlock and IFontIcon,
+        // plus three FontFamilyProperty statics — so the backend read as
+        // "WinUI controls have no font family". One filter entry turns all
+        // of them into methods and unlocks the constructor
+        // (`CreateInstanceWithName`) and the `Source` accessor the
+        // typeface read starts from.
+        "Microsoft.UI.Xaml.Media.FontFamily".to_string(),
         "Windows.Storage.Streams.InMemoryRandomAccessStream".to_string(),
         "Windows.Storage.Streams.DataWriter".to_string(),
         // StoreAsync's return type; without it the method is skipped.

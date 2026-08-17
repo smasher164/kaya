@@ -83,6 +83,23 @@ windows = { version = "0.62", features = [
 # unexplained JVM crash on one lane.
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
+    # DirectWrite — the layer BENEATH the XAML text stack, and the only
+    # place a font question gets a measured answer in this process
+    # (docs/styling-plan.md Slice 2b). Two calls, both of them things
+    # XAML cannot say:
+    #   IDWriteFontCollection::FindFamilyName — does this machine HAVE
+    #     that family. `FontFamily.Source` answers the request back and
+    #     nothing else, which is the read the slice forbids.
+    #   IDWriteFontFallback::MapCharacters — the family an unresolvable
+    #     request ACTUALLY renders in, named off the mapped font. The
+    #     fallback name is a property of the lane image (Windows build ×
+    #     locale × packaging; upstream microsoft-ui-xaml#10709 is still
+    #     unanswered), so it is measured at run time and never a
+    #     constant in this tree.
+    # It carries NONE of UI Automation's hazard above: DirectWrite is a
+    # local text API, not a cross-process automation client, so nothing
+    # here can raise RPC_E_CANTCALLOUT_ININPUTSYNCCALL in a file dialog.
+    "Win32_Graphics_DirectWrite",
     # Win32_UI_TextServices is the Text Services Framework, and it is
     # NOT UI Automation — the wall above is about attaching an automation
     # CLIENT, which reaches into other processes' UI; TSF is the input
@@ -132,6 +149,19 @@ atspi = { version = "0.30", optional = true, features = ["zbus"] }
 # 4.10+) and covers v4_6's gdk::Texture::from_bytes; the validation
 # image ships GTK 4.18.
 gtk4 = { version = "0.11.4", features = ["v4_10"] }
+# Pango, named DIRECTLY (gtk4 already pulls it in) for one feature and
+# one call: `v1_56` gates `PangoFontMap::add_font_file`, which is how a
+# brand typeface's FONT BYTES reach the text system on this platform
+# (docs/styling-plan.md Slice 2b, gtk.rs's register_font_blob).
+#
+# The documented alternative — fontconfig's `FcConfigAppFontAddFile` —
+# was MEASURED returning success and doing nothing once GTK has
+# initialised, which is every position a kaya apply can occupy; the pango
+# call was measured working in that same position. The floor this sets is
+# pango >= 1.56 on Linux, one minor version below the validation image's
+# 1.56.3, and a build against anything older fails at link with the
+# symbol named rather than falling back silently.
+pango = { version = "0.22.8", features = ["v1_56"] }
 # libadwaita: AdwNavigationSplitView is GNOME's list-detail component,
 # and adopting it is what gives the platform its own collapse animation,
 # pane proportions, separator, and back behaviour instead of geometry
@@ -301,6 +331,10 @@ path = "../../guests/rust/styling.rs"
 [[example]]
 name = "ranges"
 path = "../../guests/rust/ranges.rs"
+
+[[example]]
+name = "typeface"
+path = "../../guests/rust/typeface.rs"
 
 # Android has no native process entry (Zygote forks the process and an
 # Activity is the way in), so the Android packaging of milestone 0 is a
