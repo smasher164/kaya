@@ -9853,6 +9853,18 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn section_symbol(&self, title: &str) -> String {
+        let title = title.to_owned();
+        // The pump is sections_presentation's, for the same reason: a
+        // switcher assembled in this same drain has not built its
+        // buttons yet, and a read that ran first would report an empty
+        // switcher as a missing row.
+        Self::on_main(move |core| {
+            while glib::MainContext::default().iteration(false) {}
+            section_symbol_read(core, &title)
+        })
+    }
+
     fn select_section(&self, index: usize) {
         // The user's route: reconcile, move the stack under the echo
         // guard (the notify handler cannot re-borrow CORE from inside
@@ -9961,6 +9973,111 @@ fn rendered_sections_arm(core: &CoreState, window: u64) -> String {
         return format!("window#{window} {arm} chrome was built but never shown");
     }
     arm.to_owned()
+}
+
+/// THE SECTION ROW'S SYMBOL, off the GtkImage the real switcher button
+/// draws — the strong channel, the one `toolbar_item` uses and the one
+/// `menu_symbol` uses, never `GtkSectionPage::symbol` beside it and
+/// never the accessible Description kaya wrote (which would answer from
+/// kaya's own memory of what it asked for).
+///
+/// TITLE -> ROW is positional and that is forced by the platform:
+/// `GtkStackSwitcher` renders icon OR title (refresh_section_symbols'
+/// fact 1), so a section WITH a symbol has no visible label to match on
+/// — matching by label would only ever resolve the rows that have
+/// nothing to read. The pairing is the one the switcher itself makes:
+/// its Nth button is the stack's Nth page, which is the invariant
+/// refresh_section_symbols already asserts in debug. The TITLE half is
+/// still real — it comes off `GtkStackPage::title`, GTK's own copy, the
+/// same place `active_section_title` reads.
+///
+/// EVERY WINDOW, in id order: the sections scene puts its sidebar rows
+/// in an aux window, and the verb addresses a row by the name the user
+/// sees rather than by a window number.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn section_symbol_read(core: &CoreState, title: &str) -> String {
+    use gtk4::prelude::{Cast, WidgetExt};
+    let mut windows: Vec<u64> = core.sections.keys().copied().collect();
+    windows.sort_unstable();
+    // What the switchers DO carry, for the miss sentence: "no row by
+    // that name" and "the rows are not built yet" are different bugs and
+    // the reader chases the sentence.
+    let mut seen: Vec<String> = Vec::new();
+    for window in windows {
+        let Some(stack) = core.section_stacks.get(&window) else {
+            continue;
+        };
+        let ids = core.sections.get(&window).cloned().unwrap_or_default();
+        let mut index = None;
+        for (i, sid) in ids.iter().enumerate() {
+            let Some(record) = core.section_pages.get(sid) else {
+                continue;
+            };
+            if record.page.parent().is_none() {
+                continue;
+            }
+            let page_title = stack
+                .page(record.page.upcast_ref::<gtk4::Widget>())
+                .title()
+                .map(|t| t.to_string())
+                .unwrap_or_default();
+            if page_title == title {
+                index = Some(i);
+                break;
+            }
+            seen.push(page_title);
+        }
+        let Some(index) = index else { continue };
+        let Some((_, chrome)) = core.section_chrome.get(&window) else {
+            return format!("window#{window} has no sections chrome");
+        };
+        let mut child = chrome.first_child();
+        while let Some(widget) = child {
+            if let Some(switcher) = widget.downcast_ref::<gtk4::StackSwitcher>() {
+                let mut button = switcher.first_child();
+                let mut at = 0usize;
+                while let Some(b) = button {
+                    if at == index {
+                        let Some(icon) = first_image_icon_name(&b) else {
+                            // WHAT THIS MEASURED: the button is in the
+                            // real switcher and holds no GtkImage.
+                            // GtkStackSwitcher builds one ONLY from the
+                            // page's icon-name, so this is "the row
+                            // draws no glyph" — deliberately not "the
+                            // app declared none", which this reader
+                            // cannot tell it from.
+                            return "no glyph on the section row".to_owned();
+                        };
+                        return match symbol_name_of_icon(&icon) {
+                            Some(name) => name.to_owned(),
+                            None => format!(
+                                "the section row {title:?} draws {icon:?}, which is not in \
+                                 this backend's symbol table"
+                            ),
+                        };
+                    }
+                    at += 1;
+                    button = b.next_sibling();
+                }
+                return format!(
+                    "the switcher holding {title:?} has {at} buttons, so there is none at #{index}"
+                );
+            }
+            if widget.downcast_ref::<gtk4::StackSidebar>().is_some() {
+                // MEASURED, GTK 4.18.6 (refresh_section_symbols' fact
+                // 2): GtkStackSidebar binds the page TITLE into a
+                // GtkLabel and ignores icon-name entirely, so the
+                // sidebar arm draws no glyph for any section. This is
+                // the component, not a lowering that forgot — and
+                // saying so is the whole difference between a reader
+                // that measured and one that guessed.
+                return "a GtkStackSidebar row carries no icon".to_owned();
+            }
+            child = widget.next_sibling();
+        }
+        return format!("window#{window} sections chrome holds no switcher");
+    }
+    format!("no section row is titled {title:?} (the switchers carry: {seen:?})")
 }
 
 /// The inset MEASURED on a widget's own CSS box: the offset from its

@@ -13126,6 +13126,71 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_default()
     }
 
+    fn section_symbol(&self, title: &str) -> String {
+        let title = title.to_owned();
+        // THE ICON THE REAL ITEM CARRIES — the automation name of the
+        // IconElement in the NavigationViewItem's own Icon slot, which
+        // is `toolbar_item`'s read one control over (both go through
+        // `icon_slot!`, so the switcher needed no icon code of its own),
+        // and never `WinSection::symbol` beside it.
+        //
+        // The item's OWN uia name is its Content, i.e. the title — the
+        // AppBarButton finding one control over — so the two halves of
+        // this read come off two different properties of the same real
+        // element and neither is kaya's copy.
+        //
+        // EVERY WINDOW, in id order: the sections scene's sidebar rows
+        // live in an aux window (`Left` pane display mode there, `Top`
+        // in the primary — one control, both arms).
+        Self::on_ui_read(move |core| {
+            use windows_core::Interface;
+            let mut windows: Vec<u64> = core.section_navs.keys().copied().collect();
+            windows.sort_unstable();
+            let mut seen: Vec<String> = Vec::new();
+            for window in windows {
+                let Some(nav) = core.section_navs.get(&window) else {
+                    continue;
+                };
+                let items = nav.MenuItems()?;
+                for i in 0..items.Size()? {
+                    let Ok(item) = items.GetAt(i)?.cast::<NavigationViewItem>() else {
+                        continue;
+                    };
+                    let Ok(content) = item.Content() else { continue };
+                    let Ok(text) = content.cast::<IReference<HSTRING>>() else {
+                        continue;
+                    };
+                    let got = text.Value()?.to_string();
+                    if got != title {
+                        seen.push(got);
+                        continue;
+                    }
+                    return Ok(match item.Icon() {
+                        Ok(icon) => icon_uia_name(&icon),
+                        // The empty slot arrives as a success-coded
+                        // error (the `MenuIcon::Empty` rule): the
+                        // property returns a null pointer and
+                        // windows-core turns that into E_POINTER. What
+                        // this measured is that the row is in the real
+                        // switcher and carries no icon at all — it says
+                        // nothing about whether the app declared a
+                        // symbol, which this reader cannot tell it from.
+                        Err(e) if e.code().is_ok() => {
+                            format!("the section row {title} carries no icon")
+                        }
+                        Err(e) => {
+                            format!("the section row {title}'s icon slot could not be read: {e}")
+                        }
+                    });
+                }
+            }
+            Ok(format!(
+                "no section row is titled {title:?} (the switchers carry: {seen:?})"
+            ))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn select_section(&self, index: usize) {
         // The user's route: reconcile, move the switcher under the
         // swallow counter, and emit exactly once — the synchronous-

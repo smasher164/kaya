@@ -12,6 +12,22 @@ expect_sections 2
 # backend actually took — the desktops' horizontal spelling and the
 # phones' bottom bar are one "bar" answer, so this line runs everywhere.
 expect_sections_presentation "bar"
+# THE SYMBOLS THE ROWS REALLY DRAW, not the ones the guest declared.
+# This is the assertion whose absence let the SwiftUI decode read the
+# I64 at body+20 (alignment padding) instead of +24: `section.symbol`
+# was garbage, no glyph rendered, and all five lanes stayed green until
+# a capture caught it. Each backend reads its own switcher's row — the
+# GtkImage the StackSwitcher built, the NavigationViewItem's icon, the
+# tab item's rendered glyph — and answers in the ONE shared vocabulary,
+# so these two lines are byte-identical everywhere.
+#
+# ABOVE THE PHONE CUT, deliberately: a symbol is what a bottom bar is
+# made of, so the two mobile lanes assert it too. The sidebar rows below
+# carry symbols the desktops draw and GTK's GtkStackSidebar does not
+# (measured — it binds only the page title), so asserting them would
+# make a shared scene un-shared; the ledger holds that.
+expect_section_symbol "Feed" "home"
+expect_section_symbol "Archive" "star"
 expect_section "Feed"
 expect label#0 "feed ready"
 select_section 1

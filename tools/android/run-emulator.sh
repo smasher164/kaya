@@ -752,7 +752,15 @@ path, cut, keep = sys.argv[1], sys.argv[2], sys.argv[3]
 # A CUT WITHOUT A `keep` IS AN UNGUARDED CUT, and an optional guard is
 # the kind that is quietly not passed. Naming what the cut may not take
 # is the price of cutting at all.
-if not keep:
+#
+# A LIST, because one scene's tail can be below more than one thing the
+# leg exists to assert: the sections leg asserts both which section is
+# showing AND what its switcher row draws, and a guard naming only the
+# first would let the second slide into the tail unnoticed. Every verb
+# named gets the same two clauses. THE iOS LANE TAKES THE SAME LIST —
+# two mobile lanes, one question, and two answers is how lanes drift.
+keeps = keep.split()
+if not keeps:
     sys.exit(f"run-emulator: cutting {path} at `{cut}` with no `keep` verb — "
              f"say which assertions this cut may not take with it, or the leg "
              f"can be trimmed until it asserts nothing")
@@ -767,21 +775,22 @@ at = verbs.index(cut)
 prefix, dropped = lines[:at], lines[at:]
 
 
-def asserted(seq):
-    """The distinct `keep` steps in seq, whitespace-normalized."""
+def asserted(seq, verb):
+    """The distinct `verb` steps in seq, whitespace-normalized."""
     return {" ".join(line.split()) for line in seq
-            if (line.split() or [""])[0] == keep}
+            if (line.split() or [""])[0] == verb}
 
 
-whole, kept = asserted(lines), asserted(prefix)
-if not kept:
-    sys.exit(f"run-emulator: cutting {path} at `{cut}` leaves no `{keep}` step "
-             f"at all — the leg would pass without asserting the thing it "
-             f"exists for")
-if kept != whole:
-    sys.exit(f"run-emulator: cutting {path} at `{cut}` drops "
-             f"{sorted(whole - kept)} — the cut may not take an assertion of "
-             f"`{keep}` with it")
+for verb in keeps:
+    whole, kept = asserted(lines, verb), asserted(prefix, verb)
+    if not kept:
+        sys.exit(f"run-emulator: cutting {path} at `{cut}` leaves no `{verb}` "
+                 f"step at all — the leg would pass without asserting the thing "
+                 f"it exists for")
+    if kept != whole:
+        sys.exit(f"run-emulator: cutting {path} at `{cut}` drops "
+                 f"{sorted(whole - kept)} — the cut may not take an assertion of "
+                 f"`{verb}` with it")
 print("\n".join(f"run-emulator: NOT RUN on this host (after `{cut}`): {line}"
                 for line in dropped), file=sys.stderr)
 # Intent extras cannot carry newlines, so this lane's scripts fold into
@@ -796,7 +805,7 @@ PY
 # every expect_section above the cut. Assigned HERE, not inline: a
 # refused cut must kill the lane, not run an empty script — measured
 # 2026-08-16, three legs green-on-nothing ("script has no expects").
-SECTIONS_CUT="$(scene_script_cut sections expect_windows expect_section)" || exit 1
+SECTIONS_CUT="$(scene_script_cut sections expect_windows "expect_section expect_section_symbol")" || exit 1
 
 # The Compose interpreter carries the id of the sources it was compiled
 # from, the same contract libkaya and the SwiftUI dylib have. Written

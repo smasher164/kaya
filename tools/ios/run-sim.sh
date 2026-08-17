@@ -1033,7 +1033,14 @@ path, cut, keep = sys.argv[1], sys.argv[2], sys.argv[3]
 # A CUT WITHOUT A `keep` IS AN UNGUARDED CUT, and an optional guard is
 # the kind that is quietly not passed. Naming what the cut may not take
 # is the price of cutting at all.
-if not keep:
+#
+# A LIST, because one scene's tail can be below more than one thing the
+# leg exists to assert: the sections leg asserts both which section is
+# showing AND what its switcher row draws, and a guard naming only the
+# first would let the second slide into the tail unnoticed. Every verb
+# named gets the same two clauses.
+keeps = keep.split()
+if not keeps:
     sys.exit(f"run-sim: cutting {path} at `{cut}` with no `keep` verb — say "
              f"which assertions this cut may not take with it, or the leg "
              f"can be trimmed until it asserts nothing")
@@ -1048,21 +1055,22 @@ at = verbs.index(cut)
 prefix, dropped = lines[:at], lines[at:]
 
 
-def asserted(seq):
-    """The distinct `keep` steps in seq, whitespace-normalized."""
+def asserted(seq, verb):
+    """The distinct `verb` steps in seq, whitespace-normalized."""
     return {" ".join(line.split()) for line in seq
-            if (line.split() or [""])[0] == keep}
+            if (line.split() or [""])[0] == verb}
 
 
-whole, kept = asserted(lines), asserted(prefix)
-if not kept:
-    sys.exit(f"run-sim: cutting {path} at `{cut}` leaves no `{keep}` step "
-             f"at all — the leg would pass without asserting the thing it "
-             f"exists for")
-if kept != whole:
-    sys.exit(f"run-sim: cutting {path} at `{cut}` drops "
-             f"{sorted(whole - kept)} — the cut may not take an assertion "
-             f"of `{keep}` with it")
+for verb in keeps:
+    whole, kept = asserted(lines, verb), asserted(prefix, verb)
+    if not kept:
+        sys.exit(f"run-sim: cutting {path} at `{cut}` leaves no `{verb}` step "
+                 f"at all — the leg would pass without asserting the thing it "
+                 f"exists for")
+    if kept != whole:
+        sys.exit(f"run-sim: cutting {path} at `{cut}` drops "
+                 f"{sorted(whole - kept)} — the cut may not take an assertion "
+                 f"of `{verb}` with it")
 print("\n".join(f"run-sim: NOT RUN on this host (after `{cut}`): {line}"
                 for line in dropped if line.strip()), file=sys.stderr)
 print("\n".join(prefix))
@@ -1381,7 +1389,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
             # capability, so the leg runs everything above the click
             # that opens it — and the keep guard holds the section
             # asserts above the cut.
-            queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest" "" expect_windows expect_section
+            queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest" "" expect_windows "expect_section expect_section_symbol"
         else
             queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest"
         fi
@@ -1477,7 +1485,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
             queue_leg run_swiftui_on go "$APP" dev.kaya.milestone2go go 1 milestone2
         elif [ "$guest" = sections ]; then
             # The same phone-expressible prefix as the swift leg above.
-            queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest" "" expect_windows expect_section
+            queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest" "" expect_windows "expect_section expect_section_symbol"
         else
             queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest"
         fi

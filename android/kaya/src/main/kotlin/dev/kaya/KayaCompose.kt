@@ -1040,6 +1040,13 @@ object KayaCompose {
      */
     const val TOOLBAR_TAG = "kaya:toolbar"
     const val TOOLBAR_MORE_TAG = "kaya:toolbar-more"
+
+    /** The prefix every SECTION SWITCHER ROW's test tag carries —
+     * [kayaSectionTag]'s half that the read scopes on, so the walk can
+     * collect every row without knowing any section id. A PREFIX and not
+     * one shared tag, because two rows sharing a tag are two rows the
+     * tree cannot tell apart. */
+    const val SECTION_TAG_PREFIX = "kaya:section#"
     const val KIND_COLUMN = 1
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
@@ -4625,6 +4632,151 @@ object KayaCompose {
         return out
     }
 
+    /**
+     * EVERY SECTION SWITCHER ROW THE BAR REALLY COMPOSED, in tree order,
+     * each reduced to the two things the verb asks about — and each read
+     * off the MERGED node a TalkBack user focuses.
+     *
+     * BOTH HALVES COME FROM THE RENDER, from two different properties of
+     * that one node: the TITLE is the `Text` [NavigationBarItem]'s label
+     * slot composed, the SYMBOL is the `ContentDescription` the [Icon]
+     * inside [KayaSymbolIcon] put there. Neither is [KayaSection]'s
+     * field beside them — answering from those would make the verb agree
+     * with itself, which is exactly what let a garbage `symbol` ship.
+     *
+     * The tag is what says "this node is a section row" (kayaMenuTag's
+     * doctrine, one construct over) and it is on EVERY row, symbol or
+     * not: "the row is there and drew no icon" and "no row is there" are
+     * different measurements.
+     */
+    private fun kayaSectionRows(activity: ComponentActivity): List<SemanticsNode> {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return emptyList()
+        // THE UNMERGED TREE, and this is the one place in this file that
+        // wants it — see [kayaSectionProp] for the measurement that
+        // forced it. Every other read here is on the merged tree because
+        // that is what a service consumes; a NavigationBarItem's icon
+        // never reaches that tree at all, so a merged read of a section
+        // row could only ever answer "no icon".
+        val root = (view as RootForTest).semanticsOwner.unmergedRootSemanticsNode
+        val out = ArrayList<SemanticsNode>()
+        fun walk(node: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            val tag = node.config.getOrNull(SemanticsProperties.TestTag)
+            if (tag != null && tag.startsWith(SECTION_TAG_PREFIX)) {
+                out.add(node)
+                return
+            }
+            node.children.forEach { walk(it, depth + 1) }
+        }
+        walk(root, 0)
+        return out
+    }
+
+    /**
+     * One property off a section row's SUBTREE, not off its own node —
+     * and this is a MEASURED shape, not defensive coding.
+     *
+     * WHAT WAS MEASURED (emulator, 2026-08-17). The row's MERGED node —
+     * the one a TalkBack user focuses, and the tree every other read in
+     * this file uses — carries the label and nothing of the icon:
+     *
+     *     keys Role|OnClick|Focused|RequestFocus|Selected|TestTag|Text|…
+     *
+     * no `ContentDescription` at all, for a bar that was drawing icons
+     * (the model held `Feed=20/home`, `Archive=17/star`, both resolving
+     * to real ImageVectors). In the UNMERGED tree the icon is right
+     * there under the tagged row:
+     *
+     *     [kaya:section#7 cd=null txt=null role=Tab]
+     *       [null cd=null txt=Feed role=null]
+     *       [null cd=null txt=null role=null]
+     *         [null cd=home txt=null role=Image]
+     *
+     * So Material3's NavigationBarItem does not carry its icon slot's
+     * description up into the selectable's merged node — which is a
+     * reasonable thing for it to do (a tab that announced "home, Feed"
+     * says the same thing twice) and it means the merged tree simply
+     * does not contain this observation.
+     *
+     * The answer is therefore the first one the row's UNMERGED subtree
+     * publishes. That is still entirely the render — the semantics node
+     * [KayaSymbolIcon]'s [Icon] created — and still not
+     * [KayaSection.symbol] beside it, which is the field a wrong decode
+     * fills with garbage while every lane stays green.
+     */
+    private fun kayaSectionProp(
+        node: SemanticsNode,
+        read: (SemanticsNode) -> String?,
+        depth: Int = 0,
+    ): String {
+        if (depth > 16) return ""
+        val here = read(node)
+        if (!here.isNullOrEmpty()) return here
+        for (child in node.children) {
+            val found = kayaSectionProp(child, read, depth + 1)
+            if (found.isNotEmpty()) return found
+        }
+        return ""
+    }
+
+    private fun kayaSectionTitleOf(node: SemanticsNode): String =
+        kayaSectionProp(node, { it.config.getOrNull(SemanticsProperties.Text)
+            ?.joinToString(" ") { t -> t.text } })
+
+    private fun kayaSectionSymbolOf(node: SemanticsNode): String =
+        kayaSectionProp(node, { it.config.getOrNull(SemanticsProperties.ContentDescription)
+            ?.joinToString(" ") })
+
+    /**
+     * THE expect_section_symbol READ: the semantic name the REAL
+     * switcher row titled [title] draws.
+     *
+     * MAIN THREAD ONLY (callers go through [onUi]) — [kayaAxFind]'s
+     * rule; Compose owns its semantics tree from the thread that lays
+     * out.
+     *
+     * TOTAL, like [kayaToolbarItemRead]: every failure is a short
+     * measured sentence and a retryable non-match, never an exception.
+     * No presentation step is needed the way [kayaMenuSymbolRead] needs
+     * one — a bottom bar is composed for as long as the sections are.
+     */
+    private fun kayaSectionSymbolRead(activity: ComponentActivity, title: String): String {
+        val rows = kayaSectionRows(activity)
+        val hit = rows.firstOrNull { kayaSectionTitleOf(it) == title }
+        if (hit == null) {
+            if (rows.isEmpty()) return "the window has no section switcher"
+            // MEASURED, not guessed: the bar is composed and carries no
+            // row with this title. What it DOES carry rides the
+            // sentence, because "the title never landed" and "the row is
+            // under another name" are different bugs.
+            val shown = rows.joinToString(", ") { kayaSectionTitleOf(it) }
+            return "no section row titled $title (the switchers carry: $shown)"
+        }
+        val described = kayaSectionSymbolOf(hit)
+        if (described.isEmpty()) {
+            // The row composed and nothing in its subtree publishes a
+            // content description. It deliberately does NOT say whether
+            // the app asked for a symbol — this reader cannot tell "none
+            // declared" from "declared and never lowered", and a
+            // diagnostic may only print what it measured (invariant 3).
+            // The subtree's size rides the sentence, because "the row
+            // composed empty" and "the row composed and the icon slot
+            // drew nothing" are different bugs.
+            // The subtree's size rides the sentence, because "the row
+            // composed empty" and "the row composed and the icon slot
+            // drew nothing" are different bugs.
+            return "no icon on the section row (it has ${hit.children.size} child nodes)"
+        }
+        if (!isSymbolName(described)) {
+            // A description outside the twenty came from something other
+            // than the symbol lowering, and reporting it as a symbol
+            // nobody recognises would send the reader after the
+            // vocabulary instead of the row.
+            return "the section row describes itself \"$described\", which is not a symbol name"
+        }
+        return described
+    }
+
     /** The first catalog item with this label, in CATALOG PREORDER —
      * the same walk [kayaPromotedActions] takes, so "the item labelled
      * Save" means the same thing to both. Deliberately the whole
@@ -4981,6 +5133,37 @@ object KayaCompose {
                             observed.add("${prefix}sections $want")
                         } else {
                             failures.add("${prefix}sections presentation $got, wanted $want")
+                        }
+                    }
+                    "expect_section_symbol" -> {
+                        // THE SEMANTIC ICON on the REAL switcher row —
+                        // the gap that let a wrong symbol decode ship
+                        // green on every lane (see the Step's doc in
+                        // harness.rs). Its own arm rather than a second
+                        // label on "expect_section": check-verbs reads
+                        // each `"expect_*" ->` head and demands that arm
+                        // record or refuse, and a verb sharing another's
+                        // head is a verb the sweep never looks at.
+                        val head = quotedHead(line.substring(parts[0].length))
+                        val want = head?.let { quotedHead(it.second) }
+                        if (head == null || want == null || want.second.isNotEmpty()) {
+                            failures.add(
+                                "expect_section_symbol wants a quoted section title and a " +
+                                    "quoted symbol name: $line")
+                        } else {
+                            val got = onUi(activity) {
+                                kayaSectionSymbolRead(activity, head.first)
+                            }
+                            if (got == want.first) {
+                                observed.add("section \"${head.first}\" symbol \"${want.first}\"")
+                            } else {
+                                // The measured answer rides the failure:
+                                // it tells a wrong glyph from a row that
+                                // drew none from a switcher not built.
+                                failures.add(
+                                    "section \"${head.first}\" symbol \"$got\", " +
+                                        "wanted \"${want.first}\"")
+                            }
                         }
                     }
                     "select_section" -> {
@@ -9010,6 +9193,16 @@ private fun KayaSurface() {
  */
 fun kayaMenuTag(id: Long): String = "kaya:menu#$id"
 
+/** THE TAG EVERY MATERIALIZED SECTION ROW CARRIES, keyed by the
+ * section's own id — [kayaMenuTag] one construct over, for the same
+ * reason: it is what makes the symbol read an OBSERVATION. The tag says
+ * "this node is a section row", the merged node it lands on is the node
+ * a TalkBack user focuses, and the content description on that node got
+ * there from the [Icon] [KayaSymbolIcon] drew — not from the field the
+ * apply arm decoded, which is the field a wrong decode fills with
+ * garbage while every lane stays green. */
+fun kayaSectionTag(id: Long): String = "${KayaCompose.SECTION_TAG_PREFIX}$id"
+
 /** The SEMANTIC ICON, drawn once, in one place — the kayaApplySymbol
  * precedent from the macOS arm, so every kind gets identical treatment
  * and an unset symbol is simply no icon.
@@ -9513,6 +9706,11 @@ fun KayaSectionsScaffold(active: KayaSection) {
         NavigationBar {
             KayaSceneModel.sections.forEach { section ->
                 NavigationBarItem(
+                    // THE ROW'S OWN TAG, so the harness can address this
+                    // row in the merged semantics tree — the one thing
+                    // that makes expect_section_symbol read the render
+                    // instead of the model (kayaSectionTag).
+                    modifier = Modifier.testTag(kayaSectionTag(section.id)),
                     selected = section.id == active.id,
                     onClick = { kayaUserSelectsSection(section.id) },
                     // THE SEMANTIC ICON (docs/styling-plan.md D6). An

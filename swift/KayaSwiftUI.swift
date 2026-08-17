@@ -4017,8 +4017,16 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     // type word, exactly like the widget arms — +20 is
                     // padding, and reading it decoded garbage that
                     // rendered as NO icon (caught by the capture,
-                    // 2026-08-16; sections had no symbol assert to
-                    // catch it first — see the report's gap note).
+                    // 2026-08-16, because sections had no symbol
+                    // assertion to catch it first).
+                    //
+                    // THEY DO NOW: `expect_section_symbol` reads the
+                    // real switcher row on every backend, and this exact
+                    // perturbation — +24 back to +20 — is the watched
+                    // red that gate was built against ("symbol
+                    // 85899345928 is not in this interpreter's table",
+                    // 2026-08-17). Break this line and the sections leg
+                    // fails on all five lanes.
                     section.symbol =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 default:
@@ -5754,6 +5762,41 @@ private func kayaRunScript(_ script: String) {
                     observed.append("section \"\(want)\"")
                 } else {
                     failures.append("section \"\(got)\", wanted \"\(want)\"")
+                }
+            case "expect_section_symbol":
+                // THE SEMANTIC ICON on the REAL switcher row — the gap
+                // that let the +20/+24 decode ship (see the Step's doc
+                // in harness.rs). Its own arm rather than a second label
+                // on expect_section: check-verbs reads each `case
+                // "expect_*"` head and demands that arm record or
+                // refuse, and a verb sharing another's head is a verb
+                // the sweep never looks at.
+                let sectionRest = String(line.dropFirst(parts[0].count))
+                guard let (sectionTitle, symbolSpec) = kayaQuotedPrefix(sectionRest),
+                    let (wantSectionSymbol, sectionTail) = kayaQuotedPrefix(symbolSpec),
+                    sectionTail.isEmpty
+                else {
+                    failures.append(
+                        "expect_section_symbol wants a quoted section title and a quoted "
+                            + "symbol name: \(line)")
+                    break
+                }
+                let gotSectionSymbol = DispatchQueue.main.sync { () -> String in
+                    #if os(macOS)
+                        return kayaSectionSymbolReadMac(sectionTitle)
+                    #else
+                        return kayaSectionSymbolReadIOS(sectionTitle)
+                    #endif
+                }
+                if kayaBytesEqual(gotSectionSymbol, wantSectionSymbol) {
+                    observed.append("section \"\(sectionTitle)\" symbol \"\(wantSectionSymbol)\"")
+                } else {
+                    // The MEASURED answer rides the failure: it is what
+                    // tells a wrong glyph from a row that drew none from
+                    // a switcher that is not built yet.
+                    failures.append(
+                        "section \"\(sectionTitle)\" symbol \"\(gotSectionSymbol)\", "
+                            + "wanted \"\(wantSectionSymbol)\"")
                 }
             case "select_section":
                 // The user's route: move the switcher's selection and
@@ -10920,6 +10963,297 @@ func kayaToolbarChromeFits(_ spelling: String) -> String? {
     }
 #endif
 
+#if os(macOS)
+    /// One real section switcher row, reduced to the two things the verb
+    /// asks about, each taken off the element AppKit built.
+    struct KayaSectionRowMac {
+        /// What the row is SPOKEN as — its title.
+        let name: String
+        /// The identifier the rendering arm published, still prefixed.
+        let ident: String?
+        /// The AX role it was found under, for the miss sentence.
+        let role: String
+    }
+
+    /// EVERY SECTION SWITCHER ROW this process is showing, in the order a
+    /// walk of the accessibility tree meets them — the macOS tab bar's
+    /// items AND the source list's rows, from every window, because the
+    /// sections scene puts its sidebar in an aux window.
+    ///
+    /// A ROW IS AN ELEMENT THE RENDER STAMPED. Scoping by role instead
+    /// was tried and rejected: SwiftUI's macOS TabView publishes its
+    /// items as AXRadioButton under an AXTabGroup while the sidebar
+    /// publishes AXRow > AXCell, and a role list is a claim about
+    /// SwiftUI's internals that a release can quietly falsify — the
+    /// identifier is kaya's own mark and says "this element is a section
+    /// row" outright. The spoken name comes from AppKit's own
+    /// title/description/value, never from the stamp, so the two halves
+    /// of the match come from two different places.
+    func kayaSectionRowsMac() -> [KayaSectionRowMac] {
+        let app = kayaToolbarAxApp()
+        var rows: [KayaSectionRowMac] = []
+        func nameOf(_ element: AXUIElement, _ depth: Int) -> String {
+            for attribute in [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute] {
+                if let text = kayaAxCopy(element, attribute as String) as? String, !text.isEmpty {
+                    return text
+                }
+            }
+            // A List row publishes its text on a static-text descendant
+            // rather than on itself; the tab items name themselves.
+            if depth < 4 {
+                for child in kayaAxKids(element) {
+                    let text = nameOf(child, depth + 1)
+                    if !text.isEmpty { return text }
+                }
+            }
+            return ""
+        }
+        func walk(_ element: AXUIElement, _ depth: Int) {
+            if depth > 24 { return }
+            if let ident = kayaAxCopy(element, kAXIdentifierAttribute) as? String,
+                ident.hasPrefix(kayaSectionSymbolIdent)
+            {
+                rows.append(
+                    KayaSectionRowMac(
+                        name: nameOf(element, 0),
+                        ident: ident,
+                        role: kayaAxCopy(element, kAXRoleAttribute) as? String ?? "nil"))
+                return
+            }
+            for child in kayaAxKids(element) { walk(child, depth + 1) }
+        }
+        walk(app, 0)
+        return rows
+    }
+
+    /// THE expect_section_symbol READ on macOS.
+    ///
+    /// TOTAL, like kayaToolbarItemRead: every failure is a short
+    /// description and a retryable non-match, never a panic — which is
+    /// also the wait for the switcher to finish building.
+    func kayaSectionSymbolReadMac(_ title: String) -> String {
+        kayaSectionTrace()
+        let rows = kayaSectionRowsMac()
+        guard let hit = rows.first(where: { kayaBytesEqual($0.name, title) }) else {
+            guard !rows.isEmpty else {
+                // WHAT THIS MEASURED: no element in the whole
+                // accessibility tree carries a section row's stamp. It
+                // says nothing about which window is showing — the
+                // reader cannot tell "the switcher is not built yet"
+                // from "the render arm stopped stamping", and a
+                // diagnostic may only print what it measured.
+                return "no section rows are in the accessibility tree"
+            }
+            let shown = rows.map(\.name).joined(separator: ", ")
+            return "no section row titled \(title) (the switchers carry: \(shown))"
+        }
+        guard let ident = hit.ident else {
+            return "the section row \(title) published no rendered-symbol identifier"
+        }
+        // THE ANSWER IS THE STAMP, and its limit is stated: it is what
+        // the arm SAID it drew, not the glyph itself. macOS publishes no
+        // image object for either switcher (measured, see
+        // kayaSectionTrace), so unlike the iOS half there is nothing
+        // stronger to read — and deliberately NO fall-back to
+        // section.symbol, which is the copy that was garbage while every
+        // lane stayed green.
+        return String(ident.dropFirst(kayaSectionSymbolIdent.count))
+    }
+#endif
+
+#if !os(macOS)
+    /// EVERY SECTION SWITCHER ROW UIKit is showing: the tab bar's button
+    /// elements, each reduced to (spoken name, rendered glyph name, kaya
+    /// stamp).
+    ///
+    /// THE OUTERMOST ELEMENT ONLY, kayaToolbarIOSButtons' rule: a walk
+    /// that descended into a tab button would meet the same row twice
+    /// and read the second copy's properties.
+    func kayaSectionRowsIOS() -> [(name: String, sfDrawn: String?, ident: String?)] {
+        var bars: [UIView] = []
+        func findBars(_ view: UIView, _ depth: Int) {
+            if depth > 64 { return }
+            if view is UITabBar { bars.append(view) }
+            for sub in view.subviews { findBars(sub, depth + 1) }
+        }
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows { findBars(window, 0) }
+        }
+        var out: [(name: String, sfDrawn: String?, ident: String?)] = []
+        var seen = Set<ObjectIdentifier>()
+        func glyphUnder(_ node: NSObject, _ depth: Int) -> String? {
+            if depth > 16 { return nil }
+            if node is UIImageView, let ident = kayaAxIdentifier(node) { return ident }
+            if let view = node as? UIView {
+                for sub in view.subviews {
+                    if let found = glyphUnder(sub, depth + 1) { return found }
+                }
+            }
+            return nil
+        }
+        func walk(_ node: NSObject, _ depth: Int) {
+            if depth > 32 { return }
+            guard seen.insert(ObjectIdentifier(node)).inserted else { return }
+            if node.isAccessibilityElement,
+                node.accessibilityTraits.contains(.button)
+                    || node.accessibilityTraits.rawValue & UIAccessibilityTraits.selected.rawValue
+                        != 0
+            {
+                out.append(
+                    (
+                        name: node.accessibilityLabel ?? "",
+                        sfDrawn: glyphUnder(node, 0),
+                        ident: kayaAxIdentifier(node)
+                    ))
+                return
+            }
+            let count = node.accessibilityElementCount()
+            if count != NSNotFound && count > 0 {
+                for i in 0..<count {
+                    if let child = node.accessibilityElement(at: i) as? NSObject {
+                        walk(child, depth + 1)
+                    }
+                }
+            }
+            if let view = node as? UIView {
+                for sub in view.subviews { walk(sub, depth + 1) }
+            }
+        }
+        for bar in bars { walk(bar, 0) }
+        return out
+    }
+
+    /// A RENDERED TAB GLYPH, back to kaya's vocabulary.
+    ///
+    /// THE FILLED-VARIANT FINDING, measured on the simulator (iOS 26.5)
+    /// and the reason this is not just `kayaToolbarIOSSemantic`: a
+    /// UITabBar draws the FILLED variant of whatever symbol it is given.
+    /// kaya asks for `house` and `star`; the bar's image views publish
+    /// `house.fill` and `star.fill`, for the SELECTED tab and the
+    /// unselected one alike (both rows reported it in the same run, so
+    /// this is the bar's dress and not a selection state).
+    ///
+    /// That is a THIRD naming relationship, distinct from
+    /// kayaSymbolTable's `rendered` column: the column records an alias
+    /// SwiftUI resolves before the image exists, this records a variant
+    /// UIKit picks when it draws. Two mechanisms, two rules, and folding
+    /// them into one column would claim the bar renames the symbol,
+    /// which it does not.
+    ///
+    /// STILL NO FALL-BACK to kaya's own stamp: a row drawing an
+    /// off-table glyph, or the RIGHT glyph for the WRONG section, fails
+    /// to invert or inverts to another name and goes red either way.
+    /// Stripping a suffix cannot invent an answer the render did not
+    /// publish.
+    func kayaSectionIOSSemantic(_ rendered: String) -> String? {
+        if let name = kayaToolbarIOSSemantic(rendered) { return name }
+        if rendered.hasSuffix(".fill") {
+            return kayaToolbarIOSSemantic(String(rendered.dropLast(".fill".count)))
+        }
+        return nil
+    }
+
+    /// THE expect_section_symbol READ on iOS: the GLYPH the row really
+    /// draws, inverted back to kaya's vocabulary.
+    ///
+    /// THE INVERSION MATCHES EITHER COLUMN of kayaSymbolTable (see
+    /// kayaToolbarIOSSemantic): SwiftUI resolves an SF alias to its
+    /// canonical spelling before UIKit ever builds the image, so kaya
+    /// asks `doc.on.doc` and the bar publishes `document.on.document`.
+    ///
+    /// AND NO FALL-BACK TO THE STAMP when the inversion fails, for
+    /// kayaToolbarIOSSemantic's measured reason: a fall-back would let an
+    /// arm perturbed to draw an OFF-TABLE glyph pass while the wrong
+    /// picture was on screen, which is the exact hole this verb exists to
+    /// close.
+    func kayaSectionSymbolReadIOS(_ title: String) -> String {
+        kayaAxEnableAutomation()
+        kayaSectionTrace()
+        let rows = kayaSectionRowsIOS()
+        guard let hit = rows.first(where: { kayaBytesEqual($0.name, title) }) else {
+            guard !rows.isEmpty else { return "the window has no section switcher" }
+            let shown = rows.map(\.name).joined(separator: ", ")
+            return "no section row titled \(title) (the switchers carry: \(shown))"
+        }
+        guard let drawn = hit.sfDrawn else {
+            // MEASURED: the row is in the real bar and no image view
+            // under it publishes a glyph name. The stamp rides the
+            // sentence as a DIAGNOSTIC — it says which arm drew — and is
+            // never the answer.
+            return "the section row \(title) draws no glyph (it stamped \(hit.ident ?? "nothing"))"
+        }
+        guard let semantic = kayaSectionIOSSemantic(drawn) else {
+            return
+                "the section row \(title) renders the glyph \(drawn), which is not in this "
+                + "interpreter's table — a glyph outside the vocabulary, or a row this OS "
+                + "renames to a spelling the table has not measured"
+        }
+        return semantic
+    }
+#endif
+
+/// KAYA_SECTION_TRACE=1 dumps every surface a section-symbol read could
+/// have consulted. It is how the channel on each host was ANSWERED
+/// rather than guessed — run the sections scene, which renders the bar
+/// arm in the primary window and the sidebar arm in an aux one, and read
+/// which property carries the glyph.
+func kayaSectionTrace() {
+    guard ProcessInfo.processInfo.environment["KAYA_SECTION_TRACE"] != nil else { return }
+    var out = "KAYA_SECTION_TRACE:\n"
+    #if os(macOS)
+        let app = kayaToolbarAxApp()
+        func walk(_ element: AXUIElement, _ depth: Int) {
+            if depth > 24 { return }
+            let role = kayaAxCopy(element, kAXRoleAttribute) as? String ?? "nil"
+            let pad = String(repeating: " ", count: depth)
+            out += "  \(pad)role=\(role)"
+            out += " sub=\(kayaAxCopy(element, kAXSubroleAttribute) as? String ?? "nil")"
+            out += " title=\(kayaAxCopy(element, kAXTitleAttribute) as? String ?? "nil")"
+            out += " desc=\(kayaAxCopy(element, kAXDescriptionAttribute) as? String ?? "nil")"
+            out += " value=\(kayaAxCopy(element, kAXValueAttribute) as? String ?? "nil")"
+            out += " ident=\(kayaAxCopy(element, kAXIdentifierAttribute) as? String ?? "nil")\n"
+            for child in kayaAxKids(element) { walk(child, depth + 1) }
+        }
+        walk(app, 0)
+        for row in kayaSectionRowsMac() {
+            out += "  row name=\"\(row.name)\" role=\(row.role) ident=\(row.ident ?? "nil")\n"
+        }
+    #else
+        kayaAxEnableAutomation()
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows {
+                func dump(_ node: NSObject, _ depth: Int) {
+                    if depth > 24 { return }
+                    let pad = String(repeating: " ", count: depth)
+                    out += "  \(pad)el \(type(of: node)) label=\(node.accessibilityLabel ?? "nil")"
+                    out += " ident=\(kayaAxIdentifier(node) ?? "nil")"
+                    out += " isElement=\(node.isAccessibilityElement)"
+                    out += " traits=\(node.accessibilityTraits.rawValue)\n"
+                    let count = node.accessibilityElementCount()
+                    if count != NSNotFound && count > 0 {
+                        for i in 0..<count {
+                            if let child = node.accessibilityElement(at: i) as? NSObject {
+                                dump(child, depth + 1)
+                            }
+                        }
+                    }
+                    if let view = node as? UIView {
+                        for sub in view.subviews { dump(sub, depth + 1) }
+                    }
+                }
+                dump(window, 0)
+            }
+        }
+        for row in kayaSectionRowsIOS() {
+            out += "  row name=\"\(row.name)\" glyph=\(row.sfDrawn ?? "nil") "
+            out += "ident=\(row.ident ?? "nil") "
+            out += "toolbarSemantic=\(row.sfDrawn.flatMap(kayaToolbarIOSSemantic) ?? "nil") "
+            out += "semantic=\(row.sfDrawn.flatMap(kayaSectionIOSSemantic) ?? "nil")\n"
+        }
+    #endif
+    FileHandle.standardError.write(Data(out.utf8))
+}
+
 /// The expect_menu read: wherever the item surfaced — the OPEN context
 /// menu first (context items shadow the bar while presented), then the
 /// bar. macOS reads the REAL NSMenuItem state from the owned segment
@@ -13490,6 +13824,75 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     }
 #endif
 
+/// The prefix a SECTION SWITCHER ROW's rendering arm publishes on its
+/// accessibility identifier, the `kayaToolbarSymbolIdent` shape one
+/// construct over.
+///
+/// BOTH ARMS AND BOTH HOSTS publish it from the ONE body below, which is
+/// the point: a sidebar row and a tab item are two different pieces of
+/// chrome on macOS and the read must not have to know which one it is
+/// looking at.
+///
+/// WHAT IT IS WORTH DIFFERS BY HOST, exactly as the toolbar's does. On
+/// macOS it is the symbol ANSWER: SwiftUI hands the tab bar and the
+/// source list an SF name and keeps no image object anywhere the
+/// accessibility tree exposes (measured — KAYA_SECTION_TRACE, see the
+/// arm's report), so this identifier is the only thing on the real
+/// element that came from the render. On iOS it is a DIAGNOSTIC only:
+/// UIKit publishes the drawn SF name on the tab item's own image view,
+/// and the answer there is read off that glyph.
+let kayaSectionSymbolIdent = "kaya-section-symbol:"
+
+/// ONE ROW BODY FOR EVERY SECTION SWITCHER — the macOS sidebar list, the
+/// macOS tab bar and the phones' bottom bar.
+///
+/// It exists so that "what a section row draws" is a single arm. Before
+/// this the two macOS arms each spelled the Label/Text choice for
+/// themselves, and a perturbation of one would have left the other
+/// answering correctly — which is the shape of a negative test that
+/// proves nothing.
+///
+/// The identifier is published on EVERY arm, symbol or not, for
+/// kayaMenuTag's reason: "the row is there and drew no glyph" and "there
+/// is no row" are different measurements, and stamping only the
+/// glyph-bearing rows would collapse them into one.
+struct KayaSectionLabel: View {
+    let title: String
+    let symbol: Int64
+
+    /// Does this OS actually draw the glyph kaya asked for? The rename
+    /// trap fails as a SILENT BLANK, so the resolution is checked in the
+    /// render path and not only in the read (kayaPromotedSymbolWhyNot's
+    /// rule).
+    private func drawable(_ sf: String) -> Bool {
+        #if os(macOS)
+            return NSImage(systemSymbolName: sf, accessibilityDescription: nil) != nil
+        #else
+            return UIImage(systemName: sf) != nil
+        #endif
+    }
+
+    var body: some View {
+        if symbol != 0, let sf = kayaSFSymbol(symbol), let name = kayaSymbolName(symbol),
+            drawable(sf)
+        {
+            Label(title, systemImage: sf)
+                .accessibilityIdentifier(kayaSectionSymbolIdent + name)
+        } else if symbol != 0 {
+            // A declared symbol this host cannot draw. The row stays
+            // usable as text and the identifier says which of the two
+            // causes was measured.
+            Text(title)
+                .accessibilityIdentifier(
+                    kayaSectionSymbolIdent + kayaPromotedSymbolWhyNot(symbol))
+        } else {
+            Text(title)
+                .accessibilityIdentifier(
+                    kayaSectionSymbolIdent + "the section row drew its title as text, no icon")
+        }
+    }
+}
+
 /// A window's sections materialized: SwiftUI's TabView carries the
 /// platform's dominant idiom under the `auto` hint — toolbar tabs on
 /// macOS, the bottom bar on iOS. `sidebar` resolves to
@@ -13535,13 +13938,12 @@ struct KayaSectionsView: View {
                             // glyph beside its title — the sidebar row
                             // is where a source list wants one
                             // (docs/styling-plan.md D6). The icon-less
-                            // case stays exactly the Text it was.
-                            if let sf = kayaSFSymbol(section.symbol) {
-                                Label(section.title, systemImage: sf)
-                                    .tag(section.id)
-                            } else {
-                                Text(section.title).tag(section.id)
-                            }
+                            // case stays exactly the Text it was. ONE
+                            // body with the tab arm below, so a
+                            // perturbation of what a row draws moves
+                            // both.
+                            KayaSectionLabel(title: section.title, symbol: section.symbol)
+                                .tag(section.id)
                         }
                         // EXPLICIT, not inherited: the sidebar style is
                         // what NavigationSplitView's sidebar column
@@ -13580,11 +13982,7 @@ struct KayaSectionsView: View {
                         // The tab bar is the switcher that most wants an
                         // icon — a bare-text bottom bar is not the
                         // platform's real thing (DESIGN.md, Sections).
-                        if let sf = kayaSFSymbol(section.symbol) {
-                            Label(section.title, systemImage: sf)
-                        } else {
-                            Text(section.title)
-                        }
+                        KayaSectionLabel(title: section.title, symbol: section.symbol)
                     }
                     .tag(section.id)
             }

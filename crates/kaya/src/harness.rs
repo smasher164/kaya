@@ -342,6 +342,41 @@ pub enum Step {
     /// The ACTIVE section's title, from the platform's own selection
     /// state — never the scene model's copy.
     ExpectSection(String),
+    /// Expect the section row titled `.0` to draw the SEMANTIC ICON
+    /// named `.1`, read from the REAL rendered switcher row.
+    ///
+    /// THE GAP THIS CLOSES, and it is measured rather than imagined: the
+    /// SwiftUI section-symbol decode read the I64 at `body+20`
+    /// (alignment padding) instead of `+24`, so `section.symbol` was
+    /// garbage, no glyph rendered, and every lane stayed green for a day
+    /// — the sections scene declared four symbols and asserted none of
+    /// them. A capture caught it. `expect_menu_symbol` had already
+    /// closed exactly this hole one construct over; this is the same
+    /// verb at the sections switcher.
+    ///
+    /// The observation is the SEMANTIC NAME (`"home"`), for
+    /// expect_menu_symbol's reason: a scene shared verbatim by five
+    /// lanes cannot compare `house` against `go-home-symbolic` against
+    /// `Home`. Each backend reads what its row actually draws and
+    /// inverts it back to kaya's vocabulary; where a platform hands out
+    /// no glyph object at all, the rendering arm publishes the semantic
+    /// name on the row's own accessibility surface and the read consults
+    /// THE REAL ELEMENT, so an arm that stopped drawing moves the
+    /// answer. Each backend's channel and its limit are stated at its
+    /// arm.
+    ///
+    /// ADDRESSED BY TITLE, ACROSS EVERY WINDOW, because a section row is
+    /// what the user sees and the sections scene puts its sidebar rows
+    /// in an aux window. The answer comes from the first real row whose
+    /// title matches, in window order; two windows with a same-titled
+    /// section would be ambiguous, and the day a scene wants that the
+    /// verb grows a `window#n` target the way expect_title has one.
+    ///
+    /// TOTAL, like `menu_symbol`: a title that no row carries, or a row
+    /// carrying no glyph, reads as a short description — a retryable
+    /// non-match rather than a panic, so this doubles as the wait for a
+    /// switcher rebuild.
+    ExpectSectionSymbol(String, String),
     /// Drive the switcher to the section at `index` (add order),
     /// through the platform's real switching path — emits
     /// section_selected like a user's switch.
@@ -675,6 +710,7 @@ impl Step {
             Step::ExpectTitle { .. } => true,
             Step::ExpectSections { .. } => true,
             Step::ExpectSection { .. } => true,
+            Step::ExpectSectionSymbol { .. } => true,
             Step::ExpectSectionsPresentation { .. } => true,
             Step::SelectSection { .. } => false,
             Step::ExpectWindowSize { .. } => true,
@@ -1110,6 +1146,27 @@ pub trait Stage: Send + 'static {
     /// The ACTIVE section's title, from the platform's own selection
     /// state. No default.
     fn active_section_title(&self) -> String;
+    /// The SEMANTIC ICON NAME the REAL switcher row titled `title`
+    /// draws, searched across every window (the sections scene's
+    /// sidebar rows live in an aux window) — never the section
+    /// record's `symbol` field beside it, which is the copy the
+    /// +20/+24 decode wrote garbage into while every lane stayed
+    /// green.
+    ///
+    /// It answers with the semantic name (`"home"`) and nothing else on
+    /// success. On failure it says WHAT IT MEASURED and no more: no
+    /// switcher for that title, a row that draws no glyph, or a glyph
+    /// this backend's table cannot invert — each a distinguishable
+    /// sentence, because "wrong concept", "nothing drawn" and "not
+    /// built yet" are three different bugs and a reader chases the
+    /// sentence (invariant 3).
+    ///
+    /// TOTAL, like `menu_symbol`: a miss is a retryable non-match, so
+    /// this doubles as the wait for a switcher rebuild.
+    ///
+    /// No default: a backend that forgets this must fail to compile
+    /// rather than pass a sections icon leg vacuously.
+    fn section_symbol(&self, title: &str) -> String;
     /// The ARM the sections render actually took, "bar" or "sidebar",
     /// for the given window — stamped by the render body, never
     /// derived from the declared prop (the expect_split rule). No
@@ -1411,6 +1468,15 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .map_err(|_| format!("expect_sections wants a count: {line:?}"))?,
             ),
             "expect_section" => Step::ExpectSection(parse_string(rest)?),
+            // BEFORE `expect_section`'s neighbour in the file but not in
+            // the match: Rust's match arms are literal, so the two verbs
+            // cannot shadow each other the way a prefix grep would.
+            "expect_section_symbol" => {
+                let (title, want) = parse_quoted_prefix(rest).map_err(|e| {
+                    format!("expect_section_symbol wants a quoted section title and a quoted symbol name: {e}")
+                })?;
+                Step::ExpectSectionSymbol(title, parse_string(want)?)
+            }
             "expect_sections_presentation" => {
                 let (window, rest) = parse_window_target(rest);
                 Step::ExpectSectionsPresentation(window, parse_string(rest)?)
@@ -2477,6 +2543,21 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Ok(format!("section {want:?}"))
                 } else {
                     Err(format!("section {got:?}, wanted {want:?}"))
+                }
+            })),
+            Step::ExpectSectionSymbol(title, want) => Some(poll(|| {
+                let got = stage.section_symbol(title);
+                if got == *want {
+                    // Byte-identical on every backend: the title in its
+                    // quoted spelling, then the semantic name.
+                    Ok(format!("section {title:?} symbol {want:?}"))
+                } else {
+                    // The MEASURED answer rides the failure — the only
+                    // thing that tells "wrong glyph" from "no glyph at
+                    // all" from "no such row yet", which is exactly the
+                    // discrimination the +20/+24 decode needed and
+                    // nobody had.
+                    Err(format!("section {title:?} symbol {got:?}, wanted {want:?}"))
                 }
             })),
             Step::CloseWindow(window) => {
@@ -3929,6 +4010,12 @@ mod tests {
         fn active_section_title(&self) -> String {
             String::new()
         }
+        // The switcher row's glyph, the way menu_symbol's mock answers:
+        // one row this stage claims to draw, everything else absent, so
+        // the hit and the miss are both exercisable.
+        fn section_symbol(&self, title: &str) -> String {
+            if title == "Feed" { "home".to_owned() } else { "no such section row".to_owned() }
+        }
         fn select_section(&self, _: usize) {}
         fn menu_activate(&self, path: &str) {
             self.seen.lock().unwrap().push(format!("menu_activate {path}"));
@@ -4230,6 +4317,9 @@ mod tests {
         fn active_section_title(&self) -> String {
             String::new()
         }
+        fn section_symbol(&self, _: &str) -> String {
+            String::new()
+        }
         fn select_section(&self, _: usize) {}
         fn menu_activate(&self, _: &str) {}
         fn context_open(&self, _: Target) {}
@@ -4421,6 +4511,9 @@ mod tests {
             "bar".into()
         }
         fn active_section_title(&self) -> String {
+            String::new()
+        }
+        fn section_symbol(&self, _: &str) -> String {
             String::new()
         }
         fn select_section(&self, _: usize) {}
@@ -4789,6 +4882,62 @@ mod tests {
         assert_eq!(code, 1);
         assert!(
             verdict.contains("toolbar item Save reads \"disabled\", wanted \"enabled\""),
+            "{verdict}"
+        );
+    }
+
+    /// The section-symbol verb's grammar: two QUOTED arguments, a title
+    /// and a semantic name. Both quoted deliberately — a section title
+    /// is a user-facing string that may carry spaces, and an unquoted
+    /// tail would silently assert only its first word.
+    #[test]
+    fn section_symbol_spellings() {
+        for good in [
+            "expect_section_symbol \"Feed\" \"home\"",
+            "expect_section_symbol \"Archive\" \"star\"",
+            // A title with a space, which is the case the quoting is for.
+            "expect_section_symbol \"Recently Played\" \"star\"",
+        ] {
+            assert!(parse(good).is_ok(), "{good} should parse");
+        }
+        for bad in [
+            // Both unquoted, each half missing, and neither present.
+            "expect_section_symbol Feed home",
+            "expect_section_symbol \"Feed\" home",
+            "expect_section_symbol \"Feed\"",
+            "expect_section_symbol",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} should not parse");
+        }
+    }
+
+    /// The verb polls the stage's REAL-switcher read and fails with the
+    /// measured answer — the property the +20/+24 decode needed and
+    /// nobody had (see Step::ExpectSectionSymbol).
+    #[test]
+    fn section_symbol_expects_poll_the_real_switcher() {
+        static SECTION_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_section_symbol \"Feed\" \"home\"").unwrap(),
+            MockStage { seen: &SECTION_SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(verdict, "KAYA_SELFTEST: OK (section \"Feed\" symbol \"home\")");
+        // The miss carries WHAT WAS MEASURED, which is the whole point:
+        // "wrong glyph", "no glyph" and "no such row" have to read
+        // differently or the reader chases the wrong thing.
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect_section_symbol \"Archive\" \"star\"").unwrap(),
+            MockStage { seen: &SECTION_SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(
+            verdict
+                .contains("section \"Archive\" symbol \"no such section row\", wanted \"star\""),
             "{verdict}"
         );
     }

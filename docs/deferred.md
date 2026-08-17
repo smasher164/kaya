@@ -2599,15 +2599,70 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   route (path#family vs DWrite in-memory loader) is measured at depth,
   not assumed.
 
-- **Sections carry symbols with no harness assertion** (2026-08-16).
-  expect_menu_symbol reads menu items' icons from the real tree, but
-  nothing asserts a SECTION row's symbol — which is exactly how the
-  SwiftUI decode read the I64 at +20 (alignment padding) instead of
-  +24 and rendered NO icon while every lane stayed green; a capture
-  caught it, not a gate. The fix shape: a section-symbol read through
-  the sections ax/real-tree machinery, asserted in the sections
-  scene's desktop tail beside the presentation row. Until then the
-  captures are the only witness on every backend.
+- ~~**Sections carry symbols with no harness assertion**~~ (2026-08-16)
+  — LANDED 2026-08-17. `expect_section_symbol "<title>" "<name>"` reads
+  the REAL rendered switcher row on every backend and answers in the one
+  shared vocabulary: the `AXRadioButton`/`AXSegment`'s published
+  identifier on macOS (measured — that tree carries no glyph object at
+  all, the toolbar arm's channel one construct over), the tab item's
+  rendered glyph inverted through `kayaSymbolTable`'s two-name rows on
+  iOS, the merged node's content description on Compose, the `GtkImage`
+  the `GtkStackSwitcher` really built on GTK, and the
+  `NavigationViewItem`'s icon element's UIA name on WinUI. Two
+  assertions in `tools/scenes/sections.steps`, and they sit ABOVE the
+  phone cut rather than in the desktop tail this entry proposed, for the
+  reason in the bullet below — which means FIVE lanes assert them where
+  the tail would have reached three.
+  THE ACCEPTANCE TEST WAS THE HISTORICAL DEFECT, re-introduced: `body +
+  24` back to `body + 20` in the SwiftUI decode now fails the sections
+  leg with `section "Feed" symbol "symbol 85899345928 is not in this
+  interpreter's table", wanted "home"`, where the whole matrix once
+  stayed green. Report: scratchpad/chrome/sections-symbol.md.
+
+- **`expect_sections_presentation`'s window#N verdict is spelled two
+  different ways** (found 2026-08-17 while comparing the sections legs
+  across lanes). harness.rs — the implementation the GTK and WinUI
+  backends run — appends `"{prefix}sections {arm}"`, so the windows lane
+  prints `window#1 sections sidebar`; the Compose interpreter spells it
+  the same. The SwiftUI interpreter appends `"sections \(armPrefix)…"`
+  (KayaSwiftUI.swift:7060, and the failure sentence one line below it),
+  so the mac lane prints `sections window#1 sidebar`. Three
+  implementations, two spellings, measured side by side:
+
+      windows  ... window#1 title "library", window#1 sections sidebar)
+      mac      ... window#1 title "library", sections window#1 sidebar)
+
+  NOTHING CATCHES IT TODAY because the tail that runs this form is
+  desktop-only and each lane only requires its own `KAYA_SELFTEST: OK`;
+  the two spellings never meet. It is a two-token swap in the SwiftUI
+  arm — deliberately NOT folded into the expect_section_symbol slice,
+  which was measuring a regression and had no business changing an
+  unrelated verdict string in the same run. Whoever takes it: move the
+  prefix in both the observed and the failure line, and re-run
+  validate-mac (the string is quoted in reports, so grep before and
+  after).
+
+- **GTK's sidebar arm draws no section symbol, so the sidebar rows
+  cannot be asserted by a shared scene** (found 2026-08-17 while landing
+  `expect_section_symbol`). `GtkStackSidebar` binds only the page's
+  TITLE into a GtkLabel and ignores `icon-name` entirely (measured, GTK
+  4.18.6 — gtk.rs's `refresh_section_symbols` fact 2), and kaya does not
+  hand-build rows inside a component that owns them. The other four
+  backends all draw it: the macOS `NavigationSplitView` sidebar was
+  measured answering `section "Shelves" symbol "search"` / `section
+  "Loans" symbol "lock"` through the same read, and WinUI's `Left` pane
+  is the same `NavigationViewItem` as its `Top` one. So the sections
+  scene asserts its BAR rows only; adding the two sidebar lines would be
+  red on linux forever while green everywhere else, and scenes are
+  shared verbatim.
+  WHAT WOULD CLOSE IT: moving the GTK sections lowering onto
+  `AdwViewStack` + `AdwViewSwitcher` (the component that shows icon AND
+  title — the same migration `refresh_section_symbols` fact 1 already
+  names for the bar arm's icon-replaces-title behavior), or a
+  hand-rolled `GtkListBox` sidebar. Both are a re-lowering, not a line,
+  and the second contradicts a stated position in that file. The read
+  and the verb are already written for both arms on every other backend,
+  so the day this lands the scene grows two lines and nothing else.
 
 - **The window chrome knob is DEFERRED (maintainer, 2026-08-16)** —
   docs/chrome-plan.md C1/C1b, drafted and held before ratification.
