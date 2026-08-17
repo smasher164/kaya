@@ -367,8 +367,8 @@ in docs/deferred.md.
    needs a logged-in GUI session).
 4. The cross-platform matrix, before any feature is called landed:
    `tools/validate-all.sh` — ALL FIVE lanes concurrently by default
-   (bounded by the slowest lane, ~1 minute warm; ratified
-   2026-07-22). `--serial` for the special cases: single-lane
+   (bounded by the slowest lane — ~7 minutes warm as of 2026-08-17,
+   growing with the scene roster; ratified 2026-07-22). `--serial` for the special cases: single-lane
    benchmarking, debugging under contention, recording mode. The
    lanes remain individually runnable (`tools/validate-linux.sh`,
    `tools/ios/run-sim.sh`, `tools/android/run-emulator.sh`,
