@@ -8832,11 +8832,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // rule. See `file_save_show` for why it is IFileSaveDialog and
             // not the WinRT FileSavePicker, and why it hands back a path
             // to a file that does not exist.
-            let target = winui_window(core, spec.window.0);
-            let hwnd = target
+            // THE WINDOW IS AN APPLY-SIDE CERTAINTY and stays one now
+            // that the resolver is total: same-batch ordering means the
+            // create reached this backend first, so a miss here is a
+            // core bug and dies naming it. Only the WinRT casts below
+            // are tolerated (hwnd 0 = an unowned dialog).
+            let target = winui_window(core, spec.window.0)
+                .expect("kaya: a save dialog was presented over a window this process does not hold");
+            let hwnd = windows_core::Interface::cast::<IWindowNative>(&target)
                 .ok()
-                .and_then(|t| windows_core::Interface::cast::<IWindowNative>(&t).ok())
-                .and_then(|n| n.window_handle().ok())
+                .and_then(|n: IWindowNative| n.window_handle().ok())
                 .unwrap_or(0);
             let request = DialogRequest {
                 hwnd,
@@ -8878,11 +8883,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // makes it modal to the user; only kaya's thread is spared.
             // ONE apartment serves every dialog and outlives them all —
             // see `dialog_apartment` for the failure that shape fixes.
-            let target = winui_window(core, spec.window.0);
-            let hwnd = target
+            // The window is an apply-side certainty (see the save arm);
+            // only the WinRT casts are tolerated.
+            let target = winui_window(core, spec.window.0)
+                .expect("kaya: a file picker was presented over a window this process does not hold");
+            let hwnd = windows_core::Interface::cast::<IWindowNative>(&target)
                 .ok()
-                .and_then(|t| windows_core::Interface::cast::<IWindowNative>(&t).ok())
-                .and_then(|n| n.window_handle().ok())
+                .and_then(|n: IWindowNative| n.window_handle().ok())
                 .unwrap_or(0);
             let request = DialogRequest {
                 hwnd,
@@ -8908,14 +8915,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // (Esc, the close button, Hide) completes as None = the
             // cancel slot — routed through capi::alert_resolved, the
             // shared retire path.
-            let host = if spec.window.0 == 0 {
-                core.window.clone()
-            } else {
-                core.aux_windows
-                    .get(&spec.window.0)
-                    .expect("scene validated the alert's window")
-                    .clone()
-            };
+            // The one resolver, so the miss says what it measured; the
+            // `?` carries it to apply's caller, which panics naming it.
+            let host = winui_window(core, spec.window.0)?;
             // A dialog needs the host's LIVE XamlRoot, and a guest
             // can request one within milliseconds of launch — before
             // the content island exists (caught live 2026-07-22 the
@@ -10073,23 +10075,59 @@ struct Rect {
     bottom: i32,
 }
 
+/// Every window this process is really holding, for the sentence
+/// below: `#0, #1`. A resolver miss prints WHAT IT SAW — the two
+/// causes it cannot tell apart are "the id is wrong" and "the apply
+/// has not run yet", and the live list is the evidence that separates
+/// them for the reader (an id that never appears is a typo; one that
+/// appears a moment later was a race).
+fn live_windows(core: &CoreState) -> String {
+    let mut ids: Vec<u64> = std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
+    ids.sort_unstable();
+    ids.iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A window by kaya id — TOTAL, because window materialization is
+/// asynchronous and a harness read racing the apply is the normal
+/// state of affairs, not a bug.
+///
+/// This used to `expect("scene validated the window id")`, and that
+/// comment's assumption was exactly the bug: the scene DID validate
+/// the id, but `create_window` reaches this backend as an apply, so a
+/// read that arrives first found nothing and killed the process.
+/// Measured 2026-08-16: two windows legs died that way (five on linux)
+/// when a scene asserted on an aux window without a count barrier.
+///
+/// The error is what makes the read RETRYABLE: `on_ui_read` hands it
+/// back to the harness, which turns it into a non-match and polls
+/// again (that function's doc comment is the same rule, one layer up).
+/// Actions and applies go through `on_ui`/`on_ui_mut`, which panic on
+/// an error — from the HARNESS thread, where a panic can unwind — so
+/// the apply-side wall the ledger asked for is still there, and now it
+/// names what it measured.
+fn winui_window(core: &CoreState, id: u64) -> windows_core::Result<Window> {
+    if id == 0 {
+        return Ok(core.window.clone());
+    }
+    core.aux_windows.get(&id).cloned().ok_or_else(|| {
+        windows_core::Error::new(
+            windows_core::HRESULT(0x8000_4005u32 as i32),
+            format!(
+                "kaya: window#{id} is not materialized; live windows: {}",
+                live_windows(core)
+            ),
+        )
+    })
+}
+
 /// The advisory size request's Win32 materialization: DIP -> physical
 /// via the window's DPI, applied to the CLIENT area (the request is a
 /// content size) by carrying the current chrome delta onto the outer
 /// frame. A request, never a guarantee — the shell keeps the last
 /// word (DESIGN.md, Presentation contexts).
-fn winui_window(core: &CoreState, id: u64) -> windows_core::Result<Window> {
-    if id == 0 {
-        Ok(core.window.clone())
-    } else {
-        Ok(core
-            .aux_windows
-            .get(&id)
-            .expect("scene validated the window id")
-            .clone())
-    }
-}
-
 fn resize_request(
     window: &Window,
     width: Option<f64>,

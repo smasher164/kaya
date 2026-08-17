@@ -382,7 +382,10 @@ own the state (see the undo note in this file).
   reported, and §0e/§1b record what they found — including the two
   assumptions they overturned (Weston has no clipboard at all, and
   macOS does not prompt).
-- **GAP — the stall diagnostic DESIGN promises is not implemented.**
+- ~~**GAP — the stall diagnostic DESIGN promises is not implemented.**~~
+  CLOSED 2026-07-31 (`stall.rs`, `expect_stall` in all three interpreters,
+  the scene, matrix 841; negatives watched) — the body below is the record.
+  As found:
   DESIGN's threading section says it comes free from the transport:
   "the core reads the app's log-consumer cursor, and undrained for N
   seconds is the health signal". Nothing in crates/ reads that cursor,
@@ -466,7 +469,9 @@ own the state (see the undo note in this file).
   timed out), but a reader who sees it under load should suspect
   scheduling before suspecting a handler. KAYA_STALL_MS raises the
   threshold if a lane ever needs it to.
-- **GAP — a kaya app cannot do background work.** Found 2026-07-28
+- ~~**GAP — a kaya app cannot do background work.**~~ CLOSED 2026-07-28,
+  same day, all nine languages (thread + `App.Post`/`Poster` + `kaya_wake`;
+  matrix 808) — the body below is the record. The GAP was found 2026-07-28
   while designing file dialogs, and it is the reason that design kept
   contorting. There is NO way for a guest thread to get back onto the
   app thread: `App` is not thread-safe (Go's `Build` has a re-entrancy
@@ -2300,21 +2305,6 @@ interpreter carries slice 1's one real brand lowering
   (d) leave it — the accent family is what every other backend brands
   too. Nothing here is urgent and (d) is a real answer.
 
-## The SF symbol table wants a rendered-name column (iOS, found 2026-08-17)
-
-The iOS toolbar arm's real-tree read measures the glyph off the rendered
-UIImageView's identifier — UIKit's own name for it — and that name is
-NOT always the one kaya asked for: SwiftUI normalizes SF names before
-UIKit sees them (measured: request `doc.on.doc`, rendered identifier
-`document.on.document`). So `expect_toolbar_item`'s symbol read works
-(the toolbar column's names survive normalization) but
-`expect_menu_symbol`'s PROMOTED half stays on the render stamp, with the
-limit stated at the arm: a glyph read would turn a correct button red.
-Closing it: a canonical rendered-name column beside `sf` in
-kayaSymbolTable (research pass over all 20 names on the current OS,
-the symbols-sf-symbols.md discipline), then the promoted read goes
-full-real and the stamp retires. Maintainer's call on when.
-
 ## The typeface scene's depth stubs (Slice 2b mid-flight, expected to close with the fan-out)
 
 The depth landed 2026-08-16: spec (`set_brand_typeface` / `set_typeface`,
@@ -2573,22 +2563,6 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   exists only for the chrome-less case. The toolbar construct (C2, the
   promotion list over the command catalog) is a separate question and
   stays in the draft awaiting its own ratification.
-
-- **GTK's and WinUI's window resolvers panic on a not-yet-materialized
-  aux window** (gtk.rs `gtk_window` "harness targeted an unknown
-  window"; winui/mod.rs "scene validated the window id" — the comment's
-  assumption is exactly the bug: the scene DID validate the id, but
-  materialization is async, so a harness read racing the apply dies
-  instead of polling). Measured 2026-08-16: the sidebar tail's
-  click-then-expect_title killed five language legs on linux and two on
-  windows while rust/go squeaked by on timing. The sections scene now
-  carries an `expect_windows 2` barrier (its count read is panic-free
-  and reads the same map, so the panic path is unreachable there), but
-  the landmine holds for any future scene that asserts on an aux window
-  without a count barrier. Fix shape: the resolvers return Option, the
-  Stage reads map None to a pollable "window N not materialized yet"
-  miss, and the APPLY-side callers keep the panic (same-batch ordering
-  really does validate those).
 
 - **The per-platform accent VALUE map is spelled in no binding, and
   cannot be until the core carries a platform id.** D1's grammar admits

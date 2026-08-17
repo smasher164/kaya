@@ -1442,14 +1442,81 @@ fn wire_close(
     });
 }
 
-fn gtk_window(core: &CoreState, id: u64) -> gtk4::Window {
+/// Every window this process is really holding, for the sentences
+/// below: `#0, #1`. A resolver miss prints WHAT IT SAW and nothing
+/// else — the two causes it cannot tell apart are "the id is wrong"
+/// and "the apply has not run yet", and the live list is exactly the
+/// evidence that separates them for the reader (an id that never
+/// appears is a typo; one that appears a moment later was a race).
+fn live_windows(core: &CoreState) -> String {
+    let mut ids: Vec<u64> = std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
+    ids.sort_unstable();
+    ids.iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// What a read answers for a window this process does not hold. The
+/// brackets are the backend's own convention for "this is a
+/// description, not a value" (`<not in the accessibility tree>`), and
+/// no title, size class or presentation can equal it — so the harness
+/// keeps polling, and the sentence it prints at the deadline is this
+/// one.
+#[cfg(feature = "harness")]
+fn not_materialized(core: &CoreState, window: u64) -> String {
+    format!(
+        "<window#{window} is not materialized; live windows: {}>",
+        live_windows(core)
+    )
+}
+
+/// The OBSERVATION flavor, and the one every Stage read must use: a
+/// window that is not in the map yet is a MISS, never a panic.
+///
+/// Window materialization is asynchronous — `create_window` reaches
+/// this backend as an apply, and a harness read racing that apply is
+/// the normal state of affairs, not a bug. The harness polls every
+/// observation to a deadline (harness.rs `poll`), so a miss that
+/// resolves a beat later costs nothing and one that never resolves
+/// fails the leg with a sentence. Panicking here instead killed five
+/// language legs on linux and two on windows the one time a scene
+/// asserted on an aux window without a count barrier (measured
+/// 2026-08-16; docs/deferred.md carried it as a landmine until this
+/// split). It is worse than an ordinary panic on GTK: a panic inside a
+/// main-context closure cannot unwind, so the process ABORTS and the
+/// harness thread reports `RecvError` — a second, meaningless sentence
+/// on top of the first.
+fn gtk_window_read(core: &CoreState, id: u64) -> Option<gtk4::Window> {
     if id == 0 {
-        core.window.clone()
+        Some(core.window.clone())
     } else {
-        core.aux_windows
-            .get(&id)
-            .expect("harness targeted an unknown window")
-            .clone()
+        core.aux_windows.get(&id).cloned()
+    }
+}
+
+/// The APPLY flavor: same lookup, but a miss is a bug and says so.
+///
+/// THE `&mut CoreState` IS THE WALL, not a formality. `apply` is the
+/// only path in this backend that holds one, and same-batch ordering
+/// really does validate its ids (the create is applied before anything
+/// that names the window). Every Stage observation runs through
+/// `on_main`, which hands out `&CoreState` — so a read CANNOT reach
+/// this panic even by writing the wrong resolver name; it fails to
+/// compile instead. That is the guard, and the negative test for it is
+/// a read perturbed to call this function.
+fn gtk_window(core: &mut CoreState, id: u64) -> gtk4::Window {
+    match gtk_window_read(core, id) {
+        Some(window) => window,
+        // The list is built only on the failure path: this runs on
+        // every reconcile.
+        None => panic!(
+            "kaya: an apply targeted window#{id}, which this process does \
+             not hold (live windows: {}). Applies are ordered — the create \
+             reaches this backend before anything that names the window — \
+             so this is a core-side ordering bug, not a race.",
+            live_windows(core)
+        ),
     }
 }
 
@@ -3377,11 +3444,15 @@ fn window_content(core: &CoreState, window: u64) -> Option<gtk4::Widget> {
 /// measure the window, and measure it once for both readers.
 /// Falls back to the request before the window is mapped, when the
 /// allocation is legitimately 0.
-fn window_width(core: &CoreState, window: u64) -> i32 {
+///
+/// `None` is a window this process does not hold — never a width. A
+/// fabricated 0 here would classify as `compact` and the caller would
+/// report a size class for a window that does not exist yet.
+fn window_width(core: &CoreState, window: u64) -> Option<i32> {
     use gtk4::prelude::{GtkWindowExt, WidgetExt};
-    let target = gtk_window(core, window);
+    let target = gtk_window_read(core, window)?;
     let allocated = target.width();
-    if allocated > 0 { allocated } else { target.default_size().0 }
+    Some(if allocated > 0 { allocated } else { target.default_size().0 })
 }
 
 /// Detach a widget from whatever currently holds it. GTK gives a
@@ -4990,14 +5061,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         }
         ApplyOp::SetWindowProp { window, prop, value } => {
             use gtk4::prelude::GtkWindowExt;
-            let target = if window.0 == 0 {
-                core.window.clone()
-            } else {
-                core.aux_windows
-                    .get(&window.0)
-                    .expect("scene validated the window id")
-                    .clone()
-            };
+            let target = gtk_window(core, window.0);
             match (prop, &value) {
                 (WindowProp::Title, Value::Str(title)) => {
                     // The window's OWN title; while a navigation
@@ -6560,10 +6624,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 let owner = core.section_pages[&window.0].window;
                 if owner != 0 {
                     use gtk4::prelude::GtkWindowExt;
-                    core.aux_windows
-                        .get(&owner)
-                        .expect("scene validated the section's window")
-                        .present();
+                    gtk_window(core, owner).present();
                 }
             } else if let Some(entry) = core.nav_entries.get_mut(&window.0) {
                 entry.root = Some(root_widget);
@@ -6578,10 +6639,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 use gtk4::prelude::GtkWindowExt;
                 set_window_content(core, window.0, Some(&root_widget));
                 // Mounting presents.
-                core.aux_windows
-                    .get(&window.0)
-                    .expect("scene validated the window id")
-                    .present();
+                gtk_window(core, window.0).present();
                 core.window_roots.insert(window.0, root_widget);
             }
         }
@@ -7871,10 +7929,29 @@ impl crate::harness::Stage for GtkStage {
 
     fn resize_window(&self, window: u64, width: f64, height: f64) {
         // The REAL resize path: the size a user's drag would set.
-        Self::on_main_mut(move |core| {
+        //
+        // AN ACTION, so a miss IS a bug (the harness doctrine: an
+        // action's target was proven by a preceding expect) — but it
+        // dies on the HARNESS thread, not inside the main-context
+        // closure. A panic there cannot unwind, so it aborts the
+        // process and the failure the runner records is `RecvError`
+        // rather than this sentence.
+        let missing = Self::on_main_mut(move |core| {
             use gtk4::prelude::GtkWindowExt;
-            gtk_window(core, window).set_default_size(width as i32, height as i32);
+            match gtk_window_read(core, window) {
+                Some(target) => {
+                    target.set_default_size(width as i32, height as i32);
+                    None
+                }
+                None => Some(live_windows(core)),
+            }
         });
+        if let Some(live) = missing {
+            panic!(
+                "kaya: resize_window targeted window#{window}, which this \
+                 process does not hold (live windows: {live})"
+            );
+        }
         // WAIT FOR THE ALLOCATION, then re-run the arm. set_default_size
         // returns before GTK has laid out, so an arm that re-ran
         // immediately measured the OLD width and stamped the OLD
@@ -7894,8 +7971,8 @@ impl crate::harness::Stage for GtkStage {
         // waiting for.
         let want_regular = width >= 600.0;
         for _ in 0..100 {
-            let now = f64::from(Self::on_main(move |core| window_width(core, window)));
-            if (now >= 600.0) == want_regular {
+            let now = Self::on_main(move |core| window_width(core, window));
+            if matches!(now, Some(w) if (f64::from(w) >= 600.0) == want_regular) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -7912,7 +7989,9 @@ impl crate::harness::Stage for GtkStage {
             // boundary menu_presentation draws; the presentation from
             // the arm that actually ran.
             // The SAME source the arm used.
-            let width = window_width(core, 0);
+            let Some(width) = window_width(core, 0) else {
+                return "<the primary window is not materialized>".to_owned();
+            };
             let class = if width >= 600 { "regular" } else { "compact" };
             // THE WIDGET'S OWN ANSWER, not a value the arm stamped
             // about itself: GNOME decides where this collapses, so
@@ -7942,7 +8021,10 @@ impl crate::harness::Stage for GtkStage {
             // content width against the same 600 boundary the other
             // platforms draw — default_size on a mapped toplevel, the
             // notion window_content_size already reads.
-            let width = gtk_window(core, 0).default_size().0;
+            //
+            // The PRIMARY window, which this process holds from the
+            // moment the core comes up — the one id no read can miss.
+            let width = core.window.default_size().0;
             let class = if width >= 600 { "regular" } else { "compact" };
             // The presentation is read off the REAL chrome — a
             // PopoverMenuBar exists or it does not. GTK has only the
@@ -8391,7 +8473,10 @@ impl crate::harness::Stage for GtkStage {
                         let reg = core.menus.borrow();
                         reg.bar_of.get(&menu_root_of(&reg, id)).copied()
                     })
-                    .map(|window| gtk_window(core, window))
+                    // The read flavor and the primary as the fallback:
+                    // a catalog entry whose window has already gone
+                    // takes the same route as one with no window at all.
+                    .and_then(|window| gtk_window_read(core, window))
                     .unwrap_or_else(|| core.window.clone());
                 let _ = target.activate_action(&name, param.as_ref());
                 return;
@@ -8972,10 +9057,13 @@ impl crate::harness::Stage for GtkStage {
     fn window_title(&self, window: u64) -> String {
         Self::on_main(move |core| {
             use gtk4::prelude::GtkWindowExt;
-            gtk_window(core, window)
-                .title()
-                .map(String::from)
-                .unwrap_or_default()
+            match gtk_window_read(core, window) {
+                Some(target) => target.title().map(String::from).unwrap_or_default(),
+                // A DESCRIPTION, in the brackets no title wears, so the
+                // poll re-asks and the deadline's failure text names the
+                // cause instead of reporting an empty title.
+                None => not_materialized(core, window),
+            }
         })
     }
 
@@ -8985,8 +9073,20 @@ impl crate::harness::Stage for GtkStage {
             // On a mapped toplevel default_size tracks the current
             // content size (X11; a Wayland compositor keeps its own
             // last word, the request semantics).
-            let (w, h) = gtk_window(core, window).default_size();
-            (f64::from(w), f64::from(h))
+            //
+            // NOT-A-NUMBER FOR A WINDOW THIS PROCESS DOES NOT HOLD —
+            // the WinUI backend's spelling for a size it could not
+            // read, and for the same reason: every comparison against
+            // NaN is false, so the harness keeps polling, while a
+            // fabricated 0x0 is a measurement of a window that is not
+            // there.
+            match gtk_window_read(core, window) {
+                Some(target) => {
+                    let (w, h) = target.default_size();
+                    (f64::from(w), f64::from(h))
+                }
+                None => (f64::NAN, f64::NAN),
+            }
         })
     }
 
@@ -9045,12 +9145,27 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn close_window(&self, window: u64) {
-        Self::on_main(move |core| {
+        // An ACTION, so a miss is a bug — reported from the harness
+        // thread, where the panic can unwind and the runner records the
+        // sentence (see resize_window).
+        let missing = Self::on_main(move |core| {
             use gtk4::prelude::GtkWindowExt;
             // The REAL chrome path: close() runs close_request, so
             // the veto grammar fires exactly as a user click would.
-            gtk_window(core, window).close();
-        })
+            match gtk_window_read(core, window) {
+                Some(target) => {
+                    target.close();
+                    None
+                }
+                None => Some(live_windows(core)),
+            }
+        });
+        if let Some(live) = missing {
+            panic!(
+                "kaya: close_window targeted window#{window}, which this \
+                 process does not hold (live windows: {live})"
+            );
+        }
     }
 
     fn window_count(&self) -> usize {
@@ -9069,10 +9184,17 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn choose_alert(&self, choice: u32) {
-        Self::on_main(move |core| {
+        // `Some(sentence)` is "the live alert names a window this
+        // process does not hold" — reported from the harness thread
+        // (see resize_window). Without it the miss would fall through
+        // to the settle loop below and be reported as an alert that was
+        // answered and never resolved, which is a different bug.
+        let missing = Self::on_main(move |core| {
             use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
             let live = core.live_alert.borrow();
-            let Some(alert) = live.as_ref() else { return };
+            let Some(alert) = live.as_ref() else {
+                return None;
+            };
             let label = if choice == crate::wire::ALERT_CHOICE_CANCEL {
                 alert.labels.last().cloned()
             } else {
@@ -9082,12 +9204,16 @@ impl crate::harness::Stage for GtkStage {
                     .filter(|_| (choice as usize) < alert.actions)
                     .cloned()
             };
-            let Some(label) = label else { return };
+            let Some(label) = label else {
+                return None;
+            };
             // The REAL button inside the presented dialog window:
             // find the alert's own toplevel (transient-for our
             // window, not one of ours) and activate its button —
             // the same signal path a user's click runs.
-            let parent = gtk_window(core, alert.window);
+            let Some(parent) = gtk_window_read(core, alert.window) else {
+                return Some((alert.window, live_windows(core)));
+            };
             for toplevel in gtk4::Window::list_toplevels() {
                 let Ok(window) = toplevel.downcast::<gtk4::Window>() else {
                     continue;
@@ -9098,10 +9224,17 @@ impl crate::harness::Stage for GtkStage {
                 if let Some(button) = find_button(window.upcast_ref(), &label) {
                     use gtk4::prelude::WidgetExt as _;
                     let _ = button.activate();
-                    return;
+                    return None;
                 }
             }
+            None
         });
+        if let Some((window, live)) = missing {
+            panic!(
+                "kaya: the live alert is over window#{window}, which this \
+                 process does not hold (live windows: {live})"
+            );
+        }
         // AND WAIT FOR IT TO ACTUALLY GO, which is what makes this verb
         // mean the same thing here as everywhere else.
         //

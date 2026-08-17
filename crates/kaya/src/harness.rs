@@ -2929,6 +2929,20 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     let (gw, gh) = stage.window_content_size(id);
                     if (gw - w).abs() <= 2.0 && (gh - h).abs() <= 2.0 {
                         Ok(format!("{prefix}window {}x{}", *w as i64, *h as i64))
+                    } else if !gw.is_finite() || !gh.is_finite() {
+                        // NOT A SIZE, AND IT MUST NOT PRINT AS ONE. A
+                        // backend that could not read the window answers
+                        // NaN (GTK and WinUI both: a window this process
+                        // does not hold, a XamlRoot that is not live
+                        // yet) — and `NaN as i64` is 0, so the sentence
+                        // used to read "window 0x0", which is a
+                        // measurement of a window that was never
+                        // measured. The reader chases a zero-sized
+                        // window that does not exist.
+                        Err(format!(
+                            "{prefix}window size unreadable, wanted {}x{}",
+                            *w as i64, *h as i64
+                        ))
                     } else {
                         Err(format!(
                             "{prefix}window {}x{}, wanted {}x{}",

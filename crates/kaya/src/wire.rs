@@ -1519,7 +1519,18 @@ pub fn parse_accept_list(list: &str) -> (u32, Vec<&str>) {
 /// twice, and every custom id it names is held to the id grammar.
 /// `what` is the caller — the prop or the read — so the message says
 /// which declaration is wrong.
+///
+/// WHICH TOKENS ARE CUSTOM IS ASKED OF [`parse_accept_list`] and not
+/// decided again here. The check used to re-run the CLIP_NAMES lookup
+/// itself, which is the second reading of the string that function's
+/// comment forbids — and it had a second cost: on macOS neither
+/// rust-native backend compiles, so the parser had no caller at all in
+/// a default build and rode as a dead-code warning. Routing the check
+/// through it makes the ONE PARSER claim true on every platform, and
+/// keeps the warning meaningful: if the parser ever really is orphaned,
+/// nothing will be holding it up.
 pub(crate) fn check_accept_list(list: &str, what: &str) {
+    let (_, custom) = parse_accept_list(list);
     let tokens: Vec<&str> = list.split_whitespace().collect();
     assert!(
         !tokens.is_empty(),
@@ -1531,7 +1542,7 @@ pub(crate) fn check_accept_list(list: &str, what: &str) {
             !tokens[..i].contains(token),
             "kaya: {what} names {token:?} twice — an accept list is a SET"
         );
-        if !CLIP_NAMES.iter().any(|(name, _)| name == token) {
+        if custom.contains(token) {
             check_custom_id(token, what);
         }
     }
@@ -2637,6 +2648,15 @@ fn clip_blob(v: Option<Value>, what: &str) -> crate::protocol::Blob {
 ///
 /// ONE ENCODER for both the tx and the apply record, because the order
 /// is the contract and two copies of it would drift.
+///
+/// THE TX HALF IS TEST-ONLY, like [`decode_transaction`] and for the
+/// same reason: `Writer::tx_op` is `#[cfg(test)]` because a Rust guest
+/// never crosses the wire (it hands the root parsed `TxOp`s) and a
+/// foreign guest packs its own bytes. So this encoder exists to pin
+/// [`read_clip`] — the root's reading of what eight hand-written
+/// binding encoders produce — in `copy_records_round_trip`. The apply
+/// direction is live and goes through [`write_clip_out`].
+#[cfg_attr(not(test), allow(dead_code))]
 fn write_clip(
     b: &mut Vec<u8>,
     clip: &crate::protocol::Clip,
@@ -3098,6 +3118,90 @@ mod tests {
         for (a, b) in ops.iter().zip(decoded.iter()) {
             assert_eq!(format!("{a:?}"), format!("{b:?}"));
         }
+    }
+
+    /// The TX_COPY record, out and back: what a foreign binding packs
+    /// by hand is what the root reads.
+    ///
+    /// THE GAP THIS EXISTS FOR (found 2026-08-17, chasing a dead-code
+    /// warning on `write_clip`). `read_clip` had NO coverage at all —
+    /// a `panic!()` on its first line left all 356 tests green — because
+    /// its only encoder was written for a round-trip test nobody then
+    /// wrote. It is the root's reading of a record every one of the
+    /// eight bindings packs by hand, so a drift in the canonical order
+    /// or in the header counts surfaced on a matrix leg at best, and at
+    /// worst handed an app somebody else's representation.
+    ///
+    /// THE MIXED CLIP IS THE ONE THAT CAN FAIL. A clip carrying one
+    /// representation round-trips under any order at all; only a clip
+    /// carrying every kind at once can show custom/files/image/html/text
+    /// read back out of the descending order they were written in. Two
+    /// customs and two files, because a count read as a flag passes at
+    /// one.
+    ///
+    /// THE EMPTY CLIP IS THE OTHER END: the header describes nothing and
+    /// the values list is empty, so a decoder that took a slot anyway
+    /// runs off the end of the record rather than returning a wrong clip.
+    #[test]
+    fn copy_records_round_trip() {
+        use crate::protocol::{Blob, Clip, PickedId};
+        let png: &[u8] = &[0x89, b'P', b'N', b'G', 0, 159, 146, 150];
+        let ops = vec![
+            TxOp::Copy(Clip::default()),
+            TxOp::Copy(Clip {
+                text: Some("kaya clip".into()),
+                ..Clip::default()
+            }),
+            TxOp::Copy(Clip {
+                text: Some("kaya clip".into()),
+                html: Some("<b>kaya</b> clip".into()),
+                image: Some(Blob::from(png)),
+                files: vec![PickedId(7), PickedId(9)],
+                custom: vec![
+                    ("dev.kaya/note".into(), Blob::from(&b"note=1"[..])),
+                    ("dev.kaya/card".into(), Blob::from(&b"{}"[..])),
+                ],
+            }),
+        ];
+        let mut w = Writer::new();
+        for op in &ops {
+            w.tx_op(op);
+        }
+        let table = w.blobs.clone();
+        let decoded = wire_decode_with(&w.into_bytes(), &table);
+        assert_eq!(decoded.len(), ops.len());
+        for (a, b) in ops.iter().zip(decoded.iter()) {
+            assert_eq!(format!("{a:?}"), format!("{b:?}"));
+        }
+    }
+
+    /// A header that disagrees with the slots it describes is a broken
+    /// binding, and it says so rather than handing the app half a clip.
+    ///
+    /// The disagreement is INTRODUCED BY HAND — one field of a
+    /// well-formed record — because no encoder in this file can produce
+    /// it, and an assertion nobody has watched fire is a guess about a
+    /// state nobody has reached. Record layout: 8-byte record header,
+    /// then present / file count / custom count / reserved, so bytes
+    /// 12..16 are the file count. Claiming one file over a text-only
+    /// clip leaves one value in a record that now describes two.
+    #[test]
+    #[should_panic(expected = "copy carries 1 values but its header describes 2")]
+    fn clip_header_disagreeing_with_its_slots_fails_loudly() {
+        use crate::protocol::Clip;
+        let mut w = Writer::new();
+        w.tx_op(&TxOp::Copy(Clip {
+            text: Some("kaya clip".into()),
+            ..Clip::default()
+        }));
+        let mut bytes = w.into_bytes();
+        assert_eq!(
+            bytes[12..16],
+            0u32.to_le_bytes(),
+            "the file count is not where this test thinks it is"
+        );
+        bytes[12..16].copy_from_slice(&1u32.to_le_bytes());
+        decode_transaction(&bytes);
     }
 
     /// The two clipboard occurrences, out and back — including the
