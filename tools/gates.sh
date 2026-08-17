@@ -160,6 +160,16 @@ GATES = [
      "it is the cache's own gate — a cached verdict about the cache is "
      "worth nothing"),
     ("check-pins", ["tools/check-pins.sh"], True, ""),
+    # BOTH macOS design generations stay on the mac lane. SwiftUI reads
+    # the MAIN EXECUTABLE's sdk stamp, so flake.nix's apple-sdk_26 keeps
+    # the kaya-linked legs modern while the vendor-built hosts (python3,
+    # dotnet, the zulu JVM) hold the compat side — the side where the
+    # Button measurement bug class lives, and the side nobody chose.
+    ("check-design-generation", ["tools/check-design-generation.sh"], False,
+     "its inputs are the toolchain and the vendor hosts on the machine, not "
+     "files in this tree — a source-keyed skip would go quiet exactly when a "
+     "nixpkgs or vendor rebuild moved a stamp, which is the move it exists to "
+     "catch"),
     ("check-verbs", ["tools/check-verbs.sh"], True, ""),
     # The file-mode numbers against the spec that owns them. Five
     # hand-written sites decode the integer kaya_open_picked takes and

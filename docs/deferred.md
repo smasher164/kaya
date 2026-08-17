@@ -975,6 +975,7 @@ own the state (see the undo note in this file).
   measurement bug class lives and is a permanent first-class citizen;
   the native-kit button bridges are load-bearing indefinitely, not
   transitional.
+  APPROVED 2026-08-16 (maintainer): bump the SDK for the kaya-built legs so guests opt into macOS 26's modern design generation; the artifact-screenshot caveat (stills will show the modern look, not older releases') is acknowledged. The constraint above still binds: the compat generation keeps a leg — the vendor-stamped hosts (JVM, .NET apphost) stay compat regardless of the flake, and the bump slice must VERIFY that coverage rather than assume it. Scout report: scratchpad/chrome/sdk-bump-scout.md.
 
 ## Protocol / core
 
@@ -2406,11 +2407,15 @@ standing pattern):
   `serif` (→ `Noto Serif`, metric-matched to Roboto so no line box
   moves); a shared BLOB is the other way out, and it is the only one that
   keeps the scene's expected family one byte-frozen string on every lane.
-- **The seven other bindings** — `brand_typeface`/`brand_typeface_with`
+- ~~**The seven other bindings**~~ LANDED 2026-08-16 (31ace6b): all eight
+  bindings carry the surface, swept by check-sugar-surface. Was:
+  `brand_typeface`/`brand_typeface_with`
   in Python, Go, C#, Java, Swift, OCaml, Haskell, plus the C floor's
   explicit spelling, and the `typeface` scene's guest in each.
   check-steps holds the scene rust-only until they arrive.
-- **No font FILE ships in the tree yet**, so the `typeface` scene
+- ~~**No font FILE ships in the tree yet**~~ CLOSED 2026-08-16 (31ace6b):
+  the vendored OFL Sora ships at guests/assets/fonts/ and every lane runs
+  it through the blob channel. Was: so the `typeface` scene
   exercises the NAME form only. The bytes form is implemented and
   reachable (`brand_typeface_with(.., font: Some(bytes))` →
   CTFontManager, in-process scope, family name read back off the

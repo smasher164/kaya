@@ -295,6 +295,14 @@ in docs/deferred.md.
    opam index, none of which has a lockfile the way cargo and nix do;
    the SwiftPM clause is the one whose false green cost a debugging
    round, see docs/traps.md),
+   `tools/check-design-generation.sh` (BOTH macOS design generations stay
+   on the mac lane: SwiftUI reads the MAIN EXECUTABLE's sdk stamp, so
+   flake.nix's apple-sdk_26 keeps the kaya-linked legs modern while the
+   vendor-built hosts — python3, dotnet, the zulu JVM — hold the compat
+   side, which is where the Button measurement bug class lives and which
+   nobody chose. It measures COMPILES rather than artifacts (two probes
+   built on the spot, three hosts resolved off PATH the way the lane
+   resolves them) and refuses a verdict unless all five stamps were read),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing, and the three

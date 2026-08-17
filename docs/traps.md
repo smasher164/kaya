@@ -613,12 +613,15 @@ the same patterns return through interpreter drop-downs
   SDK stamp (the sdk field, NOT minos — verified: minos 14 + sdk 26.5
   takes the modern path), and the compat path mis-measures Button.** `otool -l
   <bin> | rg -A4 LC_BUILD_VERSION`: the stamp belongs to whoever
-  built the host binary (audited here: everything nix-linked 14.4,
-  zulu JDK 11.3, Apple's /usr/bin/python3 26.5) — so the SAME dylib
-  renders different control generations per host runtime. The dev
-  shell is uniformly old-stamped, so validate-mac exercises the
-  compat generation; the modern generation has no dedicated leg yet
-  (ledgered). In the compat generation `Button.sizeThatFits` answers borderless metrics while
+  built the host binary — so the SAME dylib renders different control
+  generations per host runtime. SINCE THE 2026-08-16 SDK BUMP
+  (flake.nix's `buildInputs = [ apple-sdk_26 ]`), the kaya-linked legs
+  (rust, go, c, ocaml, haskell — and swift, modern already via the
+  system toolchain) stamp sdk 26.5 with minos 14.0 and exercise the
+  MODERN generation, while the vendor-stamped hosts (python 14.4,
+  .NET 14.4, zulu JDK 11.3) keep the COMPAT generation covered —
+  observed coverage, held by tools/check-design-generation.sh rather
+  than by this paragraph. In the compat generation `Button.sizeThatFits` answers borderless metrics while
   the renderer draws the bezel (caption truncates to "t…"). Guard:
   macOS controls that own chrome are bridged to AppKit
   (NSViewRepresentable + `fittingSize`), which cannot self-disagree

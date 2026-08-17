@@ -41,6 +41,28 @@
         in
         {
         default = pkgs.mkShell {
+          # The macOS SDK kaya-built guests LINK against (approved
+          # 2026-08-16): sdk 26.5 opts their main executables into
+          # macOS 26's modern design generation, while minos stays 14.0
+          # (no darwinMinVersionHook on purpose — SwiftUI reads the sdk
+          # field, not minos; docs/traps.md), so macOS 14/15 stay run
+          # targets. MUST be buildInputs, not packages: packages is
+          # mkShell's alias for nativeBuildInputs (the build role), and
+          # the SDK hook then clashes with the stdenv's 14.4 and breaks
+          # cc outright — loud, measured twice (the scout report,
+          # scratchpad/chrome/sdk-bump-scout.md §2).
+          #
+          # THE DESIGN-GENERATION SPLIT this chooses (the ledger's
+          # standing constraint, docs/deferred.md): MODERN = the legs
+          # whose main executable this shell links — rust, go, c,
+          # ocaml, haskell — plus swift, which compiles against the
+          # system toolchain and was modern already. COMPAT = the legs
+          # whose main executable is a vendor-stamped host kaya does
+          # not link — python (14.4), C#/.NET (14.4), java/zulu (11.3)
+          # — OBSERVED coverage, not chosen, so the gate
+          # (tools/check-design-generation.sh) verifies both sides
+          # non-empty on every sweep rather than trusting this comment.
+          buildInputs = [ pkgs.apple-sdk_26 ];
           packages = with pkgs; [
             # Toolchain policy: LLVM/clang everywhere. Windows builds use
             # the msvc ABI through clang-cl + lld-link via cargo-xwin;

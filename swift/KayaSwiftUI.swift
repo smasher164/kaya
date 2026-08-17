@@ -2038,18 +2038,34 @@ func kayaExpandPath(_ path: String) -> String {
     /// decoy.txt, same panel, same call, same error. What the return
     /// code cannot tell you, the completion can, so the caller checks
     /// the panel is gone and the scene checks the bytes.
-    func kayaOpenPanelDrive(_ name: String) {
-        guard kayaLiveOpenPanel != nil else { return }
+    /// Returns nil when the press was DELIVERED (AX reported success);
+    /// otherwise the reason, naming the stage that refused. Delivered is
+    /// not landed: a press AX accepts can still be swallowed by a panel
+    /// that is not interactive yet, which only the panel's DISMISSAL can
+    /// prove — the caller's postcondition owns that, and re-presses on
+    /// it (see file_choose). The silent guard-returns this function used
+    /// to have were the worst of both: a re-press that could not find
+    /// the row no-oped forever with nothing printed anywhere.
+    @discardableResult
+    func kayaOpenPanelDrive(_ name: String) -> String? {
+        guard kayaLiveOpenPanel != nil else { return "no live open panel" }
         let app = kayaPanelAxApp()
-        guard let sheet = kayaPanelFind(app, [kayaPanelSheetId]) else { return }
-        if name == "cancel" {
-            if let cancel = kayaPanelFind(sheet, [kayaPanelCancelId]) {
-                AXUIElementPerformAction(cancel, kAXPressAction as CFString)
-            }
-            return
+        guard let sheet = kayaPanelFind(app, [kayaPanelSheetId]) else {
+            return "the panel's AX sheet is not findable"
         }
-        guard let browser = kayaPanelBrowser(sheet) else { return }
-        guard let row = browser.rows.last(where: { $0.name == name }) else { return }
+        if name == "cancel" {
+            guard let cancel = kayaPanelFind(sheet, [kayaPanelCancelId]) else {
+                return "no Cancel button in the AX sheet"
+            }
+            let err = AXUIElementPerformAction(cancel, kAXPressAction as CFString)
+            return err == .success ? nil : "Cancel press returned AXError \(err.rawValue)"
+        }
+        guard let browser = kayaPanelBrowser(sheet) else {
+            return "the panel publishes no browser (list/icons/columns)"
+        }
+        guard let row = browser.rows.last(where: { $0.name == name }) else {
+            return "no row named \(name) in the browser"
+        }
         // A ROW IS SELECTED WHERE ITS CONTAINER SAYS, and the attribute
         // is not the same one twice: an AXOutline takes AXSelectedRows
         // and refuses AXSelectedChildren, a collection view and an
@@ -2067,9 +2083,11 @@ func kayaExpandPath(_ path: String) -> String {
                 browser.container, kAXSelectedChildrenAttribute as CFString,
                 [row.element] as CFArray)
         }
-        if let ok = kayaPanelFind(sheet, [kayaPanelOkId]) {
-            AXUIElementPerformAction(ok, kAXPressAction as CFString)
+        guard let ok = kayaPanelFind(sheet, [kayaPanelOkId]) else {
+            return "no Open button in the AX sheet"
         }
+        let err = AXUIElementPerformAction(ok, kAXPressAction as CFString)
+        return err == .success ? nil : "Open press returned AXError \(err.rawValue)"
     }
 
     /// What the live SAVE panel is really showing: its directory, and the
@@ -6175,7 +6193,7 @@ private func kayaRunScript(_ script: String) {
                             // panel up, the next show trips the
                             // one-per-process guard, and the abort takes
                             // this failure list with it.
-                            DispatchQueue.main.sync { kayaOpenPanelDrive("cancel") }
+                            _ = DispatchQueue.main.sync { kayaOpenPanelDrive("cancel") }
                             break
                         }
                     #endif
@@ -6190,9 +6208,6 @@ private func kayaRunScript(_ script: String) {
                     }
                 #endif
                 #if os(macOS)
-                    DispatchQueue.main.sync { kayaOpenPanelDrive(arg) }
-                #endif
-                #if os(macOS)
                     // AND THE PANEL MUST BE GONE, the same postcondition
                     // harness.rs applies for the Rust backends. A press
                     // that lands before the panel is interactive is
@@ -6201,17 +6216,50 @@ private func kayaRunScript(_ script: String) {
                     // — where nobody looks for a harness problem.
                     // Measured on Windows; the rule is uniform because
                     // the failure mode is.
-                    let gone = Date().addingTimeInterval(5)
-                    while Date() < gone {
-                        if DispatchQueue.main.sync(execute: { kayaOpenPanelState() }) == nil {
-                            break
+                    //
+                    // AND THE PRESS IS RE-PRESSED, bounded, on the
+                    // postcondition's own evidence (2026-08-17: the
+                    // five-lane matrix swallowed a single press on the
+                    // modern-generation panel while the same leg ran
+                    // green twice standalone — contention stretches the
+                    // not-yet-interactive window). The re-press is safe
+                    // BECAUSE of the postcondition: a press that landed
+                    // dismisses the panel, so pressing again only ever
+                    // happens in the state where the previous press
+                    // provably did nothing. The expect verbs' bounded
+                    // retry is this same discipline; an action gets it
+                    // here, inside the verb, where its postcondition
+                    // lives — the step wrapper still never re-runs
+                    // actions.
+                    var pressWhys: [String] = []
+                    var attempts = 0
+                    var panelGone = false
+                    let overall = Date().addingTimeInterval(12)
+                    repeat {
+                        attempts += 1
+                        if let why = DispatchQueue.main.sync(execute: { kayaOpenPanelDrive(arg) }) {
+                            pressWhys.append(why)
                         }
-                        Thread.sleep(forTimeInterval: 0.05)
-                    }
-                    if let still = DispatchQueue.main.sync(execute: { kayaOpenPanelState() }) {
+                        let settle = Date().addingTimeInterval(4)
+                        while Date() < settle {
+                            if DispatchQueue.main.sync(execute: { kayaOpenPanelState() }) == nil {
+                                panelGone = true
+                                break
+                            }
+                            Thread.sleep(forTimeInterval: 0.05)
+                        }
+                    } while !panelGone && Date() < overall
+                    if !panelGone,
+                        let still = DispatchQueue.main.sync(execute: { kayaOpenPanelState() })
+                    {
+                        let delivery =
+                            pressWhys.isEmpty
+                            ? "AX reported success for every press"
+                            : "press reports: \(pressWhys.joined(separator: "; "))"
                         failures.append(
-                            "file_choose \(arg): the panel is still up (listing \(still.1)) "
-                                + "— the press was swallowed, which the panel cannot tell you")
+                            "file_choose \(arg): the panel is still up after \(attempts) "
+                                + "presses (listing \(still.1)) — every press was swallowed, "
+                                + "which the panel cannot tell you; \(delivery)")
                     }
                 #endif
             case "expect_save_dialog":
