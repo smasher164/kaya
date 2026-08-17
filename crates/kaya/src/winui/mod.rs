@@ -44,6 +44,7 @@ use bindings::Microsoft::UI::Xaml::Controls::{
     SymbolIcon,
     Slider, TextBlock, TextBox, TextChangedEventHandler, TextCompositionEndedEventArgs,
     TextCompositionStartedEventArgs, TextControlPasteEventHandler,
+    TitleBar,
     ToggleMenuFlyoutItem, TwoPaneView,
     TwoPaneViewMode, TwoPaneViewPriority, TwoPaneViewWideModeConfiguration,
 };
@@ -546,23 +547,36 @@ struct CoreState {
     /// groups mint none (the group's options materialize inline —
     /// the checkmark idiom).
     menu_natives: HashMap<(MenuAttachment, u64), MenuNative>,
-    /// The window shell (the ratified lowering): MenuBar in its own
-    /// Auto row of a shell Grid, the TOOLBAR in the Auto row under it,
+    /// The window shell (the ratified lowering): the TITLEBAR's Auto row
+    /// at the top of a shell Grid, the MenuBar in the Auto row under it,
     /// the window's real content in the Star-row slot beneath both.
     /// Built once per window at the first menubar_append; every content
     /// swap goes through the slot.
     menubars: HashMap<u64, MenuBar>,
     menu_slots: HashMap<u64, Grid>,
-    /// The shell Grid itself, kept so the toolbar row can be filled
-    /// LATER than the shell is built — a window earns its CommandBar
-    /// only when its catalog promotes something (docs/chrome-plan.md
-    /// C2), and a window with no primaries must keep exactly the tree
-    /// it had before this slice.
+    /// The shell Grid itself, kept so the titlebar row can be filled
+    /// LATER than the shell is built — a window earns its caption
+    /// `TitleBar` and the `CommandBar` inside it only when its catalog
+    /// promotes something (docs/chrome-plan.md C2), and a window with no
+    /// primaries must keep exactly the tree, and exactly the system
+    /// caption, it had before this slice.
     menu_shells: HashMap<u64, Grid>,
     /// The window's REAL toolbar, minted on the first promotion by
     /// `refresh_toolbar`. Absent = this window has no toolbar, which is
     /// a state the harness read reports rather than papers over.
     toolbars: HashMap<u64, CommandBar>,
+    /// The window's custom `TitleBar` control — the caption row the
+    /// toolbar MERGES INTO (docs/chrome-plan.md C2's WinUI row, revised
+    /// 2026-08-17). Minted by the SAME first promotion that mints the
+    /// CommandBar and by nothing else: **extended is DERIVED from
+    /// toolbar presence**, so a window whose catalog promotes nothing
+    /// never has one and keeps the standard system caption it always
+    /// had.
+    ///
+    /// Kept because `refresh_caption` has to reach it — the control is a
+    /// SECOND SINK for the composed caption, never a second author of
+    /// it (see the doc comment there).
+    window_titlebars: HashMap<u64, TitleBar>,
     /// (window, item id) -> the promoted action's `AppBarButton`.
     ///
     /// THE WRITE SIDE ONLY, and that is the whole discipline of this
@@ -1568,8 +1582,11 @@ static CONTROL_RESOURCES: OnceLock<Result<(), String>> = OnceLock::new();
 /// dictionary, and each is reached the first time an app declares the
 /// thing — the most basic thing an app can do that provokes the
 /// failure. The toolbar joined the list with C2 (docs/chrome-plan.md):
-/// CommandBar and AppBarButton are MUX types whose default styles live
-/// in the same framework dictionary as the menu's.
+/// CommandBar, AppBarButton and — since the 2026-08-17 revision put the
+/// bar in the caption row — TitleBar are MUX types whose default styles
+/// live in the same framework dictionary as the menu's. Note that the
+/// TitleBar arrives through the SAME call: one promotion mints all
+/// three, so there is exactly one gate in front of the whole set.
 fn require_control_resources(surface: &str) {
     let Some(Err(why)) = CONTROL_RESOURCES.get() else {
         return;
@@ -2113,9 +2130,27 @@ fn window_caption(core: &CoreState, window: u64) -> String {
 /// state, so calling it after ANY of the three inputs moves (the
 /// window's title, the nav stack, the dirty flag) is always correct
 /// and never needs to know which one moved.
+///
+/// TWO SINKS NOW, STILL ONE AUTHOR (the 2026-08-17 titlebar revision).
+/// A promoted window wears a `TitleBar` control, and that control is a
+/// caption WRITER in its own right: `TitleBar::UpdateTitle` does
+/// `if (currentTitle != titleText) { appWindow.Title(titleText); }`
+/// (microsoft-ui-xaml @ winui3/release/2.2.0,
+/// `src/controls/dev/TitleBar/TitleBar.cpp:505-513`). So handing it the
+/// window's DECLARED title would make it overwrite the composed caption
+/// the line above just wrote — and the first casualty would be the
+/// dirty marker, silently, since `Stage::window_dirty` reads the live
+/// `Window::Title()` and asks whether it starts with `*`. It is handed
+/// the composed string instead, which makes its write a no-op and
+/// leaves the composition with exactly one author.
 fn refresh_caption(core: &CoreState, window: u64) -> windows_core::Result<()> {
+    let caption = HSTRING::from(window_caption(core, window));
     let target = winui_window(core, window)?;
-    target.SetTitle(&HSTRING::from(window_caption(core, window)))
+    target.SetTitle(&caption)?;
+    if let Some(titlebar) = core.window_titlebars.get(&window) {
+        titlebar.SetTitle(&caption)?;
+    }
+    Ok(())
 }
 
 /// Reconcile the window's visible state with its stack: the top
@@ -2633,20 +2668,22 @@ fn resolve_menu_path(core: &CoreState, path: &str, roots: &[u64]) -> Option<u64>
 }
 
 /// Build the window shell at the first menubar_append (the ratified
-/// lowering): a Grid whose Auto row holds the MenuBar, whose second Auto
-/// row is the TOOLBAR's, and whose Star row is the content slot every
-/// later mount/nav/sections swap fills. Built ONCE and grown through
-/// rebuilds; any content the window already presents moves into the slot
-/// (detached by the SetContent swap first — XAML refuses re-parenting;
-/// docs/traps.md).
+/// lowering): a Grid whose FIRST Auto row is the TITLEBAR's, whose
+/// second Auto row holds the MenuBar, and whose Star row is the content
+/// slot every later mount/nav/sections swap fills. Built ONCE and grown
+/// through rebuilds; any content the window already presents moves into
+/// the slot (detached by the SetContent swap first — XAML refuses
+/// re-parenting; docs/traps.md).
 ///
-/// THE TOOLBAR ROW IS DECLARED HERE AND FILLED ELSEWHERE, deliberately.
+/// THE TITLEBAR ROW IS DECLARED HERE AND FILLED ELSEWHERE, deliberately.
 /// An Auto row with no child measures zero, so every window whose
 /// catalog promotes nothing keeps precisely the geometry it had before
 /// the toolbar slice — which is the property that lets this row exist in
 /// EVERY windowed scene's shell without moving a single other leg's
-/// measurements. `refresh_toolbar` mints the CommandBar into it on the
-/// first promotion.
+/// measurements. `refresh_toolbar` mints the `TitleBar` into it on the
+/// first promotion, and the MenuBar's row is unchanged in every way that
+/// shows: it is row 1 of three instead of row 0 of three, under an
+/// EMPTY row that measures zero.
 fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     use windows_core::Interface as _;
     if core.menubars.contains_key(&window) {
@@ -2680,7 +2717,7 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     defs.Append(&fill)?;
     let bar = MenuBar::new()?;
     let bar_el: FrameworkElement = bar.cast()?;
-    Grid::SetRow(&bar_el, 0)?;
+    Grid::SetRow(&bar_el, MENUBAR_ROW)?;
     shell.Children()?.Append(&bar_el)?;
     let slot = Grid::new()?;
     let slot_el: FrameworkElement = slot.cast()?;
@@ -2699,7 +2736,14 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
 
 /// The shell Grid's rows, named because two functions have to agree
 /// about them and a bare `1` in each is how they stop agreeing.
-const TOOLBAR_ROW: i32 = 1;
+///
+/// THE TITLEBAR IS THE TOP ROW, not a strip under the caption. That is
+/// the 2026-08-17 revision in one line: the promoted commands ride IN
+/// the caption row (the Files/Terminal/Settings shell), so the row that
+/// holds them has to be above the MenuBar and flush with the top of the
+/// window, which is what `ExtendsContentIntoTitleBar` makes available.
+const TITLEBAR_ROW: i32 = 0;
+const MENUBAR_ROW: i32 = 1;
 const TOOLBAR_CONTENT_ROW: i32 = 2;
 
 /// The window's PROMOTED actions, in catalog preorder — the promotion
@@ -2734,7 +2778,44 @@ fn promoted_items(core: &CoreState, window: u64) -> Vec<u64> {
 
 /// THE PROMOTION (docs/chrome-plan.md C2's WinUI row): the window's
 /// primary catalog actions as real `AppBarButton`s in its `CommandBar`,
-/// appended to `PrimaryCommands` in catalog preorder.
+/// appended to `PrimaryCommands` in catalog preorder — and the bar rides
+/// IN THE WINDOW'S CAPTION ROW, not in a strip below it.
+///
+/// THE 2026-08-17 REVISION, and it is a mount-point decision, nothing
+/// else. The first lowering hung the stock `CommandBar` in its own Auto
+/// row under the MenuBar; the capture
+/// (`scratchpad/chrome/cap-toolbar-windows.png`) showed what the
+/// research already implied — a sparse third strip with a standard
+/// caption above it is not the shell Windows 11 ships. Files, Terminal
+/// and Settings MERGE the command surface into the title bar, and the
+/// research's own §5 named the move exactly: "on Windows the genre is
+/// decided by the bar's PARENT, not by a style on the bar. The same
+/// `CommandBar` object, moved from row 0 of the shell Grid into the
+/// title bar, becomes the Files-app look." So the SAME object moved,
+/// and no knob was added anywhere: `Microsoft.UI.Xaml.Controls.TitleBar`
+/// (WASDK 1.7+, Microsoft's recommended custom-caption path per
+/// `Window.SetTitleBar`'s own remarks) goes in the shell's top row, the
+/// bar goes in its `RightHeader`, and `Window.ExtendsContentIntoTitleBar`
+/// makes the row the real caption.
+///
+/// EXTENDED IS DERIVED FROM TOOLBAR PRESENCE — the ledger's rule, and
+/// the reason this branch is inside `refresh_toolbar` and nowhere else.
+/// A window whose catalog promotes nothing never reaches here past the
+/// early return, never mints a `TitleBar`, never has
+/// `ExtendsContentIntoTitleBar` written, and keeps precisely the
+/// standard system caption it had before this slice. There is no app
+/// surface for "extended" and no knob to set: promoting an action is the
+/// whole declaration.
+///
+/// THE HEIGHT IS DERIVED TOO, and by the control rather than by kaya:
+/// `TitleBar::UpdateHeight` goes to the compact state (32px) when
+/// Content, LeftHeader and RightHeader are ALL null and to the expanded
+/// state (48px) otherwise
+/// (microsoft-ui-xaml @ winui3/release/2.2.0,
+/// `src/controls/dev/TitleBar/TitleBar.cpp:433`, heights from
+/// `TitleBar_themeresources.xaml:77-78`). Filling `RightHeader` with the
+/// bar is what makes the caption tall. kaya sets no height, and takes
+/// neither `AppWindowTitleBar.PreferredHeightOption` nor any style.
 ///
 /// WHAT KAYA WRITES IS THE LIST AND NOTHING ELSE. The 48px transparent
 /// bar that takes the window's own surface, the 20px→16px icon
@@ -2745,6 +2826,25 @@ fn promoted_items(core: &CoreState, window: u64) -> Vec<u64> {
 /// metadata and the 2.2.0 theme resources, scratchpad/chrome/
 /// toolbar-winui.md §3). Not one styling knob is set here, which is the
 /// slice's whole claim on this platform.
+///
+/// THE DRAG REGIONS ARE THE CONTROL'S JOB, and the reason to use the
+/// control at all: C1's recorded failure mode for a custom caption is
+/// "a window nobody can drag". `TitleBar` computes the passthrough rects
+/// itself — `UpdateInteractableElementsList` collects the back button,
+/// the pane toggle, the Content subtree and THE RIGHT HEADER AREA WHOLE
+/// (TitleBar.cpp:798-806), and `UpdateDragRegion` hands them to
+/// `InputNonClientPointerSource` — so the bar's slot is clickable and
+/// everything left of it drags the window.
+///
+/// `AutoRefreshDragRegions` IS SET AND IS NOT SUFFICIENT ALONE, which is
+/// measured in the control's source rather than assumed: the automatic
+/// refresh subscribes to `Content()`'s `LayoutUpdated` and only that
+/// (TitleBar.cpp:603-606, and :843-849 on re-subscribe), so a bar living
+/// in `RightHeader` gets no automatic recompute when its own width
+/// changes — which it does on every catalog rebuild, as buttons come and
+/// go. `RecomputeDragRegions()` is therefore called at the end of every
+/// rebuild below; it forces a synchronous layout first, so the rects it
+/// publishes are the ones the bar actually occupies.
 ///
 /// SECONDARY COMMANDS STAY EMPTY, and that is this backend's one
 /// deviation from the research's shape — the same deviation, for the
@@ -2780,22 +2880,78 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             // cannot resolve its theme keys fail-fasts the process on a
             // dispatcher tick, milliseconds after the step that caused
             // it (docs/traps.md; the wall's own docstring records the
-            // dump this cost when MenuBarItem did it). CommandBar and
-            // AppBarButton are the same shape of control as the ones
-            // already on that list — MUX types whose default styles live
-            // in the framework dictionary the merge brings in.
+            // dump this cost when MenuBarItem did it). CommandBar,
+            // AppBarButton and TitleBar are the same shape of control as
+            // the ones already on that list — MUX types whose default
+            // styles live in the framework dictionary the merge brings
+            // in.
             require_control_resources("this window promotes an action into its toolbar");
-            let bar = CommandBar::new()?;
-            let bar_el: FrameworkElement = bar.cast()?;
-            Grid::SetRow(&bar_el, TOOLBAR_ROW)?;
-            let Some(shell) = core.menu_shells.get(&window) else {
+            // EXTENDED IS DERIVED FROM TOOLBAR PRESENCE, and this is the
+            // wall that says so on a path nobody can avoid — every
+            // caption this backend ever mints runs this line.
+            //
+            // IT IS HERE BECAUSE NOTHING ELSE CATCHES IT, measured: with
+            // the early return above deleted, every menu-bearing window
+            // takes an extended caption it never asked for, and
+            // `commands_rust`, `todos_rust`, `clipboard_rust`,
+            // `undo_rust`, `window_rust`, `styling_rust` and
+            // `toolbar_rust` ALL PASSED — seven green legs over a window
+            // wearing chrome no app declared. No harness verb reads
+            // "is this caption extended" (there is no such concept on
+            // the other four backends, so there is no uniform read to
+            // add), so the shared scenes structurally cannot see it.
+            //
+            // The assertion is what a scene would have said if it could:
+            // a window whose catalog promotes nothing has no business
+            // owning a custom title bar.
+            assert!(
+                !promoted.is_empty(),
+                "kaya: winui: window {window} reached the caption mint with \
+                 an EMPTY promotion list. `extended` is derived from toolbar \
+                 presence (docs/chrome-plan.md C2's WinUI row): a window that \
+                 promotes nothing keeps the system caption, and minting a \
+                 TitleBar here would give it chrome no app declared."
+            );
+            let Some(shell) = core.menu_shells.get(&window).cloned() else {
                 // No shell means no menubar_append has run, and the
                 // promotion bit only ever reaches items that are in a
                 // window's catalog — so there is nothing to promote and
                 // nowhere to put it.
                 return Ok(());
             };
-            shell.Children()?.Append(&bar.cast::<UIElement>()?)?;
+            let target = winui_window(core, window)?;
+
+            // THE TITLE IS NOT WRITTEN HERE. The control has a `Title`
+            // and the obvious thing is to fill it at mint — which the
+            // lane's own door refused, by name and with the fix in the
+            // sentence: "writes a window caption outside
+            // refresh_caption: line 2906 (`titlebar.SetTitle`)". It is
+            // right. A caption composed in two places is the five-writer
+            // defect docs/dirty-plan.md D2 was written about, and this
+            // control is a caption writer in its own right (see
+            // refresh_caption's doc comment). So the mint leaves the
+            // title empty and the ONE writer fills it, below, on this
+            // rebuild and on every later one.
+            let titlebar = TitleBar::new()?;
+            let tb_el: FrameworkElement = titlebar.cast()?;
+            Grid::SetRow(&tb_el, TITLEBAR_ROW)?;
+            shell.Children()?.Append(&titlebar.cast::<UIElement>()?)?;
+
+            let bar = CommandBar::new()?;
+            titlebar.SetRightHeader(&bar.cast::<UIElement>()?)?;
+            titlebar.SetAutoRefreshDragRegions(true)?;
+
+            // ORDER IS LOAD-BEARING AND DOCUMENTED: "To specify a custom
+            // title bar, you must first set ExtendsContentIntoTitleBar
+            // to true… If ExtendsContentIntoTitleBar is false, the call
+            // to SetTitleBar does not have any effect."
+            // (Window.SetTitleBar remarks, windows-app-sdk-2.0). Swap
+            // these two lines and the window silently keeps its system
+            // caption with a second one drawn under it.
+            target.SetExtendsContentIntoTitleBar(true)?;
+            target.SetTitleBar(&tb_el)?;
+
+            core.window_titlebars.insert(window, titlebar);
             core.toolbars.insert(window, bar.clone());
             bar
         }
@@ -2833,14 +2989,41 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
     }
     // An emptied promotion list leaves the bar in the tree with nothing
     // in it; a CommandBar with no commands still measures 48px, so it
-    // is collapsed instead — the row goes back to zero and the window
-    // looks like one that never promoted anything.
+    // is collapsed instead — and so is the caption row it rides in, and
+    // the window goes back to the system caption. THE WHOLE EXTENDED
+    // STATE FOLLOWS THE ONE NUMBER, in both directions, because
+    // "extended is derived from toolbar presence" has to be as true on
+    // the way down as on the way up.
     let holds = primary.Size()? + bar.SecondaryCommands()?.Size()?;
-    bar.SetVisibility(if holds == 0 {
-        Visibility::Collapsed
-    } else {
+    let extended = holds > 0;
+    let visibility = if extended {
         Visibility::Visible
-    })?;
+    } else {
+        Visibility::Collapsed
+    };
+    bar.SetVisibility(visibility)?;
+    if let Some(titlebar) = core.window_titlebars.get(&window).cloned() {
+        titlebar.SetVisibility(visibility)?;
+        let target = winui_window(core, window)?;
+        // READ BEFORE WRITE: this runs on every catalog rebuild, and
+        // re-asserting the flag re-enters the window's frame/inset
+        // recomputation for no reason. Written only when it moves.
+        if target.ExtendsContentIntoTitleBar()? != extended {
+            target.SetExtendsContentIntoTitleBar(extended)?;
+        }
+        // The bar's width just changed and it lives in RightHeader,
+        // which the control's automatic refresh does not watch (see the
+        // doc comment). Without this the passthrough rects describe the
+        // PREVIOUS set of buttons: the window would still drag, and the
+        // buttons under the stale hole would be the wrong ones.
+        titlebar.RecomputeDragRegions()?;
+        // THE ONE CAPTION WRITER FILLS THE CONTROL'S TITLE, here and on
+        // every rebuild. Idempotent by construction (it derives the
+        // whole caption from state), so a rebuild that changed only the
+        // button set rewrites the same string and the control's own
+        // `appWindow.Title` write is a no-op.
+        refresh_caption(core, window)?;
+    }
     Ok(())
 }
 
@@ -8250,6 +8433,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.menu_slots.remove(&window.0);
             core.menu_shells.remove(&window.0);
             core.toolbars.remove(&window.0);
+            core.window_titlebars.remove(&window.0);
             core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
         ApplyOp::PushEntry { window, entry } => {
@@ -10083,6 +10267,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             menu_slots: HashMap::new(),
             menu_shells: HashMap::new(),
             toolbars: HashMap::new(),
+            window_titlebars: HashMap::new(),
             toolbar_buttons: HashMap::new(),
             menu_shortcuts: HashMap::new(),
             open_context: None,

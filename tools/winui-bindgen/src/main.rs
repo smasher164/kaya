@@ -437,6 +437,41 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.AppBar".to_string(),
         "Microsoft.UI.Xaml.Controls.ICommandBarElement".to_string(),
         "Microsoft.UI.Xaml.Controls.AppBarButton".to_string(),
+        // THE TITLEBAR THE TOOLBAR MERGES INTO (docs/chrome-plan.md C2's
+        // WinUI row, revised 2026-08-17). The modern Win11 shell — Files,
+        // Terminal, Settings — does not stack a command strip under the
+        // caption; the commands ride IN the caption row. Microsoft's
+        // recommended path for that is this control, not a hand-rolled
+        // Grid: `Window.SetTitleBar`'s own remarks say "Starting in
+        // Windows App SDK 1.7, you can use the XAML TitleBar control to
+        // create a custom title bar… We recommend the XAML TitleBar
+        // control for this."
+        //
+        // ONE ENTRY IS ENOUGH HERE, and that is measured rather than
+        // assumed — the transitivity trap two paragraphs up is real, so
+        // the emitted file was read for the five names this arm calls
+        // (SetTitle, SetRightHeader, SetAutoRefreshDragRegions,
+        // RecomputeDragRegions, new) before anything was written against
+        // them. The reason one entry suffices: every slot this arm uses
+        // is typed in ALREADY-FILTERED types — `HSTRING` for Title and
+        // `UIElement` for the three header/content slots — unlike
+        // CommandBar's collections, whose element type had to be dragged
+        // in by name.
+        //
+        // NOT filtered, each an absence with a reason:
+        //   IconSource / TitleBarTemplateSettings — kaya draws no window
+        //     icon and reads no template state; both are types this arm
+        //     never names, and windows-bindgen leaves their accessors as
+        //     vtable pads, which is the honest record of "not used here".
+        //   Microsoft.UI.Windowing.AppWindow / AppWindowTitleBar /
+        //     TitleBarHeightOption — the `PreferredHeightOption = Tall`
+        //     route. NOT taken: the control derives its own 32→48px
+        //     height from whether its slots are occupied
+        //     (TitleBar.cpp:433 UpdateHeight), and upstream
+        //     microsoft-ui-xaml#9863 says the two heights do not agree
+        //     anyway. kaya sets no height on this platform at all, which
+        //     is the same claim the CommandBar entries make.
+        "Microsoft.UI.Xaml.Controls.TitleBar".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);
