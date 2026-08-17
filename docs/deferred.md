@@ -2507,6 +2507,87 @@ whether a kind HAS a constructor, never whether the constructor takes a
 live source. Closing it: the three bindings level up, and the census
 grows the takes-a-source question so the class stays closed.
 
+## ~~DEFECT — Compose's title bar never recomposed, and `expect_title` read the other surface~~ (found by the android film 2026-08-17)
+KEY: compose windowTitle plain field, TopAppBar stale title, expect_title reads the render, stamped observation, film found it
+
+CLOSED 2026-08-17, the day it was found, in
+android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt.
+
+WHAT THE FILM SAW. The android film of the editor scene
+(scratchpad/chrome/film-android.md §9, still-2.45.png) caught one frame
+holding two different titles: the platform ActionBar read "notes" while
+the M3 TopAppBar directly under it read "untitled".
+`KayaSceneModel.windowTitle` was a PLAIN field where every neighbour a
+composable reads is `by mutableStateOf`, and the bar's title slot reads
+it — so the bar composed once and never again, while
+`mountedActivity?.title` kept moving. Five title assertions stood over
+that stale bar and every one of them was green.
+
+WHY NO GATE SAW IT. `expect_title`'s android arm read `activity.title`
+and nothing else — a read of a DIFFERENT SURFACE than the user's, which
+is what the stamped-observation rule exists to refuse. The task label
+was correct the whole time, so the read could only ever agree.
+
+THE FIX, both halves. (1) `windowTitle` joined its siblings:
+`var windowTitle by mutableStateOf("")`. (2) The read got honest and now
+asserts BOTH materializations — the Activity task label (what recents
+and the switcher show) AND the composed bar's own title node, tagged
+`kaya:toolbar-title` and read off the merged semantics tree through the
+same `kayaToolbarNode`/`kayaAxFind` the toolbar reads use. Both-agree
+rather than bar-only because the task label is not decoration: a backend
+that stopped writing it would be a real regression a bar-only read would
+wave through. macOS needs no such pairing — there the NSWindow title bar
+IS the materialization, so its arm already reads what the user sees.
+
+The bar half is asserted IF AND ONLY IF the window declares a command
+catalog, which is the exact condition `KayaRoot` composes the bar on,
+read from the model and never inferred from a failed node lookup: "this
+scene has no bar" and "the chrome broke" are different states, and
+collapsing them is how a read goes vacuous. `nav` and `dirty` declare no
+catalog and are the legs that prove that branch runs.
+
+WATCHED NEGATIVES, both on emulator-5554, perturb-restore from a saved
+copy with `shasum -c` and the substitution count printed. (a) The
+`mutableStateOf` reverted — the defect restored — turns three of the
+editor leg's five title assertions red, and the sentence is the film's
+frame in words: `the chrome's title reads "untitled" while the task
+label reads "notes", wanted "notes"`. (b) The bar's title expression
+replaced by a constant, model and task label left correct — all five go
+red naming what the chrome really drew, so the read cannot be an echo.
+
+The observation string did not move: `title "<want>"`, byte for byte,
+and the editor leg's whole verdict is byte-identical to the film's.
+
+## The CLASS behind the stale title bar has no gate (opened 2026-08-17 by the fix above)
+KEY: KayaSceneModel plain field, composition state, compose recomposition, one-field audit
+
+A `KayaSceneModel` field that decides what a composable DRAWS must be
+`by mutableStateOf`, or the surface it feeds composes once and stops.
+Nothing enforces that; `windowTitle` shipped as a plain field for a
+milestone and only a film caught it, because a plain field is not a
+compile error and the scenes read the other surface.
+
+AUDITED WHEN THE FIX LANDED, so the entry records a state and not a
+worry: 16 of KayaSceneModel's 51 fields are state-backed, 13 plain ones
+are named inside an `@Composable`, and none of the 13 is a second
+instance of the defect. Four (`alertTitle`, `alertMessage`,
+`alertActions`, `alertCancel`) are written on the lines immediately
+before `alertId`, which IS state, so the flip carries them into the
+composition — safe by ORDERING, which is the fragile kind of safe. Five
+are registries (`sectionIndex`, `menuItems`, `contextMenus`,
+`menuPopupViews`, `cellMinX`) whose elements hold their own state.
+Four (`sectionsRendered`, `formFactor`, `menuPresentation`,
+`splitPresentation`) are stamped BY the composition for the harness to
+read, not read to draw.
+
+The guard, when scheduled: a gate that reads the object's fields and the
+`@Composable` bodies and fails a plain field a composable reads to draw,
+with the four ordering-safe alert fields exempted BY NAME and with the
+ordering itself asserted rather than assumed. It is deliberately not in
+this fix — landing a new gate is a four-way edit (the script, gates.sh's
+list, check-gates' census, the CLAUDE.md/AGENTS.md prose) and this slice
+was scoped to the defect and its ledger.
+
 ## The typeface scene's depth stubs (Slice 2b mid-flight, expected to close with the fan-out)
 
 The depth landed 2026-08-16: spec (`set_brand_typeface` / `set_typeface`,

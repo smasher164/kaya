@@ -86,7 +86,11 @@ platforms, plus artifacts a human can watch.
    and "kaya: one bit, five bars"
    (https://claude.ai/code/artifact/6235dd79-ab1a-4084-a665-01cdba080e1c),
    both re-shot 2026-08-17 under the modern generation.
-   FILMS: an open question for the maintainer.
+   FILMS: DONE 2026-08-17 (ratified wanted the same day) — all five
+   platforms, each film a real leg run whose full verdict was required
+   before the film counted; the Android one ran twice because its first
+   take caught the stale-title defect (fixed same hour, the frame made
+   impossible). The films ride the styling artifact.
 
 ## §3 — not in v1 (recorded, not forgotten)
 

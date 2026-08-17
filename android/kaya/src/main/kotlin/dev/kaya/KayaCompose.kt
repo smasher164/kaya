@@ -535,11 +535,23 @@ data class KayaRange(val start: Int, val stop: Int)
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
-    // The primary surface's properties. The title materializes as the
-    // Activity task label; width/height record the advisory size
-    // request only — the system owns surface geometry on Android
-    // (DESIGN.md, Presentation contexts).
-    var windowTitle: String = ""
+    // The primary surface's properties. The title materializes on TWO
+    // surfaces here — the Activity task label (what recents and the app
+    // switcher show) and the composed [KayaMenuTopBar]'s title slot
+    // (what the user is looking at) — and expect_title asserts both.
+    // Width/height record the advisory size request only; the system
+    // owns surface geometry on Android (DESIGN.md, Presentation
+    // contexts).
+    //
+    // A COMPOSITION STATE and not a plain field, for [brandSeed]'s
+    // reason one field over and with a measured failure behind it: the
+    // bar's title slot READS this, so a plain field composes once and
+    // never again. It shipped that way, and the android film of the
+    // editor caught it in one frame — the ActionBar reading "notes"
+    // over a TopAppBar still reading "untitled"
+    // (scratchpad/chrome/film-android.md §9, still-2.45.png). Nothing
+    // was wrong with the write; the bar was simply never told.
+    var windowTitle by mutableStateOf("")
     var windowWidth: Double? = null
     var windowHeight: Double? = null
     val nodes = HashMap<Long, KayaNode>() // UI thread only
@@ -1040,6 +1052,18 @@ object KayaCompose {
      */
     const val TOOLBAR_TAG = "kaya:toolbar"
     const val TOOLBAR_MORE_TAG = "kaya:toolbar-more"
+
+    /**
+     * THE BAR'S TITLE SLOT, tagged so `expect_title` reads the string
+     * the user is looking at rather than a string beside it.
+     *
+     * Tagged and not found by shape: the bar's `actions` slot composes
+     * `TextButton`s whose labels are `Text` too, so "the first Text
+     * under the chrome" is an address that moves when a promoted item
+     * loses its symbol. The tag says WHICH node is the title, exactly
+     * as [kayaMenuTag] says which node is an item's affordance.
+     */
+    const val TOOLBAR_TITLE_TAG = "kaya:toolbar-title"
 
     /** The prefix every SECTION SWITCHER ROW's test tag carries —
      * [kayaSectionTag]'s half that the read scopes on, so the walk can
@@ -4603,6 +4627,40 @@ object KayaCompose {
     }
 
     /**
+     * THE TITLE THE CHROME REALLY DREW, off the merged semantics node —
+     * or null when this window composed no title node at all.
+     *
+     * MAIN THREAD ONLY (callers go through [onUi]).
+     *
+     * The caller pairs it with [kayaWindowHasChrome], and the pairing is
+     * the whole point: null means two different things, "this window has
+     * no bar and never should have" and "the bar is gone", and only the
+     * MODEL's catalog condition tells them apart. A read that answered
+     * "no bar, so nothing to check" from a failed node lookup would go
+     * vacuous the first time the chrome broke, which is the same defect
+     * one layer down.
+     */
+    private fun kayaChromeTitle(activity: ComponentActivity): String? {
+        val bar = kayaToolbarNode(activity) ?: return null
+        val node = kayaAxFind(bar, TOOLBAR_TITLE_TAG) ?: return null
+        return kayaAxName(node)
+    }
+
+    /**
+     * Whether this window is SUPPOSED to be showing chrome with a title
+     * in it — the condition [KayaRoot] itself branches on, read from the
+     * model rather than restated here.
+     *
+     * MAIN THREAD ONLY (callers go through [onUi]).
+     *
+     * A scene that declares no command catalog gets no phantom bar (the
+     * pre-menus surface shape), so on those scenes the task label is the
+     * only surface a title materializes on and it is the only one
+     * expect_title can assert. `nav` and `dirty` are both of those.
+     */
+    private fun kayaWindowHasChrome(): Boolean = KayaSceneModel.menubar.isNotEmpty()
+
+    /**
      * What the chrome HOLDS: every affordance under the bar, in tree
      * order, one node per thing a service can focus.
      *
@@ -5891,21 +5949,68 @@ object KayaCompose {
                             ?.let { failures.add("compose: $it") }
                     }
                     "expect_title" -> {
-                        // The REAL materialized title (the Activity
-                        // label), never only the model's copy — a
-                        // backend that ignored the write must fail.
+                        // BOTH REAL MATERIALIZATIONS, never the model's
+                        // copy — a backend that ignored the write must
+                        // fail, and so must one that told only half the
+                        // platform.
+                        //
+                        // A title lands on TWO surfaces on Android and
+                        // they are not the same surface: the Activity
+                        // task label is what recents, the app switcher
+                        // and the platform ActionBar show, and the
+                        // composed TopAppBar is what the person holding
+                        // the phone is looking at. macOS has one — the
+                        // NSWindow's title bar IS the materialization,
+                        // so reading `window.title` there reads what the
+                        // user sees. Reading only the task label here
+                        // reads the OTHER one, and that is exactly the
+                        // defect this arm now catches: the android film
+                        // of the editor caught a frame with "notes" in
+                        // the ActionBar over "untitled" in the bar
+                        // (scratchpad/chrome/film-android.md §9) while
+                        // all five of the leg's title assertions passed.
+                        //
+                        // BOTH-AGREE rather than the bar alone, because
+                        // the task label is not decoration: it is the
+                        // name this app answers to in the switcher, and
+                        // a backend that stopped writing it would be a
+                        // real regression that a bar-only read would
+                        // wave through. The bar half is asserted IF AND
+                        // ONLY IF this window declares a catalog, which
+                        // is the exact condition KayaRoot composes the
+                        // bar on — measured from the model, never from
+                        // a failed node lookup (see kayaChromeTitle).
                         val target = parts.getOrNull(1) ?: ""
                         val explicit = target.startsWith("window#")
                         val wid = if (explicit) target.removePrefix("window#").toLongOrNull() ?: -1 else 0L
                         val prefix = if (explicit) "window#$wid " else ""
                         val want = quoted(parts.drop(if (explicit) 2 else 1))
+                        val primary = wid == 0L
                         val got = onUi(activity) {
-                            if (wid == 0L) activity.title?.toString() ?: "" else ""
+                            if (primary) activity.title?.toString() ?: "" else ""
                         }
-                        if (got == want) {
-                            observed.add("${prefix}title \"$want\"")
-                        } else {
+                        val hasChrome = primary && onUi(activity) { kayaWindowHasChrome() }
+                        val chrome =
+                            if (hasChrome) onUi(activity) { kayaChromeTitle(activity) } else null
+                        if (got != want) {
                             failures.add("${prefix}title \"$got\", wanted \"$want\"")
+                        } else if (!hasChrome) {
+                            // No catalog, no bar: the task label is the
+                            // only surface this title has, and saying so
+                            // is what keeps the pass honest.
+                            observed.add("${prefix}title \"$want\"")
+                        } else if (chrome == null) {
+                            failures.add(
+                                "${prefix}the task label reads \"$got\" and the window's " +
+                                    "catalog composed no title in its chrome"
+                            )
+                        } else if (chrome != want) {
+                            failures.add(
+                                "${prefix}the chrome's title reads \"$chrome\" while the task " +
+                                    "label reads \"$got\", wanted \"$want\""
+                            )
+                        } else {
+                            observed.add("${prefix}title \"$want\"")
                         }
                     }
                     "expect_typeface" -> {
@@ -9264,7 +9369,14 @@ fun KayaMenuTopBar() {
         // about the window (see KayaCompose.TOOLBAR_TAG).
         modifier = Modifier.testTag(KayaCompose.TOOLBAR_TAG),
         title = {
-            Text(KayaSceneModel.navEntries.lastOrNull()?.title ?: KayaSceneModel.windowTitle)
+            // Tagged because expect_title READS THIS NODE — the bar is
+            // the title's visible materialization on this platform, and
+            // the task label is the other one (see TOOLBAR_TITLE_TAG).
+            Text(
+                KayaSceneModel.navEntries.lastOrNull()?.title
+                    ?: KayaSceneModel.windowTitle,
+                modifier = Modifier.testTag(KayaCompose.TOOLBAR_TITLE_TAG),
+            )
         },
         actions = {
             // Promotion is CATALOG PREORDER, recomputed on every
