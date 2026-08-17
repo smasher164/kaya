@@ -38,7 +38,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -713,6 +713,40 @@ for proto in x11 wayland; do
     # keeps this comment honest — that sweep reads the BINARY PATH out of
     # this file, comments included, so the path is not written here even
     # to say it is absent.
+    # THE TOOLBAR SCENE (docs/chrome-plan.md C2): the `primary` bit's
+    # desktop lowering. On this backend that is buttons packed into the
+    # window's AdwHeaderBar in catalog preorder, symbol-first, bound to
+    # the same win.kmi-<id> actions the menu rows use — so the scene's
+    # round trip (disable the MENU item, watch the BUTTON gray) is one
+    # source of truth rather than two copies.
+    #
+    # THROUGH a11y-leg.sh, like styling's and typeface's legs, and for a
+    # sharper reason than either: GTK publishes no getter for accessible
+    # properties, so `expect_toolbar_item` addresses a button by the name
+    # the AT-SPI BUS answers with. That is exactly the surface the arm's
+    # trap lives on — an icon-only GtkButton with no explicit accessible
+    # label publishes `name=''` (measured), which a tooltip would paper
+    # over and no in-process read could see. No bus, no answer: the arm
+    # says so in the verdict and names this wrapper.
+    #
+    # Same roster as typeface, and for the same reason — every hosted
+    # language has a toolbar guest, the C floor does not (no
+    # guests/c/toolbar.c, and the floor's Makefile SCENES does not name
+    # one), so there is no binary to run.
+    run "$proto" toolbar-rust env KAYA_SELFTEST=toolbar \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/toolbar"
+    run "$proto" toolbar-python env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/toolbar.py
+    run "$proto" toolbar-go env KAYA_SELFTEST=toolbar \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" toolbar-csharp env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" toolbar-ocaml env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/toolbar.exe
+    run "$proto" toolbar-haskell env KAYA_SELFTEST=toolbar \
+        tools/linux/a11y-leg.sh "$(hs_bin toolbar)"
+    run "$proto" toolbar-java env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
     # The confirm scene: the modal-alert grammar (gtk::AlertDialog),
     # all three answer paths through the REAL dialog button.
     # The stall diagnostic (crates/kaya/src/stall.rs): the one scene

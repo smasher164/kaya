@@ -132,6 +132,9 @@ public final class Main {
             case "styling":
                 app = Styling::app;
                 break;
+            case "toolbar":
+                app = Toolbar::app;
+                break;
             case "typeface":
                 app = Typeface::app;
                 break;

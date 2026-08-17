@@ -87,6 +87,9 @@ mod ranges;
 #[path = "styling.rs"]
 mod styling;
 
+#[path = "toolbar.rs"]
+mod toolbar;
+
 #[path = "typeface.rs"]
 mod typeface;
 
@@ -165,6 +168,10 @@ fn app(ctx: kaya::AppCtx) {
         // SEED drives Material's own scheme derivation and `heading` is
         // Compose heading() semantics — what the expect_ax step reads.
         Ok("styling") => styling::app(ctx),
+        // The toolbar scene: the promoted bar IS this host's chrome, so
+        // the scene runs here for real (the primary bit's phone arm
+        // predates its desktop ones — docs/chrome-plan.md C2).
+        Ok("toolbar") => toolbar::app(ctx),
         // The typeface scene: the brand typeface swaps the FAMILY and
         // leaves the ramp alone (docs/styling-plan.md Slice 2b). The
         // same guest the mac lane runs, with one thing supplied from

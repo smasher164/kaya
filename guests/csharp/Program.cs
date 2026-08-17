@@ -49,6 +49,7 @@ static class Program
             case "grow": GrowScene.Run(); break;
             case "layout": LayoutScene.Run(); break;
             case "styling": StylingScene.Run(); break;
+            case "toolbar": ToolbarScene.Run(); break;
             case "typeface": TypefaceScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
             default: Milestone2Scene.Run(); break;

@@ -1071,6 +1071,22 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity menus \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
+    # THE TOOLBAR SCENE (docs/chrome-plan.md C2), the menus scene's
+    # sibling one bit over: the same catalog with `primary` on two
+    # actions, asserted as real window CHROME. Nothing new is lowered on
+    # this host — the promoted pair has been in the TopAppBar's actions
+    # slot since the menus milestone, with the ⋮ holding the remainder —
+    # so what this leg exercises is the READ that landed 2026-08-17: the
+    # composed bar's own subtree, the merged semantics node each button
+    # publishes, and the disabled bit `IconButton(enabled=)` puts there.
+    # The enablement round trip is the point of the scene: the guest
+    # writes ONE signal, against the menu item, and the leg asserts the
+    # bar button AND the catalog item follow it in both directions, off
+    # two different trees.
+    run_apk toolbar-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity toolbar \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script toolbar)'"
     # The listdetail scene: list-detail's bare invariant, which is the
     # only form of it this host can run — the `split` scene drives
     # resize_window, and Android does not command its own window size
@@ -1390,6 +1406,16 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity menus \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
+    # The toolbar scene through the JVM binding (see the compose leg).
+    # Same shared script, byte for byte, against the same chrome: the
+    # promotion bit is a binding spelling all eight languages have
+    # shipped since the menus milestone, so this leg's job is to prove
+    # the Java guest reaches the identical bar rather than to exercise
+    # anything new in the binding.
+    run_apk toolbar-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity toolbar \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script toolbar)'"
     # The commands scene through the JVM binding (see the compose leg).
     # The listdetail scene through the JVM binding: the same
     # guests/java/Split.java the desktop lanes run, on the tier that
@@ -1649,6 +1675,13 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity menus \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script menus)'"
+    # The toolbar scene through the Go binding (see the compose leg);
+    # guests/go/toolbar rides the one c-shared .so that carries every
+    # scene, so this host needs nothing per-scene of its own.
+    run_apk toolbar-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity toolbar \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script toolbar)'"
     # The listdetail scene through the Go binding: guests/go/split
     # under the `listdetail` key, the same one app behind both scripts
     # the other two hosts use. `split` itself is desktop-only.

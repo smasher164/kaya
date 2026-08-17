@@ -2300,6 +2300,21 @@ interpreter carries slice 1's one real brand lowering
   (d) leave it — the accent family is what every other backend brands
   too. Nothing here is urgent and (d) is a real answer.
 
+## The SF symbol table wants a rendered-name column (iOS, found 2026-08-17)
+
+The iOS toolbar arm's real-tree read measures the glyph off the rendered
+UIImageView's identifier — UIKit's own name for it — and that name is
+NOT always the one kaya asked for: SwiftUI normalizes SF names before
+UIKit sees them (measured: request `doc.on.doc`, rendered identifier
+`document.on.document`). So `expect_toolbar_item`'s symbol read works
+(the toolbar column's names survive normalization) but
+`expect_menu_symbol`'s PROMOTED half stays on the render stamp, with the
+limit stated at the arm: a glyph read would turn a correct button red.
+Closing it: a canonical rendered-name column beside `sf` in
+kayaSymbolTable (research pass over all 20 names on the current OS,
+the symbols-sf-symbols.md discipline), then the promoted read goes
+full-real and the stamp retires. Maintainer's call on when.
+
 ## The typeface scene's depth stubs (Slice 2b mid-flight, expected to close with the fan-out)
 
 The depth landed 2026-08-16: spec (`set_brand_typeface` / `set_typeface`,
@@ -2434,40 +2449,81 @@ C2, ratified 2026-08-16) — plus two harness verbs (`expect_toolbar`,
 depth-stub helper, which is what holds their lanes' legs off in
 check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
 
-- **DEPTH STUB: toolbar on swiftui/ios** — the LOWERING is already live
-  here and has been for milestones: `KayaMenuToolbar` promotes the same
-  `kayaPromotedActions` set into `ToolbarItemGroup(.primaryAction)` with
-  a synthesized More menu for the remainder. What is missing is the
-  READ. The stage-1 stamp (`promotedRendered`) records WHICH ARM of a
-  button's label drew, which is enough for `expect_menu_symbol` and
-  explicitly not enough for these two verbs: `expect_toolbar` asks
-  whether the promoted set is really IN the chrome, and a stamp written
-  by the label cannot see the bar it is in
-  (scratchpad/chrome/ios-symbol-fix.md §7.3). Closing it is the hosted
-  `UINavigationBar` walk — the button's accessibility label and image —
-  in the simulator, with the promotion-dropped negative watched there.
-- **DEPTH STUB: toolbar on gtk** — the arm the research measured:
-  `AdwHeaderBar` buttons packed in catalog preorder inside an
-  `AdwToolbarView` (whose flat top-bar style is the platform default and
-  whose adoption is the ratified look flip), enablement free through the
-  `win.kmi-N` actions that already exist, plus the two things GTK owes
-  that nothing else does — a synthesized `GtkMenuButton` for the
-  remainder (GTK has no overflow: 24 buttons drove min-width to 1155px
-  and the window refused to shrink) and the accessible NAME an icon-only
-  button does not publish (`name=''` on AT-SPI), which is also what the
-  `expect_toolbar_item` read needs.
-- **DEPTH STUB: toolbar on winui** — the arm the research measured: a
-  `CommandBar` with the promoted primaries as `PrimaryCommands` and the
-  remainder as `SecondaryCommands`, where dynamic overflow, the 48px
-  transparent bar and `IsEnabled` all come free off the one button
-  object. The read is the UIA tree the menu reads already traverse.
-- **DEPTH STUB: toolbar on compose** — the LOWERING is live here too
-  (`KayaMenuTopBar`'s actions slot carries the promoted set and the ⋮
-  overflow). What is missing is the READ off the composed bar — the
-  row's merged semantics, the way `kayaMenuSymbolRead` reads a menu row.
-  A read answering off the promotion list instead would be the iOS
-  symbol gap again (scratchpad/chrome/toolbar-repo.md §2.4), so it waits
-  for the real one.
+- ~~**DEPTH STUB: toolbar on gtk**~~ — LANDED 2026-08-17. The look flip
+  went in as ratified: every window's chrome is an `AdwHeaderBar` inside
+  an `AdwToolbarView` that IS the window's child, so the flat top bar is
+  the platform's own default rather than a style kaya asks for. The
+  window stays a plain `gtk4::ApplicationWindow` — the SMALLER migration
+  the plan preferred — with an empty invisible titlebar widget left in
+  the titlebar slot, which is the client-side-decoration switch (measured
+  identical to `AdwApplicationWindow`, whose own `get_titlebar()` is an
+  internal gizmo doing the same job, under Xvfb, under sway and with
+  `GTK_CSD=1`). Promotion is every primary action in catalog preorder —
+  no k, because GTK has no capacity of its own — symbol-first, with the
+  accessible name written EXPLICITLY, since an icon-only button publishes
+  `name=''` and the `expect_toolbar_item` read addresses buttons by what
+  the bus answers. Enablement is free: the button names the item's
+  existing `win.kmi-<id>` action.
+  THE SYNTHESIZED `GtkMenuButton` WAS DELIBERATELY NOT BUILT, and that is
+  the one deviation from the research's shape. Its purpose was a home for
+  the unpromoted catalog, and this backend already has exactly one: the
+  whole catalog is a `GtkPopoverMenuBar` in the strip above the content
+  (`ensure_menu_strip`), so a hamburger over the same `gio::Menu` would
+  be a second copy of those rows one line above their own menu bar. The
+  `expect_toolbar` read answers `menubar` for the same structural reason
+  the macOS arm does, and it READS the real bar rather than asserting it
+  (`none` if the bar is ever gone). If kaya's linux menu lowering stops
+  being a bar, that is when GTK grows the hamburger.
+- ~~**DEPTH STUB: toolbar on winui**~~ — LANDED 2026-08-17. The arm the
+  research measured: a `CommandBar` in a second Auto row of the window
+  shell Grid, one `AppBarButton` per `primary` catalog action in catalog
+  preorder, carrying the very `IconElement` the item's menu row carries
+  (`symbol_icon`, so the toolbar needed no icon code of its own). NO
+  CAPACITY *k* IS APPLIED, and that is measured rather than chosen: this
+  bar has DYNAMIC OVERFLOW ON BY DEFAULT, so how many buttons fit is a
+  question the platform re-answers at every width breakpoint, and every
+  other default — the 48px transparent bar that takes the window's own
+  surface, the 20px→16px icon rescaling, the "…" affordance, the label
+  hidden while the bar is closed — arrives with the control. Not one
+  styling knob is set, which is C2's whole claim on this platform.
+  `SECONDARYCOMMANDS STAYS EMPTY`, the same deviation the GTK arm
+  records and for the same structural reason: `rebuild_menus` already
+  renders the WHOLE catalog into a real `MenuBar` one row above, so
+  filling the overflow would be a second copy of those rows 48px under
+  their own menu bar. `toolbar_chrome` therefore answers `menubar`, and
+  READS it (the real bar's item count) rather than asserting it. The
+  read is the UIA tree the menu reads already traverse: the promoted
+  buttons are addressed by the name they publish to an assistive client
+  (measured on the VM: an `AppBarButton`'s automation name is its
+  `Label` — `AppBarButton` is in the closed dxaml half of the framework
+  and this could not be read out of the public sources), the symbol is
+  the automation name of the `IconElement` in the button's own slot, and
+  enablement is `IsEnabled` on the one button object — which on this
+  platform really is the same object whether the bar or the overflow is
+  showing it. `refresh_role_enablement` stamps the button as well as the
+  menu row, because a role's enablement moves with no catalog traffic.
+  Five legs on this lane (rust, python, go, csharp, java), the language
+  roster the styling family has.
+- ~~**DEPTH STUB: toolbar on compose**~~ — LANDED 2026-08-17. The read
+  is the composed bar's own subtree: the `TopAppBar` carries a tag, so
+  "in the chrome" is a question about the bar rather than the window;
+  the promoted set is matched IN TREE ORDER against the tagged buttons
+  that composed; the item count is the bar's affordances (the promoted
+  pair plus the ⋮, which is a press target this chrome really holds);
+  and the remainder's home is the ⋮ anchor's own tag, measured, which is
+  why this backend reports `overflow` and not `more`. Per item, off the
+  MERGED semantics node a TalkBack user focuses: the symbol is the
+  content description `KayaSymbolIcon`'s `Icon` put there, and
+  enablement is `SemanticsProperties.Disabled`, which
+  `IconButton(enabled=)` publishes through `Modifier.clickable` — one
+  tree-hop from what a service is told, and not the model field beside
+  it. THE STATED LIMIT: the ADDRESS is resolved through the catalog,
+  because an icon-only bar button on this platform publishes the
+  SYMBOL's name as its accessible name and never the item's label, and
+  adding the label to that description would turn the menus scene's
+  already-green `expect_menu_symbol` on a promoted item red
+  (scratchpad/chrome/toolbar-android.md §6). Three legs on the emulator
+  pool — compose, jvm, go. The depth-stub helper left with it.
 - **The seven other bindings need nothing** — and that is the point of
   the ratified shape: `primary(true)` is a spelling all eight bindings
   have shipped since the menus milestone, so this slice adds no binding

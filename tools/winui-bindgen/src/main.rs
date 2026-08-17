@@ -402,6 +402,41 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.Symbol".to_string(),
         "Microsoft.UI.Xaml.Controls.SymbolIcon".to_string(),
         "Microsoft.UI.Xaml.Controls.FontIcon".to_string(),
+        // THE TOOLBAR (docs/chrome-plan.md C2's WinUI row): the window's
+        // promoted catalog actions as a CommandBar of AppBarButtons in
+        // its own Auto row of the shell Grid. Dynamic overflow, the 48px
+        // transparent bar and the icon rescaling are the platform's
+        // defaults — kaya writes the list and nothing else.
+        //
+        // THE TRANSITIVITY TRAP WEARS ITS USUAL DISGUISE HERE, and the
+        // research measured it from both sides: filtering `CommandBar`
+        // ALONE emits a CommandBar with NO PrimaryCommands and no
+        // SecondaryCommands at all (176 methods, neither present), which
+        // reads as "WinUI's command bar has no command collections".
+        // Both are IObservableVector<ICommandBarElement>, so it is
+        // ICommandBarElement — a type kaya never names in a signature —
+        // that unlocks them.
+        //   CommandBar          — the bar, its two collections and the
+        //     overflow knobs kaya deliberately never sets.
+        //   AppBar              — CommandBar's BASE. Without it the
+        //     hierarchy stops short of ContentControl/FrameworkElement
+        //     and the bar cannot be cast into the shell Grid at all.
+        //   ICommandBarElement  — the collections' element type.
+        //   AppBarButton        — one per promoted action: Label, the
+        //     `Icon` slot that takes the very IconElement symbol_icon
+        //     already builds, Click, and IsEnabled off Control.
+        // NOT filtered, and each absence is a decision: AppBarToggleButton
+        // and AppBarSeparator (only `action` items are promotable, the
+        // uniform rule every backend's promotion shares — and the toggle's
+        // IsChecked is a NULLABLE bool here, a three-state kaya's menu
+        // vocabulary does not have), and the CommandBar*/AppBar* enums
+        // (DefaultLabelPosition, OverflowButtonVisibility,
+        // ClosedDisplayMode), every one of which is a Windows-only
+        // styling knob chrome-plan refuses by name.
+        "Microsoft.UI.Xaml.Controls.CommandBar".to_string(),
+        "Microsoft.UI.Xaml.Controls.AppBar".to_string(),
+        "Microsoft.UI.Xaml.Controls.ICommandBarElement".to_string(),
+        "Microsoft.UI.Xaml.Controls.AppBarButton".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);

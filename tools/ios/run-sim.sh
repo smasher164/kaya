@@ -1329,7 +1329,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar"
     swift_pids=()
     swift_names=()
     for entry in $IOS_SWIFT_SCENES; do
@@ -1445,7 +1445,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # CGO_CFLAGS/CGO_LDFLAGS because cgo uses CC to LINK as well as to
     # compile, and -isysroot has to reach both halves.
     IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
-    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling"
+    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar"
     # ONE CROSS-BUILD FOR THE WHOLE SUITE. guests/go/cmd is the guest
     # tree's only main package: it imports every scene library and picks
     # one from KAYA_SELFTEST, which each leg below already passes as its
@@ -1737,6 +1737,23 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # regular/overflow. Either way this fails loudly.
     queue_pad_leg run_swiftui_on menus-swiftui-pad "$APP" dev.kaya.menusswiftui \
         menus-swiftui-pad menus menus 'expect_menu_presentation "regular/bar"'
+
+    # The toolbar scene (docs/chrome-plan.md C2): the same `primary` bit
+    # the menus legs above promote into the top bar, now ASSERTED there
+    # — the promoted set really among the bar buttons UIKit built, in
+    # catalog preorder, the More menu really beside them, and one
+    # button's glyph and enablement read off the element rather than the
+    # model. Until this leg the iOS half of both verbs was a depth stub.
+    #
+    # PHONE ONLY, and that is the lowering rather than an omission: a
+    # regular-width window promotes nothing at all — the catalog goes to
+    # the system menu bar instead (KayaMenuFormFactorChrome) — so there
+    # is no promoted bar on the iPad for expect_toolbar to read. The
+    # menus pad leg above is what observes that arm.
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example toolbar
+    APP=$(make_bundle toolbarrs-swiftui dev.kaya.toolbarswiftui "$TARGET_DIR/examples/toolbar")
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on toolbar-swiftui "$APP" dev.kaya.toolbarswiftui toolbar-swiftui toolbar toolbar
 
     # The listdetail scene, the DEPTH slice: list-detail's bare
     # invariant, which is the only form of it this host can run — the

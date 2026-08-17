@@ -121,6 +121,7 @@ for arg in "$@"; do
         a11yrows_rust|a11yrows_python|a11yrows_go|a11yrows_csharp|a11yrows_java) SUITE="$arg" ;;
         styling_rust|styling_python|styling_go|styling_csharp|styling_java) SUITE="$arg" ;;
         typeface_rust|typeface_python|typeface_go|typeface_csharp|typeface_java) SUITE="$arg" ;;
+        toolbar_rust|toolbar_python|toolbar_go|toolbar_csharp|toolbar_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
@@ -289,7 +290,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -1697,6 +1698,26 @@ case "$SUITE" in
         run_suite typeface_go
         run_suite typeface_csharp
         run_suite typeface_java
+        # THE TOOLBAR SCENE (docs/chrome-plan.md C2): the window's chrome
+        # carries the app's primary actions. On this backend that is a
+        # CommandBar in the shell Grid's second Auto row — one
+        # AppBarButton per `primary` catalog action, in catalog preorder,
+        # with the Fluent icon the menu row already carries — and the
+        # scene reads the REAL bar: the promoted names it publishes to
+        # UIA, the icon in each button's slot, and IsEnabled on the one
+        # button object. The unpromoted catalog stays in the MenuBar one
+        # row above, which is why nothing fills SecondaryCommands.
+        #
+        # Pooled with the styling/typeface family, and it is the same
+        # three reasons: no typed input (the scene's `click` is
+        # in-process, not an injected keystroke), no window close, and
+        # nothing foreground-sensitive — no chord is pressed, unlike the
+        # menus and commands legs that assert the same catalog.
+        run_suite toolbar_rust
+        run_suite toolbar_python
+        run_suite toolbar_go
+        run_suite toolbar_csharp
+        run_suite toolbar_java
         drain_suites
         # The ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one
         # (docs/ranges-plan.md D1), plus the two rules that make those

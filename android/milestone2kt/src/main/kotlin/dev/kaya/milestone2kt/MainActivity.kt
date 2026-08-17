@@ -101,6 +101,15 @@ class MainActivity : ComponentActivity() {
             // which arrives as an extra and reaches the guest through
             // the Os.setenv loop above.
             "typeface" -> Typeface::app
+            // The toolbar scene (docs/chrome-plan.md C2): the `primary`
+            // bit as real window chrome. Nothing new is spelled here —
+            // the guest is the menus guest with a promotion bit — and
+            // this host's chrome is the one the phones already had, the
+            // TopAppBar's actions slot plus the ⋮. What landed
+            // 2026-08-17 is the READ off that composed bar, which is
+            // what took the compose depth stub away and let
+            // tools/android/run-emulator.sh wire the legs.
+            "toolbar" -> Toolbar::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

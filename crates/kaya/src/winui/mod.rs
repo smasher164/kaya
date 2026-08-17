@@ -32,9 +32,10 @@ use windows_core::{HSTRING, Interface as _};
 
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
 use bindings::Microsoft::UI::Xaml::Controls::{
-    Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, ContentDialog,
+    AppBarButton, Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, CommandBar,
+    ContentDialog,
     ContentDialogButton, ContentDialogResult, DisabledFormattingAccelerators, FontIcon, Grid,
-    IconElement, Image, MenuBar,
+    ICommandBarElement, IconElement, Image, MenuBar,
     MenuBarItem, MenuFlyout,
     MenuFlyoutItem, MenuFlyoutItemBase, MenuFlyoutSeparator, MenuFlyoutSubItem, NavigationView,
     NavigationViewItem, NavigationViewPaneDisplayMode, ProgressBar, RadioMenuFlyoutItem,
@@ -546,11 +547,32 @@ struct CoreState {
     /// the checkmark idiom).
     menu_natives: HashMap<(MenuAttachment, u64), MenuNative>,
     /// The window shell (the ratified lowering): MenuBar in its own
-    /// Auto row of a shell Grid, the window's real content in the
-    /// Star-row slot beneath it. Built once per window at the first
-    /// menubar_append; every content swap goes through the slot.
+    /// Auto row of a shell Grid, the TOOLBAR in the Auto row under it,
+    /// the window's real content in the Star-row slot beneath both.
+    /// Built once per window at the first menubar_append; every content
+    /// swap goes through the slot.
     menubars: HashMap<u64, MenuBar>,
     menu_slots: HashMap<u64, Grid>,
+    /// The shell Grid itself, kept so the toolbar row can be filled
+    /// LATER than the shell is built — a window earns its CommandBar
+    /// only when its catalog promotes something (docs/chrome-plan.md
+    /// C2), and a window with no primaries must keep exactly the tree
+    /// it had before this slice.
+    menu_shells: HashMap<u64, Grid>,
+    /// The window's REAL toolbar, minted on the first promotion by
+    /// `refresh_toolbar`. Absent = this window has no toolbar, which is
+    /// a state the harness read reports rather than papers over.
+    toolbars: HashMap<u64, CommandBar>,
+    /// (window, item id) -> the promoted action's `AppBarButton`.
+    ///
+    /// THE WRITE SIDE ONLY, and that is the whole discipline of this
+    /// slice: enablement is stamped through this map (here and in
+    /// `refresh_role_enablement`, which must reach the button as well as
+    /// the menu row — one item, two chrome views), while every harness
+    /// READ walks the bar's own `PrimaryCommands`/`SecondaryCommands`
+    /// instead. A read through this map would agree with kaya's model no
+    /// matter what the window really holds.
+    toolbar_buttons: HashMap<(u64, u64), AppBarButton>,
     /// Canonical shortcut spelling -> action item id for the PRIMARY
     /// window's catalog (the harness's target, the sections-precedent
     /// scoping). Gates the shortcut verb: a chord no catalog action
@@ -710,10 +732,10 @@ struct WinLiveAlert {
 
 /// One menu item's retained state (the post-user mirror; see
 /// CoreState::menu_models). `primary` is the CHROME-promotion hint
-/// (DESIGN.md, "Chrome promotion and `primary`") and is stored but not
-/// yet read here: the WinUI arm is the CommandBar, and this backend
-/// still answers the toolbar verbs with `depth_stub("toolbar")`
-/// (docs/chrome-plan.md C2, ledgered in docs/deferred.md).
+/// (DESIGN.md, "Chrome promotion and `primary`") and IS read here now:
+/// `promoted_items` filters this catalog by it and `refresh_toolbar`
+/// makes each one an `AppBarButton` in the window's `CommandBar`
+/// (docs/chrome-plan.md C2).
 struct MenuModel {
     kind: MenuItemKind,
     label: String,
@@ -1075,12 +1097,18 @@ macro_rules! icon_slot {
 // metadata it derives from `MenuFlyoutItem`, so the checkable kind and
 // the radio option inherit the slot. Read from the metadata, not from
 // the UWP documentation a search finds first.
+// AppBarButton joins the list for the toolbar (docs/chrome-plan.md C2):
+// a promoted action's button takes the SAME IconElement the item's menu
+// row takes, from the same `symbol_icon`, which is why the toolbar
+// needed no icon code of its own and why its symbol read is the menu's
+// read one control over.
 icon_slot!(
     MenuFlyoutItem,
     ToggleMenuFlyoutItem,
     RadioMenuFlyoutItem,
     MenuFlyoutSubItem,
     NavigationViewItem,
+    AppBarButton,
 );
 
 /// Stamp a concept onto a control's icon slot. One place, so every kind
@@ -1116,18 +1144,37 @@ enum MenuIcon {
 /// peer with an empty name, and a name — because they fail for
 /// different reasons and the reader chases the sentence.
 fn icon_uia_name(icon: &IconElement) -> String {
-    use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
     let Ok(fe) = icon.cast::<bindings::Microsoft::UI::Xaml::FrameworkElement>() else {
         return "the icon element is not a FrameworkElement".to_owned();
     };
+    uia_name(&fe, "the icon")
+}
+
+/// The name any live element publishes to UIA — what an assistive client
+/// hears — or a short description of which of the three ways the read
+/// failed. `what` names the thing being read so the sentence says what
+/// it measured ("the icon", "the toolbar button Save").
+///
+/// EXTRACTED FROM [`icon_uia_name`] BY THE TOOLBAR ARM, which asks the
+/// same question of an `AppBarButton` that the menu symbol read asks of
+/// an `IconElement`; the icon's three sentences are unchanged
+/// word-for-word.
+///
+/// TOTAL: every failure is a short description of WHAT WAS MEASURED,
+/// never a panic and never a guess (CLAUDE.md invariant 3). The three
+/// answers are distinguishable on purpose — an element with no peer, a
+/// peer with an empty name, and a name — because they fail for
+/// different reasons and the reader chases the sentence.
+fn uia_name(fe: &FrameworkElement, what: &str) -> String {
+    use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
     // CreatePeerForElement first, FromElement second — the `ax` read's
     // ladder, and for its measured reason: an element with no peer
     // class of its own (a Grid there, an icon here) has no peer until
     // one is made, and FromElement alone reported such elements absent
     // from a tree UIA is perfectly willing to describe.
-    let peer = match FrameworkElementAutomationPeer::CreatePeerForElement(&fe) {
+    let peer = match FrameworkElementAutomationPeer::CreatePeerForElement(fe) {
         Ok(p) => p,
-        Err(_) => match FrameworkElementAutomationPeer::FromElement(&fe) {
+        Err(_) => match FrameworkElementAutomationPeer::FromElement(fe) {
             Ok(p) => p,
             // Same success-coded-error rule as MenuIcon::Empty: a NULL
             // peer means the element genuinely has none, while a
@@ -1135,9 +1182,9 @@ fn icon_uia_name(icon: &IconElement) -> String {
             // read collapses both into one sentence; they are different
             // states and this one keeps them apart.
             Err(e) if e.code().is_ok() => {
-                return "the icon has no automation peer".to_owned()
+                return format!("{what} has no automation peer")
             }
-            Err(e) => return format!("the icon's automation peer could not be made: {e}"),
+            Err(e) => return format!("{what}'s automation peer could not be made: {e}"),
         },
     };
     // An element with no name publishes the EMPTY string, not an error:
@@ -1150,10 +1197,10 @@ fn icon_uia_name(icon: &IconElement) -> String {
             // A real defect this read can see: kaya's lowering always
             // sets the name, so an icon without one was built somewhere
             // else or by a path that dropped it.
-            "the icon publishes no accessibility name".to_owned()
+            format!("{what} publishes no accessibility name")
         }
         Ok(name) => name.to_string(),
-        Err(e) => format!("the icon's accessibility name could not be read: {e}"),
+        Err(e) => format!("{what}'s accessibility name could not be read: {e}"),
     }
 }
 
@@ -1515,11 +1562,14 @@ static CONTROL_RESOURCES: OnceLock<Result<(), String>> = OnceLock::new();
 /// already knew.
 ///
 /// The menu surface is where the wall goes because it is where the
-/// dependency enters: a window MenuBar (ensure_menu_shell) and a
-/// context MenuFlyout (ensure_context_flyout) are the only two places
-/// kaya mints chrome from this dictionary, and both are reached the
-/// first time an app declares a menu — the most basic thing an app can
-/// do that provokes the failure.
+/// dependency enters: a window MenuBar (ensure_menu_shell), a context
+/// MenuFlyout (ensure_context_flyout) and the toolbar's CommandBar
+/// (refresh_toolbar) are the three places kaya mints chrome from this
+/// dictionary, and each is reached the first time an app declares the
+/// thing — the most basic thing an app can do that provokes the
+/// failure. The toolbar joined the list with C2 (docs/chrome-plan.md):
+/// CommandBar and AppBarButton are MUX types whose default styles live
+/// in the same framework dictionary as the menu's.
 fn require_control_resources(surface: &str) {
     let Some(Err(why)) = CONTROL_RESOURCES.get() else {
         return;
@@ -2583,11 +2633,20 @@ fn resolve_menu_path(core: &CoreState, path: &str, roots: &[u64]) -> Option<u64>
 }
 
 /// Build the window shell at the first menubar_append (the ratified
-/// lowering): a Grid whose Auto row holds the MenuBar and whose Star
-/// row is the content slot every later mount/nav/sections swap fills.
-/// Built ONCE and grown through rebuilds; any content the window
-/// already presents moves into the slot (detached by the SetContent
-/// swap first — XAML refuses re-parenting; docs/traps.md).
+/// lowering): a Grid whose Auto row holds the MenuBar, whose second Auto
+/// row is the TOOLBAR's, and whose Star row is the content slot every
+/// later mount/nav/sections swap fills. Built ONCE and grown through
+/// rebuilds; any content the window already presents moves into the slot
+/// (detached by the SetContent swap first — XAML refuses re-parenting;
+/// docs/traps.md).
+///
+/// THE TOOLBAR ROW IS DECLARED HERE AND FILLED ELSEWHERE, deliberately.
+/// An Auto row with no child measures zero, so every window whose
+/// catalog promotes nothing keeps precisely the geometry it had before
+/// the toolbar slice — which is the property that lets this row exist in
+/// EVERY windowed scene's shell without moving a single other leg's
+/// measurements. `refresh_toolbar` mints the CommandBar into it on the
+/// first promotion.
 fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     use windows_core::Interface as _;
     if core.menubars.contains_key(&window) {
@@ -2607,6 +2666,12 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
         GridUnitType: GridUnitType::Auto,
     })?;
     defs.Append(&bar_row)?;
+    let toolbar_row = RowDefinition::new()?;
+    toolbar_row.SetHeight(GridLength {
+        Value: 1.0,
+        GridUnitType: GridUnitType::Auto,
+    })?;
+    defs.Append(&toolbar_row)?;
     let fill = RowDefinition::new()?;
     fill.SetHeight(GridLength {
         Value: 1.0,
@@ -2619,7 +2684,7 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     shell.Children()?.Append(&bar_el)?;
     let slot = Grid::new()?;
     let slot_el: FrameworkElement = slot.cast()?;
-    Grid::SetRow(&slot_el, 1)?;
+    Grid::SetRow(&slot_el, TOOLBAR_CONTENT_ROW)?;
     shell.Children()?.Append(&slot_el)?;
     let old = target.Content().ok();
     target.SetContent(&shell.cast::<UIElement>()?)?;
@@ -2628,7 +2693,260 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     }
     core.menubars.insert(window, bar);
     core.menu_slots.insert(window, slot);
+    core.menu_shells.insert(window, shell);
     Ok(())
+}
+
+/// The shell Grid's rows, named because two functions have to agree
+/// about them and a bare `1` in each is how they stop agreeing.
+const TOOLBAR_ROW: i32 = 1;
+const TOOLBAR_CONTENT_ROW: i32 = 2;
+
+/// The window's PROMOTED actions, in catalog preorder — the promotion
+/// list, computed from the model.
+///
+/// `action` items only, and `primary` is the whole rule: this is the
+/// same filter every other backend's promotion applies (the mac arm's
+/// `kayaPromotedActions`, the GTK arm's `promoted_items`), because
+/// uniform binding semantics is a statement about what an app declares,
+/// not about what each host's chrome happens to be able to draw.
+///
+/// NO CAPACITY *k* IS APPLIED HERE, and that is measured rather than
+/// chosen: a WinUI `CommandBar` has DYNAMIC OVERFLOW ON BY DEFAULT — it
+/// moves primary commands into its own "…" menu at width breakpoints
+/// (docs/chrome-plan.md C2's WinUI row) — so the number of buttons this
+/// window can show is a question the platform answers per resize.
+/// Trimming the list here would be kaya answering it once, wrongly,
+/// with a constant. The phones apply a k because their bars have none.
+fn promoted_items(core: &CoreState, window: u64) -> Vec<u64> {
+    let roots = core.menu_windows.get(&window).cloned().unwrap_or_default();
+    let mut order = Vec::new();
+    menu_preorder(core, &roots, &mut order);
+    order
+        .into_iter()
+        .filter(|id| {
+            core.menu_models
+                .get(id)
+                .is_some_and(|m| m.kind == MenuItemKind::Action && m.primary)
+        })
+        .collect()
+}
+
+/// THE PROMOTION (docs/chrome-plan.md C2's WinUI row): the window's
+/// primary catalog actions as real `AppBarButton`s in its `CommandBar`,
+/// appended to `PrimaryCommands` in catalog preorder.
+///
+/// WHAT KAYA WRITES IS THE LIST AND NOTHING ELSE. The 48px transparent
+/// bar that takes the window's own surface, the 20px→16px icon
+/// rescaling, the "…" affordance, the dynamic overflow at width
+/// breakpoints, the label hidden while the bar is closed and re-laid
+/// beside the icon in the overflow — every one of those is the default
+/// of having the control (measured against the pinned WinUI 2.2.1
+/// metadata and the 2.2.0 theme resources, scratchpad/chrome/
+/// toolbar-winui.md §3). Not one styling knob is set here, which is the
+/// slice's whole claim on this platform.
+///
+/// SECONDARY COMMANDS STAY EMPTY, and that is this backend's one
+/// deviation from the research's shape — the same deviation, for the
+/// same reason, that the GTK arm records. `SecondaryCommands` was to be
+/// the catalog remainder's home; this window already has exactly one,
+/// because `rebuild_menus` renders THE WHOLE CATALOG into a real
+/// `MenuBar` one row above (`ensure_menu_shell`). Filling the overflow
+/// with those same rows would be a second copy of them, 48px below
+/// their own menu bar. So the remainder's home is `menubar`, read from
+/// the real bar by `toolbar_remainder_home` rather than asserted.
+///
+/// NO SECOND KEYBOARD ACCELERATOR, and this is the one hazard the
+/// research named that a lowering can walk into by being thorough:
+/// `attach_accelerator` already installs the chord on the item's
+/// `MenuFlyoutItem`, and a second `KeyboardAccelerator` on a second
+/// element is a SECOND HANDLER for one key. The button therefore takes
+/// no accelerator at all. (WinUI's dress-only property for drawing the
+/// chord text on a command is `KeyboardAcceleratorTextOverride`, which
+/// takes a rendered string like "Ctrl+S"; kaya has no such renderer —
+/// `accelerator_chord` maps the canonical spelling to enums — so
+/// nothing is written there rather than a guess being formatted.)
+fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    let promoted = promoted_items(core, window);
+    if promoted.is_empty() && !core.toolbars.contains_key(&window) {
+        // A window that never promotes anything never mints a bar, so
+        // its tree is exactly what it was before this slice.
+        return Ok(());
+    }
+    let bar = match core.toolbars.get(&window) {
+        Some(bar) => bar.clone(),
+        None => {
+            // AT MINT, NOT AT FIRST LAYOUT: a CommandBar whose template
+            // cannot resolve its theme keys fail-fasts the process on a
+            // dispatcher tick, milliseconds after the step that caused
+            // it (docs/traps.md; the wall's own docstring records the
+            // dump this cost when MenuBarItem did it). CommandBar and
+            // AppBarButton are the same shape of control as the ones
+            // already on that list — MUX types whose default styles live
+            // in the framework dictionary the merge brings in.
+            require_control_resources("this window promotes an action into its toolbar");
+            let bar = CommandBar::new()?;
+            let bar_el: FrameworkElement = bar.cast()?;
+            Grid::SetRow(&bar_el, TOOLBAR_ROW)?;
+            let Some(shell) = core.menu_shells.get(&window) else {
+                // No shell means no menubar_append has run, and the
+                // promotion bit only ever reaches items that are in a
+                // window's catalog — so there is nothing to promote and
+                // nowhere to put it.
+                return Ok(());
+            };
+            shell.Children()?.Append(&bar.cast::<UIElement>()?)?;
+            core.toolbars.insert(window, bar.clone());
+            bar
+        }
+    };
+    let primary = bar.PrimaryCommands()?;
+    primary.Clear()?;
+    core.toolbar_buttons.retain(|(w, _), _| *w != window);
+    for id in promoted {
+        let (label, symbol) = {
+            let m = &core.menu_models[&id];
+            (m.label.clone(), m.symbol)
+        };
+        let enabled = menu_effective_enabled(core, id);
+        let button = AppBarButton::new()?;
+        // THE LABEL IS THE BUTTON'S NAME, not decoration: a closed
+        // CommandBar draws icons only (it overwrites each button's
+        // IsCompact as it opens and closes), so `Label` is what the
+        // overflow row shows and what the button publishes to UIA — the
+        // sentence a Narrator user hears, and the address
+        // `expect_toolbar_item "Save"` resolves through.
+        button.SetLabel(&HSTRING::from(&*label))?;
+        apply_symbol(&button, symbol)?;
+        button.SetIsEnabled(enabled)?;
+        let attachment = MenuAttachment::Window(window);
+        let handler = RoutedEventHandler::new(move |_, _| {
+            // ONE DISPATCH PATH (the module's echo doctrine): a toolbar
+            // click is the same activation a menu click is, so it lands
+            // in the same function and emits the same occurrence.
+            menu_user_activate(id, attachment);
+            Ok(())
+        });
+        button.Click(&handler)?;
+        primary.Append(&button.cast::<ICommandBarElement>()?)?;
+        core.toolbar_buttons.insert((window, id), button);
+    }
+    // An emptied promotion list leaves the bar in the tree with nothing
+    // in it; a CommandBar with no commands still measures 48px, so it
+    // is collapsed instead — the row goes back to zero and the window
+    // looks like one that never promoted anything.
+    let holds = primary.Size()? + bar.SecondaryCommands()?.Size()?;
+    bar.SetVisibility(if holds == 0 {
+        Visibility::Collapsed
+    } else {
+        Visibility::Visible
+    })?;
+    Ok(())
+}
+
+/// What the window's REAL toolbar holds: how many items are in it, and
+/// the addressable buttons among them with the name each one publishes
+/// to UIA.
+///
+/// WALKED FROM THE BAR'S OWN COLLECTIONS, never from `toolbar_buttons`:
+/// the question every toolbar verb asks is whether the promotion reached
+/// the chrome, and kaya's own map answers "yes" whether or not it did.
+/// BOTH collections are walked because the button object is the same
+/// object wherever it sits (the measured freebie in C2's WinUI row) — so
+/// a reading that looked only at `PrimaryCommands` would go blind the
+/// day this backend fills the overflow.
+///
+/// NOTE WHAT THIS CANNOT SEE, and it is the honest limit of a CommandBar
+/// read: dynamic overflow moves a primary command into the "…" menu at a
+/// width breakpoint WITHOUT moving it between collections (it flips the
+/// button's `IsInOverflow`), so "in the chrome" here means in the bar's
+/// command list — which is what `expect_toolbar`'s invariant is about —
+/// and never "wide enough to be showing right now", which is the
+/// platform's business and changes with the user's window size.
+#[cfg(feature = "harness")]
+fn toolbar_read(
+    core: &CoreState,
+    window: u64,
+) -> windows_core::Result<(usize, Vec<(String, AppBarButton)>)> {
+    let Some(bar) = core.toolbars.get(&window) else {
+        return Ok((0, Vec::new()));
+    };
+    let mut held = 0;
+    let mut buttons = Vec::new();
+    for commands in [bar.PrimaryCommands()?, bar.SecondaryCommands()?] {
+        for index in 0..commands.Size()? {
+            held += 1;
+            let element = commands.GetAt(index)?;
+            let Ok(button) = element.cast::<AppBarButton>() else {
+                // An item that is not a button — a separator, say — is
+                // an item the chrome holds and not one this read can
+                // address. Counted, not named.
+                continue;
+            };
+            let Ok(fe) = button.cast::<FrameworkElement>() else {
+                continue;
+            };
+            let name = uia_name(&fe, "the toolbar button");
+            buttons.push((name, button));
+        }
+    }
+    Ok((held, buttons))
+}
+
+/// Where this window's unpromoted catalog lives, from the closed set the
+/// harness contract names — READ, not asserted: the window's real
+/// `MenuBar` with real items in it (`rebuild_menus` puts the WHOLE
+/// catalog there). `none` the moment that stops being true, which is the
+/// answer that would fail the step rather than quietly claiming a home
+/// the window does not have.
+#[cfg(feature = "harness")]
+fn toolbar_remainder_home(core: &CoreState, window: u64) -> windows_core::Result<&'static str> {
+    let Some(bar) = core.menubars.get(&window) else {
+        return Ok("none");
+    };
+    Ok(if bar.Items()?.Size()? > 0 {
+        "menubar"
+    } else {
+        "none"
+    })
+}
+
+/// KAYA_WINUI_TOOLBAR_TRACE=1: dump every candidate surface of the real
+/// bar at every toolbar step. The mac arm's probe, one platform over —
+/// it is how the two questions this arm could not answer by reading the
+/// framework's closed sources were settled (what an `AppBarButton`
+/// publishes as its UIA name with `Label` set and `Content` null, and
+/// which enablement surface a disable actually moves). Kept, because the
+/// next reader will have the same two questions.
+#[cfg(feature = "harness")]
+fn toolbar_trace(core: &CoreState, window: u64) {
+    if std::env::var_os("KAYA_WINUI_TOOLBAR_TRACE").is_none() {
+        return;
+    }
+    let promoted: Vec<String> = promoted_items(core, window)
+        .iter()
+        .filter_map(|id| core.menu_models.get(id).map(|m| m.label.clone()))
+        .collect();
+    eprintln!("kaya-toolbar-trace: promoted={promoted:?} bar={}", core.toolbars.contains_key(&window));
+    let Ok((held, buttons)) = toolbar_read(core, window) else {
+        eprintln!("kaya-toolbar-trace: the bar could not be walked");
+        return;
+    };
+    eprintln!("kaya-toolbar-trace: held={held}");
+    for (name, button) in buttons {
+        let label = button.Label().map(|l| l.to_string());
+        let enabled = button.IsEnabled();
+        let overflow = button.IsInOverflow();
+        let icon = match button.Icon() {
+            Ok(icon) => icon_uia_name(&icon),
+            Err(e) if e.code().is_ok() => "<no icon>".to_owned(),
+            Err(e) => format!("<unreadable: {e}>"),
+        };
+        eprintln!(
+            "kaya-toolbar-trace:   uia={name:?} label={label:?} enabled={enabled:?} \
+             overflow={overflow:?} icon={icon:?}"
+        );
+    }
 }
 
 /// Every content swap for a window goes through here: into the menu
@@ -3983,6 +4301,16 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
         if !m.shortcut.is_empty() && m.kind.takes_shortcut() {
             core.menu_shortcuts.insert(m.shortcut.clone(), id);
         }
+    }
+    // THE TOOLBAR REBUILDS WITH THE CATALOG, from the same mirror and in
+    // the same pass: `primary`, `label`, `symbol` and `enabled` all
+    // arrive as prop writes that set `menus_touched`, and every
+    // structural mutation lands here too, so this is the one place that
+    // sees them all (docs/chrome-plan.md C2: the promotion is recomputed
+    // on every catalog mutation).
+    let shells: Vec<u64> = core.menu_shells.keys().copied().collect();
+    for window in shells {
+        refresh_toolbar(core, window)?;
     }
     // The rebuild stamped STRUCTURAL enablement alone onto the fresh
     // natives, which would un-gray a role item whose clipboard half
@@ -5851,6 +6179,18 @@ fn refresh_role_enablement(core: &CoreState) {
         for ((_, native_id), native) in &core.menu_natives {
             if *native_id == id {
                 let _ = native.set_enabled(on);
+            }
+        }
+        // ONE ITEM, TWO CHROME VIEWS: a promoted role item has a toolbar
+        // button as well as a menu row, and the role factor moves with no
+        // catalog traffic at all (a clipboard offer changes, Undo's route
+        // changes), so a button left out of this loop would keep the
+        // enablement the last REBUILD stamped on it — the exact "the
+        // chrome kept its own copy" defect the scene's round trip exists
+        // to catch, arriving only for role items.
+        for ((_, button_id), button) in &core.toolbar_buttons {
+            if *button_id == id {
+                let _ = button.SetIsEnabled(on);
             }
         }
     }
@@ -7908,6 +8248,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.menu_windows.remove(&window.0);
             core.menubars.remove(&window.0);
             core.menu_slots.remove(&window.0);
+            core.menu_shells.remove(&window.0);
+            core.toolbars.remove(&window.0);
+            core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
         ApplyOp::PushEntry { window, entry } => {
             // Materializes covered/incoming: on the stack now, the
@@ -9738,6 +10081,9 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             menu_natives: HashMap::new(),
             menubars: HashMap::new(),
             menu_slots: HashMap::new(),
+            menu_shells: HashMap::new(),
+            toolbars: HashMap::new(),
+            toolbar_buttons: HashMap::new(),
             menu_shortcuts: HashMap::new(),
             open_context: None,
             menus_touched: false,
@@ -10733,19 +11079,124 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    // THE TOOLBAR IS A DEPTH SLICE, mac first (docs/chrome-plan.md C2).
-    // This backend's arm is the CommandBar the plan measured — primaries
-    // from the promotion bit, the remainder into SecondaryCommands,
-    // dynamic overflow and IsEnabled for free off the one button object.
-    // Until it is written the refusal goes through the helper both gates
-    // read, which holds every windows toolbar leg off deploy-win.sh and
-    // cannot pass vacuously because it cannot pass at all.
+    /// THE expect_toolbar READ ON WINUI, from three different sides so no
+    /// single mistake can make all of it agree: the CATALOG says how many
+    /// actions this window promotes, the REAL CommandBar says how many
+    /// items it holds and which of them publish the promoted names, and
+    /// the REAL MenuBar says whether the remainder has a home.
+    ///
+    /// ADDRESSED BY WHAT UIA PUBLISHES, which is this backend's existing
+    /// discipline (`menu_symbol` reads the icon's automation name rather
+    /// than the symbol prop beside it). An `AppBarButton`'s published
+    /// name comes from its `Label` — MEASURED on the VM 2026-08-17 with
+    /// `KAYA_WINUI_TOOLBAR_TRACE`, because `AppBarButton` lives in the
+    /// closed dxaml half of the framework and the answer cannot be read
+    /// out of the public sources. So a lowering that promoted the right
+    /// items and never labelled them fails here, with the sentence naming
+    /// what the bar really carries.
+    ///
+    /// THE REMAINDER'S HOME IS THE MENU BAR, and that is a repo fact
+    /// rather than a preference: `rebuild_menus` renders the WHOLE
+    /// catalog into a real `MenuBar` one row above this bar, so every
+    /// unpromoted action is already reachable and one home is all there
+    /// is. The research's shape put the remainder in `SecondaryCommands`;
+    /// filling it would be a second copy of those rows 48px under their
+    /// own menu bar. (The GTK arm deviates identically, for the identical
+    /// reason, and the macOS arm answers `menubar` because its catalog is
+    /// in NSApp's main menu. If this backend's menu lowering ever stops
+    /// being a bar, the read says `none` until the overflow is filled.)
     fn toolbar_chrome(&self) -> String {
-        crate::depth_stub("toolbar")
+        Self::on_ui_read(|core| {
+            toolbar_trace(core, 0);
+            let promoted: Vec<String> = promoted_items(core, 0)
+                .iter()
+                .filter_map(|id| core.menu_models.get(id).map(|m| m.label.clone()))
+                .collect();
+            let (held, buttons) = toolbar_read(core, 0)?;
+            let home = toolbar_remainder_home(core, 0)?;
+            // IN CATALOG PREORDER, matched greedily against the bar's own
+            // order: `found` counts how far the promotion list can be
+            // walked through the names the chrome really publishes.
+            let mut found = 0;
+            for (name, _) in &buttons {
+                if found < promoted.len() && name.as_bytes() == promoted[found].as_bytes() {
+                    found += 1;
+                }
+            }
+            Ok(format!("{found}/{}/{held}/{home}", promoted.len()))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    fn toolbar_item(&self, _label: &str, _aspect: &str) -> String {
-        crate::depth_stub("toolbar")
+    /// THE expect_toolbar_item READ: one aspect of the real
+    /// `AppBarButton`, addressed by the name it publishes to UIA.
+    ///
+    /// ENABLEMENT IS `IsEnabled` ON THE BUTTON, and this platform is the
+    /// easy one: it is an ordinary `Control` property, it is what the
+    /// promotion writes, and the SAME object carries it whether the bar
+    /// is showing the command or the "…" menu is (measured freebie,
+    /// docs/chrome-plan.md C2's WinUI row) — unlike macOS, where
+    /// `NSToolbarItem.isEnabled` does not move at all and the arm has to
+    /// go to the accessibility tree. The scene's round trip is what
+    /// proves it is not the menu read in disguise: two trees, one item.
+    ///
+    /// THE SYMBOL IS THE ICON THE BUTTON REALLY CARRIES — the automation
+    /// name of the `IconElement` in its `Icon` slot, which is `menu_symbol`'s
+    /// read one control over, and never `MenuModel::symbol` beside it. A
+    /// promotion that drew no icon reads as exactly that.
+    ///
+    /// TOTAL, like `menu_state`: every miss is a short sentence naming
+    /// what was measured and a retryable non-match, never a panic.
+    fn toolbar_item(&self, label: &str, aspect: &str) -> String {
+        let label = label.to_owned();
+        let aspect = aspect.to_owned();
+        Self::on_ui_read(move |core| {
+            toolbar_trace(core, 0);
+            let (held, buttons) = toolbar_read(core, 0)?;
+            let matches: Vec<usize> = buttons
+                .iter()
+                .enumerate()
+                .filter(|(_, (name, _))| name.as_bytes() == label.as_bytes())
+                .map(|(index, _)| index)
+                .collect();
+            let index = match matches[..] {
+                [index] => index,
+                [] => {
+                    let shown: Vec<&str> = buttons.iter().map(|(n, _)| n.as_str()).collect();
+                    return Ok(format!(
+                        "no toolbar item labelled {label} (the bar holds {held} items; \
+                         they publish: {shown:?})"
+                    ));
+                }
+                _ => {
+                    return Ok(format!(
+                        "{} toolbar buttons publish the name {label}, so which one this \
+                         step means is ambiguous",
+                        matches.len()
+                    ));
+                }
+            };
+            let button = &buttons[index].1;
+            if aspect == "enabled" || aspect == "disabled" {
+                return Ok(if button.IsEnabled()? { "enabled" } else { "disabled" }.to_owned());
+            }
+            Ok(match button.Icon() {
+                Ok(icon) => icon_uia_name(&icon),
+                // The empty slot arrives as a success-coded error, the
+                // same rule `MenuIcon::Empty` records: the property
+                // returns a null pointer and windows-core turns that
+                // into E_POINTER. What this measured is that the button
+                // is in the bar and carries no icon at all — it says
+                // nothing about whether the app declared a symbol,
+                // because this reader cannot tell that from a symbol
+                // that was never lowered (CLAUDE.md invariant 3).
+                Err(e) if e.code().is_ok() => {
+                    format!("the toolbar button {label} carries no icon")
+                }
+                Err(e) => format!("the toolbar button {label}'s icon slot could not be read: {e}"),
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn shortcut(&self, spelling: &str) {

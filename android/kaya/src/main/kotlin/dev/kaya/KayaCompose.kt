@@ -503,16 +503,16 @@ var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
  * harness asserts (docs/styling-plan.md D3). */
 var kayaOuterSize = androidx.compose.ui.unit.IntSize.Zero
 
-// THE DEPTH-STUB HELPER IS BACK, the eighth time it has come and gone —
-// for the toolbar slice (docs/chrome-plan.md C2), which lands mac first
-// and reaches this backend in its own slice. A CALL and not a sentence:
-// tools/check-stubs.sh and tools/check-steps.sh both read the call, and
-// neither can see a backend that refuses in its own words. It leaves
-// again with the last stub that uses it — dead code kept "for later" is
-// what a reader has to reason about for nothing.
-internal fun depthStub(scene: String): Nothing =
-    error("kaya: the $scene scene is not yet materialized on this " +
-          "backend — it is a depth slice; see CLAUDE.md's sequencing")
+// THE DEPTH-STUB HELPER IS GONE AGAIN, the eighth round trip: the
+// toolbar slice (docs/chrome-plan.md C2) was its last caller and the
+// toolbar reads landed on this backend 2026-08-17, so it leaves with the
+// stub that brought it back. That is its own rule — dead code kept "for
+// later" is what a reader has to reason about for nothing — and it is
+// also what tools/check-detekt.sh would say about an unused internal
+// function. It comes back as a CALL, never a sentence, the next time a
+// scene lands mac-first: tools/check-stubs.sh and tools/check-steps.sh
+// both read the call, and neither can see a backend that refuses in its
+// own words.
 
 /**
  * TEXT RANGES, in the unit this backend counts.
@@ -1019,6 +1019,27 @@ object KayaCompose {
      * of the catalog is always reachable through overflow.
      */
     const val MENU_PROMOTED_CAPACITY = 2
+
+    /**
+     * THE CHROME'S OWN TAGS — what makes `expect_toolbar` a read of the
+     * real bar rather than of the window. Without them the toolbar
+     * reads would search the whole activity tree, and a promoted button
+     * that had fallen out of the bar into the page below would still be
+     * "found": the tag scopes the search to the composed `TopAppBar`,
+     * so being IN THE CHROME is the thing measured.
+     *
+     * [TOOLBAR_MORE_TAG] is the ⋮ anchor, and it is how the remainder's
+     * home is measured instead of asserted. material3 1.3.1 has no
+     * overflow of its own — `AppBarRow`/`AppBarOverflowIndicator`
+     * arrived in the 1.4.0-alpha series and are absent from the pinned
+     * aar — so this interpreter synthesizes the anchor and the menu
+     * under it ([KayaOverflowMenu]). It is anchored IN the bar, which is
+     * why the home this backend reports is `overflow` (harness.rs's "a
+     * bar that overflows in place") and not `more` (a separate
+     * synthesized More menu, which is the iOS shape).
+     */
+    const val TOOLBAR_TAG = "kaya:toolbar"
+    const val TOOLBAR_MORE_TAG = "kaya:toolbar-more"
     const val KIND_COLUMN = 1
     const val KIND_BUTTON = 2
     const val KIND_LABEL = 3
@@ -4522,6 +4543,240 @@ object KayaCompose {
             "while its menu is presented"
 
     /**
+     * The invariant the BARE expect_toolbar step asserts, over this
+     * backend's `<promoted found in the real chrome>/<promoted in the
+     * catalog>/<items the chrome holds>/<remainder's home>` reading.
+     * Mirrored from harness.rs's `toolbar_chrome_fits` SENTENCE FOR
+     * SENTENCE — this interpreter is string-matched rather than
+     * compile-checked, so the rule is written once per implementation
+     * and the words are kept identical on purpose. null means it fits;
+     * the failure NAMES THE MEASURED NUMBERS, because the pass
+     * observation cannot (k is the platform's own, and the scene is
+     * compared byte-for-byte on every lane).
+     */
+    private fun kayaToolbarChromeFits(spelling: String): String? {
+        val homes = listOf("menubar", "more", "overflow", "none")
+        val parts = spelling.split("/")
+        val found = parts.getOrNull(0)?.toIntOrNull()
+        val promoted = parts.getOrNull(1)?.toIntOrNull()
+        val items = parts.getOrNull(2)?.toIntOrNull()
+        if (parts.size != 4 || found == null || promoted == null || items == null ||
+            !homes.contains(parts[3])
+        ) {
+            return "chrome reads \"$spelling\", which is not " +
+                "<promoted found>/<promoted>/<items>/<remainder's home>"
+        }
+        if (found != promoted) {
+            return "the window's chrome holds $items items, and $found of the " +
+                "$promoted promoted actions are among them in catalog preorder"
+        }
+        if (parts[3] == "none") {
+            return "the chrome holds the $found promoted actions and the remainder " +
+                "of the catalog has no home in this window"
+        }
+        return null
+    }
+
+    /**
+     * The composed `TopAppBar` — THE CHROME, and only it.
+     *
+     * MAIN THREAD ONLY (callers go through [onUi]).
+     *
+     * Deliberately NOT [kayaMenuRowNode]'s search: that one also walks
+     * every open menu popup, which is right for a menu row and wrong
+     * here. A promoted button that had stopped being a bar action and
+     * had reappeared in the overflow would be "found" by the wider
+     * walk, and the whole question this read answers is WHERE the
+     * button is. The bar is in the activity's own window; a
+     * `DropdownMenu` is a separate one.
+     */
+    private fun kayaToolbarNode(activity: ComponentActivity): SemanticsNode? {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return null
+        return kayaAxFind((view as RootForTest).semanticsOwner.rootSemanticsNode, TOOLBAR_TAG)
+    }
+
+    /**
+     * What the chrome HOLDS: every affordance under the bar, in tree
+     * order, one node per thing a service can focus.
+     *
+     * An affordance is a node carrying `SemanticsActions.OnClick`,
+     * which is what the platform means by "you can press this" — the
+     * bar's title is a `Text` and never appears. In a MERGED tree a
+     * node that merges its descendants has no children at all, so a
+     * button contributes exactly one entry and the recursion below
+     * cannot double-count the icon inside it.
+     *
+     * The count includes the ⋮ anchor, because the anchor really is one
+     * of the bar's press targets — this platform's chrome carries the
+     * promoted set AND its own overflow. That is the honest reading of
+     * "items the chrome holds", and it is the number that discriminates
+     * in a failure: a bar that lost its promoted buttons still holds 1.
+     */
+    private fun kayaToolbarAffordances(node: SemanticsNode, depth: Int = 0): List<SemanticsNode> {
+        if (depth > 64) return emptyList()
+        val out = ArrayList<SemanticsNode>()
+        for (child in node.children) {
+            if (child.config.contains(SemanticsActions.OnClick)) {
+                out.add(child)
+            } else {
+                out.addAll(kayaToolbarAffordances(child, depth + 1))
+            }
+        }
+        return out
+    }
+
+    /** The first catalog item with this label, in CATALOG PREORDER —
+     * the same walk [kayaPromotedActions] takes, so "the item labelled
+     * Save" means the same thing to both. Deliberately the whole
+     * catalog and not the promoted list: an item that fell out of the
+     * chrome must still RESOLVE, or the read could not tell "this
+     * lowering stopped promoting" from "no such item", which are the
+     * two things the toolbar failure most needs to separate. */
+    private fun kayaCatalogItemLabelled(label: String): KayaMenuItem? {
+        val flat = ArrayList<KayaMenuItem>()
+        fun walk(item: KayaMenuItem) {
+            flat.add(item)
+            item.children.forEach { walk(it) }
+        }
+        KayaSceneModel.menubar.forEach { walk(it) }
+        return flat.firstOrNull { it.label == label }
+    }
+
+    /**
+     * THE expect_toolbar READ on this backend: `<promoted found in the
+     * real chrome>/<promoted in the catalog>/<items the chrome
+     * holds>/<remainder's home>`.
+     *
+     * MAIN THREAD ONLY (callers go through [onUi]).
+     *
+     * The first number walks the COMPOSED bar's affordances in tree
+     * order and advances through the promoted list as their tags match,
+     * so a bar holding the right set in the wrong sequence does not
+     * count — promotion is catalog preorder, and order is part of the
+     * lowering. The second number is the promotion list itself. They
+     * come from the two different sides on purpose: an answer computed
+     * once and reported twice would agree with itself, and "the
+     * promotion list reached no chrome" is precisely the failure being
+     * gated. Delete the `actions` slot's body and this reads `0/2/1/…`.
+     *
+     * The remainder's home is MEASURED too — the ⋮ anchor's tag, found
+     * in the bar or not — rather than named from the model. `overflow`
+     * and not `more` because the anchor is part of the bar itself; see
+     * [TOOLBAR_MORE_TAG] for why this interpreter synthesizes it at all.
+     */
+    private fun kayaToolbarChromeRead(activity: ComponentActivity): String {
+        val promoted = kayaPromotedActions()
+        val bar = kayaToolbarNode(activity)
+        val held = if (bar == null) emptyList() else kayaToolbarAffordances(bar)
+        var matched = 0
+        for (node in held) {
+            if (matched < promoted.size &&
+                node.config.getOrNull(SemanticsProperties.TestTag) ==
+                kayaMenuTag(promoted[matched].id)
+            ) {
+                matched += 1
+            }
+        }
+        val home =
+            if (held.any {
+                    it.config.getOrNull(SemanticsProperties.TestTag) == TOOLBAR_MORE_TAG
+                }
+            ) {
+                "overflow"
+            } else {
+                "none"
+            }
+        return "$matched/${promoted.size}/${held.size}/$home"
+    }
+
+    /**
+     * THE expect_toolbar_item READ on this backend: one aspect of the
+     * real bar button, off the MERGED semantics tree — the post-merge
+     * node a TalkBack user focuses, which is the same surface
+     * [kayaMenuSymbolRead] and [kayaAxRead] consult.
+     *
+     * MAIN THREAD ONLY (callers go through [onUi]).
+     *
+     * WHAT IS READ, and from where:
+     * - PRESENCE: the node tagged `kaya:menu#<id>` inside the bar's own
+     *   subtree. Not the promotion list — the list is what is being
+     *   checked.
+     * - THE SYMBOL: the content description on that node, which got
+     *   there from the [Icon] [KayaSymbolIcon] drew. Perturb which arm
+     *   of [KayaMenuTopBar] draws and the answer moves.
+     * - ENABLEMENT: `SemanticsProperties.Disabled` on that node, which
+     *   `IconButton(enabled = …)` publishes through
+     *   `Modifier.clickable`. This is where the disable really lands on
+     *   this platform, and it is not the model field beside it: the
+     *   read is one tree-hop from what a service is told, so a lowering
+     *   that kept its own enablement copy fails here while
+     *   `expect_menu` — which reads the catalog — still passes. That
+     *   asymmetry is the scene's whole point.
+     *
+     * THE ONE LIMIT, and it is this platform's shape rather than a
+     * choice: the ADDRESS is resolved through the catalog, not read off
+     * the button. An icon-only bar button here publishes the SYMBOL's
+     * name as its accessible name and never the item's label
+     * (`Icon(contentDescription = symbolName(symbol))`), so there is no
+     * rendered "Save" to match — and adding the label to that same
+     * description is a measured trap: [kayaMenuSymbolRead] joins the
+     * description list and rejects anything outside the twenty symbol
+     * names, so `expect_menu_symbol` on a promoted item, which the
+     * menus scene already asserts, would go red
+     * (scratchpad/chrome/toolbar-android.md §6). The catalog therefore
+     * says WHICH item the label names; every ANSWER is the render's.
+     *
+     * TOTAL, like [kayaMenuStateRead]: every failure is a short
+     * sentence naming what was measured, and a retryable non-match
+     * rather than an exception.
+     */
+    private fun kayaToolbarItemRead(
+        activity: ComponentActivity,
+        label: String,
+        aspect: String,
+    ): String {
+        val bar = kayaToolbarNode(activity) ?: return "the window has no toolbar"
+        val item = kayaCatalogItemLabelled(label)
+            ?: return "no catalog item is labelled $label"
+        val node = kayaAxFind(bar, kayaMenuTag(item.id))
+        if (node == null) {
+            // MEASURED, not guessed: the bar is composed and this item's
+            // affordance is not in it. What the bar DOES carry is
+            // printed, because "the promotion never happened" and "the
+            // button is there under another name" are different bugs.
+            val shown = kayaToolbarAffordances(bar).joinToString(", ") { kayaAxName(it) }
+            return "no toolbar item labelled $label (the toolbar carries: $shown)"
+        }
+        if (aspect == "enabled" || aspect == "disabled") {
+            return if (node.config.contains(SemanticsProperties.Disabled)) {
+                "disabled"
+            } else {
+                "enabled"
+            }
+        }
+        val described = node.config.getOrNull(SemanticsProperties.ContentDescription)
+        if (described.isNullOrEmpty()) {
+            // The button composed and carries no content description.
+            // Its accessible name rides the sentence: that is what tells
+            // "the symbol arm did not draw" (a text button, named by its
+            // label) from "nothing drew at all".
+            return "the toolbar button $label carries no content description " +
+                "(it names itself \"${kayaAxName(node)}\")"
+        }
+        val name = described.joinToString(" ")
+        if (!isSymbolName(name)) {
+            // A description that is not one of the twenty came from
+            // something other than the symbol lowering — an icon blob's
+            // description is the item's LABEL — and reporting it as
+            // though it were a symbol nobody recognises would send the
+            // reader after the vocabulary instead of the button.
+            return "the toolbar button $label describes itself \"$name\", " +
+                "which is not a symbol name"
+        }
+        return name
+    }
+
+    /**
      * The inputs [kayaAxRole] weighs, for a MISMATCH. `unknown/…` says
      * the platform classified the control as something the closed set
      * has no name for, and the next question is always which something —
@@ -5934,22 +6189,17 @@ object KayaCompose {
                         else failures.add("presentation $got, wanted $want")
                     }
                     "expect_toolbar" -> {
-                        // THE TOOLBAR IS A DEPTH SLICE, mac first
-                        // (docs/chrome-plan.md C2). This backend already
-                        // promotes the `primary` bit into the
-                        // TopAppBar's actions slot, so the LOWERING is
-                        // here; what is missing is the READ off the
-                        // composed bar — the row's merged semantics, the
-                        // way kayaMenuSymbolRead reads a menu row — and
-                        // a read that answered off the promotion list
-                        // instead would be the exact defect the iOS
-                        // symbol gap was (toolbar-repo.md §2.4).
-                        //
-                        // The refusal goes through the helper both gates
-                        // read: it holds every android toolbar leg off
-                        // run-emulator.sh until the read lands, and it
-                        // cannot pass vacuously because it cannot pass.
-                        depthStub("toolbar")
+                        // BARE, like expect_menu_presentation: capacity k
+                        // is this platform's own number, so the pass
+                        // observation is the LANE-INDEPENDENT word and
+                        // the measured counts ride the failure. The
+                        // reading is a walk of the composed TopAppBar
+                        // (kayaToolbarChromeRead); the rule is mirrored
+                        // from harness.rs (kayaToolbarChromeFits).
+                        val got = onUi(activity) { kayaToolbarChromeRead(activity) }
+                        val why = kayaToolbarChromeFits(got)
+                        if (why == null) observed.add("toolbar")
+                        else failures.add(why)
                     }
                     "expect_toolbar_item" -> {
                         // Its own arm rather than a second label on the
@@ -5957,7 +6207,33 @@ object KayaCompose {
                         // ->` head and demands that arm record or
                         // refuse, and a verb sharing another's head is
                         // a verb the sweep never looks at.
-                        depthStub("toolbar")
+                        //
+                        // Quoted label, then quoted aspect — a symbol
+                        // name, or enabled/disabled. See
+                        // kayaToolbarItemRead for what each aspect is
+                        // read OFF, and for the one thing that comes
+                        // from the catalog rather than the render.
+                        val head = quotedHead(line.substring(parts[0].length))
+                        val want = head?.let { quotedHead(it.second) }
+                        if (head == null || want == null || want.second.isNotEmpty()) {
+                            failures.add(
+                                "expect_toolbar_item wants a quoted label and a quoted " +
+                                    "aspect: $line")
+                        } else {
+                            val got = onUi(activity) {
+                                kayaToolbarItemRead(activity, head.first, want.first)
+                            }
+                            if (got == want.first) {
+                                observed.add("toolbar item ${head.first} ${want.first}")
+                            } else {
+                                // The measured answer rides the failure:
+                                // it is what tells a wrong glyph from a
+                                // button that is not in the chrome.
+                                failures.add(
+                                    "toolbar item ${head.first} reads \"$got\", " +
+                                        "wanted \"${want.first}\"")
+                            }
+                        }
                     }
                     "expect_menu" -> {
                         // Quoted path first, then the state token(s);
@@ -8789,6 +9065,11 @@ private fun KayaMenuPopupRoot() {
 @Composable
 fun KayaMenuTopBar() {
     TopAppBar(
+        // The tag IS the chrome's identity for the toolbar reads: they
+        // search this subtree and nowhere else, so "the promoted set
+        // reached the chrome" is a question about the bar rather than
+        // about the window (see KayaCompose.TOOLBAR_TAG).
+        modifier = Modifier.testTag(KayaCompose.TOOLBAR_TAG),
         title = {
             Text(KayaSceneModel.navEntries.lastOrNull()?.title ?: KayaSceneModel.windowTitle)
         },
@@ -8843,10 +9124,17 @@ fun KayaMenuTopBar() {
 @Composable
 private fun KayaOverflowMenu() {
     Box {
-        IconButton(onClick = {
-            KayaSceneModel.menuOverflowDrilled = 0L
-            KayaSceneModel.menuOverflowOpen = true
-        }) { Text("⋮") }
+        IconButton(
+            onClick = {
+                KayaSceneModel.menuOverflowDrilled = 0L
+                KayaSceneModel.menuOverflowOpen = true
+            },
+            // Tagged so the remainder's home is MEASURED off the bar
+            // rather than asserted from the model: expect_toolbar reads
+            // `none` when this anchor is not composed, which is the one
+            // reading harness.rs treats as a failure outright.
+            modifier = Modifier.testTag(KayaCompose.TOOLBAR_MORE_TAG),
+        ) { Text("⋮") }
         DropdownMenu(
             expanded = KayaSceneModel.menuOverflowOpen,
             onDismissRequest = {

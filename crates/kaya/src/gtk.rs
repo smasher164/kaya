@@ -1178,6 +1178,26 @@ struct CoreState {
     /// The window's OWN mounted root and title, restored on pop.
     window_roots: HashMap<u64, gtk4::Widget>,
     window_titles: HashMap<u64, String>,
+    /// THE WINDOW'S SHELL, one per window (docs/chrome-plan.md C2): the
+    /// AdwToolbarView that IS the window's child, the AdwHeaderBar it
+    /// carries as its top bar, and the box inside that header holding the
+    /// promoted actions. Everything that used to be the window's own
+    /// child — the menu strip, a mounted root, a nav entry's root, the
+    /// split view — is the TOOLBAR VIEW's content now, which is what
+    /// `window_content` and `set_window_content` route through.
+    toolbar_views: HashMap<u64, adw::ToolbarView>,
+    header_bars: HashMap<u64, adw::HeaderBar>,
+    /// The promotion group: one box packed into the header after the back
+    /// button, holding one button per promoted catalog action. A box
+    /// rather than loose pack_start calls for two reasons, one of them
+    /// measured: a rebuild empties ONE container instead of having to
+    /// remember which of the header's children were kaya's, and the group
+    /// is the unit the harness read walks. MEASURED (2026-08-17, the
+    /// lane image): a button inside this box is allocated 34x34 on a
+    /// 40px pitch and carries the `image-button` class — pixel-identical
+    /// to one packed directly into the header — so libadwaita's `.toolbar`
+    /// treatment reaches through the box and the nesting costs nothing.
+    toolbar_groups: HashMap<u64, gtk4::Box>,
     /// The header-bar back button per window — GTK's back affordance
     /// (the ViewSwitcher-era header pattern); visible only while the
     /// window's stack has entries.
@@ -1468,9 +1488,36 @@ fn gtk_window(core: &CoreState, id: u64) -> gtk4::Window {
 /// is `label name='Unsaved changes'` (the accessible name REPLACES the
 /// glyph, which is also what a screen reader should say), and
 /// `Stage::window_dirty` reads exactly that.
-fn install_nav_chrome(window: &gtk4::Window, id: u64) -> (gtk4::Button, gtk4::Label) {
+///
+/// THE HEADER IS AN AdwHeaderBar INSIDE AN AdwToolbarView, AND THE
+/// TOOLBAR VIEW IS THE WINDOW'S CHILD — the flip ratified 2026-08-16
+/// (docs/chrome-plan.md C2's GTK row). What that buys is the platform's
+/// DEFAULT look rather than a style kaya asks for: `top-bar-style`
+/// defaults to `ADW_TOOLBAR_FLAT`, so bar and content are one surface and
+/// the hairline appears only under scrolled content, where
+/// `set_titlebar(GtkHeaderBar)` renders GNOME's RAISED treatment — an
+/// opaque band with a permanent separator (measured side by side in the
+/// lane image: 255-on-250 with a hairline vs 250-on-250 with none,
+/// scratchpad/chrome/toolbar-gtk.md Q3). The bar is 46px in every
+/// configuration either way; nothing here is a height knob.
+///
+/// THE TITLEBAR SLOT KEEPS AN EMPTY, INVISIBLE WIDGET, and that is not
+/// leftovers — it is the client-side-decoration switch. GTK 4 decides
+/// CSD from `priv->titlebar != NULL` (plus Wayland, plus `GTK_CSD`), so a
+/// window that sets NO titlebar is server-decorated on X11 and an X11
+/// window manager draws its own title bar ABOVE this header: two bars.
+/// AdwApplicationWindow solves it by installing an internal empty
+/// titlebar of its own — MEASURED (2026-08-17): `get_titlebar()` on one
+/// answers with an `AdwGizmo`. This does the same thing explicitly, which
+/// is why the two measure identical (header 46px at y=0, content at y=46,
+/// same window size) under Xvfb, under sway, and with `GTK_CSD=1`
+/// forcing the client-decorated case — and why the SMALLER migration is
+/// the one taken: the window stays a plain `gtk4::ApplicationWindow`, so
+/// the `win.` action map, the `BreakpointBin`, and every `gtk4::Window`
+/// signature in this file are untouched.
+fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
     use gtk4::prelude::{ButtonExt, GtkWindowExt, ObjectExt, WidgetExt};
-    let header = gtk4::HeaderBar::new();
+    let header = adw::HeaderBar::new();
     let back = gtk4::Button::from_icon_name("go-previous-symbolic");
     back.set_visible(false);
     back.connect_clicked(move |_| {
@@ -1480,6 +1527,13 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> (gtk4::Button, gtk4::La
         });
     });
     header.pack_start(&back);
+    // The promotion group, packed once and refilled by refresh_toolbar.
+    // 6px is libadwaita's own spacing inside a header bar (the `.toolbar`
+    // appearance's "6px margins and spacing between widgets"), so the
+    // group's buttons keep the pitch the header would have given them
+    // loose — measured identical, 40px per button either way.
+    let promoted = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    header.pack_start(&promoted);
 
     let marker = gtk4::Label::new(Some(DIRTY_MARKER));
     marker.set_visible(false);
@@ -1508,8 +1562,34 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> (gtk4::Button, gtk4::La
     title_box.set_center_widget(Some(&title));
     header.set_title_widget(Some(&title_box));
 
-    window.set_titlebar(Some(&header));
-    (back, marker)
+    let view = adw::ToolbarView::new();
+    {
+        // NOT set_top_bar_style: FLAT is the constructor default
+        // (MEASURED: the GParamSpec default is 0 and a fresh ToolbarView
+        // reads ADW_TOOLBAR_FLAT), and the one case GNOME would want
+        // RAISED — per-page backgrounds under an AdwTabView — is not in
+        // kaya's vocabulary. A backend that SET the default would be
+        // writing down a decision it does not make.
+        view.add_top_bar(&header);
+    }
+    // The CSD switch (see this function's doc): an invisible titlebar
+    // widget, which is what AdwApplicationWindow installs internally.
+    let csd = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    csd.set_visible(false);
+    window.set_titlebar(Some(&csd));
+    window.set_child(Some(&view));
+    WindowChrome { view, header, promoted, back, marker }
+}
+
+/// One window's shell, handed back by [`install_nav_chrome`] so the
+/// caller can put the pieces in CoreState. The window already holds the
+/// view; nothing here has to be installed a second time.
+struct WindowChrome {
+    view: adw::ToolbarView,
+    header: adw::HeaderBar,
+    promoted: gtk4::Box,
+    back: gtk4::Button,
+    marker: gtk4::Label,
 }
 
 /// The glyph GNOME's own editor draws for unsaved work, and the name the
@@ -2054,13 +2134,9 @@ struct MenuItemState {
     checked: bool,
     value: f64,
     /// The CHROME-promotion hint (DESIGN.md, "Chrome promotion and
-    /// `primary`"): the first k of these in catalog preorder belong in
-    /// this window's chrome. Nothing here reads it YET — the GTK arm is
-    /// the AdwHeaderBar pack, and this backend still answers the
-    /// toolbar verbs with `depth_stub("toolbar")` (docs/chrome-plan.md
-    /// C2, ledgered in docs/deferred.md). It stopped being inert BY
-    /// POLICY on 2026-08-17; it is inert here by not having got there.
-    #[allow(dead_code)]
+    /// `primary`"): these belong in this window's chrome, in catalog
+    /// preorder. `refresh_toolbar` packs them into the AdwHeaderBar — all
+    /// of them, since GTK's bar has no capacity of its own.
     primary: bool,
     /// The semantic icon's wire value (0 = none). Held ONLY so the GMenu
     /// model can be rebuilt from the registry — nothing reads it back as
@@ -2601,7 +2677,207 @@ fn rebuild_menubar(core: &CoreState, window: u64) {
     }
     assert_model_actions_resolve(core, window, model);
     refresh_menu_accels(core, window);
+    // The chrome's OTHER half. Promotion is recomputed from the catalog
+    // on every mutation (DESIGN.md, "Chrome promotion and `primary`"), and
+    // a rebuild is where every mutation lands: an append, a live label, a
+    // symbol write. The `primary` prop has its own call, since it moves
+    // the promoted set without touching the model.
+    refresh_toolbar(core, window);
 }
+
+/// The promoted actions of a window's catalog, in CATALOG PREORDER: the
+/// order the app declared them in, walked root by root. Not a count —
+/// see `refresh_toolbar` for why GTK promotes all of them.
+fn promoted_items(reg: &MenuRegistry, window: u64) -> Vec<u64> {
+    let mut out = Vec::new();
+    for &root in reg.bars.get(&window).map(Vec::as_slice).unwrap_or(&[]) {
+        for id in menu_preorder(reg, root) {
+            let item = &reg.items[&id];
+            if item.kind == MenuItemKind::Action && item.primary {
+                out.push(id);
+            }
+        }
+    }
+    out
+}
+
+/// THE PROMOTION (docs/chrome-plan.md C2's GTK row): the window's primary
+/// catalog actions as real buttons in its AdwHeaderBar, packed in catalog
+/// preorder into the group `install_nav_chrome` put there.
+///
+/// SYMBOL-FIRST. A promoted button draws the item's semantic symbol
+/// through the Adwaita column `symbol_icon_name` already resolves for the
+/// menu rows — GNOME's HIG says label-only buttons "should generally be
+/// avoided for primary window header bars" — and falls back to a label
+/// button for an item that declares no symbol, because a blank button is
+/// worse than a wide one.
+///
+/// THE ACCESSIBLE LABEL IS EXPLICIT, and that is the measured half. An
+/// icon-only GtkButton carrying only an action-name publishes
+/// `role='button' name=''` on the AT-SPI bus — a screen reader says
+/// nothing and the harness has nothing to address (measured 2026-08-16,
+/// scratchpad/chrome/toolbar-gtk.md Q2; reproduced 2026-08-17 with this
+/// arm's exact shape, where the control button that omits the property
+/// still publishes `name=''` beside its labelled siblings). The tooltip
+/// happens to fill it too, but a tooltip is a hover affordance, not a
+/// name: the property is written outright, and `Stage::toolbar_item`
+/// addresses a button by what the BUS answers, so dropping this line
+/// fails the leg instead of quietly making the chrome unaddressable.
+///
+/// THE DESCRIPTION CARRIES THE SEMANTIC SYMBOL NAME, the same slot the
+/// sections switcher uses for the same purpose (`refresh_section_symbols`)
+/// — and it is what scopes the harness's bus walk to kaya's own promoted
+/// buttons, since the header also holds GTK's window controls and
+/// libadwaita's back button.
+///
+/// ENABLEMENT IS FREE and deliberately not re-implemented here: the
+/// button names the item's existing `win.kmi-<id>` action, so GTK drives
+/// its sensitivity from the same `set_enabled` the menu row, the
+/// accelerator and every harness verb already gate on (measured:
+/// `enabled=True -> sensitive=True`, `set_enabled(False) -> sensitive=
+/// False`). That is the one-source-of-truth the scene asserts both ways.
+///
+/// NO CAPACITY. Every primary action is promoted, because k is the
+/// PLATFORM's number and GTK does not have one: a header bar takes what
+/// fits and then raises the window's minimum width (measured: 24 buttons
+/// -> min-width 1155px, ~48px each). kaya inventing a k here would be
+/// kaya answering a question the platform was asked.
+fn refresh_toolbar(core: &CoreState, window: u64) {
+    use gtk4::prelude::{AccessibleExtManual, ActionableExt, BoxExt, WidgetExt};
+    let Some(group) = core.toolbar_groups.get(&window) else {
+        return;
+    };
+    while let Some(child) = group.first_child() {
+        group.remove(&child);
+    }
+    let reg = core.menus.borrow();
+    for id in promoted_items(&reg, window) {
+        let item = &reg.items[&id];
+        let (button, drew) = match symbol_icon_name(item.symbol) {
+            Some(icon) => (gtk4::Button::from_icon_name(icon), symbol_name_of_icon(icon)),
+            None => (gtk4::Button::with_label(&item.label), None),
+        };
+        button.set_action_name(Some(&format!("win.kmi-{id}")));
+        button.set_tooltip_text(Some(&item.label));
+        button.update_property(&[gtk4::accessible::Property::Label(&item.label)]);
+        // THE DESCRIPTION IS DERIVED FROM THE ICON THAT WAS SET, never
+        // from the item's symbol field beside it: it is what scopes the
+        // harness's bus walk, and a marker published for a button that
+        // drew no icon would scope the read onto a button with nothing to
+        // read.
+        if let Some(name) = drew {
+            button.update_property(&[gtk4::accessible::Property::Description(name)]);
+        }
+        group.append(&button);
+    }
+    drop(reg);
+    warn_if_header_unshrinkable(core, window);
+}
+
+/// The unshrinkable-window signal, debug-only and printed only when it
+/// has happened: GTK has no overflow at all, so a long promotion list
+/// raises the window's MINIMUM width and the window silently stops
+/// resizing (measured: ~48px per button, 24 of them -> 1155px). Nothing
+/// fails, which is why this says what it measured rather than asserting —
+/// an app may legitimately want a wide window, and no lane can tell.
+#[cfg(debug_assertions)]
+fn warn_if_header_unshrinkable(core: &CoreState, window: u64) {
+    use gtk4::prelude::WidgetExt;
+    const NARROW: i32 = 1024;
+    let Some(header) = core.header_bars.get(&window) else {
+        return;
+    };
+    let (min, _, _, _) = header.measure(gtk4::Orientation::Horizontal, -1);
+    if min > NARROW {
+        let promoted = core.toolbar_groups.get(&window).map_or(0, |group| {
+            let mut n = 0;
+            let mut child = group.first_child();
+            while let Some(c) = child {
+                n += 1;
+                child = c.next_sibling();
+            }
+            n
+        });
+        eprintln!(
+            "kaya: window {window}'s header bar asks for {min}px minimum with \
+             {promoted} promoted actions in it — GTK has no overflow, so this \
+             window cannot be resized narrower than that"
+        );
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn warn_if_header_unshrinkable(_core: &CoreState, _window: u64) {}
+
+/// Every promoted button the window's REAL header holds, in pack order —
+/// a GtkButton anywhere under the AdwHeaderBar whose action names a
+/// catalog item (`win.kmi-<id>`).
+///
+/// WALKED FROM THE HEADER, never read out of `toolbar_groups`: the
+/// question the toolbar verbs ask is whether the promotion reached the
+/// chrome, and a group that was never packed (or a header rebuilt
+/// without it) still holds its buttons. The action-name filter is what
+/// separates kaya's promotions from the other buttons the header carries
+/// — measured on the real tree: `AdwBackButton` on `navigation.pop`,
+/// kaya's own back button on no action at all, and GtkWindowControls on
+/// `window.minimize`/`window.toggle-maximized`/`window.close`.
+#[cfg(feature = "harness")]
+fn chrome_buttons(core: &CoreState, window: u64) -> Vec<(u64, gtk4::Button)> {
+    fn walk(node: &gtk4::Widget, out: &mut Vec<(u64, gtk4::Button)>) {
+        use gtk4::prelude::{ActionableExt, Cast, WidgetExt};
+        let mut child = node.first_child();
+        while let Some(w) = child {
+            if let Some(button) = w.downcast_ref::<gtk4::Button>() {
+                if let Some(name) = button.action_name() {
+                    if let Some(id) = name
+                        .strip_prefix("win.kmi-")
+                        .and_then(|id| id.parse::<u64>().ok())
+                    {
+                        out.push((id, button.clone()));
+                    }
+                }
+            }
+            walk(&w, out);
+            child = w.next_sibling();
+        }
+    }
+    use gtk4::prelude::Cast;
+    let mut out = Vec::new();
+    if let Some(header) = core.header_bars.get(&window) {
+        walk(header.upcast_ref::<gtk4::Widget>(), &mut out);
+    }
+    out
+}
+
+/// Where the non-promoted catalog lives in this window, from the closed
+/// set the harness contract names — READ, not asserted: the window's real
+/// PopoverMenuBar over a model that really has rows. See
+/// `Stage::toolbar_chrome` for why `menubar` is the only home this
+/// backend has, and why no second one is synthesized.
+#[cfg(feature = "harness")]
+fn remainder_home(core: &CoreState, window: u64) -> &'static str {
+    use gtk4::gio::prelude::MenuModelExt;
+    use gtk4::prelude::{Cast, WidgetExt};
+    let rows = core.menu_models.get(&window).map_or(0, gio::Menu::n_items);
+    let bar = core
+        .menu_strips
+        .get(&window)
+        .and_then(|(strip, _)| strip.first_child())
+        .and_then(|child| child.downcast::<gtk4::PopoverMenuBar>().ok());
+    match bar {
+        Some(bar) if rows > 0 && bar.is_visible() => "menubar",
+        _ => "none",
+    }
+}
+
+/// What to do about an accessibility read that could not reach the bus.
+/// The toolbar verbs are TOTAL, so an unreachable bus has to be a
+/// sentence rather than a panic — and a sentence that does not name the
+/// wiring is one the reader will spend an hour on.
+#[cfg(feature = "harness")]
+const BUS_FIX: &str = "— a leg asserting the toolbar verbs must run under \
+     tools/linux/a11y-leg.sh, since GTK publishes no accessibility tree \
+     without GTK_A11Y=atspi and a bus to sit on";
 
 
 /// Every action a rendered ROW names must exist in the window's action
@@ -2696,8 +2972,10 @@ fn widget_icon_prop(widget: &gtk4::Widget) -> Option<gio::Icon> {
 
 /// The icon name of the first GtkImage under `root` — what a
 /// GtkStackSwitcher button actually draws, which is the only thing on
-/// that button that came from the page it stands for.
-#[cfg(debug_assertions)]
+/// that button that came from the page it stands for. The toolbar read
+/// asks the same question of a promoted header button, which is why the
+/// harness build wants it too.
+#[cfg(any(debug_assertions, feature = "harness"))]
 fn first_image_icon_name(root: &gtk4::Widget) -> Option<String> {
     use gtk4::prelude::{Cast, WidgetExt};
     let mut child = root.first_child();
@@ -2801,7 +3079,7 @@ fn widget_typeface(widget: &gtk4::Widget) -> Option<(String, String)> {
 /// kaya chose.
 #[cfg(feature = "harness")]
 fn walk_typefaces(core: &CoreState) -> TypefaceSeen {
-    use gtk4::prelude::{Cast, GtkWindowExt, WidgetExt};
+    use gtk4::prelude::{Cast, WidgetExt};
     fn walk(widget: &gtk4::Widget, seen: &mut TypefaceSeen) {
         let mut child = widget.first_child();
         while let Some(w) = child {
@@ -2824,8 +3102,9 @@ fn walk_typefaces(core: &CoreState) -> TypefaceSeen {
     // The CONTENT, not the window: a window's own chrome (the header bar
     // kaya installs, its title) is not the scene's, exactly as the mac
     // read walks the content view and not the title bar.
-    for window in std::iter::once(&core.window).chain(core.aux_windows.values()) {
-        if let Some(root) = window.child() {
+    let ids: Vec<u64> = std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
+    for window in ids {
+        if let Some(root) = window_content(core, window) {
             walk(root.upcast_ref::<gtk4::Widget>(), &mut seen);
         }
     }
@@ -3042,15 +3321,43 @@ fn ensure_menu_strip(core: &mut CoreState, window: u64) {
     content.set_vexpand(true);
     strip.append(&bar);
     strip.append(&content);
-    let target = gtk_window(core, window);
-    if let Some(existing) = target.child() {
-        target.set_child(gtk4::Widget::NONE);
+    // THE TOOLBAR VIEW'S content slot, not the window's child: since the
+    // flip the window's child is the shell, and the strip is one level
+    // in (see install_nav_chrome).
+    let target = window_shell(core, window);
+    if let Some(existing) = window_content(core, window) {
+        set_shell_content(&target, gtk4::Widget::NONE);
         existing.set_hexpand(true);
         existing.set_vexpand(true);
         content.append(&existing);
     }
-    target.set_child(Some(&strip));
+    set_shell_content(&target, Some(strip.upcast_ref::<gtk4::Widget>()));
     core.menu_strips.insert(window, (strip, content));
+}
+
+/// The window's shell — the AdwToolbarView installed by
+/// `install_nav_chrome`, whose content slot IS what used to be the
+/// window's child. Every content route goes through this, which is what
+/// keeps the header bar from being replaced by a mounted root.
+fn window_shell(core: &CoreState, window: u64) -> adw::ToolbarView {
+    core.toolbar_views
+        .get(&window)
+        .expect("every window gets its shell from install_nav_chrome")
+        .clone()
+}
+
+fn set_shell_content(view: &adw::ToolbarView, child: Option<&gtk4::Widget>) {
+    view.set_content(child);
+}
+
+/// What the window is showing under its chrome: the menu strip when one
+/// exists, otherwise the mounted root / nav entry / split view. The
+/// reader half of `set_window_content`, and the widget every
+/// content-scoped read wants — a read that took the window's child would
+/// now take the SHELL, which fills the window by construction and would
+/// make `expect_root_fills` pass for a root that hugs.
+fn window_content(core: &CoreState, window: u64) -> Option<gtk4::Widget> {
+    core.toolbar_views.get(&window).and_then(adw::ToolbarView::content)
 }
 
 /// Route a window's content through the menu strip when one exists:
@@ -3090,6 +3397,11 @@ fn unparent(child: &gtk4::Widget) {
         bx.remove(child);
     } else if let Some(win) = parent.downcast_ref::<gtk4::Window>() {
         win.set_child(None::<&gtk4::Widget>);
+    } else if let Some(view) = parent.downcast_ref::<adw::ToolbarView>() {
+        // A toolbar view owns its content through a PROPERTY, exactly
+        // like the navigation page below: a bare unparent would detach
+        // the widget and leave the view still pointing at it.
+        view.set_content(None::<&gtk4::Widget>);
     } else if let Some(page) = parent.downcast_ref::<adw::NavigationPage>() {
         // A page owns its child through a PROPERTY, so a bare unparent
         // detaches the widget while leaving the page still pointing at
@@ -3120,7 +3432,7 @@ fn set_window_content(core: &CoreState, window: u64, child: Option<&gtk4::Widget
         if let Some(widget) = child {
             unparent(widget);
         }
-        gtk_window(core, window).set_child(child);
+        set_shell_content(&window_shell(core, window), child);
     }
 }
 
@@ -4772,9 +5084,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .default_width(540)
                 .default_height(330)
                 .build();
-            let (back, marker) = install_nav_chrome(&aux, window.0);
-            core.back_buttons.insert(window.0, back);
-            core.dirty_markers.insert(window.0, marker);
+            let chrome = install_nav_chrome(&aux, window.0);
+            core.toolbar_views.insert(window.0, chrome.view);
+            core.header_bars.insert(window.0, chrome.header);
+            core.toolbar_groups.insert(window.0, chrome.promoted);
+            core.back_buttons.insert(window.0, chrome.back);
+            core.dirty_markers.insert(window.0, chrome.marker);
             wire_close(
                 &aux,
                 window.0,
@@ -4826,6 +5141,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             core.menu_models.remove(&window.0);
             core.menu_strips.remove(&window.0);
             core.menu_action_groups.remove(&window.0);
+            // ... and its shell, which went with the destroyed window.
+            core.toolbar_views.remove(&window.0);
+            core.header_bars.remove(&window.0);
+            core.toolbar_groups.remove(&window.0);
             {
                 let mut reg = core.menus.borrow_mut();
                 reg.bars.remove(&window.0);
@@ -5081,15 +5400,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     menu_sync_radio_state(&reg, item.0);
                 }
                 MenuProp::Primary => {
-                    // The phone-promotion hint: INERT on desktop by
-                    // design (DESIGN.md, Menus) — recorded, never
-                    // materialized.
+                    // THE CHROME PROMOTION BIT (DESIGN.md, "Chrome
+                    // promotion and `primary`"): this window's header bar
+                    // carries the primary actions, so the write re-packs
+                    // it. Its OWN call rather than a model rebuild —
+                    // `primary` moves the promoted set without changing a
+                    // single GMenu row, so nothing else here would notice.
                     core.menus
                         .borrow_mut()
                         .items
                         .get_mut(&item.0)
                         .expect("scene validated the item id")
                         .primary = crate::protocol::prop_bool(&value);
+                    let window = {
+                        let reg = core.menus.borrow();
+                        reg.bar_of.get(&menu_root_of(&reg, item.0)).copied()
+                    };
+                    if let Some(window) = window {
+                        refresh_toolbar(core, window);
+                    }
                 }
                 MenuProp::Shortcut => {
                     core.menus
@@ -6763,7 +7092,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 }
             });
         }
-        let (primary_back, primary_marker) = {
+        let primary_chrome = {
             use gtk4::prelude::Cast;
             install_nav_chrome(window.upcast_ref::<gtk4::Window>(), 0)
         };
@@ -6818,9 +7147,12 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     );
                     titles
                 },
+                toolbar_views: HashMap::from([(0, primary_chrome.view)]),
+                header_bars: HashMap::from([(0, primary_chrome.header)]),
+                toolbar_groups: HashMap::from([(0, primary_chrome.promoted)]),
                 back_buttons: {
                     let mut buttons = HashMap::new();
-                    buttons.insert(0, primary_back);
+                    buttons.insert(0, primary_chrome.back);
                     buttons
                 },
                 inset: 16.0,
@@ -6836,7 +7168,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 css_error,
                 dirty_markers: {
                     let mut markers = HashMap::new();
-                    markers.insert(0, primary_marker);
+                    markers.insert(0, primary_chrome.marker);
                     markers
                 },
                 live_alert: std::rc::Rc::new(RefCell::new(None)),
@@ -7853,20 +8185,162 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    // THE TOOLBAR IS A DEPTH SLICE, mac first (docs/chrome-plan.md C2).
-    // This backend's arm is the AdwHeaderBar pack the plan measured —
-    // buttons in catalog preorder, a synthesized GtkMenuButton for the
-    // remainder GTK has no overflow for, and the accessible name an
-    // icon-only button does not publish by itself. None of that is here
-    // yet, so the refusal goes through the helper both gates read: it
-    // holds every linux toolbar leg off run-suites.sh until the arm
-    // lands, and it cannot pass vacuously because it cannot pass.
+    /// THE expect_toolbar READ on GTK: `<promoted found>/<promoted in the
+    /// catalog>/<buttons the header holds>/<remainder's home>`.
+    ///
+    /// THREE DIFFERENT SIDES, on purpose. The second number is the model
+    /// (the catalog's primaries). The third is the REAL AdwHeaderBar,
+    /// walked for buttons that name a `win.kmi-<id>` action — a promotion
+    /// that packed nothing answers 0 there however full the promotion
+    /// list is. The first is the ACCESSIBILITY BUS: the names an
+    /// assistive client is given for those buttons, matched in order
+    /// against the promoted labels, which is the one reading that fails
+    /// when the accessible name is missing (an icon-only GtkButton
+    /// publishes `name=''` — the measured trap this arm exists to close).
+    ///
+    /// THE REMAINDER'S HOME IS THE MENU BAR, and that is a repo fact
+    /// rather than a choice made here: this backend renders the WHOLE
+    /// catalog as a GtkPopoverMenuBar in a strip above the content
+    /// (`ensure_menu_strip`), so every unpromoted action is already
+    /// reachable and one home is all there is. GTK has no overflow of its
+    /// own and the research's fallback was a synthesized GtkMenuButton
+    /// over the window's GMenu — deliberately NOT built, because it would
+    /// be a SECOND home for the same rows: the same model, one row above
+    /// its own menu bar. (Where GNOME apps grow that hamburger they have
+    /// no menu bar at all. If kaya's linux menu lowering ever stops being
+    /// a bar, this is the line that has to change, and the read says
+    /// `none` until it does — it never asserts the home, it reads the
+    /// real PopoverMenuBar and its model.) The macOS arm answers
+    /// `menubar` for exactly the same structural reason.
     fn toolbar_chrome(&self) -> String {
-        crate::depth_stub("toolbar")
+        let (title, promoted, held, home) = Self::on_main(|core| {
+            let promoted: Vec<String> = {
+                let reg = core.menus.borrow();
+                promoted_items(&reg, 0)
+                    .iter()
+                    .map(|id| reg.items[id].label.clone())
+                    .collect()
+            };
+            (
+                core.window_titles.get(&0).cloned().unwrap_or_default(),
+                promoted,
+                chrome_buttons(core, 0).len(),
+                remainder_home(core, 0),
+            )
+        });
+        let published = match atspi_promoted_buttons(&title) {
+            Ok(published) => published,
+            // NOT `0/n/m/menubar`: that spelling would print "0 of the 2
+            // promoted actions are among them", blaming a promotion that
+            // may well be there — a diagnostic saying what it did not
+            // measure (invariant 3). The unreadable case says so, and the
+            // step fails on the shape instead.
+            Err(why) => return format!("the accessibility bus did not answer ({}) {}", why.why, BUS_FIX),
+        };
+        let mut found = 0;
+        for (name, _) in &published {
+            if found < promoted.len() && name.as_bytes() == promoted[found].as_bytes() {
+                found += 1;
+            }
+        }
+        format!("{found}/{}/{held}/{home}", promoted.len())
     }
 
-    fn toolbar_item(&self, _label: &str, _aspect: &str) -> String {
-        crate::depth_stub("toolbar")
+    /// THE expect_toolbar_item READ on GTK: one aspect of the real header
+    /// button, addressed by the name the ACCESSIBILITY BUS publishes for
+    /// it — never by kaya's promotion list, and never by the tooltip
+    /// (which fills the same name and would let the a11y property be
+    /// dropped without any leg noticing).
+    ///
+    /// ENABLEMENT IS `sensitive`, MEASURED. GTK publishes both ENABLED
+    /// and SENSITIVE states; on this stack ENABLED is false for every
+    /// node in the tree including the frame and the application itself,
+    /// while SENSITIVE tracks the action exactly — measured 2026-08-17
+    /// with one action disabled mid-run: the disabled button read
+    /// `sens=False` and its untouched sibling `sens=True`. So the read
+    /// consults SENSITIVE, which is also the state GTK derives from
+    /// `gtk_widget_set_sensitive`, which is what the `win.kmi-<id>`
+    /// action's own `set_enabled` moves.
+    ///
+    /// THE SYMBOL IS THE ICON THE BUTTON REALLY DRAWS — the icon-name on
+    /// the GtkImage inside the real header child, mapped back to its
+    /// semantic name (`symbol_name_of_icon`), which is strictly more than
+    /// the macOS arm can see (there the read is an identifier the
+    /// rendering arm published about itself). The bus half and the widget
+    /// half are paired BY POSITION, because both walks visit the same
+    /// buttons in the same order — GTK's accessibility tree mirrors the
+    /// widget tree — and a length disagreement is REPORTED rather than
+    /// paired across.
+    ///
+    /// TOTAL, like menu_state: every failure is a short description and a
+    /// retryable non-match, never a panic.
+    fn toolbar_item(&self, label: &str, aspect: &str) -> String {
+        let (title, drawn, held) = Self::on_main(|core| {
+            use gtk4::prelude::Cast;
+            let buttons = chrome_buttons(core, 0);
+            let held = buttons.len();
+            // The buttons that DRAW a kaya symbol, in pack order — the
+            // same set the bus walk scopes to by description, so the two
+            // lists pair position by position.
+            let drawn: Vec<String> = buttons
+                .iter()
+                .filter_map(|(_, button)| {
+                    first_image_icon_name(button.upcast_ref::<gtk4::Widget>())
+                })
+                .filter(|icon| symbol_name_of_icon(icon).is_some())
+                .collect();
+            (
+                core.window_titles.get(&0).cloned().unwrap_or_default(),
+                drawn,
+                held,
+            )
+        });
+        let published = match atspi_promoted_buttons(&title) {
+            Ok(published) => published,
+            Err(why) => return format!("the accessibility bus did not answer ({}) {}", why.why, BUS_FIX),
+        };
+        let matches: Vec<usize> = published
+            .iter()
+            .enumerate()
+            .filter(|(_, (name, _))| name.as_bytes() == label.as_bytes())
+            .map(|(i, _)| i)
+            .collect();
+        let index = match matches[..] {
+            [index] => index,
+            [] => {
+                let shown: Vec<&str> = published.iter().map(|(n, _)| n.as_str()).collect();
+                return format!(
+                    "no toolbar item labelled {label} (the header holds {held} buttons; \
+                     the promoted ones publish: {shown:?})"
+                );
+            }
+            _ => {
+                return format!(
+                    "{} toolbar buttons publish the name {label}, so which one this \
+                     step means is ambiguous",
+                    matches.len()
+                );
+            }
+        };
+        if aspect == "enabled" || aspect == "disabled" {
+            return if published[index].1 { "enabled" } else { "disabled" }.to_owned();
+        }
+        if drawn.len() != published.len() {
+            return format!(
+                "the bus published {} promoted buttons and the header draws {} kaya \
+                 symbols, so the two cannot be paired",
+                published.len(),
+                drawn.len()
+            );
+        }
+        match symbol_name_of_icon(&drawn[index]) {
+            Some(name) => name.to_owned(),
+            None => format!(
+                "the toolbar button {label} draws {:?}, which is not in this \
+                 backend's symbol table",
+                drawn[index]
+            ),
+        }
     }
 
     fn shortcut(&self, spelling: &str) {
@@ -9117,8 +9591,12 @@ impl crate::harness::Stage for GtkStage {
 
     fn root_fills(&self) -> String {
         Self::on_main(move |core| {
-            use gtk4::prelude::{GtkWindowExt, WidgetExt};
-            let Some(root) = core.window.child() else {
+            use gtk4::prelude::WidgetExt;
+            // The SHELL's content and not the window's child, which since
+            // the AdwToolbarView flip is the shell itself — and the shell
+            // fills the window by construction, so reading it here would
+            // report a perfectly filling window for a root that hugs.
+            let Some(root) = window_content(core, 0) else {
                 return "nothing mounted".to_owned();
             };
             while glib::MainContext::default().iteration(false) {}
@@ -9165,8 +9643,8 @@ impl crate::harness::Stage for GtkStage {
 
     fn inset(&self) -> String {
         Self::on_main(move |core| {
-            use gtk4::prelude::GtkWindowExt;
-            let Some(root) = core.window.child() else {
+            // The shell's content, the root_fills rule one read over.
+            let Some(root) = window_content(core, 0) else {
                 return "nothing mounted".to_owned();
             };
             while glib::MainContext::default().iteration(false) {}
@@ -10334,6 +10812,142 @@ fn atspi_window_marker(title: &str, marker: &str) -> Result<bool, AtspiMiss> {
             n => Err(AtspiMiss {
                 why: format!(
                     "{n} frames are named {title:?}, so which window's marker to read \
+                     is ambiguous — give the windows distinct titles"
+                ),
+                retryable: false,
+            }),
+        }
+    })
+}
+
+/// The promoted header buttons as an assistive client sees them: the
+/// accessible NAME and the SENSITIVE state of each, in tree order, inside
+/// the frame this app publishes under the name `title`.
+///
+/// THE SCOPE IS THE DESCRIPTION. A window's frame holds plenty of
+/// buttons — the scene's own, the menu bar's rows, GTK's window controls
+/// — so the walk keeps only the ones carrying a kaya symbol name as
+/// their accessible description, which is what `refresh_toolbar` publishes
+/// on exactly the promoted buttons (and what the sections switcher
+/// already publishes for the same reason). The alternative scopes were
+/// measured and rejected: the header publishes as an unnamed `panel` like
+/// every other box in the tree, and setting an accessible ROLE on a box
+/// to mark it changed the published role of EVERY other box in the
+/// process (measured 2026-08-17 — a GTK 4.18 surprise worth staying away
+/// from).
+///
+/// SENSITIVE AND NOT ENABLED, also measured: on this stack ENABLED is
+/// false for every node including the frame and the application, while
+/// SENSITIVE moves with the action — one run with a single action
+/// disabled read `sens=False` on its button and `sens=True` on the
+/// untouched sibling.
+///
+/// SCOPED TO ONE FRAME, like `atspi_window_marker` and for its reason: a
+/// scene with two windows would otherwise read one window's chrome as
+/// another's.
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss> {
+    use atspi::proxy::accessible::AccessibleProxy;
+    let title = title.to_owned();
+    atspi::zbus::block_on(async move {
+        let conn = atspi::connection::AccessibilityConnection::new()
+            .await
+            .map_err(|e| AtspiMiss {
+                why: format!("no accessibility bus ({e})"),
+                retryable: false,
+            })?;
+        let root = AccessibleProxy::builder(conn.connection())
+            .destination("org.a11y.atspi.Registry")
+            .and_then(|b| b.path("/org/a11y/atspi/accessible/root"))
+            .map_err(|e| AtspiMiss { why: format!("no registry proxy ({e})"), retryable: false })?
+            .build()
+            .await
+            .map_err(|e| AtspiMiss { why: format!("no registry root ({e})"), retryable: false })?;
+
+        struct Found {
+            frames: usize,
+            buttons: Vec<(String, bool)>,
+            names: Vec<String>,
+        }
+
+        async fn walk(
+            node: AccessibleProxy<'_>,
+            want_frame: &str,
+            out: &mut Found,
+            in_frame: bool,
+            depth: usize,
+        ) {
+            // The same horizon the other two walks use: under an Adw
+            // header the promoted buttons sit at depth ~12.
+            if depth > 24 {
+                return;
+            }
+            let mut inside = in_frame;
+            if let (Ok(role), Ok(name)) = (node.get_role().await, node.name().await) {
+                if role == atspi::Role::Frame {
+                    out.names.push(name.clone());
+                    if name == want_frame {
+                        out.frames += 1;
+                        inside = true;
+                    }
+                }
+                if in_frame && role == atspi::Role::Button {
+                    let described = node.description().await.unwrap_or_default();
+                    if crate::wire::SYMBOLS.iter().any(|(_, s)| *s == described) {
+                        let sensitive = node
+                            .get_state()
+                            .await
+                            .is_ok_and(|states| states.contains(atspi::State::Sensitive));
+                        out.buttons.push((name, sensitive));
+                    }
+                }
+            }
+            let Ok(children) = node.get_children().await else {
+                return;
+            };
+            for child in children {
+                let Some(dest) = child.name() else { continue };
+                let Ok(proxy) = AccessibleProxy::builder(node.inner().connection())
+                    .destination(dest.to_owned())
+                    .and_then(|b| b.path(child.path().to_owned()))
+                else {
+                    continue;
+                };
+                if let Ok(proxy) = proxy.build().await {
+                    Box::pin(walk(proxy, want_frame, out, inside, depth + 1)).await;
+                }
+            }
+        }
+
+        let mut found = Found { frames: 0, buttons: Vec::new(), names: Vec::new() };
+        let apps = root.get_children().await.map_err(|e| AtspiMiss {
+            why: format!("the registry published no applications ({e})"),
+            retryable: true,
+        })?;
+        for app in apps {
+            let Some(dest) = app.name() else { continue };
+            let Ok(builder) = AccessibleProxy::builder(conn.connection())
+                .destination(dest.to_owned())
+                .and_then(|b| b.path(app.path().to_owned()))
+            else {
+                continue;
+            };
+            let Ok(proxy) = builder.build().await else { continue };
+            // Only our own process's application node.
+            if proxy.get_application().await.is_err() {
+                continue;
+            }
+            Box::pin(walk(proxy, &title, &mut found, false, 0)).await;
+        }
+        match found.frames {
+            1 => Ok(found.buttons),
+            0 => Err(AtspiMiss {
+                why: format!("no frame is named {title:?}; the tree published {:?}", found.names),
+                retryable: true,
+            }),
+            n => Err(AtspiMiss {
+                why: format!(
+                    "{n} frames are named {title:?}, so which window's chrome to read \
                      is ambiguous — give the windows distinct titles"
                 ),
                 retryable: false,
