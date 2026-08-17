@@ -17,6 +17,15 @@
 //     `tx.Window(0).Title(...)` is rewritten every time the destination
 //     moves, which is what a title bar is FOR; the status line at the
 //     bottom carries only what has just happened, and repeats no name.
+//   - THE CHROME'S BUTTONS ARE THE CATALOG'S, said once. Save and Find…
+//     carry `primary`, which is the only thing this app ever says about
+//     a toolbar: no bar is constructed, no order is given and no count
+//     is chosen (docs/chrome-plan.md C2). Each host promotes the first
+//     k primaries in catalog preorder into whatever chrome it has and
+//     leaves the remainder in the menus — so the two buttons in the
+//     window's chrome are the SAME items the File and Edit menus list,
+//     with the same handlers and the same enablement, and there is
+//     nothing an app could promote that a keyboard cannot still reach.
 //   - The DIRTY MARK is one declaration, `text != saved`, made on the
 //     window. kaya does not watch signals and guess: "this document has
 //     unsaved changes" is a sentence only the app can say. It rides the
@@ -715,7 +724,24 @@ func App() *kaya.App {
 		file.Item("Open…").Shortcut("primary+o").OnActivate(func(tx *kaya.Tx) {
 			ask(tx, openDoc)
 		})
-		file.Item("Save").Shortcut("primary+s").OnActivate(save)
+		// SAVE IS THE FIRST PRIMARY (docs/chrome-plan.md C2). `primary`
+		// says "promote this action into whatever chrome this window
+		// has" and nothing else: the item is still one catalog entry
+		// with one handler and one shortcut, and the app names no
+		// toolbar, no placement and no capacity — the host promotes the
+		// first k primaries in catalog preorder and keeps the rest where
+		// its catalog lives. So this line costs the editor two words and
+		// buys it the mac toolbar, the GTK header bar, the WinUI caption
+		// commands and both phones' top bars.
+		//
+		// SymbolDone IS THE SAVE IDIOM, and it is a vocabulary fact
+		// rather than a choice: the closed symbol set has no
+		// save-specific glyph and neither has Apple's own catalog
+		// (docs/styling-plan.md D6), so the checkmark is what every one
+		// of these hosts draws for "commit this". guests/go/toolbar
+		// spells it the same way for the same reason.
+		file.Item("Save").Symbol(kaya.SymbolDone).Primary(true).
+			Shortcut("primary+s").OnActivate(save)
 		file.Item("Save As…").Shortcut("primary+shift+s").OnActivate(saveAs)
 
 		// AND EDIT IS SIX DECLARATIONS AND ONE HANDLER. Five of these
@@ -744,7 +770,20 @@ func App() *kaya.App {
 		// field — see the note at the top of this file: the bar is a
 		// When body, its widgets are stamped copies, and `focus` is a
 		// command aimed at a live widget id.
-		edit.Item("Find…").Shortcut("primary+f").OnActivate(func(tx *kaya.Tx) {
+		//
+		// AND FIND IS THE SECOND PRIMARY, which is the whole of the
+		// promotion order this app declares: preorder walks File before
+		// Edit and Save before Find…, so [Save, Find…] is the promoted
+		// set on every host whose k is at least two, and the first of
+		// them on a host whose k is one. Nothing here says which comes
+		// first — the catalog already did.
+		//
+		// THE ELLIPSIS RIDES ALONG, because the button IS this item. A
+		// toolbar spelling that dropped it would be a second label for
+		// one action, and the trailing … is the platforms' own promise
+		// that the command opens something rather than doing it.
+		edit.Item("Find…").Symbol(kaya.SymbolSearch).Primary(true).
+			Shortcut("primary+f").OnActivate(func(tx *kaya.Tx) {
 			if open {
 				return
 			}
