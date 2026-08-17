@@ -31,6 +31,9 @@
 //!   context_open <kind>#<index>
 //!   expect_menu "<path>" enabled|disabled|checked|unchecked|value <N>
 //!   expect_menus <count>
+//!   expect_toolbar                    (the BARE invariant — see
+//!                                      Step::ExpectToolbar)
+//!   expect_toolbar_item "<label>" "<symbol>"|enabled|disabled
 //!   shortcut "<spelling>"
 //!
 //! Targets are (kind, creation index) — stamped copies enter the count
@@ -510,6 +513,55 @@ pub enum Step {
     /// bar is legitimate — a narrow GTK or WinUI window keeps its menu
     /// bar — so only the one direction is a defect.
     ExpectMenuPresentation(Option<String>),
+    /// The window's toolbar, BARE INVARIANT form (the
+    /// expect_menu_presentation shape): the promoted set is really in
+    /// this window's chrome, and the remainder is reachable.
+    ///
+    /// A COUNT CANNOT RIDE A SHARED SCENE. Capacity *k* is the
+    /// platform's own number — "never computed by kaya", in both mobile
+    /// arms' words — and a scene is compared byte-for-byte on every
+    /// lane, so the step asserts the invariant and reports one
+    /// lane-independent verdict: "toolbar".
+    ///
+    /// The backend answers `<promoted actions found in the real
+    /// chrome>/<promoted in the catalog>/<items the chrome holds>/<where
+    /// the remainder lives>`. The first and third numbers are READ OFF
+    /// THE PLATFORM'S OWN BAR (macOS: the NSToolbar's items), the second
+    /// is computed from the catalog, and the fourth names the
+    /// remainder's home from a closed set: `menubar` (macOS — the whole
+    /// catalog sits in the kaya-owned NSApp.mainMenu segment, so the
+    /// remainder is reachable by construction), `more` (a synthesized
+    /// More menu), `overflow` (a bar that overflows in place), `none`
+    /// (the backend found no home — a failure, since every catalog this
+    /// step runs against has a remainder).
+    ///
+    /// The chrome number and the catalog number cannot be wrong
+    /// together, which is the whole point of asking for both: one is the
+    /// real chrome and the other is the model, so a lowering that never
+    /// attached a toolbar reads `0/2/0/…` and the failure names both
+    /// sides instead of echoing the promotion list back.
+    ///
+    /// THE THIRD NUMBER IS THERE SO THE FAILURE CAN DISCRIMINATE, and it
+    /// was added because a watched negative caught the sentence lying:
+    /// perturbed so the promoted buttons drew bare text, the mac window
+    /// had a toolbar with two items whose labels AppKit left EMPTY, and
+    /// "the promotion list reached no toolbar" was printed for a window
+    /// that plainly had one. A diagnostic may only print what it
+    /// measured (CLAUDE.md invariant 3), so "no chrome at all" and "a
+    /// chrome whose items are not these" are now different sentences.
+    ExpectToolbar,
+    /// One toolbar item's ASPECT, read off the REAL chrome and never
+    /// off the promotion list: `expect_toolbar_item "Save" "done"` (the
+    /// semantic symbol the button draws), `expect_toolbar_item "Save"
+    /// "disabled"` (what the button IS, not what the model stores).
+    ///
+    /// ENABLEMENT IS PER-PLATFORM MEASURED, and the macOS measurement is
+    /// the reason this doc says so: `NSToolbarItem.isEnabled` stays
+    /// `true` for a visibly disabled SwiftUI toolbar button (measured
+    /// 2026-08-16, scratchpad/chrome/toolbar-mac.md §2.3), so a backend
+    /// must read the property its own disable actually moves and say
+    /// which one that is at the arm.
+    ExpectToolbarItem(String, String),
     /// Drive the platform's key-equivalent dispatch for a canonical
     /// shortcut spelling — at minimum the same table the platform's
     /// own key event traverses, emitting the SAME menu_activated the
@@ -655,6 +707,8 @@ impl Step {
             Step::ExpectAxHint { .. } => true,
             Step::ExpectMenus { .. } => true,
             Step::ExpectMenuPresentation { .. } => true,
+            Step::ExpectToolbar => true,
+            Step::ExpectToolbarItem { .. } => true,
             Step::Shortcut { .. } => false,
             Step::ResizeWindow { .. } => false,
             Step::ExpectSplit { .. } => true,
@@ -1154,6 +1208,31 @@ pub trait Stage: Send + 'static {
     /// No default: a backend that forgets this must fail to compile
     /// rather than pass an icon leg vacuously.
     fn menu_symbol(&self, path: &str) -> String;
+    /// What this window's chrome DID with the promotion list, spelled
+    /// `<promoted found in the real chrome>/<promoted in the
+    /// catalog>/<items the chrome holds>/<remainder's home>` — see
+    /// Step::ExpectToolbar for the vocabulary and for why the item count
+    /// is in there.
+    ///
+    /// The chrome numbers come FROM THE PLATFORM'S OWN BAR and the
+    /// catalog number from the model, deliberately from the two
+    /// different sides: an answer computed once and reported twice would
+    /// agree with itself, and the failure being gated is precisely a
+    /// promotion list that reached no chrome. No default: a backend that
+    /// forgets this must fail to compile rather than pass a toolbar leg
+    /// vacuously.
+    fn toolbar_chrome(&self) -> String;
+    /// One toolbar item's aspect, read off the REAL chrome: the
+    /// semantic symbol name it draws, or `"enabled"`/`"disabled"`.
+    ///
+    /// TOTAL, like `menu_state`: an item the chrome does not carry reads
+    /// as a short description ("no such toolbar item"), a retryable
+    /// non-match rather than a panic. A diagnostic may only print what
+    /// it measured, and the enablement half is where that bites — on
+    /// macOS `NSToolbarItem.isEnabled` stays `true` for a visibly
+    /// disabled button, so each backend reads the property its own
+    /// disable moves and names it at the arm. No default.
+    fn toolbar_item(&self, label: &str, aspect: &str) -> String;
     /// Drive the platform's key-equivalent dispatch for a canonical
     /// shortcut spelling — at minimum the same table the platform's
     /// own key event would traverse, emitting the SAME menu_activated
@@ -1634,6 +1713,28 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     Step::ExpectMenuPresentation(Some(want))
                 }
             }
+            // BARE ONLY, and the grammar says so rather than a comment:
+            // a count here would be a per-lane literal in a scene that
+            // is compared byte-for-byte on five of them.
+            "expect_toolbar" => {
+                if !rest.trim().is_empty() {
+                    return Err(format!(
+                        "expect_toolbar takes no argument — capacity k is the \
+                         platform's number, so the step asserts the invariant \
+                         (the promoted set is in the chrome, the remainder is \
+                         reachable): {line:?}"
+                    ));
+                }
+                Step::ExpectToolbar
+            }
+            "expect_toolbar_item" => {
+                let (label, tail) = parse_quoted_prefix(rest).map_err(|e| {
+                    format!("expect_toolbar_item wants a quoted label and a quoted aspect: {e}")
+                })?;
+                let aspect = parse_string(tail)?;
+                check_toolbar_aspect(&aspect).map_err(|e| format!("{e}: {line:?}"))?;
+                Step::ExpectToolbarItem(label, aspect)
+            }
             "shortcut" => {
                 let spelling = parse_string(rest)?;
                 // Grammar-level sanity only: emptiness and whitespace
@@ -2038,6 +2139,71 @@ fn check_menu_presentation(spec: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// The invariant the BARE expect_toolbar step asserts, off the backend's
+/// `<in the real chrome>/<promoted in the catalog>/<remainder's home>`
+/// reading: the promoted set really reached the chrome, and the
+/// remainder has somewhere to live. `Err` carries the sentence the step
+/// fails with, which names the MEASURED numbers and nothing else.
+/// Extracted from the step so it is directly testable; the two
+/// interpreters mirror it.
+fn toolbar_chrome_fits(spelling: &str) -> Result<(), String> {
+    const HOMES: [&str; 4] = ["menubar", "more", "overflow", "none"];
+    let parts: Vec<&str> = spelling.split('/').collect();
+    let [found, promoted, items, home] = parts[..] else {
+        return Err(format!(
+            "chrome reads {spelling:?}, which is not \
+             <promoted found>/<promoted>/<items>/<remainder's home>"
+        ));
+    };
+    let (Ok(found), Ok(promoted), Ok(items)) = (
+        found.parse::<usize>(),
+        promoted.parse::<usize>(),
+        items.parse::<usize>(),
+    ) else {
+        return Err(format!(
+            "chrome reads {spelling:?}, whose first three fields are not counts"
+        ));
+    };
+    if !HOMES.contains(&home) {
+        return Err(format!(
+            "chrome reads {spelling:?}, whose remainder home {home:?} is not one of {HOMES:?}"
+        ));
+    }
+    if found != promoted {
+        return Err(format!(
+            "the window's chrome holds {items} items, and {found} of the \
+             {promoted} promoted actions are among them in catalog preorder"
+        ));
+    }
+    if home == "none" {
+        return Err(format!(
+            "the chrome holds the {found} promoted actions and the remainder \
+             of the catalog has no home in this window"
+        ));
+    }
+    Ok(())
+}
+
+/// The aspect of an expect_toolbar_item step: `enabled`, `disabled`, or
+/// a name from the symbol vocabulary. Checked at PARSE against
+/// `wire::SYMBOLS` — the same closed set the prop's value wall reads —
+/// because a typo would otherwise read as a backend drawing the wrong
+/// glyph, which is the most expensive way to learn you misspelled
+/// "search".
+fn check_toolbar_aspect(aspect: &str) -> Result<(), String> {
+    if aspect == "enabled" || aspect == "disabled" {
+        return Ok(());
+    }
+    if crate::wire::SYMBOLS.iter().any(|(_, name)| *name == aspect) {
+        return Ok(());
+    }
+    let names: Vec<&str> = crate::wire::SYMBOLS.iter().map(|(_, name)| *name).collect();
+    Err(format!(
+        "toolbar aspect {aspect:?} is neither enabled/disabled nor a symbol \
+         name; wanted one of {names:?}"
+    ))
 }
 
 /// The state token(s) of an expect_menu step. `value` takes a 0-based
@@ -3070,6 +3236,29 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Err(format!("presentation {got}, wanted {want}"))
                 }
             })),
+            Step::ExpectToolbar => Some(poll(|| {
+                let got = stage.toolbar_chrome();
+                // LANE-INDEPENDENT VERDICT, the bare expect_split /
+                // expect_menu_presentation rule: a shared scene compares
+                // observations byte-for-byte across every platform, so
+                // the pass cannot echo a reading (k differs per lane).
+                // The MEASURED numbers ride the failure instead.
+                match toolbar_chrome_fits(&got) {
+                    Ok(()) => Ok("toolbar".to_owned()),
+                    Err(why) => Err(why),
+                }
+            })),
+            Step::ExpectToolbarItem(label, want) => Some(poll(|| {
+                let got = stage.toolbar_item(label, want);
+                if got == *want {
+                    Ok(format!("toolbar item {label} {want}"))
+                } else {
+                    // The measured answer rides the failure: it is what
+                    // tells a wrong glyph from a button that is not in
+                    // the chrome at all.
+                    Err(format!("toolbar item {label} reads {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::ExpectMenuSymbol(path, want) => Some(poll(|| {
                 let got = stage.menu_symbol(path);
                 if got == *want {
@@ -3772,6 +3961,20 @@ mod tests {
         fn menu_symbol(&self, _: &str) -> String {
             "copy".to_owned()
         }
+        // A chrome that took the promotion list, and the remainder in
+        // the menu bar — the macOS shape, which is the one the depth
+        // slice built first.
+        fn toolbar_chrome(&self) -> String {
+            "2/2/2/menubar".to_owned()
+        }
+        fn toolbar_item(&self, _: &str, aspect: &str) -> String {
+            // Answers the two axes the way menu_state's mock does: the
+            // glyph it drew, and a button the catalog disabled.
+            match aspect {
+                "enabled" | "disabled" => "disabled".to_owned(),
+                _ => "done".to_owned(),
+            }
+        }
         fn shortcut(&self, spelling: &str) {
             self.seen.lock().unwrap().push(format!("shortcut {spelling}"));
         }
@@ -4051,6 +4254,12 @@ mod tests {
         fn menu_symbol(&self, _: &str) -> String {
             String::new()
         }
+        fn toolbar_chrome(&self) -> String {
+            String::new()
+        }
+        fn toolbar_item(&self, _: &str, _: &str) -> String {
+            String::new()
+        }
         fn shortcut(&self, _: &str) {}
         fn finish(&self, code: i32, verdict: &str) {
                 let _ = self.0.send((code, verdict.to_owned()));
@@ -4236,6 +4445,12 @@ mod tests {
             String::new()
         }
         fn menu_symbol(&self, _: &str) -> String {
+            String::new()
+        }
+        fn toolbar_chrome(&self) -> String {
+            String::new()
+        }
+        fn toolbar_item(&self, _: &str, _: &str) -> String {
             String::new()
         }
         fn shortcut(&self, _: &str) {}
@@ -4467,6 +4682,101 @@ mod tests {
         ] {
             assert!(menu_presentation_fits(good), "{good} should fit");
         }
+    }
+
+    /// The toolbar verbs' grammar. `expect_toolbar` is BARE — a count
+    /// there would be a per-lane literal in a byte-frozen scene — and
+    /// the item verb's aspect is the closed set: enabled/disabled, or a
+    /// name from the symbol vocabulary the prop's own value wall reads.
+    #[test]
+    fn toolbar_spellings() {
+        for good in [
+            "expect_toolbar",
+            "expect_toolbar_item \"Save\" \"done\"",
+            "expect_toolbar_item \"Find\" \"search\"",
+            "expect_toolbar_item \"Save\" \"enabled\"",
+            "expect_toolbar_item \"Save\" \"disabled\"",
+        ] {
+            assert!(parse(good).is_ok(), "{good} should parse");
+        }
+        for bad in [
+            // A count (the whole reason the verb is bare), an aspect
+            // outside the vocabulary, a misspelled symbol, the two
+            // arguments unquoted, and each half missing.
+            "expect_toolbar 2",
+            "expect_toolbar_item \"Save\" \"checked\"",
+            "expect_toolbar_item \"Save\" \"serach\"",
+            "expect_toolbar_item Save done",
+            "expect_toolbar_item \"Save\"",
+            "expect_toolbar_item",
+        ] {
+            assert!(parse(bad).is_err(), "{bad} should not parse");
+        }
+    }
+
+    /// The bare form's invariant, both directions. The failing cases are
+    /// the two the depth slice's watched negatives produce: a promotion
+    /// list that reached no chrome, and a remainder with nowhere to be.
+    #[test]
+    fn toolbar_chrome_invariant() {
+        for good in ["2/2/2/menubar", "2/2/3/more", "3/3/9/overflow", "0/0/0/menubar"] {
+            assert!(toolbar_chrome_fits(good).is_ok(), "{good} should fit");
+        }
+        // THE TWO SENTENCES THE ITEM COUNT BUYS, and the reason it is in
+        // the spelling: "no chrome at all" and "a chrome whose items are
+        // not these" are different measurements and must read
+        // differently. The second was printed as the first by the first
+        // cut of this rule, on a real perturbed run.
+        let nothing = toolbar_chrome_fits("0/2/0/menubar").unwrap_err();
+        assert!(nothing.contains("holds 0 items, and 0 of the 2"), "{nothing}");
+        let unlabelled = toolbar_chrome_fits("0/2/2/menubar").unwrap_err();
+        assert!(unlabelled.contains("holds 2 items, and 0 of the 2"), "{unlabelled}");
+        let homeless = toolbar_chrome_fits("2/2/2/none").unwrap_err();
+        assert!(homeless.contains("no home in this window"), "{homeless}");
+        // A reading that is not the spelling at all fails NAMING what
+        // was read, rather than being coerced into a verdict.
+        for bad in ["2/2/menubar", "2/2/2/menubar/extra", "two/2/2/menubar", "2/2/2/sidebar"] {
+            let why = toolbar_chrome_fits(bad).unwrap_err();
+            assert!(why.contains(bad), "{why} should quote the reading");
+        }
+    }
+
+    /// The toolbar verbs poll the stage's real-chrome reads, report a
+    /// LANE-INDEPENDENT verdict for the bare form, and fail with the
+    /// measured answer.
+    #[test]
+    fn toolbar_expects_poll_the_real_chrome() {
+        static TOOLBAR_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let steps = parse(
+            "expect label#0 \"ok-text\"\n\
+             expect_toolbar\n\
+             expect_toolbar_item \"Save\" \"done\"\n\
+             expect_toolbar_item \"Save\" \"disabled\"",
+        )
+        .unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(steps, MockStage { seen: &TOOLBAR_SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert_eq!(
+            verdict,
+            "KAYA_SELFTEST: OK (ok-text, toolbar, toolbar item Save done, \
+             toolbar item Save disabled)"
+        );
+        // The mismatch half: the mock's enablement reads "disabled", so
+        // asserting enabled fails with the read.
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(
+            parse("expect label#0 \"ok-text\"\nexpect_toolbar_item \"Save\" \"enabled\"")
+                .unwrap(),
+            MockStage { seen: &TOOLBAR_SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1);
+        assert!(
+            verdict.contains("toolbar item Save reads \"disabled\", wanted \"enabled\""),
+            "{verdict}"
+        );
     }
 
     /// The hint verb's own spelling. It is deliberately NOT the

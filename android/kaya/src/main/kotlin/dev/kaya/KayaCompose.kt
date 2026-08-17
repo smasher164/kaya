@@ -503,20 +503,16 @@ var kayaAvailableSize = androidx.compose.ui.unit.IntSize.Zero
  * harness asserts (docs/styling-plan.md D3). */
 var kayaOuterSize = androidx.compose.ui.unit.IntSize.Zero
 
-// THE DEPTH-STUB HELPER IS GONE AGAIN, the seventh time it has come and
-// gone — it came back for the typeface slice (docs/styling-plan.md Slice
-// 2b) and leaves with it, now that this backend applies a brand typeface
-// and reads the resolved family back off the shaper. Dead code kept "for
-// later" is what a reader has to reason about for nothing.
-//
-// The next Compose depth slice re-adds it, in exactly this shape — a
-// CALL and not a sentence, because tools/check-stubs.sh and
-// tools/check-steps.sh both read the call and neither can see a backend
-// that refuses in its own words:
-//
-//     internal fun depthStub(scene: String): Nothing =
-//         error("kaya: the $scene scene is not yet materialized on this " +
-//               "backend — it is a depth slice; see CLAUDE.md's sequencing")
+// THE DEPTH-STUB HELPER IS BACK, the eighth time it has come and gone —
+// for the toolbar slice (docs/chrome-plan.md C2), which lands mac first
+// and reaches this backend in its own slice. A CALL and not a sentence:
+// tools/check-stubs.sh and tools/check-steps.sh both read the call, and
+// neither can see a backend that refuses in its own words. It leaves
+// again with the last stub that uses it — dead code kept "for later" is
+// what a reader has to reason about for nothing.
+internal fun depthStub(scene: String): Nothing =
+    error("kaya: the $scene scene is not yet materialized on this " +
+          "backend — it is a depth slice; see CLAUDE.md's sequencing")
 
 /**
  * TEXT RANGES, in the unit this backend counts.
@@ -5936,6 +5932,32 @@ object KayaCompose {
                             }
                         } else if (got == want) observed.add("presentation $want")
                         else failures.add("presentation $got, wanted $want")
+                    }
+                    "expect_toolbar" -> {
+                        // THE TOOLBAR IS A DEPTH SLICE, mac first
+                        // (docs/chrome-plan.md C2). This backend already
+                        // promotes the `primary` bit into the
+                        // TopAppBar's actions slot, so the LOWERING is
+                        // here; what is missing is the READ off the
+                        // composed bar — the row's merged semantics, the
+                        // way kayaMenuSymbolRead reads a menu row — and
+                        // a read that answered off the promotion list
+                        // instead would be the exact defect the iOS
+                        // symbol gap was (toolbar-repo.md §2.4).
+                        //
+                        // The refusal goes through the helper both gates
+                        // read: it holds every android toolbar leg off
+                        // run-emulator.sh until the read lands, and it
+                        // cannot pass vacuously because it cannot pass.
+                        depthStub("toolbar")
+                    }
+                    "expect_toolbar_item" -> {
+                        // Its own arm rather than a second label on the
+                        // one above: check-verbs reads each `"expect_*"
+                        // ->` head and demands that arm record or
+                        // refuse, and a verb sharing another's head is
+                        // a verb the sweep never looks at.
+                        depthStub("toolbar")
                     }
                     "expect_menu" -> {
                         // Quoted path first, then the state token(s);

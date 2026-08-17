@@ -709,8 +709,11 @@ struct WinLiveAlert {
 }
 
 /// One menu item's retained state (the post-user mirror; see
-/// CoreState::menu_models). `primary` is stored but INERT on desktop
-/// (the phone-promotion hint; DESIGN.md, Menus).
+/// CoreState::menu_models). `primary` is the CHROME-promotion hint
+/// (DESIGN.md, "Chrome promotion and `primary`") and is stored but not
+/// yet read here: the WinUI arm is the CommandBar, and this backend
+/// still answers the toolbar verbs with `depth_stub("toolbar")`
+/// (docs/chrome-plan.md C2, ledgered in docs/deferred.md).
 struct MenuModel {
     kind: MenuItemKind,
     label: String,
@@ -10728,6 +10731,21 @@ impl crate::harness::Stage for WinUiStage {
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    // THE TOOLBAR IS A DEPTH SLICE, mac first (docs/chrome-plan.md C2).
+    // This backend's arm is the CommandBar the plan measured — primaries
+    // from the promotion bit, the remainder into SecondaryCommands,
+    // dynamic overflow and IsEnabled for free off the one button object.
+    // Until it is written the refusal goes through the helper both gates
+    // read, which holds every windows toolbar leg off deploy-win.sh and
+    // cannot pass vacuously because it cannot pass at all.
+    fn toolbar_chrome(&self) -> String {
+        crate::depth_stub("toolbar")
+    }
+
+    fn toolbar_item(&self, _label: &str, _aspect: &str) -> String {
+        crate::depth_stub("toolbar")
     }
 
     fn shortcut(&self, spelling: &str) {

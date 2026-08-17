@@ -2053,8 +2053,13 @@ struct MenuItemState {
     enabled: bool,
     checked: bool,
     value: f64,
-    /// The phone-promotion hint, mirrored for the record: INERT on
-    /// desktop by design (DESIGN.md, Menus), so nothing here reads it.
+    /// The CHROME-promotion hint (DESIGN.md, "Chrome promotion and
+    /// `primary`"): the first k of these in catalog preorder belong in
+    /// this window's chrome. Nothing here reads it YET — the GTK arm is
+    /// the AdwHeaderBar pack, and this backend still answers the
+    /// toolbar verbs with `depth_stub("toolbar")` (docs/chrome-plan.md
+    /// C2, ledgered in docs/deferred.md). It stopped being inert BY
+    /// POLICY on 2026-08-17; it is inert here by not having got there.
     #[allow(dead_code)]
     primary: bool,
     /// The semantic icon's wire value (0 = none). Held ONLY so the GMenu
@@ -7846,6 +7851,22 @@ impl crate::harness::Stage for GtkStage {
                 .unwrap_or_else(|| "<not serializable>".to_owned());
             format!("the row's icon is {shown:?}, which is not in this backend's symbol table")
         })
+    }
+
+    // THE TOOLBAR IS A DEPTH SLICE, mac first (docs/chrome-plan.md C2).
+    // This backend's arm is the AdwHeaderBar pack the plan measured —
+    // buttons in catalog preorder, a synthesized GtkMenuButton for the
+    // remainder GTK has no overflow for, and the accessible name an
+    // icon-only button does not publish by itself. None of that is here
+    // yet, so the refusal goes through the helper both gates read: it
+    // holds every linux toolbar leg off run-suites.sh until the arm
+    // lands, and it cannot pass vacuously because it cannot pass.
+    fn toolbar_chrome(&self) -> String {
+        crate::depth_stub("toolbar")
+    }
+
+    fn toolbar_item(&self, _label: &str, _aspect: &str) -> String {
+        crate::depth_stub("toolbar")
     }
 
     fn shortcut(&self, spelling: &str) {

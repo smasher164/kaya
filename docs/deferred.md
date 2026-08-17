@@ -2424,6 +2424,57 @@ standing pattern):
   Closing it is one bundled open-licensed face plus a second scene (the
   slot is set once per process, so the two forms cannot share a run).
 
+## The toolbar scene's depth stubs (C2 mid-flight, expected to close with the fan-out)
+
+The depth landed 2026-08-17: no spec movement at all — the `primary` bit
+kaya already ships grew its first desktop lowering (docs/chrome-plan.md
+C2, ratified 2026-08-16) — plus two harness verbs (`expect_toolbar`,
+`expect_toolbar_item`), the SwiftUI **macOS** arm, the Rust guest and the
+`toolbar` scene, mac only. The other four backends refuse through the
+depth-stub helper, which is what holds their lanes' legs off in
+check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
+
+- **DEPTH STUB: toolbar on swiftui/ios** — the LOWERING is already live
+  here and has been for milestones: `KayaMenuToolbar` promotes the same
+  `kayaPromotedActions` set into `ToolbarItemGroup(.primaryAction)` with
+  a synthesized More menu for the remainder. What is missing is the
+  READ. The stage-1 stamp (`promotedRendered`) records WHICH ARM of a
+  button's label drew, which is enough for `expect_menu_symbol` and
+  explicitly not enough for these two verbs: `expect_toolbar` asks
+  whether the promoted set is really IN the chrome, and a stamp written
+  by the label cannot see the bar it is in
+  (scratchpad/chrome/ios-symbol-fix.md §7.3). Closing it is the hosted
+  `UINavigationBar` walk — the button's accessibility label and image —
+  in the simulator, with the promotion-dropped negative watched there.
+- **DEPTH STUB: toolbar on gtk** — the arm the research measured:
+  `AdwHeaderBar` buttons packed in catalog preorder inside an
+  `AdwToolbarView` (whose flat top-bar style is the platform default and
+  whose adoption is the ratified look flip), enablement free through the
+  `win.kmi-N` actions that already exist, plus the two things GTK owes
+  that nothing else does — a synthesized `GtkMenuButton` for the
+  remainder (GTK has no overflow: 24 buttons drove min-width to 1155px
+  and the window refused to shrink) and the accessible NAME an icon-only
+  button does not publish (`name=''` on AT-SPI), which is also what the
+  `expect_toolbar_item` read needs.
+- **DEPTH STUB: toolbar on winui** — the arm the research measured: a
+  `CommandBar` with the promoted primaries as `PrimaryCommands` and the
+  remainder as `SecondaryCommands`, where dynamic overflow, the 48px
+  transparent bar and `IsEnabled` all come free off the one button
+  object. The read is the UIA tree the menu reads already traverse.
+- **DEPTH STUB: toolbar on compose** — the LOWERING is live here too
+  (`KayaMenuTopBar`'s actions slot carries the promoted set and the ⋮
+  overflow). What is missing is the READ off the composed bar — the
+  row's merged semantics, the way `kayaMenuSymbolRead` reads a menu row.
+  A read answering off the promotion list instead would be the iOS
+  symbol gap again (scratchpad/chrome/toolbar-repo.md §2.4), so it waits
+  for the real one.
+- **The seven other bindings need nothing** — and that is the point of
+  the ratified shape: `primary(true)` is a spelling all eight bindings
+  have shipped since the menus milestone, so this slice adds no binding
+  surface and the 8-way sweep is empty by construction. What the other
+  languages DO owe is a `toolbar` GUEST each, so the scene can graduate
+  from validate-mac's DEPTH_SCENES into SCENES the way styling did.
+
 ## Styling follow-ups the fan-out surfaced (2026-08-12, none blocking)
 
 - **~~Font-FILE bundling waits for the asset pipeline~~ REVERSED

@@ -58,7 +58,10 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # flight: protocol + SwiftUI + the Rust binding, mac only. The other
 # three backends decode the record and refuse through depth_stub, which
 # is what holds their lanes' legs off in check-steps and check-stubs.
-DEPTH_SCENES="typeface"
+# The toolbar (docs/chrome-plan.md C2) is the second one in flight:
+# the `primary` bit's first desktop lowering, mac only, with the other
+# four backends refusing through the depth stub.
+DEPTH_SCENES="typeface toolbar"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1128,6 +1131,19 @@ drain
 KAYA_SELFTEST_SCRIPT="$(scene_script typeface)"
 export KAYA_SELFTEST_SCRIPT
 run typeface-rust-swiftui env KAYA_SELFTEST=typeface "$RUST_GUESTS"/typeface
+drain
+
+# The toolbar scene: the `primary` bit as real window chrome
+# (docs/chrome-plan.md C2). A DEPTH slice — rust only, mac only — and
+# both assertions read the REAL NSToolbar: the promoted set's presence
+# in the bar (crossed against the promotion list, so a lowering that
+# never attached a toolbar fails naming both numbers) and each button's
+# symbol and enablement. ENABLEMENT IS NOT NSToolbarItem.isEnabled,
+# which stays true for a visibly disabled SwiftUI button — the read goes
+# through the accessibility tree, where the disable actually lands.
+KAYA_SELFTEST_SCRIPT="$(scene_script toolbar)"
+export KAYA_SELFTEST_SCRIPT
+run toolbar-rust-swiftui env KAYA_SELFTEST=toolbar "$RUST_GUESTS"/toolbar
 drain
 
 # The clipboard scene: one clip in several representations, and the

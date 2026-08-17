@@ -1853,7 +1853,7 @@ and activation all resolve through the model, so a scene written
 against `File>Settings…` works on every host regardless of where the
 chrome shows it.
 
-### Compact overflow and `primary`
+### Chrome promotion and `primary`
 
 Read this with "Form factor and adaptivity". The policy below is
 correct, and its TRIGGER — once written as a platform test (desktop vs
@@ -1863,21 +1863,28 @@ The restatement is APPLIED, not pending; the policy itself never moved.
 
 With no hint, regular windows render the full catalog and compact
 windows place the entire catalog in overflow. `primary: true` asks a
-compact host to promote an action into its top bar as a real native
-action. The host
+host to promote an action into whatever chrome that window has, as a
+real native action: the top bar on a compact host, the toolbar on a
+desktop one. The host
 promotes the first *k* primary actions in catalog preorder: top-level
 grouping nodes in menubar-append order, then each node's children in
 append order, depth-first. Creation time is irrelevant. *k* is the
-platform's own idiomatic capacity, and the rest remain in overflow.
+platform's own idiomatic capacity, and the rest stay where that
+platform keeps the remainder — the overflow menu where there is one,
+the menu bar on hosts that carry the whole catalog there anyway.
 The promoted set recomputes on every catalog mutation, including a
 structural append or `primary` prop change. A later append under an
 earlier node may therefore displace an item, deterministically on
 every host. This is advisory like initial window size: the catalog and
 every command remain reachable regardless of capacity.
 
-`primary` is inert in a regular window. It does not create a desktop
-toolbar, and no toolbar materialization is planned. This one bit is an
-adaptive menu hint, not the seed of a toolbar grammar.
+One bit, one meaning, five hosts. The promoted action is the SAME item
+it was declared as — promotion confers no second identity, no separate
+handler table and no ordering of its own — so nothing here is a toolbar
+grammar. There is no toolbar construct, no placement knob, no capacity
+knob and no chrome style: the modern bar geometry is what HAVING the
+bar produces on every desktop, which is why this needs no styling
+vocabulary at all (docs/chrome-plan.md C2, ratified 2026-08-16).
 
 ### Where a platform cannot say it
 
@@ -1937,7 +1944,14 @@ of being re-decided per binding.
   bracket navigation.
 - **A toolbar grammar is not on the roadmap.** It is admitted only if
   an artifact demands semantics that adaptive menu promotion cannot
-  express.
+  express. ANSWERED 2026-08-17, and the answer was that no grammar was
+  needed: what the artifacts wanted was DESKTOP PRESENCE, which
+  adaptive menu promotion expresses exactly — `primary` grew its
+  desktop lowerings and nothing else moved (no record, no prop, no spec
+  hash, no binding spelling). App-declared toolbar ORDER remains
+  unadmitted under this same trigger; promotion order is catalog
+  preorder. See "Chrome promotion and `primary`" above and
+  docs/chrome-plan.md.
 
 ## Clipboard (ratified 2026-08-02)
 

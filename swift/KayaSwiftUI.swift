@@ -271,6 +271,22 @@ func kayaSFSymbol(_ value: Int64) -> String? {
     kayaSymbolTable.first { $0.value == value }?.sf
 }
 
+/// Why a declared symbol could not be drawn as a glyph. TWO causes, and
+/// this reader can tell them apart: a value this interpreter's table
+/// does not carry (the interpreter and the core disagree, which the spec
+/// hash exists to prevent), or a table row whose SF spelling this OS
+/// refuses — the rename trap, which fails as a silent blank image and is
+/// why the resolution is checked in the RENDER path and not only in the
+/// read. BOTH PLATFORMS: the promoted bar draws the same precedence on
+/// iOS and in the macOS toolbar, so the sentence a reader chases is one
+/// sentence rather than two that drift.
+func kayaPromotedSymbolWhyNot(_ symbol: Int64) -> String {
+    guard let sf = kayaSFSymbol(symbol) else {
+        return "symbol \(symbol) is not in this interpreter's table"
+    }
+    return "SF symbol \(sf) does not resolve on this OS"
+}
+
 #if os(macOS)
     /// The platform image for a symbol, with THE SEMANTIC NAME as its
     /// accessibility description.
@@ -7101,6 +7117,62 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("presentation \(gotPresentation), wanted \(wantPresentation)")
                 }
+            case "expect_toolbar":
+                // THE BARE INVARIANT (docs/chrome-plan.md C2): the
+                // promoted set is really in this window's chrome and the
+                // remainder is reachable. Never a count — capacity k is
+                // the platform's own number and this scene is compared
+                // byte-for-byte on five lanes — so the pass observation
+                // is one lane-independent word and the MEASURED numbers
+                // ride the failure.
+                #if os(macOS)
+                    let gotChrome = DispatchQueue.main.sync { kayaToolbarChromeRead(0) }
+                    if let why = kayaToolbarChromeFits(gotChrome) {
+                        failures.append(why)
+                    } else {
+                        observed.append("toolbar")
+                    }
+                #else
+                    // The iOS promoted bar EXISTS (it is the arm this
+                    // whole slice grew a desktop sibling for), but its
+                    // read is stage 3: the stamp KayaPromotedLabel
+                    // writes records which arm drew, not what the hosted
+                    // UINavigationBar published, and expect_toolbar's
+                    // "is it really in the chrome" question is exactly
+                    // the one a stamp cannot answer
+                    // (scratchpad/chrome/ios-symbol-fix.md §7.3).
+                    kayaDepthStub("toolbar", on: "ios")
+                #endif
+            case "expect_toolbar_item":
+                // One promoted button's aspect, off the REAL chrome:
+                // a quoted label, then a quoted aspect (a symbol name,
+                // or enabled/disabled).
+                let toolbarRest = String(line.dropFirst(parts[0].count))
+                guard let (toolbarLabel, aspectSpec) = kayaQuotedPrefix(toolbarRest),
+                    let (toolbarAspect, toolbarTail) = kayaQuotedPrefix(aspectSpec),
+                    toolbarTail.isEmpty
+                else {
+                    failures.append(
+                        "expect_toolbar_item wants a quoted label and a quoted aspect: \(line)")
+                    break
+                }
+                #if os(macOS)
+                    let gotItem = DispatchQueue.main.sync {
+                        kayaToolbarItemRead(0, toolbarLabel, toolbarAspect)
+                    }
+                    if gotItem == toolbarAspect {
+                        observed.append("toolbar item \(toolbarLabel) \(toolbarAspect)")
+                    } else {
+                        // The measured answer rides the failure: it is
+                        // what tells a wrong glyph from a button the
+                        // chrome never got.
+                        failures.append(
+                            "toolbar item \(toolbarLabel) reads \"\(gotItem)\", "
+                                + "wanted \"\(toolbarAspect)\"")
+                    }
+                #else
+                    kayaDepthStub("toolbar", on: "ios")
+                #endif
             case "expect_menu":
                 // Real item state wherever the item surfaced (bar,
                 // More, open context menu); the bounded retry doubles
@@ -10244,6 +10316,258 @@ func kayaMenuSymbolRead(_ path: String) -> String {
     #endif
 }
 
+/// The invariant the BARE expect_toolbar step asserts, over a backend's
+/// `<in the real chrome>/<promoted in the catalog>/<remainder's home>`
+/// reading: the promoted set really reached the chrome, and the
+/// remainder has somewhere to live. Mirrored from harness.rs's
+/// `toolbar_chrome_fits`, sentence for sentence — this interpreter is
+/// string-matched rather than compile-checked, so the rule is written
+/// once per implementation and the words are kept identical on purpose.
+/// nil means it fits; the failure NAMES THE MEASURED NUMBERS, because
+/// the pass observation cannot (k is the platform's, and the scene is
+/// compared byte-for-byte on every lane).
+func kayaToolbarChromeFits(_ spelling: String) -> String? {
+    let homes = ["menubar", "more", "overflow", "none"]
+    let parts = spelling.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+    guard parts.count == 4, let found = Int(parts[0]), let promoted = Int(parts[1]),
+        let items = Int(parts[2]), homes.contains(parts[3])
+    else {
+        return "chrome reads \"\(spelling)\", which is not "
+            + "<promoted found>/<promoted>/<items>/<remainder's home>"
+    }
+    if found != promoted {
+        return "the window's chrome holds \(items) items, and \(found) of the "
+            + "\(promoted) promoted actions are among them in catalog preorder"
+    }
+    if parts[3] == "none" {
+        return "the chrome holds the \(found) promoted actions and the remainder "
+            + "of the catalog has no home in this window"
+    }
+    return nil
+}
+
+#if os(macOS)
+    /// The window's REAL toolbar items, in the order AppKit holds them.
+    /// Empty when the window has no toolbar at all, which is exactly
+    /// what a promotion list that reached no chrome looks like.
+    func kayaToolbarItems(_ windowId: UInt64) -> [NSToolbarItem] {
+        let window = kayaNSWindows[windowId] ?? (windowId == 0 ? NSApp.windows.first : nil)
+        return window?.toolbar?.items ?? []
+    }
+
+    /// THE expect_toolbar READ on macOS: `<promoted found>/<promoted in
+    /// the catalog>/<items on the bar>/<remainder's home>`.
+    ///
+    /// The first number is a walk of the REAL NSToolbar's items matched
+    /// IN ORDER against the promoted list's labels — in order, because
+    /// promotion is catalog preorder and a bar holding the right set in
+    /// the wrong sequence is not the same lowering. The second is the
+    /// promoted list itself. They come from the two different sides on
+    /// purpose: an answer computed once and reported twice would agree
+    /// with itself, and "the promotion list reached no chrome" is
+    /// precisely the failure being gated.
+    ///
+    /// The THIRD number is what lets the failure discriminate, and a
+    /// watched negative is why it exists: with the symbol arm perturbed
+    /// off, the promoted buttons drew bare `Text`, AppKit lifted NO
+    /// label onto either NSToolbarItem (measured — a title reaches
+    /// `NSToolbarItem.label` from `Label(_:systemImage:)` and not from a
+    /// bare `Text`), and the sentence "reached no toolbar" was printed
+    /// for a window with a two-item toolbar.
+    ///
+    /// The remainder's home on macOS is the MENU BAR: the kaya-owned
+    /// NSApp.mainMenu segment carries the whole catalog, so every
+    /// unpromoted action is reachable by construction and no More menu
+    /// is synthesized. This checks that the segment is really there —
+    /// the same count expect_menus reads — rather than asserting it.
+    func kayaToolbarChromeRead(_ windowId: UInt64) -> String {
+        kayaToolbarTrace(windowId)
+        let promoted = kayaScene.windows[windowId].map(kayaPromotedActions) ?? []
+        var matched = 0
+        for item in kayaToolbarItems(windowId)
+        where matched < promoted.count && kayaBytesEqual(item.label, promoted[matched].label) {
+            matched += 1
+        }
+        kayaEnsureMenuSegment()
+        let owned =
+            NSApp.mainMenu.map { mainMenu in
+                kayaOwnedMenuItems.filter { $0.menu === mainMenu }.count
+            } ?? 0
+        return "\(matched)/\(promoted.count)/\(kayaToolbarItems(windowId).count)/"
+            + (owned > 0 ? "menubar" : "none")
+    }
+
+    /// THE expect_toolbar_item READ on macOS: one aspect of the real
+    /// toolbar button, addressed by the label AppKit lifted onto it.
+    ///
+    /// ENABLEMENT IS NOT `NSToolbarItem.isEnabled`, and that is measured
+    /// rather than assumed: SwiftUI hosts the button inside a
+    /// `ToolbarItemHostingView` and never writes AppKit's flag, so it
+    /// reads `true` for a visibly disabled button (measured 2026-08-16,
+    /// scratchpad/chrome/toolbar-mac.md §2.3, and again by this slice's
+    /// own probe). The read consults the accessibility tree — the same
+    /// AXUIElement client route `expect_ax` uses, and the same surface a
+    /// VoiceOver user is given — where the disable really lands.
+    ///
+    /// TOTAL, like kayaMenuStateRead: every failure is a short
+    /// description and a retryable non-match, never a panic.
+    func kayaToolbarItemRead(_ windowId: UInt64, _ label: String, _ aspect: String) -> String {
+        kayaToolbarTrace(windowId)
+        let items = kayaToolbarItems(windowId)
+        guard items.contains(where: { kayaBytesEqual($0.label, label) }) else {
+            guard !items.isEmpty else { return "the window has no toolbar" }
+            let shown = items.map(\.label).joined(separator: ", ")
+            return "no toolbar item labelled \(label) (the toolbar carries: \(shown))"
+        }
+        return kayaToolbarAxRead(label, aspect)
+    }
+
+    /// KAYA_TOOLBAR_TRACE=1 dumps every property of the real toolbar
+    /// this slice could have read, plus the accessibility tree under it.
+    /// It is how the enablement question was ANSWERED rather than
+    /// guessed: run the scene once, disable the item halfway through,
+    /// and read which property moved.
+    func kayaToolbarTrace(_ windowId: UInt64) {
+        guard ProcessInfo.processInfo.environment["KAYA_TOOLBAR_TRACE"] != nil else { return }
+        let window = kayaNSWindows[windowId] ?? (windowId == 0 ? NSApp.windows.first : nil)
+        var out = "KAYA_TOOLBAR_TRACE: window \(windowId) toolbar=\(window?.toolbar != nil)\n"
+        for (i, item) in kayaToolbarItems(windowId).enumerated() {
+            let image = item.image.map {
+                "name=\($0.name() ?? "<unnamed>") desc=\($0.accessibilityDescription ?? "<nil>")"
+            }
+            out += "  [\(i)] id=\(item.itemIdentifier.rawValue) label=\"\(item.label)\" "
+            out += "isEnabled=\(item.isEnabled) autovalidates=\(item.autovalidates) "
+            out += "image=\(image ?? "nil") "
+            out += "view=\(item.view.map { String(describing: type(of: $0)) } ?? "nil")\n"
+            if let view = item.view { out += kayaToolbarViewTrace(view, 2) }
+        }
+        out += kayaToolbarAxTrace()
+        FileHandle.standardError.write(Data(out.utf8))
+    }
+
+    private func kayaToolbarViewTrace(_ view: NSView, _ depth: Int) -> String {
+        if depth > 8 { return "" }
+        let pad = String(repeating: "  ", count: depth)
+        var out = "\(pad)\(type(of: view)) alpha=\(view.alphaValue) hidden=\(view.isHidden)"
+        out += " axRole=\(view.accessibilityRole()?.rawValue ?? "nil")"
+        out += " axLabel=\(view.accessibilityLabel() ?? "nil")"
+        out += " axTitle=\(view.accessibilityTitle() ?? "nil")"
+        if let control = view as? NSControl { out += " controlEnabled=\(control.isEnabled)" }
+        out += "\n"
+        for sub in view.subviews { out += kayaToolbarViewTrace(sub, depth + 1) }
+        return out
+    }
+
+    /// The accessibility tree under every AXToolbar, as an assistive
+    /// client receives it — role, name and AXEnabled per element.
+    private func kayaToolbarAxTrace() -> String {
+        let app = kayaToolbarAxApp()
+        var out = ""
+        func walk(_ element: AXUIElement, _ depth: Int, _ inToolbar: Bool) {
+            if depth > 24 { return }
+            let role = kayaAxCopy(element, kAXRoleAttribute) as? String ?? "nil"
+            let here = inToolbar || role == kAXToolbarRole
+            if here {
+                let pad = String(repeating: "  ", count: depth)
+                let title = kayaAxCopy(element, kAXTitleAttribute) as? String ?? "nil"
+                let desc = kayaAxCopy(element, kAXDescriptionAttribute) as? String ?? "nil"
+                let enabled = kayaAxCopy(element, kAXEnabledAttribute) as? Bool
+                let value = kayaAxCopy(element, kAXValueAttribute) as? String ?? "nil"
+                out += "  AX \(pad)role=\(role) title=\(title) desc=\(desc) "
+                out += "enabled=\(enabled.map(String.init) ?? "nil") value=\(value)"
+                out += " subrole=\(kayaAxCopy(element, kAXSubroleAttribute) as? String ?? "nil")"
+                out += " help=\(kayaAxCopy(element, kAXHelpAttribute) as? String ?? "nil")"
+                out += " ident=\(kayaAxCopy(element, kAXIdentifierAttribute) as? String ?? "nil")"
+                out +=
+                    " roledesc=\(kayaAxCopy(element, kAXRoleDescriptionAttribute) as? String ?? "nil")"
+                var namesRef: CFArray?
+                AXUIElementCopyAttributeNames(element, &namesRef)
+                out += " attrs=[\((namesRef as? [String] ?? []).joined(separator: ","))]\n"
+            }
+            for child in kayaAxKids(element) { walk(child, depth + 1, here) }
+        }
+        walk(app, 0, false)
+        return out.isEmpty ? "  AX (no AXToolbar in the tree)\n" : out
+    }
+
+    /// This process's accessibility tree, announced as a client the way
+    /// kayaAxReadOnMain announces it — macOS publishes a skeleton with
+    /// no names until an assistive client attaches, so an unannounced
+    /// read would report "no button here" for a button that is there.
+    private func kayaToolbarAxApp() -> AXUIElement {
+        let app = AXUIElementCreateApplication(getpid())
+        AXUIElementSetMessagingTimeout(app, 2.0)
+        if !kayaAxAnnounced {
+            kayaAxAnnounced = true
+            AXUIElementSetAttributeValue(
+                app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(
+                app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
+        return app
+    }
+
+    /// One toolbar button's aspect, out of the accessibility tree: the
+    /// element whose spoken name is the item's label, under an AXToolbar.
+    private func kayaToolbarAxRead(_ label: String, _ aspect: String) -> String {
+        let app = kayaToolbarAxApp()
+        var hit: AXUIElement?
+        func walk(_ element: AXUIElement, _ depth: Int, _ inToolbar: Bool) {
+            if depth > 24 || hit != nil { return }
+            let role = kayaAxCopy(element, kAXRoleAttribute) as? String ?? ""
+            let here = inToolbar || role == kAXToolbarRole
+            if here, role == kAXButtonRole {
+                let name =
+                    [kAXDescriptionAttribute, kAXTitleAttribute]
+                    .lazy
+                    .compactMap { kayaAxCopy(element, $0 as String) as? String }
+                    .first { !$0.isEmpty } ?? ""
+                if kayaBytesEqual(name, label) {
+                    hit = element
+                    return
+                }
+            }
+            for child in kayaAxKids(element) { walk(child, depth + 1, here) }
+        }
+        walk(app, 0, false)
+        guard let hit else {
+            // WHAT THIS MEASURED: the item is on the real toolbar (the
+            // caller checked) and the accessibility tree publishes no
+            // button by that name under a toolbar. It deliberately does
+            // not guess which of the two is wrong.
+            return "the toolbar carries \(label), and no accessibility button under it is named that"
+        }
+        if aspect == "enabled" || aspect == "disabled" {
+            // THE MEASURED PROPERTY. `NSToolbarItem.isEnabled` is NOT
+            // it: in the same trace block where this attribute reads
+            // false for the disabled button, AppKit's own flag reads
+            // true for it AND for the untouched control item beside it
+            // (KAYA_TOOLBAR_TRACE, 2026-08-17; the same finding the
+            // chrome plan's probe made from rendered ink). The
+            // accessibility tree is where SwiftUI's `.disabled` lands,
+            // and it is the surface a VoiceOver user is given.
+            guard let enabled = kayaAxCopy(hit, kAXEnabledAttribute) as? Bool else {
+                return "the toolbar button \(label) publishes no AXEnabled"
+            }
+            return enabled ? "enabled" : "disabled"
+        }
+        // THE SEMANTIC ICON, from the identifier the rendering arm
+        // published and AppKit carried into the real element — see
+        // KayaPromotedLabelMac for why there is no glyph object to read
+        // on this lowering, and what this can and cannot see.
+        guard let ident = kayaAxCopy(hit, kAXIdentifierAttribute) as? String,
+            ident.hasPrefix(kayaToolbarSymbolIdent)
+        else {
+            // WHAT THIS MEASURED: the button is on the real toolbar and
+            // no arm of its label published what it drew. Deliberately
+            // NOT a fall-back to the item's props — the model is what
+            // agreed with itself on iOS for four milestones.
+            return "the toolbar button \(label) published no rendered-symbol identifier"
+        }
+        return String(ident.dropFirst(kayaToolbarSymbolIdent.count))
+    }
+#endif
+
 /// The expect_menu read: wherever the item surfaced — the OPEN context
 /// menu first (context items shadow the bar while presented), then the
 /// bar. macOS reads the REAL NSMenuItem state from the owned segment
@@ -10984,16 +11308,147 @@ struct KayaMenuChrome: ViewModifier {
 
     func body(content: Content) -> some View {
         #if os(macOS)
-            // No stamping here: macOS answers the chrome verb by
-            // counting the kaya-owned segment in the REAL NSApp.mainMenu,
-            // which is a stronger read than anything this view could
-            // record.
-            content
+            // No stamping here: macOS answers the chrome verbs off the
+            // REAL tree — the kaya-owned segment in NSApp.mainMenu for
+            // the catalog, the window's own NSToolbar for the promoted
+            // set — which is a stronger read than anything this view
+            // could record.
+            content.modifier(KayaMenuToolbarMac(windowId: windowId))
         #else
             content.modifier(KayaMenuFormFactorChrome(windowId: windowId))
         #endif
     }
 }
+
+#if os(macOS)
+    /// The prefix a promoted toolbar button's rendering arm publishes on
+    /// the accessibility identifier, so the read can tell a kaya-drawn
+    /// answer from an element that simply has no identifier.
+    let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
+
+    /// The macOS window-anchor lowering: the promoted primaries as REAL
+    /// NSToolbar items (docs/chrome-plan.md C2).
+    ///
+    /// THE SAME PROMOTED LIST THE PHONES USE — `kayaPromotedActions`,
+    /// catalog preorder, the platform's own k — because the whole slice
+    /// is one bit growing a desktop lowering, not a second promotion
+    /// concept. The remainder needs no More menu here: the kaya-owned
+    /// NSApp.mainMenu segment already carries the entire catalog, so a
+    /// synthesized overflow would be a second, redundant route to the
+    /// same commands (the regular-width iPad arm's reasoning, one
+    /// platform over).
+    ///
+    /// NO TOOLBAR STYLE IS SET, and that is a MEASURED decision rather
+    /// than an omission: `.automatic` resolves to `.unified` for this
+    /// window shape — 52pt, title moved to the leading edge, the system
+    /// overflow chevron when the items do not fit — and setting
+    /// `.unified` explicitly measured identical at 52pt while the
+    /// `.expanded` control moved to 56pt, which is what proves the
+    /// modifier reaches the window at all (scratchpad/chrome/toolbar-mac.md
+    /// §2.4). The modern geometry is what HAVING the bar produces; there
+    /// is no styling knob here because none is needed.
+    struct KayaMenuToolbarMac: ViewModifier {
+        let windowId: UInt64
+        @State private var scene = kayaScene
+
+        func body(content: Content) -> some View {
+            // The promoted set is read INSIDE the body so the toolbar
+            // recomputes on every catalog mutation — a late `primary`
+            // write or a new append moves the bar, the same rule the
+            // phone arms already carry. A window with nothing promoted
+            // grows no toolbar at all, which keeps every other scene's
+            // 28pt chrome exactly where it was.
+            let promoted = scene.windows[windowId].map(kayaPromotedActions) ?? []
+            if promoted.isEmpty {
+                content
+            } else {
+                content.toolbar {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        ForEach(promoted) { item in
+                            Button {
+                                kayaMenuUserActivate(item)
+                            } label: {
+                                KayaPromotedLabelMac(item: item)
+                            }
+                            // THE ONE ENABLEMENT, off the same inherited
+                            // AND every other arm calls: disabling the
+                            // menu item disables this button because it
+                            // IS that item, not because anything copied
+                            // the flag across.
+                            .disabled(!kayaMenuEffectiveEnabled(item))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// One promoted primary's label on macOS — and the identifier that
+    /// says which arm of it drew.
+    ///
+    /// PRECEDENCE, the same rule the mac menu arm and the iOS bar
+    /// already spell: the semantic symbol wins, the app's icon bytes are
+    /// the fallback they have always been, and a bare label is the last
+    /// resort. `Label(_:systemImage:)` rather than a bare `Image`: a
+    /// toolbar renders icon-only, and the title is what AppKit lifts
+    /// onto `NSToolbarItem.label` (measured) and what an assistive
+    /// client speaks. The glyph is for the eye; the label is the name.
+    ///
+    /// WHY THE ARM PUBLISHES AN IDENTIFIER, and what it is worth. The
+    /// mac MENU read has a real glyph object to read — kaya builds the
+    /// NSMenuItem and its NSImage carries the semantic name as its
+    /// accessibility description. A SwiftUI TOOLBAR item has no such
+    /// object: measured on this host, `NSToolbarItem.image` is nil for
+    /// every item (SwiftUI hosts the button in a
+    /// `ToolbarItemHostingView<_ViewList_View>` and lifts nothing onto
+    /// AppKit's image slot), the hosting view's subtree is three
+    /// AXUnknown shims, and the real AXButton publishes no attribute
+    /// naming a glyph — its whole attribute list was dumped
+    /// (KAYA_TOOLBAR_TRACE) and there is nothing there. So the strongest
+    /// available observation is the one the RENDERING ARM makes and
+    /// APPKIT PUBLISHES: an accessibility identifier written inside each
+    /// arm, by the view that arm renders, which the platform then hands
+    /// to any client walking the tree (measured: `ident=kaya-toolbar-
+    /// symbol:done` on the real AXButton). Perturb which arm draws and
+    /// the identifier moves with it.
+    ///
+    /// WHAT IT CANNOT SEE, stated because a reader will believe it: the
+    /// pixels. An edit that keeps this arm and swaps the view inside it
+    /// would still publish "done". That limit is the iOS stamp's limit
+    /// too (scratchpad/chrome/ios-symbol-fix.md §7.3) and it is one
+    /// level weaker than the menu read, which owns a real image object.
+    struct KayaPromotedLabelMac: View {
+        let item: KayaMenuItemModel
+
+        var body: some View {
+            if item.symbol != 0 {
+                if let sf = kayaSFSymbol(item.symbol), let name = kayaSymbolName(item.symbol),
+                    kayaSymbolImage(item.symbol) != nil
+                {
+                    Label(item.label, systemImage: sf)
+                        .accessibilityIdentifier(kayaToolbarSymbolIdent + name)
+                } else {
+                    // A declared symbol this host cannot draw. The
+                    // button stays usable as text, and the identifier
+                    // says which of the two causes was measured.
+                    Text(item.label)
+                        .accessibilityIdentifier(
+                            kayaToolbarSymbolIdent + kayaPromotedSymbolWhyNot(item.symbol))
+                }
+            } else if let icon = item.icon {
+                Image(nsImage: icon)
+                    .accessibilityIdentifier(
+                        kayaToolbarSymbolIdent
+                            + "the promoted button drew the app's icon bytes, no symbol")
+            } else {
+                Text(item.label)
+                    .accessibilityIdentifier(
+                        kayaToolbarSymbolIdent
+                            + "the promoted button drew its label as text, no icon")
+            }
+        }
+    }
+#endif
 
 #if !os(macOS)
     /// Reads the live horizontal size class, records it on the window
@@ -11209,20 +11664,6 @@ struct KayaMenuChrome: ViewModifier {
         ) { _ in
             kayaRebuildCatalogMenus()
         }
-    }
-
-    /// Why a declared symbol could not be drawn as a glyph. TWO causes,
-    /// and this reader can tell them apart: a value this interpreter's
-    /// table does not carry (the interpreter and the core disagree,
-    /// which the spec hash exists to prevent), or a table row whose SF
-    /// spelling this OS refuses — the rename trap, which fails as a
-    /// silent blank image and is why the resolution is checked in the
-    /// RENDER path and not only in the read.
-    func kayaPromotedSymbolWhyNot(_ symbol: Int64) -> String {
-        guard let sf = kayaSFSymbol(symbol) else {
-            return "symbol \(symbol) is not in this interpreter's table"
-        }
-        return "SF symbol \(sf) does not resolve on this OS"
     }
 
     /// THE RENDER STAMP for one promoted button: which arm of its label
@@ -12919,8 +13360,9 @@ struct KayaRoot: View {
         .tint(kayaBrandTint())
         .font(kayaBrandFont())
         // The window's command catalog rides the window construct: on
-        // iOS this is the trailing More menu + promoted bar actions
-        // (a no-op on macOS, where the NSMenu segment owns the bar).
+        // iOS this is the trailing More menu + promoted bar actions; on
+        // macOS the NSMenu segment owns the catalog and this attaches
+        // the promoted primaries as the window's NSToolbar.
         .modifier(KayaMenuChrome(windowId: 0))
         .onAppear { kayaScene.windows[0]?.splitPresentation = "stacked" }
         .onChange(of: kayaSplitArm(0)) {
