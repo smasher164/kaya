@@ -40,10 +40,26 @@ fi
 #
 # WHAT COUNTS AS A REFERENCE: a word starting with one of the repo's
 # source roots — tools/ crates/ guests/ docs/ swift/ android/ bindings/ —
-# wherever it appears, backticked or bare. Trailing punctuation, a `:123`
-# line suffix and a possessive `'s` all end the token; a `<placeholder>`
-# right after it (`tools/guest/run_<scene>_<lang>.cmd`) makes it a FAMILY
-# name rather than a file, and families are not checked.
+# wherever it appears, backticked or bare. Trailing punctuation and a
+# possessive `'s` end the token; a `<placeholder>` right after it
+# (`tools/guest/run_<scene>_<lang>.cmd`) makes it a FAMILY name rather
+# than a file, and families are not checked.
+#
+# A `:123` OR `:123-456` SUFFIX ENDS THE TOKEN AND IS THEN READ, which is
+# the second clause: the file must exist AND must be long enough for the
+# line the sentence points at. Added 2026-08-17 out of the ledger audit's
+# F4 — `check-doc-refs` validated that a path EXISTS and could not check
+# `:1732`, so every line number in the corpus was a claim nobody held to
+# anything, and two dead ones were found by hand in one afternoon.
+#
+# WHAT IT CATCHES IS THE FILE THAT SHRANK, and that is the whole claim:
+# a reference to line 1732 of a 900-line file is dead for certain. A
+# reference to line 12 of a file whose line 12 now says something else is
+# NOT catchable this way and this gate does not pretend to — an
+# in-range line number is checked for nothing, and the gate says so
+# rather than leaving the reader to assume the number was verified.
+# Cheap, one-sided, and it costs no maintenance: nothing has to be
+# registered for a new citation to be covered.
 #
 # THREE SHAPES BEYOND THE PLAIN PATH, each measured in the tree rather
 # than imagined:
@@ -127,9 +143,32 @@ ROOTS = "tools|crates|guests|docs|swift|android|bindings"
 # docs actually punctuate a citation.
 TOKEN = re.compile(rf"(?<![A-Za-z0-9_/.-])(?:{ROOTS})/[A-Za-z0-9_./*?-]*[A-Za-z0-9_*?]")
 BRACE = re.compile(rf"((?:{ROOTS})/)\{{([^}}]*)\}}", re.S)
+# The line anchor that follows a path: `:1007` or `:1007-1013`. Read
+# immediately after the token, before the exemption markers are looked
+# for, so `docs/x.md:12 (gone)` still finds its marker.
+LINEREF = re.compile(r":(\d+)(?:-(\d+))?")
 FENCE = re.compile(r"^\s*```")
 STRIKE = re.compile(r"~~.+?~~", re.S)
 GONE = "(gone)"
+# The line clause's verdict, named once: the printer below tells the two
+# failures apart by it, because they want DIFFERENT fixes. A missing file
+# wants the path corrected or struck; an over-length line wants the
+# NUMBER corrected, and telling that reader to mark the path `(gone)`
+# would send them to remove a citation that is otherwise fine.
+SHRANK = "the file SHRANK past this citation"
+
+
+def anchor(text):
+    """`:1007-1013` at the head of TEXT -> (suffix, highest line, rest).
+
+    THE HIGHEST of the two, not the first: a range whose END is past the
+    file is exactly as dead as one whose start is, and the reader who
+    opens it lands somewhere the sentence never meant."""
+    m = LINEREF.match(text)
+    if not m:
+        return None, None, text
+    want = max(int(g) for g in m.groups() if g)
+    return m.group(0), want, text[m.end():]
 
 
 def docs():
@@ -152,10 +191,15 @@ def docs():
 def expand_braces(text):
     """`guests/{a/x.go:12, b/y.rs:4}` -> its real member paths.
 
-    Returns (text, groups, members) where members is [(line, path)] and
-    the group itself has been BLANKED OUT of the text — the tokenizer
-    would otherwise read `swift/undo.swift` out of the middle of one and
-    report a file nobody ever claimed existed.
+    Returns (text, groups, members) where members is
+    [(line, path, suffix, want)] and the group itself has been BLANKED
+    OUT of the text — the tokenizer would otherwise read
+    `swift/undo.swift` out of the middle of one and report a file nobody
+    ever claimed existed.
+
+    THE MEMBERS CARRY THEIR LINE ANCHORS. 25 of the corpus's 31
+    line-anchored references live inside brace groups today, so dropping
+    the `:207` here would leave the line clause reading six.
 
     The blanking keeps the group's newlines. A replacement that swallowed
     them would shift every line number below it in that file, and a
@@ -170,16 +214,21 @@ def expand_braces(text):
         groups += 1
         line = text.count("\n", 0, m.start()) + 1
         for item in m.group(2).split(","):
-            item = item.strip().split(":")[0].strip()
-            if item:
-                members.append((line, m.group(1) + item))
+            item = item.strip()
+            if not item:
+                continue
+            head = item.split(":")[0].strip()
+            suffix, want, _ = anchor(item[len(head):])
+            if head:
+                members.append((line, m.group(1) + head, suffix, want))
         return re.sub(r"[^\n]", " ", m.group(0))
 
     return BRACE.sub(sub, text), groups, members
 
 
 def scan(path, text):
-    """Every reference in one file, as (line, token, why-exempt-or-None).
+    """Every reference in one file, as
+    (line, token, why-exempt-or-None, suffix-or-None, want-or-None).
 
     Brace members come back carrying the LINE OF THEIR GROUP, so a dead
     path inside one is reported where a reader will find it."""
@@ -195,23 +244,27 @@ def scan(path, text):
             continue
         for m in TOKEN.finditer(line):
             token = m.group(0)
+            # The anchor is consumed BEFORE the exemption markers are
+            # looked for, so `tools/gone.sh:40 (gone)` still reads as
+            # exempt rather than as a live reference to a dead file.
+            suffix, want, rest = anchor(line[m.end():])
             why = None
             if in_fence:
                 why = "fenced"
             elif any(a <= start + m.start() < b for a, b in struck):
                 why = "struck"
-            elif GONE in line[m.end():m.end() + 12]:
+            elif GONE in rest[:12]:
                 why = "gone-marker"
-            elif line[m.end():m.end() + 1] == "<":
+            elif rest[:1] == "<":
                 why = "placeholder"
-            out.append((n, token, why))
+            out.append((n, token, why, suffix, want))
     # A brace group's members are checked but never exempted: the group
     # is a compact citation, not a quotation.
-    out.extend((line, path, None) for line, path in members)
+    out.extend((line, p, None, suffix, want) for line, p, suffix, want in members)
     return out, groups, len(members)
 
 
-def resolve(token):
+def resolve(token, want=None):
     """None if the reference is good, else the reason it is not."""
     if "..." in token:
         return ("names an ELISION rather than a path — write it out. A `...` "
@@ -224,36 +277,56 @@ def resolve(token):
             return "is not a glob this gate can resolve"
         return ("is a glob that matches NOTHING in the tree — it named "
                 "something once")
-    if (root / token).exists():
+    target = root / token
+    if not target.exists():
+        return "does not exist"
+    if want is None:
         return None
-    return "does not exist"
+    # THE LINE CLAUSE. Only a regular file has lines: a brace member can
+    # name a directory, and a `:12` on one is a citation shape this gate
+    # cannot read rather than a finding it can make.
+    if not target.is_file():
+        return None
+    try:
+        length = len(target.read_text(encoding="utf-8", errors="replace")
+                     .splitlines())
+    except OSError as exc:
+        return f"cannot be read to check its length ({exc})"
+    if want > length:
+        return (f"exists but has only {length} lines — {SHRANK}, so the "
+                f"sentence points at nothing")
+    return None
 
 
 # ------------------------------------------------------ the scan itself
 
 def run(files):
-    """(findings, checked, exempt, groups, members) over a file list."""
+    """(findings, checked, exempt, groups, members, anchored) over a file
+    list. `anchored` is how many of the checked references carried a
+    `:NNN` the line clause could read."""
     findings, checked, exempt = [], 0, {}
-    groups = members = 0
+    groups = members = anchored = 0
     for path in files:
         if not path.is_file():
             continue
         refs, g, mem = scan(path, path.read_text(encoding="utf-8"))
         groups += g
         members += mem
-        for n, token, why in refs:
+        for n, token, why, suffix, want in refs:
             if why:
                 exempt[why] = exempt.get(why, 0) + 1
                 continue
             checked += 1
-            bad = resolve(token)
+            if want is not None:
+                anchored += 1
+            bad = resolve(token, want)
             if bad:
                 try:
                     rel = path.relative_to(root)
                 except ValueError:
                     rel = path
-                findings.append((str(rel), n, token, bad))
-    return findings, checked, exempt, groups, members
+                findings.append((str(rel), n, token + (suffix or ""), bad))
+    return findings, checked, exempt, groups, members, anchored
 
 
 # ---------------------------------------------------- 0. the self-tests
@@ -271,7 +344,8 @@ sample_text = sample.read_text(encoding="utf-8")
 
 def findings_in(text, name="<doctored>"):
     refs, _, _ = scan(pathlib.Path(name), text)
-    return [(n, t, resolve(t)) for n, t, w in refs if not w and resolve(t)]
+    return [(n, t + (s or ""), resolve(t, want))
+            for n, t, w, s, want in refs if not w and resolve(t, want)]
 
 
 # N1 — a dead path must be reported. Planted into a real doc's real text.
@@ -340,16 +414,58 @@ for token in PLANTED:
         fail(f"self-test N4: {token} is exempt by the convention and was "
              f"reported anyway — the exemption is not being applied")
 
+# N6 — THE LINE CLAUSE, in both of the places a citation can carry a
+# line number, and in both directions. A reference past the end of a real
+# file must be reported; one INSIDE the file must not, or the clause
+# would be an existence check with extra noise.
+over = sample_text + "\nSee tools/check-doc-refs.sh:999999 for this.\n"
+under = sample_text + "\nSee tools/check-doc-refs.sh:10 for this.\n"
+own_len = len((root / "tools" / "check-doc-refs.sh")
+              .read_text(encoding="utf-8").splitlines())
+print(f"check-doc-refs: self-test N6 cited line 999999 and line 10 of "
+      f"tools/check-doc-refs.sh, which has {own_len} lines -> "
+      f"{len(findings_in(over)) - len(findings_in(sample_text))} and "
+      f"{len(findings_in(under)) - len(findings_in(sample_text))} new finding(s)")
+if not any("999999" in t for _, t, _ in findings_in(over)):
+    fail("self-test N6: a citation past the end of a real file was not reported "
+         "— the line clause is vacuous")
+if len(findings_in(under)) != len(findings_in(sample_text)):
+    fail("self-test N6: a citation to a line the file HAS was reported — the "
+         "line clause fires on references that are fine")
+
+# N6b — and it reaches INSIDE a brace group, where 25 of the corpus's 31
+# line anchors live. Perturbed from the real member, so a brace expansion
+# that quietly dropped the `:207` again would show here rather than in
+# six months.
+if plan.is_file():
+    deep, n6 = re.subn(r"rust/undo\.rs:207", "rust/undo.rs:999999", plan_text)
+    print(f"check-doc-refs: self-test N6b pushed a real brace member's line "
+          f"anchor past the end of guests/rust/undo.rs, {n6} substitution(s)")
+    if n6 < 1:
+        fail("self-test N6b applied NO substitution — the brace member it "
+             "perturbs is not spelled as expected")
+    elif not any("999999" in t for _, t, _ in findings_in(deep)):
+        fail("self-test N6b: an over-length citation inside a brace group was "
+             "not reported — the members are reaching the line clause without "
+             "their anchors")
+
 # N5 — THE CENSUS REFUSAL. A run that read almost nothing must refuse a
 # verdict rather than print one.
 # 27 files and 510 checkable references today, so the floors sit at
 # roughly half of each: low enough that pruning a plan doc is not a false
 # refusal, high enough that a tokenizer which stopped matching cannot
 # report a clean scan.
+#
+# THE ANCHOR FLOOR IS 1, not a fraction: the corpus carries 31 line
+# anchors across three documents, and a doc prune could honestly take
+# most of them, but it cannot take all of them by accident. Zero
+# anchors beside a full reference count means the SUFFIX stopped being
+# read — the line clause silently checking nothing, which is the exact
+# failure the rest of this census exists to refuse.
 FLOOR_FILES, FLOOR_REFS = 12, 250
 
 
-def census(nfiles, checked, exempt):
+def census(nfiles, checked, exempt, anchored):
     total_exempt = sum(exempt.values())
     if nfiles < FLOOR_FILES or checked < FLOOR_REFS:
         return (f"read {nfiles} file(s) and {checked} checkable reference(s) — "
@@ -361,41 +477,59 @@ def census(nfiles, checked, exempt):
         return (f"{total_exempt} reference(s) were exempted and only {checked} "
                 f"checked — the historical-mention convention has eaten the "
                 f"gate. REFUSAL, not a pass.")
+    if anchored == 0:
+        return (f"{checked} reference(s) checked and NOT ONE carried a `:NNN` "
+                f"line anchor — the corpus had 31 when the line clause landed, "
+                f"so this is the suffix no longer being read rather than the "
+                f"docs having dropped every citation. REFUSAL.")
     return None
 
 
-thin = census(1, 3, {})
-eaten = census(99, 999, {"fenced": 999})
+thin = census(1, 3, {}, 9)
+eaten = census(99, 999, {"fenced": 999}, 9)
+blind = census(99, 999, {}, 0)
 print(f"check-doc-refs: self-test N5 ran the census over 1 file / 3 references "
-      f"-> {thin.split(' — ')[0] if thin else 'ACCEPTED'}; and over a scan with "
+      f"-> {thin.split(' — ')[0] if thin else 'ACCEPTED'}; over a scan with "
       f"999 exemptions to 999 checks -> "
-      f"{eaten.split(' — ')[0] if eaten else 'ACCEPTED'}")
+      f"{eaten.split(' — ')[0] if eaten else 'ACCEPTED'}; and over a scan with "
+      f"no line anchor at all -> "
+      f"{blind.split(' — ')[0] if blind else 'ACCEPTED'}")
 if thin is None:
     fail("self-test N5: the census accepted a 1-file scan — the refusal is "
          "decorative")
 if eaten is None:
     fail("self-test N5: the census accepted a scan whose exemptions outnumbered "
          "its checks — the exemption ceiling is decorative")
+if blind is None:
+    fail("self-test N5: the census accepted a scan that read no line anchor at "
+         "all — the anchor floor is decorative")
 
 # ------------------------------------------------------- 1. the clauses
 
 files = docs() + extra
-findings, checked, exempt, groups, members = run(files)
+findings, checked, exempt, groups, members, anchored = run(files)
 
-problem = census(len([f for f in files if f.is_file()]), checked, exempt)
+problem = census(len([f for f in files if f.is_file()]), checked, exempt,
+                 anchored)
 if problem:
     fail(problem)
 else:
     for where, n, token, why in findings:
-        fail(f"{where}:{n} cites {token}, which {why}.\n"
-             f"    Fix the path, or — if the sentence must name something the "
-             f"tree no longer has — strike it, quote it inside a fenced block, "
-             f"or mark it `{token} {GONE}`.")
+        if SHRANK in why:
+            advice = ("Fix the LINE NUMBER — the file is there, the line is "
+                      "not. Re-read the target and cite where the thing "
+                      "moved to, or drop the anchor and name it in prose.")
+        else:
+            advice = (f"Fix the path, or — if the sentence must name something "
+                      f"the tree no longer has — strike it, quote it inside a "
+                      f"fenced block, or mark it `{token} {GONE}`.")
+        fail(f"{where}:{n} cites {token}, which {why}.\n    {advice}")
 
 detail = ", ".join(f"{k} {v}" for k, v in sorted(exempt.items())) or "none"
 if status == 0:
     print(f"check-doc-refs: OK ({len(files)} files, {checked} references "
-          f"checked, {groups} brace group(s) expanded to {members} member(s); "
+          f"checked, {anchored} of them line-anchored and held to the target's "
+          f"length, {groups} brace group(s) expanded to {members} member(s); "
           f"exempt: {detail})")
 else:
     print("check-doc-refs: FINDINGS ABOVE", file=sys.stderr)

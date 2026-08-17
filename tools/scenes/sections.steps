@@ -25,7 +25,7 @@ expect_sections_presentation "bar"
 # made of, so the two mobile lanes assert it too. The sidebar rows below
 # carry symbols the desktops draw and GTK's GtkStackSidebar does not
 # (measured — it binds only the page title), so asserting them would
-# make a shared scene un-shared; the ledger holds that.
+# text-only on the linux sidebar: a RATIFIED platform divergence (DESIGN.md, Stated platform divergences).
 expect_section_symbol "Feed" "home"
 expect_section_symbol "Archive" "star"
 expect_section "Feed"

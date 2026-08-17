@@ -1217,10 +1217,48 @@ out="$(duplicate_legs tools/deploy-win.sh)" || {
     status=1
 }
 
+# The legs a runner SUBMITS, which is not the same as the legs its text
+# mentions. This used to be `grep -oE 'run_suite [a-z0-9_]+'` over the
+# whole file, and prose was code to it: deploy-win.sh's own usage comment
+# gained the sentence "the `all` case's run_suite calls" and this gate
+# demanded tools/guest/run_calls_calls.cmd. Same shape as check-go-env's
+# reason for parsing rather than grepping — every file these rules
+# protect DOCUMENTS the rule, so the words appear in prose. The sibling
+# clause above (duplicate_legs) already skipped comments; this one did
+# not, and the two read the same lines.
+suite_legs() {
+    python3 -c '
+import re
+import sys
+
+path = sys.argv[1]
+text = sys.stdin.read() if path == "-" else open(path).read()
+out = []
+for line in text.splitlines():
+    s = line.strip()
+    if s.startswith("#"):
+        continue
+    m = re.match(r"run_suite\s+([a-z0-9_]+)\s*$", s)
+    if m:
+        out.append(m.group(1))
+print("\n".join(sorted(set(out))))
+' "$1"
+}
+
+# The guard guards itself, both directions: a leg named only in prose is
+# not a leg, and a leg on a real line is.
+if [ -n "$(printf '# the all case run_suite calls\n' | suite_legs -)" ]; then
+    echo "check-steps: SELF-TEST FAIL (a run_suite named in a COMMENT was read as a leg)" >&2
+    exit 1
+fi
+if [ "$(printf 'run_suite zzprobe_rust\n' | suite_legs -)" != "zzprobe_rust" ]; then
+    echo "check-steps: SELF-TEST FAIL (a real run_suite line was not read as a leg)" >&2
+    exit 1
+fi
+
 launchers() {
     local status=0 leg scene lang
-    for leg in $(grep -oE 'run_suite [a-z0-9_]+' tools/deploy-win.sh \
-        | cut -d' ' -f2 | sort -u); do
+    for leg in $(suite_legs tools/deploy-win.sh); do
         case "$leg" in
             # The milestone2 legs are the unprefixed originals
             # (run_rust.cmd, run_python.cmd, ...).
@@ -1239,7 +1277,7 @@ launchers() {
 }
 launchers || status=1
 
-# The staged WinUI ruling (docs/traps.md), now covering TWO scene
+# The staged WinUI ruling (docs/traps.md), now covering THREE scene
 # families that share one cause: the leg needs the DESKTOP to itself.
 #
 #   menus_*      shortcut injection is OS-global — the harness
@@ -1252,6 +1290,13 @@ launchers || status=1
 #                fail. Measured 2026-07-31: the rust leg had been green
 #                for weeks and broke the moment a python leg joined it
 #                in the pool.
+#   save_*       the Shell's save dialog is that same OS-global modal
+#                chrome, found the same way — `live_dialog` walks the
+#                DESKTOP for a visible `#32770` and takes the first, so
+#                a picker up beside it eats the typing. It needs no
+#                measurement of its own; it is the same window class on
+#                the same desktop as the line above
+#                (tools/deploy-win.sh's save block says so).
 #
 # So deploy-win must run each of these ALONE, between drains. Pinned
 # structurally: every such `run_suite` call must have `drain_suites` as
@@ -1272,7 +1317,7 @@ def significant(seq):
 bad = []
 seen = 0
 for n, line in enumerate(lines):
-    if not re.match(r"run_suite\s+(menus|filedialog)_", line):
+    if not re.match(r"run_suite\s+(menus|filedialog|save)_", line):
         continue
     seen += 1
     before = significant(lines[:n])
@@ -1280,8 +1325,8 @@ for n, line in enumerate(lines):
     if not before or before[-1] != "drain_suites" or not after or after[0] != "drain_suites":
         bad.append(f"{path}:{n + 1}: {line} lacks the drain/run/drain barrier")
 if seen == 0:
-    bad.append(f"{path}: no run_suite menus_*/filedialog_* leg found "
-               "(both scenes must stay wired)")
+    bad.append(f"{path}: no run_suite menus_*/filedialog_*/save_* leg found "
+               "(all three scenes must stay wired)")
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
 ' "$1"
@@ -1298,9 +1343,16 @@ if printf 'run_suite layout_java\nrun_suite filedialog_python\ndrain_suites\n' \
     echo "check-steps: SELF-TEST FAIL (pooled filedialog leg passed)" >&2
     exit 1
 fi
+# ...and the save family, the third — the one this gate was missing on
+# the day validate-mac already imposed the rule by hand.
+if printf 'run_suite layout_java\nrun_suite save_rust\ndrain_suites\n' \
+    | menu_serial - >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (pooled save leg passed)" >&2
+    exit 1
+fi
 
 out="$(menu_serial tools/deploy-win.sh)" || {
-    echo "check-steps: deploy-win.sh menus/filedialog legs must run serially between drain_suites calls (docs/traps.md — each needs the desktop to itself):" >&2
+    echo "check-steps: deploy-win.sh menus/filedialog/save legs must run serially between drain_suites calls (docs/traps.md — each needs the desktop to itself):" >&2
     echo "$out" >&2
     status=1
 }
@@ -1317,12 +1369,16 @@ out="$(menu_serial tools/deploy-win.sh)" || {
 # parallelizing refactor — or a sweep adding one more language beside
 # it — cannot silently re-pool them. Continuation lines are joined
 # first, because a leg's command usually wraps.
-clipboard_serial() { # path leg_regex barrier_word
+# The family NAME is a parameter because this helper now serves two
+# families with two different reasons (clipboard below, save after it),
+# and a barrier gate whose "nothing matched" message names the wrong
+# scene is a diagnostic that cannot have measured what it prints.
+family_serial() { # path leg_regex barrier_word family
     python3 -c '
 import re
 import sys
 
-path, leg_pattern, barrier = sys.argv[1], sys.argv[2], sys.argv[3]
+path, leg_pattern, barrier, family = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 raw = (sys.stdin.read() if path == "-" else open(path).read()).splitlines()
 lines = []
 buf = ""
@@ -1350,10 +1406,10 @@ for n, line in enumerate(lines):
     if not before or before[-1] != barrier or not after or after[0] != barrier:
         bad.append(f"{path}:{n + 1}: {line[:60]} lacks the {barrier}/run/{barrier} barrier")
 if seen == 0:
-    bad.append(f"{path}: no clipboard leg found (the scene must stay wired)")
+    bad.append(f"{path}: no {family} leg found (the scene must stay wired)")
 print("\n".join(bad))
 sys.exit(1 if bad else 0)
-' "$1" "$2" "$3"
+' "$1" "$2" "$3" "$4"
 }
 
 # Each runner spells its pool differently, so the rule is checked in
@@ -1364,14 +1420,14 @@ WIN_LEG='run_suite clipboard_[a-z]'
 # The guard guards itself: two clipboard legs sharing the pool must
 # fail...
 if printf 'drain\nrun clipboard-rust-swiftui env X\nrun clipboard-python-swiftui env X\ndrain\n' \
-    | clipboard_serial - "$MAC_LEG" drain >/dev/null; then
+    | family_serial - "$MAC_LEG" drain clipboard >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (pooled clipboard legs passed)" >&2
     exit 1
 fi
 # ...a clipboard leg entering a pool that still holds another scene's
 # leg (on wayland the primer would tap that leg's window)...
 if printf 'run layout-java env X\nrun clipboard-rust env X\ndrain\n' \
-    | clipboard_serial - "$MAC_LEG" drain >/dev/null; then
+    | family_serial - "$MAC_LEG" drain clipboard >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (undrained-before clipboard leg passed)" >&2
     exit 1
 fi
@@ -1381,7 +1437,7 @@ fi
 # a barrier that exists in one runner's vocabulary silently exempts
 # every other runner.
 if printf 'run_suite clipboard_rust\nrun_suite clipboard_python\ndrain_suites\n' \
-    | clipboard_serial - "$WIN_LEG" drain_suites >/dev/null; then
+    | family_serial - "$WIN_LEG" drain_suites clipboard >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (pooled deploy-win clipboard legs passed)" >&2
     exit 1
 fi
@@ -1393,12 +1449,63 @@ for spec in "tools/validate-mac.sh|$MAC_LEG|drain" \
     rest="${spec#*|}"
     leg="${rest%%|*}"
     barrier="${rest#*|}"
-    out="$(clipboard_serial "$runner" "$leg" "$barrier")" || {
+    out="$(family_serial "$runner" "$leg" "$barrier" clipboard)" || {
         echo "check-steps: $runner clipboard legs must run ALONE between drains (docs/clipboard-plan.md §0d — one system clipboard per session):" >&2
         echo "$out" >&2
         status=1
     }
 done
+
+# THE SAVE LEGS ARE MUTUALLY EXCLUSIVE ON THE MAC LANE, and the shared
+# thing is the PANEL rather than the scene: macOS remembers a save
+# panel's last directory as a USER PREFERENCE shared by every process,
+# so nine guests opening panels in one pool trample it. Measured
+# 2026-08-10 — a leg asserting its own kaya-save-<pid> directory was
+# shown a SIBLING leg's, and putting the nine legs alone between drains
+# is what raised the mac lane's ceiling to 560s. tools/validate-mac.sh
+# has imposed the rule by hand since that day; this is the wall, which
+# it went without while three older families had one.
+#
+# THE OTHER TWO DESKTOP RUNNERS ARE NOT IN THIS LOOP, and the omission
+# is the rule rather than a gap:
+#
+#   deploy-win  IS covered, one clause up — its save legs ride the
+#               menus/filedialog barrier, because on that lane the
+#               shared thing is the desktop's one modal `#32770`, not a
+#               remembered directory. Adding a second clause here would
+#               state the same requirement twice in two vocabularies.
+#   linux       is DELIBERATELY pooled (tools/linux/run-suites.sh's save
+#               block says why): GTK's save panel is driven over the
+#               PER-LEG accessibility bus, it remembers no cross-process
+#               directory, and each leg's files live under
+#               $TMPDIR/kaya-save-<pid>. A barrier there would be one
+#               that cannot fail for the reason it exists, which is a
+#               bug in the gate (CLAUDE.md invariant 4).
+#
+# So the rule is spelled where the platform imposes it, and the two
+# exclusions are on the record instead of merely absent.
+MAC_SAVE_LEG='run save-[a-z]'
+
+# The guard guards itself: two save legs sharing the pool must fail...
+if printf 'drain\nrun save-rust-swiftui env X\nrun save-python-swiftui env X\ndrain\n' \
+    | family_serial - "$MAC_SAVE_LEG" drain save >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (pooled save legs passed)" >&2
+    exit 1
+fi
+# ...and a save leg entering a pool that still holds another scene's leg,
+# which is the same trample from the other side: the sibling's panel is
+# what wrote the preference this leg is about to read.
+if printf 'run layout-java env X\nrun save-rust-swiftui env X\ndrain\n' \
+    | family_serial - "$MAC_SAVE_LEG" drain save >/dev/null; then
+    echo "check-steps: SELF-TEST FAIL (undrained-before save leg passed)" >&2
+    exit 1
+fi
+
+out="$(family_serial tools/validate-mac.sh "$MAC_SAVE_LEG" drain save)" || {
+    echo "check-steps: tools/validate-mac.sh save legs must run ALONE between drains (docs/save-plan.md, measured 2026-08-10 — macOS shares a save panel's last directory as a user preference across every process, so a pooled leg is shown a sibling's):" >&2
+    echo "$out" >&2
+    status=1
+}
 
 # THE ANDROID LANE IS NOT IN THAT LOOP, AND THE OMISSION IS THE RULE,
 # not a gap somebody should close by reflex. What §0d's correction

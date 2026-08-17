@@ -3,7 +3,7 @@
 Status: LANDED 2026-07-31 — all five backends (§6d Compose, §6e iOS)
 and all eight bindings (§6f), `tools/scenes/filedialog.steps` on every
 runner. The continuation note that tracked the tail of §6 is
-docs/handoff-filedialogs-6d.md, itself spent.
+docs/handoff-filedialogs-6d.md (gone) — spent and deleted 2026-08-17; its durable content lives in docs/traps.md, itself spent.
 
 **WAS BLOCKED ON docs/background-work-plan.md, deliberately**, and that
 block cleared when the post primitive landed 2026-07-28. Working

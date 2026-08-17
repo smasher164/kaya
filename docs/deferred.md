@@ -136,6 +136,27 @@ own the state (see the undo note in this file).
     the signatures with `;` — tools/lib/stage-coverage.py then holds them
     like the rest.
 
+- **No bookmark/persistence machinery: a picked file cannot be reopened
+  across restarts** (deferred by docs/save-plan.md §3, which said
+  "ledger it"; written down here 2026-08-17, which is when someone
+  checked and found the line missing). kaya hands the guest a HANDLE
+  for a file the user chose and the handle dies with the process:
+  nothing in the vocabulary stores a durable reference an app can
+  redeem on its next launch without showing a picker again. The
+  platforms all have the machinery, in THREE different spellings, and
+  that is most of the work — macOS security-scoped bookmarks, iOS a
+  PLAIN bookmark (the scope flag is `API_UNAVAILABLE(ios)`, the trap
+  docs/file-dialogs-plan.md recorded), Android a persistable URI
+  permission taken against the resolver, and on GTK and Windows the
+  path itself, which is exactly why a path cannot be the uniform form.
+  TRIGGER: an app that wants RECENT FILES. docs/editor-plan.md §3 names
+  it as the editor's own first cut, so the trigger is one artifact away
+  rather than hypothetical. What this is NOT, both refused on their own
+  reasons in the same §3: a filesystem API for guests, and a directory
+  picker.
+  KEY: bookmark, persistence, security-scoped, persistable URI, recent
+  files, reopen across restarts
+
 - ~~**Dirty state**~~ — LANDED 2026-08-06, and CLOSED on this entry's own
   terms: all four backend arms are struck below, the window prop has its
   sugar spelling in all eight bindings, `dirty` has a guest in each of
@@ -349,6 +370,29 @@ own the state (see the undo note in this file).
     Proving the `.steps` path end to end is its own piece of work
     (scratchpad/ranges-units.md §8.7 asked for it) and belongs where it
     can be proven on all five lanes.
+
+- **Text ranges are deferred on the ENTRY widget** (deferred by
+  docs/ranges-plan.md D1, which promised "Deferral is recorded in
+  docs/deferred.md with the three measured reasons, not silently";
+  written down here 2026-08-17, when someone checked and found no such
+  line). `highlight_ranges`, `select_range` and `reveal_range` are
+  TEXTAREA-only in the spec, and the sweep behind that (invariant 2's,
+  from the plan's five probe reports) gave three reasons, all measured:
+  - **linux — can't honestly.** An entry's highlight rides ABSOLUTE
+    byte offsets that do not follow edits, and neither reveal nor any
+    geometry is observable over AT-SPI, so a GTK arm could be written
+    but never asserted.
+  - **ios — can't fully.** The entry has three distinct gaps at the
+    iOS floor (the iOS probe's §entry), where all three primitives were
+    affordable on the TEXTAREA through public UIKit API.
+  - **no consumer.** The editor — the named forcing artifact, and the
+    reason ranges exist — is a textarea. Nothing has asked.
+  TRIGGER: an artifact whose decoration lives in a single-line field
+  (validation marking, find-as-you-type in a search box). It arrives
+  with per-platform verdicts already taken, so the work is the linux
+  and iOS answers, not the design.
+  KEY: entry ranges, entry-widget deferral, highlight_ranges,
+  select_range, reveal_range, weak sibling
 
 - **DEFERRED — wayland lane session architecture (researched
   2026-08-03, no trigger yet).** The GTK clipboard work pinned two
@@ -1141,8 +1185,16 @@ own the state (see the undo note in this file).
   keys, and `role` names a standard command with `settings` as its one
   v1 value. DESIGN.md's "Standard commands" and the shortcut policy
   carry the rules; the `commands` scene proves all three in nine
-  languages on every lane. Still open, trigger-gated: roles beyond
-  `settings`, and punctuation keys beyond the admitted set.
+  languages on every lane. ~~Still open, trigger-gated: roles beyond
+  `settings`~~ — the roles half is SHIPPED 2026-08-04: `MENU_ROLES`
+  carries six, and the five past `settings` arrived under this entry's
+  own trigger — `cut`, `copy` and `paste` with the clipboard milestone
+  (2026-08-02), `undo` and `redo` with the undo one (2026-08-04), each
+  reaching all four backends, with tools/check-roles.sh holding the
+  vocabulary and the arms to one line and DESIGN.md's cut list now
+  reading "roles beyond the six". STILL OPEN, trigger-gated:
+  punctuation keys beyond the admitted set — `scene.rs` admits exactly
+  eight and semicolon, quote and grave are absent.
 - **Menus follow-ons.** The command vocabulary LANDED 2026-07-24 —
   both anchors, all four backends, all 8 bindings plus the C floor,
   and the menus scene green on every lane. DESIGN.md's "Menus and the
@@ -1154,9 +1206,20 @@ own the state (see the undo note in this file).
   problem), For-stamped items, `bind_field` labels on context items,
   merging authored items into native text-control menus, a GTK
   hamburger presentation hint, item removal, context-item shortcuts,
-  role-based standard items (including native Settings placement),
-  punctuation shortcut keys, and — only under artifact pressure — a
-  toolbar grammar. One follow-on the section does not carry: iOS has
+  ~~role-based standard items (including native Settings placement)~~,
+  punctuation shortcut keys, and ~~a toolbar grammar, only under
+  artifact pressure~~. TWO OF THOSE HAVE SINCE COME IN. Role-based
+  standard items shipped whole: `settings` with the standard-commands
+  follow-up 2026-07-24, native placement included, then
+  `cut`/`copy`/`paste` 2026-08-02 and `undo`/`redo` 2026-08-04, six
+  roles on four backends. The toolbar trigger was ANSWERED 2026-08-17,
+  and the answer was that no grammar was needed: what the artifacts
+  wanted was desktop presence, which adaptive menu promotion already
+  expresses, so `primary` grew its desktop lowerings and nothing else
+  moved — no record, no prop, no spec hash, no binding spelling.
+  DESIGN's own cut list carries that answer; app-declared toolbar ORDER
+  stays unadmitted under the same trigger.
+  One follow-on the section does not carry: iOS has
   no hardware-keyboard route to the catalog. The interpreter holds
   the shortcut table (the harness verb drives it, and the scene
   proves the dispatch), but nothing binds it to a real iPad keyboard
@@ -1348,12 +1411,26 @@ count, so the saving is measured rather than assumed.
   path as the Go arm does; the cheap guard already exists — a
   `build-id.sh --verify` per built binary, since the id only reaches
   the executable if the archive was really linked in.
-- **guests/go/filedialog/filedialog.go computes its scene directory from a
-  bare `os.TempDir()`** — the same defect the Go clipboard guest had on
-  iOS, where the harness expands `$TMP` to the app's Documents rather
-  than a private container (Rust and Swift both carve this out). It
-  cannot fail today because filedialog is rust-only on the iOS runner;
-  it becomes a real failure the moment that leg is added.
+- ~~**guests/go/filedialog/filedialog.go computes its scene directory from a
+  bare `os.TempDir()`**~~ — FIXED 2026-08-17, together with the doctrine
+  that decides it. The guest now branches in `sceneRoot()` and asks the
+  HOST for the mobile locations through `kaya.Env` — Android's
+  `EXTERNAL_STORAGE`/Documents, iOS's `HOME`/Documents — keeping
+  `os.TempDir` as the DESKTOP fallback only, where the guest owns main
+  and Go's copy of the environment is the host's. Its header used to
+  argue the opposite ("Go's own answer to where is temp"); that argument
+  lost to the measurement behind docs/go-mobile-plan.md D2 — a
+  `-buildmode=c-shared` library is loaded rather than exec'd, so Go's
+  environment is empty forever on Android and `os.TempDir` answers with
+  its hardcoded `/tmp`, which is not a place an Android app may write.
+  Nothing errors; the files just go where nothing looks. The rule is now
+  stated in DESIGN.md's Binding conventions (a guest asks KAYA for
+  platform locations, never the language runtime's snapshot) and
+  tools/check-go-env.sh enforces the shape: a bare `os.TempDir` is red,
+  and it is legal only as the fallback of a function that branches on
+  `runtime.GOOS`. The defect this entry filed — the iOS leg landing on
+  a guest that writes where the picker cannot look — can no longer be
+  written.
 
 
 - **DEFECT — the handle bindings' transaction liveness check tests
@@ -2397,6 +2474,39 @@ interpreter carries slice 1's one real brand lowering
   (d) leave it — the accent family is what every other backend brands
   too. Nothing here is urgent and (d) is a real answer.
 
+## Comments are drowning the code (maintainer, 2026-08-17)
+KEY: comment verbosity, examples readability, war stories, traps pointers
+
+The ruling: a comment describes what the code does or states a constraint
+the code cannot show — in a line or two. It never explains something the
+reader didn't ask, and it never carries the history of how we arrived
+here. The repo's comments have grown into essays, worst in the examples,
+which are the API's public face: a guest should read as ten lines of
+kaya, and today it reads as a page of archaeology with ten lines of kaya
+inside.
+
+The cleanup slice, when scheduled: (1) the rule goes into
+CLAUDE.md/AGENTS.md so every future session writes to it; (2) examples
+first, as their own commit, so the maintainer can calibrate the cut on
+one guest before it sweeps the tree; (3) nothing agents need is lost, it
+MOVES: a comment whose content is a measured finding gets that finding
+into docs/traps.md (if it is not already there) and shrinks to a
+one-line pointer at the trap's name. The walls stay; the war stories
+relocate.
+
+## The template button's caption is not uniform (found 2026-08-17)
+KEY: template zone, button caption, bound source, tpl-surfaces takes-a-source
+
+The eight-binding caption survey (annotated in docs/tpl-props-plan.md)
+found template-zone drift the live zone does not have: a per-row button
+caption is SUGAR in Rust/Go/Java/OCaml/Haskell, FLOOR-ONLY in C#
+(`Tpl.Button(string)`) and Swift (`KayaTpl.button(_:)`), and NOT
+EXPRESSIBLE at all in Python — the "shipped unable to declare it" shape
+again. It is invisible to tools/tpl-surfaces.py because the census asks
+whether a kind HAS a constructor, never whether the constructor takes a
+live source. Closing it: the three bindings level up, and the census
+grows the takes-a-source question so the class stays closed.
+
 ## The typeface scene's depth stubs (Slice 2b mid-flight, expected to close with the fan-out)
 
 The depth landed 2026-08-16: spec (`set_brand_typeface` / `set_typeface`,
@@ -2673,9 +2783,18 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   validate-mac (the string is quoted in reports, so grep before and
   after).
 
-- **GTK's sidebar arm draws no section symbol, so the sidebar rows
-  cannot be asserted by a shared scene** (found 2026-08-17 while landing
-  `expect_section_symbol`). `GtkStackSidebar` binds only the page's
+- ~~**GTK's sidebar arm draws no section symbol, so the sidebar rows
+  cannot be asserted by a shared scene**~~ — CLOSED 2026-08-17 as a
+  RATIFIED PLATFORM DIVERGENCE (maintainer), not as work owed: DESIGN.md's
+  Binding conventions now states it under "Stated platform divergences"
+  — on Linux a sidebar's section rows are text-only, and the
+  section-symbol contract there is carried by the BAR presentation's
+  rows, which the shared scene already asserts on five lanes. So nothing
+  is waiting on a decision; what would reopen it is the GTK re-lowering
+  named at the end of this entry, and the day it lands the scene grows
+  two lines and the carve-out paragraph goes away. The measurement that
+  the ratification rests on, as filed:
+  `GtkStackSidebar` binds only the page's
   TITLE into a GtkLabel and ignores `icon-name` entirely (measured, GTK
   4.18.6 — gtk.rs's `refresh_section_symbols` fact 2), and kaya does not
   hand-build rows inside a component that owns them. The other four

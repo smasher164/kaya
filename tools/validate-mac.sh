@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES. Empty today: styling graduated
@@ -58,10 +58,11 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # flight: protocol + SwiftUI + the Rust binding, mac only. The other
 # three backends decode the record and refuse through depth_stub, which
 # is what holds their lanes' legs off in check-steps and check-stubs.
-# The toolbar (docs/chrome-plan.md C2) is the second one in flight:
-# the `primary` bit's first desktop lowering, mac only, with the other
-# four backends refusing through the depth stub.
-DEPTH_SCENES="typeface toolbar"
+# The toolbar (docs/chrome-plan.md C2) GRADUATED 2026-08-17: all five
+# platforms' arms landed, no backend carries a toolbar depth stub, and
+# the seven other guests exist — so it moved into SCENES above and
+# check-steps demands its legs on this lane like any other scene.
+DEPTH_SCENES="typeface"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 cargo build --locked --lib "${BUILD_EXAMPLES[@]}" || exit 1
@@ -1134,16 +1135,38 @@ run typeface-rust-swiftui env KAYA_SELFTEST=typeface "$RUST_GUESTS"/typeface
 drain
 
 # The toolbar scene: the `primary` bit as real window chrome
-# (docs/chrome-plan.md C2). A DEPTH slice — rust only, mac only — and
-# both assertions read the REAL NSToolbar: the promoted set's presence
-# in the bar (crossed against the promotion list, so a lowering that
-# never attached a toolbar fails naming both numbers) and each button's
-# symbol and enablement. ENABLEMENT IS NOT NSToolbarItem.isEnabled,
-# which stays true for a visibly disabled SwiftUI button — the read goes
-# through the accessibility tree, where the disable actually lands.
+# (docs/chrome-plan.md C2). Both assertions read the REAL NSToolbar: the
+# promoted set's presence in the bar (crossed against the promotion
+# list, so a lowering that never attached a toolbar fails naming both
+# numbers) and each button's symbol and enablement. ENABLEMENT IS NOT
+# NSToolbarItem.isEnabled, which stays true for a visibly disabled
+# SwiftUI button — the read goes through the accessibility tree, where
+# the disable actually lands.
+#
+# Began as a DEPTH slice; the fan-out landed all five backends' arms and
+# the seven other guests on 2026-08-17 and the scene graduated from
+# DEPTH_SCENES into SCENES — check-steps demands these legs now. No C
+# floor guest: guests/c/toolbar.c does not exist and the floor's
+# Makefile SCENES does not name it, which check-steps' sweep_c_floor
+# reads from the other side.
+#
+# POOLED, the styling block's reasoning rather than the save block's:
+# the scene's `click` is in-process, no chord is pressed, no window is
+# closed, and every read is of this leg's own window through its own
+# accessibility tree. Nothing here is session-wide state.
 KAYA_SELFTEST_SCRIPT="$(scene_script toolbar)"
 export KAYA_SELFTEST_SCRIPT
 run toolbar-rust-swiftui env KAYA_SELFTEST=toolbar "$RUST_GUESTS"/toolbar
+run toolbar-python-swiftui env KAYA_SELFTEST=toolbar python3 guests/python/toolbar.py
+run toolbar-go-swiftui env KAYA_SELFTEST=toolbar target/go-guests/kaya-go
+run toolbar-swift-swiftui env KAYA_SELFTEST=toolbar target/swift-guests/toolbar
+run toolbar-csharp-swiftui env KAYA_SELFTEST=toolbar KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run toolbar-ocaml-swiftui env KAYA_SELFTEST=toolbar KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/toolbar.exe
+run toolbar-haskell-swiftui env KAYA_SELFTEST=toolbar "$(hs_bin toolbar)"
+run toolbar-java-swiftui env KAYA_SELFTEST=toolbar KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
 
 # The clipboard scene: one clip in several representations, and the

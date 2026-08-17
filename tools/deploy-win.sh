@@ -22,8 +22,17 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
 fi
 # Deploy milestone-0 artifacts to the Windows VM and run the validations.
 #
-# Usage: tools/deploy-win.sh user@host [--provision] [rust|python|go|csharp|all]
+# Usage: tools/deploy-win.sh user@host [--provision] [rust|python|go|csharp|java|all]
+#        tools/deploy-win.sh user@host <scene>_<lang>  # ONE leg, e.g. menus_java
 #        tools/deploy-win.sh user@host probe=<exe>   # aliveness probe, e.g. probe=entry
+#
+# The <scene>_<lang> family is the parser's real surface (the arms at
+# :72-126, which the clause below holds level with the `all` case's
+# run_suite calls). Every leg this script runs can be run alone —
+# rust/python/go/csharp/java for the breadth scenes, plus the depth
+# slices' rust-only legs and editor_go. Not enumerated here on purpose:
+# a second hand-written list of the same thing is the drift this file
+# already had once.
 #
 # Convention: everything that lands on the VM as a FILE is shipped with
 # scp from this repo (tools/guest/*.cmd and the built artifacts) —

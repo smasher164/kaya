@@ -1037,43 +1037,29 @@ pub trait Stage: Send + 'static {
     /// reader written on a box where someone once expanded a save panel
     /// would hang forever on a fresh one.
     ///
-    /// DEFAULTED, AND THAT IS TEMPORARY. Every other observation here is
-    /// no-default so a backend that forgets fails to COMPILE; these three
-    /// carry a panicking body only because the save milestone landed
-    /// depth-first and gtk.rs / winui/mod.rs are the breadth arms' files.
-    /// The panic is still a wall — the first save leg on those backends
-    /// dies naming the file to edit — but the moment all four backends
-    /// implement them, drop the bodies and end the signatures with `;`
-    /// (tools/lib/stage-coverage.py then holds them like the rest).
-    fn save_dialog_state(&self) -> Option<(String, String)> {
-        unimplemented!(
-            "Stage::save_dialog_state: this backend has no save-dialog read yet \
-             — implement it beside file_dialog_state (crates/kaya/src/gtk.rs, \
-             crates/kaya/src/winui/mod.rs)"
-        )
-    }
+    /// NO DEFAULT, like every other observation here — a backend that
+    /// forgets one of these three fails to COMPILE, and
+    /// tools/lib/stage-coverage.py holds them for GTK, which
+    /// check-targets structurally cannot compile.
+    ///
+    /// They carried a panicking default body from the save milestone,
+    /// which landed depth-first while gtk.rs and winui/mod.rs were still
+    /// the breadth arms' files. That body was a wall of the weaker kind:
+    /// it fired at the first save leg on a backend that had skipped
+    /// them, which is a whole lane run after the fact, and only on a
+    /// lane that runs a save leg at all. Both real impls implement all
+    /// three (gtk.rs, winui/mod.rs), so the bodies are gone and the
+    /// signatures end in `;` — the next backend to arrive is told by
+    /// rustc, at the moment it is written.
+    fn save_dialog_state(&self) -> Option<(String, String)>;
     /// Type a name into the live save dialog's name field, the way a user
     /// would leave it. set_text's tier; whether it took is not assumed —
-    /// expect_save_dialog reads it back. Defaulted, see above.
-    fn set_save_name(&self, name: &str) {
-        let _ = name;
-        unimplemented!(
-            "Stage::set_save_name: this backend cannot type into a save dialog yet \
-             — implement it beside goto_directory (crates/kaya/src/gtk.rs, \
-             crates/kaya/src/winui/mod.rs)"
-        )
-    }
+    /// expect_save_dialog reads it back. No default, see above.
+    fn set_save_name(&self, name: &str);
     /// Press the live save dialog's REAL Save (`save`) or Cancel — the
     /// same controls a user works, so the dialog's own completion runs.
-    /// Defaulted, see above.
-    fn confirm_save(&self, save: bool) {
-        let _ = save;
-        unimplemented!(
-            "Stage::confirm_save: this backend cannot press a save dialog yet \
-             — implement it beside choose_file (crates/kaya/src/gtk.rs, \
-             crates/kaya/src/winui/mod.rs)"
-        )
-    }
+    /// No default, see above.
+    fn confirm_save(&self, save: bool);
     /// Put content on the system clipboard FROM OUTSIDE THIS APP, and
     /// read it back the same way: a child process using whatever the
     /// platform's own clipboard tool is (pbcopy/pbpaste and osascript,

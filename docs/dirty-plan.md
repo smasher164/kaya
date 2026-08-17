@@ -80,8 +80,11 @@ On iOS and Compose the prop applies (it round-trips, it is readable
 back, D5's verb asserts it) and lowers to NO chrome, because the
 platforms have none: their unsaved-state affordances are flow
 (dismiss/back confirmation), which kaya already spells through
-veto_close and navigation. The carve-out is stated here and in
-DESIGN.md's Binding conventions if ratified. The rejected alternative
+veto_close and navigation. The carve-out is stated here and, since
+2026-08-17, in DESIGN.md's Binding conventions under "Stated platform
+divergences", dated to the 2026-08-06 ratification above. (This
+sentence used to end "if ratified"; it was ratified that day and the
+DESIGN paragraph was owed for eleven.) The rejected alternative
 — synthesizing chrome the platform never shows (a title marker on a
 device with no visible title) — fails the "carve-out only where the
 platform cannot express it" test in reverse: it would express what no

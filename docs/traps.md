@@ -2766,6 +2766,8 @@ to ignore it. Every one of these was caught on the first run by
 comparison three steps later, which is the whole reason that guard
 checks the directory before aiming at it.
 
+  SINCE 2026-08-17 the doctrine covers the other half too: a GUEST asks KAYA for platform locations (kaya.Env and siblings), never the language runtime's snapshot — embedded runtimes carry a dead environment copy (measured on Android), so the language's own answer is exactly the one that breaks on phones. check-go-env now catches os.TempDir alongside os.Getenv; the rule is stated in DESIGN.md's settled rules.
+
 ## UI Automation cannot read the Shell's file dialog from a guest
 
 Measured 2026-07-31, after it cost most of a milestone.

@@ -58,14 +58,47 @@ fi
 # replacement is the thing most worth guarding, so the gate also
 # requires it to still exist and still go through C (clause 3 below).
 #
+# THE SECOND RULE, ratified 2026-08-17: A GUEST ASKS KAYA FOR PLATFORM
+# LOCATIONS, NEVER THE LANGUAGE RUNTIME'S SNAPSHOT.
+#
+# `os.TempDir` is the same defect wearing a different name. On unix it
+# IS `Getenv("TMPDIR")` with a hardcoded "/tmp" fallback, so in a
+# c-shared library it answers out of the same empty map — and it answers
+# CONFIDENTLY: "/tmp", which is not a place an Android app may write.
+# The scene's files go where nothing looks and nothing errors. The same
+# is true of every other "where is X" reader Go answers from that copy
+# (UserHomeDir, UserCacheDir, UserConfigDir), so all four are here.
+#
+# IT IS NOT A FLAT BAN, because the desktop arm of a platform switch is
+# the one place the call is right: the two mobile arms return before it,
+# and on a desktop the guest owns main, so Go's copy IS the host's. That
+# is exactly the shape guests/go/{save,editor,clipboard,filedialog}
+# already carry — a `sceneRoot()` that branches on runtime.GOOS, asks
+# kaya.Env for the phone locations (EXTERNAL_STORAGE, HOME) and falls
+# back to os.TempDir. So the rule is STRUCTURAL: a location reader must
+# sit inside a function that both branches on runtime.GOOS and reaches a
+# location through kaya.Env. A BARE one — a scene computing its
+# directory straight out of Go's snapshot — is red. That was
+# guests/go/filedialog/filedialog.go until the day this clause landed,
+# and the file's own header comment argued FOR it.
+#
+# WHY A STRUCTURE AND NOT A NAME. "The function must be called
+# sceneRoot" would be satisfied by renaming, and misses the real
+# property; "os.TempDir may not appear" would delete a correct desktop
+# fallback and push guests toward hardcoding "/tmp" themselves, which is
+# worse. The two things that make the fallback safe are the branch and
+# the host channel, and those are the two things checked.
+#
 # THE SCAN IS A PARSER, NOT A GREP, and that is load-bearing here more
 # than in most gates: every file this rule protects DOCUMENTS the rule,
-# so bindings/go/runtime.go says "os.Getenv" six times in prose. A grep
-# would have to be taught to ignore comments and would then be one
-# clever regex away from ignoring code too. go/parser knows the
-# difference for free, resolves whatever local name the `os` import was
-# given, and skips an identifier that is a local variable rather than
-# the package.
+# so bindings/go/runtime.go says "os.Getenv" six times in prose and
+# filedialog.go now spends a paragraph on os.TempDir. A grep would have
+# to be taught to ignore comments and would then be one clever regex
+# away from ignoring code too. go/parser knows the difference for free,
+# resolves whatever local name the `os` import was given, skips an
+# identifier that is a local variable rather than the package, and can
+# answer "which function is this call in", which the second rule needs
+# and no line-oriented reader has.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -105,17 +138,116 @@ var banned = map[string][]string{
 	"syscall": {"Getenv", "Environ"},
 }
 
-func isBanned(pkg, sel string) bool {
-	for _, s := range banned[pkg] {
-		if s == sel {
+// The LOCATION readers: "where is X" answered out of that same copy.
+// os.TempDir is Getenv("TMPDIR") with a hardcoded fallback; the three
+// User*Dir readers are Getenv("HOME") and its platform siblings. They
+// are not banned outright — see the header — but they may only appear
+// inside a function that branches on the platform and asks the host.
+var locations = map[string][]string{
+	"os": {"TempDir", "UserHomeDir", "UserCacheDir", "UserConfigDir"},
+}
+
+// The import paths whose local names have to be resolved before either
+// rule can read a selector.
+const (
+	kayaPath    = "dev.kaya/bindings/go"
+	runtimePath = "runtime"
+)
+
+func inList(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
 			return true
 		}
 	}
 	return false
 }
 
-// checkFile parses one file and reports every banned read in it.
-// Comments are not nodes, so prose ABOUT the rule costs nothing.
+func isBanned(pkg, sel string) bool { return inList(banned[pkg], sel) }
+
+func isLocation(pkg, sel string) bool { return inList(locations[pkg], sel) }
+
+func watched(pkg string) bool { return banned[pkg] != nil || locations[pkg] != nil }
+
+// pkgSelector answers "is this the selector <local>.<name>, with <local>
+// the PACKAGE and not some variable that happens to share its name".
+// Obj != nil means the parser resolved the identifier to a declaration
+// in this file, i.e. a local.
+func pkgSelector(sel *ast.SelectorExpr, local string) (string, bool) {
+	if local == "" {
+		return "", false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	if !ok || id.Obj != nil || id.Name != local {
+		return "", false
+	}
+	return sel.Sel.Name, true
+}
+
+// branchesOnPlatform: does this function read runtime.GOOS? That is the
+// one thing that makes a desktop fallback a fallback rather than the
+// answer everywhere.
+func branchesOnPlatform(fd *ast.FuncDecl, runtimeLocal string) bool {
+	found := false
+	ast.Inspect(fd, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if name, ok := pkgSelector(sel, runtimeLocal); ok && name == "GOOS" {
+			found = true
+		}
+		return true
+	})
+	return found
+}
+
+// asksHost: does this function reach a location through the HOST's
+// environment rather than Go's copy? Three spellings, and all three are
+// the same channel:
+//
+//	kaya.Env / kaya.LookupEnv   what a guest uses (bindings/go/runtime.go)
+//	C.getenv                    what those two are, one layer down
+//	Env / LookupEnv (unqualified)  the binding calling its own
+//
+// THE UNQUALIFIED FORM IS ONLY ACCEPTED WHERE IT CAN ONLY MEAN THAT: in
+// a file that does not import the kaya binding, i.e. inside the binding
+// itself, which never imports itself. Accepted everywhere, a guest that
+// declared its own `func Env(string) string` reading os.Getenv would
+// satisfy this check with the very defect it exists to catch.
+func asksHost(fd *ast.FuncDecl, kayaLocal string) bool {
+	found := false
+	ast.Inspect(fd, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.SelectorExpr:
+			if name, ok := pkgSelector(v, kayaLocal); ok &&
+				(name == "Env" || name == "LookupEnv") {
+				found = true
+			}
+			if name, ok := pkgSelector(v, "C"); ok && name == "getenv" {
+				found = true
+			}
+		case *ast.CallExpr:
+			if kayaLocal != "" {
+				return true
+			}
+			if id, ok := v.Fun.(*ast.Ident); ok &&
+				(id.Name == "Env" || id.Name == "LookupEnv") {
+				found = true
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// checkFile parses one file and reports every banned read in it, and
+// every location reader that is not the fallback of a platform switch.
+// Comments are not nodes, so prose ABOUT the rules costs nothing.
+//
+// Findings are TAGGED with the rule they broke ("env:" / "loc:"),
+// because the two want different sentences from the caller and a
+// diagnostic that prints the wrong cause is worse than none.
 func checkFile(name string) ([]string, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, name, nil, parser.ParseComments)
@@ -123,38 +255,60 @@ func checkFile(name string) ([]string, error) {
 		return nil, err
 	}
 
-	// Whatever local name each banned import was given here.
+	// Whatever local name each watched import was given here, plus the
+	// two the location rule has to resolve to read a function's shape.
 	locals := map[string]string{}
+	kayaLocal, runtimeLocal := "", ""
 	var found []string
 	for _, imp := range f.Imports {
 		p, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
 			continue
 		}
-		if _, ok := banned[p]; !ok {
-			continue
-		}
 		local := path.Base(p)
 		if imp.Name != nil {
 			local = imp.Name.Name
+		}
+		switch p {
+		case kayaPath:
+			if local != "_" && local != "." {
+				kayaLocal = local
+			}
+		case runtimePath:
+			if local != "_" && local != "." {
+				runtimeLocal = local
+			}
+		}
+		if !watched(p) {
+			continue
 		}
 		switch local {
 		case "_":
 			continue
 		case ".":
-			// A dot-import puts Getenv in this file's own scope, where
-			// no selector expression names it. Refused rather than
-			// analysed: it is not a spelling anything in this tree
-			// uses, and a rule that quietly cannot see a construct is
-			// the failure this whole gate exists for.
+			// A dot-import puts Getenv (and TempDir) in this file's own
+			// scope, where no selector expression names it. Refused
+			// rather than analysed: it is not a spelling anything in
+			// this tree uses, and a rule that quietly cannot see a
+			// construct is the failure this whole gate exists for.
 			pos := fset.Position(imp.Pos())
 			found = append(found, fmt.Sprintf(
-				"%s:%d:%d: dot-import of %q hides the environment readers from this scan",
+				"env: %s:%d:%d: dot-import of %q hides the readers this gate looks for",
 				name, pos.Line, pos.Column, p))
 			continue
 		}
 		locals[local] = p
 	}
+
+	// Every location reference, with the function it sits in. Collected
+	// in one pass and matched to enclosing functions afterwards, so a
+	// reference at PACKAGE level — where nothing can have branched on
+	// the platform — is a case this rule sees rather than one it misses.
+	type locRef struct {
+		pos  token.Position
+		text string
+	}
+	var locRefs []locRef
 
 	ast.Inspect(f, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
@@ -169,14 +323,66 @@ func checkFile(name string) ([]string, error) {
 			return true
 		}
 		pkg, ok := locals[id.Name]
-		if !ok || !isBanned(pkg, sel.Sel.Name) {
+		if !ok {
 			return true
 		}
 		pos := fset.Position(sel.Pos())
-		found = append(found, fmt.Sprintf("%s:%d:%d: %s.%s",
-			name, pos.Line, pos.Column, id.Name, sel.Sel.Name))
+		if isBanned(pkg, sel.Sel.Name) {
+			found = append(found, fmt.Sprintf("env: %s:%d:%d: %s.%s",
+				name, pos.Line, pos.Column, id.Name, sel.Sel.Name))
+		}
+		if isLocation(pkg, sel.Sel.Name) {
+			locRefs = append(locRefs, locRef{pos, id.Name + "." + sel.Sel.Name})
+		}
 		return true
 	})
+
+	// THE SHAPE THAT MAKES A LOCATION READER SAFE, checked per enclosing
+	// function: it branches on runtime.GOOS, and it reaches a location
+	// through the host. Each verdict names which half is missing —
+	// a diagnostic may only print what it measured, and "not the
+	// sceneRoot shape" is a sentence that fits every cause.
+	for _, ref := range locRefs {
+		var fd *ast.FuncDecl
+		for _, d := range f.Decls {
+			decl, ok := d.(*ast.FuncDecl)
+			if !ok || decl.Body == nil {
+				continue
+			}
+			if fset.Position(decl.Pos()).Offset <= ref.pos.Offset &&
+				ref.pos.Offset <= fset.Position(decl.End()).Offset {
+				fd = decl
+				break
+			}
+		}
+		where := fmt.Sprintf("loc: %s:%d:%d: %s", name, ref.pos.Line, ref.pos.Column, ref.text)
+		if fd == nil {
+			found = append(found, where+
+				" at package level, where nothing has branched on the platform")
+			continue
+		}
+		gotGOOS := branchesOnPlatform(fd, runtimeLocal)
+		gotHost := asksHost(fd, kayaLocal)
+		switch {
+		case gotGOOS && gotHost:
+			// The sceneRoot shape: mobile arms answered by the host,
+			// this one reached only on a desktop.
+		case !gotGOOS && !gotHost:
+			found = append(found, fmt.Sprintf(
+				"%s in func %s, which neither reads runtime.GOOS nor asks kaya for a "+
+					"location — this is the answer on EVERY platform", where, fd.Name.Name))
+		case !gotGOOS:
+			found = append(found, fmt.Sprintf(
+				"%s in func %s, which asks kaya for a location but never reads "+
+					"runtime.GOOS, so this is reached on the phones too",
+				where, fd.Name.Name))
+		default:
+			found = append(found, fmt.Sprintf(
+				"%s in func %s, which reads runtime.GOOS but reaches no location "+
+					"through kaya.Env — the platform arms are guesses, not the host's answer",
+				where, fd.Name.Name))
+		}
+	}
 	return found, nil
 }
 
@@ -360,10 +566,12 @@ prose = [ln for ln in text.splitlines()
          if ln.lstrip().startswith("//") and "os.Getenv" in ln]
 print(len(prose))
 # A compilable file whose ONLY mention of the banned readers is prose,
-# with a legitimate os call so the import is not the thing under test.
+# with a legitimate os use so the import is not the thing under test.
+# NOT os.TempDir, which the location rule would flag on its own merits
+# and which would make this clause pass or fail for the wrong reason.
 open(out, "w", encoding="utf-8").write(
     "package p\n\nimport \"os\"\n\n" + "\n".join(prose)
-    + "\nvar _ = os.TempDir\n")
+    + "\nvar _ = os.Stdout\n")
 PY
 )
 echo "check-go-env: self-test 3 lifted $mentions comment line(s) naming os.Getenv"
@@ -411,6 +619,90 @@ elif replacement "$T/s4.go" >/dev/null 2>&1; then
     status=1
 fi
 
+# ------------------------------------------- the location rule's four
+#
+# 5a-5d. EVERY BRANCH OF THE LOCATION VERDICT IS MADE TO PRINT, and the
+#    MESSAGE is what each clause reads, not merely the exit status. This
+#    rule answers "why is that os.TempDir wrong?", and a why-not is
+#    believed: the sentence it prints is what the next reader chases
+#    (CLAUDE.md invariant 3, and kayaOpenPanelWhyNot's two lost
+#    sessions). A branch nobody has seen print is a guess about a state
+#    nobody has reached — so all four are reached here, off the REAL
+#    bytes of the file the rule was written for.
+loc_says() { # doctored-file expected-fragment label
+    if out=$("$T/goenv" -file "$1" 2>&1); then
+        echo "check-go-env: SELF-TEST FAIL — the location rule passed $3." >&2
+        return 1
+    fi
+    case "$out" in
+        *"$2"*) return 0 ;;
+        *)
+            echo "check-go-env: SELF-TEST FAIL — the location rule went red for $3" \
+                "but did not say why in the words this clause expects (\"$2\"). It said:" >&2
+            echo "$out" >&2
+            return 1 ;;
+    esac
+}
+
+# 5a. The BARE call — the defect itself, reconstructed by putting back
+#     exactly the line guests/go/filedialog/filedialog.go carried until
+#     2026-08-17: a scene directory computed straight from Go's snapshot,
+#     in a function that has branched on nothing.
+n=$(doctor guests/go/filedialog/filedialog.go 'filepath.Join(sceneRoot(),' \
+    'filepath.Join(os.TempDir(),' "$T/s5a.go")
+echo "check-go-env: self-test 5a planted $n bare location read(s) in guests/go/filedialog/filedialog.go"
+if [ "${n:-0}" -lt 1 ]; then
+    echo "check-go-env: SELF-TEST FAIL — guests/go/filedialog/filedialog.go no" \
+        "longer computes its directory from sceneRoot(); clause 5a tested nothing." >&2
+    status=1
+elif ! loc_says "$T/s5a.go" "neither reads runtime.GOOS nor asks kaya" \
+    "a bare os.TempDir in the scene's build"; then
+    status=1
+fi
+
+# 5b. The switch WITHOUT the host channel: platform arms that hardcode
+#     paths are guesses, and this is the shape a "simplification" of
+#     sceneRoot would produce.
+n=$(doctor guests/go/filedialog/filedialog.go 'kaya.Env(' 'hardcoded(' "$T/s5b.go")
+echo "check-go-env: self-test 5b planted $n unasked location(s)"
+if [ "${n:-0}" -lt 2 ]; then
+    echo "check-go-env: SELF-TEST FAIL — sceneRoot no longer asks kaya.Env twice" \
+        "(android + ios); clause 5b tested nothing." >&2
+    status=1
+elif ! loc_says "$T/s5b.go" "reaches no location through kaya.Env" \
+    "a platform switch whose arms ask nobody"; then
+    status=1
+fi
+
+# 5c. The host channel WITHOUT the switch: the fallback is then the
+#     answer on the phones too, which is the defect with extra steps.
+n=$(doctor guests/go/filedialog/filedialog.go 'runtime.GOOS' 'platformName' "$T/s5c.go")
+echo "check-go-env: self-test 5c planted $n unbranched location read(s)"
+if [ "${n:-0}" -lt 1 ]; then
+    echo "check-go-env: SELF-TEST FAIL — sceneRoot no longer switches on" \
+        "runtime.GOOS; clause 5c tested nothing." >&2
+    status=1
+elif ! loc_says "$T/s5c.go" "never reads runtime.GOOS" \
+    "a fallback reached on every platform"; then
+    status=1
+fi
+
+# 5d. And PACKAGE LEVEL, where there is no function to have branched at
+#     all — the case a per-function rule would silently skip if it only
+#     ever looked inside functions.
+#     Anchored AFTER the import block (Go refuses a declaration before
+#     one), on the declaration the rule is really about.
+n=$(doctor guests/go/filedialog/filedialog.go 'func sceneRoot() string {' \
+    $'var _ = os.TempDir\n\nfunc sceneRoot() string {' "$T/s5d.go")
+echo "check-go-env: self-test 5d planted $n package-level location read(s)"
+if [ "${n:-0}" -ne 1 ]; then
+    echo "check-go-env: SELF-TEST FAIL — expected exactly one sceneRoot declaration" \
+        "in guests/go/filedialog/filedialog.go, planted $n." >&2
+    status=1
+elif ! loc_says "$T/s5d.go" "at package level" "a location read outside any function"; then
+    status=1
+fi
+
 if [ "$status" != 0 ]; then
     echo "check-go-env: the gate cannot vouch for itself; nothing below ran." >&2
     exit 1
@@ -423,18 +715,42 @@ if ! scan bindings/go guests/go >"$T/found.txt" 2>"$T/err.txt"; then
         cat "$T/err.txt" >&2
         exit 1
     fi
-    echo "check-go-env: Go's own view of the environment is EMPTY in an" \
-        "Android guest — the .so is loaded, not exec'd, so the Go runtime" \
-        "never sees an envp while C's getenv reads the live one. Use" \
-        "kaya.Env / kaya.LookupEnv (bindings/go/runtime.go), which read" \
-        "through C:" >&2
-    cat "$T/found.txt" >&2
-    echo "check-go-env: the failure this prevents is SILENT — an empty" \
-        "KAYA_SELFTEST is not an unknown scene name, it is the default" \
-        "arm, so every Android leg would run milestone2 against another" \
-        "scene's script. See docs/go-mobile-plan.md D2." >&2
+    # ONE SENTENCE PER RULE, over the findings that rule produced. The
+    # two failures share a cause but not a fix — one wants kaya.Env in
+    # place of a call, the other wants the call moved behind a platform
+    # switch — and a gate that printed both paragraphs every time would
+    # send half its readers to the wrong one.
+    grep '^env: ' "$T/found.txt" >"$T/env.txt"
+    grep '^loc: ' "$T/found.txt" >"$T/loc.txt"
+    if [ -s "$T/env.txt" ]; then
+        echo "check-go-env: Go's own view of the environment is EMPTY in an" \
+            "Android guest — the .so is loaded, not exec'd, so the Go runtime" \
+            "never sees an envp while C's getenv reads the live one. Use" \
+            "kaya.Env / kaya.LookupEnv (bindings/go/runtime.go), which read" \
+            "through C:" >&2
+        cat "$T/env.txt" >&2
+        echo "check-go-env: the failure this prevents is SILENT — an empty" \
+            "KAYA_SELFTEST is not an unknown scene name, it is the default" \
+            "arm, so every Android leg would run milestone2 against another" \
+            "scene's script. See docs/go-mobile-plan.md D2." >&2
+    fi
+    if [ -s "$T/loc.txt" ]; then
+        echo "check-go-env: a guest asks kaya for platform locations, never" \
+            "the language runtime's snapshot (ratified 2026-08-17). These" \
+            "readers answer out of the same empty copy on Android, and they" \
+            "answer CONFIDENTLY — os.TempDir returns its hardcoded \"/tmp\"," \
+            "which no Android app may write, so the scene's files go where" \
+            "nothing looks and nothing errors:" >&2
+        cat "$T/loc.txt" >&2
+        echo "check-go-env: the shape that is allowed is the one" \
+            "guests/go/{filedialog,save,editor,clipboard} carry — a" \
+            "sceneRoot() switching on runtime.GOOS, asking kaya.Env for the" \
+            "phone locations (EXTERNAL_STORAGE, HOME), with os.TempDir as" \
+            "the arm only a desktop reaches." >&2
+    fi
     exit 1
 fi
 
 files=$(find bindings/go guests/go -name '*.go' -type f | wc -l | tr -d ' ')
-echo "check-go-env: OK — $files Go files, no reader of Go's copy of the environment"
+echo "check-go-env: OK — $files Go files, no reader of Go's copy of the environment" \
+    "and no platform location taken from it"

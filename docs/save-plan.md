@@ -117,5 +117,7 @@ the two gates, the iOS driver verb. Then the matrix.
   the USER chose; it is not becoming a filesystem library.
 - No bookmark/persistence machinery (reopening a file across restarts
   without re-picking). Real on iOS and Android, wanted by an editor's
-  "recent files", and out of scope here — ledger it.
+  "recent files", and out of scope here — ledgered 2026-08-17, with the
+  three platform spellings and the recent-files trigger, in
+  docs/deferred.md.
 - No directory picker.

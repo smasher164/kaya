@@ -12,11 +12,8 @@
 //
 // THE FILE IS THE GUEST'S OWN, written before anything is shown, so
 // guest and interpreter agree on a path with no runner involvement —
-// they are the same process. `os.TempDir` is Go's own answer to "where
-// is temp", which is what makes the two halves agree without either
-// consulting the other; reading an environment variable directly would
-// be a guess about the platform instead (measured, the hard way, in the
-// Python port).
+// they are the same process, and both compute the place from the same
+// rule (`sceneRoot` below, and the interpreter's `$TMP` expansion).
 //
 // THE READ RUNS OFF THE APP THREAD, which is what Open tells every
 // caller to do: it blocks, and a cloud provider may download the whole
@@ -38,10 +35,74 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	kaya "dev.kaya/bindings/go"
 )
+
+// sceneRoot is the directory the picker and this guest can BOTH see, and
+// it is not the temp directory everywhere.
+//
+// A GUEST ASKS KAYA FOR PLATFORM LOCATIONS, NEVER THE LANGUAGE
+// RUNTIME'S SNAPSHOT (ratified 2026-08-17). This file used to argue the
+// opposite — that `os.TempDir` is "Go's own answer to where is temp",
+// which is what makes guest and interpreter agree without either
+// consulting the other, and that reading an environment variable would
+// be a guess about the platform. That argument lost, and the thing that
+// beat it was measured rather than reasoned: in a `-buildmode=c-shared`
+// library — kaya's Android artifact — Go's runtime never sees an envp,
+// because the .so is LOADED and not exec'd. Go's copy of the
+// environment is empty forever there, while C's getenv(3) reads the
+// live `environ` the host wrote (docs/go-mobile-plan.md D2). Every Go
+// API that answers "where is X" out of that copy answers out of an
+// empty map: `os.TempDir` returns its hardcoded "/tmp", which is not a
+// place an Android app may write. Nothing errors; the scene just puts
+// its files where nothing looks.
+//
+// So each arm names the place that platform's file browser can actually
+// reach, and each asks the HOST through kaya.Env:
+//
+//	android  a provider cannot see an app's private storage, so the
+//	         shared Documents collection is the one directory both
+//	         halves can have (EXTERNAL_STORAGE, set in every app
+//	         process; /sdcard if a device ever omits it).
+//	ios      the document picker browses providers and cannot see the
+//	         app container, but the app's own Documents directory IS
+//	         browsable — the bundle declares UIFileSharingEnabled and
+//	         LSSupportsOpeningDocumentsInPlace (tools/ios/Info.plist.in).
+//	         HOME is the container in every iOS process.
+//	desktop  temp, which is what `$TMP` expands to in the scene script
+//	         (crates/kaya/src/harness.rs, swift/KayaSwiftUI.swift).
+//
+// The desktop arm keeps os.TempDir DELIBERATELY, and it is not the
+// defect above: the two arms before it return first, so Go's empty
+// Android environment never decides where this scene's files go, and on
+// a desktop the guest owns main and Go's copy is the host's. That is
+// also the shape tools/check-go-env.sh now enforces — os.TempDir is
+// legal only as the fallback of a function that branches on
+// runtime.GOOS and asks kaya for the mobile locations; a bare one, the
+// spelling this file shipped until today, is red.
+//
+// A runtime switch rather than per-platform files, the editor guest's
+// reasoning: runtime.GOOS is a compile-time constant, so the dead arms
+// fold away, and every arm is compiled and vetted on the mac lane
+// instead of only on the platform that selects it. The same carve-out
+// in the other guests' spellings: guests/rust/filedialog.rs
+// `scene_root`, guests/go/clipboard/clipboard.go `sceneRoot`.
+func sceneRoot() string {
+	switch runtime.GOOS {
+	case "android":
+		root := kaya.Env("EXTERNAL_STORAGE")
+		if root == "" {
+			root = "/sdcard"
+		}
+		return filepath.Join(root, "Documents")
+	case "ios":
+		return filepath.Join(kaya.Env("HOME"), "Documents")
+	}
+	return os.TempDir()
+}
 
 // App builds the scene and hands it back ready to be served.
 //
@@ -56,7 +117,9 @@ import (
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	dir := filepath.Join(os.TempDir(), "kaya-picked-"+strconv.Itoa(os.Getpid()))
+	// The pid keeps parallel legs from colliding, and the script names
+	// the same place the same way ($TMP/kaya-picked-$PID).
+	dir := filepath.Join(sceneRoot(), "kaya-picked-"+strconv.Itoa(os.Getpid()))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		panic("failed to make the scene's directory: " + err.Error())
 	}

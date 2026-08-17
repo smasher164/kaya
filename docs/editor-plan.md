@@ -80,6 +80,13 @@ platforms, plus artifacts a human can watch.
 2. Legs on the other four lanes; the matrix.
 3. ARTIFACTS: stills and a short film per platform, published — the
    deliverable a remote maintainer can actually inspect.
+   STILLS DONE 2026-08-17, in two published pages that carry the editor
+   on every platform: "kaya: one hex is the whole brand"
+   (https://claude.ai/code/artifact/ff51f6d1-4003-4a5f-b98c-92a47d157452)
+   and "kaya: one bit, five bars"
+   (https://claude.ai/code/artifact/6235dd79-ab1a-4084-a665-01cdba080e1c),
+   both re-shot 2026-08-17 under the modern generation.
+   FILMS: an open question for the maintainer.
 
 ## §3 — not in v1 (recorded, not forgotten)
 

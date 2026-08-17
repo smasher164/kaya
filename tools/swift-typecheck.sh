@@ -55,9 +55,10 @@ for example in guests/swift/*.swift; do
     fi
 done
 # THE INTERPRETER ITSELF — the layer this gate did not cover until
-# 2026-07-25. swift/KayaSwiftUI.swift is ~4300 lines and is the historic
-# miss layer (it re-implements every harness verb and carries private
-# copies of the wire constants), yet its only compiler was
+# 2026-07-25. swift/KayaSwiftUI.swift is 14,182 lines (measured
+# 2026-08-17; it was ~4300 when this paragraph was written) and is the
+# historic miss layer (it re-implements every harness verb and carries
+# private copies of the wire constants), yet its only compiler was
 # build-dylib.sh inside validate-mac. So a broken interpreter reported
 # "swift-typecheck: OK" and only failed minutes later in the heavy lane
 # — measured: `NSObject.accessibilityIdentifier` typechecked green here

@@ -183,6 +183,7 @@ everywhere; only the floor spelling moves.
   with zero hits; the first guest that needs a bound caption hits the
   sweep, adds an exemption naming this paragraph, and that is the signal
   to build the sugar. Recorded so the pothole is a signpost.
+  VERIFIED 2026-08-17, all eight bindings surveyed: every live-zone button caption is a plain string and every sibling label constructor binds — per-kind absence, uniform. The TEMPLATE zone is not uniform (sugar in five, floor-only in C#/Swift, inexpressible in Python) — ledgered as its own entry.
 
 ### F6 — loose ends from the reports, fixed in passing
 

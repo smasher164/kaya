@@ -382,6 +382,42 @@ interpreter compares `utf8` views (kayaBytesEqual). Ill-formed
 platform text (a lone surrogate in a UTF-16 language) cannot reach a
 comparison — the FFI boundary repairs it before it exists to kaya.
 
+**Stated platform divergences.** Uniform semantics is the invariant, so
+the places where a platform genuinely cannot draw what the others draw
+are recorded here, once, rather than re-discovered per binding or left
+in a backend comment nobody reads. Neither of these changes what a
+program means or what it emits: the prop applies everywhere, reads back
+everywhere, and diverges only in what the host puts on screen.
+
+- **The dirty marker draws no chrome on the phones (ratified
+  2026-08-06; docs/dirty-plan.md D4).** `dirty` applies on all five
+  backends and `expect_dirty` reads it back on all five, but iOS and
+  Compose lower it to nothing, because a phone window has no chrome to
+  carry it — where macOS has `isDocumentEdited` and the close button's
+  dot, WinUI the leading `*` in the rendered caption, and GTK a bullet
+  beside the header bar's title, a phone has no title bar at all. The
+  platforms' own unsaved-work affordance there is a FLOW, the dismiss
+  or back confirmation, which kaya already spells with `veto_close`
+  and the navigation vocabulary. Synthesizing a marker the platform
+  never shows is the rejected alternative: it fails the carve-out test
+  in reverse, expressing what no native app expresses.
+- **A Linux sidebar's section rows are text-only (ratified
+  2026-08-17).** A section's `symbol` reaches every backend's own
+  catalog and every arm draws it, except GTK's SIDEBAR presentation:
+  `GtkStackSidebar` binds only the page's title into a `GtkLabel` and
+  ignores `icon-name` entirely (measured on GTK 4.18.6 — gtk.rs's
+  `refresh_section_symbols`, fact 2), and kaya does not hand-build rows
+  inside a component that owns them. So on Linux the section-symbol
+  contract is carried by the BAR presentation's rows, which do draw it,
+  and that is where the shared scene asserts — above the phones' cut,
+  so five lanes read it where a sidebar assertion would have reached
+  three and been red on Linux forever (scenes are shared verbatim,
+  invariant 6). Nothing else diverges: the read and the verb are
+  written for both arms on every other backend, macOS's
+  `NavigationSplitView` sidebar included and measured, so the day GTK's
+  lowering moves to `AdwViewStack` + `AdwViewSwitcher` the scene grows
+  two lines and this paragraph goes away.
+
 A cross-language style guide is a versioned deliverable due before v1. The
 rules that keep bindings mutually recognizable have to be written down
 somewhere; Wayland ships protocol conventions for the same reason. Settled
@@ -642,7 +678,10 @@ rules so far:
   explicitly). The vocabulary is one enum row per verb, closed under
   the same admission policy as the binding transforms: each verb
   admitted by a real artifact (clear and focus by the entry form;
-  scrollTo waits for a long list), never speculatively — and never a
+  scrollTo waits for a long list — the TEXT half of that instinct
+  shipped separately as `reveal_range`, kind 40, 2026-08-07, which
+  scrolls a textarea range into view; the list half stays deferred on
+  its own trigger), never speculatively — and never a
   general call-a-method escape hatch, which is the door to the
   imperative API this design exists to avoid. Addressing splits the
   failure modes: a live-zone target can only vanish by the guest's own
@@ -700,6 +739,17 @@ rules so far:
   lives and loop survival is the guest's own choice. Every binding
   carries the same negative test — abort mid-handler: mirror restored,
   nothing shipped, next dispatch works (tools/check-abort.sh).
+- A guest asks KAYA where the platform keeps things — `kaya.Env` and
+  its siblings, in every binding — and never the language runtime's
+  own environment snapshot. An embedded runtime carries a DEAD COPY:
+  Go fills `runtime.envs` from the envp handed to the process entry,
+  and a `-buildmode=c-shared` library the host loads never gets one, so
+  on Android `os.Getenv` is empty forever while C's `getenv(3)` reads
+  the live table (measured 2026-08-07 in a real app process). The
+  failure is silent rather than loud — an empty `KAYA_SELFTEST` is not
+  an unknown scene name, it is the default arm — which is why
+  tools/check-go-env.sh holds the rule as static text for the one
+  language whose hosting shape reaches it today.
 
 ## Layout
 
@@ -780,6 +830,16 @@ The known normalization worklist:
   number, 540×330 — SwiftUI's existing default, adopted by AppKit,
   GTK, and WinUI in the same slice, sized so the grow scene's
   smallest track stays ~63pt, clear of GTK's 34pt control minimum.
+- A container's own inset, the root inset one level down. Settled
+  2026-08-12 (`5e650a0`, WIDGET_PROPS `inset` (17), F64 in DIP, uniform
+  on all four sides): space between a container's bounds and its
+  children, carried by exactly the kinds `spacing` is — a leaf has no
+  children to hold away from its edge. It is LAYOUT, not appearance, so
+  it joins grow/spacing/align rather than the brand tier. The first
+  full-bleed app is what forced it: the editor's window `inset` of 0 put
+  the buffer on the window edge as designed and took the status row and
+  the find bar with it, and no prop could give those chrome rows their
+  margin back.
 - Alignment normalized to one container-level enum prop (ratified
   2026-07-20). `align` sets where children sit on the container's
   CROSS axis: `start` (the default — today's leading/top), `center`,
@@ -1364,7 +1424,10 @@ and Windows hand back a name for a file nobody has made, and the core
 absorbs that rather than the guest or a fourth file mode.
 
 Still deferred, each with a stated reason rather than for lack of time:
-directory selection waits for an artifact that needs it; and
+directory selection waits for an artifact that needs it;
+BOOKMARK/PERSISTENCE machinery (reopening a picked file across app
+restarts) waits for the recent-files artifact, ledgered 2026-08-17 with
+its three platform spellings; and
 EXPLICIT handle release waits for a caller who needs it, because an
 unreleased handle holds a URL and a string rather than anything the
 kernel counts — the resource that made eager opening untenable is
@@ -1598,7 +1661,9 @@ The ratified shape:
   `icon` (Blob, the blob channel — a tab bar without icons is not the
   platform's real thing), and `symbol` (the semantic icon name, added
   2026-08-16 BESIDE the Blob rather than instead of it — see "Icons
-  want names, not bytes").
+  want names, not bytes"). The one presentation that draws no symbol is
+  GTK's sidebar, stated under "Stated platform divergences" in Binding
+  conventions.
 - **Presentation is a WINDOW prop**, `sections_presentation`
   (enum: `auto | bar | sidebar`), declared beside the sections it
   presents — scoped to the hosting window (the GROUP is the unit; no
@@ -2234,7 +2299,18 @@ control has a caption, AUTHORED names where it draws nothing readable —
 and that a named group's children stay individually reachable. All five
 backends produce byte-identical strings.
 
-## Brand identity and the styling ceiling
+## Brand identity and the styling ceiling (landed 2026-08-12 to 2026-08-16)
+
+Everything admitted below shipped on all five platforms: the accent
+slot, the semantic `role` tier and the window `inset` (`55f1873`,
+2026-08-12), the per-container `inset` beside it (`5e650a0`, same day),
+macOS yielding to a declared accent (`efcfcc7`, 2026-08-12), the brand
+applied at every root rather than the primary one (`d94e66f`,
+2026-08-16), the twenty symbol names (`c94da13`, 2026-08-16) and the
+brand typeface (`31ace6b`, 2026-08-16). docs/styling-plan.md is the
+working record. The section keeps its admission voice on purpose —
+"ADMITTED" is what each verdict WAS, and the argument for the ceiling is
+what outlives the milestone.
 
 The dressed control floor answers one question — what should a *button*
 look like — and answers it well: backends normalize, there is no styling
@@ -2557,7 +2633,11 @@ App to core (content for the future, rules for the gaps):
 - Command log: one-shot imperatives. Two are BUILT (`CommandKind`):
   `focus()` and `clear()`. `scrollTo()` is designed and deferred (it
   wants a long-list scene; docs/deferred.md), and closing a window is
-  not a command at all — `destroy_window` is a transaction op.
+  not a command at all — `destroy_window` is a transaction op. The TEXT
+  half of the scrollTo instinct did ship, elsewhere in the vocabulary:
+  `reveal_range` (kind 40, 2026-08-07) scrolls a textarea range into
+  view as a transaction record rather than a command, and it is the
+  LIST half that stays deferred on its trigger.
 - Content buffers: templates and signal writes (keep-latest per signal),
   row data, drawn frames and display lists, audio samples. The slow side
   works ahead of demand and the freshest data wins (sequential-ahead for
