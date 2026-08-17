@@ -29,6 +29,7 @@ let () =
 
   build app (fun () ->
      let notes = collection () in
+     let heads = collection () in
 
      let root =
        column
@@ -55,6 +56,31 @@ let () =
               back. *)
            each notes (fun () ->
               Tpl.(entry ~a11y_id_field:element ~a11y_label_field:element ()));
+           (* THE STAMPED STYLING PROPS, and a SECOND collection rather
+              than two more widgets in the first: [expect_ax] addresses
+              the real accessibility tree by AUTHORED IDENTIFIER and
+              refuses an ambiguous one, and a scalar row has exactly one
+              field to spend on an id — so a second readable stamped
+              element needs its own strings.
+
+              BOTH ARE CONSTANTS, and this zone spells a constant the
+              way it always has, by the labeled argument's bare name:
+              [~role] beside [~bind_field], [~inset] on the container.
+              Neither takes a [_field] flavor, deliberately — what a
+              copy MEANS and how far its prototype holds children off
+              its edge are facts about the PROTOTYPE, not about the
+              row's data ([~accepts]'s rule, one prop over).
+
+              ONE TEMPLATE SURFACE HERE, unlike Rust and Java: OCaml's
+              template zone is [module Tpl] and nothing else, since
+              [Tpl.for_each] hands back a plain node rather than a row
+              trace with methods of its own. So both props are spelled
+              on the one surface and there is no forward to prove. *)
+           each heads (fun () ->
+              Tpl.(
+                row ~inset:8.0
+                  [ label ~role:Heading ~bind_field:element ~a11y_id_field:element ]
+                  ()));
          ]
          ()
      in
@@ -65,6 +91,8 @@ let () =
         name it hands back: [ignore] is OCaml's spelling for an insert
         made for effect. *)
      ignore (insert_fresh notes (Str "First note"));
-     ignore (insert_fresh notes (Str "Second note")));
+     ignore (insert_fresh notes (Str "Second note"));
+     ignore (insert_fresh heads (Str "Heading one"));
+     ignore (insert_fresh heads (Str "Heading two")));
 
   exit (run app)

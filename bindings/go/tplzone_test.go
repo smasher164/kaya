@@ -7,6 +7,7 @@ package kaya
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"os"
 	"regexp"
 	"sort"
@@ -144,10 +145,12 @@ func templateRecords(t *testing.T, body func(*Tpl)) [][]byte {
 type setProp struct {
 	widget       uint64
 	prop, source uint32
-	tag          uint32 // const: the value type it rode as
-	text         string // const, when that type is a string
-	signal       uint64 // signal
-	level, field uint32 // element
+	tag          uint32  // const: the value type it rode as
+	text         string  // const, when that type is a string
+	i64          int64   // const, when that type is an integer
+	f64          float64 // const, when that type is a double
+	signal       uint64  // signal
+	level, field uint32  // element
 }
 
 // decodeSetProp reads the record rather than re-calling the helper that
@@ -170,10 +173,23 @@ func decodeSetProp(t *testing.T, rec []byte) setProp {
 		// The tag is part of the claim: the four string props ride a
 		// ValueStr, and a prop that reached the wire as some other type
 		// would be refused by the root rather than misread here.
+		//
+		// AND THE VALUE ITSELF, for the numeric tags. A setter that
+		// forwards to the right emitter but drops its argument — sends
+		// the zero, or the wrong one of two adjacent parameters — is
+		// the failure the prop number cannot see, and role's whole
+		// vocabulary is three small integers where 0 means "no role at
+		// all". The string props already pin their text here; these are
+		// the same claim one tag over.
 		p.tag = binary.LittleEndian.Uint32(rec[24:])
-		if p.tag == ValueStr {
+		switch p.tag {
+		case ValueStr:
 			n := binary.LittleEndian.Uint32(rec[28:])
 			p.text = string(rec[32 : 32+n])
+		case ValueI64:
+			p.i64 = int64(binary.LittleEndian.Uint64(rec[32:]))
+		case ValueF64:
+			p.f64 = math.Float64frombits(binary.LittleEndian.Uint64(rec[32:]))
 		}
 	case SourceSignal:
 		p.signal = binary.LittleEndian.Uint64(rec[24:])
@@ -277,7 +293,26 @@ func TestTemplatePropsCarryTheirOwnPropAndSource(t *testing.T) {
 		// alone.
 		{"SetGrow", func(_ *Tx, tp *Tpl, n Node) setProp {
 			tp.SetGrow(n, 1)
-			return setProp{widget: n.id, prop: PropGrow, source: SourceConst, tag: ValueF64}
+			return setProp{widget: n.id, prop: PropGrow, source: SourceConst,
+				tag: ValueF64, f64: 1}
+		}},
+		// THE TWO STYLING PROPS, and the pair is exactly why this table
+		// decodes rather than re-calls: role and inset are adjacent
+		// integers in one PROPS table (16 and 17), both const, both one
+		// emit line apart on *Tpl — so SetInset reaching for TxSetRole
+		// would compile, record, stamp, and give a stamped row an
+		// emphasis of 8 instead of a margin. The prop NUMBER and the
+		// value TAG together are what tell them apart, and the tag is
+		// the half that also catches a role sent as a float.
+		{"SetRole", func(_ *Tx, tp *Tpl, n Node) setProp {
+			tp.SetRole(n, RoleHeading)
+			return setProp{widget: n.id, prop: PropRole, source: SourceConst,
+				tag: ValueI64, i64: RoleHeading}
+		}},
+		{"SetInset", func(_ *Tx, tp *Tpl, n Node) setProp {
+			tp.SetInset(n, 8)
+			return setProp{widget: n.id, prop: PropInset, source: SourceConst,
+				tag: ValueF64, f64: 8}
 		}},
 	}
 
@@ -411,11 +446,11 @@ func TestEveryTemplatePropReachesTheSealedSurfaces(t *testing.T) {
 	// THE READER IS WATCHED FIRST. A pattern that stopped matching the
 	// base surface would find no props, demand nothing of either sealed
 	// surface, and agree with everything.
-	if n := len(props(base, baseDecl)); n < 8 {
-		t.Fatalf("found %d prop writes on *Tpl, fewer than the 8 the zone is "+
-			"known to carry (grow and accepts as constants, the a11y trio in "+
-			"both flavors) — the pattern has stopped seeing the surface it "+
-			"exists to compare against", n)
+	if n := len(props(base, baseDecl)); n < 10 {
+		t.Fatalf("found %d prop writes on *Tpl, fewer than the 10 the zone is "+
+			"known to carry (grow, accepts, role and inset as constants, the "+
+			"a11y trio in both flavors) — the pattern has stopped seeing the "+
+			"surface it exists to compare against", n)
 	}
 
 	for _, s := range []struct{ what, src, decl string }{

@@ -2360,11 +2360,69 @@ public final class KayaApp {
             return t.radio(options, selected);
         }
 
+        // THE LEVEL-TAKING BINDS. The constructors above bind at level
+        // 0 — this row's own element — so these are the only way to read
+        // an OUTER row's field from a nested template, and the a11y
+        // three below (bindA11yIdField and its siblings) were forwarded
+        // while these five were not. That left one mechanism half
+        // present: a guest inside a nested for-statement could name the
+        // outer row's field for a stamped node's accessibility id and
+        // not for its text, its checked state, its image source or its
+        // value. The asymmetry was drift, not design.
+
+        /** Bind this row's copy of that node's text to the element of an
+         * enclosing For, {@code level} Fors up (0 = nearest)
+         * ({@link Tpl#bindTextElement}). */
+        public void bindTextElement(Node n, int level) {
+            t.bindTextElement(n, level);
+        }
+
+        /** …and to one FIELD of that element, the String token pinning
+         * the pairing at compile time ({@link Tpl#bindTextField}). */
+        public void bindTextField(Node n, int level, KayaRecords.Field<String> f) {
+            t.bindTextField(n, level, f);
+        }
+
+        /** An outer row's Boolean field as this copy's checked state
+         * ({@link Tpl#bindCheckedField}). */
+        public void bindCheckedField(Node n, int level, KayaRecords.Field<Boolean> f) {
+            t.bindCheckedField(n, level, f);
+        }
+
+        /** An outer row's byte[] field as this copy's image source
+         * ({@link Tpl#bindSourceField}). */
+        public void bindSourceField(Node n, int level, KayaRecords.Field<byte[]> f) {
+            t.bindSourceField(n, level, f);
+        }
+
+        /** An outer row's Double field as this copy's slider position,
+         * progress fraction or selected index — a Double token and only
+         * ever a Double one ({@link Tpl#bindValueField} states why). */
+        public void bindValueField(Node n, int level, KayaRecords.Field<Double> f) {
+            t.bindValueField(n, level, f);
+        }
+
         /** One of this row's nodes' flex weight — a Node carries no
          * transaction, so a setter after construction is the spelling
          * rather than a chain ({@link Tpl#setGrow}). */
         public void setGrow(Node n, double weight) {
             t.setGrow(n, weight);
+        }
+
+        /** What this row's copy of that node MEANS — semantic emphasis,
+         * a constant describing the prototype ({@link Tpl#setRole}).
+         * The "delete <that row's title>" button is this zone's forcing
+         * case: a stamped destructive action was declarable in no
+         * language until the template zone could spell the prop. */
+        public void setRole(Node n, Role role) {
+            t.setRole(n, role);
+        }
+
+        /** How far this row's copy of that container holds its children
+         * off its own edge ({@link Tpl#setInset}) — a constant, and
+         * container kinds only. */
+        public void setInset(Node n, double pad) {
+            t.setInset(n, pad);
         }
 
         /** One of this row's nodes' accessibility identifier
@@ -2433,6 +2491,31 @@ public final class KayaApp {
          * nested-instance shape. */
         public Collection collection() {
             return t.collection();
+        }
+
+        /**
+         * A When inside this row's template: the subtree stamps when the
+         * signal is true and unstamps when it goes false
+         * ({@link Tpl#when(Signal, Consumer)}).
+         *
+         * <p>FORWARDED BECAUSE THE WRONG ONE IS IN REACH. A nested For
+         * needs no forward — {@link Collection#rows()} opens its trace
+         * off the ambient transaction, which is how a for-statement
+         * nests today — but a When has no statement-level spelling at
+         * all, and the {@code tx.when} a guest would reach for instead
+         * mints a LIVE widget id where this zone needs a template node
+         * id. That emits the wrong id space with nothing to say so, so
+         * the reachable spelling has to be the right one.
+         */
+        public Node when(Signal<Boolean> s, Consumer<Tpl> body) {
+            return t.when(s, body);
+        }
+
+        /** A When whose body returns the handles it declared, for the
+         * same reason {@link Tpl#forEach} has that arity: a Java lambda
+         * cannot assign a captured local. */
+        public <R> Stamped<Node, R> when(Signal s, java.util.function.Function<Tpl, R> body) {
+            return t.when(s, body);
         }
 
         /** Attach a live-built context catalog to one of this row's
@@ -4102,6 +4185,39 @@ public final class KayaApp {
          */
         public void setGrow(Node n, double weight) {
             tx.emit(KayaWire.txSetGrow(n.id, weight));
+        }
+
+        /**
+         * What a stamped copy MEANS — semantic emphasis, never
+         * appearance, the blueprint twin of
+         * {@link Tx#setRole(Widget, Role)}.
+         *
+         * <p>A CONSTANT, not a source, for {@link #setAccepts}'s reason:
+         * what a copy means is a fact about the PROTOTYPE, not about the
+         * row's data. The root refuses a role on a kind it does not fit
+         * at DECLARE time — before a single row stamps, naming both the
+         * role and the kind — so there is no type here to say so, exactly
+         * as there is none for {@link #setA11yHint}.
+         */
+        public void setRole(Node n, Role role) {
+            tx.emit(KayaWire.txSetRole(n.id, role.wire));
+        }
+
+        /**
+         * A stamped CONTAINER's own padding, in DIP — the window inset
+         * one level down, the same number {@link Tx#setInset} spells in
+         * the live zone.
+         *
+         * <p>THE FORCING CASE IS A STAMPED ROW: a find bar stamped from a
+         * template sat flush against a full-bleed window's edge while the
+         * live status row beside it inset, because this zone carried
+         * exactly one layout prop ({@link #setGrow}). Const for
+         * {@link #setRole}'s reason — a prototype's margin describes the
+         * prototype — and container kinds only, which the root says at
+         * declare time.
+         */
+        public void setInset(Node n, double pad) {
+            tx.emit(KayaWire.txSetInset(n.id, pad));
         }
 
         // THE ACCESSIBILITY PROPS, one setter per source. They take the

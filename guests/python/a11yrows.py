@@ -62,4 +62,31 @@ with app.window():
         notes.insert_fresh("First note")
         notes.insert_fresh("Second note")
 
+        # THE STAMPED STYLING PROPS. A second collection rather than two
+        # widgets in the first, because expect_ax addresses the tree by
+        # IDENTIFIER and refuses an ambiguous one — a scalar row has one
+        # field to spend on an id, so a second readable copy needs its
+        # own strings.
+        #
+        # BOTH PROPS ARE CONST, here and in every binding: what a copy
+        # MEANS, and how far its prototype holds its children off its
+        # edge, are facts about the PROTOTYPE and not about the row
+        # (`accepts`'s rule).
+        #
+        # AND BOTH COST PYTHON NOTHING, which is this arm's whole
+        # finding. `role` is a method on `_Handle`, the base `Widget` and
+        # `Node` share, so the call that styles a live label is the call
+        # that styles a blueprint one. `inset` is the `inset=` argument
+        # every container constructor already takes, and a constructor
+        # inside a For hands back a Node — `_alloc_widget_or_node` is the
+        # only thing in the binding that reads `_tpl_depth`. There is no
+        # second template surface to forward to, so this scene is Python
+        # exercising a zone it could already spell, not a new one.
+        heads = kaya.collection()
+        for head in heads:
+            with kaya.row(inset=8):
+                kaya.label(bind=head).role(kaya.Role.HEADING).a11y_id(head)
+        heads.insert_fresh("Heading one")
+        heads.insert_fresh("Heading two")
+
 sys.exit(app.run())

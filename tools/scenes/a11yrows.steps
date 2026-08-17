@@ -30,3 +30,27 @@
 # deduplicates — it is just not a thing this verb can read back.
 expect_ax entry#0 "field/First note"
 expect_ax entry#last "field/Second note"
+# THE STAMPED STYLING PROPS (docs/styling-plan.md D3/D4), the second
+# collection's business. Until 2026-08-17 the template zone carried
+# neither: a stamped "Delete" button could not be declared destructive
+# in any language, and the editor's find bar — a STAMPED row — sat
+# flush against a full-bleed window while the live status row beside it
+# insets. Both are read here from the same place the live scene reads
+# them, on a widget that only exists because a row stamped it.
+#
+#   - `heading` is the role with a real-tree observable on every
+#     platform (the reason styling.steps freezes it and not the other
+#     two), so a stamped copy's role is asserted the same way a live
+#     one is — and this time the element the read lands on was never
+#     authored, only stamped.
+#   - the ids are element-sourced for the entries' reason: expect_ax
+#     addresses the real tree BY IDENTIFIER and refuses an ambiguous
+#     one, so the second collection carries its own strings and no id
+#     in this scene is shared.
+expect_ax label#0 "heading/Heading one"
+expect_ax label#last "heading/Heading two"
+# The stamped container's own padding, measured the way styling.steps
+# measures the window's — the halved gap between the row's outer extent
+# and the offer inside it, RELATIVE because absolute offers cannot be
+# byte-frozen across platforms.
+expect_inset row#0 8

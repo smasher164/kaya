@@ -24,6 +24,7 @@ let app = KayaApp()
 
 app.build { tx in
     let notes = tx.collection()
+    let heads = tx.collection()
     let root = tx.column {
         tx.each(notes) { t in
             // BOTH PROPS ELEMENT-SOURCED. The label is the point — a
@@ -41,6 +42,34 @@ app.build { tx in
             t.setA11yId(field, KayaField<String>.element)
             t.setA11yLabel(field, KayaField<String>.element)
         }
+
+        // THE STAMPED STYLING PROPS. A second collection rather than two
+        // widgets in the first, because expect_ax addresses the tree by
+        // IDENTIFIER and refuses an ambiguous one — a scalar row has one
+        // field to spend on an id, so a second readable copy needs its
+        // own strings.
+        //
+        // Both props are CONST here and const in every binding: what a
+        // copy MEANS and how far its prototype holds its children off its
+        // edge are facts about the prototype, not about the row's data
+        // (`setAccepts`'s rule).
+        //
+        // ONE SURFACE, and unlike Rust that is the whole zone rather than
+        // a choice. Swift's second template surface is the GENERATED
+        // per-record `<Rec>Row`, so it exists only over a record
+        // collection and not over this scalar one; and it hands out its
+        // `KayaTpl` as `row.t` (guests/swift/undo.swift reaches the zone
+        // that way), so every prop is as reachable from `for row in rows`
+        // as it is from here. Rust's `Row` and C#'s `<Rec>Row` keep
+        // theirs private, which is why those two must forward by hand.
+        tx.each(heads) { t in
+            let bar = t.row {
+                let title = t.label(KayaField<String>.element)
+                t.setRole(title, .heading)
+                t.setA11yId(title, KayaField<String>.element)
+            }
+            t.setInset(bar, 8)
+        }
     }
     // OUTSIDE THE BUILDER, BEFORE THE MOUNT. An insert is not a child,
     // so it has no place among the container's declarations; putting it
@@ -56,6 +85,8 @@ app.build { tx in
     // what @discardableResult permits.
     tx.insertFresh(notes, .str("First note"))
     tx.insertFresh(notes, .str("Second note"))
+    tx.insertFresh(heads, .str("Heading one"))
+    tx.insertFresh(heads, .str("Heading two"))
     tx.mount(root)
 }
 

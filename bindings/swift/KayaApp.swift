@@ -3637,6 +3637,43 @@ final class KayaTpl {
         tx.tx.setAccepts(n.id, kayaAcceptList(kinds))
     }
 
+    /// What a stamped copy MEANS — the template twin of
+    /// `KayaAppTx.setRole`. Semantic emphasis, never appearance, so a
+    /// stamped "Delete" button inside a For can finally be declared
+    /// destructive; until this existed it could be declared so in no
+    /// language.
+    ///
+    /// CONST ONLY, `setAccepts`'s rule and its reason: what a copy means
+    /// is a fact about the PROTOTYPE, not about the row's data. There is
+    /// no signal overload and no `KayaField` one, and that is parity
+    /// rather than a cut — no zone in any binding offers a dynamic
+    /// spelling.
+    ///
+    /// The kind restriction is the ROOT'S, not this type's: a role on a
+    /// kind it does not fit dies in `check_prop` at DECLARE time, before
+    /// a single row stamps, in the same sentence naming both the role and
+    /// the kind that the live zone gets (crates/kaya/src/scene.rs).
+    func setRole(_ n: KayaNodeHandle, _ role: KayaRole) {
+        tx.tx.setRole(n.id, role.rawValue)
+    }
+
+    /// A stamped CONTAINER's own padding, in DIP between its bounds and
+    /// its children — the template twin of `KayaAppTx.setInset`, and the
+    /// same number the window's `inset:` spells two levels up.
+    ///
+    /// THE FORCING CASE IS A STAMPED ROW. The editor's status row is live
+    /// and insets; its find bar is a copy stamped from a template and sat
+    /// flush against a full-bleed window's edge, because this zone
+    /// carried exactly one layout prop (`setGrow`) and nothing could give
+    /// a stamped row its margin back.
+    ///
+    /// Const for `setRole`'s reason: how far a prototype holds its
+    /// children off its edge describes the prototype. Containers only,
+    /// and the root says so at declare time.
+    func setInset(_ n: KayaNodeHandle, _ pad: Double) {
+        tx.tx.setInset(n.id, pad)
+    }
+
     /// Bind a label's text to one field of the element; KayaField<String>
     /// only — the token pins the type at compile time.
     func bindTextField(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<String>) {

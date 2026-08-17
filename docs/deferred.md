@@ -2269,24 +2269,55 @@ the seven, as a sweep with a gate clause — never one binding at a time
 left wide meanwhile: narrowing it would need an artificial wall in the
 one binding whose design makes the uniform width free.
 
-## tools/tpl-surfaces.py sees constructors, not props — three follow-ups
+## ~~tools/tpl-surfaces.py sees constructors, not props — three follow-ups~~
+
+CLOSED 2026-08-17 by the template role/inset slice, which is what made
+them real: the census had to grow prop awareness or the new surface would
+ship unswept, which is the exact defect class the census exists for.
 
 Opened 2026-08-11. The census's zone readers match constructor
 signatures, so the props slice's surfaces are held by check-sugar-surface
 clauses and per-binding tests instead. Three specific gaps the fan-out
 reports named:
 
-- **Go**: the reader's pattern sees neither a digit in a method name
+- ~~**Go**: the reader's pattern sees neither a digit in a method name
   (`SetA11yID`) nor a generic method (`BindA11yID[`). The surface
   pairing lives in bindings/go/tplzone_test.go meanwhile; the two
-  should agree or one should go.
-- **Java**: `Tpl` and `RowSurface` want the level-holding clause Rust's
+  should agree or one should go.~~ CLOSED 2026-08-17. The pattern now reads
+  `([A-Z][A-Za-z0-9]*)\s*[\(\[]`. The two agree rather than one going:
+  Go's `Row` EMBEDS `*Tpl` so the compiler holds that pair, and the two
+  surfaces that really can drift (`SumCase` and cmd/kaya-gen's
+  `<name>Row`, both holding a private `t`) stay with tplzone_test.go —
+  recorded in this file's own exemption list rather than merely absent.
+- ~~**Java**: `Tpl` and `RowSurface` want the level-holding clause Rust's
   Tpl/Row pair has — a prop on one and not the other is reachable
-  through `tx.forEach` and not `for (var row : ...)`.
-- **C#**: the generated `<Rec>Row` façade wants the same; a tested
+  through `tx.forEach` and not `for (var row : ...)`.~~ CLOSED 2026-08-17.
+  It has one, and
+  it found drift the moment it ran: `RowSurface` forwarded the three
+  a11y field-binds and not the five level-taking binds beside them, and
+  not `when` — where the miss was sharpest, since `Tx.when` mints a LIVE
+  widget id and `Tpl.when` mints a node id, so a guest inside a row
+  trace reaching for the statement-level one emitted the wrong id space
+  with nothing to say so. Six forwards, and the exclusion set is the
+  four names measured to be plumbing.
+- ~~**C#**: the generated `<Rec>Row` façade wants the same; a tested
   implementation was offered at the fan-out
   (scratchpad/csprobe/facade-parity.py, watched failing against HEAD's
-  11 missing forwards including a year-old SetGrow drift).
+  11 missing forwards including a year-old SetGrow drift).~~ CLOSED
+  2026-08-17. The clause reads the GENERATED files — what a guest
+  actually calls — and names the generator as the fix; finding none of
+  them is itself a failure, since a façade reader that locates nothing
+  agrees with everything. NOTE THE ENTRY WAS ALREADY HALF-STALE when it
+  was closed: the 11 forwards had been closed by the props slice itself,
+  so what was genuinely missing all along was only the gate that would
+  notice the NEXT drift. A census offered and not landed is a
+  measurement with a shelf life.
+
+The census's three watched negatives now live in check-sugar-surface.sh:
+a template setter deleted while its identically-spelled LIVE twin stays
+(OCaml, the historical shape), a forward deleted from a generated C#
+façade, and the zone's own header renamed — the third proving the reader
+REFUSES a verdict rather than reporting an empty zone as a clean one.
 
 ## The styling scene's depth stubs (slice 1 mid-flight, expected to close with the fan-out)
 
@@ -2697,15 +2728,17 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   the sugar-surface clause. Until then a brand book with per-platform
   values writes per-platform guests, which is exactly what the map
   exists to prevent.
-- **The template zone has no `role`.** A stamped "Delete" button inside
+- ~~**The template zone has no `role`.** A stamped "Delete" button inside
   a For cannot be declared destructive in any language — the reference
   sugar (`Tx`/`Tpl`) carries role on the live zone only, and every
   binding matched it (checked during the fan-out, uniform). If a
   collection scene ever wants per-row destructive actions, the
   reference grows `Tpl` role first and the eight spellings follow —
   two lines each per the java arm's estimate — plus a
-  tpl-surfaces/tools clause. Deliberately absent today, not forgotten.
-- **The template zone has no `inset` either — and the editor's find bar
+  tpl-surfaces/tools clause. Deliberately absent today, not forgotten.~~
+  LANDED 2026-08-17, with the inset entry below — one fan-out, because
+  the walls and sweeps were the same set twice. The record is there.
+- ~~**The template zone has no `inset` either — and the editor's find bar
   is the live case.** The container inset landed 2026-08-12 (the prop
   the full-bleed editor forced: its status row insets while the buffer
   runs to the edge), but the find bar's row is a STAMPED node, and the
@@ -2715,7 +2748,66 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   the reference grows the `Tpl` spelling first, eight bindings follow,
   and the tpl-surfaces census holds it. Worth doing together with
   template `role` if either is admitted, since the walls, sweeps and
-  gates are the same set twice.
+  gates are the same set twice.~~ BOTH LANDED 2026-08-17, together, for
+  the reason the second entry gives — the walls and sweeps were the same
+  set twice. THE SPEC DID NOT MOVE, and that is the finding worth
+  keeping: a template node has always ridden the same `set_property`
+  record a live widget does, and `declare()` runs the SAME `check_prop`
+  before pushing a prop-GENERIC `TplOp::SetProp`, which `run_body()`
+  turns into an ordinary `ApplyOp::SetProp` naming the stamped copy's
+  live id. So the four backends needed nothing either: a stamped copy's
+  role reaches macOS's real accessibility tree as AXHeading through the
+  identical arm a live label's does. The whole slice was eight binding
+  spellings, one scene, and the census. Both setters are CONST — what a
+  copy MEANS and how far its prototype holds children off its edge are
+  facts about the prototype, `accepts`'s rule one prop over.
+  The assertion is tools/scenes/a11yrows.steps, which grew a SECOND
+  scalar collection (`expect_ax` addresses the real tree by identifier
+  and refuses an ambiguous one, so a second readable stamped element
+  needs its own strings): two `expect_ax label#N "heading/…"` reads of a
+  widget no guest authored, plus `expect_inset row#0 8` on a stamped
+  container. Uniform in all eight bindings plus the C floor, whose
+  generated `kaya_tx_set_role`/`kaya_tx_set_inset` were already its
+  surface. The one deviation is Swift's GENERATED `<Rec>Row` façade,
+  which forwards no prop setter at all and is its own entry below.
+- **Swift's generated `<Rec>Row` façade is not level with its zone, and
+  no gate says so.** Measured 2026-08-17 by the template role/inset
+  fan-out, which is when the other two façades gained level-holding
+  clauses (Java's `RowSurface`, C#'s generated `<Rec>Row`) and Swift's
+  was left out on purpose. What it forwards: constructors, and not one
+  prop setter — not `setGrow`, not the a11y trio, not `setAccepts`, and
+  so not the two this slice added. It is also missing about twenty
+  constructors (`entry`, `textarea`, `slider`, `select`, `radio`,
+  `progress`, `spacer`, `scroll`, `grid`, the non-field `label`/`image`
+  overloads).
+  WHY IT IS A DEFER AND NOT A DO: the zone is not unreachable through it
+  the way C#'s is. `KayaTpl` sits on a PUBLIC `t`, and guests already
+  reach through it (guests/swift/undo.swift), where C#'s field is
+  private and Rust's `tx` is private — those two MUST forward or the
+  surface is a dead end. So Swift's gap costs an idiom, not a
+  capability, and the two generators' stated doctrines genuinely differ
+  (C#'s says the whole zone vocabulary is aimed at the façade; Swift's
+  says the handle plus the constructors that consume field tokens).
+  Closing it is one slice: seven prop forwards, the missing
+  constructors, three regenerated `guests/swift/*+Kaya.swift`, and a
+  decision about whether `t` can go private once nothing reaches
+  through it — after which tools/tpl-surfaces.py's FACADES gains its
+  fourth entry and its exemption note loses one paragraph.
+- **The three façades disagree about `context_menu`, and the census had
+  to write the disagreement down rather than settle it.** Measured
+  2026-08-17 while the level-holding clauses landed. Rust's `Row`
+  FORWARDS it deliberately — a row trace legitimately anchors a context
+  menu, which the menus scene's item rows do, and the forward was added
+  for exactly that. C#'s generated `<Rec>Row` lists `ContextMenu` among
+  the plumbing it deliberately omits. Both statements are written at
+  their own façade, so the census reads each one's own list (anything
+  else would be legislating from a gate), and the result is that a C#
+  guest holding a row cannot anchor a per-row context menu the way a
+  Rust one can — it must open the For itself. One of the two doctrines
+  is wrong and the scene that would decide it (menus, per-row) does not
+  exist in C#. Small, but it is a semantics difference behind a
+  spelling difference, which invariant 1 does not allow to stand once
+  someone has seen it.
 - **The brand mask bits deserve generated constants.** The
   `set_brand_accent` record's mask (bit 0 = light override, bit 1 =
   dark) has no spec-emitted name, so five bindings and both

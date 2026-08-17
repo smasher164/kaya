@@ -81,6 +81,10 @@ func (r todoRow) A11yHint(n kaya.Node, f kaya.Field[string]) { r.c.A11yHint(r.t,
 
 func (r todoRow) SetAccepts(n kaya.Node, kinds ...string) { r.t.SetAccepts(n, kinds...) }
 
+func (r todoRow) SetRole(n kaya.Node, role int64) { r.t.SetRole(n, role) }
+
+func (r todoRow) SetInset(n kaya.Node, pad float64) { r.t.SetInset(n, pad) }
+
 // TodoRows traces the record template as a for statement: the loop
 // body runs once, authoring the blueprint, and the close is
 // structural — range-over-func regains control even on break. The

@@ -41,6 +41,35 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 }
                 tx.insert_fresh(&notes, "First note");
                 tx.insert_fresh(&notes, "Second note");
+
+                // THE STAMPED STYLING PROPS. A second collection rather
+                // than two elements in the first, because expect_ax
+                // addresses the tree by IDENTIFIER and refuses an
+                // ambiguous one — a scalar row has one field to spend on
+                // an id, so a second readable copy needs its own strings.
+                //
+                // Both props are CONST here and const in every binding:
+                // what a copy MEANS and how far its prototype holds its
+                // children off its edge are facts about the prototype,
+                // not about the row's data (`accepts`'s rule).
+                let heads = tx.collection::<String>();
+                for mut head in heads.rows(tx) {
+                    // BOTH TEMPLATE SURFACES, deliberately: the row trace
+                    // itself carries `inset`, the `Tpl` handed to the
+                    // container body carries `role`. `Row` forwards to
+                    // `Tpl` one method at a time by hand, so a prop on
+                    // one and not the other is reachable through
+                    // `for_each` and not `for row in rows`
+                    // (tools/tpl-surfaces.py holds the pair level).
+                    let (bar, _) = head.row(|t| {
+                        let title = t.label(kaya::Field::element());
+                        t.role(title, kaya::Role::Heading);
+                        t.a11y_id(title, kaya::Field::element());
+                    });
+                    head.inset(bar, 8.0);
+                }
+                tx.insert_fresh(&heads, "Heading one");
+                tx.insert_fresh(&heads, "Heading two");
             })
             .id();
         tx.mount(root);

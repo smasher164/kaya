@@ -1252,7 +1252,9 @@ pub enum Prop {
     /// first full-bleed app: the editor's Inset(0) window put the
     /// buffer on the window edge as designed and took the status row
     /// and find bar with it, and no prop could give the chrome rows
-    /// their margin back.
+    /// their margin back. It reached the FIND BAR only when the
+    /// template zone learned to spell it too (2026-08-17): that row is
+    /// stamped, not live, and one prop with two zones is one prop.
     Inset,
 }
 

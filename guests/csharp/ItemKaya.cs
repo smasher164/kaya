@@ -183,6 +183,10 @@ sealed class ItemRow
         t.SetA11yHint(n, f, level);
 
     public void SetAccepts(Node n, params string[] kinds) => t.SetAccepts(n, kinds);
+
+    public void SetRole(Node n, Role role) => t.SetRole(n, role);
+
+    public void SetInset(Node n, double pad) => t.SetInset(n, pad);
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

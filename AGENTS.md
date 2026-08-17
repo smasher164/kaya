@@ -232,7 +232,19 @@ in docs/deferred.md.
    façade onto `Tpl` and forwarded six methods while ten kinds were
    missing — and it REFUSES A VERDICT from a reader that found
    implausibly few constructors, because a census that reads nothing
-   agrees with everything),
+   agrees with everything.
+   IT CENSUSES PROPS TOO, since 2026-08-17, and a new template prop is
+   spelled in its PROP_MEMBERS table rather than in sixteen more grep
+   lines: the props are read out of each zone's OWN BLOCK, which is the
+   thing a pattern cannot do when a binding spells its live and template
+   setters identically (OCaml's `set_grow (Widget id)` against
+   `set_grow (Node id)` — a name-keyed clause was measured passing with
+   the template setter deleted). Three façades are held level by it now,
+   Rust's `Row`, Java's `RowSurface` and C#'s GENERATED `<Rec>Row`; the
+   two that are not (Go's, which EMBEDS the zone so the compiler holds
+   it, and Swift's, which forwards no prop setter at all and is a slice
+   of its own) are named in the file's exemption list, on the record
+   rather than merely absent),
    `tools/check-universal-props.sh` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm

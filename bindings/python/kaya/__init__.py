@@ -573,6 +573,17 @@ class _Handle:
         `accepts`: a role describes the control, not the state, and no
         binding offers a Signal here.
 
+        ON THE BASE, so a STAMPED copy can say what it means: a "Delete"
+        button inside a For is the case the prop exists for, and the
+        `_Handle` docstring above is the whole reason this needed no
+        second surface. Const-only reads the same way in the template
+        zone — what a copy MEANS is a fact about the prototype and not
+        about the row, so a field or an element raises here rather than
+        travelling as one row's number. Moving this method up to
+        `Widget` would leave every stamped copy unable to be declared
+        destructive, with nothing raised anywhere; the wall that notices
+        is tools/checks/py-node-props.py.
+
         Returns the handle, so it chains:
         `kaya.button("Delete").role(kaya.Role.DESTRUCTIVE).a11y_id("delete")`."""
         _records().append(wire.tx_set_role(self.id, _role_value(role)))
@@ -745,7 +756,17 @@ class Widget(_Handle):
         status row (the app that forced it: the editor). Containers only
         — the scene rejects it anywhere else, and refuses a negative
         one. The declarative spelling is the `inset=` argument at
-        construction; this is the dynamic path."""
+        construction; this is the dynamic path.
+
+        AND THE DECLARATIVE SPELLING IS THE TEMPLATE ZONE'S. `kaya.row`
+        allocates through `_alloc_widget_or_node`, so inside a For the
+        kwarg writes a NODE's inset and the editor's find bar — a
+        stamped row — insets exactly as the live status row beside it
+        does. This dynamic setter stays live-only for the reason the
+        class comment gives: a blueprint is declared once and never
+        mutated, so a write meant to land after the build has no moment
+        to land in. The chain that keeps the kwarg working in both zones
+        is held by tools/checks/py-node-props.py."""
         _records().append(wire.tx_set_inset(self.id, float(pad)))
 
     def context_menu(self):
@@ -2678,9 +2699,9 @@ def _align_value(align):
 
 class Role:
     """The role enum: SEMANTIC EMPHASIS, the closed vocabulary
-    (docs/styling-plan.md D4). `Widget.role` also accepts these names as
-    plain strings — `role("heading")` — the Pythonic spelling, exactly as
-    `align=` does.
+    (docs/styling-plan.md D4). `_Handle.role` — a live widget's and a
+    template node's alike — also accepts these names as plain strings,
+    `role("heading")`, the Pythonic spelling exactly as `align=` does.
 
     Three, and what each is for: DESTRUCTIVE marks the press that
     destroys something (the platform's own destructive affordance — red

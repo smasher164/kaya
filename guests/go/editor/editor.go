@@ -825,17 +825,18 @@ func App() *kaya.App {
 			// so this is the whole vocabulary, and "shown and hidden"
 			// (docs/editor-plan.md E1) means built and torn down.
 			//
-			// THE TEMPLATE TIER CARRIES SOME PROPS NOW — grow and the
-			// a11y trio arrived with the template-node props slice —
-			// but NOT inset: the stamped row below cannot pad itself
-			// the way the live status row does, so the bar sits flush
-			// while the chrome under it keeps its margin. Recorded as
-			// a styling follow-up (docs/deferred.md) and not worked
-			// around; the field also keeps its natural width, the
-			// remaining gap of the same class.
+			// AND THE TEMPLATE TIER NOW CARRIES THE CHROME PROPS TOO.
+			// This bar IS the case that forced the template inset
+			// (docs/deferred.md, closed 2026-08-17): grow and the a11y
+			// trio arrived with the template-node props slice, but a
+			// STAMPED row could not pad itself the way the live status
+			// row below does, so under a full-bleed window the bar sat
+			// flush while the chrome under it kept its margin — the
+			// same 8 spelled one line down, unreachable from here. It
+			// is one call now, and the two chrome rows agree.
 			findRows = tx.Collection()
 			for row := range findRows.Rows(tx) {
-				row.Row(func() {
+				bar := row.Row(func() {
 					query = row.Entry() // entry#0
 					prev = row.Button("prev")          // button#0
 					next = row.Button("next")          // button#1
@@ -845,6 +846,7 @@ func App() *kaya.App {
 					// carries the door it is closed by.
 					done = row.Button("done") // button#2
 				})
+				row.SetInset(bar, 8)
 			}
 
 			// ONE STATUS LINE, which is what Sublime has too — and it
@@ -870,9 +872,9 @@ func App() *kaya.App {
 			// container inset is the styling pass's answer: the same
 			// number the window prop takes, one level down, so the
 			// document runs to the edge while the chrome keeps its
-			// margin. The find bar's row cannot say this yet — it is a
-			// TEMPLATE node and the template zone carries no inset
-			// (docs/deferred.md, styling follow-ups).
+			// margin. The find bar's row says the same thing with the
+			// same number, through the template zone's own spelling
+			// (`row.SetInset`) — the two chrome rows are one rule.
 			tx.Row(func() {
 				tx.Label(status).Grow(1).A11yID("status") // label#0
 				tx.Label(count).A11yID("matches")         // label#1

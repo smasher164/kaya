@@ -2874,6 +2874,14 @@ impl<'b> Row<'_, 'b> {
         self.tpl().accepts(node, kinds)
     }
 
+    pub fn role(&mut self, node: TemplateNodeId, role: crate::Role) {
+        self.tpl().role(node, role)
+    }
+
+    pub fn inset(&mut self, node: TemplateNodeId, pad: f64) {
+        self.tpl().inset(node, pad)
+    }
+
     // Forwarded because a ROW TRACE legitimately anchors context menus:
     // the menus scene's item rows carry one, and before this forward the
     // guest was forced back to the for_each combinator for the whole
@@ -5278,6 +5286,38 @@ impl Tpl<'_, '_> {
     pub fn accepts(&mut self, node: TemplateNodeId, kinds: &[crate::Accepts<'_>]) {
         let list: Vec<&str> = kinds.iter().map(|k| k.token()).collect();
         self.set(node, Prop::Accepts, list.join(" ").as_str());
+    }
+
+    /// What a stamped copy MEANS — semantic emphasis, never appearance
+    /// (docs/styling-plan.md D4). The live zone has carried this since
+    /// the styling pass and the template zone could not spell it at
+    /// all, so a stamped "Delete" button inside a For was declarable as
+    /// destructive in no language.
+    ///
+    /// CONST, like [`Self::accepts`] and for its reason: what a copy
+    /// means is a fact about the PROTOTYPE, not about the row's data.
+    /// The root refuses a role on a kind it does not fit at DECLARE
+    /// time — before a single row stamps, naming both the role and the
+    /// kind (crates/kaya/src/scene.rs, check_prop's Role arm), which is
+    /// why there is no type-level wall here either.
+    pub fn role(&mut self, node: TemplateNodeId, role: crate::Role) {
+        self.set(node, Prop::Role, role as i64);
+    }
+
+    /// A stamped CONTAINER's own padding, in layout units — the window
+    /// inset one level down (docs/styling-plan.md D3), the same number
+    /// [`Widget::inset`] spells in the live zone.
+    ///
+    /// THE FORCING CASE IS A STAMPED ROW. The editor's status row is
+    /// live and insets; its find bar is a copy stamped from a template
+    /// and sat flush against a full-bleed window's edge, because the
+    /// template zone carried exactly one layout prop (grow) and no
+    /// prop could give a stamped row its margin back. Const for
+    /// [`Self::role`]'s reason: a prototype's margin describes the
+    /// prototype. Container kinds only, and the root says so at
+    /// declare time.
+    pub fn inset(&mut self, node: TemplateNodeId, pad: f64) {
+        self.set(node, Prop::Inset, pad);
     }
 
     fn apply_source(&mut self, node: TemplateNodeId, prop: Prop, src: SourceInner) {

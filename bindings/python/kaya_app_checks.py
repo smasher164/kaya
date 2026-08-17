@@ -4,6 +4,7 @@ and batch, and removing a parent entry purges descendant instance
 mirrors. Runs against the real bindings; the core is never entered
 (records queue, the process exits)."""
 
+import struct
 import sys
 from dataclasses import dataclass
 
@@ -1151,6 +1152,40 @@ def _signal_prop(fn, prop):
     return None
 
 
+def _const_num_prop(fn, prop, value_type):
+    """(target id, value) for one constant NUMERIC prop write, or None if
+    that prop reached the wire any other way.
+
+    The two above answer a string and a signal id; the styling props are
+    numbers, and the TARGET is half of what they have to answer — a role
+    or an inset that reached the wire naming a live widget id styles
+    nothing a For will ever stamp, and raises nowhere."""
+    before = len(kaya._tx)
+    try:
+        fn()
+    except Exception as exc:  # a finding, not a crash (_elem_bind)
+        print(f"       (raised {type(exc).__name__}: {exc})")
+        _rewind(before)
+        return None
+    queued = kaya._tx[before:]
+    _rewind(before)
+    for rec in queued:
+        if _rec_kind(rec) != kaya.wire.TX_SET_PROPERTY:
+            continue
+        if int.from_bytes(rec[16:20], "little") != prop:
+            continue
+        if int.from_bytes(rec[20:24], "little") != kaya.wire.SOURCE_CONST:
+            return None
+        if int.from_bytes(rec[24:28], "little") != value_type:
+            return None
+        body = rec[32:32 + int.from_bytes(rec[28:32], "little")]
+        value = (int.from_bytes(body, "little")
+                 if value_type == kaya.wire.VALUE_I64
+                 else struct.unpack("<d", body)[0])
+        return int.from_bytes(rec[8:16], "little"), value
+    return None
+
+
 app_tpl = kaya.App()
 with app_tpl.window():
     rows5 = kaya.collection(Row3)
@@ -1272,6 +1307,107 @@ with app_tpl.window():
                 "and not in the widget table",
                 (kaya.wire.OCC_PASTED, node5.id) not in app_tpl._widget_handlers,
             )
+
+            # THE STYLING PROPS IN THE TEMPLATE ZONE: a stamped copy can
+            # say what it MEANS (`role`) and how far its prototype holds
+            # its children off its edge (`inset`). Python spelled both
+            # before the slice asked for them — and by two DIFFERENT
+            # lines, which is why they are checked apart rather than as
+            # one "the props are there":
+            #
+            #   role  — `_Handle.role`, the base `Widget` and `Node`
+            #           share, exactly as the a11y trio above.
+            #   inset — the `inset=` argument every container constructor
+            #           already takes, written onto whatever
+            #           `_alloc_widget_or_node` handed back. Inside a For
+            #           that is a Node, so the KWARG IS THIS ZONE'S
+            #           SPELLING, and `Widget.inset` (the dynamic setter)
+            #           stays live-only on purpose: a blueprint is
+            #           declared, never mutated.
+            #
+            # BOTH CLAUSES READ THE TARGET ID, which is the half no
+            # `hasattr` reader can reach. A prop that reaches the wire
+            # naming a WIDGET id styles something no For will ever stamp
+            # — the copies keep the prototype's default and nothing
+            # anywhere raises, which is the `spacing=` failure shape one
+            # zone over.
+            head5 = kaya.label(bind=row5.title)
+            check(
+                "a template node's role reaches the wire, on the NODE's id",
+                _const_num_prop(lambda: head5.role(kaya.Role.HEADING),
+                                kaya.wire.PROP_ROLE, kaya.wire.VALUE_I64)
+                == (head5.id, kaya.wire.ROLE_HEADING),
+            )
+            check(
+                "and the string spelling is the same prop here too",
+                _const_num_prop(lambda: head5.role("destructive"),
+                                kaya.wire.PROP_ROLE, kaya.wire.VALUE_I64)
+                == (head5.id, kaya.wire.ROLE_DESTRUCTIVE),
+            )
+            # CONST-ONLY, and for `accepts`'s reason rather than for a
+            # missing wire encoder — `tx_bind_role_element` is generated
+            # and sitting right there. What a copy MEANS is a fact about
+            # the prototype, so no binding offers a per-row role, and the
+            # refusal has to NAME what it got: without it `_role_value`'s
+            # int arm is reached by anything with an `__index__` and the
+            # row's number becomes a role nobody wrote.
+            for what, source in (("a field", row5.title),
+                                 ("the element", row5),
+                                 ("a Signal", name5)):
+                before_role = len(kaya._tx)
+                try:
+                    kaya.label().role(source)
+                    ok = False
+                except Exception as exc:
+                    ok = (isinstance(exc, TypeError)
+                          and type(source).__name__ in str(exc))
+                _rewind(before_role)
+                check(f"a template node's role refuses {what}", ok)
+
+            # THE CONTAINER KWARG, from inside the For — the `inset=`
+            # half. The int is written on purpose: an inset arriving as
+            # an I64 is refused by the root for its TYPE, a true
+            # complaint about the wrong mistake (the window inset's
+            # lesson, two levels up).
+            before_ins = len(kaya._tx)
+            with kaya.row(inset=8) as bar5:
+                pass
+            queued_ins = kaya._tx[before_ins:]
+            _rewind(before_ins)
+            check(
+                "a container declared inside a For is a Node",
+                isinstance(bar5, kaya.Node),
+            )
+            ins5 = [
+                r for r in queued_ins
+                if _rec_kind(r) == kaya.wire.TX_SET_PROPERTY
+                and int.from_bytes(r[16:20], "little") == kaya.wire.PROP_INSET
+            ]
+            check("and its inset= reaches the records exactly once",
+                  len(ins5) == 1)
+            # NOT `if ins5:` — behind that guard a dropped record makes
+            # the clause below VANISH instead of going red (the
+            # harness-feature failure shape this file already learned
+            # twice, at brand_accent and at brand_typeface).
+            got_ins = (
+                (int.from_bytes(ins5[0][8:16], "little"),
+                 int.from_bytes(ins5[0][20:24], "little"),
+                 int.from_bytes(ins5[0][24:28], "little"),
+                 struct.unpack("<d", ins5[0][32:40])[0])
+                if len(ins5) == 1 else (None, None, None, None))
+            check(
+                "naming the NODE's id, as a constant F64 and not an I64",
+                got_ins == (bar5.id, kaya.wire.SOURCE_CONST,
+                            kaya.wire.VALUE_F64, 8.0),
+            )
+            # AND THE DYNAMIC SETTER STAYS LIVE-ONLY, said out loud so
+            # the asymmetry is a decision and not an oversight: `Widget`
+            # adds the momentary verbs and the after-the-build prop
+            # setters over `_Handle`, and a template is declared once and
+            # never mutated. Moving `inset` down to the base would give a
+            # blueprint a write with no moment to happen in.
+            check("and the dynamic setter is not on a template node",
+                  not hasattr(bar5, "inset") and hasattr(live5, "inset"))
 
         with kaya.for_each(feed5) as cases5:
             with cases5.case(Note3) as note5:

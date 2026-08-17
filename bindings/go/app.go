@@ -3167,6 +3167,48 @@ func (t *Tpl) SetAccepts(n Node, kinds ...string) {
 	t.tx.emit(TxSetAccepts(n.id, acceptList(kinds)))
 }
 
+// SetRole declares what each stamped copy MEANS — semantic emphasis,
+// never appearance (docs/styling-plan.md D4) — from the same role
+// constants the live zone takes: RoleDestructive, RoleProminent,
+// RoleHeading. The template twin of Tx.SetRole, int64 for its reason:
+// Go's closed vocabularies are untyped integer constants in the
+// generated wire file, so a named type here would make the two tiers
+// of one binding disagree about one prop's type.
+//
+// The live zone has carried this since the styling pass and the
+// template zone could not spell it at all, so a stamped "Delete"
+// button inside a For was declarable as destructive in no language.
+//
+// CONST ONLY, like SetAccepts and for its reason: what a copy MEANS is
+// a fact about the PROTOTYPE, not about the row's data. A list whose
+// rows mean different things is two controls, which this zone already
+// spells as a sum collection's arms or a When.
+//
+// No kind wall here, and deliberately none — a Node is a bare id and
+// carries no kind. The root refuses a role on a kind it does not fit
+// at DECLARE time, before a single row stamps, naming both the role
+// and the kind, in the same words the live path uses.
+func (t *Tpl) SetRole(n Node, role int64) {
+	t.tx.emit(TxSetRole(n.id, role))
+}
+
+// SetInset pads a stamped CONTAINER — DIP between its bounds and its
+// children, uniform on all four sides, the window inset one level down
+// (docs/styling-plan.md D3). The template twin of Tx.SetInset, the same
+// number it spells.
+//
+// THE FORCING CASE IS A STAMPED ROW. The text editor's status row is
+// live and insets; its find bar is a copy stamped from a template and
+// sat flush against a full-bleed window's edge, because the template
+// zone carried exactly one layout prop (SetGrow) and no prop could give
+// a stamped row its margin back.
+//
+// Const for SetRole's reason: a prototype's margin describes the
+// prototype. Containers only, and the root says so at declare time.
+func (t *Tpl) SetInset(n Node, pad float64) {
+	t.tx.emit(TxSetInset(n.id, pad))
+}
+
 // LabelText creates a label with constant text in the blueprint: the
 // template twin of Tx.LabelText, and the same two records at either
 // depth. The bound flavors are the element ones — Row.Label over the

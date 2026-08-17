@@ -2715,6 +2715,21 @@ data TplAttr where
   -- same way. ('setGrow' on 'Declare' writes the same prop as a
   -- statement, and reaches this zone too.)
   TplGrow :: Double -> TplAttr
+  -- | This stamped CONTAINER's own padding, in layout units — the
+  -- window inset two levels up and the live 'Inset' one zone down, the
+  -- same number and the same prop.
+  --
+  -- THE FORCING CASE IS A STAMPED ROW. The editor's status row is live
+  -- and insets; its find bar is a copy stamped from a template, and it
+  -- sat flush against a full-bleed window's edge because this zone
+  -- carried exactly one layout prop (grow) and nothing could give a
+  -- stamped row its margin back.
+  --
+  -- A CONSTANT, on 'TplAccepts''s rule: a prototype's margin describes
+  -- the prototype, not the row's data. Container kinds only, and the
+  -- ROOT is what says so — a leaf dies at declare time naming the prop,
+  -- before a row stamps, as does a negative or non-finite pad.
+  TplInset :: Double -> TplAttr
   -- | This stamped copy's accessibility IDENTIFIER — the authored key
   -- automation addresses it by, never spoken.
   --
@@ -2736,6 +2751,19 @@ data TplAttr where
   -- here for the reason written above the GADT: a class-free 'Node' has
   -- nothing for @Attr 'LeafW@'s trick to stand on.
   TplA11yHint :: TplStrSource s => s -> TplAttr
+  -- | What this stamped copy MEANS — semantic emphasis, never
+  -- appearance, over the live 'Role' vocabulary. The live zone has
+  -- carried it since the styling pass while this one could not spell it
+  -- at all, so a stamped \"Delete\" button inside a For was declarable
+  -- as destructive in no language.
+  --
+  -- A CONSTANT, on 'TplAccepts''s rule: what a copy MEANS is a fact
+  -- about the prototype, and every copy of one blueprint means the same
+  -- thing. Which role fits which kind is the ROOT'S call, refused at
+  -- declare time in one sentence naming both — so there is no
+  -- type-level wall here, for the reason written above the GADT (a
+  -- class-free 'Node' gives @Attr 'LeafW@'s index nothing to stand on).
+  TplRole :: Role -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
   -- name ('acceptText' and friends) plus any custom format ids.
   --
@@ -2758,9 +2786,11 @@ data TplAttr where
 
 applyTplAttr :: TplAttr -> Node -> Tpl ()
 applyTplAttr (TplGrow weight) n = setGrow n weight
+applyTplAttr (TplInset pad) n = setNodeInset n pad
 applyTplAttr (TplA11yId src) n = bindStrSource a11yIdProp n src
 applyTplAttr (TplA11yLabel src) n = bindStrSource a11yLabelProp n src
 applyTplAttr (TplA11yHint src) n = bindStrSource a11yHintProp n src
+applyTplAttr (TplRole r) n = setNodeRole n r
 applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 
 -- The accept list on a template node: 'setAccepts' one zone down,
@@ -2768,6 +2798,18 @@ applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 -- so a token with a space is refused at the same place in both zones.
 setNodeAccepts :: Node -> [String] -> Tpl ()
 setNodeAccepts (Node n) kinds = emitT (W.txSetAccepts n (acceptList kinds))
+
+-- A template node's padding and its role: 'setInset' and 'setRole' one
+-- zone down, through the SAME emitters and the same 'roleWire', because
+-- a template node rides the ordinary SetProperty record a live widget
+-- does. Nothing in the spec moved for these two; the stamp turns the
+-- template op into an ApplyOp naming the copy's live widget id, so a
+-- stamped role and a live one lower through one backend arm.
+setNodeInset :: Node -> Double -> Tpl ()
+setNodeInset (Node n) pad = emitT (W.txSetInset n pad)
+
+setNodeRole :: Node -> Role -> Tpl ()
+setNodeRole (Node n) r = emitT (W.txSetRole n (roleWire r))
 
 -- | Props on a template node:
 --

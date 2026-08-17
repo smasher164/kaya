@@ -52,6 +52,46 @@ static class A11yrowsScene
                 // and this scene never names one.
                 tx.InsertFresh(notes, "First note");
                 tx.InsertFresh(notes, "Second note");
+
+                // THE STAMPED STYLING PROPS. A second collection rather
+                // than two elements in the first, because expect_ax
+                // addresses the tree by IDENTIFIER and refuses an
+                // ambiguous one — a scalar row has one field to spend
+                // on an id, so a second readable copy needs its own
+                // strings.
+                //
+                // A RECORD collection where the notes above are scalar,
+                // and the difference is C#'s: the SECOND template
+                // surface here is the generated <Rec>Row façade, and
+                // kaya-csgen emits one per [KayaGen] record — a scalar
+                // tx.Collection() has no Rows() to trace. The façade
+                // forwards to Tpl one method at a time by hand, so a
+                // prop on Tpl and not on it is reachable through tx.Each
+                // and not through `foreach (var row in c.Rows())`, which
+                // is a difference no guest should have to know; tracing
+                // this whole For through the façade is what proves the
+                // two forwards are real, and each one calls the Tpl
+                // method underneath.
+                //
+                // Both props are CONST here and const in every binding:
+                // what a copy MEANS and how far its prototype holds its
+                // children off its edge are facts about the prototype,
+                // not about the row's data (SetAccepts's rule).
+                var heads = ItemKaya.Collection(tx);
+                foreach (var head in heads.Rows())
+                {
+                    var bar = head.Row(() =>
+                    {
+                        var title = head.Label(head.Title);
+                        head.SetRole(title, Role.Heading);
+                        head.SetA11yId(title, head.Title);
+                    });
+                    head.SetInset(bar, 8);
+                }
+                // A heading is a line of text too, so its key is minted
+                // for the same reason the notes' are.
+                heads.InsertFresh(tx, new Item("Heading one"));
+                heads.InsertFresh(tx, new Item("Heading two"));
             });
             tx.Mount(root);
         });

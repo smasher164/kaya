@@ -240,7 +240,10 @@ if n != 1:
     sys.exit(0)
 root = tempfile.mkdtemp()
 os.makedirs(f"{root}/crates/kaya/src", exist_ok=True)
-for rel in ("bindings", "tools"):
+# `guests` too, since the census reads C#'s GENERATED `<Rec>Row` façades
+# out of the guest tree: without it that clause reports a reader it
+# cannot locate, and this probe would pass on the wrong failure.
+for rel in ("bindings", "tools", "guests"):
     os.symlink(os.path.abspath(rel), f"{root}/{rel}")
 open(f"{root}/crates/kaya/src/app.rs", "w").write(src.replace(victim, ""))
 out = subprocess.run([sys.executable, 'tools/tpl-surfaces.py', root],
@@ -259,6 +262,89 @@ case "$tpl_row_probe" in
         ;;
 esac
 unset tpl_row_probe
+
+# (d) THE PROP CENSUS IS WATCHED THE SAME WAY, in three perturbations —
+#     the census grew prop awareness on 2026-08-17 and a prop sweep
+#     nobody has seen fail is exactly the guard invariant 3 calls worse
+#     than none. Each probe stages a temp repo root in which ONE file
+#     differs and everything else is a symlink to the real tree, so the
+#     census reads the real bindings and the real generated façades and
+#     the only variable is the perturbation. Each prints its substitution
+#     count: a probe that did not apply is a FAILED test.
+#
+#     d1 IS THE HISTORICAL SHAPE ITSELF — a prop the LIVE zone has and
+#        the TEMPLATE zone does not — and OCaml is the subject because
+#        its two zones spell the prop in the same eleven characters
+#        (`set_role (Widget id)` against `set_role (Node id)`). The live
+#        setter stays in the file throughout, so a census satisfied by
+#        the live twin passes this probe and a zone-scoped one cannot.
+#     d2 is a forward deleted from a GENERATED C# façade, the clause the
+#        ledger asked for (docs/deferred.md, three follow-ups).
+#     d3 renames the zone's own header: a reader that can no longer find
+#        the zone must REFUSE, never report an empty zone as a clean one.
+tpl_prop_probe=$(python3 - <<'PROBE'
+import os, re, shutil, subprocess, sys, tempfile
+
+
+def stage(perturb):
+    """A temp repo root where exactly `perturb` (path -> text) differs."""
+    root = tempfile.mkdtemp()
+    dirs = {}
+    for path in perturb:
+        parts = path.split("/")
+        for i in range(1, len(parts)):
+            dirs.setdefault("/".join(parts[:i]), True)
+    for top in os.listdir("."):
+        if top not in dirs:
+            os.symlink(os.path.abspath(top), f"{root}/{top}")
+    for d in sorted(dirs):
+        os.makedirs(f"{root}/{d}", exist_ok=True)
+        for entry in os.listdir(d):
+            child = f"{d}/{entry}"
+            if child not in dirs and child not in perturb:
+                os.symlink(os.path.abspath(child), f"{root}/{child}")
+    for path, text in perturb.items():
+        open(f"{root}/{path}", "w", encoding="utf-8").write(text)
+    return root
+
+
+def probe(name, path, old, new, want):
+    src = open(path, encoding="utf-8").read()
+    n = src.count(old)
+    if n != 1:
+        print(f"{name}=SELFTEST-BROKEN(matched {n}, expected 1)")
+        return
+    root = stage({path: src.replace(old, new)})
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    print(f"{name}=applied:1 rc:{r.returncode} named:{want in r.stdout}")
+
+
+probe("d1", "bindings/ocaml/kaya_app.ml",
+      "    let set_role (Node id) r = emit (the_tx ()) "
+      "(Kaya_wire.tx_set_role id (role_wire r))\n",
+      "", "ocaml's TEMPLATE zone cannot spell role")
+probe("d2", "guests/csharp/ItemKaya.cs",
+      "    public void SetRole(Node n, Role role) => t.SetRole(n, role);\n",
+      "", "does not forward: SetRole")
+probe("d3", "bindings/ocaml/kaya_app.ml",
+      "module Tpl = struct\n", "module TplRenamed = struct\n",
+      "cannot find ocaml's template zone")
+PROBE
+)
+want_prop_probe="d1=applied:1 rc:1 named:True
+d2=applied:1 rc:1 named:True
+d3=applied:1 rc:1 named:True"
+if [ "$tpl_prop_probe" != "$want_prop_probe" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the template PROP census did not" \
+        "catch a perturbation it must catch). Wanted:" >&2
+    echo "$want_prop_probe" >&2
+    echo "Got:" >&2
+    echo "$tpl_prop_probe" >&2
+    exit 1
+fi
+unset tpl_prop_probe want_prop_probe
 
 # THE SCALAR ELEMENT HAS A NAME, in all eight.
 #
@@ -379,11 +465,23 @@ check haskell bindings/haskell/KayaApp.hs \
 check haskell bindings/haskell/KayaApp.hs \
     "node paste registrar" "^onPasteNode ::"
 
-# Python's five, by CLASS STRUCTURE rather than grep — the reader walks
+# Python's, by CLASS STRUCTURE rather than grep — the reader walks
 # `class Node` and its bases with `ast` and requires each prop method
 # reachable. Its negative was watched by the fan-out (rename on the
 # base -> exit 1 naming the prop; unhook the base -> exit 1 naming all
-# five).
+# of them).
+#
+# IT READS TWO STRUCTURES NOW, not one, because Python spells the zone's
+# seven props in two ways. Six ride `_Handle`, the base `class Node`
+# inherits — that is the whole of why Python needed no template setter
+# when role landed. The SEVENTH, inset, is a CONSTRUCTOR KEYWORD
+# (`kaya.row(inset=8)`), so the reader holds the chain instead: the
+# kwarg reaches `_set_inset`, which writes onto `_widget`, which is
+# `_alloc_widget_or_node` and branches on `_tpl_depth`. Nothing on that
+# path may ask which zone it is in — a `_tpl_depth` read inside
+# `_set_inset` or `_Handle.role` is the shape that would make one zone
+# quietly different from the other, and the reader refuses it. It also
+# refuses a verdict when it cannot find the allocator at all.
 tpl_props_py=$(python3 tools/checks/py-node-props.py bindings/python/kaya/__init__.py 2>&1)
 tpl_props_py_rc=$?
 if [ "$tpl_props_py_rc" -ne 0 ]; then
@@ -393,13 +491,16 @@ fi
 
 # A TEMPLATE NODE'S GROW WEIGHT, in all eight.
 #
-# The template zone carries exactly one prop, and this clause is why it
-# is exactly one. `scroll` needs it — an unconstrained viewport hugs its
-# content and nothing ever overflows, so a template scroll without a
-# grow weight is a scroll that cannot scroll — and Rust's `Tpl` could
-# always spell it through the generic `set(node, prop, value)`, so a
-# binding shipping the scroll constructor WITHOUT grow is a divergence
-# opened by the same pass that closed one.
+# The template zone carried exactly ONE prop when this clause was
+# written, and the clause is why it carried one rather than none.
+# `scroll` needs it — an unconstrained viewport hugs its content and
+# nothing ever overflows, so a template scroll without a grow weight is
+# a scroll that cannot scroll — and Rust's `Tpl` could always spell it
+# through the generic `set(node, prop, value)`, so a binding shipping
+# the scroll constructor WITHOUT grow is a divergence opened by the same
+# pass that closed one. (The zone carries seven props today: the a11y
+# trio and accepts arrived with the props slice, role and inset with the
+# styling one. The census in tools/tpl-surfaces.py is what sweeps them.)
 #
 # It is written down because the fan-out drifted on it in real time:
 # five bindings shipped a template grow and two did not, each side with
@@ -411,6 +512,15 @@ fi
 # accepts and the paste registrar are the clause block ABOVE this one
 # (docs/tpl-props-plan.md P1/P2). Spacing and align remain floor-only on
 # template containers, in every binding alike.
+#
+# AND NEW TEMPLATE PROPS DO NOT GO HERE ANY MORE. Since 2026-08-17 the
+# prop sweep lives in tools/tpl-surfaces.py's PROP_MEMBERS table, which
+# reads each spelling out of the template zone's OWN BLOCK — the thing a
+# line pattern cannot do, and the reason `role` and `inset` were added
+# there and not as sixteen more `check` lines. The clauses above and
+# below stay because they are already written and already pass; they are
+# not the pattern to copy. Python is the census's one exemption (its two
+# zones share a surface) and is covered by tools/checks/py-node-props.py.
 check rust    crates/kaya/src/app.rs \
     "template grow" "pub fn set\(&mut self, node: TemplateNodeId"
 check python  bindings/python/kaya/__init__.py \

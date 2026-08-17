@@ -31,6 +31,7 @@ final class A11yRows {
 
         app.build(tx -> {
             KayaApp.Collection notes = tx.collection();
+            KayaApp.Collection heads = tx.collection();
 
             tx.mount(tx.column(() -> {
                 // The tracing tier: the for-each IS the For — the body
@@ -52,14 +53,43 @@ final class A11yRows {
                     note.setA11yId(field, note.value());
                     note.setA11yLabel(field, note.value());
                 }
+
+                // THE STAMPED STYLING PROPS. A second collection rather
+                // than two elements in the first, because expect_ax
+                // addresses the tree by IDENTIFIER and refuses an
+                // ambiguous one — a scalar row has one field to spend on
+                // an id, so a second readable copy needs its own strings.
+                //
+                // Both props are CONST here and const in every binding:
+                // what a copy MEANS and how far its prototype holds its
+                // children off its edge are facts about the prototype,
+                // not about the row's data (setAccepts's rule).
+                //
+                // ONE SURFACE HERE WHERE RUST SPLITS TWO. Rust hands the
+                // container body its own Tpl and puts role on it while
+                // the row trace carries inset; Java's container body is a
+                // Runnable that receives nothing, so both props are
+                // spelled on the row surface — which is the stronger half
+                // anyway, since RowSurface forwards to Tpl by hand and
+                // the forward is what a scene can prove.
+                for (var head : heads.rows()) {
+                    KayaApp.Node bar = head.row(() -> {
+                        KayaApp.Node title = head.label(head.value());
+                        head.setRole(title, KayaApp.Role.HEADING);
+                        head.setA11yId(title, head.value());
+                    });
+                    head.setInset(bar, 8.0);
+                }
             }));
 
-            // Seeded after the mount, Reorder.java's shape: the two
-            // copies stamp from a template that is already closed. No
-            // key of their own — nothing outside kaya addresses these
-            // rows by key, and the a11y identity comes from the value.
+            // Seeded after the mount, Reorder.java's shape: every copy
+            // stamps from a template that is already closed. No keys of
+            // their own — nothing outside kaya addresses these rows by
+            // key, and the a11y identity comes from the value.
             tx.insertFresh(notes, "First note");
             tx.insertFresh(notes, "Second note");
+            tx.insertFresh(heads, "Heading one");
+            tx.insertFresh(heads, "Heading two");
             return null;
         });
 

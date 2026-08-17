@@ -420,3 +420,13 @@ func (sc SumCase[K, V]) BindA11yHint(n Node, sel func(*V) *string) {
 // SetAccepts declares what a copy of this arm takes from a paste; const
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }
+
+// SetRole declares what a copy of this arm MEANS — and an ARM is where
+// the const-only rule reads most naturally, since an arm IS the shape
+// its rows share: the deleted variant's button is destructive for every
+// row it stamps (Tpl.SetRole).
+func (sc SumCase[K, V]) SetRole(n Node, role int64) { sc.t.SetRole(n, role) }
+
+// SetInset pads a container this arm stamps; containers only, const
+// only (Tpl.SetInset).
+func (sc SumCase[K, V]) SetInset(n Node, pad float64) { sc.t.SetInset(n, pad) }

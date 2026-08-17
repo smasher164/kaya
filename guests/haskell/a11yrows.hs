@@ -1,6 +1,8 @@
 {- The stamped-accessibility scene from Haskell: two entries stamped
    from ONE template, each carrying its OWN ROW's accessibility
-   identity, read back out of the platform's real tree.
+   identity, read back out of the platform's real tree — and, from a
+   second collection, a stamped row that INSETS its children and a
+   stamped label that says it is a HEADING.
 
    The a11y scene makes that claim for LIVE widgets; this one makes it
    for COPIES, which none of the accessibility milestone's 719 legs
@@ -44,10 +46,31 @@ main = kayaMain $ \app -> do
     -- ('entry', not 'entryBound'): the row reaches the copy's
     -- accessibility surface and nowhere else, which is exactly what the
     -- two assertions read.
+    -- THE STAMPED STYLING PROPS, on a collection of their own rather
+    -- than two more elements in the first. 'expect_ax' addresses the
+    -- real tree BY the authored identifier and refuses an ambiguous
+    -- one, and a scalar row has exactly one field to spend on an id —
+    -- so a second readable stamped element needs its own strings.
+    --
+    -- BOTH CONST, unlike the pair above, and the reason is the one
+    -- 'TplAccepts' gives: what a copy MEANS, and how far its prototype
+    -- holds children off its edge, are facts about the PROTOTYPE. Every
+    -- copy of one blueprint is a heading, and every copy insets by 8.
+    heads <- collection
+
     root <-
       column
         [ each notes $
-            withTplAttrs [TplA11yId element, TplA11yLabel element] entry
+            withTplAttrs [TplA11yId element, TplA11yLabel element] entry,
+          -- ONE SURFACE, so both props attach the same way: this zone is
+          -- located by the RESULT TYPE 'Tpl Node' rather than by a row
+          -- trace beside a template handle, and 'withTplAttrs' is the
+          -- only way to reach a node. Rust spends its two surfaces here
+          -- (the row trace carries inset, the Tpl carries role); the
+          -- nesting below is the whole of it in Haskell.
+          each heads $
+            withTplAttrs [TplInset 8] $
+              rowOf [withTplAttrs [TplRole Heading, TplA11yId element] (label element)]
         ]
     mount root
 
@@ -58,3 +81,5 @@ main = kayaMain $ \app -> do
     -- template above.
     insert notes (VStr "a") (VStr "First note")
     insert notes (VStr "b") (VStr "Second note")
+    insert heads (VStr "h1") (VStr "Heading one")
+    insert heads (VStr "h2") (VStr "Heading two")

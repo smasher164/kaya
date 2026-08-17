@@ -67,6 +67,38 @@ func App() *kaya.App {
 			// the keys are never asserted, only the two copies' order.
 			tx.InsertFresh(notes, "First note")  // entry#0
 			tx.InsertFresh(notes, "Second note") // entry#last
+
+			// THE STAMPED STYLING PROPS. A second collection rather than
+			// two more widgets in the first, because expect_ax addresses
+			// the real tree by AUTHORED IDENTIFIER and refuses an
+			// ambiguous one — a scalar row has exactly one field to spend
+			// on an id, so a second readable stamped element needs its
+			// own strings.
+			//
+			// Both props are CONST here and const in every binding: what
+			// a copy MEANS, and how far its prototype holds children off
+			// its edge, are facts about the PROTOTYPE, not about the
+			// row's data (SetAccepts's rule, one prop over).
+			heads := tx.Collection()
+			for head := range heads.Rows(tx) {
+				// Go's Row EMBEDS *Tpl rather than forwarding to it by
+				// hand, so the row surface and the base surface are one
+				// method set and the pair cannot drift. That is why both
+				// props are spelled off `head` here: writing them any
+				// other way would be theatre about a forward the language
+				// makes for us. The sealed surfaces — SumCase and the
+				// generated <name>Row — are the ones that must forward,
+				// and bindings/go/tplzone_test.go holds them level.
+				var title kaya.Node
+				bar := head.Row(func() {
+					title = head.Label(head.Value())
+					head.SetRole(title, kaya.RoleHeading)
+					head.BindA11yID(title, head.Value())
+				})
+				head.SetInset(bar, 8)
+			}
+			tx.InsertFresh(heads, "Heading one") // label#0, row#0
+			tx.InsertFresh(heads, "Heading two") // label#last
 		}))
 	})
 

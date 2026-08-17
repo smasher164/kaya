@@ -3015,6 +3015,35 @@ sealed class Tpl
     public void SetAccepts(Node n, params string[] kinds) =>
         tx.Records.Add(KayaWire.TxSetAccepts(n.Id, Tx.AcceptList(kinds)));
 
+    /// What a stamped copy MEANS — semantic emphasis, never appearance.
+    /// The live Tx.SetRole has carried this since the styling pass and
+    /// the template zone could spell it nowhere, so a stamped "Delete"
+    /// button inside a For was declarable as destructive in no language.
+    ///
+    /// CONST, like SetAccepts above and for its reason: what a copy
+    /// means is a fact about the PROTOTYPE, not about the row's data.
+    /// The root refuses a role on a kind it does not fit at DECLARE
+    /// time, naming both the role and the kind, before a single row
+    /// stamps — which is why there is no type-level wall here, exactly
+    /// as the live zone's `role:` argument leans on that wall rather
+    /// than on Role's own type.
+    public void SetRole(Node n, Role role) =>
+        tx.Records.Add(KayaWire.TxSetRole(n.Id, (long)role));
+
+    /// A stamped CONTAINER's own padding: DIP between its bounds and
+    /// its children, uniform on all four sides — the window inset one
+    /// level down, the same number the live Tx.SetInset spells.
+    ///
+    /// THE FORCING CASE IS A STAMPED ROW. The editor's status row is
+    /// live and insets; its find bar is a copy stamped from a template,
+    /// and it sat flush against a full-bleed window's edge because this
+    /// zone carried exactly one layout prop (SetGrow) — no prop could
+    /// give a stamped row its margin back. Const for SetRole's reason: a
+    /// prototype's margin describes the prototype. Containers only, and
+    /// the root says so at declare time.
+    public void SetInset(Node n, double pad) =>
+        tx.Records.Add(KayaWire.TxSetInset(n.Id, pad));
+
     // Construction sugar, template flavor: one name per widget, the
     // argument's type picks the addressable source (constant, signal,
     // or element field); handlers receive the stamped copy's keys

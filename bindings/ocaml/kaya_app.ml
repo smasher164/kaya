@@ -2576,6 +2576,34 @@ module Tpl = struct
 
     let set_grow (Node id) weight = emit (the_tx ()) (Kaya_wire.tx_set_grow id weight)
 
+    (* --- What a stamped copy MEANS, and how far it holds its children
+       off its own edge -------------------------------------------------
+
+       The two styling props the live zone has carried since the styling
+       pass and this zone could not spell at all: a stamped "Delete"
+       button was declarable as destructive in no language, and a
+       stamped row — the editor's find bar — sat flush against a
+       full-bleed window's edge while the live status row beside it
+       inset.
+
+       CONST ONLY, unlike text or the a11y pair and exactly like
+       [set_accepts]: what a copy means, and how far its prototype holds
+       its children off its edge, are facts about the PROTOTYPE rather
+       than about the row's data. There is no [bind_role_field] for the
+       same reason there is no [bind_accepts_field].
+
+       NEITHER NEEDS A TYPE-LEVEL WALL HERE, because [node] is not typed
+       by kind (see [set_a11y_hint] above for why it cannot be) and the
+       root already judges the combination while the blueprint is being
+       recorded, before a single row stamps: a [Heading] on a template
+       button and an inset on a template label each die at declare time
+       naming both sides (crates/kaya/src/scene.rs:552, :596). The
+       constructors are still the wall a guest meets first — [~role]
+       rides button and label, [~inset] the container kinds. *)
+
+    let set_role (Node id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
+    let set_inset (Node id) pad = emit (the_tx ()) (Kaya_wire.tx_set_inset id pad)
+
     (* --- What a stamped copy carries for assistive tech --------------
        Grouped by PROP rather than by source, unlike everything else
        here, because that is how they arrive: the three sources of ONE
@@ -2818,13 +2846,17 @@ module Tpl = struct
 
   let button ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
-      ?a11y_hint_field ?text ?bind ?bind_field ?(level = 0)
+      ?a11y_hint_field ?role ?text ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) ?on_click () =
     let n = Floor.widget Kaya_wire.kind_button in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ~a11y_level n;
     Option.iter (fun v -> Floor.set_a11y_hint n v) a11y_hint;
+    (* [Destructive] or [Prominent] — the stamped row's own delete
+       button, which is what this prop reaching the zone is for; a
+       [Heading] button dies at the root, as it does live. *)
+    Option.iter (fun r -> Floor.set_role n r) role;
     Option.iter (fun s -> Floor.bind_a11y_hint n s) a11y_hint_bind;
     Option.iter (fun fd -> Floor.bind_a11y_hint_field ~level:a11y_level n fd)
       a11y_hint_field;
@@ -2868,12 +2900,17 @@ module Tpl = struct
     n
 
   let label ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?text ?bind ?bind_field ?(level = 0)
-      ?(a11y_level = level) () =
+      ?a11y_label_bind ?a11y_label_field ?role ?text ?bind ?bind_field
+      ?(level = 0) ?(a11y_level = level) () =
     let n = Floor.widget Kaya_wire.kind_label in
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    (* [Heading] is the label's role — the platform's own heading text
+       style AND the trait assistive users skim by, which is what makes
+       a stamped section title readable as one. The two button emphases
+       die at the root. *)
+    Option.iter (fun r -> Floor.set_role n r) role;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
     Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
@@ -3104,11 +3141,17 @@ module Tpl = struct
      applied creators ([unit -> node] thunks), realized left to
      right; [()] realizes, omitting it nominates a child. *)
   let container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) kind children () =
+      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) ?inset kind children ()
+      =
     let parent = Floor.widget kind in
     Option.iter (fun g -> Floor.set_grow parent g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ~a11y_level parent;
+    (* Every stamped copy's own padding. [~spacing] and [~align] stay
+       floor-only on template containers, in every binding alike — this
+       one prop comes over because a stamped row with no margin is what
+       the editor's find bar was. *)
+    Option.iter (fun p -> Floor.set_inset parent p) inset;
     List.iter (fun child -> Floor.add_child parent (child ())) children;
     parent
 
@@ -3118,12 +3161,13 @@ module Tpl = struct
      the prototype, so it stays a required constant. The columns record
      lands BEFORE the add_childs, as in the live zone. *)
   let grid ~columns ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) children () =
+      ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) ?inset children () =
     let n = Floor.widget Kaya_wire.kind_grid in
     Floor.set_columns n columns;
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ~a11y_level n;
+    Option.iter (fun p -> Floor.set_inset n p) inset;
     List.iter (fun child -> Floor.add_child n (child ())) children;
     n
 
@@ -3142,10 +3186,10 @@ module Tpl = struct
      defaulted every prop and swallowed the caller's. The live zone
      forwards the same way and for the same reason. *)
   let column ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level children =
+      ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset children =
     container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level Kaya_wire.kind_column
-      children
+      ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset
+      Kaya_wire.kind_column children
 
   (* A vertical scroll viewport per stamped copy, over EXACTLY ONE
      child. Pass [~grow] so the enclosing track CONSTRAINS it — an
@@ -3160,10 +3204,16 @@ module Tpl = struct
       ?a11y_label_bind ?a11y_label_field ?a11y_level Kaya_wire.kind_scroll
       children
 
+  (* [~inset] rides the two flex containers and the grid and stops
+     there, exactly as it does live: the root admits the prop on Column,
+     Row and Grid alone (crates/kaya/src/scene.rs:552), so [scroll]
+     above forwards no inset and a viewport asking for one dies at
+     declare time rather than reaching four backends. *)
   let row ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level children =
+      ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset children =
     container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?a11y_level Kaya_wire.kind_row children
+      ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset Kaya_wire.kind_row
+      children
 
   (* Attach a live-built context catalog ([context_catalog]) to a
      template node: every stamped copy shows the same catalog, and
