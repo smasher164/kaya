@@ -1,5 +1,11 @@
 # Saving a file — the design pass
 
+Status: LANDED 2026-08-10 (`67d14f0`) — the record, all five backends,
+all eight bindings, the C floor, `tools/scenes/save.steps` on every
+runner, and the three §0 defects fixed as D3 said. §0 below is the
+probe record from the day before that; read it as history, not as the
+state of the tree.
+
 The editor's last prerequisite. Probe reports (2026-08-09, five arms,
 every claim tagged measured/documented/assumed):
 scratchpad/save-probe-{mac,ios,linux,windows,android}.md.
@@ -21,28 +27,34 @@ opening a path that does not exist fails with errno 2 (ERROR_FILE_NOT_
 FOUND on Windows) in EVERY mode, measured on mac and windows. And a
 desktop save panel ANSWERS WITH A PATH THAT DOES NOT EXIST — measured
 on mac: `exists=false` after a clean Save, and pressing Replace does
-not truncate either. So today a save destination cannot be opened at
-all. Writing to an ALREADY-PICKED file works; saving does not.
+not truncate either. So before this milestone a save destination could
+not be opened at all. Writing to an ALREADY-PICKED file worked; saving
+did not.
 
-**Three defects found on the way, none of them about saving:**
-1. **Java's handle is read-only in every mode, on every platform** —
-   `bindings/java/dev/kaya/KayaApp.java:581-589` returns a
-   `FileInputStream` for write and read-write alike. A Java app cannot
-   write to a picked file anywhere.
+**Three defects found on the way, none of them about saving — all three
+fixed in this milestone, as D3 says:**
+1. **Java's handle was read-only in every mode, on every platform** —
+   `bindings/java/dev/kaya/KayaApp.java` returned a `FileInputStream`
+   for write and read-write alike, so a Java app could not write to a
+   picked file anywhere. FIXED: the write and read-write arms now hand
+   back a `FileOutputStream` (and both, for read-write).
 2. **The Swift backend matches mode NUMBERS as bare literals**
-   (`swift/KayaSwiftUI.swift:2195-2201`) while Rust pins them by test,
-   with nothing checking the two agree. Renumbering a mode silently
-   opens files the wrong way on Apple platforms.
-3. **The only test of `kaya_open_picked` is unix-gated** and passes
-   READ, so the API's write half is untested everywhere and unrun on
-   Windows.
+   (`swift/KayaSwiftUI.swift`) while Rust pins them by test. Nothing
+   checked the two agreed, and renumbering a mode would silently open
+   files the wrong way on Apple platforms. FIXED by a gate:
+   `tools/check-file-modes.sh` holds every hand-written decoder against
+   the spec's numbers, with a census so a new decoder cannot hide.
+3. **The only test of `kaya_open_picked` was unix-gated** and passed
+   READ, so the API's write half was untested everywhere and unrun on
+   Windows. FIXED: the gate is gone and the windows lane runs
+   `capi::picked_tests` on the guest (tools/deploy-win.sh).
 
 **The save dialog per platform** (all measured against the open
 picker's existing machinery):
 | backend | API | answers with | harness story |
 |---|---|---|---|
 | mac | `NSSavePanel` (the class `NSOpenPanel` already inherits) | ONE URL, file not created | AX ids identical to the open panel; the filename field `saveAsNameTextField` is AX-settable, verified |
-| iOS | `UIDocumentPickerViewController` export/create | a URL to a created file | **BLOCKED: simdrive has six verbs and none enters text** |
+| iOS | `UIDocumentPickerViewController` export/create | a URL to a created file | BLOCKED at probe time: simdrive had six verbs and none entered text. Unblocked by D4 — `savename` types into the field, beside `savestate`/`savepress`/`savecancel` |
 | linux | GTK4 `FileDialog` save | one path, not created | the AT-SPI path the open picker already uses |
 | windows | `IFileSaveDialog` (NOT `FileSavePicker` — its start location is an enum, it needs an owner HWND unpackaged) | a path that does not exist | the UIA machinery deploy-win already drives |
 | android | `ACTION_CREATE_DOCUMENT` | a content locator to a CREATED document | the existing picker legs |

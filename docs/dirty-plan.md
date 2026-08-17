@@ -1,5 +1,9 @@
 # Dirty-state window chrome — the design pass
 
+Status: LANDED 2026-08-06 (`6a616d6`) — D1-D6 as ratified, all five
+backends, all nine guest tiers, `dirty` out of DEPTH_SCENES and in
+every runner's SCENES.
+
 The working record for the dirty-state milestone, in the undo-plan's
 shape: probes first, decisions stated with what they replaced, nothing
 ratified until the maintainer says so. The probe reports (2026-08-06,
@@ -147,13 +151,17 @@ DEPTH IS GREEN. Spec + Rust surface + the SwiftUI mac arm + the scene,
 
 Two things the depth arm could not settle, both handed to breadth:
 
-1. **The mobile lanes have nothing to run yet.** `dirty.steps` drives a
+1. **The mobile lanes had nothing to run.** `dirty.steps` drives a
    chrome CLOSE (that is D3's demonstration), and no phone has one, so
-   the scene as written is desktop-only on the window/panels precedent.
-   D4 still wants iOS and Compose to apply the prop and read it back;
-   that needs either an explicit carve-out or a mobile-safe sibling
-   script. Both mobile interpreters currently declare
-   `depthStub("dirty")` and docs/deferred.md holds them open.
+   the scene as written looked desktop-only on the window/panels
+   precedent. D4 still wanted iOS and Compose to apply the prop and read
+   it back, which seemed to need either an explicit carve-out or a
+   mobile-safe sibling script. SETTLED 2026-08-06, with NEITHER: both
+   phone lanes run the shared scene's PHONE-EXPRESSIBLE PREFIX — the
+   mark going up, coming down on save, and going up again — cut at
+   `close_window`, with the cut declared by verb and `expect_dirty`
+   named as the assertion the cut may not take with it. Both mobile
+   depth stubs are gone and `dirty` has graduated out of DEPTH_SCENES.
 2. **`expect_title` and `dirty` must never appear in the same stretch
    of a shared script.** The WinUI arm composes its asterisk into the
    RENDERED caption, which is what `expect_title` reads there, so a

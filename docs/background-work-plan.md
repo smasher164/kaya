@@ -1,16 +1,22 @@
 # Background work — the executable plan
 
+Status: LANDED 2026-07-28 — `kaya_wake()` in the C floor
+(crates/kaya/src/capi.rs), `post` in all eight bindings,
+`tools/scenes/background.steps` on every runner. The hole below is the
+one this slice closed; read it as the argument for the slice, not as
+the state of the tree.
+
 Sequenced BEFORE file dialogs (docs/file-dialogs-plan.md), which is
 where the gap was found. The ledger entry in docs/deferred.md has the
 evidence; this file is the slice.
 
-**THE HOLE.** A kaya app cannot do work off the app thread and show the
-result. Nothing posts back: `App` is not thread-safe, no binding has a
-post primitive, and the app thread's only wake-up is
-`kaya_wait_occurrences`, blocked in C. So today a guest either blocks
+**THE HOLE.** A kaya app could not do work off the app thread and show
+the result. Nothing posted back: `App` was not thread-safe, no binding
+had a post primitive, and the app thread's only wake-up was
+`kaya_wait_occurrences`, blocked in C. So a guest either blocked
 the app thread — the window keeps drawing while input stops doing
 anything, which is the worst failure mode because it looks alive — or
-computes on its own thread and cannot write the answer anywhere.
+computed on its own thread and could not write the answer anywhere.
 
 **WHY IT COMES FIRST.** File dialogs kept trying to invent this
 privately. Without a post, the open has to arrive as a callback, and
@@ -74,6 +80,11 @@ Posting is therefore `a.dispatch` deferred, not a new concept.
   is no natural order — they arrive on different queues — so promise
   NOTHING rather than promise something that must then be enforced.
 - **Shutdown.** What happens to posts still queued when the core stops.
+  ANSWERED BY THE IMPLEMENTATION, uniformly: the loop drains posted work
+  at the TOP, before the ring and before parking, so the last drain
+  before `wait` returns false is the last one there is, and anything
+  posted after that is dropped (bindings/go/app.go's `Serve`, and its
+  siblings).
 - **Posting from inside a handler.** Queues for after; never nests.
 
 ## §4 — the guard, which is half the point
@@ -91,11 +102,13 @@ Uniform semantics, spelled per language:
   `!Sync`, so `Tx` is `!Send`, so `thread::spawn` refuses it. Nobody
   designed this; pin it with a `compile_fail` doctest before it
   evaporates under some future refactor.
-- **Go currently fails SILENTLY and must not.** `tx.Write` and
-  `tx.Signal` append to `tx.records` without checking the `closed` flag
-  the Widget chain methods do check, so a write through a captured `Tx`
-  vanishes with no panic and no error. Fix, then audit every `Tx`
-  method.
+- **Go failed SILENTLY and must not.** `tx.Write` and `tx.Signal`
+  appended to `tx.records` without checking the `closed` flag the Widget
+  chain methods do check, so a write through a captured `Tx` vanished
+  with no panic and no error. FIXED, and the audit became a wall: every
+  Go write goes through one chokepoint that carries the closed check
+  (bindings/go/app.go), and `tools/check-tx-liveness.sh` holds the rule
+  in all eight bindings.
 - **The other six**: same audit, same negative test. A language that
   cannot make it a compile error makes it a loud failure.
 

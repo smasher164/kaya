@@ -1,12 +1,19 @@
 # Clipboard — the executable plan
 
-The design below was worked out 2026-08-01 and is not yet in DESIGN.md;
-move it there when it is ratified. Sequencing follows CLAUDE.md's
+Status: COMPLETE 2026-08-04 — all five backends, all eight bindings,
+the Android helper, the scene on every runner. docs/deferred.md's
+Clipboard entry is struck with the closing record; the fan-out map is
+docs/handoff-clipboard.md.
+
+The design below was worked out 2026-08-01. It was ratified 2026-08-02
+and now lives in DESIGN.md's "Clipboard" section; this file is the
+working record behind it. Sequencing followed CLAUDE.md's
 depth-then-breadth rule: protocol, one backend, one binding, the scene,
 green on mac, only then fan out.
 
-Nothing here is settled except §0, which records the decisions already
-made and the reasoning that produced them. Several of those decisions
+Nothing here was settled except §0 when this was written, which records
+the decisions already made and the reasoning that produced them.
+Several of those decisions
 REPLACED an earlier answer in the same conversation, and the earlier
 answer is written down beside each one, because every one of them is
 the answer a fresh session would reach for first.
@@ -1770,7 +1777,8 @@ WinUI defers and is the likeliest to want it, its board having the same
 relay on the other side — recorded in docs/deferred.md rather than
 built, since that arm was settled 2026-08-03.
 
-## §11 onwards — to be written
+## §11 — the matrix — DONE
 
 The full matrix (validate-all) once the mac seed's and paste's fixes
-have ridden it.
+have ridden it. It did, 2026-08-04, and the milestone closed there;
+docs/deferred.md's struck Clipboard entry carries the closing record.

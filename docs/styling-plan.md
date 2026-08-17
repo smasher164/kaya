@@ -1,5 +1,12 @@
 # The styling/branding pass — the design
 
+Status: Slice 1 LANDED 2026-08-12 (`55f1873`, with the mac yield fixed
+in `efcfcc7` and the brand reaching every root in `d94e66f`); slice 2's
+icons LANDED 2026-08-16 (`c94da13`); slice 2b's typeface LANDED
+2026-08-16 (`31ace6b`) on four backends — iOS applies it but wires no
+legs, because the OBSERVATION has never run on a device, and
+docs/deferred.md holds that one stub open.
+
 Ratified with Akhil 2026-08-12, on top of DESIGN.md's "Brand identity
 and the styling ceiling" (the three-verdict frame: brand slots ADMITTED,
 semantic roles ADMITTED, arbitrary per-widget appearance REFUSED). Six
@@ -210,9 +217,9 @@ they are recorded here so slice 2 starts from evidence:
   Apple platforms — which VALIDATES names-not-bytes, since no shared
   asset is even legal; Material Symbols are Apache (usable anywhere) —
   the fallback family where a platform set lacks a concept;
-  material-icons-extended is frozen at 1.7.8; the linux container is
-  MISSING librsvg2-common, so no SVG icon renders on that lane today —
-  fixed in slice 2's first commit or no icon leg can ever pass.
+  material-icons-extended is frozen at 1.7.8; the linux container was
+  MISSING librsvg2-common, so no SVG icon rendered on that lane —
+  fixed in slice 2 as this said it had to be (tools/linux/Dockerfile).
 
 ## §2 — what this pass does NOT do (recorded)
 
@@ -237,8 +244,8 @@ Slice 1 — the accent + roles + inset core:
 2. Core: the derivation function with its unit tests (the danger-band
    clamp is pure math — property-testable), declare-time role/kind
    checks.
-3. Compose interpreter FOUNDATION: a MaterialTheme root (there is NONE
-   today — Android has no theme root to hang anything on). This lands
+3. Compose interpreter FOUNDATION: a MaterialTheme root (there was NONE
+   — Android had no theme root to hang anything on). This lands
    before any Android styling can exist at all.
 4. SwiftUI depth slice: accent + roles + inset on mac, the styling
    scene (pixel/AX assertions per D4's walls), rust guest, mac green.

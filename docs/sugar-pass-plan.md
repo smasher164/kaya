@@ -1,5 +1,12 @@
 # The template-zone sugar pass — the design
 
+Status: LANDED 2026-08-10 (`c20b9c2`, with S7 following in `a6c23be`) —
+both zones at parity in all eight bindings, the gate reading the
+template zone through tools/tpl-surfaces.py, and the three §0 defects
+(D1's missing tag, D2's dropped value change, D3's Python `progress`
+AttributeError) all fixed as S5 required, before any constructor
+shipped. Read §0 as the survey record, not as the state of the tree.
+
 Started 2026-08-10, from a question about one line of the text editor:
 `query = row.Widget(kaya.KindEntry)`. The editor's find bar is a
 one-row collection, so it is built in the TEMPLATE zone, and the
@@ -23,9 +30,11 @@ checkbox, button) and four in several other bindings. Everything else
 falls to `widget(kind)`, the raw floor, which passes a wire constant as
 a runtime value.
 
-**No gate looks at the template zone at all.** That is why the surface
+**No gate looked at the template zone at all.** That is why the surface
 could be complete in eight languages and simultaneously reachable only
-through the floor in every template.
+through the floor in every template. S6 closed it: `tools/tpl-surfaces.py`
+now censuses the zone, and holds a zone's several surfaces level with
+each other.
 
 Python is the exception and needs NOTHING here: its transaction is
 ambient, so `kaya.entry(on_change=...)` is literally the same call in
@@ -251,10 +260,14 @@ widget kind**, everywhere, with nothing to remember.
   options; only the selected index varies. Varying the option COUNT per
   row would need a nested collection inside the choice widget, which the
   scene rejects (labels only). Deliberate, not a gap.
-- **A per-row image.** §S4.
-- **Template-node props.** Grow, the a11y pair, `accepts` and the paste
-  hook are unreachable on a template node in most bindings today. Not
-  part of this pass; ledgered.
+- ~~**A per-row image.**~~ NOT A LIMIT — §S4 corrected this the same
+  day: `ValueType::Blob` always existed and three bindings already
+  shipped a per-row image. Rust's missing `BlobKind` marker was the
+  whole gap, and it landed with this pass (crates/kaya/src/app.rs).
+- ~~**Template-node props.**~~ Grow, the a11y pair, `accepts` and the
+  paste hook were unreachable on a template node in most bindings, and
+  this pass ledgered them rather than carrying them. CLOSED by the
+  follow-on slice, docs/tpl-props-plan.md (`c36340f`).
 
 ## §3 — sequencing
 

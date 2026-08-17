@@ -1,5 +1,9 @@
 # Template-node props + the widened floor tier — the design
 
+Status: LANDED 2026-08-11 (`c36340f`) — P1's props in all eight
+bindings, P2's gate clauses, P3's two scenes (the a11y one as its own
+scene, see below), and the floor tier's F1-F6.
+
 The two items docs/deferred.md carried out of the sugar pass
 (2026-08-10), taken together because they are the same pass's two loose
 ends: what a stamped widget can CARRY, and what a gate can SAY about a
@@ -17,9 +21,11 @@ the plan relied on them.
   both stamp to the right per-copy ApplyOps. Nothing to build below the
   bindings.
 - **The harness already reaches stamped copies** (`set_text entry#last`,
-  tools/scenes/undo.steps:279), so `expect_ax` on a stamped copy is
-  expressible today. No a11y leg has ever made that read — the
-  milestone's 719 legs all built their subjects live.
+  tools/scenes/undo.steps), so `expect_ax` on a stamped copy is
+  expressible today. No a11y leg had ever made that read — the a11y
+  milestone's 719 legs all built their subjects live. P3 closed that:
+  tools/scenes/a11yrows.steps is the first scene to read a stamped
+  copy's accessibility surface out of the platform's real tree.
 - **A11yHint stays activation-kinds-only** (scene.rs:566), and the
   restriction needs no binding-side type: misuse dies at declare time,
   before a row stamps, in the root's own words.
@@ -35,13 +41,13 @@ the plan relied on them.
 The draft of this plan assumed the paste gap was a missing dispatch arm,
 like the sugar pass's D2. The survey says otherwise, in seven bindings
 out of eight: the node registrar EXISTS and the dispatch arm EXISTS, and
-the hook can still never fire — because every backend gates the paste
-occurrence on the focused widget's ACCEPT LIST (gtk.rs:2842,
-winui/mod.rs:5574, KayaSwiftUI.swift:8875) and falls back to the
-platform's own insertion when it is empty, and no binding can put an
-accept list on a template node. `app.onPaste(node, ...)` compiles,
-registers, and waits forever. Exactly as invisible as D2's dropped value
-change, one layer up.
+the hook could still never fire — because every backend gates the paste
+occurrence on the focused widget's ACCEPT LIST (gtk.rs,
+winui/mod.rs, KayaSwiftUI.swift) and falls back to the
+platform's own insertion when it is empty, and no binding could put an
+accept list on a template node. `app.onPaste(node, ...)` compiled,
+registered, and waited forever. Exactly as invisible as D2's dropped
+value change, one layer up. P1's `accepts` is what ended it.
 
 So `accepts` is the keystone of this slice, not a rider. Rust is the one
 inversion: it CAN spell every prop at the floor (`Tpl::set`) and is the
@@ -66,11 +72,13 @@ AND `RowSurface`; Go has FIVE template surfaces (the generated Row was
 uncounted); Rust's `Row` façade forwards everything (tpl-surfaces.py
 already holds that pair level).
 
-Python's shape is its own: `Node` carries only `context_menu` today and
-the a11y/accepts/on_paste methods are Widget-only — the ambient-zone
+Python's shape was its own: `Node` carried only `context_menu` and
+the a11y/accepts/on_paste methods were Widget-only — the ambient-zone
 exemption does NOT extend to props. Its survey's fix (a shared handle
-base) is the right one; its gate clause reads the class structure by
-`ast`, not by regex and not by import-probing a built dylib.
+base) was the right one and is what shipped: `Node` and `Widget` both
+derive from `_Handle`, which carries the six. Its gate clause reads the
+class structure by `ast`, not by regex and not by import-probing a
+built dylib.
 
 ### P2 — the gate
 
@@ -89,12 +97,20 @@ one intact.
   the row's own field, two rows inserted at build, asserted with
   `expect_ax` against the platform's real tree. All nine guests
   (eight sugar + the C floor as the explicit tier); strings byte-frozen
-  (invariant 6).
+  (invariant 6). SHIPPED AS ITS OWN SCENE, tools/scenes/a11yrows.steps,
+  for a reason the writing found: a For materializes as a COLUMN and
+  container creation order differs by language, so a For added inside
+  a11y.steps would make `column#0` name different widgets in different
+  languages. The new scene asserts no container at all. The ids ended
+  up element-sourced like the labels, because `expect_ax` cannot tell
+  two copies apart by a shared const id — legal, just unreadable by
+  that verb, and the read now refuses an ambiguous id with the count
+  rather than answering with whichever it found first.
 - **clipboard.steps** gains a stamped paste target: a one-row collection
   whose entry declares `accepts`, a paste into it, and the app's
-  hook-output assertion. This is the leg that makes the node paste arm
+  hook-output assertion. This is the leg that made the node paste arm
   PRINT FOR THE FIRST TIME in every binding that has one — Go's
-  OnPasteNode arm (app.go:3667) has never fired, and a branch nobody has
+  `OnPasteNode` arm had never fired, and a branch nobody has
   seen fire is a guess (invariant 3, the why-not rule, one arm over).
 
 ## §2 — the floor tier

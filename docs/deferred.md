@@ -52,7 +52,9 @@ own the state (see the undo note in this file).
   destination the dialog promised, not to the caller's intent. DEPTH
   LANDED: spec + the core's `SaveDestination` + the Rust surface
   (`tx.save_file(name)`, `msgs.on_saved`) + the SwiftUI mac arm + the
-  `save` scene. What is still open:
+  `save` scene. BREADTH LANDED 2026-08-10 (`67d14f0`): the two remaining
+  backend arms, the seven other bindings and their guests, and the
+  file-mode gate — the struck bullets below. What is still open:
   - ~~**DEPTH STUB: save on swiftui/ios**~~ — LANDED 2026-08-09.
     `UIDocumentPickerViewController(forExporting:asCopy:)`, whose every
     initializer takes a URL that ALREADY EXISTS, so the backend stages a
@@ -79,26 +81,32 @@ own the state (see the undo note in this file).
     the picker already uses, telling the two dialogs apart by the
     `EditableText` name field the save panel alone publishes.
     `save-rust` runs on both protocols in tools/linux/run-suites.sh.
-  - **DEPTH STUB: save on winui** — `IFileSaveDialog` (NOT
+  - ~~**DEPTH STUB: save on winui**~~ — LANDED 2026-08-10.
+    `IFileSaveDialog` (NOT
     `FileSavePicker`, whose start location is an enum and which needs an
     owner HWND unpackaged), driven through the UIA machinery deploy-win
-    already has. The windows runner wires no `save` legs meanwhile.
-  - **DEPTH STUB: save on compose** — `ACTION_CREATE_DOCUMENT`, which
+    already has; `save` is in deploy-win's SCENES and `run_suite
+    save_rust` is a live leg.
+  - ~~**DEPTH STUB: save on compose**~~ — LANDED 2026-08-10.
+    `ACTION_CREATE_DOCUMENT`, which
     hands back a content locator to a document that ALREADY EXISTS, so
-    the core's create is a no-op there and the uniform behaviour is free.
-  - **The seven other bindings** — the save request and its result in
+    the core's create is a no-op there and the uniform behaviour is free;
+    `run_apk save-compose` is a live leg.
+  - ~~**The seven other bindings**~~ — LANDED 2026-08-10: the save request
+    and its result in
     Python, Go, C#, Java, Swift, OCaml, Haskell, plus the C floor's
-    explicit spelling. check-sugar-surface and check-verbs hold this
-    open.
-  - **Java's picked handle is read-only in every mode, on every
-    platform** (`bindings/java/dev/kaya/KayaApp.java:581-589` returns a
-    `FileInputStream` for write and read-write alike). A Java app cannot
-    write to a picked file anywhere — found by the save probes, fixed in
-    this milestone's breadth per docs/save-plan.md D3.
-  - **The Swift interpreter matches file-mode NUMBERS as bare literals**
-    (`swift/KayaSwiftUI.swift`, the iOS opener) while Rust pins them by
-    test, with nothing checking the two agree. D3 wants a gate, watched
-    failing.
+    explicit spelling, each with its own `save` guest.
+  - ~~**Java's picked handle is read-only in every mode, on every
+    platform**~~ — FIXED 2026-08-10 in this milestone's breadth per
+    docs/save-plan.md D3: `bindings/java/dev/kaya/KayaApp.java` now opens
+    a `FileOutputStream` for write and both streams for read-write. As
+    found by the save probes, it returned a `FileInputStream` whatever
+    the mode, so a Java app could not write to a picked file anywhere.
+  - ~~**The Swift interpreter matches file-mode NUMBERS as bare
+    literals**~~ — GUARDED 2026-08-10 by `tools/check-file-modes.sh`,
+    which reads the number `swift/KayaSwiftUI.swift`'s opener RECEIVES
+    against the spec's own and censuses every other site that decodes
+    one. D3 asked for exactly this gate.
   - **The save-over-an-existing-file path is undriven.** macOS answers a
     Save onto an existing name with a SECOND, UNNAMED `AXSheet` whose
     buttons carry stable identifiers (`action-button-1` = Replace,
@@ -116,16 +124,24 @@ own the state (see the undo note in this file).
     Finder preference hides extensions — a machine-wide setting deciding
     a byte-frozen assertion. A scene that wants filters must name files
     whose extension is already in the filter.
-  - **THE THREE SAVE `Stage` METHODS CARRY DEFAULT BODIES**
+  - **THE THREE SAVE `Stage` METHODS STILL CARRY DEFAULT BODIES**
     (`save_dialog_state`, `set_save_name`, `confirm_save` in
     crates/kaya/src/harness.rs). Every other observation there is
     no-default so a backend that forgets fails to COMPILE;
     these panic instead, only because the slice landed depth-first and
-    gtk.rs/winui/mod.rs are the breadth arms' files. When all four
-    backends implement them, DELETE the bodies and end the signatures
-    with `;` — tools/lib/stage-coverage.py then holds them like the rest.
+    gtk.rs/winui/mod.rs are the breadth arms' files. THE PREMISE HAS
+    MOVED and only the deletion is left: both real `Stage` impls
+    (`GtkStage`, `WinUiStage`) implement all three as of 2026-08-10, as
+    do the three mock stages in harness.rs, so DELETE the bodies and end
+    the signatures with `;` — tools/lib/stage-coverage.py then holds them
+    like the rest.
 
-- **Dirty state** — IN FLIGHT 2026-08-06. The design is ratified and
+- ~~**Dirty state**~~ — LANDED 2026-08-06, and CLOSED on this entry's own
+  terms: all four backend arms are struck below, the window prop has its
+  sugar spelling in all eight bindings, `dirty` has a guest in each of
+  the nine (the C floor included), and the scene graduated out of
+  DEPTH_SCENES into SCENES. The body below is the record. As filed,
+  IN FLIGHT 2026-08-06. The design is ratified and
   written down: docs/dirty-plan.md D1-D6, off five probe reports. One
   `dirty` bool beside `title` and `veto_close`; the app declares state
   and each backend spells its own chrome (the close-button dot on
@@ -185,10 +201,11 @@ own the state (see the undo note in this file).
     both ways in tools/ios/run-sim.sh. The Compose arm faces the same
     tail and can lift the same shape; if it does, the two belong in one
     helper rather than two spellings.
-  - The seven other bindings' sugar spelling of the window prop
+  - ~~The seven other bindings' sugar spelling of the window prop
     (check-sugar-surface's window-prop sweep holds it open) and the
     scene's guests, at which point `dirty` graduates out of
-    DEPTH_SCENES.
+    DEPTH_SCENES.~~ — DONE: all eight bindings spell the prop, all nine
+    guests exist, and `dirty` is in validate-mac's SCENES.
 
 - **Text ranges** — IN FLIGHT 2026-08-06. The design is ratified
   (docs/ranges-plan.md D1-D6) off five probe reports and a units
@@ -312,14 +329,15 @@ own the state (see the undo note in this file).
     the mac defect's own mechanism does not arise. The question has still
     not been put to GTK, WinUI or Compose, and the answer must be
     MEASURED rather than inherited.
-  - The seven other bindings' sugar (`highlight_ranges`,
+  - ~~The seven other bindings' sugar (`highlight_ranges`,
     `select_range`, `reveal_range`, and `set_text`, which this
     milestone added as sugar over the generic prop setter so an app can
     open a document into an editor) plus the C floor, at which point
-    `ranges` graduates out of DEPTH_SCENES. `check-sugar-surface` does
-    not police widget props today, so nothing structural holds this
-    open — `check-verbs` does, through the Compose interpreter's four
-    missing verbs and three missing constants.
+    `ranges` graduates out of DEPTH_SCENES.~~ — DONE: all eight bindings
+    carry the three primitives, the nine guests exist, the Compose
+    interpreter has the verbs and constants check-verbs held open, and
+    `ranges` is in validate-mac's SCENES. What is still open on this
+    entry is the three DEFERRED bullets above, not the surface.
   - **The scene is pure ASCII and that is a constraint, not a
     preference.** A `.steps` file travels through three step
     interpreters, a shell and an environment variable, and only the
@@ -359,8 +377,12 @@ own the state (see the undo note in this file).
 
   The original entry follows, for the reasoning it carries.
 
-- **Clipboard** — the next editor prerequisite, and the one that
-  unblocks the most: the edit roles (cut/copy/paste) are inert without
+- ~~**Clipboard** — the next editor prerequisite~~ — COMPLETE 2026-08-04;
+  this is the ORIGINAL entry, kept for the design reasoning it carries
+  and struck where the wayland carve-out above left it unstruck. The
+  closing record is the struck Clipboard entry at the top of this file.
+  As filed, it was the prerequisite that
+  unblocked the most: the edit roles (cut/copy/paste) are inert without
   it, while undo/redo, find and dirty-state titles do not depend on it.
   THE DESIGN IS WRITTEN: docs/clipboard-plan.md §0, with the reasoning
   and, for each decision that replaced an earlier answer, the answer it
@@ -518,14 +540,18 @@ own the state (see the undo note in this file).
   `pub(crate) enum Inbox` instead. This unblocks file dialogs
   (docs/file-dialogs-plan.md), clipboard, notifications, and the
   editor's own reads.
-- **DEFECT — Go silently drops a write to a closed transaction.**
-  `Tx` carries a `closed` flag and the Widget/MenuItem chain methods
-  check it, but `tx.Write` and `tx.Signal` do not: they append to
-  `tx.records`, a slice `Build` has already submitted and will never
-  submit again. The write vanishes with no panic and no error. Today it
-  is nearly unreachable because nothing invites a guest to hold a `Tx`
-  past its handler; the post primitive above is exactly that invitation,
-  so this must be fixed WITH it.
+- ~~**DEFECT — Go silently drops a write to a closed transaction.**~~
+  FIXED 2026-07-28 for Go and Rust, CLOSED 2026-07-31 for the remaining
+  five, and GUARDED by tools/check-tx-liveness.sh — the body below is
+  the record. Go's `Tx.emit` is now the one append site and `Tx.alive`
+  the one panic (bindings/go/app.go). As found:
+  `Tx` carried a `closed` flag and the Widget/MenuItem chain methods
+  checked it, but `tx.Write` and `tx.Signal` did not: they appended to
+  `tx.records`, a slice `Build` had already submitted and would never
+  submit again. The write vanished with no panic and no error. It was
+  nearly unreachable at the time because nothing invited a guest to hold
+  a `Tx` past its handler; the post primitive above was exactly that
+  invitation, which is why it had to be fixed WITH it.
   FIXED FOR GO AND RUST 2026-07-28. Go routes all 109 append sites
   through one `Tx.emit` (plus `Tx.mirror` for model reads), so the
   liveness check cannot be missed at a new callsite, and a test asserts
@@ -779,12 +805,15 @@ own the state (see the undo note in this file).
   ARM-DERIVED, so it catches an arm-choice regression and not a build
   one.)
 
-- **Form factor as the adaptivity axis** (DESIGN's "Form factor and
-  adaptivity", 2026-07-24). kaya keys adaptivity on PLATFORM —
+- ~~**Form factor as the adaptivity axis**~~ (DESIGN's "Form factor and
+  adaptivity", 2026-07-24) — DONE, CLOSED 2026-07-27; what is left is
+  the OWED GATE in the iPad entry above, which is a re-read item and not
+  this one. The body below is the record. As filed:
+  kaya keyed adaptivity on PLATFORM —
   compile-time `#if os(iOS)`, and the compact-overflow rule written as
   desktop-vs-phone. The correct axis is the window's size class,
-  resolved at runtime, per window. Every backend already has the
-  concept and kaya uses none: SwiftUI's horizontal size class,
+  resolved at runtime, per window. Every backend already had the
+  concept and kaya used none: SwiftUI's horizontal size class,
   Compose's `WindowSizeClass`, libadwaita's `AdwBreakpoint`, WinUI's
   adaptive triggers. Scope: a size-class notion in the core/window
   model, the four backend readings, re-keying the menus compact rule
@@ -981,17 +1010,31 @@ own the state (see the undo note in this file).
   the native-kit button bridges are load-bearing indefinitely, not
   transitional.
   APPROVED 2026-08-16 (maintainer): bump the SDK for the kaya-built legs so guests opt into macOS 26's modern design generation; the artifact-screenshot caveat (stills will show the modern look, not older releases') is acknowledged. The constraint above still binds: the compat generation keeps a leg — the vendor-stamped hosts (JVM, .NET apphost) stay compat regardless of the flake, and the bump slice must VERIFY that coverage rather than assume it. Scout report: scratchpad/chrome/sdk-bump-scout.md.
+  THE BUMP LANDED 2026-08-17 (`4e5c67e`), and the verification is now
+  mechanical rather than owed: `tools/check-design-generation.sh` reads
+  which generation each mac leg's host was linked for and refuses if
+  EITHER door closes, so the standing constraint above is enforced by a
+  gate instead of by whoever remembers it. The constraint itself does
+  not expire — it is what the gate holds.
 
 ## Protocol / core
 
-- **No app can control the margin around its window content** (found by
-  the editor, 2026-08-10; the maintainer chose to ship v1 with the
-  margin rather than fix it now). The SwiftUI interpreter insets window
+- ~~**No app can control the margin around its window content**~~ (found
+  by the editor, 2026-08-10; the maintainer chose to ship v1 with the
+  margin rather than fix it now) — CLOSED 2026-08-12, and BOTH shapes
+  below shipped rather than one: the WINDOW content inset is wprop 8
+  (`55f1873`) and the CONTAINER inset is prop 17 (`5e650a0`, the
+  editor's own buffer taking the edge while the chrome keeps its
+  margin). The interpreter's five hard-coded sites now read
+  `.padding(scene.windows[…]?.inset ?? 16)`, so the default is still 16
+  and no existing scene moved — costing (a)'s promise, with (b)'s reach
+  added a level down. The body below is the record. As found:
+  the SwiftUI interpreter inset window
   content by a hard-coded `.padding(16)` (swift/KayaSwiftUI.swift, five
-  sites) and the spec has NO padding property anywhere: containers can
-  SPACE their children apart, but nothing controls the space AROUND
+  sites) and the spec had NO padding property anywhere: containers could
+  SPACE their children apart, but nothing controlled the space AROUND
   content. So a full-bleed layout — a Sublime-shaped editor, a canvas,
-  a photo view — is inexpressible.
+  a photo view — was inexpressible.
   Two shapes were costed when it came up:
   (a) a WINDOW content-padding prop beside title/size/dirty, defaulting
       to today's 16 so no existing scene moves; the app asks for 0.
@@ -1049,9 +1092,15 @@ own the state (see the undo note in this file).
   assert on a container the uniqueness convention cannot name — the
   layout scene already qualifies whenever its rows deserve assertions.
 
-- **Undo/redo and session restoration — core-owned, and cheap only
-  here** (from the 2026-07-24 survey; TRIGGER SATISFIED by the text
-  editor). Every other cross-platform framework bolts undo onto
+- **Session restoration — core-owned, and cheap only here** (from the
+  2026-07-24 survey; TRIGGER SATISFIED by the text editor). THE UNDO
+  HALF OF THIS ENTRY IS DONE: the design pass it demanded happened, the
+  depth slice landed 2026-08-04 and the completion pass closed its
+  follow-ups 2026-08-05 (see the undo entries below), and `undo` runs on
+  every lane. What is still open is RESTORATION — nothing in crates/
+  serialises a scene or brings one back — and the argument for it is
+  the same one, so the body below is kept whole.
+  Every other cross-platform framework bolts undo onto
   application state it does not own; macOS has `NSUndoManager` and the
   other three platforms have nothing portable. kaya owns all state at
   rest and every mutation already arrives as a transaction, so an undo
@@ -1067,7 +1116,13 @@ own the state (see the undo note in this file).
 - **The system-integration floor** (from the survey; the editor
   triggers the first three). Four surfaces, native on every platform,
   none previously in this ledger, and collectively what separates a
-  demo from an app. In the order real apps need them: **file dialogs**
+  demo from an app. HALF OF IT IS BUILT: file dialogs landed open
+  2026-07-31 and save 2026-08-10, and the clipboard is checked off at
+  the top of this file — so what this entry still holds open is
+  NOTIFICATIONS and DRAG AND DROP, neither of which the spec mentions
+  today, plus printing behind them. The survey's framing follows
+  unchanged, because the ordering argument is what the entry is for.
+  In the order real apps need them: **file dialogs**
   — NOT a widget, a presentation context returning a result. RATIFIED
   2026-07-27, see DESIGN's "File dialogs": the alert grammar holds, but
   the result is a LIST OF HANDLES redeemable for open DESCRIPTORS, not
@@ -1230,7 +1285,8 @@ count, so the saving is measured rather than assumed.
   second instance.** Measured 2026-08-10 on mac: under an environmental
   slowdown the file picker missed the step budget, the scene proceeded
   and requested a second dialog, and the one-dialog-per-process guard
-  (crates/kaya/src/capi.rs:1732) panicked in a non-unwinding context —
+  (`file_dialog_shown`, crates/kaya/src/capi.rs:1855 as of 2026-08-17;
+  filed as :1732) panicked in a non-unwinding context —
   so the leg died with `fatal runtime error: failed to initiate panic`
   and no verdict list, rather than reporting the steps that failed. The
   Windows IME-refusal abort (recorded above, 2026-08-09) is the same
@@ -1251,7 +1307,9 @@ count, so the saving is measured rather than assumed.
   CORRECTLY refuses it (`select_range refused: ime_composition`, the
   ratified D4 rule) — and then the NEXT apply op into the RichEditBox
   fails with `HRESULT(0x8000FFFF) "Catastrophic failure"`, which
-  panics at crates/kaya/src/winui/mod.rs:830 inside a function that
+  panics at `drain_transactions`' `apply(core, op).expect(…)`
+  (crates/kaya/src/winui/mod.rs:1318 as of 2026-08-17; filed as :830)
+  inside a function that
   cannot unwind, so the process aborts (exit 0xC0000409) rather than
   failing the leg. Frequency: 1 abort in 5 observed runs of that leg
   (2 passes before, 2 passes on demand after). Not caused by the Go
@@ -1585,8 +1643,11 @@ count, so the saving is measured rather than assumed.
   reproduced 8/10 at 20:00 and 0/10 on the SAME BUILD an hour later.
   It comes back under load.
 
-- **The step-failed line exists in ONE of the three harnesses
-  (2026-08-03).** A step's final failure text is now printed the moment
+- **The step-failed line exists in TWO of the three harnesses**
+  (filed 2026-08-03 when it was one; crates/kaya/src/harness.rs got it
+  2026-08-10 in `47bd2ab`, so KayaCompose.kt is the one still without
+  it and everything below applies to Kotlin alone.) A step's final
+  failure text is now printed the moment
   it becomes final — `KAYA_HARNESS: step-failed <text>`, in
   swift/KayaSwiftUI.swift's bounded-retry wrapper — so evidence survives
   an abort that runs before the verdict line. It was bought by the iOS
@@ -1594,16 +1655,16 @@ count, so the saving is measured rather than assumed.
   (crates/kaya/src/capi.rs's one-dialog-per-process guard) destroyed the
   failure list carrying the host driver's self-diagnosing sentence, and
   the log showed only a panic and a timeout.
-  The same wrapper shape, and the same exposure, exist in
+  The same wrapper shape, and the same exposure, existed in
   android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt and in
   crates/kaya/src/harness.rs (which serves GTK and WinUI): any panic
   before the verdict loses the list the same way. Mirroring is a
   four-line edit in each; both were left out of that session only
   because each carries its own gate to re-run (check-compose +
   check-detekt for Kotlin, the harness unit tests for Rust) and the lane
-  under repair was iOS. Do them together, and keep the spelling
-  byte-identical — the three harnesses are compared by eye far more
-  often than by tool.
+  under repair was iOS. THE RUST HALF WAS DONE 2026-08-10 by the editor
+  slice; KOTLIN IS WHAT IS LEFT. Keep the spelling byte-identical — the
+  three harnesses are compared by eye far more often than by tool.
 
 - **Follow-ups from the WinUI chord-drop fix (2026-08-03).** The race:
   chords were dispatched over TWO routes split by leaf kind (79dcd1d),
@@ -2378,12 +2439,12 @@ standing pattern):
   `AddFontResourceExW` (private AND session-wide, return value 1) all
   render the fallback with no error, while a file under the app root
   works. scratchpad/styling/typeface-winui-arm.md.
-  What is NOT closed is the LEG WIRING: `tools/deploy-win.sh` needs
-  `typeface` in its depth list plus `run_suite typeface_rust` and a
-  checked-in `tools/guest/run_typeface_rust.cmd`, which this arm was
-  scoped out of touching — check-steps is RED until they land, and says
-  so. Windows is the second lane (after mac) where the scene's
-  byte-frozen `Georgia` resolves, so no per-platform row is needed here.
+  The LEG WIRING this arm was scoped out of touching CLOSED 2026-08-16
+  (`31ace6b`): `typeface` is in deploy-win's SCENES, `run_suite
+  typeface_rust` runs, and `tools/guest/run_typeface_*.cmd` are checked
+  in for five languages. Windows is the second lane (after mac) where
+  the scene's byte-frozen family resolves, so no per-platform row is
+  needed here.
   Two limits of the blob route are unmeasured because no guest ships font
   bytes: the app directory must be writable (an install under Program
   Files is not), and for a DLL-hosted guest `current_exe` is the host
@@ -2403,15 +2464,17 @@ standing pattern):
   platform ramp standing and says so, detected at apply time with a
   two-sentinel probe. Both directions of the two-write trap watched going
   red on the lane; scratchpad/styling/typeface-compose-arm.md.
-  What is NOT closed is the LEG, the same blocker the GTK arm names one
-  bullet up: `Georgia` is absent on the emulator image (and Android's
-  family lookup is case-SENSITIVE, so no capitalisation of it hits), the
-  request falls back to Roboto and the arm says so — so
-  `tools/android/run-emulator.sh` wires no `typeface` legs and
-  check-steps says so. Android's row in a per-platform scene would be
-  `serif` (→ `Noto Serif`, metric-matched to Roboto so no line box
-  moves); a shared BLOB is the other way out, and it is the only one that
-  keeps the scene's expected family one byte-frozen string on every lane.
+  THE LEG CLOSED 2026-08-16 (`31ace6b`) THE SAME WAY THE GTK ONE DID —
+  by the shared blob, which this bullet already named as the only exit
+  that keeps the expected family one byte-frozen string on every lane.
+  `tools/android/run-emulator.sh` now wires three `typeface` legs
+  (compose, jvm, go), each naming the pushed font copy in
+  `KAYA_FONT_FILE`. The blocker it records stands as the reason: `Georgia`
+  is absent on the emulator image (and Android's family lookup is
+  case-SENSITIVE, so no capitalisation of it hits), the request falls
+  back to Roboto and the arm says so. Android's row in a per-platform
+  scene would have been `serif` (→ `Noto Serif`, metric-matched to Roboto
+  so no line box moves); the blob made a per-platform row unnecessary.
 - ~~**The seven other bindings**~~ LANDED 2026-08-16 (31ace6b): all eight
   bindings carry the surface, swept by check-sugar-surface. Was:
   `brand_typeface`/`brand_typeface_with`
@@ -2517,9 +2580,11 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
 - **The seven other bindings need nothing** — and that is the point of
   the ratified shape: `primary(true)` is a spelling all eight bindings
   have shipped since the menus milestone, so this slice adds no binding
-  surface and the 8-way sweep is empty by construction. What the other
-  languages DO owe is a `toolbar` GUEST each, so the scene can graduate
-  from validate-mac's DEPTH_SCENES into SCENES the way styling did.
+  surface and the 8-way sweep is empty by construction. The `toolbar`
+  GUEST each language owed ARRIVED 2026-08-17 (`a3ea86d`): python, go,
+  csharp, java, swift, ocaml and haskell all have one. WHAT IS LEFT is
+  the graduation itself — `toolbar` is still in validate-mac's
+  DEPTH_SCENES rather than SCENES, the way styling moved.
 
 ## Styling follow-ups the fan-out surfaced (2026-08-12, none blocking)
 

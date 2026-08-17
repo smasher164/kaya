@@ -1,5 +1,10 @@
 # Undo/redo — the design pass
 
+Status: LANDED — the depth slice (`3044d73`), the five-arm fan-out
+(`a9fbf9b`, `d41247a`), the completion pass (`43144f0`) and §3b's
+stamped copies (`1d2cf95`). §5.4, the one item this file left open for
+the maintainer, is answered in §3b.
+
 The working record for the undo/redo milestone, in the shape
 docs/clipboard-plan.md proved out: the argument first, every decision
 stated with what it REPLACED, measurements before arms. The recon this
@@ -35,11 +40,12 @@ and the two are not on speaking terms:
   design where kaya owns typing undo must first win a fight that
   three platforms make unwinnable — that is carve-out territory for
   no benefit.
-- **And it is already misbehaving**: kaya's programmatic writes land
-  in the native stacks. On GTK, `set_text` and `Clear` are guarded
+- **And it was already misbehaving**: kaya's programmatic writes landed
+  in the native stacks. On GTK, `set_text` and `Clear` were guarded
   only by apply_quiet — which suppresses occurrences, not undo — so
-  Ctrl+Z today can revert a write the APP made. That is a live
-  defect this design must fix regardless of everything else.
+  Ctrl+Z could revert a write the APP made. That was a live
+  defect this design had to fix regardless of everything else, and D7
+  (widened by A1, narrowed by A3) is the fix.
 
 Meanwhile the core's half is genuinely cheap, as the ledger promised,
 but only for half the protocol: a committed transaction is a forward
@@ -473,13 +479,14 @@ owns a field's document needs to say so.
 
 ### A8 — TESTABILITY (the invariant-1 obligation)
 
-The delegated tier is currently unobservable: no harness verb can
-press a chord at a native widget (GTK panics on an unowned chord),
-and set_text is a programmatic write that clears the very history a
-native-tier scene must assert. The milestone adds a REAL-KEYSTROKE
-typing verb before the scene is written; a tier kaya cannot drive in
-a scene cannot be held to invariant 1's uniform semantics, and
-saying so now is cheaper than discovering it at the fan-out.
+The delegated tier was unobservable when this was written: no harness
+verb could press a chord at a native widget (GTK panics on an unowned
+chord), and set_text is a programmatic write that clears the very
+history a native-tier scene must assert. The milestone adds a
+REAL-KEYSTROKE typing verb before the scene is written; a tier kaya
+cannot drive in a scene cannot be held to invariant 1's uniform
+semantics, and saying so now is cheaper than discovering it at the
+fan-out. DONE: the verb is `type` (crates/kaya/src/harness.rs).
 
 ## §3 — EPISODE BANKING (ratified 2026-08-04, IN the depth slice
 ## from day one)
@@ -745,8 +752,9 @@ The depth slice: spec + core log + Rust surface + the SwiftUI mac arm
 
 The five follow-ups the depth slice and the fan-out carried
 (docs/deferred.md, "Undo follow-ups") were taken together rather than
-one per milestone. Four are closed; one is a ratification the maintainer
-owns and is stated below as a question, not an answer.
+one per milestone. Four were closed here; the fifth was a ratification
+the maintainer owned, stated in 5.4 below as a question — and ANSWERED
+2026-08-06, option A. §3b above is the answer and the shape it took.
 
 ### 5.1 REDO BANKING (built)
 
@@ -801,7 +809,13 @@ sites. The forward analogue — a redo exhausted short of the after-image
 — is unreachable for A1's reason, and if a platform is ever measured
 violating it, THAT is the arm that needs a twin.
 
-### 5.4 OPEN, FOR THE MAINTAINER: stamped copies and the `texts` run
+### ~~5.4 OPEN, FOR THE MAINTAINER: stamped copies and the `texts` run~~
+
+ANSWERED 2026-08-06 — **option A**: `texts` became arity-first, the hash
+moved, and stamped copies joined the ledger. §3b above records the
+shape, the core half and what the scene pins; no carve-out was needed,
+because option A gives every binding the same payload. What follows is
+the question as it was put.
 
 The one item left as a question. A collection row's text field is not
 banked, because `text_field_of_tag` cannot name it: an instance field's

@@ -1,7 +1,12 @@
 # Clipboard handoff — the fan-out
 
-The depth slice is green on mac. This is the map for the breadth work,
-written while the context that produced it is still warm.
+Status: THE FAN-OUT IS DONE (2026-08-03) — all eight bindings, all five
+backends, the Android helper, every leg wired and serialised. Every
+section below is closed; the file is kept as the record of what each
+arm charged, not as a map of work left.
+
+Written when the depth slice was green on mac and nothing else was,
+while the context that produced it was still warm.
 
 Read first: DESIGN.md's Clipboard section (the shape and the reasons),
 then docs/clipboard-plan.md §0 (the argument, and for each decision the
@@ -20,12 +25,13 @@ answer it REPLACED), §0e and §1b (what the probes measured), §1-§3
 - SwiftUI on macOS: the copy and read arms, the role commands, the
   paste split, enablement refresh.
 - The harness: `clipboard_seed` and `expect_clipboard`, in harness.rs
-  and both interpreters (Compose refuses with `depthStub`).
+  and both interpreters (Compose refused with `depthStub` when this was
+  written; its arm landed 2026-08-03).
 - tools/scenes/clipboard.steps + guests/rust/clipboard.rs, run as
   `clipboard-rust-swiftui` (DEPTH_SCENES in validate-mac.sh).
 - Probes: tools/mac/clipprobe, tools/linux/clipprobe, tools/ios/clipprobe.
 
-## What remains, in the order to do it
+## What remained, in the order it was done
 
 ### 0. DONE SINCE THIS MAP WAS WRITTEN
 
@@ -98,25 +104,28 @@ so every binding's decoder meets this for the first time.
 Then guests/<lang>/clipboard.* for each, and the scene moves from
 DEPTH_SCENES into SCENES on every runner.
 
-### 2. The backends
+### 2. The backends — ALL FOUR WRITTEN
 
-Each needs: the copy arm, the read arm answering exactly once, the
+Each needed: the copy arm, the read arm answering exactly once, the
 `accepts` prop, the paste split, and the three roles.
 
-- **GTK/wayland.** The compositor is sway (Weston has NO clipboard at
-  all — §0e finding 1). The foreign reader/writer for the harness verbs
-  is wl-copy/wl-paste. `check-gtk.sh` needs docker and is the only gate
-  that compiles gtk.rs.
-  START AT docs/clipboard-plan.md §5b: the probe settled the copy arm's
+- **GTK/wayland — ARM WRITTEN 2026-08-02/03, measured first (docs/
+  clipboard-plan.md §5b).** The compositor is sway (Weston has NO
+  clipboard at all — §0e finding 1). The foreign reader/writer for the
+  harness verbs is wl-copy/wl-paste. `check-gtk.sh` needs docker and is
+  the only gate that compiles gtk.rs.
+  The probe settled the copy arm's
   structure (a union provider advertises all four representations), the
   read arm's grammar (an unsatisfiable read fails fast, no timeout),
-  and — 2026-08-02, findings 3 and 4 — the blocker: the headless seat
+  and — 2026-08-02, findings 3 and 4 — what was then the blocker (both
+  RESOLVED; §0 above has the chain): the headless seat
   has no input devices, so no client could ever hold the serial
   Wayland charges for taking the selection. The lane's fix is one
   `wtype -P F24 -s 800 -p F24` primer per clipboard leg after its
   window is up. Resolving it surfaced a GDK grammar rule: a custom id
-  needs a slash or it is advertised and never served, which forces an
-  id-grammar decision at the root (finding 4; maintainer's call).
+  needs a slash or it is advertised and never served, which forced an
+  id-grammar decision at the root — RATIFIED mime-shaped, `dev.kaya/note`
+  (finding 4).
 - **WinUI — ARM WRITTEN 2026-08-03, measured first (docs/
   clipboard-plan.md §6).** Classic Win32, not WinRT (SetContent
   demands foreground; the custom-format write bridge is undocumented;
@@ -212,13 +221,15 @@ for the reason the design exists.
 There is one system clipboard per session, so clipboard legs cannot run
 concurrently with each other on ANY lane — they would be eight
 processes writing one variable. validate-mac gives each leg its own
-`drain`; the linux and windows runners need the same when their legs
-land (docs/clipboard-plan.md §0d, the 2026-08-02 correction, has the
+`drain`; the linux (tools/linux/run-suites.sh) and windows
+(tools/deploy-win.sh) runners now serialise theirs the same way, each
+in its own vocabulary and each pinned by check-steps' barrier clause
+(docs/clipboard-plan.md §0d, the 2026-08-02 correction, has the
 measurement: six of eight failed concurrently, 8/8 serially).
 
-check-stubs keeps you honest in the meantime: `clipboard` is already in
-every runner's SCENES, and the legs may only be wired once that
-runner's backend stops depth-stubbing the feature.
+check-stubs holds the rule that made this safe to write in stages:
+`clipboard` is in every runner's SCENES, and the legs may only be wired
+once that runner's backend stops depth-stubbing the feature.
 
 ## Traps, all of which failed silently first
 

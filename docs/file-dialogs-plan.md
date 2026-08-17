@@ -1,12 +1,18 @@
 # File dialogs — the executable plan
 
-**BLOCKED ON docs/background-work-plan.md, deliberately.** Working
-through §0 below is what found the real gap: kaya has no way to do work
+Status: LANDED 2026-07-31 — all five backends (§6d Compose, §6e iOS)
+and all eight bindings (§6f), `tools/scenes/filedialog.steps` on every
+runner. The continuation note that tracked the tail of §6 is
+docs/handoff-filedialogs-6d.md, itself spent.
+
+**WAS BLOCKED ON docs/background-work-plan.md, deliberately**, and that
+block cleared when the post primitive landed 2026-07-28. Working
+through §0 below is what found the real gap: kaya had no way to do work
 off the app thread and post the result back, so a late-arriving result
-has to be delivered as a callback, and then the READ after it has
+had to be delivered as a callback, and then the READ after it had
 nowhere to go either. Every shape considered here was an attempt to
-invent that primitive privately. Build it first and most of §0
-disappears: the open becomes an ordinary blocking call on a thread the
+invent that primitive privately. Building it first made most of §0
+disappear: the open became an ordinary blocking call on a thread the
 guest chose.
 
 The design is RATIFIED and lives in DESIGN.md's "File dialogs" section;
@@ -18,7 +24,7 @@ Sequencing follows CLAUDE.md's depth-then-breadth rule: protocol, one
 backend (SwiftUI on mac), one binding (Rust), the scene, green on mac.
 Only then fan out.
 
-## §0 — what is left to settle before spec.rs is touched
+## §0 — what was left to settle before spec.rs was touched
 
 Two of the three original questions are answered. `size` is OUT (Akhil,
 2026-07-28: nothing needs a pre-open size, and the rule that killed
@@ -413,12 +419,13 @@ source. The android lane runs 46 legs, the matrix 813, all pass. What
 follows is the design record and the measurements behind it.
 
 The accessibility service is landed and verified bound (docs/traps.md),
-so the harness can read and drive DocumentsUI. What remains is the apply
-arm and the source behind the handle, and the second is the real design
-question.
+so the harness can read and drive DocumentsUI. What remained at the time
+of writing was the apply arm and the source behind the handle, and the
+second was the real design question — both answered below, and both
+shipped in the same 2026-07-31 landing this section's heading records.
 
-`kaya_emit_file_dialog_result` builds a `PathSource` for every
-interpreter platform today, and that cannot work here: DocumentsUI
+`kaya_emit_file_dialog_result` built a `PathSource` for every
+interpreter platform, and that cannot work here: DocumentsUI
 answers with a `content://` URI, and `PathSource::open` is
 `std::fs::OpenOptions::open`, which has no idea what that is.
 
@@ -624,7 +631,8 @@ kaya's own selection structure, and the seven on-device measurements
 including that the open picker DOES grant write. All in DESIGN.md.
 
 Deferred with stated reasons, also in DESIGN.md: save (creating a
-document that does not exist yet), directory selection, explicit handle
+document that does not exist yet — DEFERRED NO LONGER: shipped
+2026-08-10, docs/save-plan.md), directory selection, explicit handle
 release, and persistence across restarts for a recents list — which has
 three different spellings and a trap, since the macOS security-scope
 bookmark flag is `API_UNAVAILABLE(ios)` and iOS uses a plain bookmark

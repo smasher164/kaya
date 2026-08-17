@@ -71,8 +71,11 @@ The slider and image commits are the worked examples. The ~30 touchpoints:
 6. harness.rs: TargetKind + parse arm + Stage method (make observation
    methods NO-DEFAULT so backends fail to compile rather than silently
    skip) + MockStage + grammar tests.
-7. Layer-3 constructors in all 8 bindings (check-sugar-surface
-   enforces once the kind lands in the generated wire.py).
+7. Layer-3 constructors in all 8 bindings, in BOTH construction zones —
+   the LIVE one an app builds in its build closure and the TEMPLATE one
+   inside a collection's prototype row (check-sugar-surface enforces
+   both once the kind lands in the generated wire.py; the template half
+   is the python census tools/tpl-surfaces.py).
 8. Gallery scene: extend tools/scenes/gallery.steps + every language's
    gallery guest. Scene strings byte-identical everywhere.
 9. The full validation ladder.
@@ -102,9 +105,11 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 ## Suites and platforms
 
 - The whole matrix: `tools/validate-all.sh` — the five lanes run
-  CONCURRENTLY by default (bounded by the slowest lane, ~1 minute
-  warm); `--serial` for single-lane benchmarking, contention-free
-  debugging, or recording mode. Per-lane logs print for any FAIL.
+  CONCURRENTLY by default (bounded by the slowest lane; the per-lane
+  ceilings below are the live budgets, each set at roughly 1.25x its
+  measured contended time); `--serial` for single-lane benchmarking,
+  contention-free debugging, or recording mode. Per-lane logs print for
+  any FAIL.
 - macOS: `tools/validate-mac.sh` (KAYA_JOBS=n for pool width, =1 for
   serial; KAYA_RECORD=1 for recording mode). Legs open real windows.
 - Linux: `tools/validate-linux.sh` (docker; X11 + Wayland rings;
@@ -134,7 +139,9 @@ collection keys. See DESIGN.md's transport section for the doctrine.
 - The matrix enforces PER-LANE DURATION CEILINGS, not just the doctrine
   in CLAUDE.md's invariant 8: tools/validate-all.sh fails a lane that
   exceeds its budget with "DURATION ANOMALY" even when every leg passed
-  (mac 400s, linux 300s, windows 400s, ios 300s, android 250s). A lane
+  (today mac 560s, linux 420s, windows 480s, ios 540s, android 250s —
+  the live numbers are validate-all.sh's per-lane `case`, and each one
+  carries the measurement that set it). A lane
   that slows by this much changed in KIND — look for work added to every
   leg before assuming load. Raise a ceiling in validate-all.sh only with
   a reason.
@@ -142,7 +149,9 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   slice: it builds and runs the rust example without demanding the other
   languages' guests, which SCENES membership does. check-steps enforces
   the difference (a scene in SCENES whose per-language guests do not
-  exist fails loudly). It is empty on every runner today.
+  exist fails loudly). It is NOT empty today — validate-mac.sh carries
+  the current membership, and a scene graduates out of it into SCENES in
+  the commit that gives every language a guest.
 - Traces, all env-gated and permanent: `KAYA_AX_TRACE` dumps the REAL
   accessibility tree (gtk.rs, winui/mod.rs and KayaSwiftUI.swift all
   honour it — this is the tool for the class that cost most of a day),

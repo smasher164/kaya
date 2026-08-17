@@ -336,9 +336,10 @@ one construct for a window's attributes — a prop chain (`tx.window(0)
 labeled function, a config list, or a scope, per the language's idiom
 — and the PRIMARY window's construct accepts exactly the
 created-window construct's attribute set (title, width/height,
-veto_close, list_detail, sections_presentation, the close handlers,
-and the history handlers on_undone/on_redone — the undo ledger is
-per-window, so its observers are window attributes like any other).
+veto_close, list_detail, sections_presentation, dirty, inset, the
+close handlers, and the history handlers on_undone/on_redone — the
+undo ledger is per-window, so its observers are window attributes like
+any other).
 The one
 asymmetry left is semantic: the primary has no creation or
 destruction moment, because the process owns it. No window attribute
@@ -761,12 +762,17 @@ The known normalization worklist:
   into their stacks and flex layouts. `expect_fills` gates the prop
   (children + gaps must span the content box); shares are gap-blind by
   design.
-- A normalized root inset. Settled: every backend applies 16 units
-  INSIDE the mounted root — AppKit stack edge insets, GTK CSS padding
-  on the `.kaya-root` class, UIKit layout margins, WinUI
+- A normalized root inset. Settled: every backend applies the same
+  inset INSIDE the mounted root — AppKit stack edge insets, GTK CSS
+  padding on the `.kaya-root` class, UIKit layout margins, WinUI
   `Grid.Padding`, Android `setPadding` (density-scaled: it takes
-  pixels), SwiftUI `.padding(16)` wrapping the offer reader, Compose
-  `.padding(16.dp)` before the offer reader. Inside is load-bearing:
+  pixels), SwiftUI `.padding` wrapping the offer reader, Compose
+  `.padding` before the offer reader. 16 units is the DEFAULT, not the
+  number: it was hard-coded in every backend until the text editor
+  needed 0 and could not say so, and became the `inset` window prop
+  2026-08-12 (spec.rs WINDOW_PROPS, docs/styling-plan.md D3). It is
+  kaya's own padding, so 0 is honored unconditionally; a platform's
+  safe area was never part of it. Inside is load-bearing:
   padding sits within the root's own extent, so the root still fills
   its offered area and `expect_root_fills` stays strict — a margin
   outside the root would shrink it and turn the inset into a
@@ -824,9 +830,12 @@ The known normalization worklist:
   honest AppKit bridge, not styling. Dress must not change layout
   semantics: the same geometry gates (fills, shares, aligned,
   root-fills) re-prove after any dress change, and the recordings
-  stay the judge of the chrome itself. A styling API stays out of
-  scope for v1; the binding style guide documents flavor, it does not
-  program it.
+  stay the judge of the chrome itself. An ARBITRARY per-widget styling
+  API stays out of scope for v1; the binding style guide documents
+  flavor, it does not program it. (Narrowed 2026-08-12 by the section
+  below: brand identity — accent, typeface, symbols — and the semantic
+  `role` tier were admitted, and neither is a per-widget appearance
+  knob. See "Brand identity and the styling ceiling".)
 - A defined overflow policy. Platforms variously clip silently, refuse to
   shrink windows, or break constraints by priority.
 - Grow distribution normalized to explicit weights. Settled when `grow`
@@ -902,7 +911,7 @@ single-activity architecture — one surface, a NavController stack of
 destinations inside it. The ecosystem un-conflated the concepts; the
 vocabulary starts un-conflated.
 
-### Windows (phase 4)
+### Windows (phase 4 — landed)
 
 What "window" means diverges at the root: on the desktops the app
 COMMANDS surfaces (NSWindow, AppWindow, GtkWindow — create, title,
@@ -1342,12 +1351,19 @@ different mode — not a second grammar, not a pinned writable fd held
 from the moment of the pick, and not the re-acquisition dance the
 design was prepared to pay for. What remains genuinely different about
 SAVE is creating a document that does not exist yet, which is why it
-is deferred below.
+came second.
 
-Deferred, each with a stated reason rather than for lack of time: SAVE
-is designed alongside but comes second, because creating a document
-through SAF is a different request from opening one and the error
-surface (permissions, disk full, a revoked scope) is the real work;
+SAVE LANDED 2026-08-10 (`show_save_dialog`,
+docs/save-plan.md, tools/scenes/save.steps): the picker's
+request/result grammar unchanged, one destination or none because no
+platform's save dialog names two, `suggested_name` that every platform
+takes and none guarantees, and the result's handle opening with CREATE
+— so a name the dialog invented yields an empty file on every host.
+Android and iOS hand back a document that already exists; macOS, GTK
+and Windows hand back a name for a file nobody has made, and the core
+absorbs that rather than the guest or a fourth file mode.
+
+Still deferred, each with a stated reason rather than for lack of time:
 directory selection waits for an artifact that needs it; and
 EXPLICIT handle release waits for a caller who needs it, because an
 unreleased handle holds a URL and a string rather than anything the
@@ -1578,9 +1594,11 @@ The ratified shape:
   configuration and never echoes. Bindings register the handler
   per-section at declaration (`on_selected` riding `add_section`) —
   handlers scope to their creator.
-- **SECTION_PROPS** (the ENTRY_PROPS pattern): `title` (Str) and
+- **SECTION_PROPS** (the ENTRY_PROPS pattern): `title` (Str),
   `icon` (Blob, the blob channel — a tab bar without icons is not the
-  platform's real thing).
+  platform's real thing), and `symbol` (the semantic icon name, added
+  2026-08-16 BESIDE the Blob rather than instead of it — see "Icons
+  want names, not bytes").
 - **Presentation is a WINDOW prop**, `sections_presentation`
   (enum: `auto | bar | sidebar`), declared beside the sections it
   presents — scoped to the hosting window (the GROUP is the unit; no
@@ -1725,8 +1743,9 @@ is:
 | `enabled` | Bool | Defaults true; constant or signal-bound. |
 | `checked` | Bool | Toggle only; signal-bound in both directions under the Checkbox contract. |
 | `value` | F64, integral | Radio group only; the selected option index under the Choice contract. |
-| `icon` | Blob | Optional; available to phone promotion and ignored where native menu dress has no icon. |
-| `primary` | Bool | Defaults false; action only; a phone-promotion hint and inert on desktops. |
+| `icon` | Blob | Optional; the app's own art, drawn in chrome promotion when the item declares no `symbol`, and ignored where native menu dress has no icon. |
+| `symbol` | Enum | Optional; the semantic icon name, drawn from each backend's own symbol set. Const-only like `icon` beside it, which stays for app-specific art. |
+| `primary` | Bool | Defaults false; action only; the chrome-promotion hint — the top bar on a compact host, the toolbar on a desktop one (see "Chrome promotion and `primary`"). |
 | `shortcut` | Str | A normalized shortcut spelling; any window-anchored LEAF command — action, toggle, or radio option. |
 | `role` | Str | A standard-command role from the closed vocabulary; action only. |
 
@@ -1822,7 +1841,9 @@ not loosen, by implementation accident.
 ### Standard commands
 
 A command may declare itself a STANDARD command with `role`, from a
-closed vocabulary: `settings`, `cut`, `copy`, `paste`. The declaration
+closed vocabulary: `settings`, `cut`, `copy`, `paste`, `undo`, `redo`
+(crates/kaya/src/scene.rs's MENU_ROLES; tools/check-roles.sh holds
+every backend to that line). The declaration
 is uniform and what the host does with it is the host's business —
 macOS shows the settings command in the application menu, where users
 press Command-comma to look for it, and every other host leaves the
@@ -1837,7 +1858,11 @@ own, and configures its own enablement — kaya computes that from what
 the clipboard offers and what the focused widget declared it accepts,
 rather than handing the app a signal to compute it with. See the
 Clipboard section for why copy of a selection has to be a command at
-all.
+all. `undo` and `redo` (added 2026-08-04) are that same gesture layer
+one tier deeper: they act on the FOCUSED widget first — a text widget
+whose native stack has something to give answers before the core's
+ledger does — and configure their own enablement from that same
+question, which is why they are roles and not app-authored actions.
 
 Two rules keep the vocabulary from becoming a placement grammar. One
 item per role per app, judged at the root: the host that relocates a
@@ -1845,7 +1870,7 @@ role has exactly one slot to put it in. And a role never invents a
 chord — an app that wants Command-comma spells the shortcut too, so
 every host answers the same key. A role is the only thing that can move
 an authored item into dress-owned chrome, which is why it stays this
-small; roles beyond `settings` wait for the trigger recorded under the
+small; roles beyond those six wait for the trigger recorded under the
 deliberate cuts.
 
 macOS keeps the item addressable where it was DECLARED: paths, reads,
@@ -1934,10 +1959,12 @@ of being re-decided per binding.
 - **Item removal** waits for a command lifetime shorter than its
   owning window/widget; **context-item shortcuts** wait for a portable
   native dispatch home.
-- **Roles beyond `settings`** (close-window, the responder-chain edit
-  roles, About) wait for an artifact needing their placement and
-  lifecycle semantics. About, Quit, and the standard Edit menu remain
-  dress meanwhile.
+- **Roles beyond the six** (close-window, About) wait for an artifact
+  needing their placement and lifecycle semantics. About, Quit, and the
+  standard Edit menu remain dress meanwhile. The responder-chain edit
+  roles were the named example under this trigger and ARRIVED: `cut`,
+  `copy` and `paste` with the clipboard milestone (2026-08-02), `undo`
+  and `redo` with the undo one (2026-08-04).
 - **Punctuation keys beyond the closed set** (semicolon, quote, grave,
   and the numeric-keypad keys) wait for an artifact. The set admitted
   in v1 covers the common chords — settings, zoom, comment, and
@@ -2023,10 +2050,12 @@ macOS is the measured exception: it does not prompt (2026-08-02, macOS
 
 ### Gestures are commands. Content is data.
 
-kaya has no selection API, so an app cannot construct the payload for
-"copy the selected text" itself — only the widget knows what is
-selected. Copy of a selection is therefore necessarily a COMMAND, and
-Paste is its mirror; they live in the standard-command vocabulary.
+kaya has no selection READ — `select_range` moves a textarea's
+selection, and by the no-mirror-reads doctrine nothing reads one back —
+so an app cannot construct the payload for "copy the selected text"
+itself; only the widget knows what is selected. Copy of a selection is
+therefore necessarily a COMMAND, and Paste is its mirror; they live in
+the standard-command vocabulary.
 
 The data layer (`copy`, `read_clipboard`, `on_paste`) is for overriding
 that default and for targets with no native behaviour.
@@ -2132,7 +2161,9 @@ WinUI gives an unnamed Grid no automation peer at all).
 identifier and then asks the PLATFORM what it publishes. Reading kaya's
 model would make the scene agree with itself and prove nothing. The
 `role` half is a closed set — `button`, `label`, `field`, `checkbox`,
-`slider`, `image`, `progress`, `combobox`, `group`, `unknown` — which
+`slider`, `image`, `progress`, `combobox`, `group`, `heading`
+(joined 2026-08-12 with the styling pass, the one role-tier value with
+a real-tree observable on every platform), `unknown` — which
 NORMALIZES the platforms' own vocabularies so one shared scene reads the
 same everywhere. Two rules keep it honest:
 
@@ -2259,7 +2290,11 @@ symbol sets metric-match the text beside them (SF Symbols track weight
 and baseline; Material Symbols carry weight/fill/grade axes) while a
 blob has no such relationship. The admission is a small closed set of
 semantic names mapped per backend — the `role` trick again. The Blob
-stays for genuinely app-specific art.
+stays for genuinely app-specific art. (SHIPPED 2026-08-16: the `symbol`
+enum, twenty names, on menu items and sections, with each backend
+mapping it to its own catalog — SF Symbols, Material Symbols, Adwaita,
+Fluent. The ids are append-only forever, since they are wire values in
+eight generated bindings.)
 
 Note what is *not* the reason: tinting. Tinting is a template/mask
 operation on the alpha channel (`NSImage.isTemplate`, `.alwaysTemplate`,
@@ -2437,10 +2472,16 @@ assertions true at every width (see "Adaptive list-detail").
   UIViewRepresentable / AndroidView) — the protocol never names a
   toolkit, observable semantics stay uniform, intersection-first, and
   each drop-down is recorded here with its conformance scene. Today's
-  widget vocabulary has exactly one: the macOS NSButton bridge
-  (`KayaMacButton: NSViewRepresentable`, reading `fittingSize`),
-  which this document elsewhere calls load-bearing indefinitely
-  rather than transitional.
+  widget vocabulary has three, all on the Apple backends: the macOS
+  NSButton bridge (`KayaMacButton: NSViewRepresentable`, reading
+  `fittingSize`), which this document elsewhere calls load-bearing
+  indefinitely rather than transitional; and the two textarea views the
+  interpreter owns outright since 2026-08-06 — `KayaMacTextarea` (an
+  NSTextView, because the stock TextEditor pushes an app-driven text
+  change into its private AppKit view one main-queue turn later, which
+  resets the caret and destroys every declared range) and
+  `KayaUITextView` on iOS. Their conformance scenes are `textarea` and
+  `ranges`.
 - Nothing crosses the boundary synchronously: no callbacks, no unbounded
   rendezvous. All communication reduces to two primitives plus an arena.
   - Logs: lock-free SPSC rings for ordered, lossless, consumed-once
@@ -3306,8 +3347,9 @@ remains is implementation-scale:
 4. The window vocabulary: resolved — see "Presentation contexts"
    (ratified 2026-07-21). Windows, modal presentations, and navigation
    are three context types with three unmixed lifecycle grammars;
-   phase 4 implements windows (primary props, capability-gated
-   auxiliaries, the close veto class), alerts landed next, and
+   phase 4 landed windows (primary props, capability-gated
+   auxiliaries, the close veto class — the `window` and `panels`
+   scenes), alerts landed next, and
    navigation is ratified (core-owned stacks, retained-until-popped
    entries, the intercept_back veto transplant — see the section);
    sections landed too (ratified 2026-07-22, see "Sections (tabs)");

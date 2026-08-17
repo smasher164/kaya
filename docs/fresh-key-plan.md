@@ -1,19 +1,25 @@
 # fresh keys and the undo scene reshape
 
+Status: LANDED 2026-08-05 (`30cf3ba`) — the minter in all eight sugar
+bindings, the reshaped `tools/scenes/undo.steps`, every guest adopted,
+and the C floor hand-minting the same sequence as its documentation.
+All three debts below are paid.
+
 Ratified 2026-08-04. One slice, three debts, all already in the ledger
 (docs/deferred.md):
 
-1. The shared scene's stated D5 texts-run proof cannot fail: the coarse
-   undo and the redo land the draft exactly where the last ordinary
-   emission left it, so every guest passes with its `delta.texts` fold
-   deleted (measured on the Java and Haskell lanes independently).
-2. No scene ever undoes a collection REMOVE. The inverse is implemented
+1. The shared scene's stated D5 texts-run proof could not fail: the
+   coarse undo and the redo landed the draft exactly where the last
+   ordinary emission left it, so every guest passed with its
+   `delta.texts` fold deleted (measured on the Java and Haskell lanes
+   independently).
+2. No scene undid a collection REMOVE. The inverse was implemented
    and unit-tested, and it is precisely the case where key identity
-   (not content) is what undo asserts. It has never run on a matrix.
-3. Nine guests hand-spell a surrogate-key counter (`next_key`) that is
-   mutable global state in six languages, and its safety rests on an
-   unwritten never-rewind rule whose violation is a duplicate-key panic
-   reachable through an undo/redo/add interleave.
+   (not content) is what undo asserts. It had never run on a matrix.
+3. Nine guests hand-spelled a surrogate-key counter (`next_key`) that
+   was mutable global state in six languages, and its safety rested on
+   an unwritten never-rewind rule whose violation is a duplicate-key
+   panic reachable through an undo/redo/add interleave.
 
 ## The minter: `insert_fresh`
 
@@ -83,4 +89,7 @@ regression.
 Conditional phase 2: todos and entry also hand-mint counters. If
 their expected strings do not move under adoption (keys never appear
 in output), they adopt in the same slice; if any string moves, they
-go to the ledger instead.
+go to the ledger instead. TOOK THE FIRST BRANCH: no string moved, so
+the todos and entry guests adopted the minter in this slice too, and
+`next_key` survives in the guests only as the comment naming what it
+used to be.

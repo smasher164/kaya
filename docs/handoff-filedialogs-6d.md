@@ -1,18 +1,22 @@
 # Handoff — file dialogs, what is left after Compose
 
+Status: SPENT — §6 finished 2026-07-31 (iOS arm, then all eight
+bindings). Its own instruction was "delete this file once §6 is done",
+and that condition is met; it is left here only until the maintainer
+takes it out. Nothing below describes work that is still open.
+
 Written at the end of the session that landed the Compose picker arm.
-Delete this file once §6 is done; it is a continuation note, not
-doctrine. Everything durable here is already in DESIGN.md,
-docs/traps.md, or docs/file-dialogs-plan.md — this only says where the
-work stopped.
+It was a continuation note, not doctrine. Everything durable here is
+already in DESIGN.md, docs/traps.md, or docs/file-dialogs-plan.md —
+this only said where the work stopped.
 
-## State
+## State, as of the writing (2026-07-31)
 
-- **The last eight commits are LOCAL ONLY**; `origin/main` is still at
-  `28bec96`. Nothing has been pushed since the background-scene comment
-  fix.
-- Last full matrix: ALL PASS, 813 legs (mac 209, linux 386, windows 131,
-  ios 41, android 46).
+- **The last eight commits were LOCAL ONLY** at the time; `origin/main`
+  was still at `28bec96`. Nothing had been pushed since the
+  background-scene comment fix.
+- Last full matrix then: ALL PASS, 813 legs (mac 209, linux 386,
+  windows 131, ios 41, android 46).
 - 209 unit tests, every fast gate green, check-gtk green.
 
 ## What §6 has landed
@@ -27,15 +31,17 @@ work stopped.
   chose that shape for is now measured, not assumed
   (docs/file-dialogs-plan.md §6d).
 
-The scene is still rust-only and reads the picked file OFF the app
-thread, parking between read and post.
+The scene was rust-only at that point and reads the picked file OFF the
+app thread, parking between read and post.
 
-## Next: §6e, iOS
+## Then §6e, iOS — DONE
 
 `UIDocumentPickerViewController`. The iOS half of
-`swift/KayaSwiftUI.swift` still declares `kayaDepthStub("filedialog",
-on: "ios")`, so check-steps will demand the leg the moment that goes —
-that is the gate holding the work open, not a regression.
+`swift/KayaSwiftUI.swift` declared `kayaDepthStub("filedialog", on:
+"ios")` when this was written, so check-steps would demand the leg the
+moment that went — the gate holding the work open, not a regression.
+The stub is gone; the only depth stub left in that file is `typeface`
+on iOS.
 
 `tools/ios/scopeprobe/` already measured ON HARDWARE that the open
 picker grants write, and that the simulator cannot answer sandbox
@@ -49,11 +55,12 @@ it is the same shape as Android's `UriSource` — a token kaya can still
 redeem — and `kaya_emit_file_dialog_result` already dispatches per
 platform for exactly this.
 
-## After that
+## After that — BOTH DONE
 
 - **§6f** the seven remaining guest languages, with an explicit
-  do/can't/defer verdict each (CLAUDE.md, invariant 2). No binding
-  except Rust has the picker surface yet.
+  do/can't/defer verdict each (CLAUDE.md, invariant 2). Rust was the
+  only binding with the picker surface when this was written; all eight
+  carry it now.
 - **§6g** the full matrix.
 
 ## Things that cost time, so they do not cost it twice

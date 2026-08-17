@@ -1,5 +1,10 @@
 # The text editor — the design pass
 
+Status: SHIPPED 2026-08-10 (`47bd2ab`) — `guests/go/editor/editor.go`
+and `tools/scenes/editor.steps`, with legs on all five lanes. E1-E5
+below shipped as written; the toolbar the editor asked for came later
+(docs/chrome-plan.md, `e6eca3f`).
+
 THE FORCING ARTIFACT ITSELF (Akhil, 2026-07-24; started 2026-08-10,
 once its prerequisite list emptied). Written in **Go**, because an
 editor in Rust would be kaya testing itself and every awkward corner of
@@ -22,7 +27,7 @@ a BINDING would stay invisible.
   survey behind it).
 - Open, edit, save, save-as, standard shortcuts, keyboard navigation.
 
-## §1 — the decisions (PROPOSED)
+## §1 — the decisions (PROPOSED; all five shipped as written 2026-08-10)
 
 ### E1 — the surface
 

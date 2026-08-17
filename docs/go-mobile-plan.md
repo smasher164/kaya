@@ -1,5 +1,10 @@
 # Go on iOS and Android — the design pass
 
+Status: LANDED — iOS 2026-08-07 (`0e35bd8`), Android 2026-08-07
+(`19cd5ef`), the one-main.go entry point 2026-08-09 (`aeb135a`). D4's
+"done" is met: Go legs on both phone lanes, running the shared scene
+scripts. §2's three carried-out findings stay open in docs/deferred.md.
+
 Ratified by the maintainer 2026-08-07: **Go becomes kaya's second
 five-platform guest language, before the text editor is written.** The
 reason is the editor's own purpose — an editor written in Rust would be
@@ -13,11 +18,14 @@ measured/documented/assumed): scratchpad/mobilepkg-contract.md,
 
 ## §0 — what the research settled
 
-- **Coverage today**: mac 9 languages, linux 8, windows 5, **iOS 3
-  (Rust, Swift, C), Android 2 (Rust, Java)**. Only Rust runs on all
-  five, so kaya's uniform-semantics promise is unverified on mobile for
-  six languages. Each mobile platform HAS already hosted a second guest
+- **Coverage at the time**: mac 9 languages, linux 8, windows 5, **iOS 3
+  (Rust, Swift, C), Android 2 (Rust, Java)**. Only Rust ran on all
+  five, so kaya's uniform-semantics promise was unverified on mobile for
+  six languages. Each mobile platform HAD already hosted a second guest
   language — evidence that the rest is tooling, not architecture.
+  THIS MILESTONE CLOSED IT FOR GO: both phone lanes carry Go legs now
+  (tools/ios/run-sim.sh, and android/milestone2go on the emulator), so
+  Go is the second language to run on all five.
 - **Threading is not the blocker for any candidate.** The guest has
   never run on the UI thread on any platform: it runs on its own
   blockable thread and talks to the interface through a byte transport.

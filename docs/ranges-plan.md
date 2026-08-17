@@ -1,5 +1,9 @@
 # Text ranges — the design pass
 
+Status: LANDED 2026-08-07 (`b30e621`) — the three primitives in
+crates/kaya/src/spec.rs, all five backends, the bindings, and
+`tools/scenes/ranges.steps` on every runner.
+
 The reshaped find milestone (ratified in conversation 2026-08-06: the
 framework ships range primitives; the find bar, engine, and regex
 dialect belong to the text editor app — the prior-art survey's forty
@@ -56,7 +60,7 @@ now their OWN milestone, first — docs/textarea-foundation-plan.md
 depth starts on the re-founded widgets. D3 below is superseded by
 that plan and kept for the record.
 
-## §1 — the decisions (PROPOSED; ratification pending)
+## §1 — the decisions (RATIFIED 2026-08-06, D1-D6 as a set)
 
 ### D1 — three primitives, one widget kind: the TEXTAREA
 
@@ -102,13 +106,20 @@ arrives then anyway).
 ### D5 — one verb family, per-backend reads, every read measured
 
 `expect_highlights`, `expect_selection`, `expect_revealed` (or one
-verb with a mode — depth decides the spelling):
+verb with a mode — depth decides the spelling; depth kept the three
+verbs, and that is what harness.rs carries):
 - mac: attributed-string state via the Representable's own view (plus
   AX selected-range where the probe proved it readable);
 - windows: provider-side in-process reads — GetAttributeValue
   (BackgroundColor) / GetSelection / GetVisibleRanges, each proven
   live before trusted (an interface existing is not the provider
-  implementing it — the arm's own words);
+  implementing it — the arm's own words). NOT AVAILABLE, and the arm's
+  own warning is why: WinUI publishes no Text pattern on an in-process
+  automation peer, so nothing answers those three, and a UIA client is
+  barred here. The reads went one layer down instead, to Rich Edit's
+  document model — a per-character `BackgroundColor` scan,
+  `Selection.StartPosition/EndPosition`, and `ITextRange::GetRect`
+  against the control's bounds for the viewport;
 - linux: AT-SPI for highlight and selection; reveal via the viewport
   geometry the new ScrolledWindow provides;
 - ios/android: the interpreter's state reads, failing when the apply
@@ -125,7 +136,8 @@ Representable rewrite — the riskiest single piece) + the ranges scene
 refusal's negative test) green on mac with the full textarea-scene
 blast radius re-proven. Breadth: windows (RichEditBox switch), linux
 (viewport + tags), ios, android, seven bindings' sugar, C floor; the
-matrix. The editor unblocks when this lands.
+matrix. The editor unblocks when this lands — and did: the editor was
+written three days later.
 
 ## §3 — deliberately not designed
 

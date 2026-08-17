@@ -40,8 +40,12 @@ the same patterns return through interpreter drop-downs
   minimum control size.** A share below it is clamped by the toolkit,
   and the scene then silently measures the minimum instead of the
   contract. Three shares of a 144pt column put the smallest at 28pt,
-  under GTK's 34pt minimum button height; the `grow` scene uses two
-  children at 25/75 (38 and 114pt) for exactly this reason.
+  under GTK's 34pt minimum button height, which is why the `grow` scene
+  was two children at 25/75 (38 and 114pt) then. It is three at 25/50/25
+  now, in a 540x330 window whose ~250pt column divides ~63/126/63, and
+  the BINDING minimum has moved to the textarea's declared 96pt floor.
+  The arithmetic lives beside the widgets in guests/rust/grow.rs and in
+  grow.steps' own header — recompute it there whenever a share moves.
 - **A failing Windows leg used to report PASS.** WinUI's window-`Closed`
   handler called `request_exit(0)`, and `Application.Exit()` closes the
   window — so a failing verdict stored 1, Exit() fired Closed, and the
@@ -712,16 +716,21 @@ the same patterns return through interpreter drop-downs
   host without the pri keeps every control whose template resolves
   locally.
 - **A depth-slice stub compiles; only a suite notices it against
-  wired legs.** `unimplemented!("<scene> is not yet materialized")`
-  arms are the sanctioned way to hold breadth open, and they COMPILE
+  wired legs.** Depth stubs are the sanctioned way to hold breadth
+  open, and they COMPILE
   — so every compile gate (check-targets, check-gtk) stays green
   while a runner that has since gained the scene's legs will die on
   the stub at suite time (the GTK scroll materialization was
   believed applied while the stub survived; the linux suite was the
   first to notice, 2026-07-22). Guard: tools/check-stubs.sh
   cross-checks every runner's wired scenes against its backend's
-  stub strings (the "<scene> is not yet materialized" spelling is
-  the contract), self-tested with a synthesized bad pair. Corollary
+  stubs. A STUB IS A CALL, NOT A SENTENCE, since 2026-08-05:
+  `depth_stub("<scene>")` in Rust, `depthStub` in Kotlin,
+  `kayaDepthStub(_:on:)` in Swift. It was a free-form string — the
+  spelling "<scene> is not yet materialized" — for four milestones,
+  which no backend ever wrote, so the gate could only ever pass;
+  a companion check now fails any backend that refuses in its own
+  words. Self-tested with a synthesized bad pair. Corollary
   for agents: never chain an edit script and its verification in one
   background command — the tail shows the LAST command's success,
   not the edit's failure; verify the edit itself (grep the new
@@ -1912,8 +1921,10 @@ than running it.
 
 And the general shape behind both: a gate that string-matches should say
 HOW MUCH it matched, and refuse a count that cannot be right. check-verbs
-prints "43 verbs, 73 constants"; check-sugar-surface bails if the kind
-list comes back empty. Auditing the rest after the check-stubs vacuity
+prints its verb and constant counts on every run (62 and 86 on
+2026-08-17, up from 43 and 73 when this was written — read the shape, not
+the numbers); check-sugar-surface bails if the kind list comes back
+empty. Auditing the rest after the check-stubs vacuity
 turned up no third case — check-abort builds and runs real artifacts,
 check-ambient-tx self-tests both directions — but check-stubs went four
 milestones on a convention no backend ever wrote, so the audit is worth
@@ -2928,7 +2939,7 @@ fresh one.
 Measured 2026-08-01 by tools/linux/clipprobe, before the clipboard arm
 was written.
 
-The linux lane starts `weston --backend=headless`. That compositor
+The linux lane started `weston --backend=headless` then. That compositor
 advertises `wl_data_device_manager` but no `wl_seat`, and a data device
 is obtained FROM A SEAT. No seat, no data device, no clipboard — for
 any client, including kaya's own GTK apps. It is not a harness
@@ -2940,16 +2951,25 @@ needed a seat. kaya's harness clicks by driving the toolkit, not by
 injecting input events, so the wayland legs never wanted keyboard or
 pointer input and never noticed there was none to want.
 
-The fix is a configuration this repo already runs: a nested Weston on
-the `--backend=x11` inside the Xvfb the lane already starts, which is
-what tools/linux/record-leg.sh uses for recording. That has real input,
-therefore a seat, and `wl-copy`/`wl-paste` round-trip through it.
+SECOND FINDING FROM THE SAME PROBE: on Weston, wl-clipboard works
+WITHOUT the wlr-data-control protocol (which Weston does not implement)
+by creating its own surface and TAKING FOCUS. So an out-of-process
+clipboard read there is not passive, and any leg that does one while
+another leg holds focus is asking for trouble.
 
-SECOND FINDING FROM THE SAME PROBE: wl-clipboard works there WITHOUT
-the wlr-data-control protocol (which Weston does not implement) by
-creating its own surface and TAKING FOCUS. So an out-of-process
-clipboard read on this lane is not passive, and any leg that does one
-while another leg holds focus is asking for trouble.
+THE FIX THAT SHIPPED, 2026-08-02 (f8448ae): the lane runs HEADLESS SWAY,
+not a nested Weston, and the second finding is why. A wlroots compositor
+speaks data-control, so a privileged client reads the selection with no
+surface and no focus — which is what lets the clipboard legs stay in the
+parallel pool. The nested Weston on `--backend=x11` inside the lane's
+Xvfb also has a seat and would have served the first finding alone; it
+is still what tools/linux/record-leg.sh uses for recording. Two things
+the swap costs, both in tools/linux/run-suites.sh: sway tiles by
+default, so every window must be floated by app_id or `expect_window_size`
+reads the output's size instead of the asked-for one, and the socket
+name is sway's to choose rather than declared, so it is discovered after
+start. The lane checks for THE SEAT rather than the compositor's name,
+so the next swap meets that line instead of a mystery.
 
 ## Android hands an unfocused reader an empty clipboard, silently
 

@@ -1,5 +1,9 @@
 # The text widget foundation — the design pass
 
+Status: LANDED 2026-08-06 (`4f40e59`) — all four arms. The "was" column
+of the table below is what each backend used to carry; the "becomes"
+column is what it carries now.
+
 Ratified in conversation 2026-08-06 (the maintainer's own proposal):
 before ranges, a milestone that ONLY re-founds the textarea on every
 platform's rich-CAPABLE native control, pinned to plain-text behavior.
@@ -25,7 +29,7 @@ this foundation makes cheap. Recorded in docs/deferred.md.
 
 ## The four arms (android needs nothing — measured at current pins)
 
-| arm | today | becomes | plus |
+| arm | was | becomes | plus |
 |---|---|---|---|
 | mac | bare SwiftUI TextEditor (uncontrolled ~11ms async push that destroys downstream state — measured) | NSTextView via NSViewRepresentable (the gap policy ratified 2026-07-20) | kaya controls WHEN text lands; the native find bar stays disabled (usesFindBar false — the ranges era must not fight Cmd+F) |
 | ios | SwiftUI TextEditor (same file's #else) | UITextView via UIViewRepresentable | same control the range probe proved affordable at the iOS 16 floor |

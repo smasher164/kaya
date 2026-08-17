@@ -1,9 +1,12 @@
 # The window chrome pass — design brief (Phase C)
 
-Status: DIRECTION RATIFIED 2026-08-16 (maintainer): the toolbar is the
-existing `primary` bit growing desktop lowerings — no new construct, no
-styling knob. Depth is NOT started; the DESIGN.md sentence flips when
-the slice lands, not before. C1 remains DEFERRED. Claims are marked
+Status: C2 LANDED 2026-08-17 — the iOS symbol gap first (`04e5c19`),
+mac depth (`98db76f`), the three desktop arms (`a3ea86d`), the windows
+bar moving into the caption (`ae43a7d`), and the editor adopting it
+(`e6eca3f`). The DESIGN.md sentence flipped with the slice as this said
+it would: `primary` is now documented as the chrome-promotion hint and
+has its own "Chrome promotion and `primary`" section. C1 remains
+DEFERRED. Claims are marked
 [DOC] (platform documentation, cited in the research reports), [MEASURED]
 (observed by this repo's probes — the five reports under
 scratchpad/chrome/toolbar-{mac,android,gtk,winui,repo}.md, 2026-08-16),
@@ -21,7 +24,7 @@ platform: the modern geometry is the DEFAULT RESULT of having the bar
 (mac, GTK, WinUI) or the bar is the platform's one chrome and already
 kaya's (iOS, Android). The pass therefore admits ZERO new constructs:
 it makes the promotion bit kaya already ships mean what it says on the
-three desktops that currently ignore it.
+three desktops that ignored it. All three honor it now.
 
 ## C1 — the chrome knob: `chrome: standard | extended`
 
@@ -91,11 +94,15 @@ Per-platform materialization, all rows evidence-backed:
 
 ### The two preconditions, named
 
-1. **The iOS symbol gap [MEASURED].** The promoted bar buttons on iOS
-   render NO symbol while `expect_menu_symbol` passes off the MODEL —
+1. **The iOS symbol gap [MEASURED] — FIXED FIRST, 2026-08-17
+   (`04e5c19`).** The promoted bar buttons on iOS rendered NO symbol
+   while `expect_menu_symbol` passed off the MODEL —
    a stamped-observation violation already in the tree, and the icons
-   pass is hollow on precisely the platform whose promoted bar ships.
-   Fix first (or with the depth), and move the read to the real tree.
+   pass was hollow on precisely the platform whose promoted bar ships.
+   `kayaMenuSymbolRead` now reads a RENDER STAMP for items the bar is
+   carrying; only the three aspects a modifier carries into the chrome
+   (enablement, checkedness, value) still read the model, and the
+   function says so.
    Probe: scratchpad/chrome/symprobe.py reports every `.symbol`
    read/write in KayaSwiftUI.swift with its `#if` nesting — a rendering
    read must exist outside `#if os(macOS)`.
@@ -175,3 +182,6 @@ is the only construct that is a no-op nowhere).
   constraint applies).
 - Still open at depth time: none named; the trigger sentence's flip
   lands with the slice.
+- 2026-08-17, the WinUI mount point — the bar moves INTO the caption
+  row rather than hanging in a strip under it (C2's WinUI row records
+  the measurement); RATIFIED.
