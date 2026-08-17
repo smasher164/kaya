@@ -464,6 +464,26 @@ final class KayaWindowModel: Identifiable {
     /// make the harness verb agree with the lowering by construction,
     /// and the defect being gated is precisely the two disagreeing.
     var menuPresentation: KayaMenuPresentation = .none
+    /// WHAT THE PROMOTED BAR ACTUALLY DREW, per promoted item id —
+    /// written by the arm of the button's label that rendered, never
+    /// derived from the item's props (the sectionsRendered /
+    /// splitPresentation rule). The value is the SEMANTIC NAME when the
+    /// symbol arm drew, and otherwise a sentence naming what that
+    /// button drew instead, so expect_menu_symbol can byte-compare the
+    /// good case and print a measured answer for every other one.
+    ///
+    /// Written on iOS only, because the promoted bar exists only there:
+    /// macOS answers the same verb off the REAL NSMenuItem's image,
+    /// which is a stronger read than any view could record. (So this
+    /// field is deliberately NOT in check-verbs' STAMPED list, which
+    /// demands a write outside every platform conditional — the same
+    /// reason sectionsRendered is not.)
+    ///
+    /// An entry means "this is what that button drew when it last
+    /// rendered". An item that leaves the promotion set keeps its last
+    /// stamp, so the reader gates on CURRENT promotion before
+    /// consulting one.
+    var promotedRendered: [UInt64: String] = [:]
 
     init(id: UInt64, title: String = "") {
         self.id = id
@@ -10133,17 +10153,30 @@ func kayaModelMenuState(_ item: KayaMenuItemModel, _ aspect: KayaMenuAspect) -> 
 /// available observation and a claim worth making: an icon that means
 /// something has to say what it means.
 ///
-/// iOS has no retained item registry to read (UIMenu elements are
-/// rebuilt on demand by UIMenuSystem, and kaya keeps no handle on
-/// them), exactly as kayaMenuStateRead already documents for state. So
-/// this arm answers with what it CAN measure: it resolves the same SF
-/// name the lowering would use and reports the semantic name only if
-/// UIImage(systemName:) actually produces an image on this OS. That
-/// catches the failure this vocabulary is most exposed to — a symbol
-/// name above the deployment floor, which fails as a silent blank —
-/// and it does NOT claim the menu was built, which nothing here can
-/// see. A weaker claim stated plainly beats a stronger-looking one
-/// that is vacuous.
+/// iOS answers in TWO HALVES, and which one answers is decided by what
+/// RENDERED — never by the item's props.
+///
+///  - THE RENDERED HALF: an item the promoted bar is carrying right now
+///    was drawn by KayaPromotedLabel, which stamped the arm it took on
+///    the window model. This read returns that stamp verbatim, so an
+///    arm that stopped drawing the symbol answers with what it drew
+///    instead and the assertion goes red. Before the stamp existed BOTH
+///    halves came from the model, and the shipped bar drew
+///    `Text(item.label)` for a symbol-carrying promoted item while this
+///    read answered with the concept the app had declared — the whole
+///    reason this function was rewritten.
+///  - THE UNRENDERED HALF: an unpromoted item, and every item on a
+///    regular-width window, where the catalog goes into the system menu
+///    bar instead of a promoted bar. There is nothing to read there —
+///    UIMenu elements are rebuilt on demand by UIMenuSystem and kaya
+///    keeps no handle on them, exactly as kayaMenuStateRead documents
+///    for state — so this half answers with what it CAN measure: the
+///    same SF name the lowering would use, and the semantic name only
+///    if UIImage(systemName:) really produces an image on this OS. That
+///    catches the failure this vocabulary is most exposed to (a name
+///    above the deployment floor, which fails as a silent blank) and it
+///    does NOT claim any menu was built. A weaker claim stated plainly
+///    beats a stronger-looking one that is vacuous.
 ///
 /// TOTAL, like kayaMenuStateRead: every failure is a short description
 /// and a retryable non-match, never a panic.
@@ -10177,6 +10210,26 @@ func kayaMenuSymbolRead(_ path: String) -> String {
         }
         return described
     #else
+        // THE RENDERED HALF. Both conditions are observations, not
+        // derivations: `.overflow` is stamped by the chrome body that
+        // took the compact arm, and promotion is recomputed from the
+        // same helper the bar itself consumes. A stale stamp cannot
+        // answer for an item the bar has stopped carrying, because this
+        // gate is what admits the stamp in the first place.
+        if let window = kayaScene.windows[0], window.menuPresentation == .overflow,
+            kayaPromotedActions(window).contains(where: { $0.id == item.id })
+        {
+            guard let drew = window.promotedRendered[item.id] else {
+                // WHAT THIS MEASURED: the compact chrome stamped itself,
+                // this item is in the promoted set that chrome renders,
+                // and no button of it has ever recorded what it drew.
+                // Deliberately NOT a fall-back to the model — the model
+                // is what agreed with itself here for four milestones.
+                return "promoted into the bar, and no button stamped what it drew"
+            }
+            return drew
+        }
+        // THE UNRENDERED HALF.
         guard item.symbol != 0 else { return "no symbol on the item" }
         guard let sf = kayaSFSymbol(item.symbol), let name = kayaSymbolName(item.symbol) else {
             return "symbol \(item.symbol) is not in this interpreter's table"
@@ -10194,9 +10247,19 @@ func kayaMenuSymbolRead(_ path: String) -> String {
 /// The expect_menu read: wherever the item surfaced — the OPEN context
 /// menu first (context items shadow the bar while presented), then the
 /// bar. macOS reads the REAL NSMenuItem state from the owned segment
-/// (a backend that ignored the write must fail); iOS reads the model
-/// the More menu and toolbar enumerate (the expect_sections precedent —
-/// SwiftUI exposes no separate item registry).
+/// (a backend that ignored the write must fail); iOS reads the model,
+/// because SwiftUI exposes no item registry to read instead.
+///
+/// STATE IS NOT THE SYMBOL, and the two reads part company here. Every
+/// aspect this function answers — enablement, checkedness, value — is
+/// carried into the chrome by a modifier the row itself applies
+/// (`.disabled(kayaMenuEffectiveEnabled(item))`, the Toggle's binding,
+/// the Picker's selection), so the model IS what the More menu and the
+/// promoted bar enumerate for these three. The semantic icon was the
+/// aspect where that stopped being true: the promoted bar drew a bare
+/// text label while the same model said "copy". kayaMenuSymbolRead
+/// therefore reads a RENDER STAMP for items the bar is carrying, and
+/// this comment used to promise a registry-free model read for both.
 func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
     if let wid = kayaOpenContextWidget {
         // Open-context EXCLUSIVITY: while presented, the context menu
@@ -10737,6 +10800,29 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
     }
 #endif
 
+/// One menu row's text, WITH its semantic icon where the item declared
+/// one — the SwiftUI-menu spelling of what kayaApplySymbol does to
+/// every NSMenuItem the mac arm builds. Label, not Text: the row keeps
+/// its title as the spoken text and gains the platform's own glyph.
+///
+/// Shared by the More menu's rows and by every context menu, on both
+/// platforms, which is why it resolves nothing beyond the table: a name
+/// this OS lacks draws as no glyph here, and the two READS that matter
+/// (the real NSMenuItem's image on macOS, the promoted bar's render
+/// stamp on iOS) each check resolution where they can actually observe
+/// it.
+struct KayaMenuRowLabel: View {
+    let item: KayaMenuItemModel
+
+    var body: some View {
+        if let sf = kayaSFSymbol(item.symbol) {
+            Label(item.label, systemImage: sf)
+        } else {
+            Text(item.label)
+        }
+    }
+}
+
 /// One menu item rendered in SwiftUI menu content — the More menu's
 /// children and every context menu share this vocabulary. A nested
 /// menu survives as a real cascade/drill-in; a radio_group renders
@@ -10755,26 +10841,31 @@ struct KayaMenuNodeView: View {
         case menuKindMenu:
             // The drill-in row itself disables (Compose disables the
             // drill row, mac disables the holder — one semantics).
-            Menu(item.label) {
+            Menu {
                 ForEach(item.children) { child in
                     KayaMenuNodeView(item: child, noun: noun, promoted: promoted)
                 }
+            } label: {
+                KayaMenuRowLabel(item: item)
             }
             .disabled(!kayaMenuEffectiveEnabled(item))
         case menuKindRadioGroup:
             KayaMenuRadioInline(group: item, noun: noun)
         case menuKindToggle:
             Toggle(
-                item.label,
                 isOn: Binding(
                     get: { item.checked },
                     set: { _ in kayaMenuUserActivate(item, noun: noun) })
-            )
+            ) {
+                KayaMenuRowLabel(item: item)
+            }
             .disabled(!kayaMenuEffectiveEnabled(item))
         case menuKindAction:
             if !promoted.contains(item.id) {
-                Button(item.label) {
+                Button {
                     kayaMenuUserActivate(item, noun: noun)
+                } label: {
+                    KayaMenuRowLabel(item: item)
                 }
                 .disabled(!kayaMenuEffectiveEnabled(item))
             }
@@ -10799,7 +10890,10 @@ struct KayaMenuRadioInline: View {
                 set: { index in kayaMenuUserSelectRadio(group, index, noun: noun) })
         ) {
             ForEach(Array(group.children.enumerated()), id: \.element.id) { index, option in
-                Text(option.label).tag(index)
+                // An option carries a symbol like any other leaf, and
+                // the mac arm applies one to every radio option it
+                // builds (kayaApplySymbol at the radio_group case).
+                KayaMenuRowLabel(item: option).tag(index)
             }
         }
         .pickerStyle(.inline)
@@ -11117,6 +11211,105 @@ struct KayaMenuChrome: ViewModifier {
         }
     }
 
+    /// Why a declared symbol could not be drawn as a glyph. TWO causes,
+    /// and this reader can tell them apart: a value this interpreter's
+    /// table does not carry (the interpreter and the core disagree,
+    /// which the spec hash exists to prevent), or a table row whose SF
+    /// spelling this OS refuses — the rename trap, which fails as a
+    /// silent blank image and is why the resolution is checked in the
+    /// RENDER path and not only in the read.
+    func kayaPromotedSymbolWhyNot(_ symbol: Int64) -> String {
+        guard let sf = kayaSFSymbol(symbol) else {
+            return "symbol \(symbol) is not in this interpreter's table"
+        }
+        return "SF symbol \(sf) does not resolve on this OS"
+    }
+
+    /// THE RENDER STAMP for one promoted button: which arm of its label
+    /// drew, recorded on the window model where the harness reads it.
+    ///
+    /// In onAppear/onChange rather than in `body`, the
+    /// KayaFormFactorRecorder rule — a write during body evaluation is a
+    /// mutation inside the render pass. onChange is not optional here:
+    /// switching arms gives the label a new view identity and re-fires
+    /// onAppear, but a symbol changing WITHIN the symbol arm does not,
+    /// and a stamp that cannot follow that is a stamp that goes stale
+    /// while still being believed.
+    struct KayaPromotedStamp: ViewModifier {
+        let windowId: UInt64
+        let item: UInt64
+        let drew: String
+
+        func body(content: Content) -> some View {
+            content
+                .onAppear { record() }
+                .onChange(of: drew) { record() }
+        }
+
+        private func record() {
+            kayaScene.windows[windowId]?.promotedRendered[item] = drew
+        }
+    }
+
+    /// One promoted primary's label — and the stamp of what it drew.
+    ///
+    /// PRECEDENCE, MIRRORED FROM macOS: the semantic symbol wins. The
+    /// mac arm applies `symbol` to every NSMenuItem it builds
+    /// (kayaApplySymbol) and applies `icon` to none of them, so an item
+    /// carrying both shows its symbol there; this is that same rule in
+    /// SwiftUI's spelling. The icon bytes keep the one consumer they
+    /// have ever had (KayaMenuItemModel.icon, "used by phone
+    /// promotion") as the fallback, and a bare label is the last resort.
+    ///
+    /// Label rather than Image: the glyph is what the user sees and the
+    /// item's LABEL is what an assistive client reads — the iOS half of
+    /// the claim kayaSymbolImage makes on macOS, where the semantic name
+    /// rides the image as its accessibility description.
+    ///
+    /// THE STAMP IS WRITTEN INSIDE EACH ARM, by the view that arm
+    /// renders — never from a decision computed once and used twice.
+    /// That is the difference between a read that follows the button and
+    /// one that agrees with the model by construction: perturb which arm
+    /// draws and the stamp moves with it, which is exactly what
+    /// expect_menu_symbol could not see before this existed.
+    struct KayaPromotedLabel: View {
+        let item: KayaMenuItemModel
+        let windowId: UInt64
+
+        var body: some View {
+            if item.symbol != 0 {
+                if let sf = kayaSFSymbol(item.symbol), let name = kayaSymbolName(item.symbol),
+                    UIImage(systemName: sf) != nil
+                {
+                    Label(item.label, systemImage: sf)
+                        .modifier(
+                            KayaPromotedStamp(windowId: windowId, item: item.id, drew: name))
+                } else {
+                    // A declared symbol this host cannot draw. The
+                    // button stays usable as text, and the stamp says
+                    // which of the two causes it measured.
+                    Text(item.label)
+                        .modifier(
+                            KayaPromotedStamp(
+                                windowId: windowId, item: item.id,
+                                drew: kayaPromotedSymbolWhyNot(item.symbol)))
+                }
+            } else if let icon = item.icon {
+                Image(uiImage: icon)
+                    .modifier(
+                        KayaPromotedStamp(
+                            windowId: windowId, item: item.id,
+                            drew: "the promoted button drew the app's icon bytes, no symbol"))
+            } else {
+                Text(item.label)
+                    .modifier(
+                        KayaPromotedStamp(
+                            windowId: windowId, item: item.id,
+                            drew: "the promoted button drew its label as text, no icon"))
+            }
+        }
+    }
+
     /// The iOS window-anchor lowering: promoted primaries as real
     /// trailing bar actions, the rest of the catalog behind a trailing
     /// More menu — top-level grouping nodes as labeled groups, one
@@ -11136,11 +11329,7 @@ struct KayaMenuChrome: ViewModifier {
                             Button {
                                 kayaMenuUserActivate(item)
                             } label: {
-                                if let icon = item.icon {
-                                    Image(uiImage: icon)
-                                } else {
-                                    Text(item.label)
-                                }
+                                KayaPromotedLabel(item: item, windowId: windowId)
                             }
                             .disabled(!kayaMenuEffectiveEnabled(item))
                         }
