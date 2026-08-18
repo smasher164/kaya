@@ -61,10 +61,17 @@ use bindings::Microsoft::UI::Xaml::Controls::{
 // carries the background an UNPAINTED run wears
 // (docs/ranges-plan.md D1).
 use bindings::Microsoft::UI::Text::{PointOptions, TextConstants, TextGetOptions, TextSetOptions};
-use bindings::Windows::Foundation::TypedEventHandler;
+use bindings::Windows::Foundation::{Point, TypedEventHandler};
+// The caption title's two text properties are vtable pads in this
+// backend's bindings, so the one element that needs them is parsed from
+// markup rather than constructed — `caption_title_text` carries the whole
+// reason, including the bindgen entry that would retire this import.
+use bindings::Microsoft::UI::Xaml::Markup::XamlReader;
 use bindings::Microsoft::UI::Xaml::Input::KeyboardAccelerator;
 use bindings::Windows::System::{VirtualKey, VirtualKeyModifiers};
-use bindings::Microsoft::UI::Xaml::{GridLength, GridUnitType, Style, Thickness, Visibility};
+use bindings::Microsoft::UI::Xaml::{
+    GridLength, GridUnitType, HorizontalAlignment, Style, Thickness, Visibility,
+};
 // The styling pass's two resource types (docs/styling-plan.md D4): a
 // role lowers to a keyed Style (`AccentButtonStyle`,
 // `SubtitleTextBlockStyle`) or to a keyed Brush
@@ -89,6 +96,7 @@ use bindings::Microsoft::UI::Xaml::{
     Application, ApplicationInitializationCallback, FocusState, FrameworkElement,
     RoutedEventHandler, UIElement, UnhandledExceptionEventHandler, Window,
 };
+use bindings::Windows::Foundation::EventHandler;
 
 use crate::protocol::{
     ApplyOp, CommandKind, MenuAttachment, MenuItemId, MenuItemKind, MenuProp, OccSink, Occurrence,
@@ -2966,6 +2974,444 @@ fn mint_caption_titlebar() -> windows_core::Result<TitleBar> {
     TitleBar::new()
 }
 
+/// The least room the caption's title may leave between itself and either
+/// header, in DIP.
+///
+/// IT IS `CAPTION_DRAG_STRIP`'S NUMBER, for `CAPTION_DRAG_STRIP`'S REASON:
+/// 8 is the gap this band already draws between two of its own elements —
+/// `MenuBarItemMargin` is 4,4,4,4 so the menu's items sit 8 apart
+/// (`MenuBar_themeresources.xaml:44-46`), and the `TitleBar` dictionary
+/// spells the same 8 for the gap after its own title
+/// (`TitleBarTitleMargin` = 0,0,8,0, `TitleBar_themeresources.xaml:93`).
+///
+/// A FLOOR IS NEEDED ONLY BECAUSE THE TITLE MOVED. Centred in the CONTENT
+/// SLOT — the arrangement this backend shipped until 2026-08-17 — the title
+/// could never approach a header: the slot is the space between them and
+/// the middle of it is as far from both as a point can be. Centred on the
+/// WINDOW it can, whenever one header outweighs the other, and on a narrow
+/// window it would cross one. So the floor is the band's existing rhythm
+/// applied once more rather than a new metric, exactly like the strip.
+const CAPTION_TITLE_GAP: f64 = 8.0;
+
+/// How far the arranged title may sit from the centre this backend asked
+/// for before `center_caption_title`'s post-condition calls it a defect, in
+/// DIP.
+///
+/// IT IS NOT THE ACCEPTANCE FIGURE, and the difference is the point. The
+/// acceptance is 1 PHYSICAL PIXEL, measured off UIA by the probe that sits
+/// beside this file — `title-centre-probe.sh`, which drives
+/// `title-centre-probe.ps1` against a live guest on the VM and prints one
+/// line per geometry. This is the in-process
+/// wall, and what it exists to catch is a MODEL that stopped being true —
+/// a centring that was removed, a slot that is no longer the element this
+/// code measures, a header whose extent moved without a layout pass. Every
+/// one of those is tens of pixels wrong (the arrangement this replaces was
+/// 63 px off), so a generous tolerance still catches all of them, while a
+/// tight one would risk aborting a shipped app over XAML's own layout
+/// rounding — which is up to half a physical pixel, and is the ONLY
+/// discrepancy that can legitimately appear here.
+const CAPTION_TITLE_TOLERANCE: f64 = 1.5;
+
+/// The `TitleBar` template's name for the element that occupies column 8 —
+/// the caption's content slot, and the one thing that says where the space
+/// between the two headers begins and ends
+/// (`scratchpad/chrome/TitleBar-v220.xaml:262-266`).
+const CAPTION_CONTENT_SLOT_PART: &str = "PART_ContentPresenterGrid";
+
+/// What the last centring pass asked for, and the geometry it asked it
+/// from. One entry per promoted window; dropped with the window.
+///
+/// EVERY FIELD BUT `centre` IS AN INPUT, and that is what makes the
+/// post-condition safe to run: if this pass measures exactly what the last
+/// pass measured, then the arrangement in front of this code IS the one
+/// the last pass's margin produced, and the achieved centre may be compared
+/// with the asked-for one. If ANY input moved — a live resize, a menu that
+/// grew, a title that changed — the comparison is skipped for that pass,
+/// because the layout in front of us is then the answer to a question
+/// nobody asked any more.
+#[derive(Clone, Copy, PartialEq)]
+struct CaptionTitleAim {
+    band: f64,
+    slot0: f64,
+    slot1: f64,
+    left_edge: f64,
+    right_edge: f64,
+    width: f64,
+    centre: f64,
+}
+
+thread_local! {
+    /// The centring's post-condition state, keyed by window.
+    ///
+    /// A THREAD-LOCAL RATHER THAN `CoreState`, and it is the same rule the
+    /// text-range state at the top of this file records: this map is
+    /// written from a XAML LAYOUT CALLBACK, and a callback that touched
+    /// `CORE` would be one synchronous raise away from aborting the
+    /// process — `CORE.with_borrow_mut` panics on a live borrow, and
+    /// `refresh_toolbar` holds exactly that borrow while it calls
+    /// `RecomputeDragRegions`, which forces a synchronous layout. The
+    /// centring reads nothing from the core (a `TitleBar` can be asked for
+    /// its own headers and its own content), so the one thing it must
+    /// remember lives here instead.
+    static CAPTION_TITLE_AIM: RefCell<HashMap<u64, CaptionTitleAim>> =
+        RefCell::new(HashMap::new());
+}
+
+/// The caption's title `TextBlock`, minted with the two text properties the
+/// clamp depends on.
+///
+/// WHY MARKUP AND NOT `TextBlock::new()`. `TextTrimming` and `TextWrapping`
+/// are vtable PADS in this backend's generated bindings — the filter in
+/// `tools/winui-bindgen` has never named them, and that file is outside
+/// this arm's file list — so there is no setter to call. `XamlReader` is
+/// the platform's own parser and the values it writes are LOCAL VALUES,
+/// which beat a style's setters in XAML's property precedence; that
+/// matters, because `CaptionTextBlockStyle` inherits `BaseTextBlockStyle`,
+/// whose `TextWrapping` is `Wrap` and whose `TextTrimming` is `None`. The
+/// template's own `PART_TitleText` writes exactly these two attributes on
+/// top of exactly this style (`TitleBar-v220.xaml:238-242`), which is the
+/// control telling us the style does not supply them.
+///
+/// WHAT THEY BUY, and it is not decoration: a title clamped into a span
+/// narrower than the text must give way SOMEWHERE. `Wrap` gives way by
+/// growing a second line inside a 48 DIP band; `None` gives way by cutting
+/// the last glyph in half. `NoWrap` + `CharacterEllipsis` gives way by
+/// saying so, which is the only one of the three a reader can act on.
+///
+/// `HorizontalAlignment` is `Stretch`, which is the default and is written
+/// anyway because `center_caption_title` depends on it: the title fills the
+/// box its presenter gives it, and that box is its own measured width (or
+/// `MaxWidth`, when the clamp has narrowed it), so the rect UIA publishes
+/// is never wider than the ink by more than a rounded pixel. Under `Center`
+/// the ink would float inside a box a fraction wider, and the rect the
+/// probe reads a centre from would not be the rect this code aimed.
+///
+/// THE FLAG FOR THE COORDINATOR: the cleaner home for those two properties
+/// is two members in the bindgen filter, after which this function is
+/// `TextBlock::new()` and two setters. It is written this way because
+/// `tools/` is not in this arm's file list, not because markup is better.
+fn caption_title_text() -> windows_core::Result<TextBlock> {
+    const MARKUP: &str = concat!(
+        "<TextBlock xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ",
+        "TextWrapping=\"NoWrap\" TextTrimming=\"CharacterEllipsis\" />"
+    );
+    let title: TextBlock = XamlReader::Load(&HSTRING::from(MARKUP))?.cast()?;
+    // `CaptionTextBlockStyle` is the key `PART_TitleText` itself uses
+    // (`TitleBar-v220.xaml:238`), so the title is the platform's caption
+    // type at the platform's caption size — no font, no size, no colour
+    // chosen here. A style's setters lose to the two local values above.
+    title.SetStyle(&theme_resource::<Style>("CaptionTextBlockStyle")?)?;
+    title.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+    Ok(title)
+}
+
+/// The x of an element's own origin, in another element's coordinates.
+fn element_origin_x(element: &FrameworkElement, within: &UIElement) -> windows_core::Result<f64> {
+    let origin = element
+        .TransformToVisual(within)?
+        .TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+    Ok(f64::from(origin.X))
+}
+
+/// THE TITLE CENTRES ON THE WINDOW, not on the space left over between the
+/// headers — the maintainer's ruling of 2026-08-17, and VS Code's rule:
+/// "if we're doing the one bar thing we have to commit and fully go with
+/// vscode's behavior".
+///
+/// WHAT IT REPLACES, and why the previous answer was not good enough. The
+/// `TitleBar` template puts the Content presenter in column 8 and centres
+/// it there (`TitleBar-v220.xaml:262-272`, `HorizontalAlignment` =
+/// `{ThemeResource TitleBarContentHorizontalAlignment}` = Center), so the
+/// title lands in the middle of the space BETWEEN the menu and the
+/// commands. That space is not the window: the right side carries the
+/// commands, the drag strip and the system's caption cluster while the left
+/// carries only the menu, and the title came out 83 px left of the window's
+/// centre in the toolbar scene (63 after the strip shrank to 8). Two
+/// previous arms recorded that as the platform's answer and left it. It
+/// reads as a title that missed.
+///
+/// HOW IT AIMS: A BIAS THAT COSTS NO SIZE, PLUS ONE MEASURED CORRECTION.
+/// The margin written is `(d, 0, -d, 0)`. Its two halves cancel in the
+/// title's DESIRED size — which is the whole point, see the ratchet below —
+/// while its arranged box moves by `d`, so `d` is pure position. The width
+/// is a separate property, `MaxWidth`, because that one genuinely must not
+/// enter the desired size either.
+///
+/// AND `d` IS CORRECTED, NOT PREDICTED: `d += wanted x - measured x`. Both
+/// terms are read (the second off the live tree), so no model of the
+/// template's arithmetic can be wrong here, and the correction converges in
+/// ONE step rather than iterating, because the presenter's own position
+/// does not depend on `d` — the bias cancels out of everything the layout
+/// uses to place the presenter. The wanted x is snapped to the physical
+/// pixel grid first, since XAML arranges there (`UseLayoutRounding`); an
+/// off-grid target would be rounded by the layout, re-measured as an error,
+/// and corrected forever.
+///
+/// THE RATCHET, WHICH IS THE REASON FOR ALL OF THAT, and it was measured on
+/// the lane rather than feared. The obvious spelling of "put the title
+/// HERE" is a margin pair that carves the wanted rect out of the slot:
+/// `Left = x - slot0`, `Right = slot1 - (x + width)`. It aims perfectly —
+/// drift 0 at every width — and it makes the title's desired width equal
+/// the SLOT's width, because a margin is part of what an element asks for.
+/// That travels: the star column asks for it, the template's Grid asks for
+/// it, the window's content asks for it, and a window whose content asks
+/// for 1098 DIP does not lay out again when it is dragged narrower. The
+/// measured symptom was a band frozen at its widest, with the title, the
+/// menu and the commands all where the widest window had left them, and NOT
+/// ONE further layout pass to notice — the caption stopped following its
+/// own window and nothing anywhere failed.
+///
+/// EVERY NUMBER IT USES IS MEASURED OFF THE LIVE TREE. The band's width is
+/// the control's own `ActualWidth` (the `TitleBar` fills the shell's top
+/// row, so it is the window's client width). The slot is the title's
+/// GRANDPARENT — `PART_ContentPresenter`'s own parent is
+/// `PART_ContentPresenterGrid`, the element that occupies column 8 — read
+/// by transform and `ActualWidth` rather than reconstructed from
+/// `TitleBarLeftHeaderPaddingWidth` and the insets, so no theme constant
+/// can go stale underneath it. The headers are `LeftHeader()` and
+/// `RightHeader()`, which are the menu and the command bar themselves. The
+/// title's untrimmed width comes from measuring it against an infinite
+/// constraint, which is the only reading that does not already have this
+/// function's own clamp folded into it.
+///
+/// THE CLAMP. The title may not come nearer either header than
+/// `CAPTION_TITLE_GAP`, and it may not leave the slot on the left (the
+/// control's own left-header padding column already holds 14 DIP there, so
+/// the slot's edge is the stricter bound — both are computed and the
+/// stricter wins). When the ideal position would cross either bound the
+/// title is pushed back to it, and when the span itself is narrower than
+/// the text the text is given the span and ellipsizes inside it. The order
+/// matters: a title never overlaps a header, and never disappears rather
+/// than shortening.
+///
+/// THE HOOK IS `LayoutUpdated`, and it is the honest one. The geometry
+/// moves for four different reasons — the window resizes, the menu's items
+/// change, the promoted command set changes (including the `CommandBar`'s
+/// OWN dynamic overflow, which kaya never hears about), and the caption
+/// text changes — and every one of them is a layout pass by definition,
+/// while only three of them are anything kaya calls a function for. It is
+/// also the hook the control itself uses for the same class of problem:
+/// `AutoRefreshDragRegions` subscribes to `Content()`'s `LayoutUpdated`
+/// (microsoft-ui-xaml @ winui3/release/2.2.0, `TitleBar.cpp:603-606`).
+/// That subscription is also why this function does not touch the drag
+/// regions: the Content IS the title, so a margin written here raises the
+/// event the control is already listening to, and the rects are recomputed
+/// by the control on the pass that follows. (The title contributes nothing
+/// to those rects in any case — `FindInteractableElements` punches out only
+/// `Control`s, and a `TextBlock` is not one; see `CAPTION_DRAG_STRIP`.)
+///
+/// IT CONVERGES, AND THE REASON IS STRUCTURAL RATHER THAN A LIMIT. Nothing
+/// this function measures depends on what it writes: column 8 is `Width="*"`
+/// so the slot's span does not follow the title's margin, and the headers
+/// are in their own columns. The margin is therefore a pure function of
+/// geometry the title cannot influence, so the second pass computes the
+/// same `Thickness`, writes nothing, and the layout settles. A version that
+/// inferred the slot's centre from the title's own arranged position would
+/// have layout rounding in its feedback path and could oscillate forever;
+/// this one has no feedback path at all.
+///
+/// THE POST-CONDITION IS THE WALL — see `CaptionTitleAim`. The failure this
+/// arm can have is the silent kind: delete the write and the title goes
+/// back to the slot's centre, every scene still passes (no harness verb
+/// reads a caption's geometry, and there is no uniform read to add — the
+/// other four backends draw their own band), and the only witness is a
+/// screenshot somebody has to think to take. So the arrangement is checked
+/// against what was asked for, on every pass whose inputs have not moved
+/// since the pass that asked. Measured with the write deleted: it fires.
+fn center_caption_title(window: u64, titlebar: &TitleBar) -> windows_core::Result<()> {
+    let band = titlebar.ActualWidth()?;
+    if band <= 0.0 {
+        // Before the first arrange, and while the caption is collapsed
+        // (the promotion emptied), there is no geometry to read. The pass
+        // that follows the next arrange does the work.
+        return Ok(());
+    }
+    let Ok(title) = titlebar.Content().and_then(|content| content.cast::<TextBlock>()) else {
+        return Ok(());
+    };
+    let title_fe: FrameworkElement = title.cast()?;
+    let within: UIElement = titlebar.cast()?;
+
+    // THE SLOT, BY THE NAME THE TEMPLATE GIVES IT.
+    // `PART_ContentPresenter` centres the title inside itself, so the
+    // presenter is not the slot; the slot is the element carrying
+    // `Grid.Column="8"`, which the template calls
+    // `PART_ContentPresenterGrid` (`TitleBar-v220.xaml:262-266`).
+    //
+    // NOT BY WALKING UP FROM THE TITLE, and that is measured rather than
+    // preferred: `FrameworkElement.Parent` is the LOGICAL parent and it
+    // is NULL here — a `TemplateBinding` to `TitleBar.Content` puts the
+    // element in a presenter without giving it a logical parent, so the
+    // first version of this function read `Err` and silently centred
+    // nothing (the lane measured the title still 63 px left of the
+    // window's centre, with no error anywhere).
+    let slot = titlebar
+        .GetTemplateChild(&HSTRING::from(CAPTION_CONTENT_SLOT_PART))
+        .ok()
+        .and_then(|part| part.cast::<FrameworkElement>().ok());
+    let Some(slot) = slot else {
+        // A band that has been arranged has had its template applied, so
+        // there is no benign reading of this.
+        panic!(
+            "kaya: winui: window {window}'s TitleBar is arranged {band} DIP wide, \
+             so its template has been applied, and yet it publishes no part \
+             named {CAPTION_CONTENT_SLOT_PART}. That part is the element \
+             carrying Grid.Column=\"8\" in the control's template \
+             (scratchpad/chrome/TitleBar-v220.xaml:262-266) and it is the only \
+             thing that says where the caption's content slot begins and ends; \
+             without it the title cannot be kept inside that slot while it is \
+             aimed at the window's centre. A renamed part means the pinned \
+             WinUI moved under this backend."
+        );
+    };
+    let slot0 = element_origin_x(&slot, &within)?;
+    let slot_width = slot.ActualWidth()?;
+    if slot_width <= 0.0 {
+        return Ok(());
+    }
+    let slot1 = slot0 + slot_width;
+
+    // THE HEADERS. Absent ones do not clamp: a caption with no menu has
+    // nothing on the left to collide with, and one with no command bar
+    // ends its content slot where the drag strip begins.
+    let left_edge = match titlebar
+        .LeftHeader()
+        .ok()
+        .and_then(|header| header.cast::<FrameworkElement>().ok())
+    {
+        Some(header) => element_origin_x(&header, &within)? + header.ActualWidth()?,
+        None => 0.0,
+    };
+    let right_edge = match titlebar
+        .RightHeader()
+        .ok()
+        .and_then(|header| header.cast::<FrameworkElement>().ok())
+    {
+        Some(header) => element_origin_x(&header, &within)?,
+        None => slot1,
+    };
+
+    // WHERE THE TITLE IS NOW, and by how much this code already moved it.
+    // The bias is written as `(d, -d)`, so reading `Left` reads `d`.
+    let bias = title.Margin()?.Left;
+    let origin = element_origin_x(&title_fe, &within)?;
+    let width = title.ActualWidth()?;
+
+    // THE SPAN THE TITLE MAY OCCUPY. The slot's own edge is the stricter
+    // bound on the left (the control's left-header padding column already
+    // holds 14 DIP there) and keeping inside it is not only manners: an
+    // element biased out of its slot is at the mercy of whatever the
+    // template clips.
+    let span0 = slot0.max(left_edge + CAPTION_TITLE_GAP);
+    let span1 = right_edge.min(slot1) - CAPTION_TITLE_GAP;
+    let available = (span1 - span0).max(0.0);
+
+    // The window's centre, which is the whole ruling in one expression,
+    // then the clamp, then the pixel grid.
+    let scale = title.RasterizationScale()?.max(1.0);
+    let ideal = band / 2.0 - width / 2.0;
+    // DOES IT FIT AT ALL? On a window narrow enough, or under a menu wide
+    // enough, the span between the headers is smaller than the title's own
+    // floor — a `TextBlock` will ellipsize down to one "…" and no further,
+    // and `MaxWidth` cannot take it below that. Measured on the menus scene
+    // at 540 DIP: a 9 DIP slot and a 19.5 DIP ellipsis.
+    let fits = width < available;
+    let x = if fits {
+        ideal.max(span0).min(span1 - width)
+    } else {
+        // NOTHING TO CENTRE, SO CHOOSE WHICH SIDE OVERFLOWS. The right edge
+        // is pinned its 8 DIP clear of the commands and the overflow goes
+        // LEFT, into the control's own left-header padding column, which is
+        // empty — where overflowing right would put an ellipsis under a
+        // button. Written as one branch rather than as `max(span0)` followed
+        // by `min(span1 - width)`, which silently produces this same number
+        // by having the second clamp undo the first.
+        span1 - width
+    };
+    // SNAPPED TO A WHOLE PHYSICAL PIXEL, and that is what keeps the
+    // correction below a one-step move instead of a feedback loop. XAML
+    // arranges on the pixel grid (`UseLayoutRounding`), so an off-grid
+    // target would be rounded by the layout and re-corrected by the next
+    // pass, forever.
+    let x = (x * scale).round() / scale;
+    let centre = x + width / 2.0;
+    let delta = x - origin;
+
+    let aim = CaptionTitleAim {
+        band,
+        slot0,
+        slot1,
+        left_edge,
+        right_edge,
+        width,
+        centre,
+    };
+    let previous = CAPTION_TITLE_AIM.with_borrow(|aims| aims.get(&window).copied());
+    // THE POST-CONDITION SAYS NOTHING ABOUT A TITLE THAT DOES NOT FIT, and
+    // that is the honesty rule rather than a convenience. Below its own
+    // floor the title's arranged width is no longer the width its box was
+    // given, so `origin + width / 2` is not the centre of anything this
+    // code chose, and an assertion about it would be an assertion about the
+    // font's ellipsis metrics. Measured before it was gated: the menus
+    // scene, whose menu leaves a 9 DIP slot, aborted five legs on a 4 DIP
+    // disagreement that no aim could have removed.
+    if fits && previous == Some(aim) {
+        // Every input is what the previous pass measured, so the
+        // arrangement in front of us is that pass's margin, arranged. It
+        // is the only moment at which the achieved centre can honestly be
+        // compared with the asked-for one.
+        let achieved = element_origin_x(&title_fe, &within)? + title.ActualWidth()? / 2.0;
+        assert!(
+            (achieved - centre).abs() <= CAPTION_TITLE_TOLERANCE,
+            "kaya: winui: window {window}'s caption title was aimed at x={centre:.1} \
+             and is arranged centred on x={achieved:.1}, off by {:.1} DIP, with \
+             nothing this backend measures having moved since it was aimed. The \
+             caption title centres on the WINDOW (maintainer's ruling 2026-08-17, \
+             VS Code's rule), which no scene can check: no harness verb reads a \
+             caption's geometry and the other four backends draw their own band, \
+             so this is the only place a lost centring says anything at all. What \
+             was measured, in TitleBar coordinates: band width {band:.1} (centre \
+             {:.1}), content slot {slot0:.1}..{slot1:.1}, menu's right edge \
+             {left_edge:.1}, commands' left edge {right_edge:.1}, the title's \
+             arranged width {width:.1}, the bias written {:.1}. If the slot's \
+             span and the commands' left \
+             edge disagree, the element being measured as the slot is not the \
+             template's column 8 and the whole aim is computed in the wrong \
+             place; if they agree and the title still sits at \
+             {:.1} - the slot's own centre - then nothing is biasing it.",
+            achieved - centre,
+            band / 2.0,
+            bias + delta,
+            (slot0 + slot1) / 2.0
+        );
+    } else {
+        CAPTION_TITLE_AIM.with_borrow_mut(|aims| {
+            aims.insert(window, aim);
+        });
+    }
+
+    // THE WIDTH THE TITLE MAY USE, which is what ellipsizes it. `MaxWidth`
+    // rather than a margin, because a margin is part of an element's
+    // DESIRED size and this one must not be — see the doc comment's
+    // ratchet paragraph.
+    if (available - title.MaxWidth()?).abs() > 0.05 {
+        title.SetMaxWidth(available)?;
+    }
+    // THE BIAS, written only when it moves by half a physical pixel or
+    // more. A `Thickness` write invalidates measure, and a pass that
+    // rewrote the same number would schedule a layout for nothing on every
+    // layout in the app.
+    if delta.abs() >= 0.5 / scale {
+        title.SetMargin(Thickness {
+            Left: bias + delta,
+            Top: 0.0,
+            Right: -(bias + delta),
+            Bottom: 0.0,
+        })?;
+    }
+    Ok(())
+}
+
 /// The shell Grid's rows, named because two functions have to agree
 /// about them and a bare `1` in each is how they stop agreeing.
 ///
@@ -3192,10 +3638,39 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             // so the title is the platform's caption type at the
             // platform's caption size — no font, no size, no colour
             // chosen here.
-            let caption_text = TextBlock::new()?;
-            caption_text.SetStyle(&theme_resource::<Style>("CaptionTextBlockStyle")?)?;
+            let caption_text = caption_title_text()?;
             titlebar.SetContent(&caption_text.cast::<UIElement>()?)?;
             core.window_caption_texts.insert(window, caption_text);
+
+            // THE TITLE CENTRES ON THE WINDOW, and this is the hook that
+            // keeps it there — see `center_caption_title` for why
+            // `LayoutUpdated` is the one event that cannot miss a reason
+            // the geometry moved.
+            //
+            // A WEAK REFERENCE, for two reasons that both bite. A strong
+            // one would be a cycle — the control holds the delegate and
+            // the delegate would hold the control — and this backend's
+            // delegates are not tracked by XAML's reference tracker, so
+            // the caption of every closed window would leak. And
+            // `EventHandler::new` demands `Send`, which a projected XAML
+            // interface is not and `Weak` is.
+            //
+            // IT TOUCHES NO CORE STATE, deliberately, and the rule is the
+            // one the text-range thread-locals at the top of this file
+            // record: a layout callback that borrowed `CORE` would abort
+            // the process the first time it fired inside `refresh_toolbar`
+            // — which holds that borrow while it calls
+            // `RecomputeDragRegions`, and that forces a synchronous
+            // layout. A `TitleBar` can be asked for its own headers and
+            // its own content, so the callback needs nothing else.
+            let weak_titlebar = titlebar.downgrade()?;
+            let recentre = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                match weak_titlebar.upgrade() {
+                    Some(titlebar) => center_caption_title(window, &titlebar),
+                    None => Ok(()),
+                }
+            });
+            titlebar.LayoutUpdated(&recentre)?;
 
             let bar = CommandBar::new()?;
             titlebar.SetRightHeader(&bar.cast::<UIElement>()?)?;
@@ -8833,6 +9308,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.toolbars.remove(&window.0);
             core.window_titlebars.remove(&window.0);
             core.window_caption_texts.remove(&window.0);
+            // The centring's post-condition state goes with the caption it
+            // was about (`CaptionTitleAim`). It lives outside CoreState
+            // because a layout callback writes it, so it is dropped here
+            // by hand rather than by the same line as the maps above.
+            CAPTION_TITLE_AIM.with_borrow_mut(|aims| {
+                aims.remove(&window.0);
+            });
             core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
         ApplyOp::PushEntry { window, entry } => {
