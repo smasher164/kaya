@@ -24,7 +24,7 @@ import UniformTypeIdentifiers
 /// entry: check-verbs holds the SOURCE current, but only a runtime
 /// assert catches a stale COMPILED dylib decoding new wire records
 /// with old constants — the stale-artifact class, presentation side.
-let kayaSpecHash: UInt64 = 0x7c7a23e2127c3801
+let kayaSpecHash: UInt64 = 0x9be02e4dbe710c5b
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -61,6 +61,15 @@ private let applyRevealRange: UInt16 = 30
 private let applyPresentSaveDialog: UInt16 = 31
 private let applySetBrand: UInt16 = 32
 private let applySetTypeface: UInt16 = 33
+/// The app's declared identity (docs/app-identity-plan.md). The
+/// CONSTANT is here because this file's wire mirror is a mirror — a
+/// half-copied vocabulary is the CLIP_* trap — while the LOWERING is
+/// not: mac's route is real (the Dock tile, under the regular
+/// activation policy declaring an identity implies) and unwritten,
+/// iOS's is packaging and has no runtime call at all. See the
+/// `expect_app_icon` arm, which refuses in the one spelling both gates
+/// read.
+private let applySetAppIdentity: UInt16 = 34
 private let applyPushEntry: UInt16 = 12
 private let applyPopEntry: UInt16 = 13
 private let applySetEntryProp: UInt16 = 14
@@ -3620,6 +3629,23 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaDiag(
                         "typeface \(wanted) is not installed — the platform ramp stands")
                 }
+            case applySetAppIdentity:
+                // DECODED BY NOBODY YET, ON PURPOSE. Ruling 2 of
+                // docs/app-identity-plan.md makes a declaring app
+                // `.regular` on macOS so it HAS a Dock tile to put a
+                // picture in, and that policy change plus
+                // `NSApp.applicationIconImage` is the mac arm — the
+                // plan's breadth order puts it after Linux. iOS has no
+                // runtime route at all (the full SDK census of the
+                // app-icon surface is three symbols, none of them
+                // taking bytes), so its identity is the bundle's and
+                // arrives with packaging.
+                //
+                // The record is SKIPPED rather than mis-read: the loop
+                // advances by the record's own size, so an arm that
+                // decodes nothing is exactly as correct as one that
+                // decodes and discards, and cheaper to read.
+                break
             case applyPresentSaveDialog:
                 // The platform's REAL save dialog (NSSavePanel), answered
                 // exactly once through kaya_emit_save_dialog_result — one
@@ -6563,6 +6589,37 @@ private func kayaRunScript(_ script: String) {
                     // the iOS runner wires no typeface legs and this
                     // says so where a reader will meet it.
                     kayaDepthStub("typeface", on: "ios")
+                #endif
+            case "expect_app_icon":
+                // THE IDENTITY SCENE HAS NOT REACHED EITHER APPLE
+                // PLATFORM (docs/app-identity-plan.md's breadth order:
+                // Windows depth, then Linux, then mac). The two arms
+                // are stubbed for DIFFERENT reasons and both are
+                // written out, because a shared refusal would hide that
+                // one of them is a schedule and the other is a fact:
+                //
+                //   macOS — the route is real and measured
+                //     (`NSApp.applicationIconImage` from PNG bytes
+                //     replaces the Dock tile and the Cmd-Tab tile, and
+                //     the read back is a re-rendered snapshot rather
+                //     than an echo), and it carries ruling 2's policy
+                //     change with it: an app that declares an identity
+                //     becomes `.regular`, because an `.accessory` app
+                //     has no Dock tile to put an icon in — measured, the
+                //     setter succeeded and the Dock did not move one
+                //     pixel. That is the mac arm's work, not this
+                //     slice's.
+                //
+                //   iOS — there is no runtime route at all. The full
+                //     SDK census of the app-icon surface is three
+                //     symbols, typed BOOL and NSString, none of which
+                //     takes bytes; the Home Screen icon is the bundle's,
+                //     so iOS's reader is the packaging step and its
+                //     read is of the built bundle, not of a live app.
+                #if os(macOS)
+                    kayaDepthStub("identity", on: "macos")
+                #else
+                    kayaDepthStub("identity", on: "ios")
                 #endif
             case "expect_inset":
                 // The content inset, MEASURED as the halved gap between

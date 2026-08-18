@@ -368,6 +368,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
         TxOp::SetBrandAccent { .. } => UndoVerdict::Refused("set_brand_accent"),
         TxOp::SetBrandTypeface(_) => UndoVerdict::Refused("set_brand_typeface"),
+        TxOp::SetAppIdentity(_) => UndoVerdict::Refused("set_app_identity"),
         TxOp::Copy(_) => UndoVerdict::Refused("copy"),
         TxOp::ReadClipboard { .. } => UndoVerdict::Refused("read_clipboard"),
         TxOp::PushEntry { .. } => UndoVerdict::Refused("push_entry"),
@@ -401,6 +402,11 @@ pub(crate) struct Scene {
     /// than anything derived: the core resolves nothing here, so there
     /// is nothing else to keep (docs/styling-plan.md Slice 2b).
     brand_typeface: Option<crate::protocol::TypefaceRequest>,
+    /// The app's identity, once declared — the brand's walls verbatim
+    /// (docs/app-identity-plan.md). The DECLARATION is kept rather than
+    /// anything derived, for the typeface's reason: the core inspects
+    /// neither the name nor the bytes, so there is nothing else to keep.
+    app_identity: Option<crate::protocol::AppIdentity>,
     signals: HashMap<SignalId, Value>,
     /// signal -> the (widget, property) pairs it feeds (live and stamped).
     bindings: HashMap<SignalId, Vec<(WidgetId, Prop)>>,
@@ -1741,6 +1747,68 @@ impl Scene {
                     // installed.
                     self.brand_typeface = Some(req.clone());
                     out.push(ApplyOp::SetTypeface(req));
+                }
+                TxOp::SetAppIdentity(identity) => {
+                    // THE BRAND'S TWO WALLS, VERBATIM, and for the
+                    // brand's reasons (docs/app-identity-plan.md I5):
+                    // identity is not state, and a post-mount write would
+                    // make a backend show an unidentified frame it then
+                    // has to repaint. Both die here, in the root's words,
+                    // in every language at once.
+                    assert!(
+                        self.app_identity.is_none(),
+                        "kaya: set_app_identity called twice — an app's identity is \
+                         declared once, at startup; a slot that could flip at \
+                         runtime would promise an identity-switching surface the \
+                         vocabulary deliberately does not have \
+                         (docs/app-identity-plan.md I6)"
+                    );
+                    assert!(
+                        self.mounted_windows.is_empty(),
+                        "kaya: set_app_identity after a mount — identity is declared \
+                         once, BEFORE the first mount, so no backend ever shows an \
+                         unidentified frame it must repaint"
+                    );
+                    // A NAME IS HALF THE DECLARATION, so an empty one is
+                    // an author who filled no field rather than a request
+                    // for the platform's own identity. An empty string
+                    // would sail through five lowerings and land as the
+                    // launcher binary's name — indistinguishable, on
+                    // every observation, from an identity that applied.
+                    // Declaring none at all is what asks for the
+                    // platform's own.
+                    assert!(
+                        !identity.name.is_empty(),
+                        "kaya: set_app_identity has an empty name — an app that wants \
+                         the platform's own identity declares none at all \
+                         (docs/app-identity-plan.md)"
+                    );
+                    // AND SO IS THE MARK, by the same argument. An icon
+                    // slot present but empty is the silent fallback with
+                    // a mask bit set: the wire's decoder already refuses
+                    // a blob the mask denies, and this refuses the
+                    // mirror — a mask that promises a picture over no
+                    // bytes at all.
+                    assert!(
+                        identity.icon.as_ref().is_none_or(|icon| !icon.0.is_empty()),
+                        "kaya: set_app_identity carries an EMPTY icon blob — every \
+                         platform's image decoder answers nothing for zero bytes and \
+                         every lowering would leave the platform's default in place, \
+                         which reads exactly like an icon that applied. Send the \
+                         picture's bytes or declare no icon"
+                    );
+                    // THE BYTES ARE NOT INSPECTED HERE, the typeface's
+                    // rule verbatim: whether a blob is an image, and what
+                    // picture it holds, is a question only the platform's
+                    // own decoder can answer. The core would have to
+                    // carry a PNG parser to guess, and a guess that
+                    // disagreed with the decoder would be worse than no
+                    // answer. Each backend decodes and says what came
+                    // out; the observation reads the DECODED result, so
+                    // bytes that are not an image fail exactly like an
+                    // icon that never applied.
+                    self.app_identity = Some(identity.clone());
+                    out.push(ApplyOp::SetAppIdentity(identity));
                 }
                 TxOp::ShowSaveDialog(spec) => {
                     assert!(
@@ -5629,6 +5697,81 @@ mod tests {
             "Georgia",
             "a platform with no row of its own takes the default"
         );
+    }
+
+    fn identity(name: &str) -> crate::protocol::AppIdentity {
+        crate::protocol::AppIdentity { name: name.into(), icon: None }
+    }
+
+    /// THE IDENTITY'S SET-ONCE WALLS — the brand's, verbatim, because it
+    /// is the same slot rule (docs/app-identity-plan.md I5) and a second
+    /// copy of a rule is a second chance to get it wrong.
+    #[test]
+    #[should_panic(expected = "set_app_identity called twice")]
+    fn a_second_identity_write_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetAppIdentity(identity("Aurora Notes"))]);
+        scene.apply(vec![TxOp::SetAppIdentity(identity("Aurora Sheets"))]);
+    }
+
+    #[test]
+    #[should_panic(expected = "set_app_identity after a mount")]
+    fn a_post_mount_identity_write_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        scene.apply(vec![TxOp::SetAppIdentity(identity("Aurora Notes"))]);
+    }
+
+    /// AN EMPTY NAME IS THE SILENT-FALLBACK BUG SPELLED BY THE APP: it
+    /// would reach five lowerings, name nothing, and land as the
+    /// launcher binary's own name — which every observation reports the
+    /// same way a working default does.
+    #[test]
+    #[should_panic(expected = "empty name")]
+    fn an_empty_identity_name_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetAppIdentity(identity(""))]);
+    }
+
+    /// AND THE MIRROR OF THE WIRE'S MASK RULE: a mask that promises a
+    /// picture over zero bytes. Every image decoder answers nothing for
+    /// an empty buffer, so every lowering would leave the platform's own
+    /// icon in place and every read would report that default.
+    #[test]
+    #[should_panic(expected = "EMPTY icon blob")]
+    fn an_empty_identity_icon_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetAppIdentity(crate::protocol::AppIdentity {
+            name: "Aurora Notes".into(),
+            icon: Some(crate::protocol::Blob(Vec::new().into())),
+        })]);
+    }
+
+    /// THE CLEAN PATH: one SetAppIdentity out, carrying the declaration
+    /// UNINSPECTED — the name and the bytes — because the lowering is
+    /// what decodes a picture. The bytes here are NOT a PNG on purpose:
+    /// the core must pass them on regardless, and the platform's decoder
+    /// is the only party entitled to an opinion about them.
+    #[test]
+    fn the_identity_rides_out_uninspected() {
+        let mut scene = Scene::new();
+        let declared = crate::protocol::AppIdentity {
+            name: "Aurora Notes".into(),
+            icon: Some(crate::protocol::Blob(vec![1u8, 2, 3].into())),
+        };
+        let ops = scene.apply(vec![TxOp::SetAppIdentity(declared.clone())]);
+        let out: Vec<_> = ops
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetAppIdentity(i) => Some(i),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(out.len(), 1, "one SetAppIdentity out");
+        assert_eq!(out[0], &declared, "carried verbatim — the core inspects nothing");
     }
 
     #[test]

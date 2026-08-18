@@ -2474,8 +2474,107 @@ interpreter carries slice 1's one real brand lowering
   (d) leave it — the accent family is what every other backend brands
   too. Nothing here is urgent and (d) is a real answer.
 
-## kaya windows have no app icon (maintainer, 2026-08-17)
+## The identity scene's depth stubs (the Windows depth, expected to close with the fan-out)
+
+The depth landed 2026-08-18: spec (`set_app_identity` / the apply
+record) + the WinUI arm (both sinks — the window icon through
+`CreateIconFromResourceEx` -> `Windowing_GetIconIdFromIcon` ->
+`AppWindow.SetIcon(IconId)`, and the caption through
+`TitleBar.IconSource` <- `ImageIconSource` <- `BitmapImage`) + the Rust
+binding (`app_identity` / `app_identity_named`) + the `identity` scene,
+Windows only. FOUR declarations across three backend files refuse
+through the depth-stub helper — the Swift file serves two platforms and
+declares for each, because a `#if os(macOS)` arm that works on the
+desktop says nothing about the phone — and that is what holds the other
+lanes' legs off in check-steps and check-stubs
+(docs/app-identity-plan.md's sequencing — depth then breadth, the
+standing pattern):
+
+- **DEPTH STUB: identity on gtk** — the whole route is MEASURED and
+  waiting (docs/app-identity-plan.md I4a): `gdk_toplevel_set_icon_list`
+  is public API in the lane's own GTK 4.18.6, takes `GdkTexture`s, and a
+  226-byte PNG decoded in process landed as `_NET_WM_ICON(CARDINAL) =
+  Icon (64 x 64)` with nothing on disk. `xprop -id <xid> _NET_WM_ICON`
+  is a real cross-process read (x11-utils is already in the lane image),
+  which is what `expect_app_icon`'s four samples come off. TWO THINGS
+  THE ARM OWES: the read is **X11-only** — GTK 4.18's Wayland backend
+  answers the icon-list property with a literal `break;` and the lane's
+  sway 1.10.1 advertises no `xdg_toplevel_icon_manager_v1` — so the
+  Wayland ring must SAY it has no icon read rather than skip quietly;
+  and the name half is `gdk_wayland_toplevel_set_application_id` /
+  `g_set_prgname`, which is the lever that decides which `.desktop` the
+  whole desktop matches a window to. Linux is the plan's next breadth
+  arm for exactly these reasons.
+- **DEPTH STUB: identity on swiftui/macos** — the route is measured
+  (`NSApp.applicationIconImage = NSImage(data: pngBytes)` replaces the
+  Dock tile and the Cmd-Tab tile, and reading it back is not an echo:
+  AppKit stores a re-rendered snapshot). It carries ruling 2's policy
+  change with it — an app that declares an identity becomes `.regular`,
+  because an `.accessory` app has no Dock tile to put an icon in
+  (measured: the setter succeeded, the readback showed a 512x512 image
+  installed, and the Dock did not move one pixel). One measurement is
+  owed before the arm can rely on it: whether a policy raised AFTER
+  launch puts the tile up, since the identity arrives while the app is
+  building its first screen. The fallback if it does not costs one line
+  (`swift/KayaSwiftUIEntry.swift`'s `KAYA_ACTIVATE=1` leg).
+- **DEPTH STUB: identity on swiftui/ios** — there is NO runtime route,
+  and this one is a fact rather than a schedule: the full iOS 26.5 SDK
+  census of the app-icon surface is three symbols
+  (`supportsAlternateIcons`, `setAlternateIconName`,
+  `alternateIconName`), typed BOOL and NSString, none taking bytes. The
+  Home Screen icon is the bundle's, so iOS's reader is
+  `tools/ios/run-sim.sh`'s `make_bundle` plus `Info.plist.in` (the icon
+  keys and `CFBundleDisplayName`, neither of which the plist declares
+  today), and the honest observation is of the BUILT BUNDLE rather than
+  of a live app.
+- **DEPTH STUB: identity on compose** — also a ruling and not a
+  schedule. The launcher icon is part of the installed package
+  (`android:icon` + a mipmap resource, off the same declared asset), so
+  Android's reader is the APK the lane already builds
+  (tools/android/run-emulator.sh). The running app's one route to a
+  picture — `ActivityManager.TaskDescription`'s Bitmap — stays REFUSED
+  (docs/app-identity-plan.md I6): its bytes path is deprecated at API
+  28, its non-deprecated replacement takes a drawable resource id that
+  stock Launcher3 ignores (`// TODO: Load icon resource (b/143363444)`),
+  and wiring it would give Android a FEATURE the other platforms do not
+  have rather than a different spelling of a shared one. A real blob
+  channel exists from API 37 and can be revisited when the pins move.
+
+One MEASURED question the depth slice raises and does not answer, for
+the maintainer rather than for an agent: **where in a PROMOTED window's
+caption the app mark sits.** On a window with the standard system
+caption the mark is at the caption's LEFT EDGE, which is the convention
+the original ledger entry cited and which the system draws unprompted
+from the window icon (captured 2026-08-18: the mark, then the window's
+title). On a window whose catalog promotes a command, the custom
+`TitleBar` draws it AFTER the menu — `File`, then the mark, then the
+centred title — because the control lays `IconSource` out after
+`LeftHeader` and kaya's `LeftHeader` is the window's menu (the one-band
+revision of 2026-08-17). Both are captured. Restoring the left-edge
+convention on promoted windows means putting the icon INSIDE
+`LeftHeader`, ahead of the `MenuBar`, in a container of kaya's own —
+which changes `LeftHeader`'s width, which is an input to
+`center_caption_title`'s clamp and to the lane's caption-centre probe.
+That is a caption-band arrangement decision, and the band's arrangement
+was a maintainer ruling; it is not an agent's to take.
+
+Beyond the four stubs, what the depth slice deliberately left for the
+breadth arms: the PACKAGING readers on all five platforms (ruling 4's
+"one file, two readers" — the phones are first, per ruling 3, because
+their packaging is the packaging the repo already has), the byte-equality
+gate that holds a packaged icon equal to the declared one, the seven
+remaining bindings' sugar (the `check_styling_point identity` row is RED
+until they land, by design), and Windows' own AUMID
+(`SetCurrentProcessExplicitAppUserModelID`), which draws no pixel but
+would stop kaya's Python, Java and dotnet guests grouping under the HOST
+executable's taskbar button.
+
+## ~~kaya windows have no app icon (maintainer, 2026-08-17)~~
 KEY: app icon, window identity, IconSource, caption left
+
+~~ANSWERED 2026-08-18 by docs/app-identity-plan.md (ratified) and the
+Windows depth slice above. The original entry is kept below for the
+record.~~
 
 Found while ruling on the Windows caption conventions: Windows puts the
 app icon at the caption's left edge (Win95 through Notepad on 11), and

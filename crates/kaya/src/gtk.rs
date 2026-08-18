@@ -5741,6 +5741,29 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // are what keep the direction.
             buffer.select_range(&stop, &start);
         }
+        ApplyOp::SetAppIdentity(_) => {
+            // NOT LOWERED YET, and the refusal lives at the READ rather
+            // than here (`Stage::app_icon` -> `depth_stub("identity")`),
+            // which is the shape the typeface's fan-out used and it is
+            // deliberate: an arm that PANICKED here would kill any Linux
+            // app that declared an identity, where what is true is that
+            // this backend does not draw one yet. The loud half is the
+            // observation, which is what a scene can walk into; the
+            // ledger entry is what keeps this from being forgotten.
+            //
+            // The route is measured and waiting
+            // (docs/app-identity-plan.md I4a): decode the blob to
+            // `GdkTexture`s and hand them to
+            // `gdk_toplevel_set_icon_list`, which is public API in the
+            // lane's own GTK 4.18.6 and is ALSO the Wayland path from
+            // GTK 4.20 onward — so the lowering is written once and is
+            // protocol-agnostic by construction. What is version-shaped
+            // is the EXPECTATION of visibility, not the code: on this
+            // lane's GTK the Wayland backend answers the icon-list
+            // property with a literal `break;`, so the honest sentence
+            // there is that a runtime blob buys nothing visible and the
+            // icon is the `.desktop` file's.
+        }
         ApplyOp::SetTypeface(request) => {
             // THE BRAND TYPEFACE, GTK's half (docs/styling-plan.md Slice
             // 2b): one `:root { font-family }` rule in kaya's own
@@ -9772,6 +9795,17 @@ impl crate::harness::Stage for GtkStage {
             let seen = walk_typefaces(core);
             typeface_verdict(core, &seen)
         })
+    }
+
+    /// THE IDENTITY SCENE HAS NOT REACHED THIS BACKEND (the plan's
+    /// breadth order, docs/app-identity-plan.md: Windows depth first,
+    /// Linux next). The route is measured and waiting —
+    /// `gdk_toplevel_set_icon_list` takes GdkTextures in the lane's own
+    /// GTK 4.18.6 and `xprop _NET_WM_ICON` reads the SERVER's copy back
+    /// — and until it is written this refuses in the one spelling both
+    /// gates read, which is what keeps the linux legs off the runner.
+    fn app_icon(&self) -> String {
+        crate::depth_stub("identity")
     }
 
     fn inset(&self) -> String {

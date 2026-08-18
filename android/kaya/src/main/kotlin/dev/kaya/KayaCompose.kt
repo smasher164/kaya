@@ -912,7 +912,7 @@ object KayaCompose {
     // stale compiled APK against a new libkaya.
     // ULong: the fingerprint's high bit is fair game, and a Kotlin
     // Long hex literal cannot express it.
-    private const val SPEC_HASH: ULong = 0x7c7a23e2127c3801uL
+    private const val SPEC_HASH: ULong = 0x9be02e4dbe710c5buL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -937,6 +937,21 @@ object KayaCompose {
     private const val APPLY_PRESENT_SAVE_DIALOG = 31
     private const val APPLY_SET_BRAND = 32
     private const val APPLY_SET_TYPEFACE = 33
+
+    /**
+     * The app's declared identity (docs/app-identity-plan.md). The
+     * CONSTANT is here because this file's wire mirror is a mirror — a
+     * half-copied vocabulary is the CLIP_* trap — while the LOWERING
+     * is not, and the reason is a RULING rather than a schedule: on
+     * Android the launcher icon is part of the installed package, and
+     * the running app's one route to a picture (TaskDescription's
+     * bitmap, deprecated at API 28, whose non-deprecated replacement
+     * takes a drawable resource id that stock Launcher3 ignores) is
+     * refused by the plan's I6 — it would be an Android-only FEATURE
+     * rather than an Android-only spelling. So this record's Android
+     * reader is the APK build, and the arm below skips it.
+     */
+    private const val APPLY_SET_APP_IDENTITY = 34
 
     /** The clipboard pair: a copy going out, and the privileged read
      * asking for one back. */
@@ -2094,6 +2109,22 @@ object KayaCompose {
                     // ten words are skipped by the record cursor at the
                     // bottom of this loop.
                     KayaSceneModel.brandSeed = b.int
+                APPLY_SET_APP_IDENTITY -> {
+                    // SKIPPED, BY RULING AND NOT BY SCHEDULE — see the
+                    // constant's note. The identity's Android reader is
+                    // the APK build (`android:icon` and `android:label`
+                    // off the same declared asset), which is a
+                    // packaging step and not an apply. The loop
+                    // advances by the record's own size, so an arm that
+                    // decodes nothing is exactly as correct as one that
+                    // decodes and discards.
+                    //
+                    // IT IS AN ARM AND NOT AN OMISSION because the
+                    // `else` below is `error(...)`: a record with no arm
+                    // would kill the app the first time an identity was
+                    // declared, which is a worse answer than the honest
+                    // no-op this ruling calls for.
+                }
                 APPLY_SET_TYPEFACE -> {
                     // { u32 mask; u32 platform } then the default
                     // family, the per-platform pairs, and the font slot
@@ -5006,6 +5037,25 @@ object KayaCompose {
             " heading=" + kayaAxHeading(info) + ")"
     }
 
+    /**
+     * The one spelling of "this backend has not reached that scene
+     * yet", matching Rust's `depth_stub` and Swift's `kayaDepthStub`.
+     * check-stubs refuses a runner that wires the scene's legs while
+     * this stands, and check-steps stops demanding them. Both read the
+     * CALL rather than a sentence: the convention was free-form prose
+     * for four milestones and NOT ONE BACKEND ever wrote it, so
+     * check-stubs could only ever pass — and this file is the one that
+     * proved it, carrying an undo refusal in its own words across five
+     * entry points for a whole milestone with both gates green.
+     *
+     * A ledger entry in docs/deferred.md is what buys the silence
+     * (tools/lib/stub-ledger.py); a declaration without one fails.
+     */
+    private fun depthStub(scene: String): Nothing =
+        error(
+            "kaya: the $scene scene is not yet materialized on this backend — " +
+                "it is a depth slice; see CLAUDE.md's sequencing")
+
     private fun quoted(parts: List<String>): String {
         val inner = parts.joinToString(" ").removeSurrounding("\"")
         // The grammar's escapes (harness.rs is the norm): \\n ->
@@ -6035,6 +6085,22 @@ object KayaCompose {
                         } else {
                             failures.add("typeface $got, wanted $want")
                         }
+                    }
+                    "expect_app_icon" -> {
+                        // THE IDENTITY SCENE HAS NOT REACHED THIS
+                        // BACKEND, and what is missing is the READER
+                        // rather than a lowering: Android's launcher
+                        // icon comes from the APK the lane already
+                        // builds (docs/app-identity-plan.md, ruling 3),
+                        // so the honest observation here is of the
+                        // PACKAGED artifact — the icon the package
+                        // manager hands back for this application —
+                        // and neither the packaging step that puts it
+                        // there nor the read exists yet. Until both do,
+                        // this refuses in the one spelling check-stubs
+                        // and check-steps read, which is what keeps the
+                        // android legs off the runner.
+                        depthStub("identity")
                     }
                     "expect_window_size" -> {
                         // The surface's REAL extent against the

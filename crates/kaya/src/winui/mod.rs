@@ -90,6 +90,11 @@ use bindings::Microsoft::UI::Xaml::Media::FontFamily;
 #[cfg(feature = "harness")]
 use bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationControlType;
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
+// The app identity's caption sink (docs/app-identity-plan.md I3). The
+// ONE IconSource subclass that reaches bytes: BitmapIconSource's only
+// picture slot is a Uri, so it would force a temp file — see the entry
+// in tools/winui-bindgen for the measurement.
+use bindings::Microsoft::UI::Xaml::Controls::ImageIconSource;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 use bindings::Microsoft::UI::Xaml::{
@@ -2145,6 +2150,20 @@ fn window_caption(core: &CoreState, window: u64) -> String {
         .and_then(|id| core.nav_entries.get(id))
         .map(|e| e.title.clone())
         .unwrap_or_else(|| core.window_titles.get(&window).cloned().unwrap_or_default());
+    // THE IDENTITY NAME IS THE WINDOW'S DEFAULT TITLE, never an override
+    // of one (docs/app-identity-plan.md I9). A window that says what it
+    // is keeps saying it; a window that says nothing is a window of THIS
+    // app, and every native platform names it after the app rather than
+    // leaving the caption, the taskbar tooltip and the alt-tab label
+    // blank. One string drives all three on Windows and kaya already
+    // owns it here.
+    let title = if title.is_empty() {
+        APP_IDENTITY.with_borrow(|slot| {
+            slot.as_ref().map_or_else(String::new, |identity| identity.name.clone())
+        })
+    } else {
+        title
+    };
     if core.window_dirty.get(&window).copied().unwrap_or(false) {
         format!("{DIRTY_MARK}{title}")
     } else {
@@ -4016,6 +4035,14 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             target.SetTitleBar(&tb_el)?;
 
             core.window_titlebars.insert(window, titlebar);
+            // THE CAPTION SINK OPENS HERE and nowhere else, because this
+            // is the only place a TitleBar is minted — the promotion
+            // that replaces the system caption is also what takes the
+            // system-drawn icon away, so the repair belongs beside it
+            // (docs/app-identity-plan.md I3). A window that promotes
+            // nothing keeps the system caption and its icon, and never
+            // reaches this line.
+            apply_identity_to_window(core, window)?;
             core.toolbars.insert(window, bar.clone());
             bar
         }
@@ -9609,6 +9636,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let aux = Window::new()?;
             subclass(&aux, window.0)?;
             core.aux_windows.insert(window.0, aux);
+            // A WINDOW BORN AFTER THE DECLARATION still belongs to the
+            // same app (docs/app-identity-plan.md): identity is
+            // per-APP, so the second window wears the same mark as the
+            // first, and this is one of the three orders these objects
+            // can arrive in. A no-op when nothing was declared.
+            apply_identity_to_window(core, window.0)?;
         }
         ApplyOp::DestroyWindow { window } => {
             core.window_veto.remove(&window.0);
@@ -10012,6 +10045,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .TextDocument()?
                 .Selection()?
                 .SetRange(range.start as i32, range.stop as i32)?;
+        }
+        ApplyOp::SetAppIdentity(identity) => {
+            // TWO SINKS FROM ONE DECLARATION, which is this platform's
+            // whole shape (docs/app-identity-plan.md I3): the WINDOW's
+            // icon, which the system caption draws unprompted and which
+            // the taskbar and alt-tab both read, and the XAML
+            // `TitleBar`'s `IconSource`, which repairs what a custom
+            // caption takes away from the first. See `apply_app_identity`
+            // for the byte chain into each.
+            apply_app_identity(core, &identity)?;
         }
         ApplyOp::SetTypeface(req) => {
             // TWO ROUTES, BECAUSE THE PLATFORM HAS TWO KINDS OF TEXT and
@@ -11072,6 +11115,539 @@ impl IWindowNative {
             Ok(hwnd)
         }
     }
+}
+
+// ---- The app's identity (docs/app-identity-plan.md) ----------------
+//
+// ONE DECLARATION, TWO SINKS, and the second is not a duplicate of the
+// first — it repairs what the first loses on this platform's own custom
+// captions (the plan's I3):
+//
+//   the WINDOW's icon (`AppWindow.SetIcon(IconId)`) — every window has
+//     one whether or not kaya minted a custom caption, the SYSTEM
+//     caption draws it at its left edge unprompted, and the taskbar and
+//     alt-tab read the same thing. This is the sink that matters most
+//     here, because kaya is a LIBRARY inside python.exe, java.exe and
+//     dotnet.exe for six of its eight languages: a build-time .ico in
+//     kaya's own artifacts could never reach those hosts, and Windows'
+//     documented fallback for a window with no icon ends at the HOST
+//     PROCESS's icon — so with no runtime call the Python guest wears
+//     the Python icon. One runtime call reaches all eight identically,
+//     which is exactly what invariant 1 asks for.
+//
+//   `TitleBar.IconSource` — needed precisely BECAUSE a custom caption
+//     replaces the system one and takes the system-drawn icon with it.
+//     A window whose catalog promotes nothing never mints a TitleBar
+//     (winui/mod.rs's `window_titlebars`), keeps the standard caption,
+//     and is served by the first sink alone.
+//
+// THE BYTES GO IN UNMODIFIED, BOTH WAYS. A Vista-or-later icon resource
+// may itself be a PNG, so `CreateIconFromResourceEx` takes the wire's
+// blob straight through with no decode of kaya's own; and the XAML side
+// is the `Image` widget's blob arm (mod.rs's `Prop::Source`) with two
+// lines changed at the end. kaya inspects the bytes nowhere — the core
+// refuses to (scene.rs), and this arm defers to two of the platform's
+// own decoders, which is what makes the scene's read a proof of the
+// CONVERSION rather than an echo of the request.
+
+thread_local! {
+    /// The declared identity, kept because its sinks are not all
+    /// available when it arrives: identity is declared BEFORE the first
+    /// mount (the core's wall), while an auxiliary window is created
+    /// later and a `TitleBar` is minted later still, by the first
+    /// promotion. Every one of those sites reads this slot rather than
+    /// receiving a copy, so "what is this app called and what does it
+    /// look like" has one answer in this backend.
+    static APP_IDENTITY: RefCell<Option<crate::protocol::AppIdentity>> =
+        const { RefCell::new(None) };
+    /// The caption sink's ready-made source, built ONCE from the bytes.
+    /// A XAML object in a thread-local, on the UI thread only, exactly
+    /// like CORE — and one object shared by every caption rather than a
+    /// decode per window, because the decode is the expensive half and
+    /// the picture is the same on all of them.
+    static APP_ICON_SOURCE: RefCell<Option<ImageIconSource>> = const { RefCell::new(None) };
+    /// The window sink's `IconId`, as its raw handle value. 0 = none,
+    /// which is also what `IconId::default()` carries, so the absence
+    /// and the zero are the same fact rather than two.
+    static APP_ICON_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// `CreateIconFromResourceEx`'s version word: "generally set to
+/// 0x00030000" (the Win32 documentation's own words) — the icon-resource
+/// format version, not a Windows version.
+const ICON_RESOURCE_VERSION: u32 = 0x0003_0000;
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    /// PNG bytes to an HICON with nothing on disk. `presbits` is a
+    /// pointer to MEMORY holding one icon IMAGE (an RT_ICON entry, not a
+    /// whole .ico file's directory), and since Vista that image may
+    /// itself be a PNG — which is why the wire's blob needs no
+    /// conversion of kaya's own.
+    fn CreateIconFromResourceEx(
+        presbits: *const u8,
+        size: u32,
+        is_icon: i32,
+        version: u32,
+        cx: i32,
+        cy: i32,
+        flags: u32,
+    ) -> isize;
+    /// The documented counterpart: "You should call DestroyIcon for
+    /// icons created with CreateIconFromResourceEx."
+    fn DestroyIcon(icon: isize) -> i32;
+    /// The harness's read side. `WM_GETICON` is answered by USER32's own
+    /// per-window state, not by any cache of kaya's, which is what makes
+    /// it a real read rather than an echo — the same class of channel as
+    /// the caption read `window_dirty` already trusts.
+    #[cfg(feature = "harness")]
+    fn SendMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> isize;
+    /// The fallback the documentation names when `WM_GETICON` answers 0,
+    /// and the reason the read's absence sentence can DISCRIMINATE
+    /// rather than guess: "If sending a WM_GETICON message to a window
+    /// returns 0, next try calling the GetClassLongPtr function."
+    #[cfg(feature = "harness")]
+    fn GetClassLongPtrW(hwnd: isize, index: i32) -> usize;
+    /// An HICON's two bitmaps, for the pixel read.
+    #[cfg(feature = "harness")]
+    fn GetIconInfo(icon: isize, info: *mut IconInfo) -> i32;
+}
+
+#[cfg(feature = "harness")]
+#[link(name = "gdi32")]
+unsafe extern "system" {
+    fn GetObjectW(handle: isize, size: i32, out: *mut c_void) -> i32;
+    fn GetDIBits(
+        hdc: isize,
+        bitmap: isize,
+        start: u32,
+        lines: u32,
+        bits: *mut c_void,
+        info: *mut BitmapInfo,
+        usage: u32,
+    ) -> i32;
+    fn DeleteObject(handle: isize) -> i32;
+    fn CreateCompatibleDC(hdc: isize) -> isize;
+    fn DeleteDC(hdc: isize) -> i32;
+}
+
+/// Win32's ICONINFO, laid out to match winuser.h.
+#[cfg(feature = "harness")]
+#[repr(C)]
+#[derive(Default)]
+struct IconInfo {
+    is_icon: i32,
+    hotspot_x: u32,
+    hotspot_y: u32,
+    mask: isize,
+    color: isize,
+}
+
+/// Win32's BITMAP (wingdi.h), for the icon's colour bitmap extent.
+#[cfg(feature = "harness")]
+#[repr(C)]
+#[derive(Default)]
+struct BitmapHeader {
+    kind: i32,
+    width: i32,
+    height: i32,
+    width_bytes: i32,
+    planes: u16,
+    bits_pixel: u16,
+    bits: *mut c_void,
+}
+
+/// Win32's BITMAPINFO: the header plus one colour-table entry, which is
+/// what a 32-bit BI_RGB request needs (the table is unused, but the API
+/// takes a BITMAPINFO and a bare header would be a short buffer).
+#[cfg(feature = "harness")]
+#[repr(C)]
+#[derive(Default)]
+struct BitmapInfo {
+    size: u32,
+    width: i32,
+    height: i32,
+    planes: u16,
+    bit_count: u16,
+    compression: u32,
+    size_image: u32,
+    x_pels_per_meter: i32,
+    y_pels_per_meter: i32,
+    clr_used: u32,
+    clr_important: u32,
+    colors: [u32; 1],
+}
+
+/// `Windowing_GetIconIdFromIcon`, the flat export that turns an HICON
+/// into the `IconId` the windowing API takes.
+///
+/// NOT WinRT, which is why it needs a shim at all: it is a plain C
+/// function in `Microsoft.UI.Interop.h`, exported from
+/// `Microsoft.Internal.FrameworkUdk.dll`, and the pinned header resolves
+/// it exactly this way (LoadLibrary + GetProcAddress) with its own
+/// comment explaining why — "third-party apps cannot link to the
+/// FrameworkUdk directly". The same header states the ordering
+/// precondition: "in unpackaged apps this will only work after a call to
+/// MddBootstrapInitialize()", which this backend already makes at
+/// startup (`bootstrap_windows_app_runtime`). The shape is the
+/// `IWindowNative` shim's, one interop layer over.
+type PfnGetIconIdFromIcon = unsafe extern "system" fn(
+    isize,
+    *mut bindings::Microsoft::UI::IconId,
+) -> windows_core::HRESULT;
+
+fn get_icon_id_from_icon(icon: isize) -> Result<bindings::Microsoft::UI::IconId, String> {
+    static ENTRY: OnceLock<Option<usize>> = OnceLock::new();
+    let entry = *ENTRY.get_or_init(|| {
+        let name: Vec<u16> = "Microsoft.Internal.FrameworkUdk.dll"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let module = unsafe { LoadLibraryW(name.as_ptr()) };
+        if module.is_null() {
+            return None;
+        }
+        let proc = unsafe { GetProcAddress(module, c"Windowing_GetIconIdFromIcon".as_ptr().cast()) };
+        (!proc.is_null()).then(|| proc as usize)
+    });
+    let Some(entry) = entry else {
+        return Err(
+            "Microsoft.Internal.FrameworkUdk.dll has no Windowing_GetIconIdFromIcon — the \
+             Windows App Runtime bootstrapper has not run, or this is an older runtime"
+                .to_owned(),
+        );
+    };
+    let f: PfnGetIconIdFromIcon = unsafe { std::mem::transmute(entry) };
+    let mut id = bindings::Microsoft::UI::IconId::default();
+    let hr = unsafe { f(icon, &mut id) };
+    if hr.is_err() {
+        return Err(format!("Windowing_GetIconIdFromIcon failed: {hr:?}"));
+    }
+    Ok(id)
+}
+
+/// The wire's blob as an HICON, at the size the system draws a large
+/// window icon.
+///
+/// THE BUFFER IS COPIED INTO AN ALIGNED ONE, deliberately: the
+/// documentation calls `presbits` "the DWORD-aligned buffer pointer
+/// containing the icon resource bits", and a wire blob's bytes carry an
+/// alignment of one. The copy is a few kilobytes, once, at startup.
+fn hicon_from_bytes(bytes: &[u8]) -> Result<isize, String> {
+    if bytes.is_empty() {
+        return Err("the icon blob is empty".to_owned());
+    }
+    let mut aligned: Vec<u32> = vec![0; bytes.len().div_ceil(4)];
+    // SAFETY: the destination holds at least bytes.len() bytes and the
+    // two regions are distinct allocations.
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            bytes.as_ptr(),
+            aligned.as_mut_ptr().cast::<u8>(),
+            bytes.len(),
+        );
+    }
+    // cx/cy 0 = the system's own large-icon metric, which is the size
+    // this platform draws a window icon at and therefore the size to
+    // rasterize once rather than let the shell resample.
+    let icon = unsafe {
+        CreateIconFromResourceEx(
+            aligned.as_ptr().cast::<u8>(),
+            bytes.len() as u32,
+            1,
+            ICON_RESOURCE_VERSION,
+            0,
+            0,
+            0,
+        )
+    };
+    if icon == 0 {
+        return Err(format!(
+            "CreateIconFromResourceEx refused {} bytes — the blob is not an icon image \
+             this platform can decode (a PNG or an RT_ICON entry)",
+            bytes.len()
+        ));
+    }
+    Ok(icon)
+}
+
+/// The XAML caption sink's source: the `Image` widget's blob arm
+/// (mod.rs's `Prop::Source`) with `ImageIconSource` on the end.
+///
+/// `BitmapIconSource` is the trap and it is worth naming here rather
+/// than only in the bindgen filter: its ONLY picture slot is
+/// `UriSource : Windows.Foundation.Uri`, so the obvious-looking class
+/// would force a temp file. `ImageIconSource.ImageSource` reaches
+/// `BitmapImage`, which takes an in-memory stream.
+fn image_icon_source_from_bytes(bytes: &[u8]) -> windows_core::Result<ImageIconSource> {
+    let stream = InMemoryRandomAccessStream::new()?;
+    let writer = DataWriter::CreateDataWriter(&stream)?;
+    writer.WriteBytes(bytes)?;
+    writer.StoreAsync()?.join()?;
+    writer.DetachStream()?;
+    stream.Seek(0)?;
+    let bitmap = BitmapImage::new()?;
+    bitmap.SetSource(&stream)?;
+    let source = ImageIconSource::new()?;
+    source.SetImageSource(&bitmap)?;
+    Ok(source)
+}
+
+/// The identity's arrival: decode once, then reach every sink that
+/// already exists. The sinks that do not exist yet read the slots this
+/// fills — see `apply_identity_to_window`.
+fn apply_app_identity(
+    core: &mut CoreState,
+    identity: &crate::protocol::AppIdentity,
+) -> windows_core::Result<()> {
+    APP_IDENTITY.with_borrow_mut(|slot| *slot = Some(identity.clone()));
+    if let Some(blob) = &identity.icon {
+        // THE WINDOW SINK. A failure here is LOUD, and it is the same
+        // ruling the typeface's font blob got for the same reason: bytes
+        // that are not a picture would otherwise leave the platform's
+        // own icon in place, which every observation reports exactly as
+        // a working identity would. The silent fallback is the single
+        // failure this slice exists to make impossible.
+        let icon = hicon_from_bytes(&blob.0)
+            .unwrap_or_else(|why| panic!("kaya: winui: the app identity's icon bytes: {why}"));
+        let id = get_icon_id_from_icon(icon).unwrap_or_else(|why| {
+            // The one path that DOES destroy: a decode that produced an
+            // icon the interop layer then refused. Freeing it before the
+            // panic keeps the failure clean for a host process that
+            // catches it.
+            unsafe { DestroyIcon(icon) };
+            panic!("kaya: winui: the app identity's icon bytes: {why}")
+        });
+        // THE HICON IS NOT DESTROYED ON THE SUCCESS PATH and that is
+        // deliberate: the IconId above is a handle ONTO it, the
+        // windowing layer draws from it for the process's whole life,
+        // and the identity is declared once by construction (the core's
+        // set-once wall), so there is exactly one of these per process.
+        APP_ICON_ID.set(id.Value);
+
+        // THE CAPTION SINK. A failure here is NOT loud, and the
+        // asymmetry is deliberate rather than sloppy: the bytes have
+        // already been proven decodable by the window sink above, so a
+        // failure at this point is a XAML-side condition (a stream, a
+        // dispatcher) and not a bad declaration — and the window sink is
+        // still showing the app's mark on the system caption, the
+        // taskbar and alt-tab. The scene's read is of the WINDOW's icon,
+        // so a caption that silently missed cannot pass it.
+        match image_icon_source_from_bytes(&blob.0) {
+            Ok(source) => APP_ICON_SOURCE.with_borrow_mut(|slot| *slot = Some(source)),
+            Err(e) => eprintln!(
+                "kaya: winui: the app identity's caption icon did not build: {}",
+                e.message()
+            ),
+        }
+    }
+    // EVERY WINDOW ALREADY STANDING. At declaration time that is the
+    // primary alone (identity is declared before the first mount), but
+    // this arm is written total rather than written for the timing it
+    // happens to see — the walls are the core's, and a backend that
+    // depended on them for CORRECTNESS would break the day they moved.
+    let windows: Vec<u64> = std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
+    for window in windows {
+        apply_identity_to_window(core, window)?;
+    }
+    Ok(())
+}
+
+/// One window's share of the declared identity: the window icon, the
+/// caption icon if that window has a custom caption, and the caption
+/// TEXT (which the identity's NAME can supply a default for).
+///
+/// Called from three places — the declaration, a window's creation, and
+/// a caption's minting — because those are the three orders these
+/// objects can arrive in, and picking one of them to be "the" order is
+/// how the toolbar's ExtendsContentIntoTitleBar bug happened one band
+/// over.
+fn apply_identity_to_window(core: &CoreState, window: u64) -> windows_core::Result<()> {
+    let has_identity = APP_IDENTITY.with_borrow(|slot| slot.is_some());
+    if !has_identity {
+        return Ok(());
+    }
+    let icon = APP_ICON_ID.get();
+    if icon != 0
+        && let Ok(target) = winui_window(core, window)
+        && let Ok(app_window) = target.AppWindow()
+    {
+        // SetIcon, not SetTaskbarIcon: the 1.7 split lets an app give
+        // the taskbar a different picture from the caption's, and kaya
+        // has exactly one picture by ruling — one mark, every surface.
+        app_window.SetIconWithIconId(bindings::Microsoft::UI::IconId { Value: icon })?;
+    }
+    if let Some(titlebar) = core.window_titlebars.get(&window) {
+        APP_ICON_SOURCE.with_borrow(|slot| match slot {
+            Some(source) => titlebar.SetIconSource(source),
+            None => Ok(()),
+        })?;
+    }
+    // THE NAME REACHES THE CAPTION THROUGH THE ONE CAPTION WRITER, never
+    // through `TitleBar.Title`: that property makes the control a rival
+    // author of the window's title and the first casualty is the dirty
+    // marker (see `refresh_caption`'s doc comment). A rival caption
+    // author is a bug this tree has already paid for once.
+    refresh_caption(core, window)
+}
+
+/// The window-icon read's constants, from the Win32 documentation:
+/// `WM_GETICON`'s three types and the class-icon indices its own
+/// fallback note names.
+#[cfg(feature = "harness")]
+const WM_GETICON: u32 = 0x007F;
+#[cfg(feature = "harness")]
+const ICON_SMALL: usize = 0;
+#[cfg(feature = "harness")]
+const ICON_BIG: usize = 1;
+#[cfg(feature = "harness")]
+const ICON_SMALL2: usize = 2;
+#[cfg(feature = "harness")]
+const GCLP_HICON: i32 = -14;
+
+/// The four quadrant samples of the icon the window is HOLDING, or a
+/// sentence saying what was measured instead.
+///
+/// THE ABSENCE SENTENCE DISCRIMINATES, which is the diagnostic rule
+/// (CLAUDE.md invariant 3) applied to a read rather than to a why-not.
+/// The documentation names a fallback chain — "a window that has no
+/// icon explicitly set (with WM_SETICON) uses the icon for the
+/// registered window class, and in this case DefWindowProc will return 0
+/// for a WM_GETICON message. If sending a WM_GETICON message to a window
+/// returns 0, next try calling the GetClassLongPtr function" — so a read
+/// that stopped at the first step would report "no icon" for a window
+/// the shell is drawing a perfectly good class icon for, and blame kaya
+/// for it. Both steps are taken and both answers are printed.
+#[cfg(feature = "harness")]
+fn window_icon_samples(hwnd: isize) -> String {
+    let big = unsafe { SendMessageW(hwnd, WM_GETICON, ICON_BIG, 0) };
+    let small = unsafe { SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0) };
+    let small2 = unsafe { SendMessageW(hwnd, WM_GETICON, ICON_SMALL2, 0) };
+    if trace_enabled() {
+        // WHICH SLOT ANSWERED, which is the measurement that closed this
+        // slice's one open question (docs/app-identity-plan.md I8): no
+        // documentation says whether `AppWindow.SetIcon` routes through
+        // `WM_SETICON`, and kaya sends no `WM_SETICON` of its own, so a
+        // non-zero answer here can only have come from the windowing
+        // API. MEASURED 2026-08-18 on the VM, and the answer is yes:
+        // after `SetIconWithIconId` all THREE types answer the same
+        // non-zero handle (`big=small=small2=0xbe50405`), so
+        // `AppWindow.SetIcon` writes the window's icon state and
+        // `WM_GETICON` is an honest read of what the shell will draw.
+        // A gate against it is not the false RED the plan warned of.
+        eprintln!(
+            "kaya: winui app icon: WM_GETICON big={big:#x} small={small:#x} small2={small2:#x}"
+        );
+    }
+    let Some(icon) = [big, small, small2].into_iter().find(|h| *h != 0) else {
+        let class_icon = unsafe { GetClassLongPtrW(hwnd, GCLP_HICON) };
+        return format!(
+            "<the window holds no icon of its own: WM_GETICON answered 0 for BIG, \
+             SMALL and SMALL2; the window CLASS's icon is {}>",
+            if class_icon == 0 { "absent too" } else { "what the shell draws" }
+        );
+    };
+    match icon_quadrants(icon) {
+        Ok(samples) => samples,
+        Err(why) => format!("<the window's icon could not be sampled: {why}>"),
+    }
+}
+
+/// An HICON's four quadrant centres as `RRGGBB/RRGGBB/RRGGBB/RRGGBB`,
+/// in reading order: top-left, top-right, bottom-left, bottom-right.
+///
+/// CENTRES AND NOT CORNERS, deliberately: any rescale between the
+/// declared PNG and the size this platform rasterizes an icon at blurs
+/// a quadrant BOUNDARY, and a corner sample sits on one. The centre of
+/// a large flat region survives every resampling filter exactly, which
+/// is what lets four colours be a frozen expectation where a hash of
+/// the converted bytes could never be.
+#[cfg(feature = "harness")]
+fn icon_quadrants(icon: isize) -> Result<String, String> {
+    let mut info = IconInfo::default();
+    if unsafe { GetIconInfo(icon, &mut info) } == 0 {
+        return Err("GetIconInfo refused the handle".to_owned());
+    }
+    // Both bitmaps are OURS to free once GetIconInfo has handed them
+    // over — the documentation is explicit that the caller owns them,
+    // and a leak here would run once per read on a polling verb.
+    let colour = info.color;
+    let mask = info.mask;
+    let result = icon_quadrants_of_bitmap(colour);
+    if mask != 0 {
+        unsafe { DeleteObject(mask) };
+    }
+    if colour != 0 {
+        unsafe { DeleteObject(colour) };
+    }
+    result
+}
+
+#[cfg(feature = "harness")]
+fn icon_quadrants_of_bitmap(bitmap: isize) -> Result<String, String> {
+    if bitmap == 0 {
+        return Err(
+            "the icon has no colour bitmap — it is a 1-bit mask icon, which this read \
+             cannot sample and no kaya declaration produces"
+                .to_owned(),
+        );
+    }
+    let mut header = BitmapHeader::default();
+    let size = std::mem::size_of::<BitmapHeader>() as i32;
+    if unsafe { GetObjectW(bitmap, size, (&raw mut header).cast::<c_void>()) } == 0 {
+        return Err("GetObjectW could not describe the icon's colour bitmap".to_owned());
+    }
+    let (w, h) = (header.width, header.height);
+    if w <= 1 || h <= 1 {
+        return Err(format!("the icon's colour bitmap is {w}x{h}, too small to sample"));
+    }
+    // A TOP-DOWN 32-BIT BI_RGB REQUEST, so the rows arrive in the order
+    // the picture is drawn in and every pixel is one BGRA word: the
+    // negative height is Win32's own spelling of top-down, and asking
+    // for a format converts whatever the icon really is rather than
+    // making this read carry a decoder per bit depth.
+    let mut info = BitmapInfo {
+        size: 40,
+        width: w,
+        height: -h,
+        planes: 1,
+        bit_count: 32,
+        ..BitmapInfo::default()
+    };
+    let mut pixels: Vec<u32> = vec![0; (w as usize) * (h as usize)];
+    let dc = unsafe { CreateCompatibleDC(0) };
+    if dc == 0 {
+        return Err("CreateCompatibleDC failed".to_owned());
+    }
+    let lines = unsafe {
+        GetDIBits(
+            dc,
+            bitmap,
+            0,
+            h as u32,
+            pixels.as_mut_ptr().cast::<c_void>(),
+            &mut info,
+            0,
+        )
+    };
+    unsafe { DeleteDC(dc) };
+    if lines == 0 {
+        return Err("GetDIBits read no scanlines from the icon's colour bitmap".to_owned());
+    }
+    let sample = |qx: i32, qy: i32| -> String {
+        let x = (w * (1 + 2 * qx) / 4).clamp(0, w - 1) as usize;
+        let y = (h * (1 + 2 * qy) / 4).clamp(0, h - 1) as usize;
+        let px = pixels[y * (w as usize) + x];
+        // BGRA in memory, little-endian, so the word reads 0xAARRGGBB.
+        format!("{:06X}", px & 0x00FF_FFFF)
+    };
+    Ok(format!(
+        "{}/{}/{}/{}",
+        sample(0, 0),
+        sample(1, 0),
+        sample(0, 1),
+        sample(1, 1)
+    ))
 }
 
 const WM_CLOSE: u32 = 0x0010;
@@ -14145,6 +14721,38 @@ impl crate::harness::Stage for WinUiStage {
                 )),
                 _ => Ok(first),
             }
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    /// THE PICTURE THE SHELL WILL DRAW, in pixels, off the HWND — not
+    /// off `TitleBar.IconSource` and not off anything kaya stored
+    /// (docs/app-identity-plan.md I8).
+    ///
+    /// THE THREE TIERS, and why this is the third. Reading kaya's own
+    /// model is worthless and is the exact failure this repo hunts
+    /// (`expect_menu_symbol` once passed off the model while the iOS bar
+    /// rendered nothing). Reading `TitleBar.IconSource` back is an ECHO:
+    /// it hands over the same object kaya just stored, so sixteen zero
+    /// bytes would read identically to a real PNG. `WM_GETICON` is
+    /// answered out of USER32's own per-window state — the same class of
+    /// channel as the caption read `window_dirty` already trusts, and
+    /// the very thing the taskbar and alt-tab read — and the bitmap
+    /// behind it is what `CreateIconFromResourceEx` actually produced.
+    /// So these four samples prove the CONVERSION, which is what turns
+    /// "one PNG in, each platform converts" from a promise into
+    /// something the scene tests.
+    fn app_icon(&self) -> String {
+        Self::on_ui_read(move |core| {
+            let target = winui_window(core, 0)?;
+            let hwnd = windows_core::Interface::cast::<IWindowNative>(&target)
+                .ok()
+                .and_then(|n: IWindowNative| n.window_handle().ok())
+                .unwrap_or(0);
+            if hwnd == 0 {
+                return Ok("<no hwnd: the window is not materialized>".to_owned());
+            }
+            Ok(window_icon_samples(hwnd))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }

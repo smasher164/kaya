@@ -1075,6 +1075,32 @@ check_styling_point brand_typeface \
     '^brandTypeface ::' \
     '^let brand_typeface '
 
+# THE APP IDENTITY (docs/app-identity-plan.md), the typeface's sibling
+# and the same failure shape: a transaction verb no other sweep can see
+# — not a widget kind, not a window prop — so a binding shipping it
+# wire-only strands apps in that language unable to say who they are
+# while every other gate passes.
+#
+# RED BY DESIGN, TODAY, and that is what this row is FOR. The plan
+# sequences the whole identity depth on Windows first (spec + the WinUI
+# arm + the Rust binding + the scene), with the seven other bindings'
+# sugar in the fan-out; a gate that went green on one binding would let
+# that fan-out be forgotten, which is precisely how a depth slice rots.
+# It goes green when the eighth binding lands and not before. Same
+# base-name rule as the brand rows: the icon-carrying form rides the
+# base name and the name-only form is its sibling, so one pattern per
+# language and the two forms' uniformity stays the sweep verdict's
+# business.
+check_styling_point app_identity \
+    'pub fn app_identity\(&mut self' \
+    '^def app_identity\(' \
+    'func \(tx \*Tx\) AppIdentity\(' \
+    'public void AppIdentity\(' \
+    'public void appIdentity\(' \
+    'func appIdentity\(' \
+    '^appIdentity ::' \
+    '^let app_identity '
+
 # THREE ROWS ARE KEYED PAST THE MENU ITEM'S ROLE, which shares the
 # bare name: Rust's `role(self, role: MenuRole)`, Python's
 # `def role(self, name)` on the item class and OCaml's `let item …

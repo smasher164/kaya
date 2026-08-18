@@ -131,6 +131,12 @@ for arg in "$@"; do
         styling_rust|styling_python|styling_go|styling_csharp|styling_java) SUITE="$arg" ;;
         typeface_rust|typeface_python|typeface_go|typeface_csharp|typeface_java) SUITE="$arg" ;;
         toolbar_rust|toolbar_python|toolbar_go|toolbar_csharp|toolbar_java) SUITE="$arg" ;;
+        # RUST ALONE, and that is the depth slice rather than an
+        # omission: docs/app-identity-plan.md's sequencing puts the whole
+        # identity depth on Windows first, with the seven other bindings'
+        # sugar in the fan-out. check-sugar-surface's `identity` row is
+        # RED until they land, which is what holds that work open.
+        identity_rust) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         # PHASES, not legs: they run inside `all` and are named here so
         # each can be re-run on its own while fixing what it found.
@@ -349,7 +355,14 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # record and the Rust guest exist, the other seven guests are the breadth
 # arms' (docs/save-plan.md §2). It leaves for SCENES the day the eighth
 # lands, exactly as filedialog did.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
+#
+# `identity` is here for the same reason and at the same stage
+# (docs/app-identity-plan.md's sequencing, which puts the whole depth on
+# Windows first): the spec record, the WinUI arm, the Rust binding's
+# sugar and the Rust guest exist; the other seven bindings' sugar is the
+# fan-out, and check-sugar-surface's `identity` row is RED until it
+# lands. It leaves for SCENES the day the eighth guest does.
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-identity}"
 # GO-ONLY SCENES: a guest that exists in Go and only Go BY DESIGN rather
 # than by sequencing — an editor written in Rust would be kaya testing
 # itself (docs/editor-plan.md), so there is no editor_rust to add later.
@@ -553,6 +566,14 @@ run_ssh 'setx KAYA_SCENES_DIR C:\kaya\scenes >nul'
 # legs that work by cwd and one that does not.
 run_ssh 'cmd /c if not exist C:\kaya\guests\assets\fonts mkdir C:\kaya\guests\assets\fonts'
 scp -q "$ROOT"/guests/assets/fonts/*.ttf "$HOST:C:/kaya/guests/assets/fonts/"
+
+# THE VENDORED MARK, the font's rule verbatim one asset over: the
+# identity scene's guests declare this file's BYTES, so a guest that
+# cannot open it cannot run the scene at all — it panics naming
+# KAYA_ICON_FILE. Shipped every run, outside the deploy stamp, into the
+# same repo-mirror path, for the same two reasons the font is.
+run_ssh 'cmd /c if not exist C:\kaya\guests\assets\icons mkdir C:\kaya\guests\assets\icons'
+scp -q "$ROOT"/guests/assets/icons/*.png "$HOST:C:/kaya/guests/assets/icons/"
 
 
 # EXTENSIONS MUST BE VISIBLE, and this is not cosmetic. Explorer ships
@@ -1863,6 +1884,7 @@ case "$SUITE" in
         # in-process, not an injected keystroke), no window close, and
         # nothing foreground-sensitive — no chord is pressed, unlike the
         # menus and commands legs that assert the same catalog.
+        run_suite identity_rust
         run_suite toolbar_rust
         run_suite toolbar_python
         run_suite toolbar_go

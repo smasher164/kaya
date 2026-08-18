@@ -410,6 +410,30 @@ impl TypefaceRequest {
     }
 }
 
+/// The app's declared identity, carried UNINSPECTED from the guest to
+/// every backend (docs/app-identity-plan.md, ratified 2026-08-18).
+///
+/// `name` is what the app goes by; `icon` is the picture that stands for
+/// it, as the bytes of one image file. Nothing here is resolved or
+/// validated by the core beyond the four walls the root enforces (set
+/// once, before the first mount, non-empty, not undoable), and that is
+/// the typeface's rule for the typeface's reason: whether a blob is an
+/// image is a question only the platform's own decoder can answer, and a
+/// guess that disagreed with the decoder would be worse than no answer.
+///
+/// ONE PICTURE, NOT FIVE. The same bytes reach the macOS Dock, the
+/// Windows taskbar and caption, an X11 window's `_NET_WM_ICON`, and (as
+/// the same FILE, at build time) the Android launcher and the iOS Home
+/// Screen. Per-platform artwork is refused for now, deliberately: the
+/// divergences that genuinely matter — mac's margin grid, Android's
+/// adaptive layer pair, iOS's mask — are packaging-time transforms a
+/// runtime slot cannot serve anyway.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AppIdentity {
+    pub name: String,
+    pub icon: Option<Blob>,
+}
+
 /// One clip, offered in several representations at once.
 ///
 /// A RECORD AND NOT A LIST, which is the whole shape: every platform
@@ -1536,6 +1560,12 @@ pub enum TxOp {
     /// accent's wall verbatim. The core resolves NOTHING; every backend
     /// picks its own row and looks the family up itself.
     SetBrandTypeface(TypefaceRequest),
+    /// DECLARE the app's identity (docs/app-identity-plan.md): the name it
+    /// goes by and the picture that stands for it. Set once, before the
+    /// first mount — the brand's walls verbatim. The core inspects the
+    /// bytes no more than it inspects a font's: every backend hands them
+    /// to its own platform's decoder.
+    SetAppIdentity(AppIdentity),
     /// Put one clip on the system clipboard.
     Copy(Clip),
     /// Read the clipboard outside any paste gesture — the privileged
@@ -1779,6 +1809,12 @@ pub enum ApplyOp {
     /// being installed, and substitutes it into its own type ramp.
     /// Emitted once, before the first mount's ops.
     SetTypeface(TypefaceRequest),
+    /// The app's identity, as declared (docs/app-identity-plan.md): the
+    /// backend hands the icon's bytes to its own platform's decoder and
+    /// routes the result to that platform's identity sinks — two of them
+    /// on Windows, one on each of the others. Emitted once, before the
+    /// first mount's ops.
+    SetAppIdentity(AppIdentity),
 }
 
 /// Where occurrences go: the Rust API consumes over mpsc, the C ABI over

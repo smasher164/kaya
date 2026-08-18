@@ -243,6 +243,11 @@ pub const KAYA_TX_SET_BRAND_ACCENT: u16 = 42;
 const _: () = assert!(KAYA_TX_SET_BRAND_ACCENT == wire::TX_SET_BRAND_ACCENT);
 pub const KAYA_TX_SET_BRAND_TYPEFACE: u16 = 43;
 const _: () = assert!(KAYA_TX_SET_BRAND_TYPEFACE == wire::TX_SET_BRAND_TYPEFACE);
+/// The app's declared identity (docs/app-identity-plan.md): a name and
+/// the bytes of the picture that stands for it, on the typeface's
+/// mask-plus-always-written-slot convention.
+pub const KAYA_TX_SET_APP_IDENTITY: u16 = 44;
+const _: () = assert!(KAYA_TX_SET_APP_IDENTITY == wire::TX_SET_APP_IDENTITY);
 
 /// The protocol fingerprint this core was built from. Bindings carry
 /// the same value baked in at generation (KAYA_SPEC_HASH and friends)
@@ -436,6 +441,8 @@ pub const KAYA_APPLY_SET_BRAND: u16 = 32;
 const _: () = assert!(KAYA_APPLY_SET_BRAND == wire::APPLY_SET_BRAND);
 pub const KAYA_APPLY_SET_TYPEFACE: u16 = 33;
 const _: () = assert!(KAYA_APPLY_SET_TYPEFACE == wire::APPLY_SET_TYPEFACE);
+pub const KAYA_APPLY_SET_APP_IDENTITY: u16 = 34;
+const _: () = assert!(KAYA_APPLY_SET_APP_IDENTITY == wire::APPLY_SET_APP_IDENTITY);
 const _: () = assert!(
     KAYA_APPLY_COPY == wire::APPLY_COPY
         && KAYA_APPLY_READ_CLIPBOARD == wire::APPLY_READ_CLIPBOARD
@@ -2931,6 +2938,7 @@ mod tests {
             ("show_save_dialog", KAYA_TX_SHOW_SAVE_DIALOG),
             ("set_brand_accent", KAYA_TX_SET_BRAND_ACCENT),
             ("set_brand_typeface", KAYA_TX_SET_BRAND_TYPEFACE),
+            ("set_app_identity", KAYA_TX_SET_APP_IDENTITY),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -2966,6 +2974,7 @@ mod tests {
             ("present_save_dialog", KAYA_APPLY_PRESENT_SAVE_DIALOG),
             ("set_brand", KAYA_APPLY_SET_BRAND),
             ("set_typeface", KAYA_APPLY_SET_TYPEFACE),
+            ("set_app_identity", KAYA_APPLY_SET_APP_IDENTITY),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

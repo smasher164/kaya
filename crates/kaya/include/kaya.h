@@ -171,6 +171,14 @@
  */
 #define TX_SET_BRAND_TYPEFACE 43
 
+/**
+ * The app's declared identity (docs/app-identity-plan.md): the name it
+ * goes by and the bytes of the picture that stands for it. The
+ * typeface's mask-plus-always-written-slot convention, so the two
+ * records decode the same way.
+ */
+#define TX_SET_APP_IDENTITY 44
+
 #define APPLY_CREATE 1
 
 #define APPLY_SET_PROP 2
@@ -249,6 +257,12 @@
  * the LOWERING is what resolves a family name (Slice 2b).
  */
 #define APPLY_SET_TYPEFACE 33
+
+/**
+ * The app's identity, uninspected: the declaration's body verbatim,
+ * because the LOWERING is what decodes a picture (app-identity-plan I5).
+ */
+#define APPLY_SET_APP_IDENTITY 34
 
 #define VALUE_BOOL 1
 
@@ -812,6 +826,13 @@
 #define KAYA_TX_SET_BRAND_TYPEFACE 43
 
 /**
+ * The app's declared identity (docs/app-identity-plan.md): a name and
+ * the bytes of the picture that stands for it, on the typeface's
+ * mask-plus-always-written-slot convention.
+ */
+#define KAYA_TX_SET_APP_IDENTITY 44
+
+/**
  * Host capability bits, queryable any time (like kaya_spec_hash).
  * Platform-static per build: the phones' systems own surface
  * geometry, so KAYA_CAP_AUX_WINDOWS is unset there and create_window
@@ -957,6 +978,8 @@
 #define KAYA_APPLY_SET_BRAND 32
 
 #define KAYA_APPLY_SET_TYPEFACE 33
+
+#define KAYA_APPLY_SET_APP_IDENTITY 34
 
 /**
  * One-shot commands (the widget_command tx record / COMMAND apply

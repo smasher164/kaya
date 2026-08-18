@@ -1236,6 +1236,57 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   RESOLVED family off the real views rather than echoing the \
                   request.",
         },
+        Record {
+            kind: 44,
+            name: "set_app_identity",
+            fields: &[
+                f("mask", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("name", FieldTy::Value),
+                f("icon", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "DECLARE the app's identity — the name it goes by and the \
+                  picture that stands for it (docs/app-identity-plan.md, \
+                  ratified 2026-08-18). `name` is a Str; `mask` bit 0 says an \
+                  `icon` BLOB is present, and an empty Str rides its slot when \
+                  it is not — the typeface's mask-plus-always-written-slot \
+                  convention, copied rather than reinvented, so the two \
+                  records decode the same way and one mask/slot disagreement \
+                  test covers the shape.\n\n\
+                  A TRANSACTION VERB AND NOT A WINDOW PROP, because identity \
+                  is per-APP where WINDOW_PROPS is per-window. `title` already \
+                  lives there and is the WINDOW's title; the identity name is \
+                  a different thing and the vocabulary must not conflate them \
+                  (on Windows the two meet in one string, and it is the \
+                  backend's single caption writer that composes them, never \
+                  two authors).\n\n\
+                  ONE PICTURE, FIVE ROUTES. The same PNG reaches the macOS \
+                  Dock, the Windows taskbar/alt-tab and caption, an X11 \
+                  window's _NET_WM_ICON, the Android launcher and the iOS Home \
+                  Screen — each by its platform's own route, some at runtime \
+                  off these bytes and some at build time off the same file in \
+                  the tree. One PNG goes in and each lowering converts \
+                  (NSImage(data:), BitmapImage.SetSource, an HICON, a \
+                  GdkTexture); no .ico, no .icns, no per-platform artwork on \
+                  the wire.\n\n\
+                  THE FOUR WALLS ARE THE BRAND'S, VERBATIM, and for the \
+                  brand's reasons. SET ONCE: a second write dies in the root, \
+                  in every language at once. BEFORE THE FIRST MOUNT: so no \
+                  backend shows an unidentified frame it must repaint. EMPTY \
+                  IS REFUSED: an app that wants the platform's own identity \
+                  declares none at all, and an empty string would sail through \
+                  five lowerings indistinguishable from a default. NOT \
+                  UNDOABLE: identity is not state.\n\n\
+                  THE BYTES ARE NOT INSPECTED IN THE CORE — the typeface's \
+                  rule transfers exactly. Whether a blob is an image is a \
+                  question only the platform's own decoder can answer, and a \
+                  guess that disagreed with the decoder would be worse than no \
+                  answer. Each backend decodes, and the observation reports \
+                  what the DECODER produced (a size, sampled pixels) rather \
+                  than echoing the request, so bytes that are not an image \
+                  fail exactly like an icon that never applied.",
+        },
     ],
     apply: &[
         Record {
@@ -1734,6 +1785,34 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   Android) while this crate is compiled once per target.\n\n\
                   Emitted once, before the first mount's ops, by the root's \
                   set-once arm — a backend never sees a typeface it must \
+                  un-apply.",
+        },
+        Record {
+            kind: 34,
+            name: "set_app_identity",
+            fields: &[
+                f("mask", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("name", FieldTy::Value),
+                f("icon", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "The app's identity, as DECLARED (docs/app-identity-plan.md). \
+                  The tx record's body verbatim — the core resolves nothing \
+                  here, the typeface's rule and for its reason: whether a blob \
+                  is an image, and what picture it holds, is a question only \
+                  the platform's own decoder can answer.\n\n\
+                  EACH BACKEND ROUTES IT ITSELF, and the routes are not alike: \
+                  the Windows one is TWO sinks from one declaration (the \
+                  window's icon, which the system caption, the taskbar and \
+                  alt-tab all read, and the XAML TitleBar's IconSource, which \
+                  repairs what a custom caption takes away from the first); \
+                  macOS hands the picture to the Dock under the regular \
+                  activation policy declaring an identity implies; GTK decodes \
+                  to textures and hands them to the toplevel. What a person \
+                  sees is one mark on every platform.\n\n\
+                  Emitted once, before the first mount's ops, by the root's \
+                  set-once arm — a backend never sees an identity it must \
                   un-apply.",
         },
     ],
@@ -2497,6 +2576,7 @@ mod tests {
             ("show_save_dialog", wire::TX_SHOW_SAVE_DIALOG),
             ("set_brand_accent", wire::TX_SET_BRAND_ACCENT),
             ("set_brand_typeface", wire::TX_SET_BRAND_TYPEFACE),
+            ("set_app_identity", wire::TX_SET_APP_IDENTITY),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -2543,6 +2623,7 @@ mod tests {
                 ("present_save_dialog", wire::APPLY_PRESENT_SAVE_DIALOG),
             ("set_brand", wire::APPLY_SET_BRAND),
             ("set_typeface", wire::APPLY_SET_TYPEFACE),
+            ("set_app_identity", wire::APPLY_SET_APP_IDENTITY),
             ]
         );
         // THE SAME TABLE SHAPE AS THE TWO ABOVE, and it was not always:
@@ -3085,6 +3166,21 @@ mod tests {
             ],
         );
 
+        // The app identity: a name and, here, no icon — mask bit 0 clear
+        // and an empty Str riding the always-written blob slot. Same
+        // convention as the typeface above, which is the point of writing
+        // it through the SAME generic writer: two records that claim to
+        // share a shape have to decode through one reader to prove it.
+        w.record(
+            tx_record("set_app_identity"),
+            &[
+                Arg::U32(0),
+                Arg::U32(0),
+                Arg::Value(Value::from("Aurora Notes")),
+                Arg::Value(Value::from("")),
+            ],
+        );
+
         let ops = wire::decode_transaction(&w.buf);
         let expected: Vec<TxOp> = vec![
             TxOp::CreateSignal {
@@ -3205,6 +3301,10 @@ mod tests {
                 ],
                 font: None,
             }),
+            TxOp::SetAppIdentity(crate::protocol::AppIdentity {
+                name: "Aurora Notes".into(),
+                icon: None,
+            }),
         ];
         assert_eq!(ops.len(), expected.len());
         for (a, b) in ops.iter().zip(expected.iter()) {
@@ -3263,6 +3363,34 @@ mod tests {
                 Arg::Values(vec![]),
                 // ...while the always-written slot carries a real blob.
                 Arg::Value(Value::Blob(Blob::from(&b"not a font"[..]))),
+            ],
+        );
+        let blobs = w.blobs.clone();
+        wire::decode_transaction_with_blobs(&w.buf, &move |h| {
+            blobs.get(h as usize - 1).cloned()
+        });
+    }
+
+    /// THE IDENTITY'S SLOT, THE SAME WALL. The record copies the
+    /// typeface's mask-plus-always-written-slot convention, and a
+    /// convention copied without its guard is a convention that decays:
+    /// a clear mask bit over a real blob would drop the app's MARK
+    /// silently, every backend leaving the platform default in place and
+    /// every observation reporting the default — the silent fallback one
+    /// tier over. This is the typeface's watched negative, one record
+    /// along, and it is exactly what a buggy binding encoder emits.
+    #[test]
+    #[should_panic(expected = "carries an icon blob but its mask")]
+    fn identity_mask_slot_disagreement_is_loud() {
+        let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
+        w.record(
+            tx_record("set_app_identity"),
+            &[
+                Arg::U32(0), // mask bit 0 CLEAR: "no icon present"
+                Arg::U32(0),
+                Arg::Value(Value::from("Aurora Notes")),
+                // ...while the always-written slot carries a real blob.
+                Arg::Value(Value::Blob(Blob::from(&b"not an icon"[..]))),
             ],
         );
         let blobs = w.blobs.clone();

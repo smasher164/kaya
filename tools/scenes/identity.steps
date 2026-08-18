@@ -1,0 +1,65 @@
+# The app-identity conformance scene (docs/app-identity-plan.md): an app
+# says what it is called and what it looks like, and the platform shows
+# both.
+#
+# WHAT THIS SCENE EXISTS TO CATCH is the silent fallback, one tier up
+# from the typeface's. Every platform draws SOMETHING where an app's
+# icon goes — a generic executable, the host process's mark, a
+# monochrome placeholder — so a declaration that never reached the
+# platform, bytes the decoder refused, and a working identity are
+# indistinguishable to any observation that reads back what kaya stored.
+# `expect_app_icon` reads the four quadrant CENTRES off the picture the
+# platform ended up holding, and that read is the whole point of the
+# scene: the declaration echoed back would pass while nothing was drawn.
+#
+# WHY A VENDORED MARK. The expected string has to be one string on every
+# lane AND unreachable by any platform's own default, and no picture can
+# be both unless this tree makes it. The guests therefore declare the
+# VENDORED mark's bytes (guests/assets/icons/kaya-mark.png, four flat
+# quadrants), the blob rides the same channel the typeface's font does,
+# and four unmistakable colours are what a per-platform conversion can
+# preserve where a hash of the converted bytes could not.
+# KAYA_ICON_FILE is how a runner that cannot see the repo points at a
+# pushed copy — the typeface's variable, one asset over.
+#
+# THE READ IS OF THE ARTIFACT, NOT OF THE MODEL. On Windows that means
+# WM_GETICON on the real HWND — the picture the taskbar and alt-tab draw
+# from, answered out of the window manager's own state — decoded to
+# pixels. A read of what kaya stored, or of the TitleBar's IconSource
+# property, is an echo: sixteen zero bytes would answer it identically.
+#
+# No opening settle: the first expect's bounded retry IS the
+# scene-ready wait.
+expect label#0 "identity"
+expect_app_icon "E01B24/33D17A/1C71D8/F6D32D"
+# THE PRIMARY WINDOW PROMOTES ONE COMMAND, and this line is why the
+# scene can be trusted to have exercised the SECOND Windows sink. A
+# custom caption is minted by a promotion and by nothing else, and a
+# custom caption replaces the system one — taking the system-drawn app
+# icon with it — so `TitleBar.IconSource` is what puts the mark back.
+# Reading that property would be a pure ECHO and is refused
+# (docs/app-identity-plan.md I8); what this line CAN say is that the
+# promotion happened, so the arm was reached. The pixels themselves are
+# evidence a capture carries, not a scene.
+expect_toolbar
+expect_toolbar_item "Save" "done"
+# THE NAME IS THE OTHER HALF OF THE DECLARATION, and it lands where
+# every platform puts an app's name: on a window that has none of its
+# own. A declared name never OVERRIDES a window's own title — the window
+# below says what it is and keeps saying it — it fills the blank, which
+# is what the caption, the taskbar tooltip and the alt-tab label all
+# read from one string on Windows.
+expect_title "identity"
+expect_title window#1 "Aurora Notes"
+# AN IDENTITY NEVER CHANGES WHAT ANYTHING DOES. It is chrome: the field
+# still takes text and the button still fires its handler — the roles'
+# contract one tier over, and why this scene carries live widgets rather
+# than one label.
+set_text entry#0 "hi"
+click button#0
+expect label#1 "clicked hi"
+# AND THE MARK IS STILL THERE AFTERWARDS. Identity is declared once,
+# before the first mount, and nothing an app does later may disturb it:
+# a lowering that re-applied on some later pass, or a window that took
+# the icon away when it took the focus, fails here and nowhere else.
+expect_app_icon "E01B24/33D17A/1C71D8/F6D32D"

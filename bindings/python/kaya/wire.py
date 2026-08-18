@@ -10,7 +10,7 @@ value types.
 import struct
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x7c7a23e2127c3801
+SPEC_HASH = 0x9be02e4dbe710c5b
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -177,6 +177,7 @@ TX_REVEAL_RANGE = 40
 TX_SHOW_SAVE_DIALOG = 41
 TX_SET_BRAND_ACCENT = 42
 TX_SET_BRAND_TYPEFACE = 43
+TX_SET_APP_IDENTITY = 44
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -210,6 +211,7 @@ APPLY_REVEAL_RANGE = 30
 APPLY_PRESENT_SAVE_DIALOG = 31
 APPLY_SET_BRAND = 32
 APPLY_SET_TYPEFACE = 33
+APPLY_SET_APP_IDENTITY = 34
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -448,6 +450,10 @@ def tx_set_brand_accent(seed, mask, light, dark):
 def tx_set_brand_typeface(mask, family, platforms, font):
     """REQUEST the app's brand typeface (docs/styling-plan.md D6, Slice 2b). `family` is the default family name every platform falls back to; `platforms` carries the optional per-platform overrides as PAIRS — an I64 platform tag from the `platform` enum, then that platform's family as a Str — and `mask` bit 0 says a `font` BLOB is present (an empty Str rides in its slot when it is not).  THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights, metrics and the whole type ramp stay the platform's. Substituting a family into the platform's own ramp is what makes the swap safe, and it is the role tier — not a font size — that carries emphasis.  PER-PLATFORM VALUES RIDE THE WIRE, unlike the accent's, and the asymmetry is the design (Slice 2b): a BINDING cannot know its platform — the JVM says "Linux" on Android — but a LOWERING is its platform, so each backend picks its own row out of `platforms` and no platform id is ever needed on the guest side. A colour resolves to one number a binding can compute anywhere; a family name has to survive to the backend that will look it up.  FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: when `font` carries bytes the backend hands them to its platform's app-font API (CTFontManager, fontconfig, the Compose/DWrite routes), reads back the family name the registration produced, and the NAME machinery takes over unchanged — one resolution, one observation, one fallback for both forms. A registered blob's own family wins over `family` on the backend that registered it.  SET ONCE, before the first mount — the accent's wall verbatim, and for its reason: a typeface that could flip at runtime would promise the theme-switching surface the vocabulary deliberately does not have.  THE RISK IS THE SILENT FALLBACK. Every platform's font API renders SOMETHING for a family it does not have, so a typo is invisible to every other observation: each backend gates on the family being PRESENT and otherwise leaves the platform default in place, and `expect_typeface` reads the RESOLVED family off the real views rather than echoing the request."""
     return record(TX_SET_BRAND_TYPEFACE, struct.pack("<I", mask) + struct.pack("<I", 0) + _enc.value(family) + _enc.values(platforms) + _enc.value(font))
+
+def tx_set_app_identity(mask, name, icon):
+    """DECLARE the app's identity — the name it goes by and the picture that stands for it (docs/app-identity-plan.md, ratified 2026-08-18). `name` is a Str; `mask` bit 0 says an `icon` BLOB is present, and an empty Str rides its slot when it is not — the typeface's mask-plus-always-written-slot convention, copied rather than reinvented, so the two records decode the same way and one mask/slot disagreement test covers the shape.  A TRANSACTION VERB AND NOT A WINDOW PROP, because identity is per-APP where WINDOW_PROPS is per-window. `title` already lives there and is the WINDOW's title; the identity name is a different thing and the vocabulary must not conflate them (on Windows the two meet in one string, and it is the backend's single caption writer that composes them, never two authors).  ONE PICTURE, FIVE ROUTES. The same PNG reaches the macOS Dock, the Windows taskbar/alt-tab and caption, an X11 window's _NET_WM_ICON, the Android launcher and the iOS Home Screen — each by its platform's own route, some at runtime off these bytes and some at build time off the same file in the tree. One PNG goes in and each lowering converts (NSImage(data:), BitmapImage.SetSource, an HICON, a GdkTexture); no .ico, no .icns, no per-platform artwork on the wire.  THE FOUR WALLS ARE THE BRAND'S, VERBATIM, and for the brand's reasons. SET ONCE: a second write dies in the root, in every language at once. BEFORE THE FIRST MOUNT: so no backend shows an unidentified frame it must repaint. EMPTY IS REFUSED: an app that wants the platform's own identity declares none at all, and an empty string would sail through five lowerings indistinguishable from a default. NOT UNDOABLE: identity is not state.  THE BYTES ARE NOT INSPECTED IN THE CORE — the typeface's rule transfers exactly. Whether a blob is an image is a question only the platform's own decoder can answer, and a guess that disagreed with the decoder would be worse than no answer. Each backend decodes, and the observation reports what the DECODER produced (a size, sampled pixels) rather than echoing the request, so bytes that are not an image fail exactly like an icon that never applied."""
+    return record(TX_SET_APP_IDENTITY, struct.pack("<I", mask) + struct.pack("<I", 0) + _enc.value(name) + _enc.value(icon))
 
 
 def tx_set_text(widget_id, text):

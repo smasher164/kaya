@@ -1434,6 +1434,43 @@ impl<'a> Tx<'a> {
         }));
     }
 
+    /// DECLARE the app's identity (docs/app-identity-plan.md): the name
+    /// it goes by and the picture that stands for it, as the bytes of
+    /// one image file. Set ONCE, before the first mount — the brand's
+    /// wall verbatim, and for the brand's reason: identity is not state,
+    /// and a slot that could flip at runtime would promise a surface the
+    /// vocabulary deliberately does not have.
+    ///
+    /// ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
+    /// tile, the Windows taskbar/alt-tab icon and the caption's mark, and
+    /// an X11 window's icon; the same FILE, read at build time, becomes
+    /// the Android launcher icon and the iOS Home Screen icon. Send a
+    /// PNG: each lowering converts, and no platform-specific artwork
+    /// rides the wire.
+    ///
+    /// THE BYTES ARE NEVER INSPECTED between here and the platform's own
+    /// decoder. Bytes that are not an image leave every platform's
+    /// default in place — which is why the identity scene reads what the
+    /// DECODER produced rather than echoing what was sent.
+    pub fn app_identity(&mut self, name: &str, icon: &[u8]) {
+        self.ops.push(TxOp::SetAppIdentity(crate::protocol::AppIdentity {
+            name: name.to_string(),
+            icon: Some(crate::protocol::Blob(icon.into())),
+        }));
+    }
+
+    /// The NAME-ONLY form, for an app that has a name and no mark yet.
+    /// Its identity still reaches the surfaces a name reaches — the
+    /// Windows caption and taskbar tooltip, the macOS menu bar, the
+    /// Linux `app_id`, and the two phones' packaging — and every icon
+    /// surface keeps the platform's own default, honestly and visibly.
+    pub fn app_identity_named(&mut self, name: &str) {
+        self.ops.push(TxOp::SetAppIdentity(crate::protocol::AppIdentity {
+            name: name.to_string(),
+            icon: None,
+        }));
+    }
+
     pub fn window(&mut self, window: WindowId) -> WindowRef<'_, 'a> {
         WindowRef { tx: self, window }
     }

@@ -91,6 +91,14 @@ VERB_FEATURE = {
     # being called after it, and a backend still declaring
     # depth_stub("typeface") must hold those legs off too.
     "expect_typeface": "typeface",
+    # The app identity's one observation (docs/app-identity-plan.md I8).
+    # Keyed on the verb for this table's whole reason: `identity` is the
+    # scene's name TODAY and the name-fallback below would derive the
+    # feature anyway — but the day the editor scene declares who it is,
+    # it demands the same lowering without being called after it, and a
+    # backend still declaring depth_stub("identity") must hold those
+    # legs off too.
+    "expect_app_icon": "identity",
 }
 
 # The verbs that take a menu PATH as their first argument. `shortcut` is

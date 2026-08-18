@@ -10,6 +10,18 @@
 
 pub mod Microsoft {
     pub mod UI {
+        #[repr(C)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct IconId {
+            pub Value: u64,
+        }
+        impl windows_core::TypeKind for IconId {
+            type TypeKind = windows_core::CopyType;
+        }
+        impl windows_core::RuntimeType for IconId {
+            const SIGNATURE: windows_core::imp::ConstBuffer =
+                windows_core::imp::ConstBuffer::from_slice(b"struct(Microsoft.UI.IconId;u8)");
+        }
         pub mod Composition {
             windows_core::imp::define_interface!(
                 IAnimationObject,
@@ -4226,6 +4238,16 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn SetIconWithIconId(&self, iconid: super::IconId) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetIconWithIconId)(
+                            windows_core::Interface::as_raw(this),
+                            iconid,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn Show(&self) -> windows_core::Result<()> {
                     let this = self;
                     unsafe {
@@ -4364,6 +4386,19 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn SetTaskbarIconWithIconId(
+                    &self,
+                    iconid: super::IconId,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IAppWindow4>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetTaskbarIconWithIconId)(
+                            windows_core::Interface::as_raw(this),
+                            iconid,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn SetTitleBarIcon(
                     &self,
                     iconpath: &windows_core::HSTRING,
@@ -4373,6 +4408,19 @@ pub mod Microsoft {
                         (windows_core::Interface::vtable(this).SetTitleBarIcon)(
                             windows_core::Interface::as_raw(this),
                             core::mem::transmute_copy(iconpath),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn SetTitleBarIconWithIconId(
+                    &self,
+                    iconid: super::IconId,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IAppWindow4>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetTitleBarIconWithIconId)(
+                            windows_core::Interface::as_raw(this),
+                            iconid,
                         )
                         .ok()
                     }
@@ -5039,7 +5087,11 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
-                SetIconWithIconId: usize,
+                pub SetIconWithIconId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::IconId,
+                )
+                    -> windows_core::HRESULT,
                 SetPresenter: usize,
                 SetPresenterByKind: usize,
                 pub Show:
@@ -5128,13 +5180,21 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                 )
                     -> windows_core::HRESULT,
-                SetTaskbarIconWithIconId: usize,
+                pub SetTaskbarIconWithIconId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::IconId,
+                )
+                    -> windows_core::HRESULT,
                 pub SetTitleBarIcon: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
                 )
                     -> windows_core::HRESULT,
-                SetTitleBarIconWithIconId: usize,
+                pub SetTitleBarIconWithIconId: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::IconId,
+                )
+                    -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
                 IAppWindowStatics,
@@ -63823,6 +63883,84 @@ pub mod Microsoft {
                     ForegroundProperty: usize,
                 }
                 windows_core::imp::define_interface!(
+                    IIconSource,
+                    IIconSource_Vtbl,
+                    0x39e6b320_a2af_5ee3_b7e9_4ba4aa80541a
+                );
+                impl windows_core::RuntimeType for IIconSource {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IIconSource_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Foreground: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetForeground: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub CreateIconElement: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IIconSourceFactory,
+                    IIconSourceFactory_Vtbl,
+                    0xe8bc19c6_9a64_5c54_9338_e18e076875bf
+                );
+                impl windows_core::RuntimeType for IIconSourceFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IIconSourceFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    IIconSourceOverrides,
+                    IIconSourceOverrides_Vtbl,
+                    0x9a02d369_1c79_5a81_871b_0b90946ba7f0
+                );
+                impl windows_core::RuntimeType for IIconSourceOverrides {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IIconSourceOverrides_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateIconElementCore: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    GetIconElementPropertyCore: usize,
+                }
+                windows_core::imp::define_interface!(
+                    IIconSourceStatics,
+                    IIconSourceStatics_Vtbl,
+                    0xeed55973_7e15_575f_af8e_ae2b9b975dd7
+                );
+                impl windows_core::RuntimeType for IIconSourceStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IIconSourceStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    ForegroundProperty: usize,
+                }
+                windows_core::imp::define_interface!(
                     IImage,
                     IImage_Vtbl,
                     0x220d3d8d_66de_53a1_a215_ba9c165565ab
@@ -63876,6 +64014,66 @@ pub mod Microsoft {
                         -> windows_core::HRESULT,
                     GetAsCastingSource: usize,
                     GetAlphaMask: usize,
+                }
+                windows_core::imp::define_interface!(
+                    IImageIconSource,
+                    IImageIconSource_Vtbl,
+                    0x67f75be0_c84d_57ff_9f68_039c81ea7896
+                );
+                impl windows_core::RuntimeType for IImageIconSource {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IImageIconSource_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub ImageSource: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetImageSource: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IImageIconSourceFactory,
+                    IImageIconSourceFactory_Vtbl,
+                    0x24f76321_71bd_530a_8cc8_3f615cd1437a
+                );
+                impl windows_core::RuntimeType for IImageIconSourceFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IImageIconSourceFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateInstance: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IImageIconSourceStatics,
+                    IImageIconSourceStatics_Vtbl,
+                    0x3aae805c_c128_5f0d_ae43_1b158891a1dd
+                );
+                impl windows_core::RuntimeType for IImageIconSourceStatics {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IImageIconSourceStatics_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    ImageSourceProperty: usize,
                 }
                 windows_core::imp::define_interface!(
                     IImageStatics,
@@ -68167,8 +68365,16 @@ pub mod Microsoft {
                         *mut core::ffi::c_void,
                     )
                         -> windows_core::HRESULT,
-                    IconSource: usize,
-                    SetIconSource: usize,
+                    pub IconSource: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetIconSource: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
                     pub LeftHeader: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut *mut core::ffi::c_void,
@@ -71177,6 +71383,103 @@ pub mod Microsoft {
                 unsafe impl Sync for IconElement {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct IconSource(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    IconSource,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(IconSource, super::DependencyObject);
+                impl IconSource {
+                    pub fn DispatcherQueue(
+                        &self,
+                    ) -> windows_core::Result<super::super::Dispatching::DispatcherQueue>
+                    {
+                        let this =
+                            &windows_core::Interface::cast::<super::IDependencyObject>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Foreground(&self) -> windows_core::Result<super::Media::Brush> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Foreground)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetForeground<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::Brush>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetForeground)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn CreateIconElement(&self) -> windows_core::Result<IconElement> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateIconElement)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn CreateIconElementCore(&self) -> windows_core::Result<IconElement> {
+                        let this = &windows_core::Interface::cast::<IIconSourceOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateIconElementCore)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    fn IIconSourceStatics<
+                        R,
+                        F: FnOnce(&IIconSourceStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            IconSource,
+                            IIconSourceStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for IconSource {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IIconSource>();
+                }
+                unsafe impl windows_core::Interface for IconSource {
+                    type Vtable = <IIconSource as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID = <IIconSource as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for IconSource {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Controls.IconSource";
+                }
+                unsafe impl Send for IconSource {}
+                unsafe impl Sync for IconSource {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct Image(windows_core::IUnknown);
                 windows_core::imp::interface_hierarchy!(
                     Image,
@@ -73775,6 +74078,156 @@ pub mod Microsoft {
                 }
                 unsafe impl Send for Image {}
                 unsafe impl Sync for Image {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct ImageIconSource(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    ImageIconSource,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                windows_core::imp::required_hierarchy!(
+                    ImageIconSource,
+                    IconSource,
+                    super::DependencyObject
+                );
+                impl ImageIconSource {
+                    pub fn DispatcherQueue(
+                        &self,
+                    ) -> windows_core::Result<super::super::Dispatching::DispatcherQueue>
+                    {
+                        let this =
+                            &windows_core::Interface::cast::<super::IDependencyObject>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).DispatcherQueue)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn Foreground(&self) -> windows_core::Result<super::Media::Brush> {
+                        let this = &windows_core::Interface::cast::<IIconSource>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Foreground)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetForeground<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::Brush>,
+                    {
+                        let this = &windows_core::Interface::cast::<IIconSource>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetForeground)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn CreateIconElement(&self) -> windows_core::Result<IconElement> {
+                        let this = &windows_core::Interface::cast::<IIconSource>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateIconElement)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn CreateIconElementCore(&self) -> windows_core::Result<IconElement> {
+                        let this = &windows_core::Interface::cast::<IIconSourceOverrides>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateIconElementCore)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn ImageSource(&self) -> windows_core::Result<super::Media::ImageSource> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ImageSource)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetImageSource<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<super::Media::ImageSource>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetImageSource)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn new() -> windows_core::Result<ImageIconSource> {
+                        Self::IImageIconSourceFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstance)(
+                                windows_core::Interface::as_raw(this),
+                                core::ptr::null_mut(),
+                                &mut core::ptr::null_mut(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn IImageIconSourceFactory<
+                        R,
+                        F: FnOnce(&IImageIconSourceFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            ImageIconSource,
+                            IImageIconSourceFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    fn IImageIconSourceStatics<
+                        R,
+                        F: FnOnce(&IImageIconSourceStatics) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            ImageIconSource,
+                            IImageIconSourceStatics,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for ImageIconSource {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IImageIconSource>();
+                }
+                unsafe impl windows_core::Interface for ImageIconSource {
+                    type Vtable = <IImageIconSource as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IImageIconSource as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for ImageIconSource {
+                    const NAME: &'static str = "Microsoft.UI.Xaml.Controls.ImageIconSource";
+                }
+                unsafe impl Send for ImageIconSource {}
+                unsafe impl Sync for ImageIconSource {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct ItemCollection(windows_core::IUnknown);
@@ -141638,6 +142091,30 @@ pub mod Microsoft {
                             (windows_core::Interface::vtable(this).SetSubtitle)(
                                 windows_core::Interface::as_raw(this),
                                 core::mem::transmute_copy(value),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn IconSource(&self) -> windows_core::Result<IconSource> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).IconSource)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn SetIconSource<P0>(&self, value: P0) -> windows_core::Result<()>
+                    where
+                        P0: windows_core::Param<IconSource>,
+                    {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetIconSource)(
+                                windows_core::Interface::as_raw(this),
+                                value.param().abi(),
                             )
                             .ok()
                         }

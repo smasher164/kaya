@@ -458,12 +458,44 @@ fn main() {
         // CommandBar's collections, whose element type had to be dragged
         // in by name.
         //
-        // NOT filtered, each an absence with a reason:
-        //   IconSource / TitleBarTemplateSettings — kaya draws no window
-        //     icon and reads no template state; both are types this arm
-        //     never names, and windows-bindgen leaves their accessors as
-        //     vtable pads, which is the honest record of "not used here".
+        // NOT filtered, an absence with a reason:
+        //   TitleBarTemplateSettings — kaya reads no template state; it is
+        //     a type this arm never names, and windows-bindgen leaves its
+        //     accessor as a vtable pad, which is the honest record of
+        //     "not used here".
         "Microsoft.UI.Xaml.Controls.TitleBar".to_string(),
+        // THE APP IDENTITY'S CAPTION SINK (docs/app-identity-plan.md I3).
+        // The line above used to say kaya draws no window icon and that
+        // IconSource was therefore an honest pad. It draws one now, and
+        // the pads are what stood in the way: `ITitleBar`'s vtable read
+        // `IconSource: usize, SetIconSource: usize`, so the property the
+        // metadata has since Windows App SDK 1.7 read, from the generated
+        // file, as "the TitleBar control has no icon slot".
+        //
+        // ONE SUBCLASS REACHES BYTES and it is measured, not assumed
+        // (the winmd walk in the plan's I1/§2): of the seven IconSource
+        // subclasses only ImageIconSource carries an `ImageSource` slot,
+        // and BitmapIconSource — the one whose NAME suggests it — has
+        // `UriSource : Windows.Foundation.Uri` as its only picture slot
+        // and would force a temp file. BitmapImage and ImageSource are
+        // already filtered above for the Image widget, so the blob route
+        // is the Image widget's block with two lines changed.
+        //   IconSource      — the abstract base SetIconSource takes.
+        //     Without it the setter stays a pad even with the subclass
+        //     filtered (the transitivity trap, its usual disguise).
+        //   ImageIconSource — the concrete class kaya constructs.
+        "Microsoft.UI.Xaml.Controls.IconSource".to_string(),
+        "Microsoft.UI.Xaml.Controls.ImageIconSource".to_string(),
+        // THE TASKBAR AND ALT-TAB SINK, which is the WINDOW's icon and not
+        // the control's (I3: one declaration, two sinks — the second
+        // repairs what a custom caption takes away from the first).
+        // `Microsoft.UI.IconId` is the parameter type of every
+        // `…WithIconId` overload on IAppWindow/IAppWindow4, and every one
+        // of them was a `usize` pad, which left ONLY the overloads that
+        // demand an .ico path on disk. kaya's icon arrives as bytes and
+        // six of its eight languages load kaya into someone else's
+        // process, so a path on disk is not a route this design has.
+        "Microsoft.UI.IconId".to_string(),
         // THE WINDOW'S OWN CAPTION HEIGHT (the 2026-08-17 one-band
         // revision). This entry was refused by the first titlebar arm,
         // in a comment right here that said kaya "sets no height on this

@@ -84,6 +84,11 @@ pub const TX_SET_BRAND_ACCENT: u16 = 42;
 /// Android) but a lowering IS its platform, so the rows travel and each
 /// backend picks its own.
 pub const TX_SET_BRAND_TYPEFACE: u16 = 43;
+/// The app's declared identity (docs/app-identity-plan.md): the name it
+/// goes by and the bytes of the picture that stands for it. The
+/// typeface's mask-plus-always-written-slot convention, so the two
+/// records decode the same way.
+pub const TX_SET_APP_IDENTITY: u16 = 44;
 
 // Apply record kinds (core -> presentation pump).
 pub const APPLY_CREATE: u16 = 1;
@@ -126,6 +131,9 @@ pub const APPLY_SET_BRAND: u16 = 32;
 /// The brand typeface, unresolved: the request's body verbatim, because
 /// the LOWERING is what resolves a family name (Slice 2b).
 pub const APPLY_SET_TYPEFACE: u16 = 33;
+/// The app's identity, uninspected: the declaration's body verbatim,
+/// because the LOWERING is what decodes a picture (app-identity-plan I5).
+pub const APPLY_SET_APP_IDENTITY: u16 = 34;
 
 // Value types.
 pub const VALUE_BOOL: u32 = 1;
@@ -1035,6 +1043,38 @@ pub fn decode_transaction_with_blobs(
                     platforms,
                     font,
                 })
+            }
+            TX_SET_APP_IDENTITY => {
+                let mask = r.u32();
+                let _reserved = r.u32();
+                let name = match r.value() {
+                    Value::Str(s) => s,
+                    other => panic!(
+                        "kaya: set_app_identity name is {other:?}, wanted a string"
+                    ),
+                };
+                // THE ICON SLOT IS ALWAYS WRITTEN and the mask is what
+                // says whether it means anything — the typeface's
+                // convention verbatim, including BOTH directions of the
+                // disagreement. A clear bit over a real blob would drop
+                // the app's MARK silently: every backend would leave the
+                // platform default in place and every observation would
+                // report that default, which is the silent fallback this
+                // whole slice's read is designed to expose.
+                let icon = match (mask & 1 != 0, r.value()) {
+                    (true, Value::Blob(b)) => Some(b),
+                    (true, other) => panic!(
+                        "kaya: set_app_identity says an icon blob is present but \
+                         carries {other:?}"
+                    ),
+                    (false, Value::Blob(_)) => panic!(
+                        "kaya: set_app_identity carries an icon blob but its mask \
+                         bit says none is present — the encoding disagrees with \
+                         itself and the icon would be silently dropped"
+                    ),
+                    (false, _) => None,
+                };
+                TxOp::SetAppIdentity(crate::protocol::AppIdentity { name, icon })
             }
             TX_SHOW_SAVE_DIALOG => {
                 let window = WindowId(r.u64());
@@ -1994,6 +2034,18 @@ impl Writer {
                 // way without copying the vocabulary.
                 write_typeface(b, req, this_platform(), blobs);
             }),
+            ApplyOp::SetAppIdentity(identity) => {
+                self.record(APPLY_SET_APP_IDENTITY, |b, blobs| {
+                    // THE DECLARATION'S BODY, one writer for both
+                    // channels, and for the typeface's reason: the core
+                    // resolves nothing here, so two writers would be two
+                    // chances to disagree about a shape neither side
+                    // transforms. There is no platform stamp to fill —
+                    // unlike a family name, a picture needs no row picked
+                    // for it: every platform gets the same bytes.
+                    write_app_identity(b, identity, blobs);
+                })
+            }
             ApplyOp::ClearUndo { window } => self.record(APPLY_CLEAR_UNDO, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
             }),
@@ -2348,6 +2400,11 @@ impl Writer {
             TxOp::SetBrandTypeface(req) => self.record(TX_SET_BRAND_TYPEFACE, |b, blobs| {
                 write_typeface(b, req, 0, blobs);
             }),
+            TxOp::SetAppIdentity(identity) => {
+                self.record(TX_SET_APP_IDENTITY, |b, blobs| {
+                    write_app_identity(b, identity, blobs);
+                })
+            }
             TxOp::ShowSaveDialog(spec) => self.record(TX_SHOW_SAVE_DIALOG, |b, blobs| {
                 b.extend_from_slice(&spec.window.0.to_le_bytes());
                 b.extend_from_slice(&spec.dialog.0.to_le_bytes());
@@ -2532,6 +2589,25 @@ fn write_typeface(
     }
     // The slot is written either way; see the decoder's note.
     match &req.font {
+        Some(bytes) => write_value(b, &Value::Blob(bytes.clone()), blobs),
+        None => write_value(b, &Value::Str(String::new()), blobs),
+    }
+}
+
+/// The app identity's body, shared by the tx and apply channels
+/// (docs/app-identity-plan.md I5). The typeface's writer one record
+/// along, minus the platform stamp: a family name has to be resolved per
+/// platform, a picture does not.
+fn write_app_identity(
+    b: &mut Vec<u8>,
+    identity: &crate::protocol::AppIdentity,
+    blobs: &mut Vec<Arc<[u8]>>,
+) {
+    b.extend_from_slice(&u32::from(identity.icon.is_some()).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    write_value(b, &Value::Str(identity.name.clone()), blobs);
+    // The slot is written either way; see the decoder's note.
+    match &identity.icon {
         Some(bytes) => write_value(b, &Value::Blob(bytes.clone()), blobs),
         None => write_value(b, &Value::Str(String::new()), blobs),
     }

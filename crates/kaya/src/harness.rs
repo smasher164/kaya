@@ -306,6 +306,26 @@ pub enum Step {
     /// default family, which is a REAL answer and reads as a mismatch,
     /// not as a pass.
     ExpectTypeface(String),
+    /// The app icon's SAMPLED PIXELS, read off the artifact the shell
+    /// will draw rather than echoed back from the declaration
+    /// (docs/app-identity-plan.md I8). An icon read has three tiers and
+    /// only the third is worth shipping: echoing kaya's own model is
+    /// worthless, echoing the property just written proves the call did
+    /// not throw, and a read of the picture the platform is HOLDING is
+    /// the only one that fails when the conversion failed.
+    ///
+    /// FOUR SAMPLES, NOT A HASH, and the reason is the conversion this
+    /// slice promises: one PNG goes in and each platform converts it
+    /// (an HICON here, an NSImage on mac, a GdkTexture on Linux), so a
+    /// hash of the result cannot be one frozen string across platforms
+    /// while four unmistakable colours can. The spelling is the four
+    /// quadrant centres — top-left, top-right, bottom-left,
+    /// bottom-right — as `RRGGBB` in uppercase hex, `/`-joined.
+    ///
+    /// A LOWERING THAT NEVER APPLIED reports the platform's own default
+    /// icon, or says in its own words that the window holds none, and
+    /// neither can collide with four declared colours.
+    ExpectAppIcon(String),
     /// Expect the container's children to span its content box along
     /// the main axis — the leftover-consumption half of the grow
     /// contract, and the second blind spot shares can never see:
@@ -705,6 +725,7 @@ impl Step {
             Step::ExpectRootFills { .. } => true,
             Step::ExpectInset { .. } => true,
             Step::ExpectTypeface(_) => true,
+            Step::ExpectAppIcon(_) => true,
             Step::ExpectFills { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectTitle { .. } => true,
@@ -876,6 +897,23 @@ pub trait Stage: Send + 'static {
     /// failure the slice exists to catch, dressed as a green lane. A
     /// backend without the read must fail to COMPILE.
     fn typeface(&self) -> String;
+    /// The app icon's four quadrant samples, read off the picture the
+    /// PLATFORM is holding — `RRGGBB/RRGGBB/RRGGBB/RRGGBB`, uppercase,
+    /// clockwise from the top left (docs/app-identity-plan.md I8).
+    ///
+    /// NO DEFAULT, and it earns it the way `typeface` does: an icon that
+    /// never applied leaves the platform's own in place, so a Stage that
+    /// answered "" or echoed the declaration would pass the identity leg
+    /// while nothing was ever drawn — the silent fallback, one tier up
+    /// from the font's. A backend without the read must fail to COMPILE.
+    ///
+    /// WHEN THERE IS NO ICON the answer says what it MEASURED and what
+    /// it could not tell apart, never a bare "none": the platforms
+    /// document a fallback chain (a Windows window with no icon of its
+    /// own falls through to the window CLASS's, then to the process's),
+    /// so a read that stopped at the first step would blame kaya for a
+    /// picture the shell is drawing from somewhere else.
+    fn app_icon(&self) -> String;
     /// The main-axis extents of the container's children, in child
     /// order, each as a whole percentage of their sum, joined with `,`
     /// — the observation expect_shares verifies, and the only way a
@@ -1436,6 +1474,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
             }
             "expect_typeface" => Step::ExpectTypeface(parse_string(rest)?),
+            "expect_app_icon" => Step::ExpectAppIcon(parse_string(rest)?),
             "expect_root_fills" => {
                 if !rest.is_empty() {
                     return Err(format!(
@@ -2937,6 +2976,20 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     Err(format!("typeface {got}, wanted {want}"))
                 }
             })),
+            Step::ExpectAppIcon(want) => Some(poll(|| {
+                let got = stage.app_icon();
+                if got == *want {
+                    Ok(format!("app icon {want}"))
+                } else {
+                    // WHAT THE PLATFORM IS HOLDING IS THE DIAGNOSIS, the
+                    // resolved family's rule one surface over: four
+                    // greys say a monochrome default is being drawn, a
+                    // sentence about a class icon says the window never
+                    // got one of its own, and the declared colours in a
+                    // different order say a lowering flipped an axis.
+                    Err(format!("app icon {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectRootFills => Some(poll(|| {
                 // Empty means fills; anything else is the platform's
                 // own description of the hug, for the failure text
@@ -3966,6 +4019,13 @@ mod tests {
         fn typeface(&self) -> String {
             "MockSystemFont".into()
         }
+        /// The mock applied no identity, and says so in a sentence
+        /// rather than with four colours: any colour string would be a
+        /// picture that could accidentally equal a scene's expectation,
+        /// where a sentence cannot.
+        fn app_icon(&self) -> String {
+            "<mock stage draws no app icon>".into()
+        }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
         }
@@ -4277,6 +4337,13 @@ mod tests {
         fn typeface(&self) -> String {
             "MockSystemFont".into()
         }
+        /// The mock applied no identity, and says so in a sentence
+        /// rather than with four colours: any colour string would be a
+        /// picture that could accidentally equal a scene's expectation,
+        /// where a sentence cannot.
+        fn app_icon(&self) -> String {
+            "<mock stage draws no app icon>".into()
+        }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()
         }
@@ -4472,6 +4539,13 @@ mod tests {
         /// stage that applied nothing.
         fn typeface(&self) -> String {
             "MockSystemFont".into()
+        }
+        /// The mock applied no identity, and says so in a sentence
+        /// rather than with four colours: any colour string would be a
+        /// picture that could accidentally equal a scene's expectation,
+        /// where a sentence cannot.
+        fn app_icon(&self) -> String {
+            "<mock stage draws no app icon>".into()
         }
         fn container_inset(&self, _target: Target) -> String {
             "0".into()

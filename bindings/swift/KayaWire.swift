@@ -18,7 +18,7 @@ enum KayaValue: Equatable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x7c7a23e2127c3801
+let kayaSpecHash: UInt64 = 0x9be02e4dbe710c5b
 
 struct KayaTx {
     var bytes = Data()
@@ -468,6 +468,16 @@ struct KayaTx {
         self.value(family)
         self.values(platforms)
         self.value(font)
+        self.end(kayaAt)
+    }
+
+    /// DECLARE the app's identity — the name it goes by and the picture that stands for it (docs/app-identity-plan.md, ratified 2026-08-18). `name` is a Str; `mask` bit 0 says an `icon` BLOB is present, and an empty Str rides its slot when it is not — the typeface's mask-plus-always-written-slot convention, copied rather than reinvented, so the two records decode the same way and one mask/slot disagreement test covers the shape.  A TRANSACTION VERB AND NOT A WINDOW PROP, because identity is per-APP where WINDOW_PROPS is per-window. `title` already lives there and is the WINDOW's title; the identity name is a different thing and the vocabulary must not conflate them (on Windows the two meet in one string, and it is the backend's single caption writer that composes them, never two authors).  ONE PICTURE, FIVE ROUTES. The same PNG reaches the macOS Dock, the Windows taskbar/alt-tab and caption, an X11 window's _NET_WM_ICON, the Android launcher and the iOS Home Screen — each by its platform's own route, some at runtime off these bytes and some at build time off the same file in the tree. One PNG goes in and each lowering converts (NSImage(data:), BitmapImage.SetSource, an HICON, a GdkTexture); no .ico, no .icns, no per-platform artwork on the wire.  THE FOUR WALLS ARE THE BRAND'S, VERBATIM, and for the brand's reasons. SET ONCE: a second write dies in the root, in every language at once. BEFORE THE FIRST MOUNT: so no backend shows an unidentified frame it must repaint. EMPTY IS REFUSED: an app that wants the platform's own identity declares none at all, and an empty string would sail through five lowerings indistinguishable from a default. NOT UNDOABLE: identity is not state.  THE BYTES ARE NOT INSPECTED IN THE CORE — the typeface's rule transfers exactly. Whether a blob is an image is a question only the platform's own decoder can answer, and a guess that disagreed with the decoder would be worse than no answer. Each backend decodes, and the observation reports what the DECODER produced (a size, sampled pixels) rather than echoing the request, so bytes that are not an image fail exactly like an icon that never applied.
+    mutating func setAppIdentity(_ mask: UInt32, _ name: KayaValue, _ icon: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_APP_IDENTITY))
+        self.u32(mask)
+        self.u32(0)
+        self.value(name)
+        self.value(icon)
         self.end(kayaAt)
     }
 

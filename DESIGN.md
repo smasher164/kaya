@@ -417,6 +417,37 @@ everywhere, and diverges only in what the host puts on screen.
   `NavigationSplitView` sidebar included and measured, so the day GTK's
   lowering moves to `AdwViewStack` + `AdwViewSwitcher` the scene grows
   two lines and this paragraph goes away.
+- **An app that declares an identity is a Dock app on macOS (ratified
+  2026-08-18; docs/app-identity-plan.md ruling 2).** `set_app_identity`
+  applies everywhere and every platform shows the mark, but macOS is the
+  one platform where SHOWING it changes what kind of process the app
+  is. kaya's test runs pick the `accessory` activation policy on
+  purpose — no Dock tile, no menu bar, no taking the keyboard from
+  whoever is using the machine, which is what lets five lanes run at
+  once — and an accessory app has no Dock tile to put an icon in. That
+  is measured rather than reasoned: the setter succeeded, the icon read
+  back at 512x512, and the Dock did not change by one pixel. So the
+  policy follows the DECLARATION: an app that declares an identity is
+  `regular`, an app that declares none keeps the accessory default, and
+  every lane leg but the identity scene's is unaffected. The identity
+  scene's macOS legs accept a Dock tile for the seconds they run.
+- **The identity NAME reaches less on macOS than elsewhere (ratified
+  2026-08-18; docs/app-identity-plan.md I9).** The declared name feeds
+  the menu-bar title on macOS and nothing further: no route measured
+  moves the Cmd-Tab label or the Dock tile's spoken title, so a
+  declared identity can leave the menu bar reading "Aurora Notes" while
+  Cmd-Tab still reads the launcher binary's name. The richer route —
+  injecting `CFBundleName` into the synthesized info dictionary, which
+  does move both — has to run before the first touch of
+  `NSApplication.shared`, which is before kaya's wire is open, so an
+  identity arriving in the build closure is already too late for it.
+  That is what a `.app` bundle is for, and it is packaging's to fix,
+  not the runtime record's. Elsewhere the name is whole: it is the
+  window caption, the taskbar tooltip and the alt-tab label on Windows
+  (one string, which kaya already owns through its single caption
+  writer), the `app_id` a Linux desktop matches a `.desktop` file by,
+  and `android:label` / `CFBundleDisplayName` in the two phones'
+  packages.
 
 A cross-language style guide is a versioned deliverable due before v1. The
 rules that keep bindings mutually recognizable have to be written down
@@ -2371,6 +2402,59 @@ enum, twenty names, on menu items and sections, with each backend
 mapping it to its own catalog — SF Symbols, Material Symbols, Adwaita,
 Fluent. The ids are append-only forever, since they are wire values in
 eight generated bindings.)
+
+**The app's OWN mark is the case that sentence carved out, and it is a
+blob (`set_app_identity`, the Windows depth landed 2026-08-18;
+docs/app-identity-plan.md is the ratified record).** No semantic name
+exists for a company's logo, no platform symbol set contains it, and no
+per-platform redraw is right, because the whole point is that it is the
+same mark everywhere. So an app declares two things about itself — the
+name it goes by and one PNG — and every platform shows both by its own
+route: the Dock on macOS, the taskbar, alt-tab and caption on Windows,
+the launcher and window switcher on Linux, the launcher on Android and
+the Home Screen on iOS. The record is `set_brand_typeface`'s shape
+verbatim, walls included: declared once, before the first mount, an
+empty declaration refused, the bytes never inspected by kaya's core, and
+`UndoVerdict::Refused` because identity is not state.
+
+Two things make it more than a slot. **One PNG goes in and each
+lowering converts** — an HICON on Windows, an `NSImage` on macOS, a
+`GdkTexture` on Linux — with no `.ico`, no `.icns` and no per-platform
+artwork on the wire; the per-platform transforms that genuinely matter
+(mac's margin grid, Android's adaptive layer pair, iOS's mask) are
+packaging-time work a runtime slot could not serve anyway. And **the
+source of truth is a FILE, not a call**: the packaging manifest names
+the app and names the icon beside it, the build reads that file, and the
+running app sends the same file's bytes. A build step needs the identity
+before any program has run, so it cannot come off the wire — and five
+routes reading five different files is how "the icon is the icon
+everywhere" gets broken quietly.
+
+**Why a runtime call at all, when most of what a user calls "the app
+icon" is packaging.** Windows is the answer, and it is not a special
+case so much as the clearest one: kaya is a LIBRARY loaded into someone
+else's process in six of its eight languages, so a build-time `.ico`
+inside kaya's own artifacts could never reach `python.exe`, `java.exe`
+or `dotnet.exe`. Windows' documented fallback for a window with no icon
+ends at the HOST PROCESS's icon, which means with no runtime call the
+Python guest wears the Python icon and the Java guest the JVM's. One
+runtime call from libkaya reaches all eight identically, which is
+exactly what invariant 1 asks for.
+
+**And the observation is of the picture the PLATFORM is holding.** An
+icon read has three tiers and only the third is worth shipping: echoing
+kaya's model is worthless, echoing back the property just written proves
+only that the call did not throw, and a read of the artifact the shell
+will draw is the one that fails when the conversion failed.
+`expect_app_icon` reports four sampled quadrant CENTRES of that artifact
+— on Windows, `WM_GETICON` on the real HWND, decoded to pixels. Four
+colours rather than a hash, because a hash cannot survive the
+per-platform conversion this design promises while four unmistakable
+colours can; centres rather than corners, because a rescale blurs a
+quadrant boundary and never the middle of a flat field. The vendored
+mark (`guests/assets/icons/kaya-mark.png`) is built so no platform's own
+default can equal the expectation — the vendored typeface's argument,
+one asset over.
 
 Note what is *not* the reason: tinting. Tinting is a template/mask
 operation on the alpha channel (`NSImage.isTemplate`, `.alwaysTemplate`,
