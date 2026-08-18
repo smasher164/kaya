@@ -28,6 +28,7 @@ import (
 	"dev.kaya/guests/go/gallery"
 	"dev.kaya/guests/go/grid"
 	"dev.kaya/guests/go/grow"
+	"dev.kaya/guests/go/identity"
 	"dev.kaya/guests/go/layout"
 	"dev.kaya/guests/go/menus"
 	"dev.kaya/guests/go/milestone2"
@@ -80,6 +81,7 @@ var scenes = map[string]func() *kaya.App{
 	"gallery":    gallery.App,
 	"grid":       grid.App,
 	"grow":       grow.App,
+	"identity":   identity.App,
 	"layout":     layout.App,
 	// One app behind both list-detail scripts: `split` drives
 	// resize_window and is desktop-only, `listdetail` is the bare

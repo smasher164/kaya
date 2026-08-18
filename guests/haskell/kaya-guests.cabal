@@ -200,6 +200,11 @@ executable typeface
   main-is: typeface.hs
   build-depends: kaya-guests
 
+executable identity
+  import: shared
+  main-is: identity.hs
+  build-depends: kaya-guests
+
 executable encodebench
   import: shared
   main-is: encodebench.hs

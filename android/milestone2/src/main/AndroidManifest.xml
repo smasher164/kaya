@@ -21,8 +21,17 @@
     <queries>
         <package android:name="dev.kaya.cliphelper" />
     </queries>
+    <!-- THE APP'S DECLARED IDENTITY, READ OUT OF ONE FILE
+         (docs/app-identity-plan.md ruling 4). `@mipmap/kaya_mark` is the
+         declared picture, copied verbatim into this module's generated
+         res by android/build.gradle.kts; `${kayaAppLabel}` is the
+         declared name, placed by the same reader. Neither is written
+         here, because the label WAS written here — three times, once per
+         app — and a fourth copy is how "one mark, one name" stops being
+         true without anybody editing it. -->
     <application
-        android:label="kaya milestone 0"
+        android:icon="@mipmap/kaya_mark"
+        android:label="${kayaAppLabel}"
         android:theme="@style/Theme.Kaya.NoActionBar">
         <activity
             android:name=".MainActivity"
@@ -42,6 +51,7 @@
         <service
             android:name="dev.kaya.KayaHarnessAccessibility"
             android:exported="false"
+            android:label="kaya harness"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

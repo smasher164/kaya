@@ -110,6 +110,23 @@ class MainActivity : ComponentActivity() {
             // what took the compose depth stub away and let
             // tools/android/run-emulator.sh wire the legs.
             "toolbar" -> Toolbar::app
+            // The identity scene (docs/app-identity-plan.md, rulings 3
+            // and 4). NOTHING IS LOWERED AT RUNTIME on this host: the
+            // launcher icon and the app's name are the INSTALLED
+            // PACKAGE's, compiled from guests/assets/identity.toml by
+            // android/build.gradle.kts, and `expect_app_icon` reads that
+            // package's icon back through the system PackageManager. The
+            // guest's own file supplies the FILE the same way the
+            // typeface guest does — a repo-relative default no device
+            // has, so the leg pushes the mark and names it in
+            // KAYA_ICON_FILE, which reaches the guest through the
+            // Os.setenv loop above.
+            //
+            // Its untitled window is desktop-only and Identity.java says
+            // so in its own words: a phone rejects createWindow at the
+            // root, so the guest skips it and the runner drops the one
+            // step that reads it (scene_script_drop).
+            "identity" -> Identity::app
             // Desktop-only scenes, registered for the honest failure:
             // selecting one here dies on the capability gate at
             // create_window, never by silently running milestone2.

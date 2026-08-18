@@ -2580,6 +2580,64 @@ def brand_typeface(family, platforms=None, font=None):
     ))
 
 
+def app_identity(name, icon=None):
+    """DECLARE the app's identity (docs/app-identity-plan.md): the name
+    it goes by and the picture that stands for it, as the bytes of one
+    image file.
+
+        kaya.app_identity("Aurora Notes", icon=PNG_BYTES)
+        kaya.app_identity("Aurora Notes")
+
+    ONE FUNCTION WHERE RUST HAS TWO (`app_identity` and
+    `app_identity_named`), which is `brand_typeface`'s precedent one verb
+    over: an optional keyword argument is how Python spells an optional
+    record, and the semantics is the one Rust's second function has —
+    `icon=None` declares a name and leaves every platform's own mark in
+    place, honestly and visibly.
+
+    ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
+    tile, the Windows taskbar/alt-tab icon and the caption's mark, and an
+    X11 window's icon; the same FILE, read at build time, becomes the
+    Android launcher icon and the iOS Home Screen icon. Send a PNG: each
+    lowering converts, and no platform-specific artwork rides the wire.
+
+    SET ONCE, BEFORE THE FIRST MOUNT: declare it inside the scene scope
+    (`with app.window():`) before the container that mounts. The root
+    refuses a second write and a late one — identity is not state, and a
+    slot that could flip at runtime would promise the identity-switching
+    surface the vocabulary deliberately does not have. An empty name is
+    refused there too: an app that wants the platform's own identity
+    declares none at all.
+
+    THE BYTES ARE NEVER INSPECTED between here and the platform's own
+    decoder. Whether a blob is an image is a question only that decoder
+    can answer, so bytes that are not one leave every platform's default
+    in place — which is why `expect_app_icon` reads what the DECODER
+    produced rather than echoing what was sent.
+    """
+    if icon is not None and not isinstance(icon, (bytes, bytearray,
+                                                  memoryview)):
+        raise TypeError(
+            f"kaya: app_identity icon= takes an image FILE's bytes, not "
+            f"{type(icon).__name__} — the NAME is the first argument, and a "
+            "path is the app's to read"
+        )
+    if not isinstance(name, str):
+        raise TypeError(
+            f"kaya: app_identity takes the app's name as str ('Aurora "
+            f"Notes'), not {type(name).__name__} — an image FILE's bytes ride "
+            "the icon= slot, which is a different thing"
+        )
+    _records().append(wire.tx_set_app_identity(
+        # Bit 0 says a blob rides; the slot is written either way, as an
+        # empty Str when it does not (the record's shape is fixed).
+        1 if icon is not None else 0,
+        name,
+        wire.BlobHandle(runtime.register_blob(icon)) if icon is not None
+        else "",
+    ))
+
+
 #: The undo-group record's kind, in the two header bytes `record()`
 #: frames it with — how `undoable` recognises a marker it already put at
 #: the head, without unpacking anything.

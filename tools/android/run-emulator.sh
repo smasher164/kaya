@@ -373,10 +373,73 @@ font_prepare() { # serial
         return 1
     fi
 }
+# THE IDENTITY SCENE'S MARK, THE FONT'S STORY ONE ASSET OVER. The guest
+# declares the VENDORED mark's BYTES (docs/app-identity-plan.md ruling 4)
+# and its default path is repo-relative, which no device has, so the file
+# is pushed here and the identity legs name the pushed copy in
+# KAYA_ICON_FILE.
+#
+# THE PATH COMES OUT OF THE DECLARATION, never retyped:
+# guests/assets/identity.toml is the one place the name and the picture
+# are written down, and a packaging step that retypes the path is the
+# second reader ruling 4 exists to prevent (tools/check-app-identity.sh
+# C6 holds this).
+#
+# A SHORT PUSH IS FATAL HERE TOO, and for a sharper reason than the
+# font's: corrupt bytes make BitmapFactory refuse the blob, and the
+# identity read then reports declared bytes it could not decode — three
+# removes from a half-finished push. The size is compared where the cause
+# is.
+KAYA_IDENTITY_MANIFEST="$ROOT/guests/assets/identity.toml"
+ICON_REL="$(python3 - "$KAYA_IDENTITY_MANIFEST" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+man = pathlib.Path(sys.argv[1])
+if not man.is_file():
+    sys.exit(f"run-emulator: {man} is missing — the app identity is declared "
+             f"there and the APK reads its icon and label from it "
+             f"(docs/app-identity-plan.md ruling 4)")
+decl = tomllib.loads(man.read_text(encoding="utf-8"))
+icon = decl.get("icon")
+if not isinstance(icon, str) or not icon.strip():
+    sys.exit(f"run-emulator: {man} declares no `icon`, so there is no mark to "
+             f"push to any device")
+print(icon)
+PY
+)"
+icon_rel_rc=$?
+if [ "$icon_rel_rc" -ne 0 ] || [ -z "$ICON_REL" ]; then
+    echo "run-emulator: could not read the declared icon from $KAYA_IDENTITY_MANIFEST" >&2
+    exit 1
+fi
+ICON_SRC="$ROOT/$ICON_REL"
+ICON_ON_DEVICE=/data/local/tmp/kaya-mark.png
+icon_prepare() { # serial
+    local serial="$1" want got
+    want="$(wc -c <"$ICON_SRC" | tr -d ' ')"
+    if ! adb -s "$serial" push "$ICON_SRC" "$ICON_ON_DEVICE" >/dev/null; then
+        echo "run-emulator: could not push $ICON_SRC to $serial" >&2
+        return 1
+    fi
+    # World-readable for font_prepare's reason: pushed by the SHELL user,
+    # opened by the app's.
+    adb -s "$serial" shell chmod 644 "$ICON_ON_DEVICE" >/dev/null || true
+    got="$(adb -s "$serial" shell stat -c %s "$ICON_ON_DEVICE" 2>/dev/null | tr -d '\r')"
+    if [ "$got" != "$want" ]; then
+        echo "run-emulator: the app mark on $serial is ${got:-no} bytes, and the" >&2
+        echo "  declared one ($ICON_REL) is $want — the identity legs would report" >&2
+        echo "  bytes the platform's decoder refused instead of a push that half" >&2
+        echo "  landed" >&2
+        return 1
+    fi
+}
 for serial in "${SERIALS[@]}"; do
     cliphelper_prepare "$serial" || exit 1
     CLIPHELPER_IME_ON+=("$serial")
     font_prepare "$serial" || exit 1
+    icon_prepare "$serial" || exit 1
 done
 timing cliphelper
 
@@ -411,6 +474,60 @@ select_helper_ime() { # serial
     echo "  finish the composing region before the select arrives" >&2
     return 1
 }
+
+# WHAT "BOUND" IS RECOGNISED BY, and why it is asserted rather than
+# assumed. `dumpsys accessibility` prints its bound set as
+# `Bound services:{Service[label=..., feedbackType...]}` — a LABEL and no
+# component — so the only thing this runner can match on is a name the
+# harness service gives itself. It used to match the bare word "kaya",
+# and that worked by ACCIDENT: the service declared no label of its own,
+# so it inherited the application's, and every validation app was called
+# "kaya milestone 0".
+#
+# The app identity slice took the accident away (docs/app-identity-plan.md
+# ruling 3): android:label is now the DECLARED name, which contains no
+# "kaya" — and the bind check then failed on all three pool devices,
+# through three arms and a reboot each, every leg reporting a picker that
+# never came up. MEASURED 2026-08-18, a whole lane's worth of legs, and
+# nothing anywhere named the cause.
+#
+# So the service names ITSELF now, and the two sides are checked against
+# each other here rather than hoped at. This is the guard for a coupling
+# invisible from either end: the manifests cannot see this grep, and this
+# grep cannot see the manifests.
+A11Y_LABEL="kaya harness"
+a11y_label_check() {
+    python3 - "$A11Y_LABEL" android/*/src/main/AndroidManifest.xml <<'A11YPY'
+import pathlib
+import re
+import sys
+
+want = sys.argv[1]
+bad = []
+seen = 0
+for path in sys.argv[2:]:
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    for service in re.findall(r"<service\b.*?</service>", text, re.S):
+        if "KayaHarnessAccessibility" not in service:
+            continue
+        seen += 1
+        if 'android:label="%s"' % want not in service:
+            bad.append(
+                "%s: the harness accessibility service declares no "
+                'android:label="%s", so dumpsys prints whatever label it '
+                "inherits — today the app's DECLARED name — and this runner's "
+                "bind check greps that label. Every leg on every device would "
+                "fail saying the picker never came up." % (path, want))
+if not seen:
+    bad.append("no android/*/src/main/AndroidManifest.xml declares "
+               "KayaHarnessAccessibility at all — this check read nothing and "
+               "would agree with any label")
+if bad:
+    sys.exit("run-emulator: " + "\n  ".join(bad))
+print('run-emulator: harness a11y label "%s" declared by %d apps' % (want, seen))
+A11YPY
+}
+a11y_label_check || exit 1
 
 leg_names=()
 leg_pids=()
@@ -576,7 +693,7 @@ run_apk_on() {
         local tries=0
         while [ "$tries" -lt 50 ]; do
             if adb -s "$serial" shell dumpsys accessibility 2>/dev/null \
-                | tr -d '\r' | grep -q "Bound services:.*kaya"; then
+                | tr -d '\r' | grep -q "Bound services:.*$A11Y_LABEL"; then
                 bound=1
                 break
             fi
@@ -799,6 +916,79 @@ print(";".join(prefix) + ";")
 PY
 }
 
+# ONE STEP OUT OF THE MIDDLE, where a CUT can only take a tail.
+#
+# scene_script_cut above exists for a scene that goes out of reach at its
+# END. The identity scene does not: its one desktop-only step is
+# `expect_title window#1`, which reads the declared NAME off a window that
+# has no title of its own — and this host has no auxiliary windows at all
+# (create_window is capability-rejected; DESIGN.md, Presentation
+# contexts). Below that step sit the live widgets and the SECOND
+# expect_app_icon, which is the step that catches an icon some later pass
+# disturbed. A cut would take all of it, so this takes the one step
+# instead.
+#
+# THE SHARED FILE STAYS BYTE-FROZEN and the dropped step is printed, so a
+# green leg still says what it declined — scene_script_cut's rule, and
+# every guard here is that function's guard restated for a middle step:
+#
+#   THE STEP MUST BE THERE, EXACTLY ONCE. Not there means the scene was
+#   reshaped and this drop is stale — the leg would then run everything,
+#   including the step this host cannot express. More than once means the
+#   drop is ambiguous about which one it takes.
+#   THE KEEP VERBS ARE MANDATORY, and every distinct assertion each one
+#   makes anywhere in the file must survive. A drop that could take the
+#   assertion the leg exists for is a gate satisfiable without exercising
+#   the real thing.
+#
+# NAMED BY VERB AND TARGET, never by the whole line: the line carries the
+# declared NAME, and retyping a declared value in a runner is the second
+# source of truth guests/assets/identity.toml exists to prevent.
+scene_script_drop() { # scene verb target keep-verb...
+    python3 - "$ROOT/tools/scenes/$1.steps" "$2" "$3" "${@:4}" <<'PY'
+import pathlib
+import sys
+
+path, verb, target = sys.argv[1], sys.argv[2], sys.argv[3]
+keeps = sys.argv[4:]
+if not keeps:
+    sys.exit(f"run-emulator: dropping `{verb} {target}` from {path} with no `keep` "
+             f"verb — say which assertions this drop may not take with it, or the "
+             f"leg can be trimmed until it asserts nothing")
+lines = [" ".join(line.split()) for line in pathlib.Path(path).read_text().splitlines()
+         if line.strip() and not line.lstrip().startswith("#")]
+hits = [i for i, line in enumerate(lines)
+        if line.split()[:2] == [verb, target]]
+if len(hits) != 1:
+    sys.exit(f"run-emulator: {path} has {len(hits)} `{verb} {target}` steps and this "
+             f"lane drops exactly one — the scene was reshaped and nobody re-read "
+             f"what the phone can express. Fix the leg, do not widen the drop.")
+kept = lines[:hits[0]] + lines[hits[0] + 1:]
+
+
+def asserted(seq, v):
+    """The distinct `v` steps in seq, whitespace-normalized."""
+    return {line for line in seq if line.split()[:1] == [v]}
+
+
+for v in keeps:
+    whole, survived = asserted(lines, v), asserted(kept, v)
+    if not survived:
+        sys.exit(f"run-emulator: dropping `{verb} {target}` from {path} leaves no "
+                 f"`{v}` step at all — the leg would pass without asserting the "
+                 f"thing it exists for")
+    if survived != whole:
+        sys.exit(f"run-emulator: dropping `{verb} {target}` from {path} takes "
+                 f"{sorted(whole - survived)} — the drop may not take an assertion "
+                 f"of `{v}` with it")
+print(f"run-emulator: NOT RUN on this host (no auxiliary windows): {lines[hits[0]]}",
+      file=sys.stderr)
+# Intent extras cannot carry newlines, so this lane's scripts fold into
+# `;` — the grammar's newline stand-in, exactly as scene_script does.
+print(";".join(kept) + ";")
+PY
+}
+
 # The sections tail opens an aux window this host rejects by
 # capability; the cut boundary is the tail's own first verb
 # (expect_windows appears nowhere above it), and the keep guard holds
@@ -806,6 +996,15 @@ PY
 # refused cut must kill the lane, not run an empty script — measured
 # 2026-08-16, three legs green-on-nothing ("script has no expects").
 SECTIONS_CUT="$(scene_script_cut sections expect_windows "expect_section expect_section_symbol")" || exit 1
+
+# The identity scene's one desktop-only step, dropped for every suite
+# rather than per block: all three guests skip the untitled window on
+# this host (rust by cfg, go by build tag, java by a runtime probe), so
+# all three run the same script. Assigned HERE for SECTIONS_CUT's reason
+# — a refused drop must kill the lane, not run a script the drop never
+# checked.
+IDENTITY_SCRIPT="$(scene_script_drop identity expect_title window#1 \
+    expect_app_icon)" || exit 1
 
 # The Compose interpreter carries the id of the sources it was compiled
 # from, the same contract libkaya and the SwiftUI dylib have. Written
@@ -825,6 +1024,44 @@ public final class KayaBuildId {
     private KayaBuildId() {}
 }
 EOF
+}
+
+# RULING 4'S BYTE EQUALITY, ASSERTED ON THE ARTIFACT ITSELF.
+#
+# The plan's mechanism is "one file, two readers", and its failure mode is
+# the quiet kind: the launcher shows last month's icon, the running window
+# shows this month's, and every test still passes, because each reader is
+# internally consistent. tools/check-app-identity.sh holds every
+# hand-written copy of the declaration level without building anything;
+# this is the half only a build can make — the bytes INSIDE the apk gradle
+# just wrote against the bytes guests/assets/identity.toml declares.
+#
+# HERE AND NOT IN A GATE, because invariant 3 puts the wall where someone
+# walks into it: the packaging step refuses, so no leg ever installs an
+# apk carrying a mark nobody declared.
+#
+# The entry name is android/build.gradle.kts's, which copies the declared
+# file verbatim into each app's generated res (and pins
+# `isCrunchPngs = false` so aapt cannot re-encode it behind this check).
+apk_icon_verify() { # apk
+    local apk="$1" declared packaged
+    if ! unzip -l "$apk" res/mipmap/kaya_mark.png >/dev/null 2>&1; then
+        echo "run-emulator: $apk carries no res/mipmap/kaya_mark.png — the app" >&2
+        echo "  identity's picture never reached the package, so its launcher icon" >&2
+        echo "  is whatever Android draws for an app that declares none" >&2
+        echo "  (android/build.gradle.kts is the reader; $ICON_REL is the source)" >&2
+        return 1
+    fi
+    declared="$(shasum -a 256 <"$ICON_SRC" | cut -d' ' -f1)"
+    packaged="$(unzip -p "$apk" res/mipmap/kaya_mark.png | shasum -a 256 | cut -d' ' -f1)"
+    if [ "$declared" != "$packaged" ]; then
+        echo "run-emulator: the mark inside $apk is not the declared one." >&2
+        echo "  declared ($ICON_REL): $declared" >&2
+        echo "  packaged (res/mipmap/kaya_mark.png): $packaged" >&2
+        echo "  One picture is the picture on all five platforms (ruling 1); two" >&2
+        echo "  readers that disagree is the failure ruling 4 exists to prevent." >&2
+        return 1
+    fi
 }
 
 # THE GO GUEST'S ARTIFACT: a `-buildmode=c-shared` .so the shell Activity
@@ -942,6 +1179,8 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     kaya_write_compose_marker
     (cd android && gradle --console=plain -q :milestone2:assembleDebug) || exit 1
     "$ROOT/tools/build-id.sh" --verify --component compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" || exit 1
+    apk_icon_verify \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" || exit 1
     run_apk compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
@@ -1096,6 +1335,37 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity toolbar \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script toolbar)'"
+    # THE IDENTITY SCENE (docs/app-identity-plan.md, rulings 3 and 4): an
+    # app says what it is called and what it looks like, and the platform
+    # shows both. NOTHING IS LOWERED AT RUNTIME ON THIS HOST and that is
+    # the ruling rather than the schedule — Android's launcher icon is
+    # part of the installed package, so the reader is the APK gradle just
+    # built (`android:icon` + a mipmap resource, `android:label`, all
+    # three off guests/assets/identity.toml), and the running app's one
+    # route to a picture, TaskDescription's Bitmap, stays REFUSED (I6).
+    #
+    # SO WHAT THIS LEG EXERCISES is the read, and the read is of the
+    # PACKAGE: the system PackageManager resolving this app's launcher
+    # icon out of the installed APK's own resources, sampled at the four
+    # quadrant centres. It cannot pass vacuously — the packaged mark is in
+    # the APK whether or not a guest declared anything, so the read also
+    # requires the wire declaration to have arrived and to sample the same
+    # four colours. That is the byte-equality invariant re-proved on the
+    # device, one tier below apk_icon_verify's proof on the artifact.
+    #
+    # THE MARK RIDES KAYA_ICON_FILE for the typeface font's reason: the
+    # guest's default path is repo-relative and a device has no repo;
+    # icon_prepare pushed the declared file to every pool device above.
+    #
+    # ONE STEP IS NOT RUN HERE, printed by scene_script_drop and named in
+    # its comment: `expect_title window#1` reads the declared NAME off an
+    # auxiliary window, and this host has none. The name's Android reader
+    # is `android:label` in that same APK.
+    run_apk identity-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity identity \
+        --es KAYA_SELFTEST_SCRIPT "'${IDENTITY_SCRIPT}'" \
+        --es KAYA_ICON_FILE "$ICON_ON_DEVICE"
     # The listdetail scene: list-detail's bare invariant, which is the
     # only form of it this host can run — the `split` scene drives
     # resize_window, and Android does not command its own window size
@@ -1316,6 +1586,8 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
     (cd android && gradle --console=plain -q :milestone2kt:assembleDebug) || exit 1
     "$ROOT/tools/build-id.sh" --verify --component compose \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" || exit 1
+    apk_icon_verify \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" || exit 1
     timing build-jvm
     run_apk jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
@@ -1425,6 +1697,19 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity toolbar \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script toolbar)'"
+    # The identity scene through the JVM binding (see the compose leg for
+    # what the scene is for and why nothing is lowered at runtime here).
+    # What this arm adds is the Java binding's `appIdentity` on the tier
+    # that shares guests/java's sources with the desktop lanes, and the
+    # ONE thing its guest must get right on a phone: Identity.java skips
+    # the untitled window on a host with no auxiliary windows, which it
+    # decides at RUNTIME because one artifact serves the desktops and
+    # this device both.
+    run_apk identity-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity identity \
+        --es KAYA_SELFTEST_SCRIPT "'${IDENTITY_SCRIPT}'" \
+        --es KAYA_ICON_FILE "$ICON_ON_DEVICE"
     # The commands scene through the JVM binding (see the compose leg).
     # The listdetail scene through the JVM binding: the same
     # guests/java/Split.java the desktop lanes run, on the tier that
@@ -1568,6 +1853,8 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     (cd android && gradle --console=plain -q :milestone2go:assembleDebug) || exit 1
     "$ROOT/tools/build-id.sh" --verify --component compose \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" || exit 1
+    apk_icon_verify \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" || exit 1
     timing build-go
     run_apk go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
@@ -1691,6 +1978,20 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity toolbar \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script toolbar)'"
+    # The identity scene through the Go binding (see the compose leg).
+    # Two things are this leg's alone. KAYA_ICON_FILE crosses the
+    # environment trap this suite exists to keep honest — the guest reads
+    # it with kaya.Env and never os.Getenv, which under the JNI attach
+    # answers "" forever, and "" here is not an error but the guest's
+    # repo-relative default (tools/check-go-env.sh is the static half).
+    # And the untitled window is split by BUILD TAG rather than by a
+    # runtime probe (guests/go/identity/untitled_{desktop,phone}.go),
+    # because a Go guest is cross-built per platform.
+    run_apk identity-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity identity \
+        --es KAYA_SELFTEST_SCRIPT "'${IDENTITY_SCRIPT}'" \
+        --es KAYA_ICON_FILE "$ICON_ON_DEVICE"
     # The listdetail scene through the Go binding: guests/go/split
     # under the `listdetail` key, the same one app behind both scripts
     # the other two hosts use. `split` itself is desktop-only.

@@ -8,6 +8,27 @@
     <string>@BUNDLE_ID@</string>
     <key>CFBundleName</key>
     <string>@NAME@</string>
+    <!-- THE DECLARED APP IDENTITY, or nothing at all
+         (docs/app-identity-plan.md ruling 3). iOS has NO runtime route to
+         the Home Screen icon — the SDK's whole app-icon surface is
+         supportsAlternateIcons/setAlternateIconName/alternateIconName,
+         typed BOOL and NSString, none of which takes bytes — so this
+         bundle is where an iOS app's identity lives, and make_bundle
+         fills these keys from guests/assets/identity.toml.
+
+         IT IS PER-BUNDLE AND NOT GLOBAL, deliberately: a guest that
+         declares no identity must produce a bundle carrying none, or the
+         interpreter's bundle read could report an icon for an app that
+         never declared one. That is the vacuous pass this whole scene
+         exists to make impossible.
+
+         CFBundleIconFiles NAMES A FILE IN THE BUNDLE ROOT, which is the
+         pre-asset-catalog spelling and the only one available here: there
+         is no asset catalog in this tree and no `actool` in the dev
+         shell, and the declared mark is copied in VERBATIM because
+         tools/check-app-identity.sh C5 holds every app-icon resource in
+         the tree byte-identical to the declaration. -->
+    @IDENTITY@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

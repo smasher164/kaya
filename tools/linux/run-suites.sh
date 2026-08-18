@@ -38,7 +38,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -160,8 +160,24 @@ status=0
 # FLOATING IS NOT OPTIONAL: sway tiles by default, which forces every
 # window to the output size — measured, a window asking for 640x480 got
 # 1276x693 — and that would break every expect_window_size leg, none of
-# which has anything to do with the clipboard. kaya's GTK windows carry
-# application_id("dev.kaya.Milestone2"), so the app_id rule matches.
+# which has anything to do with the clipboard.
+#
+# AND THE RULE IS `app_id=".*"` FOR A REASON, which this comment used to
+# get wrong. It claimed kaya's windows carry
+# `application_id("dev.kaya.Milestone2")` — the GApplication id — and
+# that the rule matches because of it. THEY DO NOT. A Wayland toplevel's
+# `app_id` (and an X11 window's `WM_CLASS`) follows `g_get_prgname()`,
+# which defaults to the LAUNCHER BINARY's name, so this lane's legs
+# advertise `python3`, `dotnet`, `java`, `milestone2` and `kaya-go` —
+# one per launcher, none of them the GApplication id. MEASURED
+# 2026-08-18 in this image: the identity scene's primary window, built
+# before any transaction is drained, reported `WM_CLASS = "identity"`
+# (the example binary's name), and its SECOND window — created after
+# `set_app_identity` had called `g_set_prgname("Aurora Notes")` —
+# reported `WM_CLASS = "Aurora Notes"`. So the name really is settable
+# at runtime, and it reaches every surface created after it is set.
+# A rule naming any one id would match a fraction of the legs;
+# `app_id=".*"` is what makes every leg float.
 #
 # The socket name is sway's to choose, unlike Weston's --socket, so it
 # is discovered after start rather than declared.
@@ -455,6 +471,39 @@ run_build go build_go
 drain_builds
 timing guest-builds
 
+# THE IDENTITY LEGS' ASSET, VERIFIED RATHER THAN ASSUMED — the typeface
+# block's rule one asset over, and for the same reason: the identity
+# guests default to the mark's repo-relative path, this script runs from
+# /work (the `cd` at the top) and /work IS the repo, so that default
+# resolves here. KAYA_ICON_FILE is for a runner whose guest cannot see
+# the repo, which is a phone.
+#
+# AND THE PATH IS READ FROM THE DECLARATION, never retyped. The app
+# identity is written down once, in guests/assets/identity.toml
+# (docs/app-identity-plan.md ruling 4), and a second copy of the path in
+# this file would be exactly the drift that decision exists to prevent —
+# tools/check-app-identity.sh fails a tools/ script that names the mark
+# without reading the manifest.
+#
+# LOUD, AND BEFORE ANY LEG RUNS. Without the mark an identity guest dies
+# inside its build closure with a panic about a missing file, on seven
+# legs at once, and the reader has to work back from seven stack traces
+# to one absent asset. This says it once, in the words that name the fix.
+identity_icon="$(python3 -c 'import tomllib; print(tomllib.load(open("guests/assets/identity.toml","rb"))["icon"])' 2>&1)"
+identity_rc=$?
+if [ "$identity_rc" -ne 0 ]; then
+    echo "run-suites: guests/assets/identity.toml could not be read: $identity_icon" >&2
+    exit 1
+fi
+if [ ! -s "$identity_icon" ]; then
+    echo "run-suites: the declared app mark \"$identity_icon\" is missing or empty" \
+        "inside the container. The repo is mounted at /work and this script runs" \
+        "from there, so the guests' repo-relative default should resolve —" \
+        "check the mount before doubting the guests." >&2
+    exit 1
+fi
+echo "identity: the declared mark resolves at $identity_icon ($(wc -c <"$identity_icon") bytes)"
+
 for proto in x11 wayland; do
     run "$proto" rust "$CARGO_TARGET_DIR/debug/examples/milestone2"
     run "$proto" c /tmp/c-guests/milestone2
@@ -747,6 +796,84 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin toolbar)"
     run "$proto" toolbar-java env KAYA_SELFTEST=toolbar KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # THE IDENTITY SCENE (docs/app-identity-plan.md): an app says what it
+    # is called and what it looks like, and this platform shows both. On
+    # this backend the mark is the declared blob decoded in process to a
+    # GdkTexture and handed to `gdk_toplevel_set_icon_list`, and the NAME
+    # is `g_set_prgname` + `g_set_application_name` — which is also what
+    # fills the blank on a window that declares no title of its own, the
+    # scene's `expect_title window#1 "Aurora Notes"`.
+    #
+    # THE READ IS OF THE X SERVER'S OWN COPY: `xprop -id <xid>
+    # _NET_WM_ICON`, the property every other client on that display
+    # sees, decoded to the four quadrant centres. Not GTK read back —
+    # there is no read-back for an icon list — and not kaya's model,
+    # which would pass with no lowering at all.
+    #
+    # THROUGH a11y-leg.sh, like styling's, typeface's and toolbar's legs,
+    # and for toolbar's reason rather than for the icon's: the scene
+    # promotes one command and asserts `expect_toolbar_item "Save"`, and
+    # GTK publishes no getter for accessible properties, so that button
+    # is addressed by the name the AT-SPI BUS answers with. No bus, no
+    # answer (measured: without the wrapper this scene fails on the two
+    # toolbar steps and on nothing else).
+    #
+    # Same roster as typeface and toolbar, and for the same reason —
+    # every hosted language has an identity guest, the C floor does not
+    # (no guests/c/identity.c, and the floor's Makefile SCENES does not
+    # name one), so there is no binary to run.
+    #
+    # ================= AND THE TWO RINGS ARE NOT THE SAME =============
+    # THE ICON IS X11-ONLY ON THIS LANE, and the wayland ring says so
+    # rather than skipping quietly (docs/app-identity-plan.md ruling 5,
+    # which separates Linux's two surfaces: an installed app's identity
+    # comes from a `.desktop` file and works on both protocols, while the
+    # runtime blob route — what an UNINSTALLED binary like these legs has
+    # — reaches X11 today and wayland only from GTK 4.20 with a
+    # compositor that speaks xdg-toplevel-icon-v1). MEASURED in this
+    # image 2026-08-18: GTK is 4.18.6, whose wayland backend drops the
+    # icon-list property, and `wayland-info` lists no
+    # xdg_toplevel_icon_manager_v1 on sway 1.10.1.
+    #
+    # So the wayland ring runs a WITNESS rather than the scene, and the
+    # witness is why this is not a silent skip: it runs the SAME guest
+    # under wayland and requires the leg to fail on the icon steps AND
+    # ONLY on the icon steps, with the backend's own measured sentence.
+    # That asserts three things a skip asserts nothing about — the
+    # lowering still RUNS on wayland (the arm is protocol-agnostic by
+    # construction, which is what makes this a version note rather than
+    # a carve-out), the rest of the identity scene including the NAME
+    # half passes there, and the diagnostic a reader will believe is
+    # reachable and says what it measured. It goes RED the day the
+    # image's GTK reaches 4.20 and the compositor speaks the protocol,
+    # which is exactly the day someone should move this leg onto the
+    # scene proper. ONE witness and not seven: what it measures is a
+    # GTK-and-compositor fact that no binding can change, where the X11
+    # ring below runs the full roster because the SCENE is about the
+    # semantics every language shares.
+    case "$proto" in
+        x11)
+            run "$proto" identity-rust env KAYA_SELFTEST=identity \
+                tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/identity"
+            run "$proto" identity-python env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
+                tools/linux/a11y-leg.sh python3 guests/python/identity.py
+            run "$proto" identity-go env KAYA_SELFTEST=identity \
+                tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+            run "$proto" identity-csharp env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
+                tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+            run "$proto" identity-ocaml env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
+                tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/identity.exe
+            run "$proto" identity-haskell env KAYA_SELFTEST=identity \
+                tools/linux/a11y-leg.sh "$(hs_bin identity)"
+            run "$proto" identity-java env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
+                tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+            ;;
+        wayland)
+            run "$proto" identity-witness-rust env KAYA_SELFTEST=identity \
+                tools/linux/identity-wayland-witness.sh \
+                tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/identity"
+            ;;
+    esac
     # The confirm scene: the modal-alert grammar (gtk::AlertDialog),
     # all three answer paths through the REAL dialog button.
     # The stall diagnostic (crates/kaya/src/stall.rs): the one scene

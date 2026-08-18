@@ -1610,6 +1610,49 @@ let brand_typeface ?(platforms = []) ?font family =
        | Some bytes -> Kaya_wire.Blob (Kaya_runtime.register_blob bytes)
        | None -> Kaya_wire.Str ""))
 
+(* DECLARE this app's identity (docs/app-identity-plan.md): the name it
+   goes by and the picture that stands for it, as the bytes of one image
+   file — [app_identity ~icon:mark "Aurora Notes"].
+
+   ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
+   tile, the Windows taskbar/alt-tab icon and the caption's mark, and an
+   X11 window's icon; the same FILE, read at build time, becomes the
+   Android launcher icon and the iOS Home Screen icon. Send a PNG: each
+   lowering converts, and no platform-specific artwork rides the wire.
+
+   [~icon] LEFT OUT IS THE NAME-ONLY DECLARATION — the optional labelled
+   argument [brand_typeface]'s [~font] already uses, and OCaml's spelling
+   of Rust's second function. A named app with no mark still reaches the
+   surfaces a name reaches (the Windows caption and taskbar tooltip, the
+   macOS menu bar, the Linux app_id, and both phones' packaging), and
+   every icon surface keeps the platform's own default, honestly and
+   visibly.
+
+   SET ONCE, BEFORE THE FIRST MOUNT: [brand_typeface]'s wall verbatim,
+   and for its reason — identity is not state, and a slot that could flip
+   at runtime would promise the identity-switching surface the vocabulary
+   deliberately does not have. The root refuses a second write, a late
+   one and an empty name; an app that wants the platform's own identity
+   declares none at all.
+
+   THE BYTES ARE NEVER INSPECTED between here and the platform's own
+   decoder. Whether a blob is an image is a question only that decoder
+   can answer, so bytes that are not one leave every platform's default
+   in place, which is why the conformance scene reads what the DECODER
+   produced rather than echoing this request back. *)
+let app_identity ?icon name =
+  emit (the_tx ())
+    (Kaya_wire.tx_set_app_identity
+       (match icon with Some _ -> 1 | None -> 0)
+       (Kaya_wire.Str name)
+       (* THE ICON SLOT IS ALWAYS WRITTEN and the mask above is what
+          says whether it means anything: an absent icon rides as an
+          empty Str, so the record's field count never varies with the
+          payload (the brand mask's discipline, verbatim). *)
+       (match icon with
+       | Some bytes -> Kaya_wire.Blob (Kaya_runtime.register_blob bytes)
+       | None -> Kaya_wire.Str ""))
+
 (* Mount into the default window; per-window targets arrive with the
    window vocabulary. *)
 (* Set a window's attributes in one construct — the attribute set is

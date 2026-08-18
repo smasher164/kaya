@@ -385,9 +385,12 @@ comparison — the FFI boundary repairs it before it exists to kaya.
 **Stated platform divergences.** Uniform semantics is the invariant, so
 the places where a platform genuinely cannot draw what the others draw
 are recorded here, once, rather than re-discovered per binding or left
-in a backend comment nobody reads. Neither of these changes what a
-program means or what it emits: the prop applies everywhere, reads back
-everywhere, and diverges only in what the host puts on screen.
+in a backend comment nobody reads. NONE of them changes what a program
+means or what it emits: the prop applies everywhere, reads back
+everywhere, and diverges only in what the host puts on screen. Each
+names the date it was ratified and the brief that argued it, because a
+divergence with no provenance reads as a bug the next person tries to
+fix.
 
 - **The dirty marker draws no chrome on the phones (ratified
   2026-08-06; docs/dirty-plan.md D4).** `dirty` applies on all five
@@ -431,14 +434,29 @@ everywhere, and diverges only in what the host puts on screen.
   `regular`, an app that declares none keeps the accessory default, and
   every lane leg but the identity scene's is unaffected. The identity
   scene's macOS legs accept a Dock tile for the seconds they run.
+  THE POLICY IS RAISED LATE AND THAT IS ENOUGH (measured 2026-08-18):
+  the identity arrives while the app is building its first screen, long
+  after `applicationWillFinishLaunching` has set `accessory`, and the
+  tile still goes up. Raising it does NOT take the front — nothing
+  calls `NSApplication.activate` — so eight identity legs put eight
+  tiles in the Dock and steal nobody's keyboard, which is what lets the
+  scene run beside everything else. The tile is UNMASKED on macOS, a
+  hard-edged square beside rounded system icons, and MASKED on iOS,
+  rounded by SpringBoard: one declaration, each platform's own
+  convention, and the square is the declared blob owning its own shape
+  rather than a defect.
 - **The identity NAME reaches less on macOS than elsewhere (ratified
   2026-08-18; docs/app-identity-plan.md I9).** The declared name feeds
-  the menu-bar title on macOS and nothing further: no route measured
+  the menu-bar title on macOS and the caption of any window that
+  declared no title of its own, and nothing further: no route measured
   moves the Cmd-Tab label or the Dock tile's spoken title, so a
   declared identity can leave the menu bar reading "Aurora Notes" while
-  Cmd-Tab still reads the launcher binary's name. The richer route —
-  injecting `CFBundleName` into the synthesized info dictionary, which
-  does move both — has to run before the first touch of
+  Cmd-Tab still reads the launcher binary's name. Filling a blank
+  caption is not overriding one — a window with a title of its own
+  keeps it, on every backend, which is why the identity scene's two
+  `expect_title` lines are the same two lines everywhere. The richer
+  route — injecting `CFBundleName` into the synthesized info
+  dictionary, which does move both — has to run before the first touch of
   `NSApplication.shared`, which is before kaya's wire is open, so an
   identity arriving in the build closure is already too late for it.
   That is what a `.app` bundle is for, and it is packaging's to fix,
@@ -448,6 +466,46 @@ everywhere, and diverges only in what the host puts on screen.
   writer), the `app_id` a Linux desktop matches a `.desktop` file by,
   and `android:label` / `CFBundleDisplayName` in the two phones'
   packages.
+- **On Linux the identity has two surfaces, and only one of them
+  carries a version note (ratified 2026-08-18;
+  docs/app-identity-plan.md ruling 5).** A RUNNING app's mark reaches
+  an X11 window's `_NET_WM_ICON` today and nothing on Wayland until
+  GTK 4.20 plus `xdg-toplevel-icon-v1`; an INSTALLED app's mark comes
+  from a `.desktop` file plus the hicolor install, on both protocols,
+  and that is the primary route with no version condition attached.
+  This is a version note, not a carve-out: the code is ONE path — the
+  lowering hands decoded textures to `gdk_toplevel_set_icon_list`, and
+  GTK 4.20 lowers that same list into `xdg_toplevel_icon_v1.add_buffer`
+  — so what is missing is a protocol on one lane image, not a
+  behaviour. The gap is held open by a leg rather than by a stub
+  (docs/deferred.md), and it goes red when the platform moves.
+- **On Android the mark and the name are the INSTALLED PACKAGE's
+  (ratified 2026-08-18; docs/app-identity-plan.md I6, ruling 3).**
+  `android:icon` and `android:label`, compiled from the declared asset
+  by the APK build — and a running kaya app has no route to either. The
+  one runtime route to a picture, `ActivityManager.TaskDescription`, is
+  refused: its bytes path is deprecated at API 28, its non-deprecated
+  replacement takes a drawable resource id stock Launcher3 ignores, and
+  it would give Android a FEATURE the other four platforms have not
+  rather than a different spelling of a shared one. The identity
+  scene's `expect_app_icon` reads the packaged icon back through the
+  system's PackageManager, and requires the wire declaration to have
+  arrived and to match it — so the read cannot pass on the packaging
+  alone, which is in the APK whether any guest declared anything or
+  not.
+- **On iOS the identity is the BUNDLE's, and the name has no window
+  reader at all (ratified 2026-08-18; docs/app-identity-plan.md I8).**
+  iOS has no runtime call that takes picture bytes — the whole SDK
+  surface is `supportsAlternateIcons`, `setAlternateIconName` and
+  `alternateIconName`, typed BOOL and NSString — so both halves are
+  packaging: the icon copied into the bundle and `CFBundleDisplayName`.
+  That is a fact about the platform rather than a schedule; nothing is
+  waiting to be built. And iOS has no auxiliary windows, so the
+  window-caption reader the other platforms use for the NAME does not
+  exist there: the phone's reader of the name is its package's own
+  label. The shared scene is not touched for it — the one step that
+  reads a caption off an auxiliary window is DROPPED by the runner,
+  which prints what it declined (invariant 6).
 
 A cross-language style guide is a versioned deliverable due before v1. The
 rules that keep bindings mutually recognizable have to be written down
@@ -2423,12 +2481,18 @@ lowering converts** — an HICON on Windows, an `NSImage` on macOS, a
 artwork on the wire; the per-platform transforms that genuinely matter
 (mac's margin grid, Android's adaptive layer pair, iOS's mask) are
 packaging-time work a runtime slot could not serve anyway. And **the
-source of truth is a FILE, not a call**: the packaging manifest names
-the app and names the icon beside it, the build reads that file, and the
-running app sends the same file's bytes. A build step needs the identity
-before any program has run, so it cannot come off the wire — and five
-routes reading five different files is how "the icon is the icon
-everywhere" gets broken quietly.
+source of truth is a FILE, not a call**: the packaging manifest
+(`guests/assets/identity.toml`) names the app and names the icon beside
+it, the build reads that file, and the running app sends the same file's
+bytes. A build step needs the identity before any program has run, so it
+cannot come off the wire — and five routes reading five different files
+is how "the icon is the icon everywhere" gets broken quietly. That last
+sentence is a gate rather than a hope: `tools/check-app-identity.sh`
+holds every hand-written copy of the name and the path level with the
+declaration, and DECODES the mark's own pixels against the byte-frozen
+`expect_app_icon` string the shared scene asserts, so an asset swapped
+without moving the expectation fails there instead of on five lanes at
+once.
 
 **Why a runtime call at all, when most of what a user calls "the app
 icon" is packaging.** Windows is the answer, and it is not a special

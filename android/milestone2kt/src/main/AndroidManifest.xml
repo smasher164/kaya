@@ -7,8 +7,12 @@
     <queries>
         <package android:name="dev.kaya.cliphelper" />
     </queries>
+    <!-- The declared identity, read out of guests/assets/identity.toml by
+         android/build.gradle.kts. The reasoning is spelled once, in
+         milestone2's manifest. -->
     <application
-        android:label="kaya milestone 0 (jvm ring)"
+        android:icon="@mipmap/kaya_mark"
+        android:label="${kayaAppLabel}"
         android:theme="@style/Theme.Kaya">
         <activity
             android:name=".MainActivity"
@@ -28,6 +32,7 @@
         <service
             android:name="dev.kaya.KayaHarnessAccessibility"
             android:exported="false"
+            android:label="kaya harness"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

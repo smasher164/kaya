@@ -321,6 +321,29 @@ in docs/deferred.md.
    the half that survives a new site: every file that redeems a picked
    file is in one of two tables, and the pass-through table's claim is
    itself checked, by refusing any bare mode number in those files),
+   `tools/check-app-identity.sh` (ONE declared identity, and every
+   hand-written copy of it agrees. guests/assets/identity.toml names the
+   app and names its mark; a BUILD reads it (the APK's mipmap and
+   `android:icon`/`android:label`, the iOS bundle's icon and
+   `CFBundleDisplayName`) and the RUNNING APP reads the same file's
+   bytes onto the wire (the macOS Dock, the Windows taskbar and caption,
+   an X11 window). Five routes reading five different files is how one
+   mark on five platforms breaks quietly — the launcher shows last
+   month's icon, the running window shows this month's, and every test
+   still passes. The clause with teeth is the one nothing else could
+   have: the byte-frozen `expect_app_icon "E01B24/33D17A/1C71D8/F6D32D"`
+   in tools/scenes is DECODED against the mark's actual pixels, so
+   swapping the asset without moving the expectation fails here instead
+   of on five lanes at once. Beside it: every file naming
+   `KAYA_ICON_FILE` takes its default from the declaration, every
+   identity guest declares the declared name, any app-icon resource
+   anywhere in the tree is byte-identical to the declared mark, and a
+   tools/ packaging step reads the manifest rather than retyping the
+   path — the .cmd launchers excepted, because cmd.exe cannot read TOML.
+   BUILD OUTPUT IS DELIBERATELY OUT OF ITS WALK: the bytes actually
+   written into an artifact are checked by the packaging step itself,
+   which is the path nobody can avoid, and a gate that reads a build
+   directory has a red that the last watched negative can manufacture),
    `tools/check-stubs.sh` (no runner wires a scene's legs while its
    backend still stubs the feature — depth-slice stubs compile, so
    only this cross-check sees the combination. A DEPTH STUB IS A CALL,

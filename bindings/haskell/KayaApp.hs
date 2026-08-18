@@ -123,6 +123,8 @@ module KayaApp
     BrandAttr (..),
     brandTypeface,
     TypefaceAttr (..),
+    appIdentity,
+    appIdentityNamed,
     Platform (..),
     AlertAttr (..),
     showAlert,
@@ -1107,6 +1109,48 @@ emitTypeface family attrs =
     -- IO: real bytes register through the blob channel first (the menu
     -- icon's mechanism) and travel as a handle.
     slot = maybe (pure (W.VStr "")) (fmap W.VBlob . registerBlob) font
+
+-- | DECLARE this app's identity (docs/app-identity-plan.md): the name it
+-- goes by and the picture that stands for it, as the bytes of one image
+-- file — @appIdentity "Aurora Notes" markPng@.
+--
+-- ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
+-- tile, the Windows taskbar\/alt-tab icon and the caption's mark, and an
+-- X11 window's icon; the same FILE, read at build time, becomes the
+-- Android launcher icon and the iOS Home Screen icon. Send a PNG: each
+-- lowering converts, and no platform-specific artwork rides the wire.
+--
+-- SET ONCE, BEFORE THE FIRST MOUNT — 'brandTypeface''s walls verbatim
+-- and for their reason: identity is not state, and a slot that could
+-- flip at runtime would promise the identity-switching surface the
+-- vocabulary deliberately does not have. The root refuses a second
+-- write, a late one and an empty name, in its own words, in all eight
+-- languages.
+--
+-- THE BYTES ARE NEVER INSPECTED between here and the platform's own
+-- decoder. Whether a blob is an image is a question only that decoder
+-- can answer, so bytes that are not one leave every platform's default
+-- in place — which is why the conformance scene reads what the DECODER
+-- produced rather than echoing this request back.
+appIdentity :: String -> BS.ByteString -> Build ()
+appIdentity name icon =
+  -- Real bytes register through the blob channel first (the menu icon's
+  -- mechanism) and travel as a handle, which is why this needs IO.
+  emitBIO (W.txSetAppIdentity 1 (W.VStr name) . W.VBlob <$> registerBlob icon)
+
+-- | The NAME-ONLY form, for an app that has a name and no mark yet — a
+-- SECOND FUNCTION rather than an attribute list, because there is
+-- exactly one optional thing here and Haskell names it by naming the
+-- function. Its identity still reaches the surfaces a name reaches (the
+-- Windows caption and taskbar tooltip, the macOS menu bar, the Linux
+-- app_id, and both phones' packaging) and every icon surface keeps the
+-- platform's own default, honestly and visibly.
+appIdentityNamed :: String -> Build ()
+appIdentityNamed name =
+  -- The slot is written either way — an empty Str stands in when there
+  -- are no bytes — so the record's field count never varies with the
+  -- payload.
+  emitB (W.txSetAppIdentity 0 (W.VStr name) (W.VStr ""))
 
 -- | Mount into the default window; per-window targets arrive with the
 -- window vocabulary.

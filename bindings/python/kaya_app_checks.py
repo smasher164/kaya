@@ -1757,6 +1757,112 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
           "pass through for the ROOT to refuse", passed_through == 3)
     _rewind(before)
 
+    # THE APP IDENTITY (docs/app-identity-plan.md), the typeface's
+    # sibling and the same failure shape one tier up: every platform
+    # draws SOMETHING where an app's mark goes, so a declaration this
+    # binding queued wrong is indistinguishable from a lowering that
+    # never applied. The mask and the slot are the pair that goes
+    # silently wrong — the core refuses BOTH directions of a
+    # disagreement (crates/kaya/src/wire.rs), and this is where Python's
+    # side of it is read.
+
+    def _identity(rec):
+        """The TX_SET_APP_IDENTITY record, field by field: 8 header,
+        u32 mask, u32 reserved, the name value, the icon slot. Answers
+        (mask, reserved, name, icon_kind, icon_len)."""
+        def one(off):
+            kind = int.from_bytes(rec[off:off + 4], "little")
+            length = int.from_bytes(rec[off + 4:off + 8], "little")
+            body = rec[off + 8:off + 8 + length]
+            nxt = off + 8 + (length + 7) // 8 * 8
+            return kind, length, body, nxt
+        mask = int.from_bytes(rec[8:12], "little")
+        reserved = int.from_bytes(rec[12:16], "little")
+        _k, _n, name, off = one(16)
+        icon_kind, icon_len, _b, _off = one(off)
+        return mask, reserved, name.decode(), icon_kind, icon_len
+
+    def _identity_records(records):
+        return [r for r in records
+                if _rec_kind(r) == kaya.wire.TX_SET_APP_IDENTITY]
+
+    before = len(kaya._tx)
+    kaya.app_identity("Aurora Notes", icon=b"\x89PNG\r\n\x1a\n not really")
+    identities = _identity_records(kaya._tx[before:])
+    check("app_identity reaches the records", len(identities) == 1)
+    # The sentinel rather than `if identities:`, for the typeface
+    # clause's measured reason: a dropped record must make these FAIL,
+    # not vanish.
+    mask, reserved, name, icon_kind, icon_len = (
+        _identity(identities[0]) if len(identities) == 1
+        else (None, None, None, None, None))
+    check("with the name as a Str, bit 0 set and a Blob in the icon slot",
+          (mask, name, icon_kind) == (1, "Aurora Notes", kaya.wire.VALUE_BLOB))
+    check("and the reserved word untouched — a guest names no platform here",
+          reserved == 0)
+    _rewind(before)
+
+    # THE NAME-ONLY FORM, which is Python's spelling of Rust's
+    # `app_identity_named`: the icon slot is written ANYWAY, as the empty
+    # Str, so the record's field count never varies with the payload.
+    before = len(kaya._tx)
+    kaya.app_identity("Aurora Notes")
+    named_only = _identity_records(kaya._tx[before:])
+    check("app_identity with no icon= still reaches the records",
+          len(named_only) == 1)
+    mask, _reserved, name, icon_kind, icon_len = (
+        _identity(named_only[0]) if len(named_only) == 1
+        else (None, None, None, None, None))
+    check("with bit 0 CLEAR and the icon slot written as the empty Str",
+          (mask, name, icon_kind, icon_len)
+          == (0, "Aurora Notes", kaya.wire.VALUE_STR, 0))
+    _rewind(before)
+
+    # THE TWO WIRE-DOMAIN TYPES, said out loud where the other seven
+    # bindings have `&str` and `Option<&[u8]>`. Nothing semantic: the
+    # path-instead-of-bytes slip is the one that would otherwise reach
+    # the core as a name-shaped blob.
+    for what, kwargs, fragment in (
+        ("icon= that is not bytes",
+         {"name": "Aurora Notes", "icon": "guests/assets/icons/kaya-mark.png"},
+         "takes an image FILE's bytes"),
+        ("a name that is not a str", {"name": b"Aurora Notes"},
+         "takes the app's name as str"),
+    ):
+        before_bad = len(kaya._tx)
+        try:
+            kaya.app_identity(**kwargs)
+            ok = False
+        except Exception as exc:
+            ok = isinstance(exc, TypeError) and fragment in str(exc)
+        _rewind(before_bad)
+        check(f"app_identity refuses {what}", ok)
+
+    # WHAT IS DELIBERATELY NOT REFUSED HERE, pinned so a later edit
+    # cannot quietly add it: an empty name and an empty icon blob are
+    # both the ROOT's, in one sentence every language reads
+    # (crates/kaya/src/scene.rs). A binding-local copy of a root wall was
+    # measured as the only wall in eight once already (invariant 1).
+    before = len(kaya._tx)
+    passed_through = 0
+    for kwargs in ({"name": ""}, {"name": "Aurora Notes", "icon": b""}):
+        try:
+            kaya.app_identity(**kwargs)
+            passed_through += 1
+        except Exception:
+            pass
+    check("an empty name and an empty icon blob both pass through for the "
+          "ROOT to refuse", passed_through == 2)
+    # AND THE EMPTY BLOB STILL SETS THE MASK, which is what makes the
+    # root's refusal reachable: a binding that turned zero bytes into the
+    # name-only form would swallow the wall on Python alone.
+    empty_icon = _identity_records(kaya._tx[before:])
+    check("and an empty icon= still declares itself present in the mask",
+          len(empty_icon) == 2
+          and _identity(empty_icon[1])[0] == 1
+          and _identity(empty_icon[1])[3] == kaya.wire.VALUE_BLOB)
+    _rewind(before)
+
     with kaya.column():
         before = len(kaya._tx)
         kaya.label(text="Sections").role(kaya.Role.HEADING)

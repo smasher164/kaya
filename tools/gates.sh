@@ -189,6 +189,17 @@ GATES = [
     # nothing held them to the spec's numbering — the same class as
     # check-verbs' private wire constants, one ABI over.
     ("check-file-modes", ["tools/check-file-modes.sh"], True, ""),
+    # ONE DECLARED IDENTITY, READ BY A BUILD AND BY A RUNNING APP. Five
+    # routes reading five different files is how "one mark on five
+    # platforms" breaks quietly: the launcher shows last month's icon,
+    # the running window shows this month's, and every test still
+    # passes. This holds guests/assets/identity.toml level with every
+    # hand-written copy of it, and holds the byte-frozen scene
+    # expectation level with the mark's actual pixels.
+    ("check-app-identity", ["tools/check-app-identity.sh"], False,
+     "one of its clauses walks every path in the tree looking for app-icon "
+     "resources, so any add, delete or rename is a real input — check-case's "
+     "shape, and a key that cheap to invalidate is a cache that never hits"),
     ("check-jni", ["tools/check-jni.sh"], True, ""),
     ("check-stubs", ["tools/check-stubs.sh"], True, ""),
     ("check-compose", ["tools/check-compose.sh"], True, ""),

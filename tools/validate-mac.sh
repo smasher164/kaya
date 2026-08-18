@@ -48,7 +48,7 @@ timing() {
 # they encode per-language coverage decisions (the deploy-win
 # panels_go lesson: a fourth hand-maintained list is a forgotten
 # registration waiting to ship).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet — built and run rust-only until their guests
 # arrive, when they move into SCENES. Empty today: styling graduated
@@ -62,6 +62,13 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # platforms' arms landed, no backend carries a toolbar depth stub, and
 # the seven other guests exist — so it moved into SCENES above and
 # check-steps demands its legs on this lane like any other scene.
+# The identity scene (docs/app-identity-plan.md) went STRAIGHT into
+# SCENES rather than through DEPTH_SCENES: its depth platform was
+# Windows, and by the time this lane's arm landed all eight guests
+# existed, so a depth entry here would have held seven legs off a
+# backend that had the feature. It carries no C floor guest, exactly as
+# `toolbar` does not (guests/c/Makefile's SCENES is the other side of
+# that, read by check-steps' sweep_c_floor).
 DEPTH_SCENES="typeface"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
@@ -1166,6 +1173,53 @@ run toolbar-ocaml-swiftui env KAYA_SELFTEST=toolbar KAYA_LIB="$ROOT/target/debug
     _build/default/guests/ocaml/toolbar.exe
 run toolbar-haskell-swiftui env KAYA_SELFTEST=toolbar "$(hs_bin toolbar)"
 run toolbar-java-swiftui env KAYA_SELFTEST=toolbar KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
+drain
+
+# The identity scene (docs/app-identity-plan.md): an app says what it is
+# called and what it looks like, and this platform shows both.
+#
+# THESE LEGS PUT A DOCK TILE ON THE SCREEN, and that is ruling 2 rather
+# than a side effect to apologize for. An `.accessory` app — every other
+# leg on this lane, deliberately, so a suite never steals the human's
+# keyboard — has NO DOCK TILE to put a picture in: measured, the setter
+# succeeded, the image read back at 512x512, and the Dock did not move
+# one pixel. So an app that DECLARES an identity becomes `.regular`, and
+# these eight legs are the only ones on this lane that do. They do not
+# ACTIVATE (nothing calls NSApplication.activate, which stays behind
+# KAYA_ACTIVATE=1), so the tiles appear and go without taking the front
+# — measured while capturing the Dock, with another app still frontmost
+# throughout.
+#
+# THE POLICY IS RAISED LATE, AND THAT WAS THE PLAN'S ONE OPEN QUESTION.
+# The identity arrives while the app is building its first screen, so it
+# arrives after launch, and nobody had measured whether a policy raised
+# at that moment puts the tile up. It does: captured 2026-08-18, the
+# declared four-quadrant mark in this machine's Dock beside thirteen
+# rounded system icons (unmasked, which is the blob owning its own
+# shape). The KAYA_ACTIVATE=1 fallback swift/KayaSwiftUIEntry.swift
+# holds open was not needed and is not set here.
+#
+# POOLED, the toolbar block's reasoning: the scene's `click` is
+# in-process, no chord is pressed, no window is closed, and both icon
+# reads are of this process's own AppKit state. The activation policy is
+# per-process too, so eight of these are eight independent Dock tiles.
+#
+# NO C FLOOR LEG: guests/c/identity.c does not exist and the floor's
+# Makefile SCENES does not name it, which check-steps' sweep_c_floor
+# reads from the other side.
+KAYA_SELFTEST_SCRIPT="$(scene_script identity)"
+export KAYA_SELFTEST_SCRIPT
+run identity-rust-swiftui env KAYA_SELFTEST=identity "$RUST_GUESTS"/identity
+run identity-python-swiftui env KAYA_SELFTEST=identity python3 guests/python/identity.py
+run identity-go-swiftui env KAYA_SELFTEST=identity target/go-guests/kaya-go
+run identity-swift-swiftui env KAYA_SELFTEST=identity target/swift-guests/identity
+run identity-csharp-swiftui env KAYA_SELFTEST=identity KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    dotnet exec "$CS_GUEST"
+run identity-ocaml-swiftui env KAYA_SELFTEST=identity KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
+    _build/default/guests/ocaml/identity.exe
+run identity-haskell-swiftui env KAYA_SELFTEST=identity "$(hs_bin identity)"
+run identity-java-swiftui env KAYA_SELFTEST=identity KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
 

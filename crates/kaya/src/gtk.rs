@@ -1178,6 +1178,33 @@ struct CoreState {
     /// The window's OWN mounted root and title, restored on pop.
     window_roots: HashMap<u64, gtk4::Widget>,
     window_titles: HashMap<u64, String>,
+    /// The windows whose title the APP wrote, as opposed to the one this
+    /// backend built its primary with. It is the difference between a
+    /// window that says what it is and a window with nothing written,
+    /// and that is exactly the blank an app's declared NAME fills
+    /// (docs/app-identity-plan.md I9). Without it the primary's
+    /// placeholder — "kaya milestone 2", set in the builder before any
+    /// transaction exists — is indistinguishable from a title an app
+    /// chose, and an app that declared an identity would keep wearing
+    /// kaya's own name.
+    app_titled: std::collections::HashSet<u64>,
+    /// The app's declared identity NAME (docs/app-identity-plan.md I9),
+    /// kept because it is a window's DEFAULT caption: it fills the blank
+    /// on a window that declares no title of its own and never overrides
+    /// one that does.
+    identity_name: Option<String>,
+    /// WHAT THIS PROCESS DID WITH THE DECLARED ICON BLOB — not what the
+    /// platform is holding, which is the read's job and a different
+    /// question entirely. The two together are what let the observation
+    /// tell "kaya never set an icon" from "kaya set one and it did not
+    /// survive" (docs/app-identity-plan.md I8, invariant 3).
+    identity_icon: IdentityIcon,
+    /// The windows whose `GdkToplevel` was handed the icon list. A record
+    /// of calls this process made, and it is stated as such wherever it
+    /// is printed: `gdk_toplevel_set_icon_list` returns nothing and no
+    /// GDK call reads it back, so this is the most a diagnostic may claim
+    /// without going to the X server.
+    identity_icon_on: BTreeSet<u64>,
     /// THE WINDOW'S SHELL, one per window (docs/chrome-plan.md C2): the
     /// AdwToolbarView that IS the window's child, the AdwHeaderBar it
     /// carries as its top bar, and the box inside that header holding the
@@ -1518,6 +1545,457 @@ fn gtk_window(core: &mut CoreState, id: u64) -> gtk4::Window {
             live_windows(core)
         ),
     }
+}
+
+/// What this process did with the declared icon blob
+/// (docs/app-identity-plan.md I4a). Three states, and they are three
+/// because a diagnostic that could not tell them apart would be the
+/// `kayaOpenPanelWhyNot` failure one platform over: "the app declared
+/// nothing", "the decoder refused the bytes" and "a texture went to the
+/// toplevels" all look identical from outside, and the second is the
+/// silent fallback this scene exists to catch.
+// The refusal's two numbers are read by `lowering()`, which only a
+// harness build has — a shipped app records the refusal and prints its
+// KAYA_DIAG line, and nothing reads it back.
+#[cfg_attr(not(feature = "harness"), allow(dead_code))]
+enum IdentityIcon {
+    /// No identity with an icon has reached this backend.
+    Undeclared,
+    /// The blob decoded, and this is the texture every toplevel is
+    /// handed. Kept for the WHOLE process lifetime, not just the apply:
+    /// a window created later gets the same one, so an app's mark does
+    /// not depend on which window happened to exist when it was
+    /// declared.
+    Texture(gtk4::gdk::Texture),
+    /// GDK's own decoder refused the bytes. The platform's own icon
+    /// stays in place — an app that shipped a broken file gets what it
+    /// would have got with no declaration, which is the typeface's rule
+    /// (the core does not inspect the bytes; only the platform's decoder
+    /// can answer), and the read says so rather than reporting a default
+    /// as a success.
+    Refused { bytes: usize, why: String },
+}
+
+impl IdentityIcon {
+    /// One clause, in this process's own words, for every sentence the
+    /// icon read can print. It states what KAYA DID and never what the
+    /// platform holds: `gdk_toplevel_set_icon_list` returns nothing and
+    /// GDK offers no read-back, so the toplevel count is a count of
+    /// calls made and is worded that way.
+    #[cfg(feature = "harness")]
+    fn lowering(&self, on: &BTreeSet<u64>) -> String {
+        let windows = || {
+            on.iter().map(|id| format!("#{id}")).collect::<Vec<_>>().join(", ")
+        };
+        match self {
+            Self::Undeclared => {
+                "kaya set no icon here: no app identity carrying icon bytes reached \
+                 this backend"
+                    .to_owned()
+            }
+            Self::Refused { bytes, why } => format!(
+                "kaya set no icon here: GDK's own decoder refused the declared {bytes} \
+                 bytes ({why}), so the platform's own icon was left in place"
+            ),
+            Self::Texture(texture) => {
+                use gtk4::prelude::TextureExt;
+                if on.is_empty() {
+                    format!(
+                        "kaya decoded the declared blob to a {}x{} texture and handed it \
+                         to NO toplevel — every window was still unrealized when the \
+                         identity arrived and none has been presented since",
+                        texture.width(),
+                        texture.height(),
+                    )
+                } else {
+                    format!(
+                        "kaya decoded the declared blob to a {}x{} texture and called \
+                         gdk_toplevel_set_icon_list with it on window {} (that call \
+                         returns nothing and GDK reads no icon back, so this clause is \
+                         a record of what this process did, not of what the platform \
+                         kept)",
+                        texture.width(),
+                        texture.height(),
+                        windows(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/// Hand the declared mark to one window's `GdkToplevel`
+/// (docs/app-identity-plan.md I4a, the ratified route).
+///
+/// STRAIGHT TO `gdk_toplevel_set_icon_list`, never through a NAME. The
+/// name-based calls (`gtk_window_set_icon_name`, `gtk_application_...`)
+/// resolve through `GtkIconTheme` into this same GDK function and carry
+/// two measured traps on the way: `gtk_icon_theme_add_search_path` scans
+/// at ADD time, so bytes written afterwards stay invisible; and
+/// `has_icon() == TRUE` with an empty `get_icon_sizes` — which is what an
+/// unthemed flat PNG produces — makes GTK DELETE `_NET_WM_ICON` silently.
+/// A blob has no name to be looked up by anyway, and going straight to
+/// the toplevel avoids both. `gtk_window_set_icon` does not exist in
+/// GTK4 at all.
+///
+/// PROTOCOL-AGNOSTIC BY CONSTRUCTION, which is the reason this arm has
+/// no `#[cfg]` and no display-backend test in it. GTK 4.20 implements
+/// `xdg-toplevel-icon-v1` by feeding THIS IDENTICAL icon-list of
+/// textures into `xdg_toplevel_icon_v1.add_buffer`, so the lowering is
+/// correct on X11 today and correct on Wayland the day the lane's GTK
+/// and compositor move. What is version-shaped is the EXPECTATION OF
+/// VISIBILITY, not the code — a version note rather than a carve-out.
+///
+/// A WINDOW WITH NO SURFACE IS NOT AN ERROR. GTK realizes a toplevel
+/// lazily, and an auxiliary window is built hidden and presented at
+/// mount, so this runs a second time from the present path rather than
+/// forcing a realize the app did not ask for.
+fn apply_identity_icon(core: &mut CoreState, window: u64) {
+    use gtk4::prelude::{Cast, NativeExt};
+    let IdentityIcon::Texture(texture) = &core.identity_icon else {
+        return;
+    };
+    let texture = texture.clone();
+    let Some(target) = gtk_window_read(core, window) else {
+        return;
+    };
+    let Some(surface) = target.surface() else {
+        return;
+    };
+    let Ok(toplevel) = surface.dynamic_cast::<gtk4::gdk::Toplevel>() else {
+        return;
+    };
+    toplevel.set_icon_list(std::slice::from_ref(&texture));
+    core.identity_icon_on.insert(window);
+}
+
+/// The caption a window falls back to when it declares none of its own —
+/// the app's declared NAME, or nothing (docs/app-identity-plan.md I9).
+///
+/// A DECLARED NAME NEVER OVERRIDES A WINDOW'S OWN TITLE. It fills the
+/// blank, which is what every platform does with an app's name, and it
+/// is why this is keyed on `app_titled` rather than on whether the GTK
+/// title string is empty: this backend builds its primary window with a
+/// placeholder before any transaction exists, and a placeholder is a
+/// blank an app never wrote.
+fn identity_caption(core: &CoreState, window: u64) -> Option<String> {
+    if core.app_titled.contains(&window) {
+        return None;
+    }
+    core.identity_name.clone()
+}
+
+/// What this PROCESS can say about the app icon, gathered under the main
+/// context so the read itself needs no GTK at all
+/// (docs/app-identity-plan.md I8).
+///
+/// The split is deliberate: everything below this struct talks to the X
+/// SERVER through `xprop`, which takes tens of milliseconds and is
+/// polled, and holding the main context across a subprocess would stall
+/// the very app whose window is being read.
+#[cfg(feature = "harness")]
+struct IdentityProbe {
+    /// The GDK display object's own GType name — `GdkX11Display`,
+    /// `GdkWaylandDisplay`, or whatever else was opened. MEASURED, not
+    /// derived from `GDK_BACKEND`: the environment variable is a
+    /// request, and which backend GDK actually opened is the fact.
+    backend: String,
+    /// The GTK this process is RUNNING against (`gtk_get_major_version`
+    /// and its siblings), not the version it was compiled with. The
+    /// wayland icon route is version-shaped, so the number a reader
+    /// needs is the one that is live.
+    gtk: String,
+    /// What this process did with the declared blob, in its own words
+    /// (`IdentityIcon::lowering`).
+    lowering: String,
+    /// How many of this process's windows were handed the icon list. The
+    /// read holds the SERVER's count of toplevels carrying the mark
+    /// against this one, which is the only way to catch a lowering that
+    /// reached some windows and not others — carriers agreeing with each
+    /// other cannot.
+    applied: usize,
+}
+
+#[cfg(feature = "harness")]
+fn identity_probe(core: &CoreState) -> IdentityProbe {
+    use gtk4::glib::prelude::ObjectExt;
+    IdentityProbe {
+        backend: gtk4::gdk::Display::default().map_or_else(
+            || "<no GdkDisplay is open in this process>".to_owned(),
+            |display| display.type_().name().to_string(),
+        ),
+        gtk: format!(
+            "{}.{}.{}",
+            gtk4::major_version(),
+            gtk4::minor_version(),
+            gtk4::micro_version()
+        ),
+        lowering: core.identity_icon.lowering(&core.identity_icon_on),
+        applied: core.identity_icon_on.len(),
+    }
+}
+
+/// Run one of the X11 command-line tools and hand back its output, or a
+/// sentence describing exactly how it failed.
+///
+/// EVERY FAILURE MODE IS A DIFFERENT SENTENCE, because they are
+/// different causes and the reader chases whichever one is printed: the
+/// tool missing from the image is not the tool refusing the window, and
+/// neither is the tool answering "no such property".
+#[cfg(feature = "harness")]
+fn x11_tool(program: &str, args: &[&str]) -> Result<String, String> {
+    match std::process::Command::new(program).args(args).output() {
+        Ok(out) if out.status.success() => {
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        }
+        Ok(out) => Err(format!(
+            "`{program} {}` failed ({}): {}",
+            args.join(" "),
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        )),
+        Err(why) => Err(format!(
+            "`{program}` could not be run at all ({why}) — x11-utils is what \
+             carries it, and without it this read cannot ask the X server \
+             anything"
+        )),
+    }
+}
+
+/// Every toplevel on this display, as `(window id, name)`.
+///
+/// THE SEARCH IS THE PRICE OF HAVING NO WINDOW MANAGER. `_NET_CLIENT_LIST`
+/// is written by a window manager and the lane runs none, so the root's
+/// direct children ARE the toplevels and `xwininfo -root -children` is
+/// what lists them. Each X11 leg owns its own Xvfb (`xvfb-run -a`), so
+/// the children of that display's root are this process's windows and
+/// nobody else's.
+#[cfg(feature = "harness")]
+fn x11_toplevels() -> Result<Vec<(String, String)>, String> {
+    let listing = x11_tool("xwininfo", &["-root", "-children"])?;
+    let mut out = Vec::new();
+    for line in listing.lines() {
+        let line = line.trim();
+        if !line.starts_with("0x") {
+            continue;
+        }
+        let Some(id) = line.split_whitespace().next() else {
+            continue;
+        };
+        // `0x600007 "identity": ("identity" "Identity")  480x360+0+0`
+        // — the window's name is the first quoted run, and a window
+        // with none says so in words.
+        let name = line
+            .split_once('"')
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .map_or_else(
+                || {
+                    if line.contains("has no name") {
+                        "(has no name)".to_owned()
+                    } else {
+                        "(unnamed)".to_owned()
+                    }
+                },
+                |(name, _)| name.to_owned(),
+            );
+        out.push((id.to_owned(), name));
+    }
+    Ok(out)
+}
+
+/// One toplevel's `_NET_WM_ICON`, as the CARDINALs the X server is
+/// holding.
+///
+/// `32c` FORCES THE FORMAT, and without it this read gets nothing usable:
+/// xprop knows `_NET_WM_ICON` and pretty-prints it as `Icon (64 x 64)`
+/// plus an ASCII rendering, which says an icon is there and nothing about
+/// what colour it is. Asking for 32-bit cardinals prints the property's
+/// actual words — width, height, then one ARGB word per pixel, EWMH's own
+/// layout.
+#[cfg(feature = "harness")]
+fn x11_icon_property(id: &str) -> Result<Vec<u32>, String> {
+    let text = x11_tool("xprop", &["-id", id, "-notype", "32c", " $0+", "_NET_WM_ICON"])?;
+    if text.contains("not found") {
+        return Err("_NET_WM_ICON: not found (this window carries no icon property)".to_owned());
+    }
+    let mut values = Vec::new();
+    let mut digits = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+        } else if !digits.is_empty() {
+            values.push(digits.parse::<u64>().unwrap_or(0) as u32);
+            digits.clear();
+        }
+    }
+    if !digits.is_empty() {
+        values.push(digits.parse::<u64>().unwrap_or(0) as u32);
+    }
+    if values.is_empty() {
+        return Err(format!(
+            "_NET_WM_ICON is present but xprop printed no numbers for it: {:?}",
+            text.trim()
+        ));
+    }
+    Ok(values)
+}
+
+/// The four quadrant CENTRES of an `_NET_WM_ICON` property,
+/// `RRGGBB/RRGGBB/RRGGBB/RRGGBB` in reading order — the same string the
+/// WinUI arm produces from an HICON, because the scene compares it
+/// byte-for-byte across every platform.
+///
+/// CENTRES AND NOT CORNERS, the WinUI read's rule for the WinUI read's
+/// reason: any rescale between the declared PNG and the size a platform
+/// rasterizes at blurs a quadrant BOUNDARY, and a corner sample sits on
+/// one. The centre of a large flat region survives every resampling
+/// filter exactly.
+#[cfg(feature = "harness")]
+fn x11_icon_quadrants(values: &[u32]) -> Result<String, String> {
+    if values.len() < 3 {
+        return Err(format!(
+            "_NET_WM_ICON holds {} words, too few to be an icon (EWMH's layout \
+             is width, height, then one ARGB word per pixel)",
+            values.len()
+        ));
+    }
+    let (w, h) = (values[0] as usize, values[1] as usize);
+    let pixels = &values[2..];
+    if w < 2 || h < 2 || pixels.len() < w * h {
+        return Err(format!(
+            "_NET_WM_ICON says {w}x{h} and carries {} words after the two size \
+             words, which is not that picture",
+            pixels.len()
+        ));
+    }
+    let sample = |qx: usize, qy: usize| {
+        let x = (w * (1 + 2 * qx) / 4).min(w - 1);
+        let y = (h * (1 + 2 * qy) / 4).min(h - 1);
+        // EWMH stores ARGB in a 32-bit CARDINAL, rows top to bottom.
+        format!("{:06X}", pixels[y * w + x] & 0x00FF_FFFF)
+    };
+    Ok(format!(
+        "{}/{}/{}/{}",
+        sample(0, 0),
+        sample(1, 0),
+        sample(0, 1),
+        sample(1, 1)
+    ))
+}
+
+/// THE PICTURE THE PLATFORM ENDED UP HOLDING, in pixels
+/// (docs/app-identity-plan.md I8).
+///
+/// THE THREE TIERS, and why this is the third. Reading kaya's own model
+/// is worthless and is the exact failure this repo hunts. Reading GTK
+/// back — `gtk_window_get_icon_name()` — is an ECHO: it hands over the
+/// string just set, and GDK offers no read-back for an icon LIST at all.
+/// `xprop -id <xid> _NET_WM_ICON` asks the X SERVER what it is holding,
+/// which is the copy every other client on that display sees, and the
+/// numbers it prints are the pixels `gdk_toplevel_set_icon_list` really
+/// put there. So these four samples prove the CONVERSION, which is what
+/// turns "one PNG in, each platform converts" from a promise into
+/// something the scene tests.
+///
+/// AND EVERY FAILURE PATH SAYS WHAT IT MEASURED (invariant 3). There is
+/// no single "no icon" sentence here: which toplevels exist, what each
+/// one answered, and what this process did with the declared bytes are
+/// three separate measurements, and a reader chasing a red leg needs all
+/// three to tell "kaya never set it" from "kaya set it and it did not
+/// survive" from "the display cannot answer at all".
+#[cfg(feature = "harness")]
+fn read_app_icon(probe: &IdentityProbe) -> String {
+    let IdentityProbe { backend, gtk, lowering, applied } = probe;
+    if !backend.contains("X11") {
+        // THE MEASURED ABSENCE, never a skip and never a bare "none".
+        // Every varying part of this sentence is something this process
+        // went and read: which display object GDK opened, which GTK is
+        // live, and what kaya did with the bytes. The version note is
+        // what makes it a version note rather than a carve-out — the
+        // lowering above is already protocol-agnostic, and only the
+        // expectation of visibility is conditional.
+        return format!(
+            "<no icon read on this display: GDK's display object here is \
+             {backend}, and the one route that reports an app icon back to the \
+             process that set it is the X server's own _NET_WM_ICON, which needs \
+             an X11 display. {lowering}. This process runs GTK {gtk}; on wayland \
+             the icon travels as xdg-toplevel-icon-v1, which GTK lowers from 4.20 \
+             onward and which has no request that reads an icon back to a client \
+             — so on this display there is nothing to ask, and the mark this \
+             scene asserts is measured on the X11 ring>"
+        );
+    }
+    let toplevels = match x11_toplevels() {
+        Ok(found) => found,
+        Err(why) => {
+            return format!(
+                "<the X11 icon read could not list this display's toplevels: \
+                 {why}. {lowering}>"
+            )
+        }
+    };
+    if toplevels.is_empty() {
+        return format!(
+            "<this X11 display's root has no children at all, so no window this \
+             process opened is mapped yet. {lowering}>"
+        );
+    }
+    let mut carried: Vec<(String, String, String)> = Vec::new();
+    let mut bare: Vec<String> = Vec::new();
+    for (id, name) in &toplevels {
+        match x11_icon_property(id).and_then(|values| x11_icon_quadrants(&values)) {
+            Ok(samples) => carried.push((id.clone(), name.clone(), samples)),
+            Err(why) => bare.push(format!("{id} {name:?} answered {why}")),
+        }
+    }
+    if carried.is_empty() {
+        return format!(
+            "<no _NET_WM_ICON on any of this display's {} toplevels: {}. {lowering}>",
+            toplevels.len(),
+            bare.join("; ")
+        );
+    }
+    let first = carried[0].2.clone();
+    if carried.iter().any(|(_, _, samples)| *samples != first) {
+        // ONE APP, ONE MARK: identity is per-app, so two of this
+        // process's windows wearing different pictures is a lowering
+        // that reached some toplevels and not others, and the sentence
+        // names which is which rather than picking a winner.
+        return format!(
+            "<this app's toplevels carry DIFFERENT icons: {}. {lowering}>",
+            carried
+                .iter()
+                .map(|(id, name, samples)| format!("{id} {name:?} = {samples}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+    }
+    // ...AND ON EVERY WINDOW THIS PROCESS SET. Carriers agreeing with
+    // each other is not enough: a lowering that reached the primary and
+    // not the second window agrees with itself perfectly, and the
+    // scene's closing read exists precisely to catch a window that took
+    // the mark away when it took the focus. So the SERVER's count of
+    // toplevels carrying the mark is held against this process's count
+    // of windows it handed the list to.
+    //
+    // AGAINST THE APPLY COUNT AND NOT AGAINST THE TOPLEVEL COUNT, which
+    // is measured rather than assumed: an identity leg's X11 root has
+    // THREE named children for two kaya windows in the lane image — GTK
+    // keeps an unmapped window of its own carrying the same WM_CLASS —
+    // so demanding an icon on every child would fail every passing run.
+    if carried.len() < *applied {
+        return format!(
+            "<the mark is on {} of this app's toplevels but this process set it on \
+             {applied} windows, so a window lost it or never got it: {}. {lowering}>",
+            carried.len(),
+            carried
+                .iter()
+                .map(|(id, name, samples)| format!("{id} {name:?} = {samples}"))
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
+    }
+    first
 }
 
 /// Install the window's chrome: a HeaderBar carrying GTK's back
@@ -5068,6 +5546,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // entry covers it the entry's title shows (the
                     // NavigationStack semantic), and this one comes
                     // back at pop.
+                    //
+                    // AND IT IS THE APP'S, which is what stops a declared
+                    // identity name from overriding it: the name fills
+                    // the blank on a window with nothing written and
+                    // never replaces what an app wrote here
+                    // (identity_caption).
+                    core.app_titled.insert(window.0);
                     core.window_titles.insert(window.0, title.clone());
                     let covered = core
                         .nav_stacks
@@ -5148,6 +5633,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 .default_width(540)
                 .default_height(330)
                 .build();
+            // A NEW WINDOW WITH NO TITLE WEARS THE APP'S NAME
+            // (docs/app-identity-plan.md I9). Written into `window_titles`
+            // as well as onto the widget, because that map is what every
+            // navigation fallback restores from — a window whose stack
+            // empties must come back to the same caption it started with,
+            // not to the blank.
+            if let Some(caption) = identity_caption(core, window.0) {
+                core.window_titles.insert(window.0, caption.clone());
+                aux.set_title(Some(&caption));
+            }
             let chrome = install_nav_chrome(&aux, window.0);
             core.toolbar_views.insert(window.0, chrome.view);
             core.header_bars.insert(window.0, chrome.header);
@@ -5184,6 +5679,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
             core.window_roots.remove(&window.0);
             core.window_titles.remove(&window.0);
+            core.app_titled.remove(&window.0);
+            core.identity_icon_on.remove(&window.0);
             core.back_buttons.remove(&window.0);
             core.dirty_markers.remove(&window.0);
             // ... and its sections, each with ITS stack (the one way
@@ -5741,28 +6238,94 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // are what keep the direction.
             buffer.select_range(&stop, &start);
         }
-        ApplyOp::SetAppIdentity(_) => {
-            // NOT LOWERED YET, and the refusal lives at the READ rather
-            // than here (`Stage::app_icon` -> `depth_stub("identity")`),
-            // which is the shape the typeface's fan-out used and it is
-            // deliberate: an arm that PANICKED here would kill any Linux
-            // app that declared an identity, where what is true is that
-            // this backend does not draw one yet. The loud half is the
-            // observation, which is what a scene can walk into; the
-            // ledger entry is what keeps this from being forgotten.
+        ApplyOp::SetAppIdentity(identity) => {
+            // THE APP'S NAME AND ITS MARK, GTK's half
+            // (docs/app-identity-plan.md I4a and I9). Both halves are
+            // lowered here, and both are recorded, because the read has
+            // to tell "kaya never set one" from "kaya set one and the
+            // platform did not keep it".
             //
-            // The route is measured and waiting
-            // (docs/app-identity-plan.md I4a): decode the blob to
-            // `GdkTexture`s and hand them to
-            // `gdk_toplevel_set_icon_list`, which is public API in the
-            // lane's own GTK 4.18.6 and is ALSO the Wayland path from
-            // GTK 4.20 onward — so the lowering is written once and is
-            // protocol-agnostic by construction. What is version-shaped
-            // is the EXPECTATION of visibility, not the code: on this
-            // lane's GTK the Wayland backend answers the icon-list
-            // property with a literal `break;`, so the honest sentence
-            // there is that a runtime blob buys nothing visible and the
-            // icon is the `.desktop` file's.
+            // THE NAME GOES ON THE PROGRAM NAME FIRST, and that is the
+            // lever rather than a cosmetic string: `g_get_prgname()` is
+            // what GTK's Wayland backend sends as the toplevel's
+            // `app_id` and what its X11 backend writes into `WM_CLASS`,
+            // and THAT string is what decides which `.desktop` file the
+            // whole desktop matches this window to — the launcher icon,
+            // the switcher label and the dock entry all follow it. It is
+            // also readable cross-process: AT-SPI's application
+            // accessible hard-wires Name = prgname and Description =
+            // g_get_application_name, so both writes land somewhere an
+            // assistive client can see (I9, measured).
+            //
+            // WHAT IT DOES NOT MOVE, stated because a reader will
+            // otherwise assume it does: a toplevel's `app_id` and
+            // `WM_CLASS` are sent when the SURFACE is created, and this
+            // backend builds and presents its primary window inside
+            // `run_core`'s activate handler — before the app thread's
+            // first transaction is drained. So a name arriving here
+            // renames the PROGRAM and every surface created afterwards,
+            // and the primary's already-sent class keeps the launcher
+            // binary's name. Moving that one needs
+            // `gdk_wayland_toplevel_set_application_id` (and its X11
+            // sibling), which live in crates this tree does not depend
+            // on; the ledger carries it.
+            if !identity.name.is_empty() {
+                glib::set_prgname(Some(identity.name.as_str()));
+                glib::set_application_name(&identity.name);
+                core.identity_name = Some(identity.name.clone());
+                // ...and the name fills the blank on every window that
+                // has none of its own, which is where an app's name is
+                // observable at runtime on this platform. Never over a
+                // title the app wrote: `identity_caption` carries that
+                // rule and `app_titled` is what makes the primary's
+                // builder placeholder distinguishable from one.
+                let live: Vec<u64> =
+                    std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
+                for id in live {
+                    let Some(caption) = identity_caption(core, id) else {
+                        continue;
+                    };
+                    core.window_titles.insert(id, caption.clone());
+                    if let Some(target) = gtk_window_read(core, id) {
+                        use gtk4::prelude::GtkWindowExt;
+                        target.set_title(Some(&caption));
+                    }
+                }
+            }
+            // THE BYTES ARE THE PLATFORM'S DECODER'S BUSINESS, which is
+            // the typeface's rule one asset over and the core's fourth
+            // wall: kaya never inspects them, and whether a blob is an
+            // image is a question only GDK can answer. A refusal is
+            // RECORDED rather than fatal — an app that shipped a broken
+            // file gets what it would have got with no declaration at
+            // all, and the observation is what says so.
+            core.identity_icon = match &identity.icon {
+                None => IdentityIcon::Undeclared,
+                Some(blob) => {
+                    let bytes = glib::Bytes::from_owned(blob.0.clone());
+                    match gtk4::gdk::Texture::from_bytes(&bytes) {
+                        Ok(texture) => IdentityIcon::Texture(texture),
+                        Err(why) => {
+                            eprintln!(
+                                "KAYA_DIAG app identity: GDK refused the declared icon \
+                                 blob ({} bytes): {why} — the platform's own icon stays \
+                                 in place",
+                                blob.0.len()
+                            );
+                            IdentityIcon::Refused {
+                                bytes: blob.0.len(),
+                                why: why.to_string(),
+                            }
+                        }
+                    }
+                }
+            };
+            core.identity_icon_on.clear();
+            let live: Vec<u64> =
+                std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
+            for id in live {
+                apply_identity_icon(core, id);
+            }
         }
         ApplyOp::SetTypeface(request) => {
             // THE BRAND TYPEFACE, GTK's half (docs/styling-plan.md Slice
@@ -6648,6 +7211,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 if owner != 0 {
                     use gtk4::prelude::GtkWindowExt;
                     gtk_window(core, owner).present();
+                    // THE SECOND OF TWO PLACES A WINDOW IS FIRST SHOWN,
+                    // and the app's mark goes on at both. A toplevel has
+                    // no GdkSurface until it is realized, so the identity
+                    // apply could not have reached this window: presenting
+                    // it is the first moment there is anything to set an
+                    // icon on (docs/app-identity-plan.md I4a).
+                    apply_identity_icon(core, owner);
                 }
             } else if let Some(entry) = core.nav_entries.get_mut(&window.0) {
                 entry.root = Some(root_widget);
@@ -6663,6 +7233,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 set_window_content(core, window.0, Some(&root_widget));
                 // Mounting presents.
                 gtk_window(core, window.0).present();
+                // ...and a presented window is a REALIZED one, which is
+                // the first moment it has a GdkToplevel to carry the
+                // app's mark (docs/app-identity-plan.md I4a). The
+                // identity apply ran before this window had a surface;
+                // this is where it lands.
+                apply_identity_icon(core, window.0);
                 core.window_roots.insert(window.0, root_widget);
             }
         }
@@ -7228,6 +7804,13 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     );
                     titles
                 },
+                // EMPTY, and that is the point: the title the builder
+                // just set is kaya's placeholder, not one an app wrote,
+                // so a declared identity name may replace it.
+                app_titled: std::collections::HashSet::new(),
+                identity_name: None,
+                identity_icon: IdentityIcon::Undeclared,
+                identity_icon_on: BTreeSet::new(),
                 toolbar_views: HashMap::from([(0, primary_chrome.view)]),
                 header_bars: HashMap::from([(0, primary_chrome.header)]),
                 toolbar_groups: HashMap::from([(0, primary_chrome.promoted)]),
@@ -9797,15 +10380,20 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    /// THE IDENTITY SCENE HAS NOT REACHED THIS BACKEND (the plan's
-    /// breadth order, docs/app-identity-plan.md: Windows depth first,
-    /// Linux next). The route is measured and waiting —
-    /// `gdk_toplevel_set_icon_list` takes GdkTextures in the lane's own
-    /// GTK 4.18.6 and `xprop _NET_WM_ICON` reads the SERVER's copy back
-    /// — and until it is written this refuses in the one spelling both
-    /// gates read, which is what keeps the linux legs off the runner.
+    /// The app's mark, off the X SERVER's copy of the property this
+    /// process set — never off GTK, which has no read-back for an icon
+    /// list, and never off kaya's own model. `read_app_icon` carries the
+    /// whole argument.
+    ///
+    /// TWO STEPS AND NOT ONE, deliberately: the main context answers what
+    /// only this process knows (which display GDK opened, which GTK is
+    /// live, what kaya did with the declared bytes) and is released
+    /// before `xprop` is spawned. This verb is POLLED, so holding the
+    /// main context across a subprocess would stall the app being read
+    /// once every twenty milliseconds.
     fn app_icon(&self) -> String {
-        crate::depth_stub("identity")
+        let probe = Self::on_main(identity_probe);
+        read_app_icon(&probe)
     }
 
     fn inset(&self) -> String {

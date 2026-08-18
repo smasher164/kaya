@@ -134,6 +134,9 @@ public final class Main {
             case "typeface":
                 app = Typeface::app;
                 break;
+            case "identity":
+                app = Identity::app;
+                break;
             default:
                 app = Milestone2::app;
                 break;

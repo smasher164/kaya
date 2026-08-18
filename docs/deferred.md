@@ -2482,63 +2482,125 @@ record) + the WinUI arm (both sinks — the window icon through
 `AppWindow.SetIcon(IconId)`, and the caption through
 `TitleBar.IconSource` <- `ImageIconSource` <- `BitmapImage`) + the Rust
 binding (`app_identity` / `app_identity_named`) + the `identity` scene,
-Windows only. FOUR declarations across three backend files refuse
+Windows only. FOUR declarations across three backend files refused
 through the depth-stub helper — the Swift file serves two platforms and
-declares for each, because a `#if os(macOS)` arm that works on the
-desktop says nothing about the phone — and that is what holds the other
+declared for each, because a `#if os(macOS)` arm that works on the
+desktop says nothing about the phone — and that is what held the other
 lanes' legs off in check-steps and check-stubs
 (docs/app-identity-plan.md's sequencing — depth then breadth, the
-standing pattern):
+standing pattern). ALL FOUR CLOSED 2026-08-18 in the breadth fan-out,
+below, each with the lane result its arm measured; the settled-tree
+five-lane run is the coordinator's and is not claimed here. What the
+fan-out found instead of stubs is four new entries after this section —
+two measured Linux gaps, and two questions that outgrew the scene:
 
-- **DEPTH STUB: identity on gtk** — the whole route is MEASURED and
-  waiting (docs/app-identity-plan.md I4a): `gdk_toplevel_set_icon_list`
-  is public API in the lane's own GTK 4.18.6, takes `GdkTexture`s, and a
-  226-byte PNG decoded in process landed as `_NET_WM_ICON(CARDINAL) =
-  Icon (64 x 64)` with nothing on disk. `xprop -id <xid> _NET_WM_ICON`
-  is a real cross-process read (x11-utils is already in the lane image),
-  which is what `expect_app_icon`'s four samples come off. TWO THINGS
-  THE ARM OWES: the read is **X11-only** — GTK 4.18's Wayland backend
-  answers the icon-list property with a literal `break;` and the lane's
-  sway 1.10.1 advertises no `xdg_toplevel_icon_manager_v1` — so the
-  Wayland ring must SAY it has no icon read rather than skip quietly;
-  and the name half is `gdk_wayland_toplevel_set_application_id` /
-  `g_set_prgname`, which is the lever that decides which `.desktop` the
-  whole desktop matches a window to. Linux is the plan's next breadth
-  arm for exactly these reasons.
-- **DEPTH STUB: identity on swiftui/macos** — the route is measured
-  (`NSApp.applicationIconImage = NSImage(data: pngBytes)` replaces the
-  Dock tile and the Cmd-Tab tile, and reading it back is not an echo:
-  AppKit stores a re-rendered snapshot). It carries ruling 2's policy
-  change with it — an app that declares an identity becomes `.regular`,
-  because an `.accessory` app has no Dock tile to put an icon in
-  (measured: the setter succeeded, the readback showed a 512x512 image
-  installed, and the Dock did not move one pixel). One measurement is
-  owed before the arm can rely on it: whether a policy raised AFTER
-  launch puts the tile up, since the identity arrives while the app is
-  building its first screen. The fallback if it does not costs one line
-  (`swift/KayaSwiftUIEntry.swift`'s `KAYA_ACTIVATE=1` leg).
-- **DEPTH STUB: identity on swiftui/ios** — there is NO runtime route,
-  and this one is a fact rather than a schedule: the full iOS 26.5 SDK
-  census of the app-icon surface is three symbols
-  (`supportsAlternateIcons`, `setAlternateIconName`,
-  `alternateIconName`), typed BOOL and NSString, none taking bytes. The
-  Home Screen icon is the bundle's, so iOS's reader is
-  `tools/ios/run-sim.sh`'s `make_bundle` plus `Info.plist.in` (the icon
-  keys and `CFBundleDisplayName`, neither of which the plist declares
-  today), and the honest observation is of the BUILT BUNDLE rather than
-  of a live app.
-- **DEPTH STUB: identity on compose** — also a ruling and not a
-  schedule. The launcher icon is part of the installed package
-  (`android:icon` + a mipmap resource, off the same declared asset), so
-  Android's reader is the APK the lane already builds
-  (tools/android/run-emulator.sh). The running app's one route to a
-  picture — `ActivityManager.TaskDescription`'s Bitmap — stays REFUSED
-  (docs/app-identity-plan.md I6): its bytes path is deprecated at API
-  28, its non-deprecated replacement takes a drawable resource id that
-  stock Launcher3 ignores (`// TODO: Load icon resource (b/143363444)`),
-  and wiring it would give Android a FEATURE the other platforms do not
-  have rather than a different spelling of a shared one. A real blob
-  channel exists from API 37 and can be revisited when the pins move.
+- ~~**DEPTH STUB: identity on gtk**~~ — LANDED 2026-08-18.
+  `ApplyOp::SetAppIdentity` replaces the deliberate no-op:
+  `glib::set_prgname` + `glib::set_application_name` for the name,
+  `gdk::Texture::from_bytes` + `gdk_toplevel_set_icon_list` for the
+  mark, and the name written onto every window that has no title of its
+  own — the fill-the-blank rule, never an override, which is the same
+  rule the Windows caption writer spells and is why the scene's two
+  `expect_title` lines are the same two lines on both. The icon route
+  goes STRAIGHT to the texture list and never through an icon NAME, so
+  both traps I4a measured (`add_search_path` scans at add time;
+  `has_icon()==TRUE` over an empty `get_icon_sizes` makes GTK delete
+  `_NET_WM_ICON` silently) sit on a road not taken. Three call sites,
+  the WinUI arm's shape: the declaration, and the two places a window is
+  first presented; a window with no `GdkSurface` yet is realized later
+  and picked up there. `Stage::app_icon` splits an in-process
+  `identity_probe` from the `xprop -id <xid> -notype 32c` read run
+  OUTSIDE the main context, because the verb is polled every 20 ms and
+  holding the context across a subprocess would stall the app being
+  read; the `32c` is load-bearing, since xprop KNOWS `_NET_WM_ICON` and
+  pretty-prints it as `Icon (64 x 64)` plus an ASCII rendering, which
+  says an icon is there and nothing about what colour it is. Three icon
+  states (Undeclared / Texture / Refused) rather than two, so the
+  diagnostic cannot do what `kayaOpenPanelWhyNot` did one platform over.
+  Five watched negatives, each with its substitution count asserted and
+  restored from a saved copy; the linux lane went 526 -> 534 legs with
+  all 526 control verdicts byte-identical. The two things this stub OWED
+  are now the two open entries below — they are gaps in the PLATFORM,
+  measured, not work the arm left.
+- ~~**DEPTH STUB: identity on swiftui/macos**~~ — LANDED 2026-08-18,
+  and it closed the measurement it owed. `kayaApplyMacIdentity` raises
+  the activation policy (ruling 2), installs
+  `NSApp.applicationIconImage` from the wire's PNG, and writes the menu
+  bar's first item title; `kayaWindowCaption` then gives a window with
+  no title of its own the declared name, which is what
+  `expect_title window#1` reads. THE OWED MEASUREMENT IS ANSWERED: a
+  policy raised AFTER launch does put the Dock tile up
+  (`setActivationPolicy` returned true, tile captured), so the
+  `KAYA_ACTIVATE=1` fallback this entry held open is not wired and
+  swift/KayaSwiftUIEntry.swift is untouched — and `.regular` does not
+  take the front, so eight identity legs put eight tiles up and steal
+  nobody's keyboard. THE FINDING WORTH KEEPING:
+  `applicationIconImage` reads back as a 128x128 SIXTEEN-BIT snapshot in
+  the display's ICC profile, not the 1024x1024 the plan recorded, and
+  converting it back to sRGB through an EIGHT-bit context quantizes
+  twice — it reported `1D71D8` for a declared `1C71D8`, one unit out,
+  which would have made mac the one lane that could not meet a
+  byte-frozen expectation. A 16-bit context with ONE rounding at the end
+  recovers all four exactly; truncating the high byte instead of
+  rounding does not, so the rounding is load-bearing and the comment
+  says so. Eight legs; the mac lane ran 303 legs with no failure. A
+  defect its own negative caught: the first caption reader answered `""`
+  for a window that DOES NOT EXIST, so `expect_title window#1` passed
+  vacuously on iOS until the read was made to `guard let` the window.
+- ~~**DEPTH STUB: identity on swiftui/ios**~~ — LANDED 2026-08-18 as
+  PACKAGING, which is what this entry said it would be.
+  tools/ios/run-sim.sh reads guests/assets/identity.toml ONCE, at the
+  top, with tomllib, and never retypes either value; `make_bundle` grew
+  a fourth argument that copies the declared mark into the bundle
+  VERBATIM — not resized, because the byte-equality rule holds every
+  app-icon resource in the tree identical to the declaration and there
+  is no asset catalog and no `actool` in this dev shell — and fills
+  tools/ios/Info.plist.in's new `@IDENTITY@` slot with
+  `CFBundleDisplayName` plus
+  `CFBundleIcons > CFBundlePrimaryIcon > CFBundleIconFiles`. The read
+  (`kayaIOSAppIconWhyNot`, five states, all five made to print) resolves
+  the named file out of the bundle, holds it equal to the bytes the
+  guest declared over the wire, and then decodes it with UIKit's OWN
+  decoder — so its samples prove the CONVERSION rather than that a file
+  was copied. The guest is pointed at the app's DATA CONTAINER and
+  deliberately not at the bundle's copy: comparing the bundle with
+  itself would make ruling 4's byte equality vacuous on this lane, where
+  the data container is a second, independently delivered copy. Three
+  legs; `tools/ios/run-sim.sh all` ran 87 legs with zero failures. The
+  permanent half — that iOS has no runtime route at all — is now a
+  stated divergence in DESIGN.md rather than a ledger row, because it is
+  a fact about the platform and not a schedule.
+- ~~**DEPTH STUB: identity on compose**~~ — LANDED 2026-08-18, the
+  ruling's way. android/build.gradle.kts reads
+  guests/assets/identity.toml at configuration time, refuses loudly on a
+  missing, empty or unparseable declaration or a missing icon file,
+  copies the declared PNG verbatim into each application module's
+  generated mipmap, and sets the `kayaAppLabel` manifest placeholder;
+  the three app manifests name `@mipmap/kaya_mark` and
+  `${kayaAppLabel}`, and `isCrunchPngs = false` stops aapt re-encoding
+  the bytes behind the check. Measured through the whole chain: the
+  declared file, the generated resource and the entry unzipped OUT OF
+  THE APK share one sha256, and `aapt2 dump badging` reports
+  `application-label:'Aurora Notes'`. The Compose read resolves this
+  package's launcher icon through the system PackageManager
+  (`queryIntentActivities(MAIN/LAUNCHER)` -> `ResolveInfo.loadIcon`)
+  and samples it, behind a VACUITY WALL that is the point of the whole
+  arm: the icon is compiled into the APK whether a guest declared
+  anything or not, so the wire declaration must have arrived, decoded,
+  and matched before the read will answer at all. Three watched
+  negatives, three different sentences. `TaskDescription` stays REFUSED
+  (docs/app-identity-plan.md I6) and nothing here calls it. THE
+  REGRESSION IT FOUND is the entry's real lesson: `run_apk_on` waited
+  for the harness accessibility service by grepping
+  `dumpsys accessibility` for `Bound services:.*kaya`, and that line
+  prints a LABEL — the service declared none of its own and inherited
+  the application's, which used to be "kaya milestone 0". The moment
+  `android:label` became the declared name the word "kaya" left the line
+  and every leg on every device failed saying the picker never came up,
+  through three arms and a reboot each, with the service bound the whole
+  time and nothing naming the cause. The service now names itself
+  (`android:label="kaya harness"`) and `a11y_label_check` refuses before
+  any leg runs, including when it reads no service at all.
 
 One MEASURED question the depth slice raises and does not answer, for
 the maintainer rather than for an agent: **where in a PROMOTED window's
@@ -2559,15 +2621,151 @@ That is a caption-band arrangement decision, and the band's arrangement
 was a maintainer ruling; it is not an agent's to take.
 
 Beyond the four stubs, what the depth slice deliberately left for the
-breadth arms: the PACKAGING readers on all five platforms (ruling 4's
-"one file, two readers" — the phones are first, per ruling 3, because
-their packaging is the packaging the repo already has), the byte-equality
-gate that holds a packaged icon equal to the declared one, the seven
-remaining bindings' sugar (the `check_styling_point identity` row is RED
-until they land, by design), and Windows' own AUMID
+breadth arms, and where each of those went. LANDED 2026-08-18: the
+declaration itself (guests/assets/identity.toml, ruling 4's "one file,
+two readers", beside the vendored typeface's own pattern); the
+byte-equality gate over it (tools/check-app-identity.sh, six clauses,
+which found a real drift on its first run — tools/deploy-win.sh staged
+the mark with a GLOB and therefore shipped whatever was in the directory
+rather than what was declared); the PACKAGING readers the phones have
+(the APK's mipmap and `make_bundle`'s bundle copy, per ruling 3); and
+the seven remaining bindings' sugar, which turned
+`check_styling_point app_identity` from RED-by-design to green in all
+eight languages. STILL OPEN: Windows' own AUMID
 (`SetCurrentProcessExplicitAppUserModelID`), which draws no pixel but
 would stop kaya's Python, Java and dotnet guests grouping under the HOST
-executable's taskbar button.
+executable's taskbar button; the macOS `.app` bundle, which is the only
+route to `CFBundleName` and therefore to the Cmd-Tab label; and a Linux
+`.desktop` install, whose precondition is the `WM_CLASS` entry below.
+
+## The Linux runtime icon route is X11-only until GTK 4.20 (measured 2026-08-18)
+KEY: identity, _NET_WM_ICON, xdg-toplevel-icon, gdk_toplevel_set_icon_list, wayland witness, GTK 4.20
+
+MEASURED on the lane image: `pkg-config --modversion gtk4` is **4.18.6**,
+whose Wayland backend answers the icon-list property with a literal
+`break;`, and `wayland-info` on the lane's sway lists no
+`xdg_toplevel_icon_manager_v1`. So a RUNNING kaya binary puts real pixels
+on an X11 window's `_NET_WM_ICON` and nothing at all on Wayland. The
+lowering is already protocol-agnostic — GTK 4.20 lowers this same texture
+list into `xdg_toplevel_icon_v1.add_buffer` — so what closes this is the
+lane image moving, not code in crates/kaya/src/gtk.rs.
+
+THIS IS NOT A DEPTH STUB AND IT IS NOT HELD OPEN BY ONE. gtk.rs has the
+feature; what it has not got is a protocol, and a depth stub is
+per-BACKEND. So the gap is expressed as a LEG: the wayland ring runs
+tools/linux/identity-wayland-witness.sh, which runs the same guest under
+wayland and requires the leg to fail on the icon steps AND ONLY on the
+icon steps — the count of icon failures read out of
+tools/scenes/identity.steps rather than typed into the script, the
+failing sentence naming the GDK display object it actually found, and a
+grep for the backend's own record of the `gdk_toplevel_set_icon_list`
+call, which is what makes "protocol-agnostic by construction" a tested
+claim rather than a comment. The NAME half of the identity IS observable
+on wayland and stays under test there.
+
+IT SELF-REDS THE DAY THE PROTOCOL ARRIVES. The witness asserts that this
+gap still exists, so a platform that starts drawing the icon turns the
+leg RED and its failure text names the honest response: run the scene
+here. A leg that printed no `KAYA_SELFTEST` verdict at all fails there
+too, so "the gap is as documented" can never be confused with "the guest
+died at startup". Nothing has to be remembered for this entry to be
+re-examined.
+
+An INSTALLED app is unaffected on either protocol: that identity comes
+from a `.desktop` file plus the hicolor install, which is ruling 5's
+first surface and carries no GTK version condition at all.
+
+## The primary window keeps its launcher binary's `app_id`/`WM_CLASS` (measured 2026-08-18)
+KEY: identity, app_id, WM_CLASS, g_set_prgname, gdk4-x11, gdk4-wayland, desktop file
+
+`g_set_prgname` is a lever and not a cosmetic string: it is what GTK's
+Wayland backend sends as `app_id` and what its X11 backend writes into
+`WM_CLASS`, and that string is what a desktop matches a window to a
+`.desktop` file by. MEASURED on the lane image: the identity leg's
+PRIMARY window — built and presented in `run_core`'s activate handler
+BEFORE the app thread's first transaction is drained — reported
+`WM_CLASS(STRING) = "identity", "identity"`, the example BINARY's name;
+its SECOND window, created after `set_app_identity` had called
+`g_set_prgname("Aurora Notes")`, reported
+`WM_CLASS(STRING) = "Aurora Notes", "Aurora Notes"`. So the name really
+is settable at runtime and reaches every surface created after it is
+set. What it cannot do is move a class that has already been sent.
+
+Moving the primary window's would need
+`gdk_wayland_toplevel_set_application_id` and its X11 sibling, which live
+in the `gdk4-wayland` / `gdk4-x11` crates this tree does not depend on —
+a crates/kaya/Cargo.toml plus Cargo.lock change, which is why the GTK arm
+did not make it. It is a PRECONDITION for a Linux `.desktop` packaging
+reader rather than a cosmetic nit: without it, no `.desktop` file could
+ever match a kaya window.
+
+Found in passing and already corrected: tools/linux/run-suites.sh's
+comment claimed kaya's GTK windows carry
+`application_id("dev.kaya.Milestone2")` and that the sway rule matched
+because of it. They do not — `app_id` follows `g_get_prgname()`, which
+defaults to the launcher binary's name, so the lane's legs advertise
+`python3`, `dotnet`, `java`, `milestone2`, `kaya-go`.
+
+## `kaya_capabilities()` has no binding surface in any of the eight languages (found 2026-08-18)
+KEY: kaya_capabilities, KAYA_CAP_AUX_WINDOWS, capability query, create_window, aux window, eight-language sugar
+
+`kaya_capabilities()` is a real C export (crates/kaya/src/capi.rs, and
+crates/kaya/include/kaya.h) that answers exactly the question the
+identity scene was forced to ask — does this host have auxiliary windows
+— and NO binding wraps it, in any of the eight languages (verified by
+grep). This is the first slice where that cost something. `create_window`
+is rejected AT THE ROOT on iOS and Android
+(`KAYA_CAP_AUX_WINDOWS` is unset), the identity guest opens an auxiliary
+window in its BUILD closure — that window is where
+`expect_title window#1` reads the declared name back — so on a phone the
+guest aborted after one harness step, with the identity already declared.
+`sections` gets away with the same call by reachability (its
+`create_window` sits in a handler only the desktop tail clicks) and
+`split`/`panels` are never phone legs at all.
+
+NOTHING IS BROKEN TODAY, and that is why this is a question rather than a
+gap: each guest that reaches a phone derives the answer from its own
+platform predicate, keyed on the SAME predicate the core keys on — Go a
+build-tag pair (`untitled_desktop.go` / `untitled_phone.go`), Swift a
+`#if !os(iOS)`, Rust the `cfg(target_os)` the core's own arm uses, and
+Java a runtime `Class.forName("android.os.Build")` probe, because one
+Java source is compiled twice (javac for the desktop, gradle for
+Android) and the language has no conditional compilation. Each was
+watched: `go list` resolves the pair per GOOS, a poisoned copy proved the
+Swift branch is compiled on macOS and excluded on iOS, and a wrong Java
+answer fails loudly in both directions rather than passing vacuously.
+That is the invariant-1 shape — one semantics, four spellings.
+
+THE DECISION IS THE MAINTAINER'S because it is an eight-language sugar
+point, not an arm's: whether the capability word the core already owns
+gets one spelling per binding plus a `check_styling_point`-style row
+holding all eight level, or whether guests keep deriving it from platform
+predicates. Invariant 2 makes it a sweep across all eight either way. No
+arm took it.
+
+## No gate compiles a Swift GUEST for iOS (gate gap, found 2026-08-18)
+KEY: swift-typecheck, iOS guest, guests/swift, gate gap, os(iOS)
+
+tools/swift-typecheck.sh's iOS pass covers swift/KayaSwiftUI.swift,
+swift/KayaSwiftUIEntry.swift and tools/ios/clipctl. Nothing in the gate
+set compiles anything under guests/swift/ against an iOS SDK, so the
+first compiler to see an `#if os(iOS)` mistake in a Swift guest is the
+simulator, minutes into a run.
+
+THAT IS LIVE FROM 2026-08-18 RATHER THAN THEORETICAL:
+guests/swift/identity.swift now carries a `#if !os(iOS)` guard around the
+auxiliary window, and Swift guests reach phones — tools/ios/run-sim.sh
+builds bundles out of guests/swift. The arm typechecked the file by hand
+against the simulator SDK (RC=0) and proved the branch really is excluded
+there, by splicing a poisoned line into a TEMP COPY: macOS RC=1 with
+three diagnostics naming the poison, iOS RC=0 with none. But a hand check
+is not a gate, and invariant 3 asks where the wall SITS.
+
+Closing it is small and the shape is already in the file: the macOS guest
+loop directly above the iOS pass in tools/swift-typecheck.sh is exactly
+what this needs, pointed at the iOS SDK. Note when doing it that the gate
+is named after a layer it did not always compile, which has burned
+someone here before (docs/traps.md).
 
 ## ~~kaya windows have no app icon (maintainer, 2026-08-17)~~
 KEY: app icon, window identity, IconSource, caption left
@@ -2612,6 +2810,29 @@ wall disabled → the scene PASSES with a byte-identical verdict. The wall
 (armed per layout pass) is the standing guard; the harness-level read is
 the gap. Closing it: a UIA read of the caption band's mark element,
 likely alongside the system-menu binding work above.
+
+## The pasteboard needs a foreign-writer witness (measured 2026-08-18)
+KEY: pasteboard changeCount, clipboard legs, foreign writer, human at the machine
+
+Two mac clipboard legs failed mid-matrix with pastes reading "" while
+six siblings passed and the same legs pass standalone: the machine's
+one pasteboard was written under the legs (a human ⌘C anywhere does
+it — the maintainer was at the keyboard, and IDE activity timestamps
+align). The failure SENTENCE cost the investigation: "reads empty"
+cannot discriminate a broken paste from a foreign writer. The guard:
+NSPasteboard.changeCount snapshotted before the paste; on mismatch the
+leg says "the pasteboard changed under this leg: foreign writer" and
+the red names the cause in one line instead of one rerun.
+
+## iOS identity packaging is proven on the simulator only (2026-08-18)
+KEY: iOS signing, device install, bundle packaging, simulator-only
+
+The identity fan-out's iOS packaging reader (make_bundle consuming the
+declaration) is proven end-to-end on the SIMULATOR. The lane has no
+.app SIGNING and no device-install route, so a real iPhone has never
+shown the mark. Closing it is a signing/provisioning story — its own
+slice when a device lane exists; recorded so "iOS identity works" is
+read at its true width.
 
 ## Comments are drowning the code (maintainer, 2026-08-17)
 KEY: comment verbosity, examples readability, war stories, traps pointers

@@ -6,7 +6,10 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.ContentResolver
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -577,6 +580,30 @@ object KayaSceneModel {
      * un-apply a brand.
      */
     var brandSeed by mutableStateOf<Int?>(null)
+
+    /**
+     * THE DECLARED IDENTITY AS IT ARRIVED ON THE WIRE (apply 34;
+     * docs/app-identity-plan.md) — the name, and the icon's bytes, or
+     * null for "the guest declared none".
+     *
+     * KEPT, WHERE THE TYPEFACE'S REQUEST DELIBERATELY IS NOT (see the
+     * note below), and the difference is what the read does with it.
+     * `expect_typeface` must never see the request, because the request
+     * is exactly what an echo would report. `expect_app_icon` reports
+     * the PACKAGE's icon and uses these two only as a REQUIREMENT: the
+     * launcher icon is compiled into the APK whether or not any guest
+     * declared anything, so a read of the package alone would pass on a
+     * run that declared nothing — the vacuous green this repo treats as
+     * worse than red. The read refuses unless the declaration arrived
+     * AND its bytes sample the same four colours as the packaged
+     * resource.
+     *
+     * NOT A COMPOSITION STATE: nothing composes them. The launcher icon
+     * belongs to the installed package and no route from here reaches it
+     * (the apply arm states the refusal).
+     */
+    var appIdentityName: String? = null
+    var appIdentityIcon: ByteArray? = null
 
     // THE REQUESTED FAMILY IS NOT STORED, and its absence is the point
     // (docs/styling-plan.md Slice 2b). It existed here while the record
@@ -1465,6 +1492,26 @@ object KayaCompose {
                     KayaPresent.blobData(handle)?.let { blobs[handle] = it }
                 }
             }
+            // SET_APP_IDENTITY CARRIES A BLOB TOO — the app's mark, on
+            // the same batch-local table and just as short-lived. The
+            // handle would resolve to null on the UI thread and the read
+            // would then say the identity carried no icon, which is a
+            // true sentence about a false state: the guest declared one.
+            //
+            // { u32 mask; u32 reserved } then the name, then the icon
+            // slot — always written, the mask says whether it means
+            // anything (wire.rs's write_app_identity). Absolute reads,
+            // so the record cursor is untouched.
+            if (kind == APPLY_SET_APP_IDENTITY) {
+                var at = start + 8 + 8
+                val len = b.getInt(at + 4) // the name
+                at += 8 + len
+                if (at % 8 != 0) at += 8 - at % 8
+                if (b.getInt(at) == VALUE_BLOB) {
+                    val handle = b.getLong(at + 8)
+                    KayaPresent.blobData(handle)?.let { blobs[handle] = it }
+                }
+            }
             b.position(start + size)
         }
         return blobs
@@ -2110,20 +2157,45 @@ object KayaCompose {
                     // bottom of this loop.
                     KayaSceneModel.brandSeed = b.int
                 APPLY_SET_APP_IDENTITY -> {
-                    // SKIPPED, BY RULING AND NOT BY SCHEDULE — see the
-                    // constant's note. The identity's Android reader is
-                    // the APK build (`android:icon` and `android:label`
-                    // off the same declared asset), which is a
-                    // packaging step and not an apply. The loop
-                    // advances by the record's own size, so an arm that
-                    // decodes nothing is exactly as correct as one that
-                    // decodes and discards.
+                    // { u32 mask; u32 reserved } then the name, then the
+                    // icon slot — always written, the mask says whether
+                    // it means anything (wire.rs's write_app_identity).
+                    val mask = b.int
+                    b.int // reserved
+                    val name = readString(b)
+                    val icon =
+                        if (mask and 1 != 0) {
+                            blobs[readBlobHandle(b)]
+                        } else {
+                            skipValue(b)
+                            null
+                        }
+                    // NOTHING IS DRAWN FROM HERE, BY RULING AND NOT BY
+                    // SCHEDULE. Android's launcher icon is part of the
+                    // INSTALLED PACKAGE — `android:icon` plus a mipmap
+                    // resource, both produced from this same declared
+                    // asset by android/build.gradle.kts — and a running
+                    // app has no route to it. The one route a running app
+                    // has to any picture, ActivityManager.TaskDescription's
+                    // Bitmap, stays REFUSED (docs/app-identity-plan.md
+                    // I6): its bytes path is deprecated at API 28, its
+                    // non-deprecated replacement takes a drawable resource
+                    // id that stock Launcher3 ignores
+                    // (`// TODO: Load icon resource (b/143363444)`), and
+                    // wiring it would give Android a FEATURE the other
+                    // four platforms have not rather than a different
+                    // SPELLING of a shared one — invariant 1's
+                    // distinction. A real blob channel exists from API 37
+                    // and can be revisited when the pins move.
                     //
-                    // IT IS AN ARM AND NOT AN OMISSION because the
-                    // `else` below is `error(...)`: a record with no arm
-                    // would kill the app the first time an identity was
-                    // declared, which is a worse answer than the honest
-                    // no-op this ruling calls for.
+                    // SO WHY DECODE AT ALL: for the READ, which is not a
+                    // lowering. `expect_app_icon` reports the package's
+                    // icon, and the package carries the mark whether or
+                    // not any guest declared one — so without these two
+                    // fields the read would pass on a run that declared
+                    // nothing at all.
+                    KayaSceneModel.appIdentityName = name
+                    KayaSceneModel.appIdentityIcon = icon
                 }
                 APPLY_SET_TYPEFACE -> {
                     // { u32 mask; u32 platform } then the default
@@ -5037,24 +5109,16 @@ object KayaCompose {
             " heading=" + kayaAxHeading(info) + ")"
     }
 
-    /**
-     * The one spelling of "this backend has not reached that scene
-     * yet", matching Rust's `depth_stub` and Swift's `kayaDepthStub`.
-     * check-stubs refuses a runner that wires the scene's legs while
-     * this stands, and check-steps stops demanding them. Both read the
-     * CALL rather than a sentence: the convention was free-form prose
-     * for four milestones and NOT ONE BACKEND ever wrote it, so
-     * check-stubs could only ever pass — and this file is the one that
-     * proved it, carrying an undo refusal in its own words across five
-     * entry points for a whole milestone with both gates green.
-     *
-     * A ledger entry in docs/deferred.md is what buys the silence
-     * (tools/lib/stub-ledger.py); a declaration without one fails.
-     */
-    private fun depthStub(scene: String): Nothing =
-        error(
-            "kaya: the $scene scene is not yet materialized on this backend — " +
-                "it is a depth slice; see CLAUDE.md's sequencing")
+    // NO `depthStub` HELPER LIVES HERE ANY MORE, and its absence is a
+    // fact rather than an oversight: `identity` was this backend's last
+    // depth stub and the read below replaced it, so the function had no
+    // callers and check-detekt's UnusedPrivateMember is the gate that
+    // says so. The next depth slice that needs one writes it back in
+    // this spelling — `depthStub("<scene>")`, which is what check-stubs
+    // and check-steps read, never a sentence of its own
+    // (tools/lib/hand-rolled-stubs.py fails a hand-rolled refusal) — and
+    // buys its silence with an OPEN entry in docs/deferred.md
+    // (tools/lib/stub-ledger.py).
 
     private fun quoted(parts: List<String>): String {
         val inner = parts.joinToString(" ").removeSurrounding("\"")
@@ -6087,20 +6151,21 @@ object KayaCompose {
                         }
                     }
                     "expect_app_icon" -> {
-                        // THE IDENTITY SCENE HAS NOT REACHED THIS
-                        // BACKEND, and what is missing is the READER
-                        // rather than a lowering: Android's launcher
-                        // icon comes from the APK the lane already
-                        // builds (docs/app-identity-plan.md, ruling 3),
-                        // so the honest observation here is of the
-                        // PACKAGED artifact — the icon the package
-                        // manager hands back for this application —
-                        // and neither the packaging step that puts it
-                        // there nor the read exists yet. Until both do,
-                        // this refuses in the one spelling check-stubs
-                        // and check-steps read, which is what keeps the
-                        // android legs off the runner.
-                        depthStub("identity")
+                        // THE PICTURE THE LAUNCHER DRAWS, in pixels,
+                        // resolved by the system's PackageManager out of
+                        // the INSTALLED PACKAGE — never off kaya's model,
+                        // which on this host holds no icon at all
+                        // (docs/app-identity-plan.md, ruling 3 and I8).
+                        // The sentences it can answer with instead, and
+                        // why each one can only be printed when it was
+                        // measured, are at kayaAppIconSamples.
+                        val want = quoted(parts.drop(1))
+                        val got = onUi(activity) { kayaAppIconSamples(activity) }
+                        if (got == want) {
+                            observed.add("app icon $want")
+                        } else {
+                            failures.add("app icon $got, wanted $want")
+                        }
                     }
                     "expect_window_size" -> {
                         // The surface's REAL extent against the
@@ -8909,6 +8974,130 @@ internal fun kayaResolvedTypeface(): String {
     }
     if (families.size > 1) return "sites disagree: " + bySite.joinToString(", ")
     return families.first()
+}
+
+/**
+ * THE HONEST READ, for `expect_app_icon`: the four quadrant centres of
+ * the picture the LAUNCHER draws for this app, and a requirement that
+ * the guest's declaration agrees with it.
+ *
+ * WHERE THE PICTURE COMES FROM. On Android the launcher icon is part of
+ * the installed package (docs/app-identity-plan.md ruling 3), so this
+ * asks the system's PackageManager to resolve the MAIN/LAUNCHER activity
+ * of this package and to load its icon — the same resolution the launcher
+ * itself performs, out of the APK's own resources, through a system
+ * service. Nothing here reads kaya's model, which on this backend holds
+ * no picture at all: the apply arm draws nothing, by ruling.
+ *
+ * AND WHY IT ALSO REQUIRES THE DECLARATION. The packaged icon is in the
+ * APK whether or not a guest declared anything, so a read of the package
+ * alone would PASS ON A RUN THAT DECLARED NOTHING — an observation that
+ * cannot fail for the reason it exists. Both halves must be present and
+ * they must sample the same four colours, which is ruling 4's
+ * byte-equality invariant re-proved on the device rather than in a gate.
+ *
+ * THE SENTENCES, and what each one MEASURED (invariant 3: a read may
+ * print only what it measured, and must tell its causes apart):
+ *
+ *   no declaration    `KayaSceneModel.appIdentityName` is null — no
+ *                     set_app_identity record was decoded in this
+ *                     process. Distinct from every sentence below.
+ *   no icon declared  the record arrived and its mask carried no blob,
+ *                     so the name is known and the picture is not.
+ *   undecodable       BitmapFactory refused the declared bytes; the byte
+ *                     count is printed because it is what was refused.
+ *   no launcher       queryIntentActivities found no MAIN/LAUNCHER
+ *                     activity for this package at all.
+ *   no packaged icon  ResolveInfo.getIconResource() is 0 — the package
+ *                     declares android:icon on neither the activity nor
+ *                     the application, so the system hands back its own
+ *                     default, which loadIcon() would return with no
+ *                     complaint. Measured, never inferred from pixels.
+ *   disagreement      both sides sampled, and their samples differ; both
+ *                     are printed, because which one is wrong is exactly
+ *                     what the reader has to decide.
+ *
+ * A sentence is wrapped in `<…>` and the samples never are, which is what
+ * lets the two helpers below hand a failure back through a String.
+ */
+internal fun kayaAppIconSamples(activity: ComponentActivity): String {
+    val name = KayaSceneModel.appIdentityName
+        ?: return "<no set_app_identity record reached this process: the guest " +
+            "declared no identity, and the launcher icon is compiled into the APK " +
+            "whether it did or not>"
+    val declared = KayaSceneModel.appIdentityIcon
+        ?: return "<the identity \"$name\" arrived with no icon: the record's mask " +
+            "carried no blob, so there is nothing declared for the packaged picture " +
+            "to be equal to>"
+    val declaredBitmap = BitmapFactory.decodeByteArray(declared, 0, declared.size)
+        ?: return "<the declared icon bytes are not an image this platform can " +
+            "decode: BitmapFactory refused ${declared.size} bytes>"
+
+    val pm = activity.packageManager
+    val pkg = activity.packageName
+    val launcher = Intent(Intent.ACTION_MAIN)
+        .addCategory(Intent.CATEGORY_LAUNCHER)
+        .setPackage(pkg)
+    @Suppress("DEPRECATION")
+    val resolved = pm.queryIntentActivities(launcher, 0).firstOrNull()
+        ?: return "<the installed package $pkg publishes no MAIN/LAUNCHER activity, " +
+            "so no launcher has an icon to draw for it>"
+    if (resolved.iconResource == 0) {
+        return "<the installed package $pkg declares no launcher icon: the resolved " +
+            "activity's icon resource id is 0, so android:icon reached neither the " +
+            "activity nor the application and the launcher draws the system default>"
+    }
+    val packagedSamples = kayaDrawableSamples(resolved.loadIcon(pm), "the packaged icon")
+    if (packagedSamples.startsWith("<")) return packagedSamples
+    val declaredSamples = kayaBitmapSamples(declaredBitmap, "the declared bytes")
+    if (declaredSamples.startsWith("<")) return declaredSamples
+    if (packagedSamples != declaredSamples) {
+        return "<the packaged icon and the declared bytes disagree: the package's " +
+            "launcher resource samples $packagedSamples, the ${declared.size} bytes " +
+            "the guest declared sample $declaredSamples>"
+    }
+    return packagedSamples
+}
+
+/** A drawable rasterized at its intrinsic size and sampled. Always
+ *  through a Canvas, so an adaptive or vector icon is measured as the
+ *  system would compose it rather than skipped, and so no hardware
+ *  bitmap reaches [kayaBitmapSamples] (getPixel throws on one). */
+private fun kayaDrawableSamples(icon: Drawable, what: String): String {
+    val w = icon.intrinsicWidth
+    val h = icon.intrinsicHeight
+    if (w <= 1 || h <= 1) {
+        return "<$what rasterizes to ${w}x${h}, too small to sample four quadrants>"
+    }
+    val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    icon.setBounds(0, 0, w, h)
+    icon.draw(Canvas(out))
+    return kayaBitmapSamples(out, what)
+}
+
+/**
+ * `RRGGBB/RRGGBB/RRGGBB/RRGGBB` — top-left, top-right, bottom-left,
+ * bottom-right, the reading order every backend's read uses.
+ *
+ * CENTRES AND NOT CORNERS, the WinUI read's rule and for its reason: any
+ * rescale between the declared 64x64 PNG and the size a platform
+ * rasterizes an icon at blurs the quadrant BOUNDARIES, and a corner
+ * sample sits on one. Android does rescale — a mipmap with no density
+ * qualifier is treated as mdpi and the emulator's 320dpi doubles it — so
+ * this is load-bearing here and not a copied convention.
+ */
+private fun kayaBitmapSamples(bitmap: Bitmap, what: String): String {
+    val w = bitmap.width
+    val h = bitmap.height
+    if (w <= 1 || h <= 1) {
+        return "<$what decoded to ${w}x${h}, too small to sample four quadrants>"
+    }
+    fun sample(qx: Int, qy: Int): String {
+        val x = (w * (1 + 2 * qx) / 4).coerceIn(0, w - 1)
+        val y = (h * (1 + 2 * qy) / 4).coerceIn(0, h - 1)
+        return String.format(java.util.Locale.ROOT, "%06X", bitmap.getPixel(x, y) and 0xFFFFFF)
+    }
+    return "${sample(0, 0)}/${sample(1, 0)}/${sample(0, 1)}/${sample(1, 1)}"
 }
 
 /**

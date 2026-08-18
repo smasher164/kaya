@@ -1710,6 +1710,54 @@ func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
 	tx.emit(TxSetBrandTypeface(mask, family, platforms, font))
 }
 
+// AppIdentity DECLARES the app's identity (docs/app-identity-plan.md):
+// the name it goes by and the picture that stands for it, as the bytes
+// of one image file.
+//
+//	tx.AppIdentity("Aurora Notes", markPNG)
+//
+// ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
+// tile, the Windows taskbar/alt-tab icon and the caption's mark, and an
+// X11 window's icon; the same FILE, read at build time, becomes the
+// Android launcher icon and the iOS Home Screen icon. Send a PNG: each
+// lowering converts, and no platform-specific artwork rides the wire.
+//
+// SET ONCE, BEFORE THE FIRST MOUNT, the brand's wall verbatim and for
+// its reason: identity is not state, and a slot that could flip at
+// runtime would promise the identity-switching surface the vocabulary
+// deliberately does not have. The root refuses a second write and a late
+// one, and it refuses an empty name — an app that wants the platform's
+// own identity declares none at all.
+//
+// THE BYTES ARE NEVER INSPECTED between here and the platform's own
+// decoder. Whether a blob is an image is a question only that decoder
+// can answer, so bytes that are not one leave every platform's default
+// in place — which is why the conformance scene reads what the DECODER
+// produced rather than echoing this request back. Nil bytes reach the
+// root as the empty blob they are and die there, in the sentence every
+// language gets.
+//
+// TWO METHODS RATHER THAN A VARIADIC (BrandTypeface's shape one verb
+// over), because there is exactly one optional thing here and Go names
+// it by naming the method: see AppIdentityNamed.
+func (tx *Tx) AppIdentity(name string, icon []byte) {
+	// The bytes go to the core ONCE, by handle, exactly as an image's
+	// do — the record carries the handle, never the picture itself.
+	tx.emit(TxSetAppIdentity(1, name, BlobHandle(RegisterBlob(icon))))
+}
+
+// AppIdentityNamed is the NAME-ONLY form, for an app that has a name and
+// no mark yet. Its identity still reaches the surfaces a name reaches —
+// the Windows caption and taskbar tooltip, the macOS menu bar, the Linux
+// app_id, and the two phones' packaging — and every icon surface keeps
+// the platform's own default, honestly and visibly.
+func (tx *Tx) AppIdentityNamed(name string) {
+	// The icon slot is written either way — an absent icon rides as an
+	// empty Str — so the record's field count never varies with the
+	// payload (the brand mask's discipline, verbatim).
+	tx.emit(TxSetAppIdentity(0, name, ""))
+}
+
 // Window is the prop chain for an existing window (0 = the primary).
 func (tx *Tx) Window(id uint64) WindowRef {
 	return WindowRef{tx: tx, id: id}

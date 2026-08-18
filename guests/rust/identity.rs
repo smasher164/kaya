@@ -17,8 +17,20 @@
 use kaya::Occurrence;
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
+    // THE UNTITLED WINDOW IS DESKTOP-ONLY, on the SAME predicate the core
+    // itself keys on (crates/kaya/src/scene.rs's CreateWindow arm), so the
+    // two cannot drift: the phones' systems own surface geometry, so
+    // KAYA_CAP_AUX_WINDOWS is unset there and `create_window` is a
+    // deterministic scene error. Measured before this cfg existed: the
+    // guest aborted with "this host has no auxiliary windows" after one
+    // harness step, on an emulator, with the icon already declared. The
+    // phone lanes drop the one step that reads it
+    // (tools/android/run-emulator.sh's scene_script_drop); the NAME's
+    // reader there is the package's own label.
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     use kaya::WindowId;
 
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     const UNTITLED: WindowId = WindowId(1);
 
     let (status, field, go) = ctx.apply(|tx| {
@@ -65,14 +77,17 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         // THE UNTITLED WINDOW. It declares no title at all rather than
         // an empty one: an empty string is a title an app WROTE, and the
         // rule under test is what a window with nothing written shows.
-        let untitled = tx.create_window(UNTITLED).size(360.0, 240.0).id();
-        let aux_root = tx
-            .column(|tx| {
-                let caption = tx.signal("no title of its own");
-                tx.label(caption); // label#2
-            })
-            .id();
-        tx.mount_in(untitled, aux_root);
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            let untitled = tx.create_window(UNTITLED).size(360.0, 240.0).id();
+            let aux_root = tx
+                .column(|tx| {
+                    let caption = tx.signal("no title of its own");
+                    tx.label(caption); // label#2
+                })
+                .id();
+            tx.mount_in(untitled, aux_root);
+        }
 
         (status, field, go)
     });

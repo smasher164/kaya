@@ -131,12 +131,7 @@ for arg in "$@"; do
         styling_rust|styling_python|styling_go|styling_csharp|styling_java) SUITE="$arg" ;;
         typeface_rust|typeface_python|typeface_go|typeface_csharp|typeface_java) SUITE="$arg" ;;
         toolbar_rust|toolbar_python|toolbar_go|toolbar_csharp|toolbar_java) SUITE="$arg" ;;
-        # RUST ALONE, and that is the depth slice rather than an
-        # omission: docs/app-identity-plan.md's sequencing puts the whole
-        # identity depth on Windows first, with the seven other bindings'
-        # sugar in the fan-out. check-sugar-surface's `identity` row is
-        # RED until they land, which is what holds that work open.
-        identity_rust) SUITE="$arg" ;;
+        identity_rust|identity_python|identity_go|identity_csharp|identity_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
         # PHASES, not legs: they run inside `all` and are named here so
         # each can be re-run on its own while fixing what it found.
@@ -342,7 +337,7 @@ timing vm-ready
 # forgotten entry shipped every artifact except the one a leg needed
 # (panels_go: sources never reached the VM; check-steps' per-runner
 # grep was satisfied by the other three lists).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed yet. Built, shipped and run RUST-ONLY, so a backend can
 # be validated before nine guests exist — the deploy-win twin of
@@ -351,18 +346,13 @@ SCENES="background stall milestone2 entry gallery todos reorder feed grow layout
 # fail loudly, correctly) or go unexercised on this lane entirely, which
 # is how the WinUI accessibility read ended up committed unproven.
 #
-# `save` is here while the language sweep lands: the scene, the spec
-# record and the Rust guest exist, the other seven guests are the breadth
-# arms' (docs/save-plan.md §2). It leaves for SCENES the day the eighth
-# lands, exactly as filedialog did.
-#
-# `identity` is here for the same reason and at the same stage
-# (docs/app-identity-plan.md's sequencing, which puts the whole depth on
-# Windows first): the spec record, the WinUI arm, the Rust binding's
-# sugar and the Rust guest exist; the other seven bindings' sugar is the
-# fan-out, and check-sugar-surface's `identity` row is RED until it
-# lands. It leaves for SCENES the day the eighth guest does.
-DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-identity}"
+# EMPTY TODAY, and that is the list working rather than the list being
+# unused: `save` graduated when its eighth guest landed and `identity`
+# did the same on 2026-08-18 — the day check-sugar-surface's `identity`
+# row went green — exactly as filedialog had. The variable stays because
+# the next depth slice needs it on its first day, and because
+# KAYA_WIN_DEPTH_SCENES is how one is driven before it graduates.
+DEPTH_SCENES="${KAYA_WIN_DEPTH_SCENES:-}"
 # GO-ONLY SCENES: a guest that exists in Go and only Go BY DESIGN rather
 # than by sequencing — an editor written in Rust would be kaya testing
 # itself (docs/editor-plan.md), so there is no editor_rust to add later.
@@ -572,8 +562,23 @@ scp -q "$ROOT"/guests/assets/fonts/*.ttf "$HOST:C:/kaya/guests/assets/fonts/"
 # cannot open it cannot run the scene at all — it panics naming
 # KAYA_ICON_FILE. Shipped every run, outside the deploy stamp, into the
 # same repo-mirror path, for the same two reasons the font is.
+#
+# READ OUT OF THE DECLARATION, not globbed out of the directory beside
+# it (docs/app-identity-plan.md ruling 4, held by
+# tools/check-app-identity.sh). A glob ships whatever happens to be
+# there; the manifest names the ONE file the build and the running app
+# are both supposed to read, and that is the whole point of there being
+# a manifest.
+icon_rel="$(python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["icon"])' "$ROOT/guests/assets/identity.toml")"
+icon_rc=$?
+if [ "$icon_rc" -ne 0 ] || [ ! -f "$ROOT/$icon_rel" ]; then
+    echo "deploy-win: guests/assets/identity.toml does not name a readable icon" >&2
+    echo "  (got \"$icon_rel\", rc=$icon_rc) — the identity legs would run against" >&2
+    echo "  whatever the guest already had on disk" >&2
+    exit 1
+fi
 run_ssh 'cmd /c if not exist C:\kaya\guests\assets\icons mkdir C:\kaya\guests\assets\icons'
-scp -q "$ROOT"/guests/assets/icons/*.png "$HOST:C:/kaya/guests/assets/icons/"
+scp -q "$ROOT/$icon_rel" "$HOST:C:/kaya/$icon_rel"
 
 
 # EXTENSIONS MUST BE VISIBLE, and this is not cosmetic. Explorer ships
@@ -1885,6 +1890,10 @@ case "$SUITE" in
         # nothing foreground-sensitive — no chord is pressed, unlike the
         # menus and commands legs that assert the same catalog.
         run_suite identity_rust
+        run_suite identity_python
+        run_suite identity_go
+        run_suite identity_csharp
+        run_suite identity_java
         run_suite toolbar_rust
         run_suite toolbar_python
         run_suite toolbar_go

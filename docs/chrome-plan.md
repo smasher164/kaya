@@ -65,9 +65,9 @@ advisory status (DESIGN.md, Menus). It is honored by both phone arms
 (iOS promoted bar actions; Android TopAppBar actions) and stored-inert
 on macOS, GTK and WinUI behind one DESIGN.md sentence: "no toolbar
 materialization is planned … not the seed of a toolbar grammar"
-(DESIGN.md:1878-1880), whose own admission trigger reads "admitted only
+(DESIGN.md:1936-1938), whose own admission trigger reads "admitted only
 if an artifact demands semantics that adaptive menu promotion cannot
-express" (DESIGN.md:1938-1940).
+express" (DESIGN.md:1996-1998).
 
 **The ratified answer to that trigger: desktop presence.** Nothing
 else. The slice deletes that sentence and grows three lowerings for the

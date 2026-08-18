@@ -102,9 +102,9 @@ draft could find no runtime call that takes picture bytes. But kaya
 already builds both packages:
 
 - the Android lane builds an installable APK with gradle
-  (`tools/android/run-emulator.sh:943`), and
+  (`tools/android/run-emulator.sh:1180`), and
 - the iOS lane assembles a real `.app` bundle with a real `Info.plist`
-  (`tools/ios/run-sim.sh:93`, the `make_bundle` function, filling in
+  (`tools/ios/run-sim.sh:137`, the `make_bundle` function, filling in
   `tools/ios/Info.plist.in`).
 
 So those two steps become **the first two readers of the declared
@@ -218,9 +218,9 @@ variable that overrides it for a runner whose guest cannot see the repo
 lines carry that file to the three places that are not the repo: pushed
 to each Android device (`tools/android/run-emulator.sh:354`), copied to
 the Windows machine at the mirrored path
-(`tools/deploy-win.sh:554`), and left at its default inside the Linux
+(`tools/deploy-win.sh:544`), and left at its default inside the Linux
 container because the container mounts the repo
-(`tools/linux/run-suites.sh:687`). The identity icon takes exactly this
+(`tools/linux/run-suites.sh:736`). The identity icon takes exactly this
 shape, with its own `KAYA_*` variable and the same three staging lines.
 
 **A gate makes the two readers agree.** The bytes packaged into an
@@ -239,23 +239,30 @@ platforms whose packaging step does not exist yet.
 it is edits to a script that already exists. "Later" means the step
 itself has to be built first.
 
+The "today or later" column is updated as each reader is BUILT, so it
+records what the tree does rather than what the brief expected
+(2026-08-18: the two phone packaging readers and all three runtime
+readers are real and their legs are green on their lanes; the four
+`later` rows are untouched and are packaging's, not this slice's).
+
 | where the icon shows | the reader that puts it there | where that reader lives | today or later |
 |---|---|---|---|
-| **Android launcher** | the APK build | `tools/android/run-emulator.sh:943` builds the APK; the icon becomes a `mipmap` resource and `android:icon` in the three app manifests | **TODAY** |
-| **iOS Home Screen** | the bundle assembly | `tools/ios/run-sim.sh:93` (`make_bundle`) and `tools/ios/Info.plist.in`, which needs the icon keys plus `CFBundleDisplayName` | **TODAY** |
-| **macOS Dock and Cmd-Tab** | the running app | the SwiftUI backend sets the Dock icon from the wire bytes, under the `regular` policy of ruling 2 | **TODAY** (runtime) |
-| **macOS before launch** (Finder, Spotlight, Launchpad) | a `.app` bundle | there is no bundle in the tree; mac guests run as bare executables | later |
+| **Android launcher** | the APK build | android/build.gradle.kts reads the declaration at configuration time and copies the mark into each module's generated `mipmap`; the three app manifests name `@mipmap/kaya_mark` and `${kayaAppLabel}`; tools/android/run-emulator.sh unzips the packaged entry back out and refuses on a hash mismatch | **BUILT 2026-08-18** — declared, generated and in-APK bytes share one sha256, `aapt2 dump badging` reads `application-label:'Aurora Notes'` |
+| **iOS Home Screen** | the bundle assembly | tools/ios/run-sim.sh's `make_bundle` takes a fourth argument that copies the declared mark in verbatim and fills tools/ios/Info.plist.in's `@IDENTITY@` slot with `CFBundleDisplayName` plus the `CFBundleIcons` keys | **BUILT 2026-08-18** — opt-in per bundle; every other bundle's plist payload is byte-unchanged |
+| **macOS Dock and Cmd-Tab** | the running app | the SwiftUI backend sets the Dock icon from the wire bytes, under the `regular` policy of ruling 2 | **TODAY** (runtime) — the Dock tile only; Cmd-Tab needs the `.app` row below |
+| **macOS before launch** (Finder, Spotlight, Launchpad) | a `.app` bundle | there is no bundle in the tree; mac guests run as bare executables | later — and it is also the only route to `CFBundleName`, so the Cmd-Tab label waits on it |
 | **Windows taskbar, alt-tab and caption** | the running app | the WinUI backend sets the window icon and, on windows with a custom caption, the caption's icon | **TODAY** (runtime) |
 | **Windows before launch, and pinned shortcuts** | an icon resource inside the executable, plus the identifier Windows calls an AUMID (the string that groups an app's windows under one taskbar button and backs a pinned shortcut) | no `.ico` and no resource script exist in the tree, and six of eight languages load kaya into someone else's process, so an icon inside kaya's own executable could not cover them anyway | later |
-| **Linux launcher, dock and switcher** (X11 and Wayland) | an install step | a `.desktop` file plus the PNG in the `hicolor` directories. No `.desktop` file exists in the tree | later |
-| **Linux window, uninstalled binary** (the test lane) | the running app | the GTK backend hands decoded textures to the window. Pixels under X11 today; Wayland when GTK reaches 4.20 and the compositor supports `xdg-toplevel-icon` | **TODAY** (X11 only) |
+| **Linux launcher, dock and switcher** (X11 and Wayland) | an install step | a `.desktop` file plus the PNG in the `hicolor` directories. No `.desktop` file exists in the tree, and its precondition is a `WM_CLASS`/`app_id` a desktop can match (docs/deferred.md) | later |
+| **Linux window, uninstalled binary** (the test lane) | the running app | the GTK backend hands decoded textures to the window. Pixels under X11 today; Wayland when GTK reaches 4.20 and the compositor supports `xdg-toplevel-icon` | **TODAY** (X11 only) — the Wayland ring runs a witness leg that goes red the day that changes |
 
 Two things this table settles. The phones are the first packaging
 readers because their packaging is the packaging the repo already has,
-which is ruling 3. And Linux gets its real desktop identity from the row
-marked later, not from the lane row, which is ruling 5: the lane's
-X11-only runtime pixels are what a bare binary can do, and they are not
-the story for an installed app.
+which is ruling 3 — and they are the first two BUILT, which is the
+fan-out doing what the ruling said. And Linux gets its real desktop
+identity from the row marked later, not from the lane row, which is
+ruling 5: the lane's X11-only runtime pixels are what a bare binary can
+do, and they are not the story for an installed app.
 
 ## 0. What this is for, in one paragraph
 
@@ -338,9 +345,31 @@ an app that declares none keeps the `.accessory` default, so every lane
 leg but the identity scene's is unchanged, and that scene's mac legs
 accept a Dock tile for the seconds they run.** The reasoning below is
 kept as the record of what the choice was between. Ruling 2 in "The
-decisions, plainly" carries the plain-language version and the one
-measurement the implementation still owes (whether a policy raised after
-launch puts the tile up).
+decisions, plainly" carries the plain-language version.
+
+**THE ONE MEASUREMENT THIS RULING OWED IS CLOSED [MEASURED 2026-08-18,
+macOS 26.5.2, the mac arm].** A policy raised AFTER launch does put the
+tile up. The identity arrives while the app is building its first
+screen, long after `applicationWillFinishLaunching` has set
+`.accessory`, so the lowering raises the policy at apply time:
+`setActivationPolicy(.regular)` returned true and the Dock tile was
+captured six seconds into a run. The fallback this brief held open —
+running the identity legs under `KAYA_ACTIVATE=1` so the app delegate
+raises the policy at launch — is therefore NOT wired, and
+swift/KayaSwiftUIEntry.swift is untouched.
+
+Two things measured beside it. **`.regular` does not take the front**,
+which corrects option 2's own wording below: nothing calls
+`NSApplication.activate` (that stays behind `KAYA_ACTIVATE=1`), and
+across the capture the frontmost app never changed — the menu bar in
+the full-screen shot still belonged to another application while kaya's
+tile sat in the Dock. So the eight identity legs put eight tiles up and
+steal nobody's keyboard, and the keyboard-stealing risk option 2 accepted
+turned out not to be incurred. And **the tile is UNMASKED**, as I1
+predicted: a hard-edged square beside thirteen rounded system icons,
+which is the declared blob owning its own shape. iOS masks the same
+bytes into a rounded square — one declaration, two platform conventions,
+now a stated divergence in DESIGN.md.
 
 The icon works unbundled. What it needs is `.regular`.
 
@@ -551,15 +580,21 @@ again; and `has_icon() == TRUE` is *not* sufficient, because an unthemed
 flat PNG has empty `get_icon_sizes`, which makes GTK delete
 `_NET_WM_ICON` silently. Going straight to `set_icon_list` avoids both.
 
-**A defect found in passing.** tools/linux/run-suites.sh:164 claims
-kaya's GTK windows carry `application_id("dev.kaya.Milestone2")` as the
-reason its sway rule matches. The Wayland `app_id` actually follows
-`g_get_prgname()`, not the GApplication id, so the lane's legs advertise
-`python3`, `dotnet`, `java`, `milestone2`, `kaya-go` — one per launcher
-binary. The lane is unaffected only because its rule is `app_id=".*"`.
-The comment is wrong and should be corrected whether or not this slice
-proceeds **[MEASURED: same binary under three argv[0]s gave three sway
-app_ids]**.
+**A defect found in passing — CORRECTED 2026-08-18 by the GTK arm.**
+tools/linux/run-suites.sh claimed kaya's GTK windows carry
+`application_id("dev.kaya.Milestone2")` as the reason its sway rule
+matches. The Wayland `app_id` actually follows `g_get_prgname()`, not
+the GApplication id, so the lane's legs advertise `python3`, `dotnet`,
+`java`, `milestone2`, `kaya-go` — one per launcher binary. The lane was
+unaffected only because its rule is `app_id=".*"`. The comment now says
+so, with the measurement beside it
+(tools/linux/run-suites.sh:165) **[MEASURED: same binary under three
+argv[0]s gave three sway app_ids; and, on the identity leg, a primary
+window reading `WM_CLASS = "identity"` beside a later window reading
+`WM_CLASS = "Aurora Notes"`]**. What the correction exposed is a real
+gap and is ledgered: the PRIMARY window's class is sent before any
+transaction drains, so `g_set_prgname` cannot move it, and moving it
+needs `gdk4-x11`/`gdk4-wayland` (docs/deferred.md).
 
 ## I5 — the wire shape
 
@@ -603,7 +638,7 @@ reasons intact:**
    (scene.rs:370). Identity is not state.
 
 **Why the blob channel is the right home, on the tree's own doctrine.**
-DESIGN.md:2360, "Icons want names, not bytes" — the argument that
+DESIGN.md:2418, "Icons want names, not bytes" — the argument that
 produced the `symbol` enum — ends "**The Blob stays for genuinely
 app-specific art.**" An app's own mark is the canonical case: no
 semantic name exists for it, no platform symbol set contains it, and no
@@ -675,8 +710,8 @@ it.
   ground that no phone has a runtime call taking picture bytes. That is
   true and it is the wrong conclusion, because the phones are the two
   platforms whose packaging the repo ALREADY builds: gradle makes an
-  installable APK (tools/android/run-emulator.sh:943) and the iOS lane
-  assembles a real bundle (tools/ios/run-sim.sh:93). Both become
+  installable APK (tools/android/run-emulator.sh:1180) and the iOS lane
+  assembles a real bundle (tools/ios/run-sim.sh:137). Both become
   readers of the declared identity now, which is what puts a real
   launcher icon on both phones. The rest of this bullet is the reasoning
   for the half that stays refused, the Android-only Recents card, and it
@@ -712,7 +747,7 @@ entry did not anticipate.
 
 Most of what a user calls "the app icon" is **build-time**, on every
 platform: the mac bundle's icon, the .desktop `Icon=`, the Android
-manifest's drawable, the iOS asset catalog. DESIGN.md:3566 already says
+manifest's drawable, the iOS asset catalog. DESIGN.md:3630 already says
 so for mac in the tree's own words — `cargo run` launches unbundled
 binaries, and "a minimal `.app` bundle … is needed only for
 bundle-identity features: the app-menu name, `Info.plist` behaviors,
@@ -783,12 +818,29 @@ kaya has the HWND through the existing `IWindowNative` shim.
 
 **macOS has a real read with a named limit, and a trap sitting beside
 it.** `NSApp.applicationIconImage` read back is **not** an echo: AppKit
-stores a re-rendered 1024×1024 snapshot, so the object returned is not
+stores a re-rendered snapshot, so the object returned is not
 the object handed in, and `sha256` of its TIFF is a stable per-input
 fingerprint (identical across 15 runs for one PNG, different for
-another) **[MEASURED]**. **What it cannot do is distinguish "stored"
-from "shown"** — in the accessory arm this exact read reported a
-512×512 image installed while the Dock had no tile at all. Any verb
+another) **[MEASURED]**.
+
+**THE SNAPSHOT'S SHAPE, CORRECTED 2026-08-18 BY THE MAC ARM, because
+this is the number the read has to be safe against.** This research pass
+recorded 1024×1024 and the accessory probe reported 512×512; the arm
+measured **128×128, SIXTEEN BITS PER COMPONENT, in the DISPLAY's ICC
+profile** (`Color LCD` on that host). The size does not matter much —
+quadrant centres survive any of the three — but the depth and the
+profile do: sampling means converting back to sRGB, and doing that
+conversion into an EIGHT-bit context quantizes twice and reported
+`1D71D8` for a declared `1C71D8`, one unit out, which would have made
+mac the one lane that could not meet a byte-frozen expectation. A
+16-bit context with ONE rounding at the end recovers all four exactly;
+truncating the high byte instead of rounding does not (`F7D32C`). So
+the rounding is load-bearing, and the earlier numbers in this paragraph
+were a size read under different conditions rather than a contract.
+
+**What the read cannot do is distinguish "stored"
+from "shown"** — in the accessory arm this exact read reported an image
+installed while the Dock had no tile at all. Any verb
 reporting "icon applied" from this read alone **would have passed on
 every lane leg**. A read that cannot tell those apart must say so, and
 the diagnostic rule (invariant 3) requires it to print what it measured
@@ -802,12 +854,30 @@ against a menu bar that never changed **[MEASURED]**. Apple's own docs
 warn the property is not thread safe and that other machinery depends on
 it. It is refused as a name route on those grounds.
 
-**The one question this pass could not close, named as a precondition.**
+**The one question this pass could not close, named as a precondition —
+CLOSED 2026-08-18 by the Windows depth slice, and the answer is YES.**
 No document states whether `AppWindow.SetIcon` routes through
-`WM_SETICON`. If it does not, a `WM_GETICON` gate would be a **false
-RED**. The winui arm wrote the probe but it did not run, so this is
-[INFER] and it is the first thing the Windows depth slice must settle —
-before any gate is written against `WM_GETICON`, not after.
+`WM_SETICON`; if it did not, a `WM_GETICON` gate would have been a
+**false RED**. The winui arm wrote the probe and the depth slice ran it
+**[MEASURED 2026-08-18, the real VM, the `identity_rust` leg under
+`KAYA_WINUI_TRACE=1`]**:
+
+    kaya: winui app icon: WM_GETICON big=0xbe50405 small=0xbe50405 small2=0xbe50405
+    KAYA_SELFTEST: OK (identity, app icon E01B24/33D17A/1C71D8/F6D32D, ...)
+
+kaya sends no `WM_SETICON` anywhere — the only icon-setting call in the
+process is `AppWindow.SetIconWithIconId`, fed by
+`CreateIconFromResourceEx` -> `Windowing_GetIconIdFromIcon`. All three
+`WM_GETICON` types answer the SAME non-zero HICON and the pixels behind
+that handle are the four declared quadrant colours, so the windowing API
+does write the window's USER32 icon state, `WM_GETICON` is an honest
+read-back of what the taskbar and alt-tab draw, and the gate written
+against it is not a false RED. The trace line is kept permanently with
+the measurement beside it, so the next reader who doubts the routing can
+re-measure in one run. Two things it settled in passing: the FrameworkUdk
+`GetProcAddress` shim works in the unpackaged guest, and
+`CreateIconFromResourceEx` takes the wire's PNG bytes unmodified — no
+`.ico`, and no decode of kaya's own.
 
 **Android's read is real, and the arm traced it end to end.**
 `ActivityManager.getAppTasks()` → `AppTask.getTaskInfo()` →
@@ -959,6 +1029,9 @@ unchanged.
    `AppWindow.SetIcon` routes through `WM_SETICON` on the real VM. It
    decides whether the Windows gate can read `WM_GETICON` at all, and
    writing the gate before knowing is how a false RED gets built.
+   **DONE 2026-08-18, before the gate: it does, all three `WM_GETICON`
+   types answer one non-zero HICON carrying the declared pixels.
+   I8 above holds the measurement.**
 1. Spec: `set_app_identity` + the apply record; the hash moves;
    everything regenerates in lockstep (invariant 7).
 2. Core: the five walls with their unit tests, the undo verdict.
@@ -982,9 +1055,9 @@ unchanged.
 6. The phones' packaging readers, per ruling 3, which are the first two
    build-time consumers of the asset: the APK gains an icon resource
    plus `android:icon` and `android:label`
-   (tools/android/run-emulator.sh:943 builds it), and the iOS bundle
+   (tools/android/run-emulator.sh:1180 builds it), and the iOS bundle
    gains the icon plus `CFBundleDisplayName` and the icon keys
-   (tools/ios/run-sim.sh:93 assembles it, from
+   (tools/ios/run-sim.sh:137 assembles it, from
    tools/ios/Info.plist.in). Android's runtime Recents route stays
    refused (I6).
 7. Gates: one `check_styling_point` row, one `VERB_FEATURE` row in
@@ -1031,13 +1104,17 @@ are in the record below.
    RATIFIED as proposed.
 7. **Two findings that stand on their own**, whether or not this slice
    proceeds, and which the maintainer may want handled separately: the
-   inaccurate comment at tools/linux/run-suites.sh:164 about where the
+   inaccurate comment at tools/linux/run-suites.sh:165 about where the
    Wayland `app_id` comes from (I4a), and the fact that kaya's Python,
    Java and dotnet guests currently group under the **host executable's**
    taskbar button on Windows for want of an AUMID (I3).
-   Still open, and not blocking: they are ledger items whenever the
-   maintainer wants them, and the AUMID one is repaired for free by the
-   Windows work in step 3 of the sequencing.
+   The first is CORRECTED 2026-08-18 by the GTK arm, with the
+   measurement written beside the comment — and the gap under it (the
+   PRIMARY window's `app_id`/`WM_CLASS` cannot be moved from inside the
+   process) is now its own ledger entry. The AUMID one is STILL OPEN and
+   ledgered; it was not repaired for free by the Windows depth after
+   all, since nothing in that slice calls
+   `SetCurrentProcessExplicitAppUserModelID`.
 
 ## Ratification record
 
@@ -1075,8 +1152,14 @@ are in the record below.
   with each platform converting (I6), the refusals other than the phone
   half above (I6), and Windows as the depth platform (Dependencies and
   sequencing).
-- Still open, and none of it blocking: I8's measurement of whether
+- ~~Still open, and none of it blocking: I8's measurement of whether
   `AppWindow.SetIcon` routes through `WM_SETICON`, which the Windows
   work takes first; whether a macOS activation policy raised after
   launch puts the Dock tile up, which the mac work measures before
-  relying on it; and the two standalone findings in ask 7 above.
+  relying on it~~ — **BOTH CLOSED 2026-08-18, both YES.** The Windows
+  depth slice ran the `WM_GETICON` probe on the real VM before writing
+  the gate (I8), and the mac arm measured the late policy raise putting
+  the tile up, with `.regular` never taking the front (I2). Neither
+  fallback was needed: no `WM_SETICON` call was added and
+  `KAYA_ACTIVATE=1` stayed unwired. Still open from this record: the two
+  standalone findings in ask 7 above.

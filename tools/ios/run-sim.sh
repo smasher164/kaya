@@ -90,17 +90,97 @@ SIMDRIVE=$(tools/ios/simdrive/build.sh)
 # guest sees (tools/ios/clipctl/main.swift).
 CLIPCTL=$(tools/ios/clipctl/build.sh)
 
+# THE DECLARED APP IDENTITY, READ ONCE, FROM THE ONE PLACE IT IS WRITTEN
+# (docs/app-identity-plan.md ruling 4). This lane is one of the two
+# BUILD-TIME readers the ruling names — it assembles a real .app with a
+# real Info.plist, so the icon goes into the bundle and the name into
+# CFBundleDisplayName, neither of which this plist declared before.
+#
+# THE VALUES COME OUT OF THE DECLARATION, never retyped: retyping either
+# one here is the second reader ruling 4 exists to prevent, and
+# tools/check-app-identity.sh C6 holds this file to it.
+KAYA_IDENTITY_MANIFEST="$ROOT/guests/assets/identity.toml"
+IDENTITY_DECL="$(python3 - "$KAYA_IDENTITY_MANIFEST" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+man = pathlib.Path(sys.argv[1])
+if not man.is_file():
+    sys.exit(f"run-sim: {man} is missing — the app identity is declared there "
+             f"and this lane's bundles read their icon and display name from "
+             f"it (docs/app-identity-plan.md ruling 4)")
+decl = tomllib.loads(man.read_text(encoding="utf-8"))
+icon, name = decl.get("icon"), decl.get("name")
+for key, value in (("icon", icon), ("name", name)):
+    if not isinstance(value, str) or not value.strip():
+        sys.exit(f"run-sim: {man} declares no `{key}`, so the bundles this lane "
+                 f"assembles would carry half an identity")
+print(icon)
+print(name)
+PY
+)"
+identity_decl_rc=$?
+if [ "$identity_decl_rc" -ne 0 ] || [ -z "$IDENTITY_DECL" ]; then
+    echo "run-sim: could not read the app identity from $KAYA_IDENTITY_MANIFEST" >&2
+    exit 1
+fi
+ICON_REL="$(printf '%s\n' "$IDENTITY_DECL" | head -1)"
+IDENTITY_NAME="$(printf '%s\n' "$IDENTITY_DECL" | tail -1)"
+ICON_SRC="$ROOT/$ICON_REL"
+ICON_IN_BUNDLE="$(basename "$ICON_REL")"
+if [ ! -f "$ICON_SRC" ]; then
+    echo "run-sim: the declared app mark $ICON_REL is missing from this tree" >&2
+    exit 1
+fi
+
 make_bundle() {
-    local name="$1" bundle_id="$2" executable_path="$3"
+    # A fourth argument, ANY non-empty value, puts the declared identity
+    # into this bundle: the mark copied in verbatim and the plist's icon
+    # keys plus CFBundleDisplayName filled from the manifest. Empty — the
+    # default, and every other bundle on this lane — leaves the plist
+    # exactly as it was before identity existed.
+    #
+    # OPT-IN AND NOT GLOBAL. The interpreter's iOS `expect_app_icon` reads
+    # THIS artifact and holds it equal to what the guest declared over the
+    # wire, so a bundle carrying an identity its guest never declared
+    # would be an icon nobody asked for, and the read could report one for
+    # an app with no declaration at all.
+    local name="$1" bundle_id="$2" executable_path="$3" identity="${4:-}"
     local app="$BUNDLES/$name.app"
     rm -rf "$app"
     mkdir -p "$app"
-    KAYA_NAME="$name" KAYA_BUNDLE_ID="$bundle_id" python3 -c '
+    local icon_keys=""
+    if [ -n "$identity" ]; then
+        cp "$ICON_SRC" "$app/$ICON_IN_BUNDLE" || return 1
+        icon_keys="$ICON_IN_BUNDLE"
+    fi
+    KAYA_NAME="$name" KAYA_BUNDLE_ID="$bundle_id" \
+        KAYA_ICON_KEYS="$icon_keys" KAYA_DISPLAY_NAME="$IDENTITY_NAME" python3 -c '
 import os, sys
 tpl = open("tools/ios/Info.plist.in").read()
+icon = os.environ["KAYA_ICON_KEYS"]
+# The icon file name carries its extension in the bundle and NOT in
+# CFBundleIconFiles: iOS matches the entry against the bundle root by
+# base name, which is what lets one entry stand for the @2x/@3x family
+# an asset catalog would emit. The interpreter resolves it the same way.
+block = "" if not icon else """<key>CFBundleDisplayName</key>
+    <string>{name}</string>
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconFiles</key>
+            <array>
+                <string>{base}</string>
+            </array>
+        </dict>
+    </dict>""".format(name=os.environ["KAYA_DISPLAY_NAME"],
+                      base=icon.rsplit(".", 1)[0])
 sys.stdout.write(tpl.replace("@EXECUTABLE@", os.environ["KAYA_NAME"])
                     .replace("@BUNDLE_ID@", os.environ["KAYA_BUNDLE_ID"])
-                    .replace("@NAME@", os.environ["KAYA_NAME"]))' > "$app/Info.plist"
+                    .replace("@NAME@", os.environ["KAYA_NAME"])
+                    .replace("@IDENTITY@", block))' > "$app/Info.plist"
     cp "$executable_path" "$app/$name"
     echo "$app"
 }
@@ -979,6 +1059,73 @@ simdrive_watch() { # udid bundle_id documents_dir
     done
 }
 
+# DROP ONE STEP, not a suffix — the cut's sibling, for a step that is out
+# of reach on this host while everything AFTER it is expressible.
+#
+# The cut in run_swiftui_on takes a tail: it exists for `dirty` and
+# `editor`, whose last stretch hangs off a chrome close this platform has
+# not got, so everything below one verb goes. `identity` is the other
+# shape. Exactly one of its steps reads the declared NAME off an
+# AUXILIARY window, and this host has none — the core rejects
+# create_window by capability, so the guest does not build one
+# (guests/rust/identity.rs's cfg, keyed on the same predicate) — while
+# the two icon reads, the toolbar assertions and the live-widget round
+# trip below it are all perfectly expressible. Cutting the tail here
+# would throw away the second `expect_app_icon`, which is the step that
+# proves nothing later disturbed the mark.
+#
+# THE SAME TWO GUARDS THE CUT CARRIES, for the same reasons: a drop that
+# matches no step is STALE (the scene was reshaped and nobody re-read
+# what the phone can express), and the `keep` verbs name the assertions
+# the drop may not take with it. And a green leg still SAYS what it
+# declined.
+#
+# NAMED BY VERB AND TARGET, never by the whole line: the line carries the
+# declared NAME, and retyping a declared value in a runner is the second
+# source of truth guests/assets/identity.toml exists to prevent.
+scene_script_drop() { # scene verb target keep-verb...
+    python3 - "$ROOT/tools/scenes/$1.steps" "$2" "$3" "${@:4}" <<'PY'
+import pathlib
+import sys
+
+path, verb, target = sys.argv[1], sys.argv[2], sys.argv[3]
+keeps = sys.argv[4:]
+if not keeps:
+    sys.exit(f"run-sim: dropping `{verb} {target}` from {path} with no `keep` "
+             f"verb — say which assertions this drop may not take with it, or "
+             f"the leg can be trimmed until it asserts nothing")
+lines = [" ".join(line.split()) for line in pathlib.Path(path).read_text().splitlines()
+         if line.strip() and not line.lstrip().startswith("#")]
+hits = [i for i, line in enumerate(lines) if line.split()[:2] == [verb, target]]
+if len(hits) != 1:
+    sys.exit(f"run-sim: {path} has {len(hits)} `{verb} {target}` steps and this "
+             f"lane drops exactly one — the scene was reshaped and nobody "
+             f"re-read what the phone can express. Fix the leg, do not widen "
+             f"the drop.")
+kept = lines[:hits[0]] + lines[hits[0] + 1:]
+
+
+def asserted(seq, v):
+    """The distinct `v` steps in seq, whitespace-normalized."""
+    return {line for line in seq if line.split()[:1] == [v]}
+
+
+for v in keeps:
+    whole, survived = asserted(lines, v), asserted(kept, v)
+    if not survived:
+        sys.exit(f"run-sim: dropping `{verb} {target}` from {path} leaves no "
+                 f"`{v}` step at all — the leg would pass without asserting the "
+                 f"thing it exists for")
+    if survived != whole:
+        sys.exit(f"run-sim: dropping `{verb} {target}` from {path} takes "
+                 f"{sorted(whole - survived)} — the drop may not take an "
+                 f"assertion of `{v}` with it")
+print(f"run-sim: NOT RUN on this host (no auxiliary windows): {lines[hits[0]]}",
+      file=sys.stderr)
+print("\n".join(kept))
+PY
+}
+
 # Rust entrypoint + SwiftUI backend legs: install the bundle (with the
 # embedded dylib) on the claimed simulator and launch with the scene
 # script from the environment.
@@ -1019,6 +1166,17 @@ run_swiftui_on() {
     # this scene one step earlier, at `click button#0`, and the prefix
     # asserts `dirty false` and never `dirty true`.
     local cut="${9:-}" keep="${10:-}"
+    # The 11th and 12th: THE ONE STEP THIS HOST CANNOT EXPRESS while
+    # everything after it can (scene_script_drop above). Mutually
+    # exclusive with the cut — a leg that both trims a tail and drops a
+    # step is two decisions wearing one name — and the same `keep` guard
+    # holds it.
+    local drop_verb="${11:-}" drop_target="${12:-}"
+    if [ -n "$cut" ] && [ -n "$drop_verb" ]; then
+        echo "run-sim: $name asks for both a cut at \`$cut\` and a drop of" \
+            "\`$drop_verb $drop_target\` — pick one" >&2
+        return 1
+    fi
     xcrun simctl install "$udid" "$app"
     local container
     container=$(xcrun simctl get_app_container "$udid" "$bundle_id" app)
@@ -1076,6 +1234,9 @@ print("\n".join(f"run-sim: NOT RUN on this host (after `{cut}`): {line}"
 print("\n".join(prefix))
 PY
         ) || return 1
+    elif [ -n "$drop_verb" ]; then
+        script=$(scene_script_drop "$scene" "$drop_verb" "$drop_target" $keep) \
+            || return 1
     else
         script=$(grep -v '^#' "$ROOT/tools/scenes/$scene.steps")
     fi
@@ -1105,8 +1266,32 @@ $extra"
         simdrive_watch "$udid" "$bundle_id" "$data_container/Documents" &
         watcher_pid=$!
     fi
+    # THE DECLARED MARK, DELIVERED WHERE THE GUEST CAN OPEN IT. The guest's
+    # default path is repo-relative and an app inside the simulator has no
+    # repo — its working directory is `/`, so `guests/assets/...` resolves
+    # nowhere. So the mark is STAGED INTO THIS APP'S OWN DATA CONTAINER
+    # and KAYA_ICON_FILE names it, the typeface's KAYA_FONT_FILE one asset
+    # over. The container is a real host path that both sides can see; it
+    # is the same meeting point the picker and clipboard verbs already use
+    # (docs/traps.md), so nothing new is being trusted here.
+    #
+    # A SECOND, INDEPENDENT COPY, and that is the point rather than an
+    # accident: the bundle got its copy from make_bundle and the guest
+    # reads THIS one, so the interpreter holding the two equal is ruling
+    # 4's byte-equality check — the declared bytes against the packaged
+    # bytes — running where the lane can watch it. Pointing the guest at
+    # the bundle's own copy would make that comparison a file compared
+    # with itself.
+    local icon_env=()
+    if [ "$scene" = identity ]; then
+        local icon_container
+        icon_container=$(xcrun simctl get_app_container "$udid" "$bundle_id" data)
+        mkdir -p "$icon_container/Documents"
+        cp "$ICON_SRC" "$icon_container/Documents/$ICON_IN_BUNDLE" || return 1
+        icon_env=(SIMCTL_CHILD_KAYA_ICON_FILE="$icon_container/Documents/$ICON_IN_BUNDLE")
+    fi
     local out
-    out=$(SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
+    out=$(env "${icon_env[@]}" SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
         SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$script" \
         SIMCTL_CHILD_KAYA_SWIFTUI_LIB="$container/libkaya_swiftui.dylib" \
         timeout 120 xcrun simctl launch --console-pty "$udid" "$bundle_id" 2>&1) || true
@@ -1337,7 +1522,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar identity"
     swift_pids=()
     swift_names=()
     for entry in $IOS_SWIFT_SCENES; do
@@ -1379,10 +1564,30 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     [ "$swift_status" = 0 ] || exit 1
     for entry in $IOS_SWIFT_SCENES; do
         guest="${entry%%:*}"
-        APP=$(make_bundle "${guest}swift" "dev.kaya.${guest}swift" "$BUNDLES/${guest}swift-bin")
+        # THE DECLARED IDENTITY GOES INTO ONE BUNDLE, the one whose guest
+        # declares an identity — make_bundle's fourth argument, and the
+        # reason it is opt-in is written there.
+        ident=""
+        if [ "$guest" = identity ]; then ident=identity; fi
+        APP=$(make_bundle "${guest}swift" "dev.kaya.${guest}swift" "$BUNDLES/${guest}swift-bin" "$ident")
         cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
         if [ "$guest" = milestone2 ]; then
             queue_leg run_swiftui_on swift "$APP" dev.kaya.milestone2swift swift 1 milestone2
+        elif [ "$guest" = identity ]; then
+            # ONE STEP IS NOT RUN HERE and the leg prints it: `expect_title
+            # window#1` reads the declared NAME off an auxiliary window,
+            # and this host has none — the core rejects create_window by
+            # capability, so the guest builds no such window. THE NAME IS
+            # STILL DECLARED AND STILL READ on this platform; what changes
+            # is where it is read FROM, and here that is the bundle's own
+            # CFBundleDisplayName, written by make_bundle from the same
+            # manifest (docs/app-identity-plan.md ruling 3). The keep
+            # guard names `expect_app_icon`: the drop may not take either
+            # icon read with it, which is what makes this a trim rather
+            # than a way to pass.
+            queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" \
+                "$guest-swift" "$guest" "$guest" "" "" expect_app_icon \
+                expect_title "window#1"
         elif [ "$guest" = sections ]; then
             # THE PHONE-EXPRESSIBLE PREFIX (the dirty-cut shape): the
             # sections tail opens an aux window this host rejects by
@@ -1453,7 +1658,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # CGO_CFLAGS/CGO_LDFLAGS because cgo uses CC to LINK as well as to
     # compile, and -isysroot has to reach both halves.
     IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
-    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar"
+    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar identity"
     # ONE CROSS-BUILD FOR THE WHOLE SUITE. guests/go/cmd is the guest
     # tree's only main package: it imports every scene library and picks
     # one from KAYA_SELFTEST, which each leg below already passes as its
@@ -1479,10 +1684,17 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # notices, at build time, before a single bundle is assembled.
     "$ROOT/tools/build-id.sh" --verify "$BUNDLES/go-bin" || exit 1
     for guest in $IOS_GO_SCENES; do
-        APP=$(make_bundle "${guest}go" "dev.kaya.${guest}go" "$BUNDLES/go-bin")
+        ident=""
+        if [ "$guest" = identity ]; then ident=identity; fi
+        APP=$(make_bundle "${guest}go" "dev.kaya.${guest}go" "$BUNDLES/go-bin" "$ident")
         cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
         if [ "$guest" = milestone2 ]; then
             queue_leg run_swiftui_on go "$APP" dev.kaya.milestone2go go 1 milestone2
+        elif [ "$guest" = identity ]; then
+            # The swift leg's drop, verbatim and for its reasons.
+            queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" \
+                "$guest-go" "$guest" "$guest" "" "" expect_app_icon \
+                expect_title "window#1"
         elif [ "$guest" = sections ]; then
             # The same phone-expressible prefix as the swift leg above.
             queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest" "" expect_windows "expect_section expect_section_symbol"
@@ -1762,6 +1974,31 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     APP=$(make_bundle toolbarrs-swiftui dev.kaya.toolbarswiftui "$TARGET_DIR/examples/toolbar")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on toolbar-swiftui "$APP" dev.kaya.toolbarswiftui toolbar-swiftui toolbar toolbar
+
+    # The identity scene (docs/app-identity-plan.md). THE ONLY LEG ON THIS
+    # LANE THAT ASSERTS ON THE BUNDLE IT WAS BUILT INTO, and that is the
+    # platform rather than a shortcut: iOS has NO runtime route to the
+    # Home Screen icon — the SDK's whole app-icon surface is
+    # supportsAlternateIcons, setAlternateIconName and alternateIconName,
+    # typed BOOL and NSString, none of which takes bytes — so the artifact
+    # an iOS app's identity lives in is its bundle, and make_bundle above
+    # is the reader ruling 3 puts there.
+    #
+    # `expect_app_icon` therefore decodes the icon file inside THIS app's
+    # bundle with UIKit's own decoder and samples its four quadrant
+    # centres, exactly as the mac leg samples AppKit's Dock copy and the
+    # Windows leg samples the HICON behind WM_GETICON — one frozen string,
+    # three artifacts. It cannot pass vacuously: an app that declared no
+    # identity over the wire, a bundle with no icon keys, a bundle naming
+    # a file it does not hold, and a bundle whose icon differs from the
+    # declared bytes each go RED naming which (docs/app-identity-plan.md
+    # I8, and ruling 4's byte-equality check is that last one).
+    SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example identity
+    APP=$(make_bundle identityrs-swiftui dev.kaya.identityswiftui "$TARGET_DIR/examples/identity" identity)
+    cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
+    queue_leg run_swiftui_on identity-swiftui "$APP" dev.kaya.identityswiftui \
+        identity-swiftui identity identity "" "" expect_app_icon \
+        expect_title "window#1"
 
     # The listdetail scene, the DEPTH slice: list-detail's bare
     # invariant, which is the only form of it this host can run — the

@@ -3002,6 +3002,49 @@ final class KayaAppTx {
             font.map { .blob(kayaRegisterBlob($0)) } ?? .str(""))
     }
 
+    /// DECLARE the app's identity (docs/app-identity-plan.md): the name
+    /// it goes by and the picture that stands for it, as the bytes of
+    /// one image file. One name covers both forms, the
+    /// defaulted-argument shape `brandTypeface` and the window construct
+    /// already use — `icon:` left out is the name-only declaration.
+    ///
+    /// ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
+    /// tile, the Windows taskbar/alt-tab icon and the caption's mark,
+    /// and an X11 window's icon; the same FILE, read at build time,
+    /// becomes the Android launcher icon and the iOS Home Screen icon.
+    /// Send a PNG: each lowering converts, and no platform-specific
+    /// artwork rides the wire.
+    ///
+    /// SET ONCE, BEFORE THE FIRST MOUNT: the brand's wall verbatim, and
+    /// for its reason — identity is not state, and a slot that could
+    /// flip at runtime would promise the identity-switching surface the
+    /// vocabulary deliberately lacks. The root refuses a second write, a
+    /// late one and an empty name; an app that wants the platform's own
+    /// identity declares none at all.
+    ///
+    /// THE BYTES ARE NEVER INSPECTED between here and the platform's own
+    /// decoder. Whether a blob is an image is a question only that
+    /// decoder can answer, so bytes that are not one leave every
+    /// platform's default in place, which is why the conformance scene
+    /// reads what the DECODER produced rather than echoing this request
+    /// back. The bytes are copied out at the call, so the `Data` is
+    /// yours again the moment this returns.
+    ///
+    /// A NAMED APP WITH NO MARK still reaches the surfaces a name
+    /// reaches — the Windows caption and taskbar tooltip, the macOS menu
+    /// bar, the Linux app_id, and both phones' packaging — and every
+    /// icon surface keeps the platform's own default, honestly and
+    /// visibly.
+    func appIdentity(_ name: String, icon: Data? = nil) {
+        // The icon SLOT rides either way and the mask is what says
+        // whether it means anything — the brand mask's discipline, and
+        // the reason this record's field count never varies with the
+        // payload.
+        tx.setAppIdentity(
+            icon == nil ? 0 : 1, .str(name),
+            icon.map { .blob(kayaRegisterBlob($0)) } ?? .str(""))
+    }
+
     /// Create an auxiliary window (capability-gated: phone hosts
     /// reject at the root); materializes hidden, mountIn presents.
     /// Named arguments are the Swift spelling.

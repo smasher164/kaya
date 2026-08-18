@@ -690,6 +690,15 @@ final class KayaSceneModel {
     /// observation — the whole risk of a family swap is that a request
     /// echoed back looks exactly like a swap that happened.
     var typefaceRequested: String?
+    /// The DECLARED app identity (apply 34), or nil when this app
+    /// declared none. Both halves are the request as it arrived, never a
+    /// resolution: on macOS the picture is handed to AppKit and the
+    /// observation reads AppKit's own copy back, and on iOS the bytes
+    /// exist only so the bundle read has something to disagree with —
+    /// an app that declared nothing must not pass that read
+    /// (docs/app-identity-plan.md I8).
+    var appIdentityName: String?
+    var appIdentityIcon: Data?
     // Per-kind registries in creation order (stamped copies included):
     // the harness names targets as kind#index.
     var buttons: [KayaNode] = []
@@ -3264,6 +3273,24 @@ private func kayaCollectBlobs(_ batch: Data) -> [UInt64: Data] {
                     blobs[handle] = KayaHost.blobData(handle)
                 }
             }
+            // SET_APP_IDENTITY's icon blob (apply 34). Its slot sits
+            // after mask+reserved and the name, so the walk is the
+            // record's own — and it has to be HERE rather than in the
+            // apply arm for the reason at the top of this function: the
+            // handle dies with the batch, and the apply runs on the main
+            // queue after the pump has already asked for the next one.
+            // Without this the icon arrives as no bytes at all, with no
+            // error on any side.
+            if kind == applySetAppIdentity {
+                var vat = at + 8 + 8
+                let nameLen = Int(raw.loadUnaligned(fromByteOffset: vat + 4, as: UInt32.self))
+                vat += 8 + nameLen
+                if vat % 8 != 0 { vat += 8 - vat % 8 }
+                if raw.loadUnaligned(fromByteOffset: vat, as: UInt32.self) == valueBlob {
+                    let handle = raw.loadUnaligned(fromByteOffset: vat + 8, as: UInt64.self)
+                    blobs[handle] = KayaHost.blobData(handle)
+                }
+            }
             at += size
         }
     }
@@ -3630,22 +3657,55 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                         "typeface \(wanted) is not installed — the platform ramp stands")
                 }
             case applySetAppIdentity:
-                // DECODED BY NOBODY YET, ON PURPOSE. Ruling 2 of
-                // docs/app-identity-plan.md makes a declaring app
-                // `.regular` on macOS so it HAS a Dock tile to put a
-                // picture in, and that policy change plus
-                // `NSApp.applicationIconImage` is the mac arm — the
-                // plan's breadth order puts it after Linux. iOS has no
-                // runtime route at all (the full SDK census of the
-                // app-icon surface is three symbols, none of them
-                // taking bytes), so its identity is the bundle's and
-                // arrives with packaging.
-                //
-                // The record is SKIPPED rather than mis-read: the loop
-                // advances by the record's own size, so an arm that
-                // decodes nothing is exactly as correct as one that
-                // decodes and discards, and cheaper to read.
-                break
+                // ONE DECLARATION, TWO PLATFORMS THAT REACH IT
+                // DIFFERENTLY, and the difference is measured rather
+                // than scheduled (docs/app-identity-plan.md I1, I8):
+                // macOS hands the picture to the Dock at runtime, iOS
+                // has no runtime route at all and its identity is the
+                // bundle's (tools/ios/run-sim.sh's make_bundle).
+                var iat = body + 8
+                func nextIdentityValue() -> (UInt32, Int, Int) {
+                    let type = raw.loadUnaligned(fromByteOffset: iat, as: UInt32.self)
+                    let len = Int(raw.loadUnaligned(fromByteOffset: iat + 4, as: UInt32.self))
+                    let at = iat + 8
+                    iat += 8 + len
+                    if iat % 8 != 0 { iat += 8 - iat % 8 }
+                    return (type, at, len)
+                }
+                let identityMask = raw.loadUnaligned(fromByteOffset: body, as: UInt32.self)
+                let (_, nameAt, nameLen) = nextIdentityValue()
+                let identityName = String(
+                    decoding: raw[nameAt..<(nameAt + nameLen)], as: UTF8.self)
+                // The icon slot is always written; the mask says whether
+                // it means anything (the typeface's convention, copied).
+                let (iconType, iconAt, _) = nextIdentityValue()
+                var identityIcon: Data?
+                if identityMask & 1 != 0, iconType == valueBlob {
+                    let handle = raw.loadUnaligned(fromByteOffset: iconAt, as: UInt64.self)
+                    identityIcon = blobs[handle]
+                }
+                kayaScene.appIdentityName = identityName
+                kayaScene.appIdentityIcon = identityIcon
+                #if os(macOS)
+                    kayaApplyMacIdentity(identityName, identityIcon)
+                #else
+                    // NO RUNTIME ROUTE, AND THAT IS A MEASURED FACT
+                    // RATHER THAN A SCHEDULE: the whole iOS app-icon
+                    // surface is `supportsAlternateIcons`,
+                    // `setAlternateIconName` and `alternateIconName`,
+                    // typed BOOL and NSString, none of which takes
+                    // bytes. The bytes are kept because the OBSERVATION
+                    // needs them: `expect_app_icon` reads the icon out
+                    // of the bundle this app is running from and holds
+                    // it equal to this declaration, so an app that
+                    // declared nothing cannot pass it.
+                    kayaDiag(
+                        "app identity \(identityName): iOS has no runtime route to the "
+                            + "Home Screen icon, so this declaration reaches the platform "
+                            + "through tools/ios/run-sim.sh's make_bundle; "
+                            + "\(identityIcon?.count ?? 0) icon bytes kept for the "
+                            + "bundle read")
+                #endif
             case applyPresentSaveDialog:
                 // The platform's REAL save dialog (NSSavePanel), answered
                 // exactly once through kaya_emit_save_dialog_result — one
@@ -5862,7 +5922,7 @@ private func kayaRunScript(_ script: String) {
                         if let window = kayaTitleWindow(wid) {
                             return window.title
                         }
-                        return wid == 0 ? kayaScene.windows[0]?.title ?? "" : ""
+                        return wid == 0 ? kayaWindowCaption(0) : ""
                     #else
                         // iOS has no title bar; the surface-title read
                         // is the model that feeds UIScene.title — and
@@ -5873,7 +5933,7 @@ private func kayaRunScript(_ script: String) {
                         if let top = kayaScene.windows[wid]?.entries.last {
                             return top.title
                         }
-                        return kayaScene.windows[wid]?.title ?? ""
+                        return kayaWindowCaption(wid)
                     #endif
                 }
                 if kayaBytesEqual(got, want) {
@@ -6591,36 +6651,26 @@ private func kayaRunScript(_ script: String) {
                     kayaDepthStub("typeface", on: "ios")
                 #endif
             case "expect_app_icon":
-                // THE IDENTITY SCENE HAS NOT REACHED EITHER APPLE
-                // PLATFORM (docs/app-identity-plan.md's breadth order:
-                // Windows depth, then Linux, then mac). The two arms
-                // are stubbed for DIFFERENT reasons and both are
-                // written out, because a shared refusal would hide that
-                // one of them is a schedule and the other is a fact:
-                //
-                //   macOS — the route is real and measured
-                //     (`NSApp.applicationIconImage` from PNG bytes
-                //     replaces the Dock tile and the Cmd-Tab tile, and
-                //     the read back is a re-rendered snapshot rather
-                //     than an echo), and it carries ruling 2's policy
-                //     change with it: an app that declares an identity
-                //     becomes `.regular`, because an `.accessory` app
-                //     has no Dock tile to put an icon in — measured, the
-                //     setter succeeded and the Dock did not move one
-                //     pixel. That is the mac arm's work, not this
-                //     slice's.
-                //
-                //   iOS — there is no runtime route at all. The full
-                //     SDK census of the app-icon surface is three
-                //     symbols, typed BOOL and NSString, none of which
-                //     takes bytes; the Home Screen icon is the bundle's,
-                //     so iOS's reader is the packaging step and its
-                //     read is of the built bundle, not of a live app.
-                #if os(macOS)
-                    kayaDepthStub("identity", on: "macos")
-                #else
-                    kayaDepthStub("identity", on: "ios")
-                #endif
+                // TWO PLATFORMS, TWO ARTIFACTS, ONE STRING. macOS reads
+                // AppKit's own copy of the Dock picture; iOS reads the
+                // icon file inside the bundle it is running out of,
+                // because it has no runtime route to the Home Screen at
+                // all. Both go through the same quadrant sampler, so the
+                // expectation is byte-identical here, on Windows and on
+                // GTK (docs/app-identity-plan.md I8).
+                let wantIcon = kayaQuoted(Array(parts[1...]))
+                let gotIcon = DispatchQueue.main.sync { () -> String in
+                    #if os(macOS)
+                        return kayaMacAppIcon()
+                    #else
+                        return kayaIOSAppIcon()
+                    #endif
+                }
+                if gotIcon == wantIcon {
+                    observed.append("app icon \(wantIcon)")
+                } else {
+                    failures.append("app icon \(gotIcon), wanted \(wantIcon)")
+                }
             case "expect_inset":
                 // The content inset, MEASURED as the halved gap between
                 // the padding container's outer extent and the offer
@@ -8221,6 +8271,336 @@ func kayaRegisterFont(_ bytes: Data) -> String? {
     }
     return families.first!
 }
+
+// ---- The app identity ---------------------------------------------
+//
+// ONE DECLARATION, TWO ROUTES (docs/app-identity-plan.md, ratified
+// 2026-08-18), and the difference between the routes is a MEASUREMENT
+// rather than a schedule. macOS hands the picture to the Dock while the
+// app runs. iOS has no runtime call that takes picture bytes at all —
+// the whole SDK surface is supportsAlternateIcons/setAlternateIconName/
+// alternateIconName, typed BOOL and NSString — so its identity is the
+// BUNDLE's, written by tools/ios/run-sim.sh's make_bundle, and the
+// honest observation is of that artifact.
+
+/// The four quadrant CENTRES of a decoded picture, as
+/// `RRGGBB/RRGGBB/RRGGBB/RRGGBB` in reading order: top-left, top-right,
+/// bottom-left, bottom-right.
+///
+/// THE CONTRACT IS THE WINUI ARM'S, VERBATIM
+/// (crates/kaya/src/winui/mod.rs's `icon_quadrants`): the scene's
+/// expectation is ONE frozen string on every lane, so the sample points,
+/// the reading order and the spelling are one rule with two spellings of
+/// it. Centres and not corners, because whatever rescale a platform
+/// applies between the declared 64x64 PNG and the size it rasterizes at
+/// blurs a quadrant BOUNDARY, while the centre of a large flat region
+/// survives every resampling filter exactly.
+///
+/// SIXTEEN BITS PER COMPONENT, AND THAT IS NOT BELT AND BRACES — it is
+/// the difference between this read agreeing with every other lane and
+/// missing by one. MEASURED 2026-08-18 on the declared mark: AppKit does
+/// not keep the picture it was handed. `applicationIconImage` reads back
+/// as a 128x128, SIXTEEN-BIT snapshot in the DISPLAY's ICC profile
+/// ("Color LCD" on this host), so sampling it means a colour conversion
+/// back to sRGB — and doing that conversion into an EIGHT-bit context
+/// quantizes twice and reported `1D71D8` for a declared `1C71D8`. A
+/// 16-bit context and one rounding at the end recovers all four colours
+/// exactly. Truncating the high byte instead of rounding does NOT
+/// (`F7D32C` for `F6D32D`), so the rounding is load-bearing.
+///
+/// WHAT THAT LEAVES UNMEASURED, said out loud: a display profile whose
+/// gamut is SMALLER than sRGB would clip rather than round-trip, and no
+/// number of bits would recover the declaration. Every display this has
+/// been run against contains sRGB.
+/// A window's EFFECTIVE caption: the title that window declared, or the
+/// declared app identity's NAME when it declared none.
+///
+/// FILLING THE BLANK, NEVER OVERRIDING (tools/scenes/identity.steps): a
+/// window that says what it is keeps saying it, and a window with
+/// nothing written shows what the APP is called. That is the same rule
+/// the Windows backend spells through its one caption writer, which is
+/// why the scene's two `expect_title` lines are the same two lines on
+/// both platforms. An app that declared no identity is unaffected —
+/// the blank stays blank and AppKit substitutes the process name, as it
+/// always has.
+/// A WINDOW THAT DOES NOT EXIST HAS NO CAPTION, and that guard is the
+/// half a negative test caught: without it `expect_title window#1` PASSED
+/// on iOS, where the guest builds no auxiliary window at all — the model
+/// lookup missed, the empty string became "no title of its own", and the
+/// identity name filled a blank belonging to nothing. A read that answers
+/// for a window nobody created is the vacuous pass this scene exists to
+/// make impossible.
+func kayaWindowCaption(_ windowId: UInt64) -> String {
+    guard let own = kayaScene.windows[windowId]?.title else { return "" }
+    guard own.isEmpty, let name = kayaScene.appIdentityName, !name.isEmpty else {
+        return own
+    }
+    return name
+}
+
+func kayaIconQuadrants(_ image: CGImage) -> String? {
+    let width = image.width, height = image.height
+    guard width > 1, height > 1 else { return nil }
+    var pixels = [UInt16](repeating: 0, count: width * height * 4)
+    let drawn: Bool = pixels.withUnsafeMutableBufferPointer { buf -> Bool in
+        guard
+            let ctx = CGContext(
+                data: buf.baseAddress, width: width, height: height,
+                bitsPerComponent: 16, bytesPerRow: width * 8,
+                space: CGColorSpace(name: CGColorSpace.sRGB)
+                    ?? CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+                    | CGBitmapInfo.byteOrder16Little.rawValue)
+        else { return false }
+        // OPAQUE BLACK FIRST. A source carrying alpha composites over
+        // whatever is already in this buffer, and uninitialized memory
+        // would make a translucent pixel report a different colour every
+        // run — a flake that would read as a lowering bug.
+        ctx.setFillColor(red: 0, green: 0, blue: 0, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        ctx.interpolationQuality = .none
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return true
+    }
+    guard drawn else { return nil }
+    // A bitmap context's memory is TOP-DOWN — row 0 is the picture's top
+    // edge — while its user space has a bottom-left origin, so drawing
+    // the image upright lands its top row first. Same order the Windows
+    // arm asks GetDIBits for with a negative height.
+    func sample(_ qx: Int, _ qy: Int) -> String {
+        let x = min(width * (1 + 2 * qx) / 4, width - 1)
+        let y = min(height * (1 + 2 * qy) / 4, height - 1)
+        let at = (y * width + x) * 4
+        func byte(_ v: UInt16) -> Int { Int((Double(v) / 65535.0 * 255.0).rounded()) }
+        return String(
+            format: "%02X%02X%02X",
+            byte(pixels[at]), byte(pixels[at + 1]), byte(pixels[at + 2]))
+    }
+    return [sample(0, 0), sample(1, 0), sample(0, 1), sample(1, 1)]
+        .joined(separator: "/")
+}
+
+#if os(macOS)
+    /// This process's activation policy, spelled rather than numbered:
+    /// every sentence below turns on it, and `policy=1` in a diagnostic
+    /// is a number the reader has to go and look up.
+    func kayaMacPolicySpelling() -> String {
+        switch NSApp.activationPolicy() {
+        case .regular: return "regular"
+        case .accessory: return "accessory"
+        case .prohibited: return "prohibited"
+        @unknown default: return "policy \(NSApp.activationPolicy().rawValue)"
+        }
+    }
+
+    /// THE DECLARED IDENTITY, LOWERED (docs/app-identity-plan.md ruling
+    /// 2 and I9). Three things happen here and each is measured:
+    ///
+    /// THE POLICY, WHICH IS A RATIFIED BEHAVIOUR CHANGE. `.accessory`
+    /// — every lane leg's default, so a suite's windows never steal the
+    /// human's keyboard — has NO DOCK TILE to put a picture in, measured
+    /// directly: the setter succeeded, the read back showed a 512x512
+    /// image installed, and the Dock did not move one pixel. So an app
+    /// that DECLARES an identity becomes `.regular`; an app that declares
+    /// none keeps the accessory default, which is why every other lane
+    /// leg is unaffected.
+    ///
+    /// THE ICON, from plain PNG bytes: `NSImage(data:)` then
+    /// `applicationIconImage` replaces the Dock tile AND the Cmd-Tab
+    /// switcher tile, with no `.icns` and no multi-representation set.
+    /// The tile is UNMASKED — a hard-edged square beside rounded system
+    /// icons — which is the blob owning its own shape, not a defect.
+    /// Bytes the platform cannot decode leave the platform's own icon
+    /// standing and say so, which is the typeface's silent-fallback wall
+    /// one tier up.
+    ///
+    /// THE NAME IS PARTIAL ON THIS PLATFORM AND MUST NOT PRETEND
+    /// OTHERWISE (I9). `NSApp.mainMenu`'s first item's title renders the
+    /// declared name in the menu bar and has no ordering constraint. No
+    /// route moves the Cmd-Tab label or the Dock tile's AX title, so a
+    /// declared identity can leave the menu bar reading "Aurora Notes"
+    /// while Cmd-Tab still reads `kaya-go`. The richer route — injecting
+    /// `CFBundleName` — must run before the first touch of
+    /// `NSApplication.shared`, which is before the wire is open, so it is
+    /// refused and packaging is what would do it properly.
+    /// `ProcessInfo.processName` is refused too: it moved the in-process
+    /// API while the RENDERED menu bar kept the old name, captured twice.
+    func kayaApplyMacIdentity(_ name: String, _ icon: Data?) {
+        let before = kayaMacPolicySpelling()
+        var raised = true
+        if NSApp.activationPolicy() != .regular {
+            raised = NSApp.setActivationPolicy(.regular)
+        }
+        var installed = "none declared"
+        if let bytes = icon {
+            if let image = NSImage(data: bytes) {
+                NSApp.applicationIconImage = image
+                installed = "\(bytes.count) bytes -> \(Int(image.size.width))x"
+                    + "\(Int(image.size.height))"
+            } else {
+                // MEASURED, AND THE PLATFORM'S OWN ICON IS LEFT
+                // STANDING: whether a blob is a picture is a question
+                // only this platform's decoder can answer, and it just
+                // answered no. Nothing is substituted — the read then
+                // reports whatever AppKit is really holding, which
+                // cannot collide with four declared colours.
+                installed = "\(bytes.count) bytes REFUSED by NSImage(data:)"
+                kayaDiag(
+                    "the app identity's icon bytes: NSImage(data:) refused "
+                        + "\(bytes.count) bytes — the blob is not a picture this "
+                        + "platform can decode, so the icon macOS already had "
+                        + "stands and nothing was substituted")
+            }
+        }
+        // The menu bar's first item is the app menu, and its title is the
+        // one runtime name route this platform has. `kayaSyncMacMenuBar`
+        // is the other writer of this menu; it never touches item 0's
+        // title, so there is one author here.
+        if let first = NSApp.mainMenu?.items.first, !name.isEmpty {
+            first.title = name
+        }
+        kayaDiag(
+            "app identity \(name): policy \(before) -> \(kayaMacPolicySpelling()) "
+                + "(setActivationPolicy returned \(raised)), icon \(installed), "
+                + "menu-bar title \(NSApp.mainMenu?.items.first?.title ?? "<no main menu>")")
+    }
+
+    /// WHY THIS READ CANNOT REPORT QUADRANT SAMPLES, or nil when it can.
+    ///
+    /// EVERY ANSWER IS A SENTENCE THIS PROCESS WENT AND MEASURED
+    /// (CLAUDE.md invariant 3, tools/check-diagnostics.sh), and the
+    /// second one is the whole reason this function exists: reading
+    /// `NSApp.applicationIconImage` back is NOT an echo — AppKit stores a
+    /// re-rendered snapshot, so the object returned is not the object
+    /// handed in — but it STILL CANNOT TELL "stored" FROM "SHOWN". In the
+    /// accessory arm this exact read reported a 512x512 image installed
+    /// while the Dock had no tile at all, so a verb reporting "icon
+    /// applied" from the image alone would have passed on every lane leg
+    /// (docs/app-identity-plan.md I8). The activation policy is the part
+    /// of "shown" that IS measurable from in here, so it is measured and
+    /// named; what is left unmeasurable — whether the tile the Dock draws
+    /// is this picture — is what the capture is for.
+    func kayaMacAppIconWhyNot(_ held: NSImage?, _ bitmap: CGImage?) -> String? {
+        guard let held else {
+            return "<AppKit holds no picture at all: NSApp.applicationIconImage is "
+                + "nil, this app declared \(kayaScene.appIdentityIcon?.count ?? 0) "
+                + "icon bytes, and this process is \(kayaMacPolicySpelling())>"
+        }
+        guard NSApp.activationPolicy() == .regular else {
+            return "<a \(Int(held.size.width))x\(Int(held.size.height)) picture is "
+                + "installed but this process is \(kayaMacPolicySpelling()): an app "
+                + "that is not regular has no Dock tile to put one in, so this read "
+                + "cannot say anything is showing it>"
+        }
+        guard let bitmap else {
+            return "<AppKit holds a \(Int(held.size.width))x\(Int(held.size.height)) "
+                + "NSImage with no bitmap representation this read can sample; "
+                + "the app declared \(kayaScene.appIdentityIcon?.count ?? 0) icon bytes>"
+        }
+        guard bitmap.width > 1, bitmap.height > 1 else {
+            return "<AppKit's picture rasterizes to \(bitmap.width)x\(bitmap.height), "
+                + "too small to sample by quadrant>"
+        }
+        return nil
+    }
+
+    /// THE PICTURE THE SHELL WILL DRAW, in pixels, off AppKit's own copy
+    /// — never off `kayaScene.appIdentityIcon`, which is the declaration
+    /// echoed back and would pass with no lowering at all.
+    @MainActor func kayaMacAppIcon() -> String {
+        let held = NSApp.applicationIconImage
+        var rect = CGRect(origin: .zero, size: held?.size ?? .zero)
+        let bitmap = held?.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+        if let why = kayaMacAppIconWhyNot(held, bitmap) { return why }
+        guard let bitmap, let samples = kayaIconQuadrants(bitmap) else {
+            return "<AppKit's picture could not be drawn into a sampling bitmap: "
+                + "\(bitmap?.width ?? 0)x\(bitmap?.height ?? 0)>"
+        }
+        return samples
+    }
+#else
+    /// THE BUNDLE'S ICON FILE, resolved the way iOS itself resolves it:
+    /// `CFBundleIcons` > `CFBundlePrimaryIcon` > `CFBundleIconFiles`, the
+    /// first name, as a `.png` in the bundle. Returns the URL and the
+    /// name it looked for, so a failure can say WHICH name it wanted.
+    func kayaIOSBundleIconEntry() -> (name: String, url: URL?) {
+        let icons = Bundle.main.object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any]
+        let primary = icons?["CFBundlePrimaryIcon"] as? [String: Any]
+        let files = primary?["CFBundleIconFiles"] as? [String]
+        guard let first = files?.first else { return ("", nil) }
+        if first.hasSuffix(".png") {
+            return (first, Bundle.main.url(
+                forResource: String(first.dropLast(4)), withExtension: "png"))
+        }
+        return (first + ".png",
+                Bundle.main.url(forResource: first, withExtension: "png"))
+    }
+
+    /// WHY THIS READ CANNOT REPORT QUADRANT SAMPLES, or nil when it can.
+    ///
+    /// THE READ IS OF THE BUILT BUNDLE, and it is designed so that it
+    /// CANNOT PASS VACUOUSLY. iOS has no runtime route to the Home Screen
+    /// icon — the SDK's whole app-icon surface is `supportsAlternateIcons`
+    /// (BOOL), `setAlternateIconName` (NSString) and `alternateIconName`
+    /// (NSString), none of which takes bytes — so the artifact this
+    /// platform's identity actually lives in is the bundle the app is
+    /// running out of, and that is what is read. Three separate states
+    /// go RED and each names itself: an app that declared NO identity, a
+    /// bundle that carries no icon, and a bundle whose icon is a
+    /// different picture from the one the wire declared. The last is
+    /// ruling 4's byte-equality check — the two readers of one
+    /// declaration held equal — realized where the lane can watch it.
+    func kayaIOSAppIconWhyNot(_ entry: (name: String, url: URL?), _ bundled: Data?)
+        -> String?
+    {
+        guard let declared = kayaScene.appIdentityIcon else {
+            return "<this app declared no identity: no set_app_identity record "
+                + "carrying icon bytes reached this backend, so there is nothing "
+                + "the bundle at \(Bundle.main.bundleURL.lastPathComponent) can be "
+                + "held equal to>"
+        }
+        guard !entry.name.isEmpty else {
+            return "<the bundle \(Bundle.main.bundleURL.lastPathComponent) declares "
+                + "no icon: its Info.plist has no CFBundleIcons > "
+                + "CFBundlePrimaryIcon > CFBundleIconFiles, while the app declared "
+                + "\(declared.count) icon bytes over the wire>"
+        }
+        guard let bundled else {
+            return "<the bundle names \(entry.name) in CFBundleIconFiles but holds "
+                + "no such file: \(Bundle.main.bundleURL.lastPathComponent) carries "
+                + "\((try? FileManager.default.contentsOfDirectory(atPath: Bundle.main.bundlePath).count) ?? -1) "
+                + "entries, and the app declared \(declared.count) icon bytes>"
+        }
+        guard bundled == declared else {
+            return "<the bundle's icon and the declared icon are different pictures: "
+                + "\(entry.name) is \(bundled.count) bytes, the wire declared "
+                + "\(declared.count) bytes, and the first byte they differ at is "
+                + "\(zip(bundled, declared).enumerated().first { $0.element.0 != $0.element.1 }?.offset ?? min(bundled.count, declared.count))>"
+        }
+        guard UIImage(data: bundled)?.cgImage != nil else {
+            return "<the bundle's \(entry.name) is \(bundled.count) bytes that UIKit "
+                + "will not decode: UIImage(data:) produced no bitmap, so the Home "
+                + "Screen has nothing to draw either>"
+        }
+        return nil
+    }
+
+    /// The bundle's icon in PIXELS, decoded by UIKit's own decoder — the
+    /// same conversion the Home Screen would do — so the samples prove
+    /// the conversion and not merely that a file was copied.
+    @MainActor func kayaIOSAppIcon() -> String {
+        let entry = kayaIOSBundleIconEntry()
+        let bundled = entry.url.flatMap { try? Data(contentsOf: $0) }
+        if let why = kayaIOSAppIconWhyNot(entry, bundled) { return why }
+        guard let bundled, let bitmap = UIImage(data: bundled)?.cgImage,
+            let samples = kayaIconQuadrants(bitmap)
+        else {
+            return "<the bundle's \(entry.name) could not be drawn into a sampling "
+                + "bitmap: \(bundled?.count ?? 0) bytes>"
+        }
+        return samples
+    }
+#endif
 
 private struct KayaButtonStyle: PrimitiveButtonStyle {
     let prominent: Bool
@@ -12580,7 +12960,7 @@ struct KayaAuxRoot: View {
         Group {
         if scene.windows[windowId]?.sections.isEmpty == false {
             KayaSectionsView(windowId: windowId)
-                .navigationTitle(scene.windows[windowId]?.title ?? "")
+                .navigationTitle(kayaWindowCaption(windowId))
         } else {
         NavigationStack(path: kayaNavPath(windowId)) {
             Group {
@@ -12590,7 +12970,7 @@ struct KayaAuxRoot: View {
             }
             .padding(scene.windows[windowId]?.inset ?? 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .navigationTitle(scene.windows[windowId]?.title ?? "")
+            .navigationTitle(kayaWindowCaption(windowId))
             .navigationDestination(for: UInt64.self) { eid in
                 KayaEntryRoot(entryId: eid)
             }
@@ -12633,7 +13013,7 @@ struct KayaSplitRoot: View {
             }
             .padding(scene.windows[windowId]?.inset ?? 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .navigationTitle(scene.windows[windowId]?.title ?? "")
+            .navigationTitle(kayaWindowCaption(windowId))
         } detail: {
             // The TOP of the stack is the detail. An empty stack gets
             // the platform's own empty state — every one of the four
@@ -12655,7 +13035,7 @@ struct KayaSplitRoot: View {
                 // "python3.14" — a naming coincidence had been
                 // standing in for the feature (2026-07-27).
                 Color.clear
-                    .navigationTitle(scene.windows[windowId]?.title ?? "")
+                    .navigationTitle(kayaWindowCaption(windowId))
             }
         }
         .onAppear { record() }
@@ -14149,7 +14529,7 @@ struct KayaRoot: View {
         // an unset prop changes nothing): SwiftUI's blessed window
         // titling path on macOS; harmless on iOS, where the switcher
         // label is stamped in the apply arm instead.
-        .navigationTitle(scene.windowTitle)
+        .navigationTitle(kayaWindowCaption(0))
         // THE BRAND ACCENT, applied as .tint of the current
         // appearance's derived FILL — a value the core computed, never
         // re-derived here (docs/styling-plan.md D1). A DECLARED BRAND

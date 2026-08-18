@@ -2669,6 +2669,48 @@ The general shape: when a check and the tool it polices disagree about
 what "changed" means, the check is the one that is wrong. Ask what the
 build system keys on, and key on the same thing.
 
+## A restored copy keeps its OLD mtime, so the PERTURBED artifact
+## survives the restore
+
+The ritual for a watched negative — perturb a file, see the guard go
+red, put the file back — is five steps and git is in none of them:
+(1) `cp` the file to the scratchpad and record `shasum -a 256`;
+(2) perturb, PRINTING the substitution count, because an unchanged file
+is a failed test and not a passed one; (3) watch the guard fail;
+(4) `cp` the backup over the file; (5) `shasum -a 256 -c` the recorded
+sum. `git checkout -- <file>` is not step 4 and never is: it restores
+HEAD, and on a mid-slice tree that erases whatever uncommitted work the
+file was carrying. Measured 2026-08-16, when it took out an entire
+uncommitted fan-out that could only be recovered by replaying an agent's
+Edit calls out of a transcript.
+
+THE HALF THAT ONLY BITES WHEN SOMETHING GETS BUILT, measured 2026-08-18
+by the GTK identity arm. `shutil.copy2` and `cp -p` preserve the saved
+copy's METADATA, mtime included — and that mtime predates the build made
+from the perturbation. So after the restore the source is byte-correct
+and OLDER than the artifact compiled from the doctored bytes, cargo
+calls the tree up to date, builds nothing, and the next run executes the
+PERTURBED artifact. Every hash checked in step 5 passes. The negative
+after it then measures a binary nobody asked for, in either direction:
+a guard can appear broken because the fix never got compiled, or appear
+fine because the perturbation is still live.
+
+What caught it was the stale-artifact guard, doing exactly its job:
+
+    libkaya.so: STALE — carries 00f372a973117341,
+      but core in this tree is 5f34bf2e3fa43428
+
+So the ritual gains a sixth step: after copying the backup back, TOUCH
+the file (or copy without metadata), rebuild, and `tools/build-id.sh
+--verify` the artifact. The source hash is not the thing the next run
+executes.
+
+The neighbour above is the same disagreement seen from the other side.
+There a check keyed on mtime while dune keyed on hashes, and the CHECK
+was the liar; here cargo's mtime key is right and the RESTORE lied to
+it. Both come out of one question worth asking whenever a file is put
+back by hand: what does the build key on, and did the restore move it?
+
 ## Two file dialogs on one desktop take each other down
 
 The windows lane's `filedialog_rust` leg had been green for weeks. It

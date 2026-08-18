@@ -1,0 +1,25 @@
+# THE APP IDENTITY, DECLARED ONCE (docs/app-identity-plan.md ruling 4).
+#
+# An app gets to say two things about itself: the name it goes by and the
+# picture that stands for it. This file is where it says them, and it is
+# a FILE rather than a call because the two things that consume the
+# declaration do not both have a running program to ask:
+#
+#   the BUILD reads it before any program has started — the APK's mipmap
+#   resource and `android:icon`/`android:label`, the iOS bundle's icon
+#   and `CFBundleDisplayName`, a `.desktop` file's `Icon=`/`Name=`, an
+#   executable's icon resource;
+#
+#   the RUNNING APP reads it too, and sends the same file's bytes over
+#   the wire in `set_app_identity`, which is what reaches the macOS Dock,
+#   the Windows taskbar and caption, and an X11 window.
+#
+# Five routes reading five different files is how "one mark on five
+# platforms" gets broken quietly, so tools/check-app-identity.sh holds
+# every hand-written copy of these two values equal to the two here — the
+# guests' default icon path, the guests' declared name, and the byte-
+# frozen expectation in tools/scenes/identity.steps, which is checked
+# against the pixels this file's icon actually carries.
+
+name = "Aurora Notes"
+icon = "guests/assets/icons/kaya-mark.png"

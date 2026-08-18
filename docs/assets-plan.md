@@ -38,7 +38,15 @@ class cannot exist here). The resolution rule and its failure sentence
 ("no asset named X; the package carries [...]") live once, in the core.
 STREAMING IS DEFERRED BEHIND A NAMED TRIGGER: admitted only when an
 artifact carries an asset too large to hold in memory; designed then,
-not now. The refusal list stands unchanged. The maintainer's churn rule
+not now. GO'S SECOND SPELLING IS ADMITTED BEHIND ITS OWN TRIGGER, and
+this is an admission rather than a refusal (maintainer, 2026-08-18): an
+`fs.FS` façade over the asset root is legal binding-side sugar — the
+same tier as `bytes.NewReader`, zero core surface — the moment a real Go
+artifact wants to hand its assets to something FS-shaped
+(`http.FileServer`, `template.ParseFS`, `embed.FS`'s consumers). Not
+speculatively: the trigger is an artifact that wants it, and until one
+does, `bytes()` plus `bytes.NewReader` is the whole Go surface.
+The refusal list stands unchanged. The maintainer's churn rule
 applies to the implementation: every decision here was made on
 correctness (packaged assets are not files on Android; platform
 locations are the host's knowledge), never on update effort.
@@ -199,7 +207,7 @@ The four per-platform icon tables (swift/KayaSwiftUI.swift for SF
 Symbols, crates/kaya/src/gtk.rs:78 for Adwaita names,
 crates/kaya/src/winui/mod.rs for Fluent, and KayaCompose.kt for Material,
 20 entries each) are per-platform spellings of a semantic vocabulary, and
-DESIGN.md:2360 already ruled the question: "Icons want names, not bytes
+DESIGN.md:2418 already ruled the question: "Icons want names, not bytes
 ... The Blob stays for genuinely app-specific art."
 
 A measured gap found while surveying them, out of scope here and worth a
@@ -361,28 +369,28 @@ copied once (docs/app-identity-plan.md, I5):
 
 ## A4. Where an asset sits, per platform
 
-The identity plan's table (docs/app-identity-plan.md:242) is about which
+The identity plan's table (docs/app-identity-plan.md:248) is about which
 reader puts an icon where a user sees it. This one is a layer below: how
 the bytes get to the machine at all. All rows [REPO].
 
 | platform | repo run today | staged to the lane today | in a packaged app | reader exists? |
 |---|---|---|---|---|
 | **macOS** | repo-relative default, no copy | nothing needed, runs from the repo root | `Contents/Resources/` in a `.app` | later; no bundle in the tree |
-| **Linux** | repo-relative default | nothing needed, the repo is bind-mounted at `/work` (tools/linux/run-suites.sh:687 states the reasoning) | `$datadir/kaya/<app>/` beside the `.desktop` file | later |
-| **Windows** | n/a | `scp` every run into a repo-mirror path, deliberately outside the deploy stamp so an asset edit cannot be swallowed by a stamp skip (tools/deploy-win.sh:554) | beside the exe, or inside an MSIX | staging today, packaging later |
+| **Linux** | repo-relative default | nothing needed, the repo is bind-mounted at `/work` (tools/linux/run-suites.sh:736 states the reasoning) | `$datadir/kaya/<app>/` beside the `.desktop` file | later |
+| **Windows** | n/a | `scp` every run into a repo-mirror path, deliberately outside the deploy stamp so an asset edit cannot be swallowed by a stamp skip (tools/deploy-win.sh:544) | beside the exe, or inside an MSIX | staging today, packaging later |
 | **Android** | n/a | `adb push` to `/data/local/tmp` with a size check, then named into the app through an intent extra (tools/android/run-emulator.sh:356) | APK resources or `assets/`, read through `AssetManager` | staging today, packaging later |
 | **iOS** | n/a | **nothing. No file-push route for assets exists.** | inside the `.app`, copied at bundle assembly | **neither** |
 
 **The iOS row is the finding.** [MEASURED] `grep -c typeface` over the
 five lane scripts: validate-mac 5, the linux suite runner 19, deploy-win
 15, the android emulator runner 21, **ios/run-sim 0**. The scene lists at
-tools/ios/run-sim.sh:1340 do not contain `typeface`. The one asset kaya
+tools/ios/run-sim.sh:1525 do not contain `typeface`. The one asset kaya
 ships has never reached iOS, and the lane's only host-to-guest binary
 channel is a base64-over-container-file bridge that is the clipboard and
 dialog protocol, not an asset installer.
 
 The recommended fix is the one that is also the packaging reader:
-**tools/ios/run-sim.sh:93 (`make_bundle`) copies the asset root into the
+**tools/ios/run-sim.sh:137 (`make_bundle`) copies the asset root into the
 bundle's Resources.** That is what a shipped iOS app does anyway, so iOS
 becomes the first lane whose asset delivery is the real mechanism rather
 than a test convenience, and the typeface scene becomes runnable there.
@@ -474,10 +482,10 @@ the survey found it.
   that put fonts on the blob channel: "an asset pipeline offers fonts
   nothing the blob channel lacks, density variants and OS packaging are
   raster-art concerns" (docs/styling-plan.md:270, ledgered at
-  docs/deferred.md:2928). The identity brief answers that sentence for
+  docs/deferred.md:3126). The identity brief answers that sentence for
   the icon by converting in the lowering, and re-refuses per-platform
   icon art **for now**, to be reopened when packaging lands
-  (docs/app-identity-plan.md:661). This brief changes neither. An asset
+  (docs/app-identity-plan.md:696). This brief changes neither. An asset
   is one file, and the platform converts.
 - **Localized asset variants.** kaya has no localization vocabulary at
   all; a per-locale asset would be its first and would arrive through the
@@ -495,7 +503,7 @@ the survey found it.
   runner that ships it on purpose.
 - **Moving the test image literals into the asset root.** A1 gives the
   four reasons.
-- **Turning the four icon tables into assets.** DESIGN.md:2360 settled
+- **Turning the four icon tables into assets.** DESIGN.md:2418 settled
   it: icons want names, not bytes.
 
 ## Dependencies and sequencing

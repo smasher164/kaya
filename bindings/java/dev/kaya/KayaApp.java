@@ -245,6 +245,10 @@ public final class KayaApp {
     // when it does not, so the field count never varies with the
     // payload).
     private static final int TYPEFACE_MASK_FONT = 1;
+    // And the same for set_app_identity's one mask bit: it says an icon
+    // BLOB rides in the record's last slot (an empty string rides there
+    // when it does not).
+    private static final int IDENTITY_MASK_ICON = 1;
 
     private long signals, widgets, collections, nodes, menuItems;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
@@ -3943,6 +3947,59 @@ public final class KayaApp {
                     font != null
                             ? new KayaWire.BlobHandle(KayaRing.blobRegister(font))
                             : ""));
+        }
+
+        /**
+         * DECLARE the app's identity (docs/app-identity-plan.md): the
+         * name it goes by and the picture that stands for it, as the
+         * bytes of one image file.
+         *
+         * <p>ONE PICTURE, FIVE PLATFORMS. The same bytes become the
+         * macOS Dock tile, the Windows taskbar/alt-tab icon and the
+         * caption's mark, and an X11 window's icon; the same FILE, read
+         * at build time, becomes the Android launcher icon and the iOS
+         * Home Screen icon. Send a PNG: each lowering converts, and no
+         * platform-specific artwork rides the wire.
+         *
+         * <p>SET ONCE, BEFORE THE FIRST MOUNT — the brand's wall
+         * verbatim, and for its reason: identity is not state, and a
+         * slot that could flip at runtime would promise the
+         * identity-switching surface the vocabulary does not have. The
+         * root refuses a second write, a late one and an empty name; an
+         * app that wants the platform's own identity declares none at
+         * all.
+         *
+         * <p>THE BYTES ARE NEVER INSPECTED between here and the
+         * platform's own decoder — whether a blob is an image is a
+         * question only that decoder can answer — so the conformance
+         * scene reads what the DECODER produced rather than echoing this
+         * request back.
+         */
+        public void appIdentity(String name, byte[] icon) {
+            // ONE COPY INTO CORE MEMORY, the handle consumed by this
+            // transaction's submit — setSource's registration
+            // semantics, which is the channel a picture shares.
+            emit(KayaWire.txSetAppIdentity(
+                    IDENTITY_MASK_ICON, name,
+                    new KayaWire.BlobHandle(KayaRing.blobRegister(icon))));
+        }
+
+        /**
+         * The NAME-ONLY form, for an app that has a name and no mark
+         * yet — the second overload {@link #brandTypeface(String)} uses
+         * one verb over, and Java's spelling of Rust's second function.
+         * Its identity still reaches the surfaces a name reaches (the
+         * Windows caption and taskbar tooltip, the macOS menu bar, the
+         * Linux app_id, and both phones' packaging) and every icon
+         * surface keeps the platform's own default, honestly and
+         * visibly.
+         */
+        public void appIdentity(String name) {
+            // The icon slot rides either way and the mask above is what
+            // says whether it means anything: an absent icon travels as
+            // an empty string, so the record's field count never varies
+            // with the payload.
+            emit(KayaWire.txSetAppIdentity(0, name, ""));
         }
 
         public WindowRef createWindow(long id) {

@@ -91,6 +91,9 @@ mod toolbar;
 #[path = "typeface.rs"]
 mod typeface;
 
+#[path = "identity.rs"]
+mod identity;
+
 /// The scene selector: the emulator legs pass `--es KAYA_SELFTEST entry`.
 /// A LEG NEEDS ITS ARM HERE — tools/check-stubs.sh and the panic below
 /// hold that.
@@ -137,6 +140,13 @@ fn app(ctx: kaya::AppCtx) {
         // pushes the file and names it in KAYA_FONT_FILE
         // (tools/android/run-emulator.sh).
         Ok("typeface") => typeface::app(ctx),
+        // The identity scene reads the vendored MARK's bytes, the
+        // typeface's story one asset over: its default path is
+        // guests/assets/icons/kaya-mark.png, which is repo-relative and
+        // so no device has it, and the leg pushes that declared file and
+        // names the pushed copy in KAYA_ICON_FILE
+        // (tools/android/run-emulator.sh).
+        Ok("identity") => identity::app(ctx),
         // "1" is the selftest flag's original spelling, from before the
         // value doubled as a scene selector.
         Ok("1") | Err(_) => milestone2::app(ctx),

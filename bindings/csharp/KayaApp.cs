@@ -2192,6 +2192,53 @@ sealed class Tx
             font is null ? (object)"" : new KayaWire.BlobHandle(Kaya.RegisterBlob(font))));
     }
 
+    /// DECLARE the app's identity (docs/app-identity-plan.md): the name
+    /// it goes by and the picture that stands for it, as the bytes of
+    /// one image file — tx.AppIdentity("Aurora Notes", markPng).
+    ///
+    /// ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
+    /// tile, the Windows taskbar/alt-tab icon and the caption's mark,
+    /// and an X11 window's icon; the same FILE, read at build time,
+    /// becomes the Android launcher icon and the iOS Home Screen icon.
+    /// Send a PNG: each lowering converts, and no platform-specific
+    /// artwork rides the wire.
+    ///
+    /// SET ONCE, BEFORE THE FIRST MOUNT: the brand's wall verbatim and
+    /// for its reason — identity is not state, and a slot that could
+    /// flip at runtime would promise the identity-switching surface the
+    /// vocabulary deliberately does not have. The root refuses a second
+    /// write and a late one, in its own words, in every language at
+    /// once, and it refuses an empty name the same way: an app that
+    /// wants the platform's own identity declares none at all.
+    ///
+    /// THE BYTES ARE NEVER INSPECTED between here and the platform's own
+    /// decoder. Whether a blob is an image is a question only that
+    /// decoder can answer, so bytes that are not one leave every
+    /// platform's default in place — which is why the conformance scene
+    /// reads what the DECODER produced rather than echoing this request
+    /// back.
+    ///
+    /// icon: the picture's bytes, on the same blob channel an image
+    /// rides. Leave it out for the NAME-ONLY form — the optional
+    /// parameter BrandTypeface already uses, and C#'s spelling of
+    /// Rust's second function: a named app with no mark yet still
+    /// reaches the Windows caption, the macOS menu bar, the Linux
+    /// app_id and both phones' packaging, and every icon surface keeps
+    /// the platform's own default.
+    public void AppIdentity(string name, byte[]? icon = null)
+    {
+        // The mask says whether the icon slot means anything; the slot
+        // is written EITHER WAY (an empty Str when it does not), so the
+        // record's field count never varies with the payload — the
+        // brand mask's discipline verbatim.
+        Records.Add(KayaWire.TxSetAppIdentity(
+            icon is null ? 0u : 1u, name,
+            // The bytes go to the core ONCE, by handle, exactly as an
+            // image's do — the record carries the handle, never the
+            // picture itself.
+            icon is null ? (object)"" : new KayaWire.BlobHandle(Kaya.RegisterBlob(icon))));
+    }
+
     /// Mount into the default window; per-window targets arrive with
     /// the window vocabulary.
     /// Set the window's attributes in one construct — the attribute
