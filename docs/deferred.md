@@ -2474,6 +2474,20 @@ interpreter carries slice 1's one real brand lowering
   (d) leave it — the accent family is what every other backend brands
   too. Nothing here is urgent and (d) is a real answer.
 
+## kaya windows have no app icon (maintainer, 2026-08-17)
+KEY: app icon, window identity, IconSource, caption left
+
+Found while ruling on the Windows caption conventions: Windows puts the
+app icon at the caption's left edge (Win95 through Notepad on 11), and
+kaya has no app-icon vocabulary at all — nothing an app can declare,
+nothing a backend lowers. The WinUI TitleBar control has an `IconSource`
+slot waiting; mac has the Dock/window-restoration identity; Linux has
+the .desktop/window icon; the phones have launcher icons the packaging
+already owes. This is APP IDENTITY machinery, not a layout tweak: one
+declared identity (name + icon bytes, likely the wire blob channel the
+typeface uses) lowered per platform. Design question for a future
+slice; the caption-left slot is its Windows home when it lands.
+
 ## Comments are drowning the code (maintainer, 2026-08-17)
 KEY: comment verbosity, examples readability, war stories, traps pointers
 

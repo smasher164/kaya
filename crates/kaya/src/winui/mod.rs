@@ -2801,6 +2801,171 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
 /// cells is uniform including the affordance kaya does not mint.
 const CAPTION_COMMAND_CELL: f64 = 48.0;
 
+/// The width of the drag strip between the promoted commands and the
+/// system's minimize/maximize/close, in DIP.
+///
+/// WHAT OWNS THAT GAP, read off the template rather than guessed. The
+/// `TitleBar` control's template is a twelve-column Grid
+/// (`scratchpad/chrome/TitleBar-v220.xaml:168-193`). Column 9 is
+/// `PART_RightHeaderPresenter`, where kaya's `CommandBar` lives, and it
+/// carries no margin and no padding — neither in the template nor from
+/// this backend. Column 11 is `RightPaddingColumn`, which the control
+/// overwrites every layout with `AppWindowTitleBar.RightInset()`
+/// (`TitleBar.cpp:466-478`), so it is exactly the system caption
+/// cluster's own width. Between them sits column 10, which holds NO
+/// template child at all and whose whole width is
+/// `TitleBarMinDragRegionWidth` — 48 in the library's dictionary
+/// (`TitleBar_themeresources.xaml:85`). Measured on the lane before this
+/// constant existed: rightmost command's right edge 812, leftmost system
+/// button 860, gap 48 to the pixel. The gap is that column and nothing
+/// else.
+///
+/// WHY 48 IS THE WRONG NUMBER HERE. The column is a MINIMUM DRAG REGION:
+/// it exists so that a caption whose slots are full still leaves the user
+/// somewhere to grab. In this band that job is already done many times
+/// over, and the control's own source says why. `UpdateInteractableElementsList`
+/// (`TitleBar.cpp:753-811`) punches the Left and Right header presenters
+/// out WHOLE, but for `Content` it recurses through
+/// `FindInteractableElements`, which only punches out elements that are
+/// `Control`s and enabled (`TitleBar.cpp:1026-1038`). kaya's Content is a
+/// bare `TextBlock`, and `TextBlock` derives from `FrameworkElement`, not
+/// from `Control` — so nothing in column 8 is ever punched out, and
+/// column 8 is `Width="*"`. Every pixel between the menu and the commands
+/// is drag surface; on the measured 946-wide window that is a strip about
+/// 450 px across, with the title drawn in the middle of it. Column 10 is
+/// belt-and-suspenders, and 48 DIP of it is a caption button's worth of
+/// nothing next to commands the maintainer asked to read as one family
+/// with the system cluster.
+///
+/// WHERE 8 COMES FROM. It is the gap this band ALREADY draws between two
+/// caption-hosted controls, measured on the same run as the 48 above:
+/// the `MenuBar` items in `LeftHeader` sit 8 apart (`MenuBarItemMargin`
+/// is 4,4,4,4, `MenuBar_themeresources.xaml:44-46`), and the `TitleBar`
+/// dictionary spells the same number for the gap after the title
+/// (`TitleBarTitleMargin` = 0,0,8,0, `TitleBar_themeresources.xaml:93`).
+/// So the strip is not a new metric: it is the band's existing
+/// element-to-element gap, applied once more, at the one place that was
+/// still using a reserve-a-whole-button number.
+///
+/// WHAT THE STRIP IS FOR AT 8, stated honestly because the number is
+/// small: it is SEPARATION, not the drag affordance. A user who reaches
+/// for the overflow "…" must not be one rounding error away from Close.
+/// The drag affordance is column 8, which is measured above and which
+/// the lane drags by. 0 would be defensible for dragging and is not
+/// defensible for that neighbour.
+const CAPTION_DRAG_STRIP: f64 = 8.0;
+
+/// Write `CAPTION_DRAG_STRIP` into the application's resource dictionary
+/// under the `TitleBar` control's own key.
+///
+/// THIS IS THE PLATFORM'S OWN MECHANISM, not a workaround. Every metric
+/// in that template is a `{ThemeResource}` lookup, and a lookup from
+/// inside a control template walks out to `Application.Resources` before
+/// it reaches the framework's dictionaries. Overriding a theme key in the
+/// app dictionary is what an App.xaml would spell as
+///
+/// ```xml
+/// <Application.Resources>
+///   <ResourceDictionary>
+///     <ResourceDictionary.MergedDictionaries>
+///       <XamlControlsResources/>
+///     </ResourceDictionary.MergedDictionaries>
+///     <x:Double x:Key="TitleBarMinDragRegionWidth">8</x:Double>
+///   </ResourceDictionary>
+/// </Application.Resources>
+/// ```
+///
+/// kaya is a code-only app with no App.xaml (`outer_on_launched` merges
+/// `XamlControlsResources` by hand for the same reason), so this is that
+/// same document written through the same object. A DIRECT entry rather
+/// than another merged dictionary, deliberately: a dictionary's own keys
+/// are searched before any of its merged ones, so this wins regardless of
+/// what else is appended later — `apply_brand` appends after launch and
+/// the ordering rule in its doc comment does not have to be re-derived
+/// here. The value is a boxed `f64`, which is byte-for-byte what the
+/// library's own `<x:Double>` becomes at runtime, so the `GridLength`
+/// conversion on the far side sees exactly what it sees today.
+///
+/// CALLED AT THE MINT, BEFORE THE FIRST `TitleBar` EXISTS, and that
+/// placement is load-bearing: a resource VALUE changed after a tree is
+/// built does not re-flow it (the same rule `apply_brand`'s doc comment
+/// records — Microsoft's own theme editor cycles `RequestedTheme` to
+/// force it). The mint arm runs exactly once per promoted window and is
+/// the same chokepoint `require_control_resources` guards, so there is no
+/// path to a `TitleBar` that skips it.
+///
+/// THE READ-BACK PROVES THE DICTIONARY ANSWERS, AND ONLY THAT. `Insert`
+/// on a `ResourceDictionary` returns whether it replaced an existing key,
+/// which says nothing about whether the value arrived, so the value is
+/// read back through the same `Lookup` the rest of this module uses. What
+/// that cannot prove is that the CONTROL consumed it: column 10's width
+/// is not readable without a layout pass, and there is none here. That
+/// half is measured on the lane instead, by reading the gap between the
+/// last command and the first caption button off UIA — 48 before this
+/// function existed, 8 after (`scratchpad/chrome/winui-caption-gap.md`).
+fn apply_caption_drag_strip() -> windows_core::Result<()> {
+    const KEY: &str = "TitleBarMinDragRegionWidth";
+    APP.with_borrow(|app| {
+        let app = app
+            .as_ref()
+            .expect("the toolbar lowering runs on the UI thread, where APP lives");
+        let resources = app.Resources()?;
+        resources.Insert(
+            &PropertyValue::CreateString(&HSTRING::from(KEY))?,
+            &PropertyValue::CreateDouble(CAPTION_DRAG_STRIP)?,
+        )?;
+        let readback: f64 = resources
+            .Lookup(&PropertyValue::CreateString(&HSTRING::from(KEY))?)?
+            .cast::<IReference<f64>>()?
+            .Value()?;
+        assert!(
+            readback == CAPTION_DRAG_STRIP,
+            "kaya: winui: the application resource dictionary was asked for \
+             {KEY} = {CAPTION_DRAG_STRIP} and answers {readback}. That key is \
+             the whole width of the TitleBar template's column 10 \
+             (TitleBar-v220.xaml:190), which is the gap between this window's \
+             promoted commands and the system's minimize/maximize/close, so a \
+             dictionary that did not take the write would silently give the \
+             band back its 48 DIP reserve. This says nothing about whether the \
+             CONTROL consumed the value - that is a layout fact and is measured \
+             on the lane - only that the dictionary this process hands to XAML \
+             does not hold the number kaya wrote."
+        );
+        Ok(())
+    })
+}
+
+/// The one place a `TitleBar` is constructed, so that the one ordering it
+/// depends on cannot be got wrong.
+///
+/// THE FAILURE THIS EXISTS FOR IS SILENT, and it is the same shape as the
+/// one the previous revision measured for a menu that never reached the
+/// caption. `apply_caption_drag_strip` writes a `{ThemeResource}` value,
+/// and a theme resource is resolved when the template is applied — write
+/// it afterwards and the control keeps the library's 48, the band gets a
+/// caption button's worth of dead space back, and NOTHING FAILS: no
+/// harness verb reads a template column's width (there is no such concept
+/// on the other four backends, so there is no uniform read to add), the
+/// toolbar and menus scenes pass unchanged, and the only witness is a
+/// screenshot somebody has to think to take.
+///
+/// Two adjacent statements whose order matters is not a guard — a
+/// refactor reorders them without reading either comment. One function
+/// that does both, called from one site, is: the ordering is now a
+/// property of these three lines instead of a property of
+/// `refresh_toolbar`'s statement order.
+///
+/// WHAT WOULD FINISH THE WALL and is not in this arm's file list: a
+/// census in `tools/` that `TitleBar::new()` appears in this module only
+/// inside this function. That is the clause which survives someone adding
+/// a second caption; it is noted in
+/// `scratchpad/chrome/winui-caption-gap.md` for the maintainer rather
+/// than left to memory.
+fn mint_caption_titlebar() -> windows_core::Result<TitleBar> {
+    apply_caption_drag_strip()?;
+    TitleBar::new()
+}
+
 /// The shell Grid's rows, named because two functions have to agree
 /// about them and a bare `1` in each is how they stop agreeing.
 ///
@@ -3016,7 +3181,7 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             // refresh_caption). The mint puts an EMPTY TextBlock in the
             // centre slot and the ONE writer fills it, below, on this
             // rebuild and on every later one.
-            let titlebar = TitleBar::new()?;
+            let titlebar = mint_caption_titlebar()?;
             let tb_el: FrameworkElement = titlebar.cast()?;
             Grid::SetRow(&tb_el, TITLEBAR_ROW)?;
             shell.Children()?.Append(&titlebar.cast::<UIElement>()?)?;
