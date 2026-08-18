@@ -3070,8 +3070,8 @@ sealed class Tpl
     }
 
     /// A button with its caption, in the blueprint: the template twin
-    /// of Tx.Button, and the same constructor java's Tpl.button,
-    /// swift's KayaTpl.button and ocaml's template zone already carry.
+    /// of Tx.Button. The argument's type picks the caption's source, as
+    /// it does for Label — a constant, a signal, or the row's field.
     ///
     /// IT TAKES NO HANDLER, and the omission is the design. A stamped
     /// copy's click names the copy, so the handler is registered
@@ -3083,6 +3083,23 @@ sealed class Tpl
     {
         var n = Widget(KayaWire.KindButton);
         SetText(n, text);
+        return n;
+    }
+
+    public Node Button(Signal s)
+    {
+        var n = Widget(KayaWire.KindButton);
+        tx.Records.Add(KayaWire.TxBindText(n.Id, s.Id));
+        return n;
+    }
+
+    /// A button captioned from the row's OWN field — the "Delete
+    /// &lt;that row's title&gt;" shape, which only this zone can spell.
+    /// The live zone has no twin: a live button has no row to read.
+    public Node Button(Field<string> f)
+    {
+        var n = Widget(KayaWire.KindButton);
+        BindTextField(n, 0, f);
         return n;
     }
 

@@ -3724,8 +3724,9 @@ final class KayaTpl {
     }
 
     /// A button with its caption, in the blueprint: the template twin
-    /// of `KayaAppTx.button(_:onClick:grow:)`, and the same constructor
-    /// Java's and OCaml's template zones already carry.
+    /// of `KayaAppTx.button(_:onClick:grow:)`. The argument's type picks
+    /// the caption's source, as it does for `label` — a constant, a
+    /// signal, or the row's own field.
     ///
     /// It takes NO handler argument, and the omission is the design:
     /// a stamped copy's click names the copy, so the handler is
@@ -3737,6 +3738,21 @@ final class KayaTpl {
     func button(_ text: String) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_BUTTON))
         setText(n, text)
+        return n
+    }
+
+    func button(_ s: KayaSignal) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_BUTTON))
+        tx.tx.bindText(n.id, s.id)
+        return n
+    }
+
+    /// A button captioned from the row's OWN field — the "Delete <that
+    /// row's title>" shape, which only this zone can spell. The live
+    /// zone has no twin: a live button has no row to read.
+    func button(_ f: KayaField<String>) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_BUTTON))
+        bindTextField(n, f)
         return n
     }
 

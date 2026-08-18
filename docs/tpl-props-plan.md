@@ -184,6 +184,19 @@ everywhere; only the floor spelling moves.
   sweep, adds an exemption naming this paragraph, and that is the signal
   to build the sugar. Recorded so the pothole is a signpost.
   VERIFIED 2026-08-17, all eight bindings surveyed: every live-zone button caption is a plain string and every sibling label constructor binds — per-kind absence, uniform. The TEMPLATE zone is not uniform (sugar in five, floor-only in C#/Swift, inexpressible in Python) — ledgered as its own entry.
+  AND THAT TEMPLATE DRIFT IS CLOSED, 2026-08-18. C# and Swift gained the
+  `Button(Signal)`/`Button(Field<string>)` overloads their own `Label`
+  already had, Python gained `button(bind=)` — the capability, not just a
+  spelling, since `_text_value` had refused a row's field outright — and
+  all eight now take BOTH a signal and an element field there.
+  THE LIVE-ZONE CLAIM ABOVE IS UNCHANGED AND IS NOW WALLED IN PYTHON:
+  `bind=` raises outside a template naming this paragraph. Python's
+  transaction is ambient, so one function serves both zones and the other
+  seven's "there is no such live overload" has to be a zone check there —
+  without it, closing the template gap would have opened a live one in
+  exactly one binding. tools/tpl-surfaces.py grew the takes-a-source
+  question the same day; before it, `Tpl.Button(string)` satisfied the
+  census exactly as `Tpl.button(Signal<String>)` did.
 
 ### F6 — loose ends from the reports, fixed in passing
 

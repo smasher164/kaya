@@ -2491,6 +2491,17 @@ slice; the caption-left slot is its Windows home when it lands.
 ## Comments are drowning the code (maintainer, 2026-08-17)
 KEY: comment verbosity, examples readability, war stories, traps pointers
 
+STATUS 2026-08-18: in-progress — examples first. (1) is DONE: the rule is
+in CLAUDE.md/AGENTS.md's environment section. (2) is started, not swept:
+four guests are cut as a calibration sample for the maintainer to judge
+the taste on: guests/go/typeface/typeface.go,
+guests/go/filedialog/filedialog.go, guests/rust/typeface.rs and
+guests/c/entry.c — the last on the floor's gentler cut, per invariant 5.
+The remaining ~328 guest files are NOT cut, held by two blockers recorded
+with the sample: a second writer was landing the template-caption slice
+in the same working tree, and the cut moves line numbers that
+docs/sugar-pass-plan.md cites and tools/check-doc-refs.sh holds.
+
 The ruling: a comment describes what the code does or states a constraint
 the code cannot show — in a line or two. It never explains something the
 reader didn't ask, and it never carries the history of how we arrived
@@ -2508,8 +2519,10 @@ into docs/traps.md (if it is not already there) and shrinks to a
 one-line pointer at the trap's name. The walls stay; the war stories
 relocate.
 
-## The template button's caption is not uniform (found 2026-08-17)
+## ~~The template button's caption is not uniform~~ (found 2026-08-17)
 KEY: template zone, button caption, bound source, tpl-surfaces takes-a-source
+
+CLOSED 2026-08-18, in the three bindings plus the census.
 
 The eight-binding caption survey (annotated in docs/tpl-props-plan.md)
 found template-zone drift the live zone does not have: a per-row button
@@ -2518,8 +2531,75 @@ caption is SUGAR in Rust/Go/Java/OCaml/Haskell, FLOOR-ONLY in C#
 EXPRESSIBLE at all in Python — the "shipped unable to declare it" shape
 again. It is invisible to tools/tpl-surfaces.py because the census asks
 whether a kind HAS a constructor, never whether the constructor takes a
-live source. Closing it: the three bindings level up, and the census
-grows the takes-a-source question so the class stays closed.
+live source.
+
+THE THREE SPELLINGS, each its own language's idiom rather than a shared
+one. C# and Swift are overload languages whose `Label`/`label` already
+ships the const/signal/field triple, so `Tpl.Button(Signal)` +
+`Tpl.Button(Field<string>)` and `KayaTpl.button(KayaSignal)` +
+`KayaTpl.button(KayaField<String>)` are simply that triple finished on
+the neighbouring kind. Python gained the CAPABILITY, not a spelling:
+`_text_value` raises on anything but `str` and the binding has no
+widget-level bind to fall to, so `button(bind=)` had to be built, taking
+a Signal, the enclosing For's element or one of its fields exactly as
+`label(bind=)` does.
+
+AND THE LIVE ZONE STAYED SHUT, which is the half that nearly went wrong.
+A bound caption is template-only in all eight (docs/tpl-props-plan.md
+F5, re-verified the day before). The other seven refuse it live by
+having no such overload; Python's transaction is ambient, so one
+function serves both zones and an unguarded `bind=` would have opened a
+live-zone divergence in exactly one binding while closing the template
+one. It raises outside a template, naming F5 — the same "Python's
+equivalent of not compiling is raising here" the `label(bind=)` floor
+already uses.
+
+THE CENSUS GREW THE SECOND QUESTION (tools/tpl-surfaces.py): not whether
+the kind has a constructor but whether that constructor takes the ROW,
+asked as a PAIR — a signal source AND an element field — because the
+signal arm alone is answered by every live zone in the tree and the
+field arm is the one only a template can spell. Python is IN this census
+though it is exempt from the two above, and the difference is the whole
+finding: an ambient surface gives every KIND to a template by
+construction, but a source is not a kind. check-sugar-surface's self-test
+(e) splices the three files back in from `c9bb989` and requires the red
+to name csharp, swift and python — five quiet, three named, the drift's
+own shape — plus a deleted overload in an UNTOUCHED sibling (java) and a
+renamed constructor that must make the reader refuse rather than report
+an empty set.
+
+STILL OPEN, one surface over: C#'s generated `<Rec>Row` façade
+(guests/csharp/*Kaya.cs, emitted by tools/kaya-csgen) forwards
+`Button(string)` alone and now lags the zone by two overloads, so the
+new arms are reachable through `tx.Each` and not through `foreach (var
+row in c.Rows())`. Two `Fwd` lines beside Program.cs's `Fwd("Button",
+["string text"], "text")` and a regeneration close it; it is its own
+entry below because the generator and its three generated files move
+together and this slice did not own the guest tree.
+
+## C#'s generated row façade lags the template button's new caption arms (2026-08-18)
+KEY: csharp Rec Row facade, kaya-csgen Fwd, Button overloads, tpl-surfaces name-set blindness
+
+tools/kaya-csgen/Program.cs:322 forwards `Button(string text)` and
+nothing else, so the `Button(Signal)` and `Button(Field<string>)`
+overloads added to `Tpl` on 2026-08-18 are missing from every generated
+`<Rec>Row`. A guest writing `foreach (var row in todos.Rows())` cannot
+caption a stamped button from the row; a guest writing `tx.Each(...)`
+can. That is the difference the façade clause exists to refuse.
+
+WHY NO GATE SEES IT: tpl-surfaces.py's façade clause compares NAME SETS,
+and `Button` is in both sets already — overloads are invisible to it, in
+the same way the kind census was invisible to sources. Fixing the
+forwards and teaching that clause to compare ARITY-AND-TYPE rather than
+names are the same slice; doing the first without the second leaves the
+next overload free to drift.
+
+The other two façades need nothing here. Rust's `Row` forwards
+`button(impl Into<TplSource<StrKind>>)`, so it took every source the
+moment `Tpl` did. Swift's generated `<Rec>Row` forwards five
+constructors and no prop setters at all and is already ledgered as its
+own slice inside tpl-surfaces.py's FACADES comment; its `t: KayaTpl` is
+public, so the zone stays reachable through it.
 
 ## ~~DEFECT — Compose's title bar never recomposed, and `expect_title` read the other surface~~ (found by the android film 2026-08-17)
 KEY: compose windowTitle plain field, TopAppBar stale title, expect_title reads the render, stamped observation, film found it

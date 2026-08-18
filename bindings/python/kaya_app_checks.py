@@ -984,6 +984,13 @@ with app_src.window():
     with kaya.for_each(rows3) as el:
         for what, fn, prop, index in (
             ("label", lambda: kaya.label(bind=el.title), kaya.wire.PROP_TEXT, 0),
+            # The per-row CAPTION. Python was the one binding that could
+            # not spell it at all — `text=` runs the UTF-8 wall, which
+            # raises on a FieldRef, and there is no widget-level bind to
+            # fall to — while five bindings had it as sugar and two at
+            # their zone's floor (docs/deferred.md, "the template
+            # button's caption is not uniform").
+            ("button", lambda: kaya.button(bind=el.title), kaya.wire.PROP_TEXT, 0),
             ("checkbox", lambda: kaya.checkbox(checked=el.done),
              kaya.wire.PROP_CHECKED, 1),
             ("slider", lambda: kaya.slider(value=el.pct), kaya.wire.PROP_VALUE, 2),
@@ -1084,6 +1091,24 @@ with app_src.window():
                 _elem_bind(lambda: kaya.image(source=shot3.pic))
                 == {"prop": kaya.wire.PROP_SOURCE, "level": 0, "field": 0},
             )
+
+    # AND THE ZONE WALL UNDER `button(bind=)`. A bound caption is a
+    # TEMPLATE-zone constructor in all eight and exists in no live zone
+    # (docs/tpl-props-plan.md F5, re-verified 2026-08-17). The other
+    # seven refuse it live by having no such overload; Python's ambient
+    # transaction gives one function to both zones, so the refusal is a
+    # zone check and this is the only place it can be watched.
+    sig_live = kaya.signal("live")
+    before_live = len(kaya._tx)
+    try:
+        kaya.button(bind=sig_live)
+        check("button(bind=) refuses a LIVE-zone caption source", False)
+    except TypeError as exc:
+        check(
+            "button(bind=) refuses a LIVE-zone caption source",
+            "template-only" in str(exc),
+        )
+    _rewind(before_live)
 
 # TEMPLATE-NODE PROPS (docs/tpl-props-plan.md §1). The a11y trio,
 # `accepts` and `on_paste` sit on the `_Handle` base both handle classes

@@ -329,6 +329,222 @@ PROP_ZONES = [
 ]
 
 
+# --- the TAKES-A-SOURCE census -----------------------------------------
+#
+# A constructor that EXISTS is not a constructor that can be handed the
+# row's own data, and until 2026-08-18 nothing in the tree asked the
+# second question. `Tpl.Button(string)` satisfied the kind census exactly
+# as `Tpl.button(Signal<String>)` did, so a per-row button caption was
+# sugar in five bindings, floor-only in C# and Swift, and inexpressible
+# in Python — for as long as the sweep only asked whether the kind was
+# there (docs/deferred.md, "the template button's caption is not
+# uniform", found 2026-08-17). It is the gap-shape the ledger already
+# named once for Python's `progress`: a check that asserts a constructor
+# EXISTS cannot see which arm is reachable.
+#
+# WHAT IS ASKED IS A PAIR, not "does it take a source". Each point must
+# accept BOTH a SIGNAL and an ELEMENT FIELD. The signal arm alone proves
+# nothing about this zone — every LIVE constructor in the tree takes a
+# signal too — while the field arm is the thing only a template can
+# spell: "Delete <that row's title>", one caption per stamped copy. A
+# binding with the signal arm and not the field arm is the drift this
+# census exists to see, so it is reported by name and not summed away.
+#
+# PYTHON IS IN THIS CENSUS, though it is exempt from both censuses above,
+# and the difference IS the finding. Its transaction is ambient, so one
+# module-level surface serves both zones and every KIND works in a
+# template by construction — a kind census has nothing to measure there.
+# A SOURCE IS NOT A KIND: `_text_value` raises on anything but `str`, so
+# `kaya.button` refused a row's field while looking complete to every
+# sweep in the tree, and Python was the one binding that could not spell
+# the caption at all.
+#
+# Each reader returns the set of source flavours the point accepts, or
+# None when it cannot LOCATE the constructor — which is refused as a
+# broken reader, never reported as a binding with no sources. The two
+# outcomes look identical in a name set and could not be more different.
+SOURCE_FLAVOURS = ("signal", "field")
+
+# The points, one per (kind, prop) that must be sourceable in the zone.
+# One today; the table is the shape a second one lands in.
+SOURCE_POINTS = ("button caption",)
+
+
+def sources_rust(_):
+    src = read("crates/kaya/src/app.rs")
+    body = brace_block(src, r"^impl Tpl<'_, '_> \{")
+    if body is None:
+        return None
+    m = re.search(r"^\s{4}pub fn button\(([^)]*)\)", body, re.M)
+    if m is None or "TplSource<StrKind>" not in m.group(1):
+        return set() if m else None
+    # The source-ness is the TYPE's, not the signature's: one `impl
+    # Into<TplSource<StrKind>>` argument is both arms or neither, so the
+    # flavours are read where the conversions are declared.
+    got = set()
+    if re.search(r"^impl<K> From<SignalId> for TplSource<K>", src, re.M):
+        got.add("signal")
+    if re.search(r"^impl<K> From<Field<K>> for TplSource<K>", src, re.M):
+        got.add("field")
+    return got
+
+
+def sources_go(_):
+    # The zone is the RECEIVER here, so the file is the block. Every
+    # `Button*` header is read — the constant arm and the bound one are
+    # different methods in this binding — and only the header, since a
+    # body mentioning Signal would otherwise answer for a signature that
+    # does not take one.
+    src = read("bindings/go/app.go")
+    heads = re.findall(r"func \(t \*Tpl\) Button[A-Za-z0-9]*(.*?)\) Node \{", src, re.S)
+    if not heads:
+        return None
+    joined = "".join(heads)
+    got = set()
+    if "Signal[string]" in joined:
+        got.add("signal")
+    if "Field[string]" in joined:
+        got.add("field")
+    return got
+
+
+def _overload_params(body, pattern):
+    """The parameter lists of every overload matching `pattern`."""
+    return re.findall(pattern, body, re.M)
+
+
+def sources_csharp(_):
+    body = brace_block(read("bindings/csharp/KayaApp.cs"),
+                       r"^\s*(public |internal )?sealed class Tpl\b")
+    if body is None:
+        return None
+    pars = _overload_params(body, r"^\s*public Node Button\(([^)]*)\)")
+    if not pars:
+        return None
+    got = set()
+    for p in pars:
+        if re.search(r"\bSignal\b", p):
+            got.add("signal")
+        if re.search(r"\bField<string>", p):
+            got.add("field")
+    return got
+
+
+def sources_java(_):
+    body = brace_block(read("bindings/java/dev/kaya/KayaApp.java"),
+                       r"^\s*public final class Tpl\b")
+    if body is None:
+        return None
+    pars = _overload_params(body, r"^\s*public Node button\(([^)]*)\)")
+    if not pars:
+        return None
+    got = set()
+    for p in pars:
+        if re.search(r"\bSignal<String>", p):
+            got.add("signal")
+        if re.search(r"\bField<String>", p):
+            got.add("field")
+    return got
+
+
+def sources_swift(_):
+    body = brace_block(read("bindings/swift/KayaApp.swift"), r"^final class KayaTpl\b")
+    if body is None:
+        return None
+    pars = _overload_params(body, r"^\s*func button\(([^)]*)\)\s*->\s*KayaNodeHandle")
+    if not pars:
+        return None
+    got = set()
+    for p in pars:
+        if re.search(r"\bKayaSignal\b", p):
+            got.add("signal")
+        if re.search(r"\bKayaField<String>", p):
+            got.add("field")
+    return got
+
+
+def sources_ocaml(_):
+    body = keyword_block(read("bindings/ocaml/kaya_app.ml"), r"^module Tpl = struct\b", r"^end")
+    if body is None:
+        return None
+    # One `let button`, its sources spelled as optional arguments; the
+    # header runs to the `=` that opens the body.
+    m = re.search(r"^  let button\b(.*?)=\n", body, re.S | re.M)
+    if m is None:
+        return None
+    head = m.group(1)
+    got = set()
+    # `?bind` and `?bind_field` are different arguments and the first is
+    # a prefix of the second, so the signal arm is matched only where no
+    # further name follows.
+    if re.search(r"\?bind(?![_a-z])", head):
+        got.add("signal")
+    if re.search(r"\?bind_field\b", head):
+        got.add("field")
+    return got
+
+
+def sources_haskell(_):
+    # The zone is the RETURN TYPE and the sources are the CLASS: the
+    # constructor's constraint names the class, and the class's instances
+    # say which flavours it admits. Both halves are read, because a
+    # constraint over a class with no Signal instance would be a source
+    # in name only.
+    src = read("bindings/haskell/KayaApp.hs")
+    m = re.search(r"^buttonBound :: (\w+) s => s -> Tpl Node$", src, re.M)
+    if m is None:
+        return None
+    cls = m.group(1)
+    got = set()
+    if re.search(rf"^instance {cls} Signal\b", src, re.M):
+        got.add("signal")
+    if re.search(rf"^instance {cls} \(KField String\)", src, re.M):
+        got.add("field")
+    return got
+
+
+def sources_python(_):
+    # ONE surface, both zones, so the "zone" here is the constructor
+    # itself: the `bind=` argument and the ladder under it. A signature
+    # with `bind=` whose body never reaches the element encoder would be
+    # the silent-nothing arm this binding has already shipped once
+    # (kaya.label(bind=) before its floor), so both are read.
+    src = read("bindings/python/kaya/__init__.py")
+    m = re.search(r"^def button\(([^)]*)\):\n(.*?)(?=^def )", src, re.S | re.M)
+    if m is None:
+        return None
+    params, body = m.group(1), m.group(2)
+    if not re.search(r"\bbind=", params):
+        return set()
+    got = set()
+    if "wire.tx_bind_text(" in body:
+        got.add("signal")
+    if "wire.tx_bind_text_element(" in body:
+        got.add("field")
+    return got
+
+
+# (language, reader, where the point is spelled, how it is spelled)
+SOURCE_ZONES = [
+    ("rust", sources_rust, "impl Tpl (crates/kaya/src/app.rs)",
+     "`button(impl Into<TplSource<StrKind>>)`"),
+    ("go", sources_go, "func (t *Tpl) Button* (bindings/go/app.go)",
+     "a `ButtonBound` over Signal[string] | Field[string]"),
+    ("csharp", sources_csharp, "sealed class Tpl (bindings/csharp/KayaApp.cs)",
+     "`Button(Signal)` / `Button(Field<string>)` overloads"),
+    ("java", sources_java, "class Tpl (bindings/java/dev/kaya/KayaApp.java)",
+     "`button(Signal<String>)` / `button(Field<String>)` overloads"),
+    ("swift", sources_swift, "final class KayaTpl (bindings/swift/KayaApp.swift)",
+     "`button(KayaSignal)` / `button(KayaField<String>)` overloads"),
+    ("ocaml", sources_ocaml, "module Tpl (bindings/ocaml/kaya_app.ml)",
+     "`?bind` / `?bind_field` on `let button`"),
+    ("haskell", sources_haskell, "buttonBound (bindings/haskell/KayaApp.hs)",
+     "instances of the constructor's own source class"),
+    ("python", sources_python, "def button (bindings/python/kaya/__init__.py)",
+     "`bind=` taking a Signal or an element field"),
+]
+
+
 # --- the FAÇADES, held level with the zone they forward to -------------
 #
 # A template zone can have a SECOND surface: a for-statement façade that
@@ -572,6 +788,44 @@ def main():
                 "children off its edge. THE LIVE ZONE'S SETTER OF THE SAME NAME "
                 "DOES NOT COUNT: this census reads the zone's own block precisely "
                 "because the two spell the prop identically."
+            )
+            status = 1
+
+    # THE TAKES-A-SOURCE CENSUS. Same zones, read for whether the
+    # constructor can be handed the ROW rather than for whether it is
+    # there at all — the question the kind census structurally cannot
+    # ask, and the one the template button's caption drifted under.
+    for lang, reader, where, spelling in SOURCE_ZONES:
+        try:
+            got = reader(None)
+        except OSError as e:
+            print(f"tpl-surfaces: cannot read {lang}'s binding for the source census ({e})")
+            status = 1
+            continue
+
+        if got is None:
+            print(
+                f"tpl-surfaces: cannot find {lang}'s template button constructor "
+                f"for the source census — {where}. A reader that cannot LOCATE "
+                "the point it censuses has not measured a binding with no "
+                "sources; it has stopped reading. Fix the reader here rather "
+                "than deleting it."
+            )
+            status = 1
+            continue
+
+        missing = [f for f in SOURCE_FLAVOURS if f not in got]
+        if missing:
+            print(
+                f"check-sugar-surface: {lang}'s TEMPLATE-zone button caption "
+                f"takes no {' or '.join(missing)} source — in {where}. A "
+                "stamped copy's caption is then one string for every row, and "
+                "\"Delete <that row's title>\" is spellable in that language "
+                f"only at the zone's floor, or not at all. The spelling here is "
+                f"{spelling}; the other seven bindings each have their own, and "
+                "all eight take BOTH a signal and an element field. A "
+                "CONSTRUCTOR THAT EXISTS IS NOT ONE THAT TAKES THE ROW: this "
+                "clause is the half the kind census above cannot ask."
             )
             status = 1
 

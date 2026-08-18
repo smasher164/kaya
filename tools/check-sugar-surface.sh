@@ -346,6 +346,128 @@ if [ "$tpl_prop_probe" != "$want_prop_probe" ]; then
 fi
 unset tpl_prop_probe want_prop_probe
 
+# (e) AND THE TAKES-A-SOURCE CENSUS, which grew on 2026-08-18 and asks
+#     the question the two above structurally cannot: not whether the
+#     kind has a constructor, but whether that constructor can be handed
+#     the ROW. `Tpl.Button(string)` satisfies the kind census exactly as
+#     `Tpl.button(Signal<String>)` does, which is how a per-row button
+#     caption came to be sugar in five bindings, floor-only in C# and
+#     Swift and inexpressible in Python with every gate green
+#     (docs/deferred.md, closed 2026-08-18).
+#
+#     e1 IS THAT HISTORICAL SHAPE ITSELF, spliced back in from git: the
+#        three bindings' files as they stood at c9bb989, everything else
+#        the real tree. The census must come back red naming exactly
+#        csharp, swift and python — five quiet, three named — which is
+#        the drift the ledger recorded, and is the proof that this clause
+#        would have caught it. The splice is REFUSED if a file comes back
+#        byte-identical to the working tree: a perturbation that applied
+#        nothing is a failed test, not a passed one (invariant 3).
+#     e2 deletes JAVA's field overload — a binding this slice never
+#        touched — because a census keyed to the three that were fixed
+#        would pass e1 and see nothing anywhere else.
+#     e3 renames Haskell's constructor: a reader that can no longer find
+#        the point must REFUSE, never report a binding with no sources.
+#        The two outcomes are one empty set apart and could not differ
+#        more.
+tpl_src_probe=$(python3 - <<'PROBE'
+import os, shutil, subprocess, sys, tempfile
+
+LANGS = ("rust", "go", "csharp", "java", "swift", "ocaml", "haskell", "python")
+BASE = "c9bb989"  # the commit the drift was closed on top of
+
+
+def stage(perturb):
+    """A temp repo root where exactly `perturb` (path -> text) differs."""
+    root = tempfile.mkdtemp()
+    dirs = {}
+    for path in perturb:
+        parts = path.split("/")
+        for i in range(1, len(parts)):
+            dirs.setdefault("/".join(parts[:i]), True)
+    for top in os.listdir("."):
+        if top not in dirs:
+            os.symlink(os.path.abspath(top), f"{root}/{top}")
+    for d in sorted(dirs):
+        os.makedirs(f"{root}/{d}", exist_ok=True)
+        for entry in os.listdir(d):
+            child = f"{d}/{entry}"
+            if child not in dirs and child not in perturb:
+                os.symlink(os.path.abspath(child), f"{root}/{child}")
+    for path, text in perturb.items():
+        open(f"{root}/{path}", "w", encoding="utf-8").write(text)
+    return root
+
+
+def run(perturb):
+    root = stage(perturb)
+    r = subprocess.run([sys.executable, "tools/tpl-surfaces.py", root],
+                       capture_output=True, text=True)
+    shutil.rmtree(root)
+    return r
+
+
+# e1 — the historical shape, read out of git rather than re-typed here.
+perturb = {}
+for path in ("bindings/csharp/KayaApp.cs", "bindings/swift/KayaApp.swift",
+             "bindings/python/kaya/__init__.py"):
+    old = subprocess.run(["git", "show", f"{BASE}:{path}"],
+                         capture_output=True, text=True)
+    if old.returncode != 0:
+        print(f"e1=SELFTEST-BROKEN(cannot read {BASE}:{path})")
+        break
+    if old.stdout == open(path, encoding="utf-8").read():
+        print(f"e1=SELFTEST-BROKEN({path} unchanged since {BASE})")
+        break
+    perturb[path] = old.stdout
+else:
+    r = run(perturb)
+    named = [l for l in LANGS if f"{l}'s TEMPLATE-zone button caption" in r.stdout]
+    print(f"e1=applied:{len(perturb)} rc:{r.returncode} named:{','.join(named)}")
+
+# e2 — an untouched sibling's field overload, deleted.
+JAVA = "bindings/java/dev/kaya/KayaApp.java"
+victim = """        public Node button(KayaRecords.Field<String> f) {
+            Node n = widget(KayaWire.KIND_BUTTON);
+            bindTextField(n, 0, f);
+            return n;
+        }
+"""
+src = open(JAVA, encoding="utf-8").read()
+n = src.count(victim)
+if n != 1:
+    print(f"e2=SELFTEST-BROKEN(matched {n}, expected 1)")
+else:
+    r = run({JAVA: src.replace(victim, "")})
+    hit = "java's TEMPLATE-zone button caption takes no field" in r.stdout
+    print(f"e2=applied:1 rc:{r.returncode} named:{hit}")
+
+# e3 — the reader must refuse, not report an empty set.
+HS = "bindings/haskell/KayaApp.hs"
+src = open(HS, encoding="utf-8").read()
+old = "buttonBound :: TplStrSource s => s -> Tpl Node\n"
+n = src.count(old)
+if n != 1:
+    print(f"e3=SELFTEST-BROKEN(matched {n}, expected 1)")
+else:
+    r = run({HS: src.replace(old, "buttonRenamed :: TplStrSource s => s -> Tpl Node\n")})
+    hit = "cannot find haskell's template button constructor" in r.stdout
+    print(f"e3=applied:1 rc:{r.returncode} named:{hit}")
+PROBE
+)
+want_src_probe="e1=applied:3 rc:1 named:csharp,swift,python
+e2=applied:1 rc:1 named:True
+e3=applied:1 rc:1 named:True"
+if [ "$tpl_src_probe" != "$want_src_probe" ]; then
+    echo "check-sugar-surface: SELF-TEST FAIL (the template TAKES-A-SOURCE census" \
+        "did not catch a perturbation it must catch). Wanted:" >&2
+    echo "$want_src_probe" >&2
+    echo "Got:" >&2
+    echo "$tpl_src_probe" >&2
+    exit 1
+fi
+unset tpl_src_probe want_src_probe
+
 # THE SCALAR ELEMENT HAS A NAME, in all eight.
 #
 # A template constructor's element source is a FIELD, addressed by index

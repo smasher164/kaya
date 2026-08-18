@@ -2929,10 +2929,48 @@ def column(grow=None, spacing=None, align=None, inset=None):
     return _Container(handle)
 
 
-def button(text=None, on_click=None, grow=None):
+def button(text=None, bind=None, on_click=None, grow=None):
+    """A button; `text` for a constant caption, `bind` for one the row
+    supplies — a Signal, the enclosing For's element, or one of its
+    fields (`row.title`), which is the "Delete <that row's title>" shape
+    a list of per-row actions wants.
+
+    `bind` IS TEMPLATE-ONLY. A bound caption is a template-zone
+    constructor in all eight bindings and exists in no live zone
+    (docs/tpl-props-plan.md F5); the other seven refuse it live by
+    having no such live overload, and Python's transaction is ambient —
+    one function serves both zones — so it checks the zone instead.
+    """
     handle = _widget(wire.KIND_BUTTON)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("button text", text)))
+    if bind is not None:
+        if _tpl_depth == 0:
+            raise TypeError(
+                "kaya: button bind is template-only — a live button's caption "
+                "is a constant in all eight bindings (docs/tpl-props-plan.md "
+                "F5). Bind inside `with kaya.for_each(c) as row:`; live, pass "
+                "text=."
+            )
+        if isinstance(bind, Signal):
+            _records().append(wire.tx_bind_text(handle.id, bind.id))
+        elif isinstance(bind, Element):
+            _records().append(wire.tx_bind_text_element(handle.id, bind._level()))
+        elif isinstance(bind, FieldRef):
+            _records().append(
+                wire.tx_bind_text_element(handle.id, bind._level(), bind._index)
+            )
+        else:
+            # label's floor, for label's reason: the other seven type
+            # this argument, so a source they do not recognize fails to
+            # compile, and Python's equivalent of not compiling is
+            # raising here rather than binding nothing in silence.
+            raise TypeError(
+                f"kaya: button bind takes a Signal, the enclosing For's "
+                f"element, or one of its fields (row.title), not "
+                f"{type(bind).__name__} — inside a case arm project the "
+                "field: kaya.button(bind=note.text)"
+            )
     if on_click is not None:
         _app._register(handle, wire.OCC_BUTTON_CLICKED, on_click)
     _set_grow(handle, grow)
