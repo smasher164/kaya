@@ -1,6 +1,6 @@
 # kaya assets: one root, three readers
 
-Status: **DRAFT for ratification, 2026-08-18.** Nothing here is built and
+Status: **RATIFIED 2026-08-18 (maintainer)** — the ruling is stated plainly below; the survey and evidence sections follow unchanged. Nothing here is built and
 nothing here blocks the app-identity slice, which ships under the
 convention the tree already has. This brief answers the maintainer's
 question of 2026-08-18: "we have some examples right now where we declare
@@ -20,6 +20,28 @@ The ratified precedent this generalizes is docs/app-identity-plan.md:124
 (ruling 4, "the identity comes from a file") and its mechanism section
 docs/app-identity-plan.md:186, which established one asset file with two
 readers, the vendored-font pattern, and a byte-equality gate.
+
+## The ruling, plainly (ratified 2026-08-18)
+
+`asset(name)` is a CORE call returning an asset HANDLE. Two redemptions:
+the BLOB route (hand it to kaya — fonts, icons, images — bytes never
+round-trip through guest memory) and `bytes()` (when the guest is the
+consumer). A file-like reading API is BINDING-SIDE SUGAR ONLY: each
+language wraps the bytes in its own standard in-memory reader
+(bytes.NewReader, BytesIO, MemoryStream, ...) — idiomatic spelling,
+zero core surface. NO file descriptors: that was PickedFile's necessity
+(a provider-opened file with no path behind it), not ours — kaya
+resolves the name and produces the bytes itself, so no noCompress
+packaging rule and no fd-offset sharing subtleties exist. Assets are
+READ-ONLY structurally (no mode argument — the check-file-modes bug
+class cannot exist here). The resolution rule and its failure sentence
+("no asset named X; the package carries [...]") live once, in the core.
+STREAMING IS DEFERRED BEHIND A NAMED TRIGGER: admitted only when an
+artifact carries an asset too large to hold in memory; designed then,
+not now. The refusal list stands unchanged. The maintainer's churn rule
+applies to the implementation: every decision here was made on
+correctness (packaged assets are not files on Android; platform
+locations are the host's knowledge), never on update effort.
 
 ## The decisions this brief asks for, plainly
 
