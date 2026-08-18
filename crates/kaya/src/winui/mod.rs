@@ -2809,6 +2809,47 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
 /// cells is uniform including the affordance kaya does not mint.
 const CAPTION_COMMAND_CELL: f64 = 48.0;
 
+/// The theme key holding the height an `AppBarButton`'s own template is
+/// laid out for, which is NOT the height of the row it sits in.
+///
+/// WHAT IT REPAIRS, measured (scratchpad/chrome/winui-clip.md §2). An
+/// `AppBarButton` in a CLOSED CommandBar is put in the `Compact` visual
+/// state, which sets its pointer-over visual's margin to
+/// `AppBarButtonInnerBorderCompactMargin` = **2,6,2,22**
+/// (`AppBarButton_themeresources.xaml:119,150`). Those 22 DIP are the
+/// collapsed label's row. On a button of `AppBarThemeMinHeight` — 64 —
+/// the hover border is y 6..42, 36 tall, centre 24, and
+/// `AppBarButtonContentViewboxCollapsedMargin` = 0,16,0,2 puts the 16 DIP
+/// icon at y 16..32, centre 24: concentric, which is the arrangement those
+/// two margins were written together for.
+///
+/// THE CAPTION ROW IS 48, and that is what breaks it. The `TitleBar`
+/// control's expanded row is 48 (`AppBarThemeCompactHeight` is the same
+/// 48), so the button is MEASURED against 48 and arranged 48 while both
+/// margins stay absolute: the hover border becomes `48 - 6 - 22` = 20 DIP
+/// tall, still top-aligned at 6, and its bottom edge cuts across the
+/// button's own icon at y 26 with six rows of glyph drawn below it on bare
+/// background. That is the maintainer's "the grey box on hover of the
+/// command buttons is also cut off" (2026-08-18) — and it is not a clip:
+/// pixel-measured, the box's edge profile is symmetric top and bottom, so
+/// it is a COMPLETE rounded rect that is 16 DIP too short.
+///
+/// SO THE BUTTON IS GIVEN THE HEIGHT ITS OWN TEMPLATE ASSUMES, read out of
+/// the dictionary rather than written here, and the CommandBar's own clip
+/// takes the empty label row back off: `LayoutRoot`'s `Grid.Clip` is
+/// `TemplateSettings.ClipRect`, the closed bar's compact height, so the
+/// 64 DIP button is clipped to the 48 DIP band for RENDERING AND FOR
+/// HIT-TESTING both. Measured after: `Root` 48x64, hover border 44x36 at
+/// y 6..42, and UIA still publishes each button as 48x48 — the clip, seen
+/// from outside.
+///
+/// The `MoreButton` beside them needs none of this: `EllipsisButton` is
+/// written for 48 outright (`MinHeight` = `AppBarThemeCompactHeight`,
+/// margin `AppBarEllipsisButtonInnerBorderMargin` = 2,6,6,6 → 40x36
+/// centred), which is why its hover box was the right shape all along and
+/// its neighbours' were not.
+const CAPTION_COMMAND_BUTTON_BOX_KEY: &str = "AppBarThemeMinHeight";
+
 /// The width of the drag strip between the promoted commands and the
 /// system's minimize/maximize/close, in DIP.
 ///
@@ -2943,6 +2984,206 @@ fn apply_caption_drag_strip() -> windows_core::Result<()> {
     })
 }
 
+thread_local! {
+    /// Set by `refresh_toolbar`, cleared by the first caption layout pass
+    /// that had something arranged to measure. UI-thread only, and it
+    /// deliberately touches no core state: the layout callback that reads
+    /// it runs inside `refresh_toolbar`'s own `RecomputeDragRegions`, which
+    /// holds the `CORE` borrow.
+    static CAPTION_GEOMETRY_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The height an `AppBarButton`'s own template is laid out for, read out
+/// of the theme dictionary rather than written down here.
+///
+/// A MISSING KEY IS FATAL AND SAYS SO. The number is not a preference this
+/// backend could fall back from: `CAPTION_COMMAND_BUTTON_BOX_KEY`'s whole
+/// documentation is the arithmetic that ties this value to
+/// `AppBarButtonInnerBorderCompactMargin`'s 22 and
+/// `AppBarButtonContentViewboxCollapsedMargin`'s 16, and a guess would put
+/// the hover visual back across the icon with nothing to notice it.
+fn caption_command_button_box() -> windows_core::Result<f64> {
+    APP.with_borrow(|app| {
+        let app = app
+            .as_ref()
+            .expect("the toolbar lowering runs on the UI thread, where APP lives");
+        let key = CAPTION_COMMAND_BUTTON_BOX_KEY;
+        let found = app
+            .Resources()?
+            .Lookup(&PropertyValue::CreateString(&HSTRING::from(key))?)
+            .and_then(|v| v.cast::<IReference<f64>>())
+            .and_then(|v| v.Value());
+        match found {
+            Ok(value) => Ok(value),
+            Err(err) => panic!(
+                "kaya: winui: the application resource dictionary publishes no \
+                 {key} ({err:?}). That key is the height an AppBarButton's own \
+                 template is laid out for, and the two margins that place a \
+                 promoted command's hover visual — \
+                 AppBarButtonInnerBorderCompactMargin's bottom 22 and \
+                 AppBarButtonContentViewboxCollapsedMargin's top 16 — are only \
+                 concentric at that height. Its absence means the pinned WinUI \
+                 moved under this backend, and guessing the number would put \
+                 the hover box back across the icon with nothing to see it."
+            ),
+        }
+    })
+}
+
+/// The first descendant of `root` carrying `name` as its template name.
+fn named_descendant(root: &UIElement, name: &str) -> windows_core::Result<Option<FrameworkElement>> {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    if let Ok(fe) = root.cast::<FrameworkElement>() {
+        if fe.Name()? == name {
+            return Ok(Some(fe));
+        }
+    }
+    for i in 0..VisualTreeHelper::GetChildrenCount(root)? {
+        let child = VisualTreeHelper::GetChild(root, i)?;
+        if let Ok(child) = child.cast::<UIElement>() {
+            if let Some(hit) = named_descendant(&child, name)? {
+                return Ok(Some(hit));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// THE TWO CAPTION-COMMAND GEOMETRIES THIS BACKEND OWNS, asserted against
+/// the arrangement XAML actually produced.
+///
+/// WHY A POST-CONDITION AND NOT A GATE. Both failures this checks for are
+/// SILENT and no scene can see either: a hover visual sitting 16 DIP above
+/// the icon it belongs to, and an overflow glyph with a row shaved off its
+/// dots, are pixels. Every harness read here goes through the button
+/// OBJECTS — `expect_toolbar_item` resolves a UIA name, `menu_state` reads
+/// a flag — and all of those answer the same whether or not the button is
+/// drawing itself correctly. The two writes that place them
+/// (`button.SetHeight`, `apply_caption_ellipsis_box`) are also both the
+/// kind that fail QUIETLY: a `{ThemeResource}` written after the template
+/// is applied is simply ignored, and a height that stops being written
+/// leaves a button that still measures 48x48 to UIA. So the wall is a
+/// measurement of the ARRANGEMENT, on the path every promoted window runs.
+///
+/// IT RUNS AFTER A LAYOUT, WHICH IS WHY IT IS DEFERRED. `refresh_toolbar`
+/// arms it and the caption's own `LayoutUpdated` fires it, because the
+/// rebuild may be adding the bar to the tree for the first time and there
+/// is nothing arranged to measure yet. An unarranged pass leaves it armed
+/// rather than passing vacuously — a check that answers "0x0, fine" is the
+/// census that read nothing and agreed with everything.
+fn assert_caption_command_geometry(titlebar: &TitleBar) -> windows_core::Result<bool> {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    let band = titlebar.ActualHeight()?;
+    if band <= 0.0 {
+        return Ok(false);
+    }
+    let Ok(header) = titlebar
+        .RightHeader()
+        .and_then(|header| header.cast::<UIElement>())
+    else {
+        // No promoted commands: nothing in this band to measure.
+        return Ok(true);
+    };
+
+    // THE OVERFLOW GLYPH'S BOX consumed the value kaya wrote.
+    let ellipsis = named_descendant(&header, "EllipsisIcon")?;
+    let Some(ellipsis) = ellipsis else {
+        return Ok(false);
+    };
+    let box_height = ellipsis.ActualHeight()?;
+    if box_height <= 0.0 {
+        return Ok(false);
+    }
+    assert!(
+        (box_height - CAPTION_ELLIPSIS_ICON_BOX).abs() < 0.5,
+        "kaya: winui: the caption CommandBar's overflow glyph is arranged in \
+         a box {box_height} DIP tall; kaya wrote \
+         {CAPTION_ELLIPSIS_ICON_BOX} into the application dictionary under \
+         AppBarExpandButtonCircleDiameter, which is what the template binds \
+         that FontIcon's Height to. The library's own value for that key is 3 \
+         against a FontSize of 20, and at 3 the glyph loses an anti-aliased \
+         row off the bottom of every dot (measured 1:1, \
+         scratchpad/chrome/winui-clip.md). A box of the library's size means \
+         the write did not reach the control — the usual cause is ordering: a \
+         {{ThemeResource}} is resolved when the template is applied, so \
+         apply_caption_ellipsis_box has to run BEFORE the CommandBar exists, \
+         which is why it is welded into mint_caption_titlebar."
+    );
+
+    // EVERY PROMOTED COMMAND'S HOVER VISUAL IS CONCENTRIC WITH ITS ICON.
+    // Found by the names the AppBarButton template gives them: a button's
+    // `Root` is the node carrying both.
+    fn walk(node: &UIElement, band: f64, checked: &mut usize) -> windows_core::Result<()> {
+        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+        let mut border = None;
+        for i in 0..VisualTreeHelper::GetChildrenCount(node)? {
+            let child = VisualTreeHelper::GetChild(node, i)?;
+            let Ok(child) = child.cast::<FrameworkElement>() else {
+                continue;
+            };
+            if child.Name()? == "AppBarButtonInnerBorder" {
+                border = Some(child);
+            }
+        }
+        if let Some(border) = border {
+            let root: UIElement = node.cast()?;
+            if let Some(icon) = named_descendant(&root, "ContentViewbox")? {
+                let within: UIElement = root.clone();
+                let btop = border
+                    .TransformToVisual(&within)?
+                    .TransformPoint(Point { X: 0.0, Y: 0.0 })?
+                    .Y as f64;
+                let bh = border.ActualHeight()?;
+                let itop = icon
+                    .TransformToVisual(&within)?
+                    .TransformPoint(Point { X: 0.0, Y: 0.0 })?
+                    .Y as f64;
+                let ih = icon.ActualHeight()?;
+                if bh > 0.0 && ih > 0.0 {
+                    *checked += 1;
+                    let bcentre = btop + bh / 2.0;
+                    let icentre = itop + ih / 2.0;
+                    assert!(
+                        (bcentre - icentre).abs() <= 1.0 && btop + bh <= band + 0.5,
+                        "kaya: winui: a promoted command's hover visual is not on \
+                         its own icon. The AppBarButtonInnerBorder — the element \
+                         the template paints the pointer-over background into — \
+                         is arranged {bh} DIP tall from y {btop}, centre \
+                         {bcentre}; the ContentViewbox holding the icon is {ih} \
+                         DIP tall from y {itop}, centre {icentre}; the caption \
+                         band is {band} DIP. Those two centres agree only when \
+                         the button is as tall as its own template assumes \
+                         (AppBarThemeMinHeight, written by refresh_toolbar via \
+                         caption_command_button_box): the closed CommandBar puts \
+                         the button in the Compact visual state, whose \
+                         AppBarButtonInnerBorderCompactMargin reserves 22 DIP at \
+                         the bottom for a collapsed label, and in a 48 DIP \
+                         caption row that leaves a 20 DIP box top-aligned at 6 \
+                         whose lower edge cuts across the icon."
+                    );
+                }
+            }
+        }
+        for i in 0..VisualTreeHelper::GetChildrenCount(node)? {
+            let child = VisualTreeHelper::GetChild(node, i)?;
+            if let Ok(child) = child.cast::<UIElement>() {
+                walk(&child, band, checked)?;
+            }
+        }
+        Ok(())
+    }
+    let mut checked = 0usize;
+    walk(&header, band, &mut checked)?;
+    // A BAR WITH BUTTONS IN IT AND NOTHING MEASURED is the vacuous pass
+    // this check exists to refuse: it means the walk did not find the
+    // template parts, not that the geometry is right.
+    let buttons = VisualTreeHelper::GetChildrenCount(&header)?;
+    if buttons > 0 && checked == 0 {
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 /// The one place a `TitleBar` is constructed, so that the one ordering it
 /// depends on cannot be got wrong.
 ///
@@ -2971,7 +3212,86 @@ fn apply_caption_drag_strip() -> windows_core::Result<()> {
 /// than left to memory.
 fn mint_caption_titlebar() -> windows_core::Result<TitleBar> {
     apply_caption_drag_strip()?;
+    apply_caption_ellipsis_box()?;
     TitleBar::new()
+}
+
+/// The height of the box the CommandBar's "…" glyph is drawn in, in DIP.
+///
+/// WHY THIS EXISTS, measured (scratchpad/chrome/winui-clip.md §1-2). The
+/// CommandBar template draws its overflow affordance as
+///
+/// ```xml
+/// <FontIcon x:Name="EllipsisIcon" FontSize="20" Glyph="&#xE712;"
+///           Height="{ThemeResource AppBarExpandButtonCircleDiameter}" />
+/// ```
+///
+/// (`scratchpad/chrome/v220-CommandBar_themeresources.xaml:839`) and that
+/// resource is **3** in the shipped dictionary — a key whose name is ONE
+/// DOT'S DIAMETER used as the whole icon's height. So a 20 DIP glyph is
+/// arranged in a 3 DIP box: read off the live tree, `EllipsisIcon` is
+/// `20.0x3.0` with its own TextBlock `20.0x20.0` centred on it and hanging
+/// 8.5 DIP out of it top and bottom. Only what falls inside the 3 DIP box
+/// is painted.
+///
+/// WHAT THAT COSTS ON THE GLASS, pixel-measured at 1:1 (dpi 96): each dot
+/// renders with an anti-aliased TOP row, two full rows, and then nothing —
+/// two byte-identical full rows followed by pure white, which is not a
+/// shape any font draws. With the box opened to the glyph's own type size
+/// the same three dots render FOUR rows and the new bottom row is the
+/// exact mirror of the top. One anti-aliased row of every dot was being
+/// cut off, and the glyph sat half a pixel low as well; it now centres on
+/// the band like every other icon in the row.
+///
+/// 20 IS THE GLYPH'S OWN FONT SIZE, the literal three lines up in the same
+/// element. The box is the type size the icon is drawn at, which is the
+/// smallest honest answer to "how tall is this icon"; kaya invents no
+/// number here any more than it does for the drag strip.
+const CAPTION_ELLIPSIS_ICON_BOX: f64 = 20.0;
+
+/// Give the CommandBar's "…" a box its own glyph fits in.
+///
+/// Written through `Application.Resources` under the platform's own key —
+/// the same lightweight-styling route, with the same timing rule, as
+/// `apply_caption_drag_strip`: a `{ThemeResource}` is resolved when the
+/// template is applied, so this has to be in the dictionary BEFORE the
+/// `CommandBar` exists. That is why it is welded into
+/// `mint_caption_titlebar` beside its sibling rather than left as a
+/// statement someone can move.
+///
+/// SCOPED IN PRACTICE THOUGH THE KEY IS GLOBAL: `CommandBar::new()` is
+/// called in exactly one place in this backend (`refresh_toolbar`), kaya
+/// exposes no CommandBar widget kind, so the only bar this can reach is
+/// the caption's own.
+fn apply_caption_ellipsis_box() -> windows_core::Result<()> {
+    const KEY: &str = "AppBarExpandButtonCircleDiameter";
+    APP.with_borrow(|app| {
+        let app = app
+            .as_ref()
+            .expect("the toolbar lowering runs on the UI thread, where APP lives");
+        let resources = app.Resources()?;
+        resources.Insert(
+            &PropertyValue::CreateString(&HSTRING::from(KEY))?,
+            &PropertyValue::CreateDouble(CAPTION_ELLIPSIS_ICON_BOX)?,
+        )?;
+        let readback: f64 = resources
+            .Lookup(&PropertyValue::CreateString(&HSTRING::from(KEY))?)?
+            .cast::<IReference<f64>>()?
+            .Value()?;
+        assert!(
+            readback == CAPTION_ELLIPSIS_ICON_BOX,
+            "kaya: winui: the application resource dictionary was asked for \
+             {KEY} = {CAPTION_ELLIPSIS_ICON_BOX} and answers {readback}. That \
+             key is the CommandBar template's Height for the FontIcon carrying \
+             the overflow \"…\" glyph, and the library's own value for it is 3 \
+             against a FontSize of 20, which cuts a row off every dot. This \
+             says nothing about whether the CONTROL consumed the value — that \
+             is a layout fact and `assert_caption_command_geometry` measures \
+             it on every rebuild — only that the dictionary this process hands \
+             to XAML holds the number kaya wrote."
+        );
+        Ok(())
+    })
 }
 
 /// The least room the caption's title may leave between itself and either
@@ -3666,7 +3986,16 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             let weak_titlebar = titlebar.downgrade()?;
             let recentre = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
                 match weak_titlebar.upgrade() {
-                    Some(titlebar) => center_caption_title(window, &titlebar),
+                    Some(titlebar) => {
+                        center_caption_title(window, &titlebar)?;
+                        // The armed post-condition, fired on the first pass
+                        // that has something arranged to measure. Costs one
+                        // bool test on every other pass.
+                        if CAPTION_GEOMETRY_ARMED.get() && assert_caption_command_geometry(&titlebar)? {
+                            CAPTION_GEOMETRY_ARMED.set(false);
+                        }
+                        Ok(())
+                    }
                     None => Ok(()),
                 }
             });
@@ -3707,6 +4036,14 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         // about the button, including its height, comes from the closed
         // CommandBar it sits in.
         button.SetWidth(CAPTION_COMMAND_CELL)?;
+        // THE CAPTION CELL'S OTHER HALF, and the second metric this arm
+        // writes: the height the button's OWN template is laid out for,
+        // read out of the theme dictionary. See
+        // CAPTION_COMMAND_BUTTON_BOX_KEY for why a 48 DIP row makes a
+        // 64 DIP button draw its hover visual across its own icon, and
+        // why the CommandBar's own clip is what keeps the extra 16 out
+        // of the client area.
+        button.SetHeight(caption_command_button_box()?)?;
         // THE LABEL IS THE BUTTON'S NAME, not decoration: a closed
         // CommandBar draws icons only (it overwrites each button's
         // IsCompact as it opens and closes), so `Label` is what the
@@ -3771,6 +4108,11 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         // the move changes LeftHeader's extent, and the rects published
         // below have to be the ones the bar ends up occupying.
         rehost_menubar(core, window, extended)?;
+        // ARM THE GEOMETRY POST-CONDITION. It cannot run here: this
+        // rebuild may be the one that puts the bar in the tree, so there
+        // is nothing arranged yet to measure. The caption's own
+        // LayoutUpdated fires it on the first pass that has.
+        CAPTION_GEOMETRY_ARMED.set(true);
         // The bar's width just changed and it lives in RightHeader,
         // which the control's automatic refresh does not watch (see the
         // doc comment). Without this the passthrough rects describe the

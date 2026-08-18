@@ -25,12 +25,26 @@
 #
 #     crates/kaya/src/winui/title-centre-probe.sh akhil@192.168.64.2
 #
-# THE DEPLOY DOES NOT CARRY IT YET, and that is stated rather than implied:
-# `tools/deploy-win.sh` is where a lane-carried probe belongs and `tools/`
-# was outside the file list of the arm that wrote this. The wall that DOES
-# run on every lane leg is the post-condition inside `center_caption_title`;
-# this script is the measurement that says by how much, in physical pixels,
-# off UIA.
+# THE LANE CARRIES IT: `tools/deploy-win.sh`'s caption-centre phase runs
+# this on every full windows lane, and `tools/deploy-win.sh <host>
+# caption-centre` runs it alone. The wall that runs on every lane LEG is the
+# post-condition inside `center_caption_title`; this script is the
+# measurement that says by how much, in physical pixels, off UIA — at widths
+# no scene drives.
+#
+# THE LANE READS TWO KINDS OF LINE FROM THIS FILE and asserts on them, so
+# they are a contract, not decoration:
+#   AIMPLAN <n>          how many geometries this run will attempt, printed
+#                        BEFORE any of them: a sweep that stopped early
+#                        reports no drift, which is the same output as a
+#                        sweep that found none.
+#   AIMFLOOR w=<n>       the narrowest width driven — the one tag at which a
+#                        vanished title is correct rather than a defect.
+#   AIMV <tag> drift=<d> clamped=<bool> absent=<bool>
+#                        one per geometry. CLAMPED carries the one
+#                        distinction a reader has to make and `grep DRIFT=0`
+#                        cannot: on a narrow window the offset is the rule
+#                        working.
 $ErrorActionPreference = "Stop"
 $log = $env:KAYA_TC_LOG
 if (-not $log) { $log = "C:\Users\akhil\kaya-tc\prove-centre.txt" }
@@ -154,6 +168,15 @@ function Aim($tag) {
   if ($t -eq $null) {
     Say ("AIM  {0,-10} window {1}..{2} centre {3}   *** UIA PUBLISHED NO ELEMENT NAMED `"{4}`" ***" -f `
          $tag, $fr.Left, $fr.Right, [int]$winC, $cap)
+    # THE ROW IS STILL EMITTED, and it says ABSENT rather than going
+    # missing. A row that simply vanished would make the plan's count
+    # rule fail for a state that is CORRECT at the sweep's floor — below
+    # 480 the span between the headers closes entirely and the title
+    # collapses to nothing rather than crossing a header — and, worse,
+    # would let a title that vanished at a WIDE width hide inside the
+    # same silence. The lane's rule is that an absent row is allowed at
+    # the sweep's narrowest width and nowhere else.
+    Say ("AIMV {0} drift=absent clamped=true absent=true" -f $tag)
     return
   }
   $tC = $t.X + $t.Width / 2.0
@@ -170,7 +193,33 @@ function Aim($tag) {
        $(if ($cmdL -eq $null) { "n/a" } else { [string][int]($cmdL - ($t.X + $t.Width)) }))
   if ($menuR -ne $null -and $t.X -lt $menuR) { Say ("AIM  {0,-10} *** THE TITLE OVERLAPS THE MENU: title starts at {1}, the menu ends at {2} ***" -f $tag, [int]$t.X, [int]$menuR) }
   if ($cmdL -ne $null -and ($t.X + $t.Width) -gt $cmdL) { Say ("AIM  {0,-10} *** THE TITLE OVERLAPS THE COMMANDS: title ends at {1}, the commands start at {2} ***" -f $tag, [int]($t.X + $t.Width), [int]$cmdL) }
+  # THE MACHINE-READABLE TWIN of the row above, for the lane phase that
+  # reads this output (tools/deploy-win.sh's caption-centre phase). It
+  # carries the one distinction a reader has to make and a `grep DRIFT=0`
+  # cannot: a row is CLAMPED when the window's own centre would put the
+  # title across a header, and a clamped row's drift is the rule WORKING.
+  # Computed from the same measured edges as the row above, with 4 DIP of
+  # slack because these edges are read to the first BUTTON while the
+  # backend clamps to the CommandBar, which insets it by ~3.
+  $wanted = $winC - $t.Width / 2.0
+  $clamped = $false
+  if ($menuR -ne $null -and $wanted -lt ($menuR + 4)) { $clamped = $true }
+  if ($cmdL -ne $null -and ($wanted + $t.Width) -gt ($cmdL - 4)) { $clamped = $true }
+  Say ("AIMV {0} drift={1} clamped={2} absent=false" -f $tag, [Math]::Round($tC - $winC, 1), $clamped.ToString().ToLower())
 }
+
+# THE PLAN, PRINTED BEFORE ANY OF IT RUNS. The lane phase requires exactly
+# this many AIMV rows back: a probe that measured nothing — a window that
+# never appeared, a sweep that threw halfway — otherwise reports no drift
+# at all, which reads identically to reporting no drift because there is
+# none. Kept beside the two lists it counts so it cannot drift from them.
+$sweep = @(1100, 900, 800, 700, 640, 600, 560, 520, 480)
+Say ("AIMPLAN {0}" -f ($sweep.Count + 2))
+# The narrowest width this run drives. It is the ONE tag at which a row
+# may report the title absent: at that width the toolbar scene's menu,
+# commands, drag strip and caption cluster fill the band, and collapsing
+# the title is the clamp taken to its limit rather than a defect.
+Say ("AIMFLOOR w={0}" -f ($sweep | Measure-Object -Minimum).Minimum)
 
 Aim "launch"
 
@@ -201,7 +250,7 @@ Aim "after-drag"
 # THE CLAMP, driven deliberately: a width sweep, each step a real resize.
 # The whole run is printed so the width at which the true centre stops being
 # reachable is READ rather than asserted.
-foreach ($w in @(1100, 900, 800, 700, 640, 600, 560, 520, 480)) {
+foreach ($w in $sweep) {
   $f = Frame $h
   $wr = New-Object RECT
   [U]::GetWindowRect($h, [ref]$wr) | Out-Null

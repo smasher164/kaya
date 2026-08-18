@@ -132,6 +132,9 @@ for arg in "$@"; do
         typeface_rust|typeface_python|typeface_go|typeface_csharp|typeface_java) SUITE="$arg" ;;
         toolbar_rust|toolbar_python|toolbar_go|toolbar_csharp|toolbar_java) SUITE="$arg" ;;
         probe=*) SUITE="$arg" ;;
+        # PHASES, not legs: they run inside `all` and are named here so
+        # each can be re-run on its own while fixing what it found.
+        caption-centre) SUITE="$arg" ;;
         enable-dumps|crash-report|analyze-dump) SUITE="$arg" ;;
         *) echo "unknown argument: $arg" >&2; exit 2 ;;
     esac
@@ -163,6 +166,25 @@ def audit(text):
     return sorted({name for name in run if name not in arms})
 
 
+def audit_phases(text):
+    """PHASES the `all` case runs that no other arm of that case runs.
+
+    A phase is not a leg — it is a shell function, called as
+    `name || status=1` — so the leg audit above cannot see it. It carries
+    exactly the same regret: `caption_centre_probe` drives a window sweep
+    that takes a minute, and a phase you can only reach by running the
+    whole lane is a phase nobody re-runs while fixing what it found.
+    """
+    body = text.split("\n    all)\n", 1)
+    if len(body) != 2:
+        sys.exit("deploy-win: the `all` case arm could not be located, so the "
+                 "phase census read nothing and would agree with anything.")
+    inside = body[1].split("\n        ;;\n", 1)[0]
+    in_all = set(re.findall(r"(?m)^\s+(\w+) \|\| status=1$", inside))
+    alone = set(re.findall(r"(?m)^\s*[\w|=*-]+\) (\w+) \|\| status=1 ;;$", text))
+    return sorted(in_all - alone)
+
+
 # THE SELF-TEST FIRST: a checker that cannot see the drift it exists for
 # reports OK on every tree, including the one this fixed.
 #
@@ -178,8 +200,23 @@ if audit(drifted) != ["y_go"]:
     sys.exit("deploy-win: SELF-TEST FAIL (a leg with no arm of its own was not seen)")
 if audit(f'y_go|x_rust) SUITE="$arg" ;;\n    {call} y_go\n    {call} x_rust\n'):
     sys.exit("deploy-win: SELF-TEST FAIL (an arm'd leg was reported as unreachable)")
+fixture = ("\n    all)\n        only_in_all || status=1\n        both || status=1\n"
+           "        ;;\n    x) both || status=1 ;;\n")
+if audit_phases(fixture) != ["only_in_all"]:
+    sys.exit("deploy-win: SELF-TEST FAIL (a phase reachable only from `all` was not seen; "
+             f"the census answered {audit_phases(fixture)})")
 
-missing = audit(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+stranded = audit_phases(text)
+if stranded:
+    sys.exit(
+        "deploy-win: these phases run in the `all` case and are called from "
+        f"nowhere else, so none can be re-run alone: {', '.join(stranded)}. "
+        "Give each an arm in BOTH case statements — one in `case \"$arg\"` "
+        "naming the verb, one in `case \"$SUITE\"` calling the function — "
+        "the way caption-centre/caption_centre_probe does."
+    )
+missing = audit(text)
 if missing:
     sys.exit(
         "deploy-win: these legs run in the `all` case but no argument arm "
@@ -1041,6 +1078,104 @@ PY
 unit_tests_on_windows
 timing unit-tests
 
+# THE CAPTION TITLE'S AIM, measured on this guest, on every full lane.
+#
+# WHY IT IS A LANE PHASE. A promoted window's caption title is aimed at the
+# WINDOW's centre (the maintainer's ruling of 2026-08-17, VS Code's rule),
+# clamped when a header would collide. NO SCENE CAN SEE THAT: every harness
+# read of a window's title goes through the string, and the string is the
+# same whether the TextBlock sits on the window's centre line or 63 DIP
+# left of it on the leftover slot's. The in-process post-condition inside
+# `center_caption_title` catches the aim being WRONG; only an outside
+# observer with UIA and the window's visible frame can say by how many
+# physical pixels, and say it at widths a scene never drives.
+#
+# It lived beside the backend as a hand-run script for one milestone
+# (crates/kaya/src/winui/title-centre-probe.sh, whose header said so), which
+# is the shape this repo calls barely a guard: the session that needs it
+# most is the one with no context and it will not think to run it. This is
+# that script, on the path a full lane already walks, reusing the driver
+# rather than copying its scheduling.
+#
+# THE COUNT RULES, because a probe that measures nothing reports no drift,
+# which reads exactly like reporting no drift because there is none:
+#   - the probe declares its plan (AIMPLAN n) before it runs any of it, and
+#     exactly n AIMV rows must come back;
+#   - at least CAPTION_CENTRE_MIN_CLEAR of those rows must be UNCLAMPED —
+#     the toolbar scene's title provably fits at the launch width, after
+#     the border drag, and at 1100/900/800/700 — so a run in which every
+#     row went clamped (a menu that grew, a window that never widened)
+#     cannot satisfy the drift rule vacuously;
+#   - every unclamped row's drift must be 0;
+#   - and no row may report the title OVERLAPPING a header, at any width.
+CAPTION_CENTRE_MIN_CLEAR=6
+caption_centre_probe() {
+    echo "== the caption title's aim (title-centre-probe, on the guest) =="
+    local log rc
+    log="$LEGS_DIR/caption-centre.log"
+    KAYA_TCP_NO_DEPLOY=1 "$ROOT/crates/kaya/src/winui/title-centre-probe.sh" "$HOST" \
+        >"$log" 2>&1
+    rc=$?
+    cat "$log"
+    if [ "$rc" -ne 0 ]; then
+        echo "deploy-win: the caption-centre probe did not produce a measurement." >&2
+        return 1
+    fi
+    python3 - "$log" "$CAPTION_CENTRE_MIN_CLEAR" <<'PY'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+want_clear = int(sys.argv[2])
+plan = re.search(r"^AIMPLAN (\d+)$", text, re.M)
+if not plan:
+    sys.exit("deploy-win: the probe printed no AIMPLAN line; there is no plan to "
+             "check the rows against, so no number of rows would mean anything.")
+want = int(plan.group(1))
+rows = re.findall(r"^AIMV (\S+) drift=(\S+) clamped=(true|false) absent=(true|false)$",
+                  text, re.M)
+if len(rows) != want:
+    sys.exit(f"deploy-win: the caption-centre probe planned {want} measurements and "
+             f"reported {len(rows)}. A sweep that stopped early reports no drift, "
+             "which is the same output as a sweep that found none — fix the probe or "
+             "the guest, do not lower the plan.")
+floor = re.search(r"^AIMFLOOR (\S+)$", text, re.M)
+if not floor:
+    sys.exit("deploy-win: the probe printed no AIMFLOOR line, so there is no width at "
+             "which a vanished title is allowed and the absence rule below could only "
+             "be vacuous.")
+stray = [t for t, _d, _c, a in rows if a == "true" and t != floor.group(1)]
+if stray:
+    sys.exit("deploy-win: the caption title VANISHED at " + ", ".join(stray) +
+             f". A title UIA does not publish is only correct at the sweep's narrowest "
+             f"width ({floor.group(1)}), where the menu, the commands, the drag strip and "
+             "the caption cluster fill the band and collapsing the title is the clamp "
+             "taken to its limit. At any wider width it is a title that stopped existing.")
+clear = [r for r in rows if r[2] == "false"]
+if len(clear) < want_clear:
+    sys.exit(f"deploy-win: only {len(clear)} of {len(rows)} caption-centre rows were "
+             f"UNCLAMPED and this lane requires {want_clear}. A clamped row's drift is "
+             "the rule working, so a run where everything clamped would pass the drift "
+             "rule having proved nothing about the aim. Rows: " +
+             ", ".join(f"{t}={'clamped' if c == 'true' else d}" for t, d, c, _a in rows))
+bad = [(t, d) for t, d, _c, _a in clear if float(d) != 0.0]
+if bad:
+    sys.exit("deploy-win: the caption title is not on the window's centre at " +
+             ", ".join(f"{t} (drift {d})" for t, d in bad) +
+             ". DRIFT is the title's centre-x minus the visible frame's centre-x, both "
+             "read; a non-zero drift on an UNCLAMPED row means center_caption_title's "
+             "bias is not reaching the TextBlock — the historic value is -63, the "
+             "leftover slot's own centre.")
+overlaps = re.findall(r"^AIM .*THE TITLE OVERLAPS.*$", text, re.M)
+if overlaps:
+    sys.exit("deploy-win: the caption title crosses a header:\n  " +
+             "\n  ".join(overlaps))
+print(f"deploy-win: caption title aimed at the window's centre — {len(rows)} widths "
+      f"measured, {len(clear)} unclamped, all at DRIFT 0")
+PY
+}
+
 # Recording mode (KAYA_RECORD=1): a WGC capturer (tools/guest/
 # record-win, built on the VM) films kaya windows for the whole run,
 # saving frames named by VM-clock epoch ms. GDI-family capture shows
@@ -1472,6 +1607,12 @@ status=0
 rec_suite_start
 case "$SUITE" in
     all)
+        # FIRST, AND ALONE. The probe drives a real border drag and a
+        # width sweep on the one window it can find by class, so it needs
+        # the desktop to itself — the same reason the menus legs sit
+        # between drains. Nothing has been submitted to the pool yet here.
+        caption_centre_probe || status=1
+        timing caption-centre
         run_suite rust
         run_suite python
         run_suite go
@@ -1922,6 +2063,10 @@ case "$SUITE" in
         run_suite clipboard_java
         drain_suites
         ;;
+    # Standalone, because every gate in this repo is standalone: a phase
+    # you can only reach by running the whole lane is a phase nobody
+    # re-runs while fixing what it found.
+    caption-centre) caption_centre_probe || status=1 ;;
     probe=*) run_probe "${SUITE#probe=}" || status=1 ;;
     enable-dumps) run_guest_oneshot enable-dumps.cmd out_enable_dumps.txt "EXIT=" || status=1 ;;
     crash-report) run_guest_oneshot crash-report.cmd out_crash_report.txt "REPORTDONE" || status=1 ;;

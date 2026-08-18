@@ -11,12 +11,23 @@
 #
 #   crates/kaya/src/winui/title-centre-probe.sh akhil@192.168.64.2
 #
+# or, through the lane that now carries it:
+#
+#   tools/deploy-win.sh akhil@192.168.64.2 caption-centre
+#
 # It builds and deploys first (tools/deploy-win.sh's toolbar_rust leg), so
 # what it measures is this tree and not yesterday's exe.
 #
-# THE DEPLOY DOES NOT CARRY THIS YET: `tools/deploy-win.sh` is where a
-# lane-carried probe belongs, and `tools/` was outside the file list of the
-# arm that wrote it. Stated here so the next reader does not go looking.
+# THE LANE RUNS THIS SCRIPT, and that is the whole point of the flag below.
+# `tools/deploy-win.sh`'s caption-centre phase calls it with
+# KAYA_TCP_NO_DEPLOY=1, because the lane has already built and shipped the
+# very artifacts this would rebuild; there is one driver rather than a
+# second copy of the scheduling in the lane. Run by hand it deploys, so a
+# bare invocation still measures THIS tree.
+#
+# Exit status: 0 only if the probe wrote a measurement. Everything the
+# lane ASSERTS about that measurement it asserts itself, off the AIMV/
+# AIMPLAN lines this prints — see deploy-win.sh's caption_centre phase.
 set -u
 
 HOST="${1:?usage: title-centre-probe.sh user@host}"
@@ -33,13 +44,16 @@ trap cleanup EXIT
 
 mkdir -p "$WORK/scenes"
 
-# The guest exe and libkaya, built from THIS tree.
-( cd "$ROOT" && tools/deploy-win.sh "$HOST" toolbar_rust ) > "$WORK/deploy.log" 2>&1
-rc=$?
-if [ "$rc" -ne 0 ]; then
-    echo "title-centre-probe: the toolbar_rust leg failed (rc=$rc); nothing was measured."
-    tail -20 "$WORK/deploy.log"
-    exit 1
+# The guest exe and libkaya, built from THIS tree. Skipped when the lane
+# is the caller: it has just built and shipped them.
+if [ -z "${KAYA_TCP_NO_DEPLOY:-}" ]; then
+    ( cd "$ROOT" && tools/deploy-win.sh "$HOST" toolbar_rust ) > "$WORK/deploy.log" 2>&1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "title-centre-probe: the toolbar_rust leg failed (rc=$rc); nothing was measured."
+        tail -20 "$WORK/deploy.log"
+        exit 1
+    fi
 fi
 
 # The scratch scene: the shipped steps plus a settle to measure inside.
@@ -72,7 +86,21 @@ ssh "$HOST" "schtasks /run /tn kaya_tcp_p" >/dev/null
 sleep 50
 
 echo "== the measurement =="
-ssh "$HOST" "cmd /c type $R\\prove.txt"
+ssh "$HOST" "cmd /c type $R\\prove.txt" > "$WORK/prove.txt" 2>&1
+cat "$WORK/prove.txt"
 echo "== the guest's own verdict for the same run =="
 ssh "$HOST" "cmd /c type $R\\out.txt" | grep -E "KAYA_SELFTEST|step-failed|panicked|EXIT="
 ssh "$HOST" "cmd /c rmdir /s /q $R" >/dev/null 2>&1
+
+# A PROBE THAT WROTE NOTHING IS A FAILURE, not a silent pass. Everything
+# else about the numbers is the caller's to assert; this is the one thing
+# only the driver can see.
+grep -q "^AIMPLAN " "$WORK/prove.txt"
+rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "title-centre-probe: the probe wrote no AIMPLAN line, so it did not reach its sweep."
+    echo "  Nothing above is a measurement of the title's aim; the usual cause is that"
+    echo "  no window of class WinUIDesktopWin32WindowClass appeared, which the probe"
+    echo "  says in its own words above (it lists what WAS on the desktop)."
+    exit 1
+fi
