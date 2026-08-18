@@ -1,21 +1,11 @@
 //! The dirty-state conformance scene: unsaved work as window chrome
-//! (docs/dirty-plan.md). One boolean beside `title` and `veto_close`
-//! — the app declares STATE and the backend spells its platform's own
-//! affordance (the dot in the close button on macOS, a leading `*` in
-//! the rendered caption on Windows, a bullet in the GTK header bar,
-//! nothing on the phones, which have none).
+//! (docs/dirty-plan.md). The byte-frozen contract is
+//! tools/scenes/dirty.steps.
 //!
-//! TWO DECLARATIONS, ON PURPOSE. An edit writes the document AND says
-//! `.dirty(true)`; saving writes it back and says `.dirty(false)`.
-//! kaya does not watch your signals and guess — "the document has
-//! unsaved changes" is a statement only the app can make, and the
-//! window prop is where it makes it.
-//!
-//! AND THE MARK ARMS NOTHING. The close attempt fires the veto class
-//! this window already opted into, the app opens its own dialog, and
-//! cancelling keeps the window with the mark still up. That flow is
-//! composed here out of parts that predate this prop — which is the
-//! whole reason `dirty` is presentation and nothing else.
+//! `dirty` IS DECLARED, never inferred: kaya does not watch your
+//! signals and guess, so an edit writes the document AND says
+//! `.dirty(true)`. It arms nothing — the close flow below is the
+//! ordinary veto class.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::AlertChoice;
@@ -30,9 +20,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let (doc, status) = ctx.apply(|tx| {
-        // `dirty` and `veto_close` are orthogonal — either can be set
-        // without the other, on every platform. This window takes both
-        // because it is an editor: it owns its close so it can ask.
+        // `dirty` and `veto_close` are orthogonal; this window takes
+        // both because an editor owns its close so it can ask.
         tx.window(kaya::DEFAULT_WINDOW).title("dirty").veto_close(true);
         let doc = tx.signal("notes");
         let status = tx.signal("saved");
@@ -50,8 +39,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         (doc, status)
     });
 
-    // The handler binds to THE WINDOW at its declaration: it can only
-    // ever mean this surface's close was asked for.
     msgs.on_close_requested(kaya::DEFAULT_WINDOW, Msg::CloseAsked);
 
     while let Some(msg) = msgs.next(&ctx) {
@@ -66,8 +53,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.window(kaya::DEFAULT_WINDOW).dirty(false);
             }),
             Msg::CloseAsked => {
-                // Nothing has closed: the veto class says so. An editor
-                // with unsaved work asks; a clean one agrees at once.
+                // Nothing has closed yet: the veto class says so.
                 let alert = ctx.apply(|tx| {
                     tx.show_alert()
                         .title("unsaved changes")
@@ -79,11 +65,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_alert(alert, Msg::Answered);
             }
             Msg::Answered(choice) => ctx.apply(|tx| match choice {
-                // Agreeing destroys the surface, which for the PRIMARY
-                // window is the process itself — so the scene answers
-                // cancel and this arm stays the honest spelling of
-                // "yes, close it" rather than a step. Answering a
-                // dialog is not saving: the mark stays up either way.
+                // THIS ARM ABORTS IF IT EVER RUNS — docs/traps.md, "An
+                // app can VETO a close but cannot AGREE to one". The
+                // scene answers cancel; this stays the honest spelling.
                 AlertChoice::Action(_) => tx.destroy_window(kaya::DEFAULT_WINDOW),
                 AlertChoice::Cancel => tx.write(status, "kept editing"),
             }),

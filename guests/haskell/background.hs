@@ -1,22 +1,13 @@
 -- The background conformance scene, Haskell port — work off the app
 -- thread, posted back (docs/background-work-plan.md).
 --
--- WHAT IT PROVES, and the reason for its odd shape: a wrong
--- implementation must DEADLOCK rather than disagree. The worker parks
--- until a CLICK releases it, and only a live app thread can process a
--- click — so a binding that let background work occupy the app thread
--- cannot reach the end of the script at all. It could not even deliver
--- its own release.
+-- THE SCENE'S SHAPE IS DELIBERATE: a wrong implementation must DEADLOCK
+-- rather than disagree. The worker parks until a CLICK releases it, and
+-- only a live app thread can process a click.
 --
--- The parking is a plain empty MVar and the worker a plain forkIO.
--- kaya supplies no waiting primitive and should not: the point is that
--- a guest uses its own language's concurrency and hands back only the
--- result.
---
--- The accumulators are the guest's own state rather than signal
--- read-backs — signals are write-only by doctrine. IORefs suffice
--- without locking: everything that touches them runs on the app
--- thread, inside a posted transaction.
+-- The accumulators are the guest's own state, because signals are
+-- write-only. IORefs without locking: everything that touches them runs
+-- on the app thread, inside a posted transaction.
 
 import Control.Concurrent (forkIO, newEmptyMVar, takeMVar, tryPutMVar)
 import Data.IORef (modifyIORef', newIORef, readIORef)
@@ -40,21 +31,18 @@ main = kayaMain $ \app -> do
         []
         [ labelBound status [A11yId "status"], -- label#0
           labelBound alive [A11yId "alive"], -- label#1
-          -- Authored so the CLOSING read can address it: the AX read
-          -- needs an identifier, and an index read passes for an arm
-          -- that ran and drew nothing.
+          -- Authored so the closing AX read can address it by identifier;
+          -- an index read passes for an arm that ran and drew nothing.
           labelBound detail [A11yId "nested"], -- label#2
           buttonOn
             "start" -- button#0
             ( do
                 _ <- forkIO $ do
-                  -- Parks here until the scene clicks release. Were the
-                  -- binding running this on the app thread, that click
-                  -- could never be processed and the whole scene would
-                  -- deadlock — the point.
+                  -- Parks until the scene clicks release; on the app
+                  -- thread that click could never be processed.
                   takeMVar released
                   -- Three posts, in order. The accumulator makes this a
-                  -- test of ORDER and not merely of which one ran last.
+                  -- test of ORDER and not of which one ran last.
                   mapM_
                     ( \step -> post app $ do
                         modifyIORef' postedRef (++ step)
@@ -69,12 +57,9 @@ main = kayaMain $ \app -> do
           -- worker is parked and has posted nothing.
           buttonOn "ping" (buildTx app (writeSignal alive (VStr "alive"))) [], -- button#1
           -- tryPutMVar, NOT putMVar: putMVar BLOCKS when the MVar is
-          -- already full, so a second click on release would block the
-          -- APP THREAD forever. The scene clicks once and would never
-          -- have shown it. Every other guest's release is
-          -- non-blocking by construction (close, Event.set,
-          -- semaphore.signal, CountDownLatch.countDown); this is the
-          -- one language where the obvious spelling is the wrong one.
+          -- already full, so a second release click would block the APP
+          -- THREAD forever. The scene clicks once and would never show
+          -- it (docs/deferred.md, the blocking-release entry).
           buttonOn "release" (() <$ tryPutMVar released ()) [], -- button#2
           -- A post from INSIDE a handler QUEUES for after; it never
           -- nests. The handler appends a, posts an action appending b,

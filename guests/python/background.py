@@ -1,22 +1,13 @@
 """The background conformance scene, Python port — work off the app
 thread, posted back (docs/background-work-plan.md).
 
-WHAT IT PROVES, and the reason for its odd shape: a wrong
-implementation must DEADLOCK rather than disagree. The worker parks
-until a CLICK releases it, and only a live app thread can process a
-click — so a binding that let background work occupy the app thread
-cannot reach the end of the script at all. It could not even deliver
-its own release.
+THE SHAPE IS DELIBERATE: a wrong implementation must DEADLOCK rather
+than disagree. The worker parks until a CLICK releases it, and only a
+live app thread can process a click, so a binding that let background
+work occupy the app thread cannot even deliver its own release.
 
-The parking is a plain `threading.Event`, and the worker is a plain
-daemon thread. kaya supplies no waiting primitive and should not: the
-point is that a guest uses its own language's concurrency and hands
-back only the result.
-
-The accumulators are the guest's own state rather than signal
-read-backs — signals are write-only by doctrine (the app owns its
-model). No lock is needed on them: everything that touches them runs on
-the app thread, inside a posted transaction.
+The accumulators need no lock: everything that touches them runs on the
+app thread, inside a posted transaction.
 """
 
 import sys
@@ -33,12 +24,11 @@ nested = []
 
 def start():
     def worker():
-        # Parks here until the scene clicks release. Were the binding
-        # running this on the app thread, that click could never be
-        # processed and the whole scene would deadlock — the point.
+        # Parks until the scene clicks release; work on the app thread
+        # would leave that click unprocessed and deadlock the scene.
         released.wait()
-        # Three posts, in order. The accumulator makes this a test of
-        # ORDER and not merely of which one ran last.
+        # Three posts, in order: the accumulator makes this a test of
+        # ORDER, not of which one ran last.
         for step in ("1", "2", "3"):
             def land(step=step):
                 posted.append(step)
@@ -51,8 +41,7 @@ def start():
 
 
 def ping():
-    # Proof the app thread is still serving input while the worker is
-    # parked and has posted nothing.
+    # Proof the app thread still serves input while the worker is parked.
     alive.set("alive")
 
 
@@ -83,9 +72,8 @@ with app.window(title="background"):
     with kaya.column():
         kaya.label(bind=status).a11y_id("status")  # label#0
         kaya.label(bind=alive).a11y_id("alive")  # label#1
-        # Authored so the CLOSING read can address it: the AX read needs
-        # an identifier, and an index read passes for an arm that ran
-        # and drew nothing.
+        # Authored so the closing AX read can address it by identifier;
+        # an index read passes for an arm that ran and drew nothing.
         kaya.label(bind=detail).a11y_id("nested")  # label#2
         kaya.button("start", on_click=start)  # button#0
         kaya.button("ping", on_click=ping)  # button#1

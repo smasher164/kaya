@@ -1,13 +1,6 @@
--- The split conformance scene, Haskell port — adaptive list-detail via
--- the config-list spelling: @window 0 [WTitle "split", WListDetail
--- True]@, @pushEntry 7 [ETitle "detail", EOnPopped ...]@ plus 'mountIn'
--- presents the detail.
---
--- The guest asks for the presentation ONCE and then does nothing
--- adaptive ever again. Everything after that is the platform
--- re-deciding as the size class changes: an app does not write two
--- layouts and pick one, and there is no prop for WHICH way it
--- presents. Nothing here is split-specific except that one prop.
+-- The split conformance scene, Haskell port — adaptive list-detail. The
+-- guest asks for the presentation ONCE and does nothing adaptive ever
+-- again; there is no prop for WHICH way it presents.
 --
 -- TWO scripts drive this ONE app: split resizes and names the
 -- presentation on each side, listdetail asserts the bare invariant at
@@ -31,20 +24,16 @@ main = kayaMain $ \app -> do
       column
         []
         [ -- Authored ids so the REAL-TREE read can address these: an
-          -- index read passes whether or not anything reached the
-          -- screen, which is the gap that let a non-rendering split
-          -- arm look green.
+          -- index read passes whether or not anything reached the screen,
+          -- which once let a non-rendering split arm look green.
           labelBound s [A11yId "list"], -- label#0
           buttonOn "open detail"
             ( buildTx app $ do
-                -- The popped handler rides the push, per-entry — the
-                -- showAlert precedent, unchanged by the split.
                 pushEntry
                   detailId
                   [ ETitle "detail",
-                    -- Retention: the base root took this write while
-                    -- the detail was up, on a regular window where it
-                    -- was VISIBLE the whole time.
+                    -- Retention: the base root takes this write while
+                    -- the detail is up.
                     EOnPopped (buildTx app (writeSignal s (VStr "popped detail")))
                   ]
                 caption <- signal (VStr "detail pane")

@@ -1,27 +1,19 @@
 (* The milestone-2 scene from OCaml, on the let surface with the
-   construction sugar: constructors carry their props, containers take
-   their children, and the tree reads as a tree. A local open
-   (Tpl.( ... )) switches into the template zone — the same vocabulary
-   over template-node ids, plus the element bindings. Handles declared
-   inside a template escape as the body's result.
+   construction sugar. A local open (Tpl.( ... )) switches into the
+   template zone; handles declared inside a template escape as the
+   body's result.
 
-   WHAT THIS SCENE DOCUMENTS IS HOW OCCURRENCES REACH AN APP, and that
-   is the whole of its carve-out (DESIGN.md, scope ratified 2026-08-05).
-   The remove handler is registered CENTRALLY, after the build, against
-   the handle the build returned: [on_click_node app remove_button],
-   the tier underneath the [~on_click] argument todos.ml and undo.ml
-   pass to their constructors. Both spellings register the same handler
-   in the same table; this file is where the explicit one is written
-   down. It is also why the group For keeps its result — a central
-   registration needs a handle to name, and [each] discards what the
-   template body returns.
+   THIS SCENE CARRIES THE EXPLICIT REGISTRATION TIER (DESIGN.md, scope
+   ratified 2026-08-05): the remove handler is registered CENTRALLY,
+   after the build, against the handle the build returned
+   ([on_click_node app remove_button]) rather than through the
+   [~on_click] argument todos.ml and undo.ml pass. Both spellings land
+   in the same table. It is also why the group For keeps its result —
+   [each] discards what the template body returns.
 
-   AND THE APP NAMES EVERY GROUP AND ITEM ITSELF. "g1" and "a" are
-   app-chosen identity, not filler: the scene reaches back for g1 to
-   rename it and for g2/a to remove it, so those names are the app's
-   own and [insert_fresh] — the minter todos.ml and entry.ml use for
-   data that identifies nothing — would be the wrong tool here. A key
-   the app looks up is a key the app authors.
+   The app authors "g1" and "a" itself because it looks them up again
+   (rename g1, remove g2/a); [insert_fresh] is for data that identifies
+   nothing.
 
    Build the library first (cargo build), then, from a scratch dir
    holding this file plus the contents of bindings/ocaml:
@@ -42,22 +34,16 @@ let () =
        let extras = signal (Bool false) in
 
        let groups = collection () in
-       (* The group template. The For realizes here because its result
-          carries the handles the registration below names (the
-          per-group items collection, the remove button); [w group_list]
-          slots the live For into the root's child list. The inner For
-          is spelled the same way for the same reason, now that it is
-          the only reason left: it hands back the stamped remove button
-          that [on_click_node] registers against. A nested For whose
-          body keeps nothing is [Tpl.each] and sits in a child list
-          directly — guests/ocaml/menus.ml does that. *)
+       (* Both Fors keep their results because the central registration
+          below needs the handles they carry. A nested For whose body
+          keeps nothing is [Tpl.each] instead, and sits in a child list
+          directly (guests/ocaml/menus.ml). *)
        let group_list, (items, remove_button) =
          for_each groups (fun () ->
              Tpl.(
                let items = collection () in
-               (* A group of a scalar collection IS its name, so the
-                  label binds to [element], the scalar collection's own
-                  token — no field name to give. *)
+               (* A scalar collection's element IS its value, so
+                  [element] is the whole source. *)
                let name = label ~bind_field:element () in
                let item_list, (_cell, remove_button) =
                  for_each items (fun () ->
@@ -65,10 +51,6 @@ let () =
                      (* The stamped copies are what the script clicks
                         (button#last, the most recent stamp). *)
                      let remove_button = button ~text:"remove" () in
-                     (* The body ends with its blueprint root paired
-                        with the handle that escapes; the root is fixed
-                        by what was recorded, not by what is returned,
-                        so the pair costs nothing. *)
                      let cell = column [ w text; w remove_button ] () in
                      (cell, remove_button)) ()
                in
@@ -112,10 +94,6 @@ let () =
   on_click_node app remove_button (fun keys ->
       match keys with
       | [ Str group; Str item ] ->
-          (* The instance handle names the target once; mutation and
-             read hang off the same value. The collection is the model:
-             the count read is the fold of the patches, this one
-             included. *)
           let todos = at items (Str group) in
           remove todos (Str item);
           let left = count todos in

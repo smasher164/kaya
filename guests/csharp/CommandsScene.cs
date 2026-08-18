@@ -21,10 +21,8 @@ static class CommandsScene
             var details = tx.Signal(false);
             var sort = tx.Signal(0.0);
 
-            // The settings command declares its own punctuation chord
-            // and the role that tells macOS where users look for it. An
-            // ordinary command sits beside it so the menu that declared
-            // it is not left empty once the platform moves it.
+            // Reload sits beside Settings so this menu is not left empty
+            // once a platform moves the settings item elsewhere.
             var file = tx.Menu("File", items: new[]
             {
                 tx.Item("Reload"),
@@ -32,18 +30,14 @@ static class CommandsScene
                     role: Tx.RoleSettings,
                     onActivate: t =>
                     {
-                        // Fires twice on purpose: once by the chord,
-                        // once by activating the item at its DECLARED
-                        // path — which on macOS lives in the
-                        // application menu by then.
+                        // Fires twice on purpose: once by the chord, once
+                        // by activating the item at its DECLARED path.
                         settingsCount++;
                         t.Write(status, $"settings {settingsCount}");
                     }),
             });
 
-            // A checkable command carrying its own key, and a group
-            // whose options each answer their own chord. Option order
-            // IS the index vocabulary: Name = 0, Date = 1.
+            // Option order IS the index vocabulary: Name = 0, Date = 1.
             var view = tx.Menu("View", items: new[]
             {
                 tx.Toggle("Details", isChecked: details, shortcut: "primary+backslash",

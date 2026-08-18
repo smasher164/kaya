@@ -1,9 +1,7 @@
-// The layout scene, Swift port — the native-default observation
-// vehicle; see guests/rust/layout.rs for the axes it stresses. The two
-// label expects (KAYA_SELFTEST=layout) only prove the tree built; the
-// scene asserts no geometry — container targets index by creation
-// order, which legitimately differs per language. The grow contract is
-// asserted in the grow scene instead.
+// The layout scene, Swift port — the native-default observation vehicle;
+// see guests/rust/layout.rs. It asserts NO geometry: container targets
+// index by creation order, which legitimately differs per language. The
+// grow contract is asserted in the grow scene instead.
 
 import Foundation
 
@@ -19,16 +17,14 @@ app.build { tx in
     let root = tx.column {
         tx.label(bind: probe)  // label#0
 
-        // Main-axis free space: three unequal children with leftover
-        // room.
+        // Main-axis free space: three unequal children, room left over.
         tx.row {
             tx.button("A")
             tx.button("longer")
             tx.label(bind: tail)  // label#1
         }
 
-        // Cross-axis alignment: three different intrinsic heights, one
-        // grower filling the leftover row width.
+        // Cross-axis alignment: three intrinsic heights, one grower.
         tx.row {
             tx.checkbox("check")
             tx.label(bind: mixed)  // label#2

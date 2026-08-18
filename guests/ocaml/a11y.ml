@@ -1,20 +1,16 @@
-(* The accessibility conformance scene from OCaml, on the let surface
-   with the construction sugar: the two universal props (the [~a11y_id]
-   and [~a11y_label] labeled arguments every constructor takes, like
-   [~grow]) and the verb that reads them back out of the PLATFORM'S OWN
+(* The accessibility conformance scene from OCaml: the universal
+   [~a11y_id]/[~a11y_label] props, read back out of the PLATFORM'S OWN
    accessibility tree rather than kaya's model.
 
-   Every widget kind appears, and exactly one container of each
-   container kind — the props are universal, and container targets are
-   stable only while a scene keeps one of each. See guests/rust/a11y.rs
-   for the full note; the byte-frozen contract is
-   tools/scenes/a11y.steps. *)
+   EVERY WIDGET KIND APPEARS AND EXACTLY ONE CONTAINER OF EACH KIND:
+   container targets are ordinal, so they stay stable only while the
+   scene keeps one of each. See guests/rust/a11y.rs for the full note;
+   the byte-frozen contract is tools/scenes/a11y.steps. *)
 
 open Kaya_app
 
-(* A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the gallery
-   scene's asset, embedded as source per the include_str! doctrine —
-   scenes carry their inputs, no runtime file I/O. *)
+(* A 2x2 RGB PNG, 75 bytes. Embedded as source per the include_str!
+   doctrine: scenes carry their inputs, no runtime file I/O. *)
 let test_png =
   Bytes.of_string
     "\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\
@@ -31,14 +27,13 @@ let () =
        column ~a11y_id:"form" ~a11y_label:"Form"
          [
            (* Caption-bearing controls: identified, but deliberately
-              NOT labelled. The platform must speak the caption. *)
+              NOT labelled — the platform must speak the caption. *)
            button ~a11y_id:"save" ~a11y_hint:"save the draft" ~text:"Save";
            checkbox ~a11y_id:"details" ~a11y_hint:"show more detail"
              ~text:"Details";
            button ~a11y_id:"reset" ~text:"Reset";
            label ~a11y_id:"status" ~text:"Ready";
-           (* Caption-less controls: an app MUST name these, and the
-              tree must report the authored name. *)
+           (* Caption-less controls: an app MUST name these. *)
            entry ~a11y_id:"name" ~a11y_label:"Full name";
            textarea ~a11y_id:"notes" ~a11y_label:"Notes";
            slider ~a11y_id:"volume" ~a11y_label:"Volume" ~min:0.0 ~max:1.0
@@ -49,8 +44,6 @@ let () =
               choice itself does not. *)
            select ~a11y_id:"color" ~a11y_label:"Color" [ "Red"; "Green" ];
            radio ~a11y_id:"size" ~a11y_label:"Size" [ "Small"; "Large" ];
-           (* Containers are GROUPS to an assistive client, and naming
-              one is how an app declares it a group. *)
            grid ~columns:2 ~a11y_id:"cells" ~a11y_label:"Cells"
              [ label ~text:"Name"; label ~text:"Ada" ];
            scroll ~a11y_id:"feed" ~a11y_label:"Feed" [ label ~text:"Item" ];

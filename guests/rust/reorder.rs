@@ -1,20 +1,13 @@
-//! The reorder scene: order as collection data, end to end. Three
-//! stamped rows and two buttons that never touch a widget — each
-//! handler repositions an entry by key (collection_move on the wire,
-//! move_child at the toolkit), and the selftest's expect_order reads
-//! the toolkit's actual child order back, which no creation-ordered
-//! registry could observe.
-//!
-//! The backend selftest (KAYA_SELFTEST=reorder) checks "a|b|c", clicks
-//! rotate (first entry to the end), checks "b|c|a", clicks lift (last
-//! entry before the first), and checks "a|b|c" again.
+//! The reorder scene: order as collection data, end to end. Each
+//! handler repositions an entry BY KEY and never touches a widget;
+//! expect_order reads the toolkit's actual child order back. The
+//! byte-frozen contract is tools/scenes/reorder.steps.
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Item {
     title: String,
 }
 
-/// The event vocabulary: two buttons, two meanings.
 #[derive(Clone)]
 enum Msg {
     Rotate,
@@ -49,9 +42,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Rotate => {
-                // First entry to the end. The model owns the order, so
-                // the handler asks it which key is first — it never
-                // counts widgets.
+                // The MODEL owns the order, so the handler asks it which
+                // key is first; it never counts widgets.
                 ctx.apply(|tx| {
                     let entries = tx.items(&items);
                     let (first, _) =
@@ -60,9 +52,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
             }
             Msg::Lift => {
-                // Last entry to the front: move_to_front is sugar for
-                // move_before the current first key — the same wire
-                // op, keys never indices.
+                // Keys, never indices.
                 ctx.apply(|tx| {
                     let entries = tx.items(&items);
                     let (last, _) =

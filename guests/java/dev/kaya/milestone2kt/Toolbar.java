@@ -4,21 +4,14 @@ import dev.kaya.KayaApp;
 
 /**
  * The toolbar conformance scene, JVM port: the {@code primary} bit as
- * real window chrome (docs/chrome-plan.md C2). The app declares ONE
- * catalog and marks two actions primary; every host promotes the same
- * first two in catalog preorder — the desktop's toolbar, the phones' top
- * bar — and the rest of the catalog stays reachable where that host
- * keeps it.
- *
- * <p>There is no toolbar vocabulary to spell here, and that is the
- * point: this guest is the menus guest with a promotion bit and no new
- * call. Canonical semantics in guests/rust/toolbar.rs; the byte-frozen
- * contract in tools/scenes/toolbar.steps.
+ * real window chrome (docs/chrome-plan.md C2). One catalog, two actions
+ * marked primary, and every host promotes the same first two. Canonical
+ * semantics in guests/rust/toolbar.rs; the byte-frozen contract in
+ * tools/scenes/toolbar.steps.
  */
 final class Toolbar {
-    // The guest's own copy of the enablement, flipped by the button. A
-    // field rather than a local because a Java lambda cannot assign a
-    // captured one; the signal is the model either way.
+    // A field rather than a local: a Java lambda cannot assign a
+    // captured one.
     private static boolean saveEnabled = true;
 
     static void app() {
@@ -26,22 +19,17 @@ final class Toolbar {
 
         app.build(tx -> {
             KayaApp.Signal<String> status = tx.signal("ready");
-            // The one signal the enablement round-trip turns on. The app
-            // writes it against the MENU ITEM and says nothing about any
-            // button: the promoted button is that same item, so it
-            // follows or the lowering kept a copy.
+            // Written against the MENU ITEM and nothing else: the
+            // promoted button is that same item, so it follows or the
+            // lowering kept a copy.
             KayaApp.Signal<Boolean> canSave = tx.signal(true);
 
-            // CATALOG PREORDER DECIDES PROMOTION — top-level groupings
-            // in menubar-append order, then each node's children in
-            // append order, depth-first. Save is the first primary and
-            // Find the second, so every host's promoted set is
-            // [Save, Find] however large its own k is.
+            // CATALOG PREORDER DECIDES PROMOTION — groupings in
+            // menubar-append order, then children depth-first. Save is
+            // the first primary and Find the second, so every host's
+            // promoted set is [Save, Find] whatever its own k is.
             KayaApp.WindowRef win = tx.window(0).title("toolbar");
             KayaApp.MenuItem file = win.menu("File");
-            // `DONE` is the checkmark idiom: the vocabulary has no
-            // save-specific glyph, and neither does Apple's own catalog
-            // (docs/styling-plan.md D6).
             file.item("Save")
                     .symbol(KayaApp.Symbol.DONE)
                     .primary(true)
@@ -57,9 +45,7 @@ final class Toolbar {
                     .symbol(KayaApp.Symbol.SEARCH)
                     .primary(true)
                     .onActivate(t -> t.write(status, "found"));
-            // The remainder: everything below is catalog, not chrome, on
-            // every platform — which is what makes the bare
-            // expect_toolbar's second half a real question.
+            // The remainder: catalog, not chrome, on every platform.
             edit.item("Replace").symbol(KayaApp.Symbol.EDIT);
 
             KayaApp.MenuItem view = win.menu("View");

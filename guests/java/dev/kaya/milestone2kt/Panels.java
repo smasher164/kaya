@@ -4,15 +4,12 @@ import dev.kaya.KayaApp;
 
 /**
  * The panels conformance scene from the JVM — see guests/rust/panels.rs
- * for the full rationale. A main window and an inspector; the inspector
- * arms vetoClose, so the chrome close EMITS close_requested and closes
- * nothing — the guest answers by recording the request in the status
- * label and destroying the window (the request/confirm veto class,
- * DESIGN.md's Presentation contexts). Desktop-only: phone hosts reject
- * createWindow at the root by capability.
+ * for the rationale. The inspector arms vetoClose, so its chrome close
+ * emits close_requested and closes nothing; the guest records the
+ * request and destroys the window itself.
  *
- * The createWindow chain is Java's spelling of the window sugar;
- * app.onCloseRequested is the event surface.
+ * <p>DESKTOP ONLY: phone hosts reject createWindow at the root by
+ * capability.
  */
 final class Panels {
     static void app() {
@@ -25,9 +22,6 @@ final class Panels {
                 tx.label(s); // label#0
             }));
 
-            // The veto handler binds to the inspector at its
-            // declaration (handlers scope to the thing that creates
-            // them): it can only ever mean this window's close.
             tx.createWindow(1)
                     .title("inspector")
                     .size(480.0, 320.0)

@@ -1,15 +1,11 @@
 //! The confirm conformance scene: the modal-alert grammar as
-//! assertions (the request/result grammar's first client — DESIGN.md,
-//! Presentation contexts). TWO different dialogs from two buttons —
-//! delete (two actions) and eject (one action) — each bound to its
-//! OWN handler at show time: the dialog-to-callback association is
-//! structural (distinct message variants here; the eject handler can
-//! never see a delete answer), which is the point of request-bound
-//! results — no guest ever inspects an alert id. Ids are
-//! binding-allocated; registrations retire with their one result,
-//! and re-showing after every answer proves the retirement. Cancel
-//! is the uniform dismissal slot (Esc, back, outside tap, the cancel
-//! button itself).
+//! assertions (DESIGN.md, Presentation contexts). The byte-frozen
+//! contract is tools/scenes/confirm.steps.
+//!
+//! Each dialog is bound to its own handler AT SHOW TIME, so no guest
+//! inspects an alert id; registrations retire with their one result.
+//! Cancel is the uniform dismissal slot (Esc, back, outside tap, the
+//! cancel button itself).
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::AlertChoice;

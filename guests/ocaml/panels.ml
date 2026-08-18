@@ -17,9 +17,6 @@ let () =
      let root = column [ label ~bind:s (* label#0 *) ] () in
      mount root;
 
-     (* The veto handler binds to the inspector at its declaration
-        (handlers scope to the thing that creates them): it can only
-        ever mean this window's close. *)
      let () =
        create_window ~title:"inspector" ~width:480.0 ~height:320.0
          ~veto_close:true

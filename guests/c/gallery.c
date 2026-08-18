@@ -1,8 +1,7 @@
-/* The gallery scene from C, on the function floor: a row with a
- * checkbox and its status label, and a row with a slider and its
- * volume label. Both controls own their state and report each change
- * as an occurrence; the app answers by writing the paired signal — the
- * same uncontrolled contract as the entry, with a bool and a double.
+/* The gallery scene from C, on the function floor: the uncontrolled
+ * contract with a bool and a double. Both controls own their state and
+ * report each change as an occurrence; the app answers by writing the
+ * paired signal.
  *
  * Built and run by the Linux container suite with KAYA_SELFTEST=gallery. */
 
@@ -28,8 +27,7 @@
 #define W_IMAGE_BAD 10
 #define W_QUARTER 11
 
-/* A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the first
- * binary asset, embedded as source per the include_str! doctrine —
+/* A 2x2 RGB PNG (red/green over blue/white), embedded as source:
  * scenes carry their inputs, no runtime file I/O. */
 static const uint8_t TEST_PNG[75] = {
     137, 80,  78,  71,  13,  10,  26,  10,  0,   0,   0,   13,  73,
@@ -56,21 +54,19 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_BAR, KAYA_KIND_SLIDER);
     kaya_tx_set_min(&tx, W_BAR, 0.0);
     kaya_tx_set_max(&tx, W_BAR, 1.0);
-    /* The slider's position binds a float signal — the programmatic
-     * write path the quarter button drives below. */
+    /* The slider's position binds a float signal: the programmatic write
+     * path the quarter button drives below. */
     kaya_tx_bind_value(&tx, W_BAR, SIG_POS);
     kaya_tx_create_widget(&tx, W_VOLUME, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_VOLUME, SIG_VOLUME);
     kaya_tx_create_widget(&tx, W_QUARTER, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_QUARTER, "quarter");
 
-    /* The content-buffer row: a valid 2x2 PNG decodes and reports its
-     * size, and deliberately invalid bytes read 0x0 — decode failure
-     * is the placeholder class, never a crash, on every backend. On
-     * the function floor the blob channel is explicit: register the
-     * bytes (one copy into core memory; the handle is consumed by the
-     * next kaya_submit, and the guest's bytes are free to drop the
-     * moment the call returns), then aim set_source at the widget. */
+    /* A valid 2x2 PNG decodes and reports its size; deliberately
+     * invalid bytes read 0x0, decode failure being the placeholder
+     * class and never a crash. A REGISTERED BLOB IS CONSUMED BY THE
+     * NEXT kaya_submit, and the guest's bytes may be dropped as soon as
+     * the register call returns. */
     static const uint8_t not_an_image[] = "not an image";
     uint64_t png_handle = kaya_blob_register(TEST_PNG, sizeof TEST_PNG);
     uint64_t bad_handle =
@@ -124,8 +120,8 @@ static void *app(void *arg) {
                 uint8_t buf[256];
                 KayaTx tx = {buf, 0};
                 char volume[32];
-                /* Integer percent, so every language's formatting
-                 * agrees. */
+                /* Integer percent, so every language's formatting agrees
+                 * byte for byte (tools/scenes/gallery.steps). */
                 snprintf(volume, sizeof volume, "volume: %d%%",
                          (int)(value.f * 100.0 + 0.5));
                 kaya_tx_write_signal(&tx, SIG_VOLUME, kaya_str(volume));
@@ -133,10 +129,9 @@ static void *app(void *arg) {
             }
         } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys)) {
             if (id == W_QUARTER && n_keys == 0) {
-                /* The programmatic write: fans out to the control and
-                 * must NOT come back as a value_changed occurrence
-                 * (property writes are configuration; only the user
-                 * path and commands emit). */
+                /* The programmatic write fans out to the control and
+                 * must NOT come back as a value_changed occurrence:
+                 * only the user path and commands emit. */
                 uint8_t buf[256];
                 KayaTx tx = {buf, 0};
                 kaya_tx_write_signal(&tx, SIG_POS, kaya_f64(0.25));
@@ -148,8 +143,6 @@ static void *app(void *arg) {
 }
 
 int main(void) {
-    /* The stale-artifact guard: this guest compiled against one spec
-     * revision; the loaded library must speak the same one. */
     if (kaya_spec_hash() != KAYA_SPEC_HASH) {
         fprintf(stderr, "kaya: library/binding spec mismatch — rebuild both\n");
         return 1;

@@ -78,17 +78,15 @@ with app.window(title="menus"):
     # File and its Export leaf share one enablement signal: one write
     # moves both.
     with app.menu("File", enabled=can_export) as file:
-        # THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT, drawn
-        # by each platform in its own symbol set. `done` is the
-        # checkmark idiom — the vocabulary has no `save` on purpose
-        # (Apple's own catalog has no save-specific glyph either).
+        # The symbol is a CONCEPT drawn by each platform in its own set
+        # (docs/styling-plan.md D6). The vocabulary has no `save`, so
+        # `done` — the checkmark idiom — is the spelling.
         kaya.item("Save", symbol=kaya.Symbol.DONE, shortcut="primary+s",
                   on_activate=on_save)
         kaya.item("Export", enabled=can_export, symbol=kaya.Symbol.FORWARD)
         share = kaya.item("Share", primary=True, on_activate=on_share)
 
     with app.menu("View"):
-        # A toggle carries a symbol like any other leaf.
         kaya.toggle("Details", checked=details, symbol=kaya.Symbol.INFO,
                     on_toggle=on_details)
 
@@ -98,7 +96,7 @@ with app.window(title="menus"):
         kaya.option("Date")
 
     groups = kaya.collection()
-    # Catalog built live: items are shared across stamped copies; the
+    # Catalog built LIVE: items are shared across stamped copies, the
     # template only attaches, and each activation carries its key path.
     with kaya.context_catalog() as catalog:
         kaya.item("Remove", symbol=kaya.Symbol.DELETE, on_activate=on_remove)

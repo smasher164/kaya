@@ -1,10 +1,5 @@
-// The align conformance scene, Go port — see guests/rust/align.rs and
-// tools/scenes/align.steps for the full rationale. The root column
-// centers children of three different natural widths; the row aligns
-// baselines across a label, a checkbox, and a tall no-baseline image
-// whose bottom sits ON the baseline (the CSS replaced-element rule) —
-// the construction that separates the modes on every platform's
-// control metrics.
+// The align conformance scene, Go port. See guests/rust/align.rs and
+// tools/scenes/align.steps.
 package align
 
 import (
@@ -21,16 +16,6 @@ var tallPNG = []byte{
 	68, 174, 66, 96, 130,
 }
 
-// App builds the scene and hands it back ready to be served.
-//
-// THE TAIL IS THE ONLY THING THAT DIFFERS BY PLATFORM, and it differs
-// because the hosting does: a desktop or iOS guest owns the process
-// main thread and lends it to kaya (guests/go/cmd/main_desktop.go),
-// while on Android the OS owns main and kaya starts the guest on a
-// thread of its own (guests/go/cmd/main_android.go). Both tails are
-// one package over one scene table, so everything above them — the
-// transaction, the handlers, the strings — is compiled into every
-// platform's artifact from these bytes.
 func App() *kaya.App {
 	app := kaya.NewApp()
 

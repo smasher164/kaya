@@ -1,12 +1,7 @@
-// The confirm conformance scene, C# port — the modal-alert grammar
-// via named arguments (the request/result grammar's first client):
-// one button re-shows a two-action alert; the three rounds take the
-// three answer paths (action 0, action 1, KayaWire.AlertChoiceCancel
-// — every platform-native dismissal), and the status label records
-// each result. The result handler rides the REQUEST (onResult:, the
-// widget-handler precedent) and retires with its one answer; ids
-// are binding-allocated. See guests/rust/confirm.rs and
-// tools/scenes/confirm.steps.
+// The confirm conformance scene, C# port — the modal-alert grammar.
+// The three rounds take the three answer paths (action 0, action 1,
+// KayaWire.AlertChoiceCancel, which is every platform-native
+// dismissal). See guests/rust/confirm.rs and tools/scenes/confirm.steps.
 
 static class ConfirmScene
 {
@@ -25,9 +20,8 @@ static class ConfirmScene
                 tx.Label(bind: status); // label#0
                 tx.Button("delete", onClick: inner =>
                 {
-                    // The result handler rides the request and
-                    // retires with its one answer; ids are
-                    // binding-allocated — no counter plumbing.
+                    // The result handler rides the request and retires
+                    // with its one answer; ids are binding-allocated.
                     inner.ShowAlert(
                         title: "delete item?",
                         message: "this cannot be undone",
@@ -42,8 +36,6 @@ static class ConfirmScene
                 });
                 tx.Button("eject", onClick: inner =>
                 {
-                    // A different dialog, a different handler: the
-                    // association is the registration itself.
                     inner.ShowAlert(
                         title: "eject disk?",
                         message: "it is still mounted",

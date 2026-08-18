@@ -21,10 +21,8 @@ let () =
      window ~title:"commands"
        ~menus:
          [
-           (* The settings command declares its own punctuation chord
-              and the role that tells macOS where users look for it. An
-              ordinary command sits beside it so the menu that declared
-              it is not left empty once the platform moves it. *)
+           (* The ordinary command sits beside Settings so the menu that
+              declared it is not left empty once macOS moves it. *)
            menu ~label:"File"
              [
                item ~label:"Reload";
@@ -32,14 +30,13 @@ let () =
                  ~role:role_settings
                  ~on_activate:(fun () ->
                    (* Fires twice on purpose: once by the chord, once by
-                      activating the item at its DECLARED path — which on
+                      activating the item at its DECLARED path, which on
                       macOS lives in the application menu by then. *)
                    incr settings_count;
                    write status (Str (Printf.sprintf "settings %d" !settings_count)));
              ];
-           (* A checkable command carrying its own key, and a group whose
-              options each answer their own chord. Option order IS the
-              index vocabulary: Name = 0, Date = 1. *)
+           (* Option order IS the index vocabulary: Name = 0,
+              Date = 1. *)
            menu ~label:"View"
              [
                toggle ~label:"Details" ~bind_checked:details

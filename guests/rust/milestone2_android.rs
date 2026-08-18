@@ -1,9 +1,7 @@
-//! The Android packaging of milestone 0. The app logic is milestone2.rs,
-//! pulled in as a module; only the entry differs, because Android has no
-//! native process entry (Zygote forks the process and an Activity is the
-//! way in). This builds as a cdylib whose one exported symbol is the JNI
-//! entry behind dev.kaya.Kaya.nativeStart; milestone2's fn main comes
-//! along but is never linked as an entry point.
+//! The Android packaging: ONE APK hosts every scene, so this file is a
+//! `mod` per scene plus a match on KAYA_SELFTEST. Android has no native
+//! process entry, so this builds as a cdylib whose one exported symbol
+//! is the JNI entry behind dev.kaya.Kaya.nativeStart.
 #![allow(dead_code)]
 
 // Empty on other targets so `cargo test` on the host still builds every
@@ -93,9 +91,9 @@ mod toolbar;
 #[path = "typeface.rs"]
 mod typeface;
 
-/// One APK hosts every scene: Android has one example app rather than
-/// one binary per scene, so the selftest script doubles as the scene
-/// selector (the emulator legs pass `--es KAYA_SELFTEST entry`).
+/// The scene selector: the emulator legs pass `--es KAYA_SELFTEST entry`.
+/// A LEG NEEDS ITS ARM HERE — tools/check-stubs.sh and the panic below
+/// hold that.
 #[cfg(target_os = "android")]
 fn app(ctx: kaya::AppCtx) {
     match std::env::var("KAYA_SELFTEST").as_deref() {
@@ -107,21 +105,13 @@ fn app(ctx: kaya::AppCtx) {
         Ok("layout") => layout::app(ctx),
         Ok("align") => align::app(ctx),
         Ok("grow") => grow::app(ctx),
-        // Alerts are phone-native; confirm runs here for real.
         Ok("confirm") => confirm::app(ctx),
-        // The stall diagnostic. The watchdog is core-side and needs no
-        // arm here — the leg exists because a phone is exactly where an
-        // app that looks alive and ignores you is hardest to tell from
-        // a slow one.
         Ok("stall") => stall::app(ctx),
-        // Navigation is phone-native too: predictive back IS the
-        // affordance; nav runs here for real.
         Ok("nav") => nav::app(ctx),
         Ok("split") => split::app(ctx),
-        // The same app under the other list-detail script: `split`
-        // drives resizes this host cannot perform, `listdetail` asserts
-        // the bare invariant at the width the DEVICE picked. One arm
-        // per SCRIPT, one app behind both.
+        // Two SCRIPTS, one app: `split` drives resizes this host cannot
+        // perform, `listdetail` asserts the bare invariant at the width
+        // the device picked.
         Ok("listdetail") => split::app(ctx),
         Ok("scroll") => scroll::app(ctx),
         Ok("progress") => progress::app(ctx),
@@ -136,63 +126,20 @@ fn app(ctx: kaya::AppCtx) {
         Ok("a11yrows") => a11yrows::app(ctx),
         Ok("filedialog") => filedialog::app(ctx),
         Ok("clipboard") => clipboard::app(ctx),
-        // The save scene: the round trip an editor walks. The dialog is
-        // ACTION_CREATE_DOCUMENT, which is DocumentsUI again — the same
-        // hand-off to another app the filedialog scene needs the
-        // accessibility service for, with the mode flipped.
         Ok("save") => save::app(ctx),
-        // The undo scene. THE ARM COMES WITH THE LEG, which this file's
-        // own note below says the hard way: a leg wired without its arm
-        // here runs the milestone-2 scene against the undo script and
-        // fails every step for the wrong reason. tools/check-stubs.sh
-        // holds the leg itself off tools/android/run-emulator.sh until
-        // the Compose backend's core-tier seam closes.
         Ok("undo") => undo::app(ctx),
-        // The dirty scene. The same app the desktops run — the guest is
-        // shared, the CHROME is what differs, and here there is none
-        // (docs/dirty-plan.md D4): the prop applies, expect_dirty reads
-        // it back, and the leg's script stops above the chrome close
-        // this host does not have (tools/android/run-emulator.sh says
-        // where and why).
         Ok("dirty") => dirty::app(ctx),
-        // The text-ranges scene: HIGHLIGHT a set, SELECT one, REVEAL
-        // one, plus the two things that make those three a contract —
-        // a user's keystroke DROPS a declared set, and a select_range
-        // arriving mid-composition is REFUSED. The same guest the mac
-        // lane runs; the offsets are UTF-8 byte offsets there and here,
-        // and the document's CJK first line is what makes that a
-        // testable claim rather than a stated one.
         Ok("ranges") => ranges::app(ctx),
-        // The styling scene: brand + roles + inset (docs/styling-plan.md
-        // slice 1). The same guest the mac lane runs; here the brand
-        // SEED drives Material's own scheme derivation and `heading` is
-        // Compose heading() semantics — what the expect_ax step reads.
         Ok("styling") => styling::app(ctx),
-        // The toolbar scene: the promoted bar IS this host's chrome, so
-        // the scene runs here for real (the primary bit's phone arm
-        // predates its desktop ones — docs/chrome-plan.md C2).
         Ok("toolbar") => toolbar::app(ctx),
-        // The typeface scene: the brand typeface swaps the FAMILY and
-        // leaves the ramp alone (docs/styling-plan.md Slice 2b). The
-        // same guest the mac lane runs, with one thing supplied from
-        // outside — the scene reads the vendored font's BYTES, and its
-        // default path is repo-relative, which is a path no device has.
-        // The leg pushes the file and names it in KAYA_FONT_FILE
-        // (tools/android/run-emulator.sh); the guest panics naming that
-        // variable if the file is not there, so a delivery that failed
-        // cannot read as a font that did not apply.
+        // The typeface scene reads the vendored font's BYTES and its
+        // default path is repo-relative, which no device has: the leg
+        // pushes the file and names it in KAYA_FONT_FILE
+        // (tools/android/run-emulator.sh).
         Ok("typeface") => typeface::app(ctx),
-        // The milestone-2 scene is the DEFAULT and says so: its leg
-        // passes "1" (the selftest flag's original spelling, from
-        // before the value doubled as a scene selector), and a build
-        // with no selector at all is the app a person launches by hand.
+        // "1" is the selftest flag's original spelling, from before the
+        // value doubled as a scene selector.
         Ok("1") | Err(_) => milestone2::app(ctx),
-        // ANY OTHER NAME IS A WIRING BUG, and it used to run
-        // milestone2 instead. That is a silent wrong scene: the leg
-        // launches, the milestone-2 scene runs happily, and every step
-        // of the script the runner asked for fails against labels from
-        // a scene nobody selected. Cost a debugging round when the
-        // filedialog leg was first wired without its arm here.
         Ok(other) => panic!(
             "kaya: no scene named {other:?} in this APK — the runner asked for a leg \
              the guest does not carry"

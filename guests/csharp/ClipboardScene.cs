@@ -1,23 +1,8 @@
 // The clipboard conformance scene, C# port — one clip in several
 // representations, and the privileged read that takes one back
-// (DESIGN.md, Clipboard; docs/clipboard-plan.md).
-//
-// EVERY ASSERTION CROSSES A PROCESS BOUNDARY, which is the whole design
-// of this scene. kaya's representation set is closed because the
-// LOWERINGS are the hard part — CF_HTML's mandatory offset header,
-// Android's content:// URI for an image, CF_HDROP's double-NUL struct —
-// and a check where kaya reads what kaya wrote parses its own malformed
-// header perfectly happily. That is not merely less coverage: it is a
-// check that cannot fail for the reason the design exists.
-//
-// THE ONE EXCEPTION IS THE CUSTOM FORMAT, deliberately. No stock tool
-// on any platform writes an app-defined type, so the guest copies one
-// and reads it back, with the foreign reader confirming from outside
-// that the bytes really are there under that id.
-//
-// THE IMAGE IS ASSERTED AS A DECODED SIZE, never as bytes: every host
-// re-encodes freely between image types, so a byte count would be a
-// different number on every lane for one picture.
+// (DESIGN.md, Clipboard; docs/clipboard-plan.md, whose §"The image is a
+// decoded size, never bytes" and foreign-reader sections say why the
+// assertions are shaped the way they are).
 //
 // Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
 // contract in tools/scenes/clipboard.steps.
@@ -31,11 +16,8 @@ using System.Threading;
 
 static class ClipboardScene
 {
-    // A 4x4 PNG, spelled out rather than generated: the scene asserts
-    // "4x4" through a foreign decoder, so the picture has to be a real
-    // encoded image whose size is knowable from the script. Written to
-    // disk for the seeding tool AND handed to Copy as bytes — the same
-    // picture both ways.
+    // A real 4x4 PNG: a foreign decoder asserts its size, so this must
+    // stay a valid encoded image.
     static readonly byte[] PixelPng =
     {
         0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
@@ -50,28 +32,22 @@ static class ClipboardScene
         0x44, 0xAE, 0x42, 0x60, 0x82, // IEND + crc
 };
 
-    // The app-defined format's id: reverse-DNS and space-free, because
-    // it reaches every platform's own registry VERBATIM — a UTI on
-    // Apple, RegisterClipboardFormat on Windows, a target atom on X11
-    // and Wayland, a MIME type on Android.
+    // Reverse-DNS and space-free: this id reaches every platform's own
+    // registry VERBATIM (UTI, RegisterClipboardFormat, X11 target atom,
+    // Android MIME type).
     const string NoteId = "dev.kaya/note";
 
-    // NO QUOTES IN THE PAYLOAD, and the reason is the script rather
-    // than the clipboard: the step grammar's escapes are \n, \r and \\
-    // in all three interpreters, with no \" — so a quoted byte could
-    // not be spelled in the expectation.
+    // No quotes in the payload: the step grammar escapes \n, \r and \\
+    // only, so a quoted byte could not be spelled in the expectation.
     static readonly byte[] NoteBytes = Encoding.UTF8.GetBytes("note=1");
 
     public static void Run()
     {
         var app = new KayaApp();
 
-        // Both halves compute this identically, the filedialog rule:
-        // guest and interpreter are the same process, so they agree on
-        // a path with no runner involvement, and the pid keeps parallel
-        // legs from colliding. Path.GetTempPath() is .NET's OWN answer
-        // to "where is temp", which is what makes the two halves agree
-        // without either consulting the other.
+        // Guest and interpreter are one process and compute this path
+        // identically, with no runner involvement; the pid keeps
+        // parallel legs from colliding.
         string dir = Path.Combine(
             Path.GetTempPath(),
             "kaya-clip-" + Process.GetCurrentProcess().Id);
@@ -86,12 +62,6 @@ static class ClipboardScene
 
         app.Build(tx =>
         {
-            // THE GESTURE LAYER'S DECLARATION, and an app writes nothing
-            // else for it: the Paste command lowers to the platform's
-            // own, acts on whatever is focused, and works out its own
-            // enablement. kaya has no selection API, which is exactly
-            // why copy of a selection has to be a command rather than
-            // something an app assembles out of the data layer.
             var edit = tx.Menu("Edit", items: new[]
             {
                 tx.Item("Cut", role: Tx.RoleCut),
@@ -107,10 +77,8 @@ static class ClipboardScene
             {
                 switch (clip)
                 {
-                    // EMPTY IS THE UNIVERSAL NO, and the guest does not
-                    // try to tell its four causes apart — denied,
-                    // unfocused, absent, or nothing this read accepted.
-                    // The platforms deliberately decline to say.
+                    // Empty is the universal no: denied, unfocused,
+                    // absent or unaccepted, and no platform says which.
                     case null:
                         tx.Write(status, "empty");
                         break;
@@ -125,10 +93,8 @@ static class ClipboardScene
                             $"custom {c.Id} {Encoding.UTF8.GetString(c.Bytes)}");
                         break;
                     case Representation.Image img:
-                        // STRAIGHT BACK OUT, because the assertion that
-                        // matters is a foreign DECODER's: the byte count
-                        // differs per host for one picture, and the
-                        // decoded size does not.
+                        // Straight back out, for a foreign decoder to
+                        // assert the size of.
                         tx.Copy().Image(img.Bytes).Send();
                         tx.Write(status, "image");
                         break;
@@ -141,11 +107,7 @@ static class ClipboardScene
                         var picked = f.Value[0];
                         var thread = new Thread(() =>
                         {
-                            // OFF THE APP THREAD, which is what Open
-                            // documents: it blocks, and a pasted file is
-                            // no different from a picked one — it IS a
-                            // picked one, the same capability arriving
-                            // through a second door.
+                            // Open BLOCKS, so never on the app thread.
                             string text;
                             try
                             {
@@ -174,13 +136,8 @@ static class ClipboardScene
                 tx.SetA11yId(label, "status");
                 tx.Button("copy", onClick: inner =>
                 {
-                    // ONE CLIP, FOUR REPRESENTATIONS. kaya derives none
-                    // of them from any other: whether list bullets
-                    // survive html-to-text is this app's decision, so it
-                    // spells out both. The order they go on the wire is
-                    // kaya's, not this chain's — descending richness,
-                    // which is preference order on every host that has
-                    // one.
+                    // One clip, four representations: kaya derives none
+                    // of them from any other, so the app spells each.
                     inner.Copy()
                         .Text("kaya clip")
                         .Html("<b>kaya</b> clip")
@@ -200,16 +157,12 @@ static class ClipboardScene
                 tx.Button("focus rich", onClick: inner => inner.Focus(rich));
                 tx.Button("focus plain", onClick: inner => inner.Focus(plain));
 
-                // DECLARES WHAT IT TAKES, so a paste lands in the hook
-                // and this app decides what to do with it.
+                // Declares what it takes, so a paste lands in the hook.
                 rich = tx.Entry(); // entry#0
                 tx.SetAccepts(rich, Tx.AcceptText);
                 tx.SetA11yId(rich, "rich");
                 tx.OnPaste(rich, (inner, clip) =>
                 {
-                    // THE SAME SHAPE THE READ ANSWERS WITH, and free
-                    // where the read is not: a gesture is its own
-                    // authorisation, so no platform charges a prompt.
                     if (clip is Representation.Text t)
                     {
                         inner.Write(status, "pasted " + t.Value);
@@ -218,19 +171,14 @@ static class ClipboardScene
                     inner.Write(status, "pasted " + clip);
                 });
 
-                // DECLARES NOTHING, so the platform's own insertion
-                // happens and the field's ordinary change path reports
-                // it — which is what a plain text editor gets for free.
+                // Declares NOTHING on purpose: the platform's own
+                // insertion happens and the ordinary change path reports it.
                 plain = tx.Entry(); // entry#1
                 tx.SetA11yId(plain, "plain");
 
-                // A STAMPED paste target: the same two-door contract one
-                // tier down. The accept list comes from the TEMPLATE, so
-                // the copy declares what it takes before it exists, and
-                // the paste arrives as an INSTANCE occurrence carrying
-                // the copy's own key — which is what rowStatus prints.
-                // Nothing could declare it until now, so this arm has
-                // never fired on any backend.
+                // A stamped paste target: the accept list comes from the
+                // TEMPLATE, and the paste arrives as an instance
+                // occurrence carrying the copy's key.
                 tx.SetA11yId(tx.Label(bind: rowStatus), "row-status"); // label#1
                 var rows = tx.Collection();
                 tx.Each(rows, t =>
@@ -239,9 +187,7 @@ static class ClipboardScene
                     t.SetAccepts(field, Tx.AcceptText);
                     tx.OnPaste(field, (inner, keys, clip) =>
                     {
-                        // The key rides the payload, outermost first,
-                        // and printing it is the proof this dispatched
-                        // as an instance occurrence and not a live one.
+                        // The key path rides the payload, outermost first.
                         string key = (string)keys[0];
                         if (clip is Representation.Text t2)
                         {

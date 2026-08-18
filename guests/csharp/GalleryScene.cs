@@ -1,9 +1,6 @@
-// The gallery scene from C#: a row with a checkbox and its status
-// label, a row with a slider and its volume label, and a row with two
-// images (a valid PNG and deliberately invalid bytes). The controls
-// own their state and report each change; the app answers by writing
-// the paired signal — the entry's uncontrolled contract, with a bool
-// and a double.
+// The gallery scene from C#: a checkbox, a slider and two images (a
+// valid PNG and deliberately invalid bytes), on the uncontrolled
+// contract with a bool and a double.
 //
 // Build the library first (cargo build), then:
 //     KAYA_SELFTEST=gallery KAYA_LIB=target/debug/libkaya.dylib \
@@ -15,9 +12,6 @@ static class GalleryScene
     {
         var app = new KayaApp();
 
-        // The construction sugar: constructors carry their handlers,
-        // containers take their children, and the build body reads as
-        // the tree.
         app.Build(tx =>
         {
             var status = tx.Signal("urgent: false");
@@ -45,11 +39,8 @@ static class GalleryScene
                 });
                 tx.Row(() =>
                 {
-                    // The content-buffer row: a valid 2x2 PNG decodes
-                    // and reports its size, and deliberately invalid
-                    // bytes read 0x0 — decode failure is the
-                    // placeholder class, never a crash, on every
-                    // backend.
+                    // Invalid bytes read 0x0: a decode failure is a
+                    // placeholder on every backend, never a crash.
                     tx.Image(TestPng);
                     tx.Image(System.Text.Encoding.ASCII.GetBytes("not an image"));
                 });
@@ -59,9 +50,8 @@ static class GalleryScene
         System.Environment.Exit(app.Run());
     }
 
-    // A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the first
-    // binary asset, embedded as source per the include_str! doctrine —
-    // scenes carry their inputs, no runtime file I/O.
+    // A 2x2 RGB PNG, 75 bytes, embedded as source: a scene carries its
+    // inputs and does no runtime file I/O.
     static readonly byte[] TestPng =
     {
         137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,

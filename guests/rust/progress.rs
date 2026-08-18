@@ -1,7 +1,6 @@
-//! The progress conformance scene: a determinate bar at a quarter
-//! and an indeterminate one — both read back from the REAL control
-//! (fraction as integer percent; activity mode as "indeterminate").
-//! Display-only, like image: no occurrence, no interaction.
+//! The progress conformance scene: a determinate bar and an
+//! indeterminate one, both read back from the REAL control. The
+//! contract is tools/scenes/progress.steps.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();

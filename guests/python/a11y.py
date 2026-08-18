@@ -17,9 +17,8 @@ import kaya
 
 app = kaya.App()
 
-# A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the gallery
-# scene's asset, embedded as source per the include_str! doctrine —
-# scenes carry their inputs, no runtime file I/O.
+# A 2x2 RGB PNG, 75 bytes, embedded as source: scenes carry their inputs
+# and do no runtime file I/O.
 TEST_PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68,
                   82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154,
                   115, 0, 0, 0, 18, 73, 68, 65, 84, 120, 156, 99, 248, 207,
@@ -29,8 +28,8 @@ TEST_PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68,
 
 with app.window():
     with kaya.column() as form:
-        # Caption-bearing controls: identified, but deliberately NOT
-        # labelled. The platform must speak the caption.
+        # Caption-bearing controls: identified, deliberately NOT labelled
+        # — the platform must speak the caption.
         kaya.button("Save").a11y_id("save").a11y_hint("save the draft")
         kaya.checkbox("Details").a11y_id("details").a11y_hint("show more detail")
         kaya.button("Reset").a11y_id("reset")
@@ -42,12 +41,12 @@ with app.window():
         kaya.slider(min=0.0, max=1.0, value=0.5).a11y_id("volume").a11y_label("Volume")
         kaya.progress(value=0.25).a11y_id("loading").a11y_label("Loading")
         kaya.image(TEST_PNG).a11y_id("logo").a11y_label("Logo")
-        # The two CHOICE kinds: their options carry captions, the
-        # choice itself does not.
+        # The two CHOICE kinds: their options carry captions, the choice
+        # itself does not.
         kaya.select(["Red", "Green"]).a11y_id("color").a11y_label("Color")
         kaya.radio(["Small", "Large"]).a11y_id("size").a11y_label("Size")
-        # Containers are GROUPS to an assistive client, and naming one
-        # is how an app declares it a group.
+        # Containers are GROUPS to an assistive client; naming one is how
+        # an app declares it a group.
         with kaya.grid(2) as cells:
             kaya.label(text="Name")
             kaya.label(text="Ada")

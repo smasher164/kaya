@@ -31,10 +31,9 @@ final class Menus {
             // write moves both.
             KayaApp.WindowRef win = tx.window(0).title("menus");
             KayaApp.MenuItem file = win.menu("File").enabled(canExport);
-            // THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT,
-            // drawn by each platform in its own symbol set. `DONE` is the
-            // checkmark idiom — the vocabulary has no `save` on purpose
-            // (Apple's own catalog has no save-specific glyph either).
+            // Symbols are CONCEPTS, drawn per platform: the vocabulary
+            // has no `save`, so `DONE` is the checkmark idiom
+            // (docs/styling-plan.md D6).
             file.item("Save")
                     .symbol(KayaApp.Symbol.DONE)
                     .shortcut("primary+s")
@@ -42,7 +41,6 @@ final class Menus {
             file.item("Export").enabled(canExport).symbol(KayaApp.Symbol.FORWARD);
             KayaApp.MenuItem share = file.item("Share").primary(true).onActivate(onShare);
 
-            // A toggle carries a symbol like any other leaf.
             win.menu("View").toggle("Details").checked(details)
                     .symbol(KayaApp.Symbol.INFO)
                     .onToggle((t, on) ->
@@ -56,8 +54,8 @@ final class Menus {
                     t.write(status, index == 1 ? "sorted date" : "sorted name"));
 
             groups = tx.collection();
-            // Catalog built live: items are shared across stamped copies; the
-            // template only attaches, and each activation carries its key path.
+            // One catalog shared across stamped copies: the template
+            // only attaches, and each activation carries its key path.
             KayaApp.ContextCatalog catalog = tx.contextCatalog();
             catalog.item("Remove").symbol(KayaApp.Symbol.DELETE)
                     .onActivateNode((t, keys) -> {
@@ -72,17 +70,17 @@ final class Menus {
                 tx.button("enable export", t -> // button#0
                         t.write(canExport, true));
                 tx.button("reset menu state", t -> { // button#1
-                    // The folds never echo the user's pick, so details/sort
-                    // still hold false/0; these two prop writes are real
-                    // checked/value records (never coalesced) that reset the
+                    // The folds never echo the user's pick, so these
+                    // signals still hold false/0 — the writes are real
+                    // records (never coalesced) that reset the
                     // backend's user-state mirror.
                     t.write(details, false);
                     t.write(sort, 0.0);
                     t.write(status, "ready");
                 });
                 tx.button("extend menus", t -> { // button#2
-                    // Append-only: rename the retained File, move the promotion
-                    // hint from Share to Publish, grow the bar by Tools.
+                    // Append-only: rename the retained File, move the
+                    // promotion hint, grow the bar by Tools.
                     t.menu(share).primary(false);
                     t.menu(file).label("Document")
                             .item("Publish").primary(true)

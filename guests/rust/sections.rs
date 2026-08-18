@@ -1,10 +1,7 @@
 //! The sections conformance scene: two peer roots in the primary
-//! window's section set — presentation context, not lifecycle. The
-//! archive pane folds section_selected into a visit count, which pins
-//! the echo doctrine from both sides: the user's switch emits (the
-//! harness drives the real switcher), while the feed button's
-//! programmatic select_section moves the selection silently. The
-//! count surviving switch round trips proves retention.
+//! window's section set. The visit count pins the echo doctrine from
+//! both sides — a user's switch emits, a programmatic select_section
+//! does not. The byte-frozen contract is tools/scenes/sections.steps.
 
 use kaya::WindowId;
 
@@ -17,12 +14,10 @@ enum Msg {
 
 const FEED: WindowId = WindowId(7);
 const ARCHIVE: WindowId = WindowId(8);
-// The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
-// shared scene covers BOTH arms: the primary stays `bar`, and this
-// window opens from a handler only the desktop tail's click reaches —
-// the phone runners cut the tail, the click never fires, and
-// create_window never runs where the capability is absent. No
-// capability read needed: reachability is the gate.
+// The SIDEBAR arm, in an AUX WINDOW so one shared scene covers both:
+// this opens from a handler only the desktop tail's click reaches, so
+// create_window never runs where the capability is absent. Reachability
+// is the gate; no capability read is needed.
 const LIBRARY: WindowId = WindowId(1);
 const SHELVES: WindowId = WindowId(2);
 const LOANS: WindowId = WindowId(3);
@@ -30,18 +25,12 @@ const LOANS: WindowId = WindowId(3);
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
     let visits_label = ctx.apply(|tx| {
-        // One construct carries the window's attributes (the
-        // unification rule). The hint is ADVISORY: `bar` is each
-        // desktop's horizontal spelling and the phones' physics
-        // regardless — no observable rides on it.
+        // The presentation hint is ADVISORY: no observable rides on it.
         tx.window(kaya::DEFAULT_WINDOW)
             .title("sections")
             .sections_presentation(kaya::SectionsPresentation::Bar);
-        // THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar
-        // without icons is not the platform's real thing, and the
-        // glyph that means `home` differs per platform — SF Symbols
-        // spells it `house`, and no shared asset would be legal
-        // anyway (SF Symbols are licensed to Apple platforms only).
+        // Semantic symbols, never assets (docs/styling-plan.md D6): SF
+        // Symbols are licensed to Apple platforms only.
         let feed = tx.add_section(FEED).title("Feed").symbol(kaya::Symbol::Home).id();
         let archive = tx
             .add_section(ARCHIVE)
@@ -91,8 +80,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.create_window(LIBRARY)
                         .title("library")
                         .sections_presentation(kaya::SectionsPresentation::Sidebar);
-                    // The SIDEBAR arm carries symbols too: the source
-                    // list is where a mac app most wants them.
                     let shelves = tx
                         .add_section_in(LIBRARY, SHELVES)
                         .title("Shelves")

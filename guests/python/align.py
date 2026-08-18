@@ -5,9 +5,6 @@ widths; the row aligns baselines across a label, a checkbox, and a
 tall no-baseline image whose bottom sits ON the baseline (the CSS
 replaced-element rule) — the construction that separates the modes on
 every platform's control metrics.
-
-`align=` at construction is the declarative spelling; Widget.align is
-the dynamic path this scene has no reason to use.
 """
 
 import sys

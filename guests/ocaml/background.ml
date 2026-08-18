@@ -1,22 +1,14 @@
 (* The background conformance scene, OCaml port — work off the app
    thread, posted back (docs/background-work-plan.md).
 
-   WHAT IT PROVES, and the reason for its odd shape: a wrong
-   implementation must DEADLOCK rather than disagree. The worker parks
-   until a CLICK releases it, and only a live app thread can process a
-   click — so a binding that let background work occupy the app thread
-   cannot reach the end of the script at all. It could not even deliver
-   its own release.
+   THE ODD SHAPE IS SO THAT A WRONG IMPLEMENTATION DEADLOCKS RATHER THAN
+   DISAGREES: the worker parks until a CLICK releases it, and only a live
+   app thread can process a click.
 
    The parking is a plain Mutex + Condition and the worker a plain
-   Thread. kaya supplies no waiting primitive and should not: the point
-   is that a guest uses its own language's concurrency and hands back
-   only the result.
-
-   The accumulators are the guest's own state rather than signal
-   read-backs — signals are write-only by doctrine. They need no lock:
-   everything that touches them runs on the app thread, inside a posted
-   transaction. *)
+   Thread; kaya supplies no waiting primitive and should not. The
+   accumulators are the guest's own state, signals being write-only, and
+   need no lock — everything touching them runs on the app thread. *)
 
 open Kaya_wire
 open Kaya_app
@@ -38,16 +30,15 @@ let () =
 
       let start () =
         let worker () =
-          (* Parks here until the scene clicks release. Were the binding
-             running this on the app thread, that click could never be
-             processed and the whole scene would deadlock — the point. *)
+          (* Parks until the scene clicks release: on the app thread
+             that click could never be processed. *)
           Mutex.lock release_lock;
           while not !released do
             Condition.wait release_cond release_lock
           done;
           Mutex.unlock release_lock;
           (* Three posts, in order. The accumulator makes this a test of
-             ORDER and not merely of which one ran last. *)
+             ORDER, not of which one ran last. *)
           List.iter
             (fun step ->
               post app (fun () ->
@@ -58,16 +49,13 @@ let () =
         ignore (Thread.create worker ());
         write status (Str "working")
       in
-      (* Proof the app thread is still serving input while the worker is
-         parked and has posted nothing. *)
+      (* Proof the app thread still serves input while the worker is parked. *)
       let ping () = write alive (Str "alive") in
-      (* This one takes a lock, unlike every other guest's release. It
-         is bounded and safe — the worker only ever holds release_lock
-         to test the predicate, and Condition.wait releases it while
-         parked — but it IS a lock acquisition on the app thread, which
-         is the kind of thing worth noticing rather than inheriting.
-         OCaml has no lock-free latch in its stdlib the way the others
-         do (close, Event.set, semaphore.signal, countDown). *)
+      (* THIS RELEASE TAKES A LOCK ON THE APP THREAD, unlike every other
+         guest's: OCaml's stdlib has no lock-free latch the way the
+         others do (close, Event.set, semaphore.signal, countDown). It is
+         bounded — the worker holds release_lock only to test the
+         predicate, and Condition.wait releases it while parked. *)
       let release () =
         Mutex.lock release_lock;
         released := true;
@@ -75,9 +63,8 @@ let () =
         Mutex.unlock release_lock
       in
       (* A post from INSIDE a handler QUEUES for after; it never nests.
-         The handler appends a, posts a thunk appending b, appends c — so
-         it commits "ac" and the posted thunk then commits "acb".
-         Nesting can only ever produce "abc". *)
+         So this commits "ac" and the posted thunk then commits "acb";
+         nesting could only ever produce "abc". *)
       let nest () =
         nested := !nested ^ "a";
         post app (fun () ->
@@ -88,16 +75,15 @@ let () =
       in
 
       (* Children are THUNKS: omitting the trailing unit leaves one, and
-         the container realizes them left to right (the curried-children
-         convention; DESIGN.md, Binding conventions). *)
+         the container realizes them left to right (DESIGN.md, Binding
+         conventions). *)
       let root =
         column
           [
             label ~a11y_id:"status" ~bind:status (* label#0 *);
             label ~a11y_id:"alive" ~bind:alive (* label#1 *);
-            (* Authored so the CLOSING read can address it: the AX read
-               needs an identifier, and an index read passes for an arm
-               that ran and drew nothing. *)
+            (* Authored because the closing AX read needs an identifier;
+               an index read passes for an arm that drew nothing. *)
             label ~a11y_id:"nested" ~bind:detail (* label#2 *);
             button ~text:"start" ~on_click:start (* button#0 *);
             button ~text:"ping" ~on_click:ping (* button#1 *);

@@ -38,7 +38,7 @@ each other.
 
 Python is the exception and needs NOTHING here: its transaction is
 ambient, so `kaya.entry(on_change=...)` is literally the same call in
-both zones (guests/python/undo.py:315). The survey confirmed all 14
+both zones (guests/python/undo.py:193). The survey confirmed all 14
 kinds plus spacer already work inside a template there; the module-level
 `_tpl_depth` flips one allocator between Widget and Node
 (bindings/python/kaya/__init__.py:182, :1264) and every constructor
@@ -104,18 +104,20 @@ Two kinds of hit, and the second was not part of the original question.
 
 **Template-zone floor calls** — the ones that need the new sugar. The
 undo scene's per-row note entry, in all seven handle bindings
-(guests/{go/undo/undo.go:309, rust/undo.rs:207, swift/undo.swift:287,
-ocaml/undo.ml:321, haskell/undo.hs:308, csharp/UndoScene.cs:300,
-java/dev/kaya/milestone2kt/Undo.java:260}) plus the editor's find bar
-(guests/go/editor/editor.go:775). Python already spells it with sugar.
+(guests/{go/undo/undo.go:224, rust/undo.rs:135, swift/undo.swift:209,
+ocaml/undo.ml:170, haskell/undo.hs:169, csharp/UndoScene.cs:151,
+java/dev/kaya/milestone2kt/Undo.java:164}) plus the editor's find bar
+(guests/go/editor/editor.go:568). Python already spells it with sugar.
 
 **Live-zone floor calls that already have sugar available** — fixable
 today, and an invariant 5 violation that no gate catches because these
 scenes are not in check-sugar-surface's scene tables.
-`guests/haskell/textarea.hs:17-21` builds its ENTIRE scene at the floor
-while `textareaOn` sits in the binding (bindings/haskell/KayaApp.hs:1886);
-`guests/ocaml/textarea.ml:19-23` does the same; menus.hs:108,
-menus.ml:86 and menus.swift:106 each spell one label at the floor.
+`guests/haskell/textarea.hs` builds its ENTIRE scene at the floor while
+`textareaOn` sits in the binding (bindings/haskell/KayaApp.hs:1886);
+`guests/ocaml/textarea.ml` does the same; menus.hs, menus.ml and
+menus.swift each spell one label at the floor. (Line anchors dropped
+2026-08-18: the comment cut moved every one of them, and what these
+sentences record is a state the pass has since removed.)
 
 ## §1 — the decisions
 
@@ -225,9 +227,8 @@ declaration exists.
 
 Ratified 2026-08-10, after the pass proper landed. Three guests still
 built a template label at the widget-kind floor —
-guests/haskell/menus.hs:108, guests/ocaml/menus.ml:86,
-guests/swift/menus.swift:106 — and all three wanted the same missing
-thing.
+guests/haskell/menus.hs, guests/ocaml/menus.ml, guests/swift/menus.swift
+— and all three wanted the same missing thing.
 
 A template constructor's element source is a FIELD, addressed by index
 off a record. A SCALAR collection has no record: its element IS the
@@ -279,7 +280,8 @@ Depth then breadth, per CLAUDE.md.
 3. Fan out: the seven other bindings, D2's registrar in each, D3.
 4. The examples, both kinds of hit, plus the scene-tier rules that would
    have caught them.
-5. `guests/c/undo.c:199-204` records the current rationale — that the
-   template sugar takes a source and an unbound entry has none. It stops
-   being true here and gets corrected in the same commit.
+5. `guests/c/undo.c` records the current rationale — that the template
+   sugar takes a source and an unbound entry has none. It stops being
+   true here and gets corrected in the same commit. (Done; the paragraph
+   itself went out with the 2026-08-18 comment cut.)
 6. The ladder: unit tests, 31/31 gates, validate-mac, the five lanes.

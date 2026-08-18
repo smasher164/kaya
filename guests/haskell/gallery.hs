@@ -12,9 +12,8 @@ import qualified Data.ByteString.Char8 as BC
 import KayaApp
 import KayaWire (Value (..))
 
-{- A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the first
-   binary asset, embedded as source per the include_str! doctrine —
-   scenes carry their inputs, no runtime file I/O. -}
+{- A 2x2 RGB PNG (red/green over blue/white), 75 bytes, embedded as
+   source: scenes carry their inputs, with no runtime file I/O. -}
 testPng :: BS.ByteString
 testPng =
   BS.pack
@@ -27,9 +26,6 @@ testPng =
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- The construction sugar: constructors carry their handlers,
-  -- containers take their children, and the do-block reads as the
-  -- tree.
   buildTx app $ do
     status <- signal (VStr "urgent: false")
     volume <- signal (VStr "volume: 50%")
@@ -56,10 +52,8 @@ main = kayaMain $ \app -> do
               labelBound volume,
               buttonOn "quarter" onQuarter
             ],
-          {- The content-buffer row: a valid 2x2 PNG decodes and
-             reports its size, and deliberately invalid bytes read 0x0
-             — decode failure is the placeholder class, never a crash,
-             on every backend. -}
+          {- Deliberately invalid bytes read 0x0: decode failure is the
+             placeholder class, never a crash, on every backend. -}
           row [imageBytes testPng, imageBytes (BC.pack "not an image")]
         ]
     mount root

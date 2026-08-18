@@ -1,19 +1,15 @@
 //! The panels conformance scene: the auxiliary-window grammar as
-//! assertions. A main window and an inspector; the inspector arms
-//! veto_close, so the chrome close EMITS close_requested and closes
-//! nothing — the guest answers by recording the request in the status
-//! label and destroying the window (the request/confirm veto class,
-//! DESIGN.md's Presentation contexts). Desktop-only: phone hosts
-//! reject create_window at the root by capability.
+//! assertions (DESIGN.md, Presentation contexts). The inspector arms
+//! veto_close, so its chrome close emits and closes nothing. The
+//! byte-frozen contract is tools/scenes/panels.steps.
+//!
+//! DESKTOP-ONLY: phone hosts reject create_window by capability.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::WindowId;
 
     const INSPECTOR: WindowId = WindowId(1);
 
-    // The handler binds to THE INSPECTOR at its declaration (handlers
-    // scope to the thing that creates them): it can only ever mean
-    // this window's close was vetoed — no id inspection anywhere.
     #[derive(Clone, Copy)]
     enum Msg {
         CloseAsked,

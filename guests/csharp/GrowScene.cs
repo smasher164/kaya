@@ -1,13 +1,8 @@
-// The grow conformance scene, C# port — see guests/rust/grow.rs for
-// the full rationale. Every child of the column and of the row is a
-// grower, so each split is exactly weight/Σweight: 1,2,1 divide the
-// column 25/50/25 and the row's 1,3 divide its width 25/75. The
-// harness (KAYA_SELFTEST=grow) asserts both splits, root-fills, and
-// that the textarea TAKES the track its weight earned, byte-for-byte
-// against every other language and backend.
-//
-// The `grow:` argument is the declarative spelling; tx.SetGrow is the
-// dynamic path this scene has no reason to use.
+// The grow conformance scene, C# port — see guests/rust/grow.rs for the
+// rationale. EVERY child is a grower, so each split is exactly
+// weight/Σweight: 1,2,1 divide the column 25/50/25 and the row's 1,3
+// divide its width 25/75. Those numbers are what KAYA_SELFTEST=grow
+// asserts, so a non-growing child changes them.
 
 static class GrowScene
 {

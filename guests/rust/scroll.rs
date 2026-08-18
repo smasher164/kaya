@@ -1,11 +1,7 @@
-//! The scroll conformance scene: the scroll viewport's contract as
-//! assertions. Twelve rows in a 330-high window overflow the
-//! viewport (expect_overflow — content extent vs viewport extent,
-//! both geometry); scroll_end drives the toolkit's REAL scrolling
-//! API to the bottom, and expect_at_end reads the content's end edge
-//! back from the toolkit. A trailing click proves the scrolled-to
-//! content is live, not painted: the last row's button writes the
-//! status label at the top.
+//! The scroll conformance scene: the viewport's contract as assertions
+//! — overflow, a real scroll to the end, and a trailing click proving
+//! the scrolled-to content is live rather than painted. The byte-frozen
+//! contract is tools/scenes/scroll.steps.
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone, Copy)]
@@ -20,10 +16,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let root = tx
             .column(|tx| {
                 tx.label(status); // label#0
-                // The viewport GROWS: it takes the column's leftover
-                // track, which is what CONSTRAINS it — an
-                // unconstrained viewport hugs its content and nothing
-                // overflows (the first thing this scene caught).
+                // The viewport MUST GROW: an unconstrained one hugs its
+                // content and nothing overflows.
                 tx.scroll(|tx| {
                     // scroll#0
                     tx.column(|tx| {

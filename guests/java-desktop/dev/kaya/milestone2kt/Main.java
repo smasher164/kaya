@@ -3,18 +3,16 @@ package dev.kaya.milestone2kt;
 import dev.kaya.KayaRing;
 
 /**
- * The desktop twin of the Android shell's MainActivity: load the
- * cdylib (KAYA_LIB's absolute path when set, the library path
- * otherwise — the same resolution the C# guests use), attach the
- * KayaRing natives, spawn the scene thread, and give the main thread
- * to kaya_run. Same package as the scenes (their app() entries are
- * package-private), different source root: the Android build's
- * srcDirs sweep guests/java wholesale, and this file must never
- * compile there (KayaRing.attach() has no Activity on the desktop).
+ * The desktop twin of the Android shell's MainActivity: load the cdylib
+ * (KAYA_LIB when set, the library path otherwise), attach the KayaRing
+ * natives, spawn the scene thread, and give the main thread to
+ * kaya_run. KAYA_SELFTEST selects the scene; any unrecognized value
+ * (including the bare "1" the harness sets) runs milestone2.
  *
- * KAYA_SELFTEST selects the scene exactly as on Android; any
- * unrecognized value (including the bare "1" the harness sets by
- * default) runs milestone2.
+ * <p>Same package as the scenes (their app() entries are
+ * package-private), different source root: the Android build's srcDirs
+ * sweep guests/java wholesale, and this file must never compile there
+ * — KayaRing.attach() has no Activity on the desktop.
  */
 public final class Main {
     public static void main(String[] args) {
@@ -86,9 +84,7 @@ public final class Main {
             case "stall":
                 app = Stall::app;
                 break;
-            // One app behind both list-detail scripts: split resizes,
-            // listdetail asserts the bare invariant where the host
-            // picks the width.
+            // One app behind both list-detail scripts.
             case "split":
             case "listdetail":
                 app = Split::app;

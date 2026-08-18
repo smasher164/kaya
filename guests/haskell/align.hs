@@ -1,13 +1,8 @@
-{- The align conformance scene, Haskell port — see
-   guests/rust/align.rs and tools/scenes/align.steps for the full
-   rationale. The root column centers children of three different
-   natural widths; the row aligns baselines across a label, a
-   checkbox, and a tall no-baseline image whose bottom sits ON the
-   baseline (the CSS replaced-element rule) — the construction that
-   separates the modes on every platform's control metrics.
-
-   The 'Align' attr is the declarative spelling; 'setAlign' is the
-   dynamic path this scene has no reason to use. -}
+{- The align conformance scene, Haskell port — see guests/rust/align.rs
+   and tools/scenes/align.steps for the full rationale. The row's tall
+   no-baseline image has its BOTTOM on the baseline (the CSS
+   replaced-element rule); that construction is what separates the modes
+   on every platform's control metrics. -}
 
 import qualified Data.ByteString as BS
 import KayaApp

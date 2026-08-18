@@ -1,10 +1,7 @@
 """The entry scene: the first widget with owned state, exercising the
 uncontrolled contract end to end. The field owns its text and reports
-each edit as a text-changed occurrence; the app folds those into a
-plain variable (`draft`) — its own model, per doctrine; there is no
-read-back from the widget. The add button inserts the draft into the
-todos collection and answers with the count read from the collection
-model (the patch-producing fold, same as milestone 2).
+each edit as a text-changed occurrence; the app folds those into
+`draft` and never reads back from the widget.
 
 The backend selftest (KAYA_SELFTEST=entry) sets the field's text to
 "milk", emits the change through the delegate's own path, clicks add,
@@ -35,24 +32,17 @@ def on_change(text):
 
 
 def on_add():
-    # The empty-draft guard every real form has — and the scene's
-    # proof that clear emptied the draft through the occurrence fold,
-    # not a side assignment.
+    # Also the scene's proof that clear emptied the draft through the
+    # occurrence fold rather than a side assignment.
     if not draft:
         status.set(f"nothing to add, {len(todos)} total")
         return
-    # The draft is a line of text and nothing else — no identity of its
-    # own — so the key comes from the binding: insert_fresh mints one
-    # per collection instance and hands it back
-    # (docs/fresh-key-plan.md). This app has no use for the key, and an
-    # app that does takes it from here rather than inventing a second
-    # name for the same datum.
+    # The binding mints the key (docs/fresh-key-plan.md).
     todos.insert_fresh(draft)
     status.set(f"added {draft}, {len(todos)} total")
-    # Finish the form: drop the field's content and put the cursor
-    # back, atomically with the insert. The field answers with
-    # text_changed("") through its normal edit path, and on_change
-    # empties the draft.
+    # Finish the form, atomically with the insert. The field answers with
+    # text_changed("") through its normal edit path, so on_change empties
+    # the draft.
     field.clear()
     field.focus()
 

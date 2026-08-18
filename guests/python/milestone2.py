@@ -1,12 +1,9 @@
 """The milestone-2 scene from Python, on the tier-1 surface: ambient
 transactions, container auto-parenting, co-located click handlers,
-element proxies, handles with methods — plus derived signals: the
-extras banner's When binds `steps.eq(1)`, recomputed by the binding at
-write time and batched into the same transaction; the core never
-knows. The counter itself is a guest variable — signals are a render
-pipe, written and never read back. The
-wire vocabulary underneath (kaya_wire) is generated from kaya::spec by
-kaya-bindgen.
+element proxies, handles with methods, and derived signals — the extras
+banner's When binds `steps.eq(1)`, recomputed by the binding at write
+time and batched into the same transaction. The counter itself is a
+guest variable: signals are a render pipe, written and never read back.
 
 Build the library first (cargo build), then:
     KAYA_SELFTEST=1 python3 crates/kaya/examples/milestone2.py
@@ -40,8 +37,8 @@ def on_step():
 
 
 def on_remove(group, item_key):
-    # The collection is the model: after the patch, reading it back is
-    # exact — the count in the status proves the fold, not a shadow copy.
+    # The collection IS the model, so the count in the status is read
+    # back from it rather than from a shadow copy.
     todos = items.at(group)
     todos.remove(item_key)
     status.set(f"removed {group}/{item_key}, {len(todos)} left")
@@ -55,13 +52,12 @@ with app.window():
     with kaya.column():
         kaya.button("step", on_click=on_step)
         kaya.label(bind=status)
-        # Operator sugar: `steps == 1` is steps.eq(1), a derived Bool
-        # signal (`if steps:` raises, pointing at kaya.when — the
-        # branch must be traced, not taken).
+        # `steps == 1` is steps.eq(1), a derived Bool signal. `if steps:`
+        # RAISES, pointing at kaya.when: the branch must be traced, not
+        # taken.
         with kaya.when(steps == 1):
             kaya.label("extras on")
-        # The tracing tier: nested for statements trace to nested Fors;
-        # each body runs once.
+        # Nested for statements trace to nested Fors; each body runs ONCE.
         for group in groups:
             with kaya.column():
                 kaya.label(bind=group)

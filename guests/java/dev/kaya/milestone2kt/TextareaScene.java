@@ -28,22 +28,9 @@ final class TextareaScene {
             tx.window(0).title("textarea");
             KayaApp.Signal<String> lines = tx.signal("0 lines");
 
-            // Java lambdas cannot assign captured locals, so the two
-            // handles the registrations below need come back out of the
-            // container body through one-slot arrays (Entry.java's
-            // idiom, and Undo.java's). The tally label needs no handle
-            // at all: it follows the signal.
-            //
-            // This scene used to attach its three children by hand — an
-            // empty tx.column(() -> {}) and three tx.addChild calls —
-            // while the container sugar that parents everything declared
-            // in its body sat unused (invariant 5). The same records
-            // either way, the same ids in the same order; only each
-            // attachment moves, next to the child it attaches. The
-            // haskell and ocaml ports were converted in c20b9c2 and this
-            // one was missed, because addChild is not a widget-kind
-            // spelling and the floor rules of the day read only two
-            // carve-out scenes.
+            // Java lambdas cannot assign captured locals, so handles
+            // declared inside a container body come back out through
+            // one-slot arrays.
             KayaApp.Widget[] editor = new KayaApp.Widget[1];
             KayaApp.Widget[] clear = new KayaApp.Widget[1];
             tx.mount(tx.column(() -> {

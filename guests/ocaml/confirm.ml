@@ -1,12 +1,9 @@
-(* The confirm conformance scene, OCaml port — the modal-alert
-   grammar via labeled arguments (the request/result grammar's first
-   client): one button re-shows a two-action alert; the three rounds
-   take the three answer paths (action 0, action 1, [alert_cancel] —
-   every platform-native dismissal), and the status label records
-   each result. The result handler rides the REQUEST (~on_result,
-   the widget-handler precedent) and retires with its one answer;
-   ids are binding-allocated. See guests/rust/confirm.rs and
-   tools/scenes/confirm.steps. *)
+(* The confirm conformance scene, OCaml port — the modal-alert grammar
+   via labeled arguments. The three rounds take the three answer paths
+   (action 0, action 1, and [alert_cancel], which is every
+   platform-native dismissal). The result handler rides the REQUEST
+   (~on_result) and retires with its one answer. See
+   guests/rust/confirm.rs and tools/scenes/confirm.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -19,9 +16,6 @@ let () =
      window ~title:"confirm" ();
      let s = signal (Str "no decision") in
      status := Some s;
-     (* The result handler rides the request and retires with its
-        one answer; ids are binding-allocated — no counter
-        plumbing. *)
      let delete_answered choice =
        match !status with
        | Some s ->
@@ -33,8 +27,6 @@ let () =
            write s (Str text)
        | None -> ()
      in
-     (* A different dialog, a different handler: the association is
-        the registration itself. *)
      let eject_answered choice =
        match !status with
        | Some s ->

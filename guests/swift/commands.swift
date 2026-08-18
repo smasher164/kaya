@@ -1,10 +1,8 @@
-// The standard-commands scene, Swift port: a chord on every leaf kind
-// (a checkable command, one option of a group, a plain command), the
-// punctuation keys those chords need, and the `settings` role — which
-// macOS shows in the application menu while the item stays addressable
-// where it was declared. Canonical semantics in
-// guests/rust/commands.swift's Rust sibling (guests/rust/commands.rs);
-// the byte-frozen contract in tools/scenes/commands.steps.
+// The standard-commands scene, Swift port: a chord on every leaf kind,
+// the punctuation keys those chords need, and the `settings` role —
+// macOS shows it in the application menu while the item stays
+// addressable where it was declared. See guests/rust/commands.rs and
+// tools/scenes/commands.steps.
 
 import Foundation
 
@@ -16,26 +14,21 @@ app.build { tx in
     let details = tx.signal(.bool(false))
     let sort = tx.signal(.f64(0.0))
 
-    // The settings command declares its own punctuation chord and the
-    // role that tells macOS where users look for it. An ordinary
-    // command sits beside it so the menu that declared it is not left
-    // empty once the platform moves it.
+    // Reload sits beside Settings so the menu is not left empty once
+    // macOS moves the settings item out of it.
     let file = tx.menu(
         "File",
         items: [
             tx.item("Reload"),
             tx.item("Settings…", shortcut: "primary+comma", role: KayaAppTx.roleSettings) { t in
                 // Fires twice on purpose: once by the chord, once by
-                // activating the item at its DECLARED path — which on
-                // macOS lives in the application menu by then.
+                // activating the item at its DECLARED path.
                 settingsCount += 1
                 t.write(status, .str("settings \(settingsCount)"))
             },
         ])
 
-    // A checkable command carrying its own key, and a group whose
-    // options each answer their own chord. Option order IS the index
-    // vocabulary: Name = 0, Date = 1.
+    // Option order IS the index vocabulary: Name = 0, Date = 1.
     let view = tx.menu(
         "View",
         items: [

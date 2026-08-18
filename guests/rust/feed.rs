@@ -1,17 +1,5 @@
-//! The feed scene: sum-typed elements, end to end. One collection
-//! holds two constructors — Note{text} and Todo{title, done} — the For
-//! declares one case per constructor, and stamping eliminates by each
-//! entry's discriminant. "promote" converts the first note into a
-//! todo: an update carrying a different constructor, which the core
-//! answers by restamping the same key in place. The checkbox handler
-//! reaches its field through the match-refined accessor — a write on
-//! the wrong constructor is unrepresentable, and a stale occurrence's
-//! arm simply doesn't run.
-//!
-//! The backend selftest (KAYA_SELFTEST=feed) reads the note labels
-//! (the For container's bare label children; todo rows nest theirs),
-//! toggles the todo, promotes the first note, and watches the
-//! done-count label move.
+//! The feed scene: sum-typed elements, end to end. The byte-frozen
+//! contract is tools/scenes/feed.steps.
 
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
@@ -20,7 +8,6 @@ enum Post {
     Todo { title: String, done: bool },
 }
 
-/// The event vocabulary: the occurrence-side eliminator.
 #[derive(Clone)]
 enum Msg {
     Promote,
@@ -46,10 +33,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             msgs.on_click(promote, Msg::Promote);
             tx.label(done_count);
             // The eliminator as a record of arms: one field per
-            // constructor, so a missing arm is a missing field — totality
-            // at compile time, the same way a match holds its arms. Each
-            // arm's handles come back in the matching field of the out
-            // record.
+            // constructor, so a missing arm is a missing field.
             tx.for_each_sum(&feed, PostCases {
                 note: |t: &mut kaya::Tpl| {
                     t.label(Post::note_text());
@@ -74,9 +58,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Promote => {
-                // The first note, promoted to a finished todo: the
-                // model is asked which entry is a Note — the handler
-                // never counts widgets — and the update's new
+                // The MODEL is asked which entry is a Note; the handler
+                // never counts widgets. An update carrying a different
                 // constructor restamps that key's copy in place.
                 ctx.apply(|tx| {
                     let note = tx.items(&feed).into_iter().find_map(|(k, p)| match p {
@@ -90,8 +73,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::Toggle(path, checked) => {
                 // The match arm as an accessor: Some exactly when the
-                // entry still holds Todo. A stale occurrence lands in
-                // the None arm and folds into nothing.
+                // entry still holds Todo, so a stale occurrence folds
+                // into nothing rather than writing a wrong constructor.
                 ctx.apply(|tx| {
                     if let Some(todo) = Post::todo(tx, &feed, path[0].clone()) {
                         todo.done(checked);

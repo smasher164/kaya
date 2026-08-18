@@ -1,13 +1,8 @@
 {- The toolbar conformance scene, Haskell port: the `primary` bit as real
    window chrome (docs/chrome-plan.md C2). The app declares ONE catalog
    and marks two actions primary; every host promotes the same first two
-   in catalog preorder — the desktop's toolbar, the phones' top bar —
-   and the rest of the catalog stays reachable where that host keeps it.
-
-   There is no toolbar vocabulary to spell here, and that is the point:
-   this guest is the menus guest with a promotion bit and no new call.
-   Canonical semantics in guests/rust/toolbar.rs; the byte-frozen
-   contract in tools/scenes/toolbar.steps. -}
+   in catalog preorder. Canonical semantics in guests/rust/toolbar.rs;
+   the byte-frozen contract in tools/scenes/toolbar.steps. -}
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 
@@ -16,23 +11,18 @@ import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- The guest's own copy of the enablement, flipped by the button. The
-  -- signal is the model; this IORef is only what "the other one" means.
   saveEnabledRef <- newIORef True
 
   buildTx app $ do
     status <- signal (VStr "ready")
-    -- The one signal the enablement round-trip turns on. The app writes
-    -- it against the MENU ITEM and says nothing about any button: the
-    -- promoted button is that same item, so it follows or the lowering
-    -- kept a copy.
+    -- Written against the MENU ITEM, never against any button: the
+    -- promoted button IS that item, so it follows or the lowering kept
+    -- a copy.
     canSave <- signal (VBool True)
 
     -- CATALOG PREORDER DECIDES PROMOTION — top-level groupings in
     -- menubar-append order, then each node's children in append order,
-    -- depth-first. Save is the first primary and Find the second, so
-    -- every host's promoted set is [Save, Find] however large its own k
-    -- is.
+    -- depth-first. Save is the first primary and Find the second.
     window
       0
       [ WTitle "toolbar",
@@ -43,8 +33,7 @@ main = kayaMain $ \app -> do
               [ item
                   "Save"
                   -- `done` is the checkmark idiom: the vocabulary has no
-                  -- save-specific glyph, and neither does Apple's own
-                  -- catalog (docs/styling-plan.md D6).
+                  -- save-specific glyph (docs/styling-plan.md D6).
                   [ ISymbol SymbolDone,
                     IPrimary True,
                     IEnabledBy canSave,
@@ -66,9 +55,8 @@ main = kayaMain $ \app -> do
                     IPrimary True,
                     IOnActivate (submitTx app (writeSignal status (VStr "found")))
                   ],
-                -- The remainder: everything below is catalog, not
-                -- chrome, on every platform — which is what makes the
-                -- bare expect_toolbar's second half a real question.
+                -- Everything from here down is catalog, not chrome, on
+                -- every platform.
                 item "Replace" [ISymbol SymbolEdit]
               ],
             menu

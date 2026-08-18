@@ -1,18 +1,14 @@
-// The accessibility conformance scene from Swift: the two universal
-// props (setA11yId, setA11yLabel) and the verb that reads them back out
-// of the PLATFORM'S OWN accessibility tree rather than kaya's model.
+// The accessibility conformance scene from Swift: setA11yId/setA11yLabel
+// read back out of the PLATFORM'S OWN accessibility tree, not kaya's
+// model. See guests/rust/a11y.rs and tools/scenes/a11y.steps.
 //
-// Every widget kind appears, and exactly one container of each
-// container kind — the props are universal, and container targets are
-// stable only while a scene keeps one of each. See guests/rust/a11y.rs
-// for the full note; the byte-frozen contract is
-// tools/scenes/a11y.steps.
+// EXACTLY ONE CONTAINER OF EACH KIND: container targets are ordinal, so
+// a second row or column here renames every later one.
 
 import Foundation
 
-/// A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the gallery
-/// scene's asset, embedded as source per the include_str! doctrine —
-/// scenes carry their inputs, no runtime file I/O.
+/// A 2x2 RGB PNG, 75 bytes. Scenes carry their inputs as source; no
+/// runtime file I/O.
 let testPNG = Data([
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2,
     0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154, 115, 0, 0, 0, 18, 73, 68, 65,
@@ -51,16 +47,12 @@ app.build { tx in
         let logo = tx.image(testPNG)
         tx.setA11yId(logo, "logo")
         tx.setA11yLabel(logo, "Logo")
-        // The two CHOICE kinds: their options carry captions, the
-        // choice itself does not.
         let color = tx.select(["Red", "Green"])
         tx.setA11yId(color, "color")
         tx.setA11yLabel(color, "Color")
         let size = tx.radio(["Small", "Large"])
         tx.setA11yId(size, "size")
         tx.setA11yLabel(size, "Size")
-        // Containers are GROUPS to an assistive client, and naming one
-        // is how an app declares it a group.
         let cells = tx.grid(columns: 2) {
             tx.label("Name")
             tx.label("Ada")

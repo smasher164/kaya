@@ -3,23 +3,17 @@
    them back out of the PLATFORM'S OWN accessibility tree rather than
    kaya's model.
 
-   Every widget kind appears, and exactly one container of each
-   container kind — the props are universal, and container targets are
-   stable only while a scene keeps one of each. See guests/rust/a11y.rs
-   for the full note; the byte-frozen contract is
-   tools/scenes/a11y.steps.
-
-   The attrs are indexed by widget class and these two are polymorphic
-   in it (Attr c, like 'Grow'), which is the type-level statement that
-   they are UNIVERSAL: a leaf and a box take them the same way. -}
+   Every widget kind appears, and EXACTLY ONE container of each
+   container kind: container targets are stable only while a scene keeps
+   one of each. See guests/rust/a11y.rs for the full note; the
+   byte-frozen contract is tools/scenes/a11y.steps. -}
 
 import qualified Data.ByteString as BS
 
 import KayaApp
 
-{- A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the gallery
-   scene's asset, embedded as source per the include_str! doctrine —
-   scenes carry their inputs, no runtime file I/O. -}
+{- A 2x2 RGB PNG (red/green over blue/white), 75 bytes, embedded as
+   source: scenes carry their inputs, with no runtime file I/O. -}
 testPng :: BS.ByteString
 testPng =
   BS.pack
@@ -56,11 +50,9 @@ main = kayaMain $ \app -> do
             [A11yId "color", A11yLabel "Color"],
           radioOn ["Small", "Large"] 0 (const (return ()))
             [A11yId "size", A11yLabel "Size"],
-          -- Containers are GROUPS to an assistive client, and naming
-          -- one is how an app declares it a group.
-          -- grid takes no attr list (the one container constructor
-          -- that does not), so its props ride the Build monad: declare
-          -- it, set the two props as statements, hand the handle back.
+          -- grid takes no attr list (the one container constructor that
+          -- does not), so its props ride the Build monad: declare it,
+          -- set the props as statements, hand the handle back.
           ( do
               cells <- grid 2 [labelText "Name", labelText "Ada"]
               setA11yId cells "cells"

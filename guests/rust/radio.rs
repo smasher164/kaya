@@ -1,6 +1,5 @@
-//! The radio conformance scene: a size group over three options and a
-//! label folding each pick — the choice contract (see select.rs) in
-//! its inline presentation.
+//! The radio conformance scene: the choice contract (see select.rs) in
+//! its inline presentation. The contract is tools/scenes/radio.steps.
 
 const OPTIONS: [&str; 3] = ["Small", "Medium", "Large"];
 

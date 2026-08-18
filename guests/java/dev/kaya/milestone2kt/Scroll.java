@@ -3,11 +3,11 @@ package dev.kaya.milestone2kt;
 import dev.kaya.KayaApp;
 
 /**
- * The scroll conformance scene from the JVM — the viewport grows so
- * the enclosing track constrains it (an unconstrained viewport hugs
- * its content and nothing overflows); the bottom button, reachable
- * only by scrolling, proves the scrolled-to content is live. See
- * guests/rust/scroll.rs and tools/scenes/scroll.steps.
+ * The scroll conformance scene from the JVM. See guests/rust/scroll.rs
+ * and tools/scenes/scroll.steps.
+ *
+ * <p>THE VIEWPORT MUST GROW so the enclosing track constrains it: an
+ * unconstrained viewport hugs its content and nothing overflows.
  */
 final class Scroll {
     static void app() {

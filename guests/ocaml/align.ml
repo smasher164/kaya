@@ -1,13 +1,9 @@
 (* The align conformance scene, OCaml port — see guests/rust/align.rs
-   and tools/scenes/align.steps for the full rationale. The root
-   column centers children of three different natural widths; the row
-   aligns baselines across a label, a checkbox, and a tall no-baseline
-   image whose bottom sits ON the baseline (the CSS replaced-element
-   rule) — the construction that separates the modes on every
-   platform's control metrics.
-
-   [~align] at construction is the declarative spelling; [set_align]
-   is the dynamic path this scene has no reason to use. *)
+   and tools/scenes/align.steps for the full rationale. The root column
+   centers children of three different natural widths; the row aligns
+   baselines across a label, a checkbox, and a tall no-baseline image
+   whose bottom sits ON the baseline (the CSS replaced-element rule),
+   which is what separates the modes on every platform's metrics. *)
 
 open Kaya_wire
 open Kaya_app

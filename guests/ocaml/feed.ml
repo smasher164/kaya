@@ -1,11 +1,9 @@
 (* The feed scene from OCaml: sum-typed elements, end to end. The
-   variant declaration is the sum ([@@deriving kaya_gen] over constructors
-   carrying inline records); the generated post_each eliminator takes
-   one REQUIRED labelled arm per constructor — template totality is a
-   compile error here, and the scene checks it again. Handlers
-   eliminate with match, and the generated per-constructor patches
-   witness that match: a drifted entry is refused, so a stale
-   occurrence folds into nothing.
+   variant declaration is the sum ([@@deriving kaya_gen]); the generated
+   [post_each] takes one REQUIRED labelled arm per constructor, so
+   template totality is a compile error here. The generated
+   per-constructor patches witness the handler's match, and a drifted
+   entry is refused rather than folded.
 
    Build like milestone2.ml, then run with KAYA_SELFTEST=feed. *)
 
@@ -33,9 +31,8 @@ let () =
            Str (Printf.sprintf "%d done" n))
      in
      let on_promote () =
-       (* The first note, promoted to a finished todo: the model is
-          asked which entry is a Note, and the update's new constructor
-          restamps that key's copy in place. *)
+       (* The update's new constructor restamps that key's copy in
+          place. *)
        let entries = sum_items feed in
        match
          List.find_opt (fun (_, p) -> match p with Note _ -> true | _ -> false) entries
@@ -45,8 +42,8 @@ let () =
        | _ -> ()
      in
      let on_toggle keys checked =
-       (* The match is the refinement; the generated patch witnesses
-          it. A stale occurrence lands in the other arm. *)
+       (* The match is the refinement and the generated patch witnesses
+          it; a stale occurrence lands in the other arm. *)
        let post = sum_get feed (List.hd keys) in
        match post with
        | Some (Todo _) -> post_todo_patch ~done_:checked feed (List.hd keys)

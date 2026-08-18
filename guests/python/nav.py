@@ -18,21 +18,21 @@ SETTINGS = 8
 
 
 def popped_detail():
-    # Bound to the detail entry at push (the on_result precedent):
-    # this can only ever mean the detail screen popped.
+    # Bound to the detail entry at push, so it can only ever mean the
+    # detail screen popped.
     status.set("popped detail")
 
 
 def back_asked_settings():
-    # The veto class: nothing has popped; agree and confirm. No
-    # entry_popped will fire — this write is the round's final status.
+    # The veto class: nothing has popped yet. No entry_popped will fire,
+    # so this write is the round's final status.
     status.set("back requested")
     kaya.pop_entry()
 
 
 def open_detail():
-    # A widget handler runs inside the ambient transaction already;
-    # the push scope nests, and the status write rides the same commit.
+    # The push scope NESTS inside the handler's ambient transaction, so
+    # the status write rides the same commit.
     with app.push_entry(DETAIL, title="detail", on_popped=popped_detail):
         caption = kaya.signal("detail pane")
         with kaya.column():

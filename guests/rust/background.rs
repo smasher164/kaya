@@ -1,25 +1,14 @@
 //! The background conformance scene: work off the app thread, posted
 //! back (DESIGN.md's threading model; docs/background-work-plan.md).
+//! The byte-frozen contract is tools/scenes/background.steps.
 //!
-//! WHAT IT PROVES, and the reason for its odd shape: a wrong
-//! implementation must DEADLOCK rather than disagree. The worker parks
-//! until a CLICK releases it, and only a live app thread can process a
-//! click — so a binding that let background work occupy the app thread
-//! cannot reach the end of the script at all. It could not even deliver
-//! its own release. That is much stronger than reading a different
-//! value, and it is what stops the scene passing for an implementation
-//! that simply blocked.
+//! THE ODD SHAPE IS THE POINT: a wrong implementation must DEADLOCK
+//! rather than disagree. The worker parks until a CLICK releases it, so
+//! a binding that let background work occupy the app thread could not
+//! even deliver its own release.
 //!
-//! The parking is a plain `Receiver::recv` on a channel this guest owns.
-//! kaya supplies no waiting primitive and should not: the whole point is
-//! that a guest uses its own language's concurrency and hands back only
-//! the result.
-//!
-//! The accumulators are the guest's own state, not read back from
-//! signals — signals are write-only by doctrine (the app owns its
-//! model). They are `Arc<Mutex<..>>` because a posted closure must be
-//! `Send` to get here; the lock is uncontended, since everything that
-//! touches it runs on the app thread.
+//! Signals are write-only, so the accumulators are the guest's own
+//! state. `Arc<Mutex<..>>` because a posted closure must be `Send`.
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -43,9 +32,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .column(|tx| {
                 tx.label(status).a11y_id("status"); // label#0
                 tx.label(alive).a11y_id("alive"); // label#1
-                // Authored so the CLOSING read can address it: the AX
-                // read needs an identifier, and an index read passes for
-                // an arm that ran and drew nothing.
+                // Authored because the closing AX read needs an
+                // identifier: an index read passes for an arm that ran
+                // and drew nothing.
                 tx.label(nested).a11y_id("nested"); // label#2
                 let start = tx.button("start").id(); // button#0
                 msgs.on_click(start, Msg::Start);
@@ -78,14 +67,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 std::thread::Builder::new()
                     .name("background-worker".into())
                     .spawn(move || {
-                        // Parks here until the scene clicks release. Were
-                        // the binding running this on the app thread,
-                        // that click could never be processed and the
-                        // whole scene would deadlock — the point.
+                        // Parks until the scene clicks release; on the
+                        // app thread that click could never be processed.
                         let _ = rx.recv();
-                        // Three posts, in order. The accumulator makes
-                        // this a test of ORDER and not merely of which
-                        // one ran last.
+                        // The accumulator makes this a test of ORDER,
+                        // not merely of which post ran last.
                         for step in ["1", "2", "3"] {
                             let acc = Arc::clone(&acc);
                             poster.post(move |tx| {

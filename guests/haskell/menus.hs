@@ -1,10 +1,10 @@
 {-# LANGUAGE DataKinds #-}
 
-{- The menus conformance scene, Haskell port: the command vocabulary (a
-   File/View/Sort menu bar, context menus on a live label and on stamped
-   rows), the uncontrolled-menu echo doctrine, and a late
+{- The menus conformance scene, Haskell port: a File/View/Sort menu bar,
+   context menus on a live label and on stamped rows, and a late
    rename/append/promotion rework. Canonical semantics in
-   guests/rust/menus.rs; the byte-frozen contract in tools/scenes/menus.steps. -}
+   guests/rust/menus.rs; the byte-frozen contract in
+   tools/scenes/menus.steps. -}
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 
@@ -13,9 +13,8 @@ import KayaWire (Value (..), kindLabel)
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- The per-group items collection escapes the build as its result; the
-  -- Remove fold reads it back through this IORef, filled right after the
-  -- build and before dispatch starts.
+  -- Filled right after the build and before dispatch starts: the Remove
+  -- fold reads the items collection back through here.
   itemsRef <- newIORef (Nothing :: Maybe Collection)
 
   (groups, itemsColl) <- buildTx app $ do
@@ -26,9 +25,9 @@ main = kayaMain $ \app -> do
 
     let onShare = submitTx app (writeSignal status (VStr "shared"))
 
-    -- File and its Export leaf share one enablement signal: one write
-    -- moves both. File and Share realize early because the extend handler
-    -- needs their handles; 'pure' slots them back in.
+    -- File and its Export leaf share one enablement signal. File and
+    -- Share realize early because the extend handler needs their
+    -- handles; 'pure' slots them back in.
     share <- item "Share" [IPrimary True, IOnActivate onShare]
     file <-
       menu
@@ -36,11 +35,9 @@ main = kayaMain $ \app -> do
         [IEnabledBy canExport]
         [ item
             "Save"
-            -- THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT,
-            -- drawn by each platform in its own symbol set. `done` is
-            -- the checkmark idiom — the vocabulary has no `save` on
-            -- purpose (Apple's own catalog has no save-specific glyph
-            -- either).
+            -- A semantic icon names a CONCEPT, drawn by each platform in
+            -- its own symbol set; the vocabulary has no `save`, so
+            -- `done` is the checkmark idiom (docs/styling-plan.md D6).
             [ ISymbol SymbolDone,
               IShortcut "primary+s",
               IOnActivate (submitTx app (writeSignal status (VStr "saved")))
@@ -58,7 +55,6 @@ main = kayaMain $ \app -> do
               []
               [ toggle
                   "Details"
-                  -- A toggle carries a symbol like any other leaf.
                   [ ICheckedBy details,
                     ISymbol SymbolInfo,
                     IOnToggle
@@ -85,7 +81,7 @@ main = kayaMain $ \app -> do
       ]
 
     groups <- collection
-    -- Catalog built live: items are shared across stamped copies; the
+    -- Built live: the items are SHARED across stamped copies, the
     -- template only attaches, and each activation carries its key path.
     catalog <-
       contextCatalog
@@ -108,16 +104,13 @@ main = kayaMain $ \app -> do
             ]
         ]
 
-    -- The group For escapes its items collection; 'pure groupList' slots
-    -- the live For into the root below. Remove's activation names BOTH
-    -- keys (group, then item).
+    -- Remove's activation names BOTH keys (group, then item).
     (groupList, itemsColl) <- forEach groups $ do
       itemsColl <- collection
       itemList <- each itemsColl $ do
-        -- label#2 once g2/a stamps. `element` is the scalar
-        -- collection's own token — its element IS the value, so there
-        -- is no field name to give — and it lowers to the same
-        -- bind_element this line used to spell at the widget-kind floor.
+        -- label#2 once g2/a stamps. `element` is the scalar collection's
+        -- own token: its element IS the value, so there is no field name
+        -- to give.
         row <- label element
         nodeContextMenu row catalog
       _ <- columnOf [pure itemList]
@@ -132,15 +125,14 @@ main = kayaMain $ \app -> do
             submitTx app (writeSignal canExport (VBool True)),
           buttonOn "reset menu state" $ -- button#1
             -- The folds never echo the user's pick, so details/sort still
-            -- hold False/0; these two prop writes are real checked/value
-            -- records (never coalesced) that reset the user-state mirror.
+            -- hold False/0 and these two writes are real records rather
+            -- than no-ops the core could coalesce away.
             submitTx app $ do
               writeSignal details (VBool False)
               writeSignal sort (VF64 0.0)
               writeSignal status (VStr "ready"),
           buttonOn "extend menus" $ -- button#2
-            -- Append-only: rename the retained File, move the promotion
-            -- hint from Share to Publish, grow the bar by Tools.
+            -- Append-only: the bar grows and nothing is removed.
             submitTx app $ do
               setMenuPrimary share False
               setMenuLabel file "Document"

@@ -2,22 +2,11 @@
 representations, and the privileged read that takes one back (DESIGN.md,
 Clipboard; docs/clipboard-plan.md).
 
-EVERY ASSERTION CROSSES A PROCESS BOUNDARY, which is the whole design of
-this scene. kaya's representation set is closed because the LOWERINGS
-are the hard part — CF_HTML's mandatory offset header, Android's
-content:// URI for an image, CF_HDROP's double-NUL struct — and a check
-where kaya reads what kaya wrote parses its own malformed header
-perfectly happily. That is not merely less coverage: it is a check that
-cannot fail for the reason the design exists.
-
-THE ONE EXCEPTION IS THE CUSTOM FORMAT, deliberately. No stock tool on
-any platform writes an app-defined type, so the guest copies one and
-reads it back, with the foreign reader confirming from outside that the
-bytes really are there under that id.
-
-THE IMAGE IS ASSERTED AS A DECODED SIZE, never as bytes: every host
-re-encodes freely between image types, so a byte count would be a
-different number on every lane for one picture.
+Assertions cross a process boundary: a FOREIGN tool seeds and reads the
+clipboard, because a check where kaya reads what kaya wrote parses its
+own malformed header happily. The custom format is the one exception (no
+stock tool writes an app-defined type), and the image is asserted as a
+DECODED SIZE, never bytes — every host re-encodes freely.
 
 Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
 contract in tools/scenes/clipboard.steps.
@@ -33,20 +22,17 @@ import kaya
 
 app = kaya.App()
 
-# Both halves compute this identically, the filedialog rule: guest and
-# interpreter are the same process, so they agree on a path with no
-# runner involvement, and the pid keeps parallel legs from colliding.
-# `tempfile.gettempdir()` and NOT `TMPDIR` — the environment variable is
-# a POSIX spelling with no Windows equivalent, and reading it sent an
-# earlier guest's files to the root of the current drive.
+# Guest and interpreter compute this identically, with no runner
+# involvement; the pid keeps parallel legs from colliding.
+# `tempfile.gettempdir()` and NEVER `TMPDIR` — see docs/traps.md, the
+# POSIX-spelling trap that wrote a guest's files to the root of the
+# current drive on Windows.
 scene_dir = pathlib.Path(tempfile.gettempdir()) / f"kaya-clip-{os.getpid()}"
 scene_dir.mkdir(parents=True, exist_ok=True)
 
-# A 4x4 PNG, spelled out rather than generated: the scene asserts "4x4"
-# through a foreign decoder, so the picture has to be a real encoded
-# image whose size is knowable from the script. Written to disk for the
-# seeding tool AND handed to copy() as bytes — the same picture both
-# ways.
+# A real encoded 4x4 PNG, spelled out rather than generated: the scene
+# asserts "4x4" through a foreign decoder. Written to disk for the
+# seeding tool AND handed to copy() as bytes.
 PIXEL_PNG = bytes([
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  # signature
     0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  # IHDR length + type
@@ -60,15 +46,13 @@ PIXEL_PNG = bytes([
     0x44, 0xAE, 0x42, 0x60, 0x82,  # IEND + crc
 ])
 
-# The app-defined format's id: reverse-DNS and space-free, because it
-# reaches every platform's own registry VERBATIM — a UTI on Apple,
-# RegisterClipboardFormat on Windows, a target atom on X11 and Wayland,
-# a MIME type on Android.
+# Reverse-DNS and space-free: this id reaches every platform's own
+# registry VERBATIM (a UTI, RegisterClipboardFormat, an X11 target atom,
+# an Android MIME type).
 NOTE_ID = "dev.kaya/note"
-# NO QUOTES IN THE PAYLOAD, and the reason is the script rather than the
-# clipboard: the step grammar's escapes are \n, \r and \\ in all three
-# interpreters, with no \" — so a quoted byte could not be spelled in the
-# expectation.
+# NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r and \\
+# with no \" (crates/kaya/src/harness.rs), so a quoted byte could not be
+# spelled in the expectation.
 NOTE_BYTES = b"note=1"
 
 (scene_dir / "pixel.png").write_bytes(PIXEL_PNG)
@@ -76,11 +60,8 @@ NOTE_BYTES = b"note=1"
 
 
 def copy_rich():
-    # ONE CLIP, FOUR REPRESENTATIONS. kaya derives none of them from any
-    # other: whether list bullets survive html-to-text is this app's
-    # decision, so it spells out both. The order they go on the wire is
-    # kaya's, not this call's — descending richness, which is preference
-    # order on every host that has one.
+    # One clip, four representations; kaya derives none from any other, so
+    # the app spells out both text and html. Wire order is kaya's.
     kaya.copy(text="kaya clip", html="<b>kaya</b> clip",
               image=PIXEL_PNG, custom={NOTE_ID: NOTE_BYTES})
     status.set("copied")
@@ -88,9 +69,9 @@ def copy_rich():
 
 def answered(clip):
     match clip:
-        # EMPTY IS THE UNIVERSAL NO, and the guest does not try to tell
-        # its four causes apart — denied, unfocused, absent, or nothing
-        # this read accepted. The platforms deliberately decline to say.
+        # Empty is the universal no; its four causes (denied, unfocused,
+        # absent, nothing accepted) are not distinguishable — the
+        # platforms decline to say, so the guest does not guess.
         case None:
             status.set("empty")
         case kaya.Representation.Text(text):
@@ -100,9 +81,8 @@ def answered(clip):
         case kaya.Representation.Custom(ident, body):
             status.set(f"custom {ident} {body.decode()}")
         case kaya.Representation.Image(data):
-            # STRAIGHT BACK OUT, because the assertion that matters is a
-            # foreign DECODER's: the byte count differs per host for one
-            # picture, and the decoded size does not.
+            # Straight back out: the assertion that matters is a foreign
+            # decoder's size, not a byte count.
             kaya.copy(image=data)
             status.set("image")
         case kaya.Representation.Files(files):
@@ -111,10 +91,8 @@ def answered(clip):
                 return
 
             def worker():
-                # OFF THE APP THREAD, which is what open() documents: it
-                # blocks, and a pasted file is no different from a picked
-                # one — it IS a picked one, the same capability arriving
-                # through a second door.
+                # OFF THE APP THREAD: open() blocks, and a pasted file is
+                # a picked file arriving through a second door.
                 name = files[0].name
                 try:
                     handle, _seekable = files[0].open(kaya.wire.FILE_MODE_READ)
@@ -146,9 +124,8 @@ def read_files():
 
 
 def pasted(clip):
-    # THE SAME SHAPE THE READ ANSWERS WITH, and free where the read is
-    # not: a gesture is its own authorisation, so no platform charges a
-    # prompt for this one.
+    # The same shape the read answers with, and unprivileged: a gesture
+    # is its own authorisation.
     match clip:
         case kaya.Representation.Text(text):
             status.set(f"pasted {text}")
@@ -157,9 +134,8 @@ def pasted(clip):
 
 
 def row_pasted(key, clip):
-    # THE COPY'S OWN KEY RIDES IN FRONT of the payload — "r1" here, the
-    # shape every node handler receives — and printing it is the proof
-    # the paste dispatched as an INSTANCE occurrence and not a live one.
+    # The copy's own key rides in front of the payload; printing it is
+    # what proves the paste dispatched as an INSTANCE occurrence.
     match clip:
         case kaya.Representation.Text(text):
             row_status.set(f"row {key} pasted {text}")
@@ -168,12 +144,6 @@ def row_pasted(key, clip):
 
 
 with app.window(title="clipboard"):
-    # THE GESTURE LAYER'S DECLARATION, and an app writes nothing else
-    # for it: the Paste command lowers to the platform's own, acts on
-    # whatever is focused, and works out its own enablement. kaya has no
-    # selection API, which is exactly why copy of a selection has to be
-    # a command rather than something an app assembles out of the data
-    # layer.
     with app.menu("Edit"):
         kaya.item("Cut", role=kaya.ROLE_CUT)
         kaya.item("Copy", role=kaya.ROLE_COPY)
@@ -188,31 +158,23 @@ with app.window(title="clipboard"):
         kaya.button("read text", on_click=read_text)       # button#2
         kaya.button("read image", on_click=read_image)     # button#3
         kaya.button("read files", on_click=read_files)     # button#4
-        # The lambdas name fields declared below: the declaration order
-        # is the scene's, shared verbatim with every other language, and
-        # a handler runs long after the column is built.
+        # The lambdas name fields declared BELOW; the declaration order is
+        # the scene's, and a handler runs long after the column is built.
         kaya.button("focus rich",
                     on_click=lambda: rich.focus())         # button#5
         kaya.button("focus plain",
                     on_click=lambda: plain.focus())        # button#6
 
-        # DECLARES WHAT IT TAKES, so a paste lands in the hook and this
-        # app decides what to do with it.
+        # Declares what it takes, so a paste lands in the hook.
         rich = kaya.entry().accepts(kaya.ACCEPT_TEXT).on_paste(pasted)
         rich.a11y_id("rich")                               # entry#0
-        # DECLARES NOTHING, so the platform's own insertion happens and
-        # the field's ordinary change path reports it — which is what a
-        # plain text editor gets for free.
+        # Declares nothing, so the platform inserts and the field's
+        # ordinary change path reports it.
         plain = kaya.entry().a11y_id("plain")              # entry#1
 
-        # A STAMPED paste target: the same two-door contract one tier
-        # down. The accept list comes from the TEMPLATE — the prop no
-        # binding could spell before docs/tpl-props-plan.md P1 — and the
-        # paste arrives as an INSTANCE occurrence carrying the copy's own
-        # key, which is what row_status prints. This is the branch no
-        # backend had ever fired: the registrar existed in seven bindings
-        # and the dispatch in all of them, but a paste only reaches a
-        # widget that declared an accept list, and no stamped copy could.
+        # A STAMPED paste target: the accept list comes from the TEMPLATE
+        # (docs/tpl-props-plan.md P1) and the paste arrives as an INSTANCE
+        # occurrence carrying the copy's key.
         kaya.label(bind=row_status).a11y_id("row-status")  # label#1
         rows = kaya.collection()
         for row in rows:

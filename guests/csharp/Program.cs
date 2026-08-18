@@ -1,13 +1,12 @@
-// One guest binary hosts every scene, the Android APK pattern brought
-// to the desktop: the KAYA_SELFTEST value doubles as the scene selector
-// (and "1", the plain selftest flag, means the milestone-2 scene).
+// One guest binary hosts every scene: the KAYA_SELFTEST value doubles
+// as the scene selector, and "1" (the plain selftest flag) falls to the
+// default arm, the milestone-2 scene.
 static class Program
 {
     static void Main()
     {
-        // Headless invariant checks ride the same binary (the bindings
-        // compile into this assembly): KAYA_CHECK selects one, no
-        // window, no Run().
+        // Headless invariant checks ride the same binary: KAYA_CHECK
+        // selects one, no window, no Run().
         if (System.Environment.GetEnvironmentVariable("KAYA_CHECK") == "abort")
         {
             AbortCheck.Run();

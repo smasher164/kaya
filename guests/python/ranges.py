@@ -2,37 +2,15 @@
 an editor cannot write for itself — HIGHLIGHT a set of ranges, SELECT
 one, REVEAL one — driven by a search this file writes in six lines.
 
-THE SIX LINES ARE THE POINT. kaya ships no find engine, no find bar and
-no regex dialect (docs/ranges-plan.md §3): what to decorate is the app's
-question, and every editor answers it differently. What no app can write
-for itself is the other half — colouring a run of a native text view,
-moving its selection, scrolling it into view — and that is exactly what
-the framework ships.
+kaya ships no find engine, no find bar and no regex dialect
+(docs/ranges-plan.md §3): what to decorate is the app's question.
 
-THE OFFSETS ARE UTF-8 BYTE OFFSETS, AND THAT IS WHY THIS SEARCH RUNS
-OVER `doc.encode()` RATHER THAN OVER `doc`. Python is one of the four
-languages whose own string index is NOT kaya's unit: `str.find` counts
-scalars, so on this document `doc.find("alpha")` answers 51 where kaya's
-offset is 57. The document opens with a CJK word for exactly that
-reason — the six-byte gap is a unit test, and a guest (or a backend)
-that mixed the two would decorate six characters early and the scene's
-frozen offsets would say so. Searching the bytes is not a workaround: it
-is the honest spelling of "give kaya the offsets it asked for", it costs
-one `.encode()`, and UTF-8 is self-synchronizing, so a byte-level match
-lands on a character boundary and finds the same occurrences a `str`
-search would.
-
-WHAT EACH LEG PROVES, in the order the script runs them:
-  * a set of three matches decorated at once, read back out of the
-    platform's own accessibility tree;
-  * one of them selected, likewise;
-  * the third REVEALED — asserted `offscreen` first, so the leg cannot
-    pass on a document that happened to fit;
-  * a user's keystroke DROPPING the declared set (D2: ranges are
-    app-owned and never tracked across an edit);
-  * a `select_range` REFUSED because the user is mid-composition (D4),
-    which is the one thing on this surface a backend is expected not to
-    do.
+THE OFFSETS ARE UTF-8 BYTE OFFSETS, WHICH IS WHY THE SEARCH RUNS OVER
+`doc.encode()` AND NOT OVER `doc` — `str.find` counts scalars, so the
+two disagree on this document. The rule and the numbers are in
+`highlight_ranges`' docstring (bindings/python/kaya/__init__.py); the
+document opens with a CJK word so a guest that mixed the units decorates
+six characters early and the frozen offsets say so.
 
 Canonical semantics in guests/rust/ranges.rs; the byte-frozen contract
 in tools/scenes/ranges.steps.
@@ -44,12 +22,10 @@ import kaya
 
 app = kaya.App()
 
-# The document, frozen — byte-identical to guests/rust/ranges.rs's DOC,
-# because invariant 6 compares every assertion byte for byte across the
-# languages and the offsets below are positions in THESE bytes. Three
-# occurrences of `alpha` and nothing else containing that substring;
-# forty short lines, so the last match is far below a 240x96 viewport
-# and REVEAL has something to do.
+# BYTE-IDENTICAL to guests/rust/ranges.rs's DOC: the scene's frozen
+# offsets are positions in THESE bytes. Three occurrences of `alpha` and
+# nothing else containing it; forty short lines, so the last match is
+# below a 240x96 viewport and REVEAL has something to do.
 DOC = """line 00: 日本語 preface
 line 01: gamma kappa
 line 02: alpha beta gamma
@@ -93,18 +69,14 @@ line 39: the last line"""
 
 NEEDLE = "alpha"
 
-# The app's own copy of the document, which is the ONLY authority on
-# what the offsets mean. It advances on every edit, exactly as an
-# editor's buffer does.
+# The app's own copy, which is the ONLY authority on what the offsets
+# mean. It advances on every edit.
 doc = DOC
 
 
 def find_all(text, needle):
-    """THE WHOLE SEARCH. Literal, forward, non-overlapping, over the
-    UTF-8 bytes — so what it yields is already kaya's unit. An editor
-    that wants case folding, word boundaries or a regex dialect writes
-    those here, in the app, where its users can be told what they mean.
-    """
+    """The whole search: literal, forward, non-overlapping, over the
+    UTF-8 BYTES, so what it yields is already kaya's unit."""
     data, hit = text.encode(), needle.encode()
     hits, at = [], data.find(hit)
     while at >= 0:
@@ -114,11 +86,9 @@ def find_all(text, needle):
 
 
 def on_edit(text):
-    # THE SEARCH RESULTS ARE STALE AND THE APP SAYS SO. kaya has already
-    # dropped the decorations — a declared set is bound to the text it
-    # was declared against — and this is the app agreeing rather than
-    # being told: an editor whose document moved has to search again
-    # before it can claim anything about where the matches are.
+    # kaya has ALREADY dropped the decorations (D2: a declared set is
+    # bound to the text it was declared against); this is the app
+    # agreeing, not being told.
     global doc
     doc = text
     status.set("0 matches")
@@ -153,10 +123,9 @@ def on_select_first():
 with app.window(title="ranges"):
     status = kaya.signal("0 matches")
     with kaya.column():
-        # The editor, seeded with the document the app opened. The a11y
-        # id is not decoration: every range assertion reads the
-        # platform's accessibility tree, and the id is how a leg finds
-        # this control there.
+        # The a11y id is REQUIRED, not decoration: every range assertion
+        # reads the platform's accessibility tree and finds this control
+        # by that id.
         editor = kaya.textarea(on_change=on_edit)          # textarea#0
         editor.a11y_id("doc").a11y_label("Document").set_text(DOC)
         kaya.label(bind=status)                            # label#0

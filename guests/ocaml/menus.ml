@@ -1,8 +1,8 @@
-(* The menus conformance scene, OCaml port: the command vocabulary (a
-   File/View/Sort menu bar, context menus on a live label and on stamped
-   rows), the uncontrolled-menu echo doctrine, and a late
+(* The menus conformance scene, OCaml port: a File/View/Sort menu bar,
+   context menus on a live label and on stamped rows, and a live
    rename/append/promotion rework. Canonical semantics in
-   guests/rust/menus.rs; the byte-frozen contract in tools/scenes/menus.steps. *)
+   guests/rust/menus.rs; the byte-frozen contract in
+   tools/scenes/menus.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -19,18 +19,13 @@ let () =
 
        let on_share () = write status (Str "shared") in
 
-       (* File and its Export leaf share one enablement signal: one write
-          moves both. File and Share realize early because the extend
-          handler needs their handles; [w] slots them back in. *)
        let share = item ~label:"Share" ~primary:true ~on_activate:on_share () in
        let file =
          menu ~label:"File" ~bind_enabled:can_export
            [
-             (* THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT,
-                drawn by each platform in its own symbol set. [Done] is
-                the checkmark idiom — the vocabulary has no `save` on
-                purpose (Apple's own catalog has no save-specific glyph
-                either). *)
+             (* A symbol names a CONCEPT, drawn by each platform in its
+                own set (docs/styling-plan.md D6); the vocabulary has no
+                `save`, so [Done] is the checkmark idiom. *)
              item ~label:"Save" ~symbol:Done ~shortcut:"primary+s"
                ~on_activate:(fun () -> write status (Str "saved"));
              item ~label:"Export" ~bind_enabled:can_export ~symbol:Forward;
@@ -42,7 +37,6 @@ let () =
          ~menus:
            [
              w file;
-             (* A toggle carries a symbol like any other leaf. *)
              menu ~label:"View"
                [
                  toggle ~label:"Details" ~bind_checked:details ~symbol:Info
@@ -61,9 +55,9 @@ let () =
 
        let groups = collection () in
        let items_ref = ref None in
-       (* Catalog built live: items are shared across stamped copies; the
-          template only attaches. The Remove handler predates the items
-          collection, so it reads it back through [items_ref]. *)
+       (* One catalog shared across every stamped copy; the template
+          only attaches it. [items_ref] is how the handler reaches a
+          collection the [for_each] below has not returned yet. *)
        let catalog =
          context_catalog
            [
@@ -78,9 +72,7 @@ let () =
            ]
        in
 
-       (* The group For escapes its items collection (the seed and the
-          Remove handler need it); [w group_list] slots the live For into
-          the root below. Remove's activation names BOTH keys (group, item). *)
+       (* Remove's activation names BOTH keys (group, item). *)
        let group_list, items =
          for_each groups
            (fun () ->
@@ -89,20 +81,10 @@ let () =
                let _ =
                  column
                    [
-                     (* THE INNER FOR AS A CHILD. Its body keeps no
-                        handle — the Remove handler hangs off the
-                        catalog, not off a stamped node — so [each]
-                        drops the result and the partial application
-                        slots into this list like any constructor. The
-                        [w item_list] line it replaces was there
-                        because this zone had no [each] until now. *)
                      each items (fun () ->
                          (* label#2 once g2/a stamps. [element] is the
-                            scalar collection's own token — its element
-                            IS the value, so there is no field name to
-                            give — and it lowers to the same
-                            bind_element this line used to spell at the
-                            widget-kind floor. *)
+                            scalar collection's token: its element IS the
+                            value, so there is no field name to give. *)
                          let row = label ~bind_field:element () in
                          context_menu row catalog);
                    ]
@@ -122,17 +104,18 @@ let () =
                ~on_click:(fun () -> write can_export (Bool true)) (* button#0 *);
              button ~text:"reset menu state"
                ~on_click:(fun () ->
-                 (* The folds never echo the user's pick, so details/sort
-                    still hold false/0; these two prop writes are real
-                    checked/value records (never coalesced) that reset the
-                    backend's user-state mirror. *)
+                 (* The folds never echo the user's pick, so details and
+                    sort still hold false/0; these writes are real
+                    records, never coalesced away, and they reset the
+                    backend's own user-state mirror. *)
                  write details (Bool false);
                  write sort (F64 0.0);
                  write status (Str "ready")) (* button#1 *);
              button ~text:"extend menus"
                ~on_click:(fun () ->
-                 (* Append-only: rename the retained File, move the promotion
-                    hint from Share to Publish, grow the bar by Tools. *)
+                 (* Append-only: rename the retained File, move the
+                    promotion hint from Share to Publish, grow the bar by
+                    Tools. *)
                  set_menu_primary share false;
                  set_menu_label file "Document";
                  menu_append file

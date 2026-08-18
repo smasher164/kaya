@@ -15,8 +15,8 @@ import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- The settings command fires twice on purpose (once by the chord,
-  -- once at its declared path), so its count lives outside the build.
+  -- The settings command fires twice on purpose (once by the chord, once
+  -- at its declared path), so its count lives outside the build.
   settingsRef <- newIORef (0 :: Int)
 
   buildTx app $ do
@@ -33,10 +33,8 @@ main = kayaMain $ \app -> do
       0
       [ WTitle "commands",
         WMenus
-          [ -- The settings command declares its own punctuation chord
-            -- and the role that tells macOS where users look for it. An
-            -- ordinary command sits beside it so the menu that declared
-            -- it is not left empty once the platform moves it.
+          [ -- Reload sits beside Settings so this menu is not left empty
+            -- once the platform moves the settings item elsewhere.
             menu
               "File"
               []
@@ -48,9 +46,7 @@ main = kayaMain $ \app -> do
                     IOnActivate onSettings
                   ]
               ],
-            -- A checkable command carrying its own key, and a group
-            -- whose options each answer their own chord. Option order IS
-            -- the index vocabulary: Name = 0, Date = 1.
+            -- Option order IS the index vocabulary: Name = 0, Date = 1.
             menu
               "View"
               []

@@ -29,11 +29,10 @@ main = do
     insert c (VStr "b") (VStr "two")
     return c
 
-  -- Abort mid-transaction after mutating: the boundary must restore
-  -- the mirror and rethrow (rollback + propagate is the tx boundary's
-  -- contract; surviving is the dispatch loop's). Here rollback is by
-  -- purity — a throwing Build trips buildTx's evaluate barrier before
-  -- the store-back and submit ever run.
+  -- Abort mid-transaction after mutating: the boundary must restore the
+  -- mirror and rethrow. Rollback is by PURITY here — a throwing Build
+  -- trips buildTx's evaluate barrier before the store-back and submit
+  -- ever run.
   aborted <-
     try $ buildTx app $ do
       insert todos (VStr "c") (VStr "three")
@@ -44,9 +43,8 @@ main = do
     Left _ -> return ()
   expectKeys app todos ["a", "b"] "abort did not restore the mirror"
 
-  -- The dispatch discipline: a throwing handler is logged and the
-  -- loop continues — the next transaction works and sees the restored
-  -- model.
+  -- The dispatch discipline: a throwing handler is logged and the loop
+  -- continues, and the next transaction sees the restored model.
   dispatch $ buildTx app $ do
     insert todos (VStr "d") (VStr "four")
     error "handler bug"
@@ -54,21 +52,14 @@ main = do
   buildTx app (insert todos (VStr "c") (VStr "three"))
   expectKeys app todos ["a", "b", "c"] "post-abort commit broken"
 
-  -- Derived registrations roll back by the same purity (bDerived is
-  -- stored back only on commit), but appDerived is internal to
-  -- KayaApp, so there is nothing to observe here — not pinned.
+  -- NOT PINNED: derived registrations roll back by the same purity, but
+  -- appDerived is internal to KayaApp so there is nothing to observe.
 
-  -- The menu surface: the record stream is internal to the Build
-  -- monad, so the record-level emission asserts live in the desktop
-  -- fixtures (ledgered for Haskell). What this fixture pins is that
-  -- the constructors run through the emitter — a committing buildTx
-  -- submits the catalog without error (a constructor that emitted
-  -- nothing could not fail here, but one that emits garbage dies in
-  -- the marshaller) — that the binding's ONE shortcut parser rejects
-  -- aliases (the throw crosses buildTx's evaluate/submit barrier,
-  -- aborting the transaction by purity), and that an aborted append
-  -- propagates and leaves the app usable (append-at-any-time: the
-  -- retained handle reopens through menuAppend).
+  -- The menu surface. The record stream is internal to the Build monad,
+  -- so what the three clauses below pin is that the constructors run
+  -- through the emitter, that the binding's ONE shortcut parser rejects
+  -- aliases, and that an aborted append propagates and leaves the app
+  -- usable.
   file <- buildTx app $ do
     f <- menu "File" [] [item "Save" [IShortcut "PRIMARY+S"]]
     window 0 [WMenus [pure f]]

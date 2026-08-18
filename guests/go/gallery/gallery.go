@@ -1,12 +1,7 @@
-// The gallery scene from Go: a row with a checkbox and its status
-// label, and a row with a slider and its volume label. Both controls
-// own their state and report each change; the app answers by writing
-// the paired signal — the entry's uncontrolled contract, with a bool
-// and a float64.
-//
-// Build the library first (cargo build), then, from the repo root:
-//
-//	KAYA_SELFTEST=gallery go run crates/kaya/examples/gallery.go
+// The gallery scene from Go: a checkbox and a slider, each owning its
+// state and reporting each change while the app answers by writing
+// the paired signal — the uncontrolled contract with a bool and a
+// float64.
 package gallery
 
 import (
@@ -15,22 +10,9 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// App builds the scene and hands it back ready to be served.
-//
-// THE TAIL IS THE ONLY THING THAT DIFFERS BY PLATFORM, and it differs
-// because the hosting does: a desktop or iOS guest owns the process
-// main thread and lends it to kaya (guests/go/cmd/main_desktop.go),
-// while on Android the OS owns main and kaya starts the guest on a
-// thread of its own (guests/go/cmd/main_android.go). Both tails are
-// one package over one scene table, so everything above them — the
-// transaction, the handlers, the strings — is compiled into every
-// platform's artifact from these bytes.
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	// The construction sugar: constructors carry their handlers,
-	// containers take their children, and the build body reads as the
-	// tree.
 	app.Build(func(tx *kaya.Tx) {
 		status := tx.Signal("urgent: false")
 		volume := tx.Signal("volume: 50%")
@@ -57,10 +39,10 @@ func App() *kaya.App {
 				})
 			})
 			tx.Row(func() {
-				// The content-buffer row: a valid 2x2 PNG decodes and
-				// reports its size, and deliberately invalid bytes
-				// read 0x0 — decode failure is the placeholder class,
-				// never a crash, on every backend.
+				// A valid 2x2 PNG decodes and reports its size;
+				// deliberately invalid bytes read 0x0 — decode
+				// failure is the placeholder class, never a crash, on
+				// every backend.
 				tx.Image(testPNG)
 				tx.Image([]byte("not an image"))
 			})
@@ -70,9 +52,7 @@ func App() *kaya.App {
 	return app
 }
 
-// A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the first
-// binary asset, embedded as source per the include_str! doctrine —
-// scenes carry their inputs, no runtime file I/O.
+// A 2x2 RGB PNG (red/green over blue/white), 75 bytes.
 var testPNG = []byte{
 	137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
 	0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154,

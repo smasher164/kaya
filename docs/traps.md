@@ -3574,3 +3574,129 @@ inode stays alive under every process reading it. Windows turns the
 in-place rewrite into a crash in the WRITER; POSIX turns it into a
 crash in the READER, later, in a different process, with a stack that
 points at freetype instead of at the write.
+
+## A live-zone `When` stamps an EMPTY key path, and the wire reads that
+## as "this id is a widget id"
+
+Measured 2026-08-10 with the text editor (guests/go/editor), and the
+reason its find bar is a collection of ONE ROW rather than the `When` a
+reader would expect. Every occurrence a live-zone When's body produces
+is misrouted, silently, to whatever widget happens to hold the same
+number.
+
+The wire's identity rule is one sentence (crates/kaya/src/wire.rs, the
+click-tag block, and spec.rs's `button_clicked` doc): the occurrence
+body is `{ u64 id; u32 path_len; ... path }`, and PATH_LEN 0 MEANS `id`
+IS A WIDGET ID. Otherwise `id` is a template node id and the values are
+the copy's key path. `decode_click_tag` branches on exactly that.
+
+A For's copies each carry their key, so a For occurrence decodes as the
+instance it came from. A When has no keys — `register_when_site` in
+scene.rs is handed the enclosing path, and in the LIVE zone that path is
+empty — so its stamped copy's occurrences go out with path_len 0 and a
+TEMPLATE NODE id sitting in the field the decoder has just decided is a
+widget id. The two spaces are separate counters that both start at 1
+(the `counters` struct in each binding, e.g. bindings/go/app.go), so the
+ids collide from the very first widget.
+
+What that looked like: typing in a When-stamped find field arrived at
+the TEXTAREA's change handler — template node 2 read as widget 2 — and
+the document went dirty with text nobody had typed into it. The bar's
+three buttons landed on widgets that had no click handler at all and
+simply vanished. Nothing errors anywhere on this path.
+
+Why four milestones missed it: the only `When` any guest declares
+(guests/go/milestone2) holds a STATIC LABEL, which produces no
+occurrences, so no scene had ever exercised a When body that could
+report anything.
+
+No guard exists. Until there is one, a live-zone When whose body
+contains an interactive widget is a trap, and the workaround is a `For`
+over a one-entry collection: its copy carries a key, so the path is
+non-empty and the occurrence decodes as the instance it is.
+
+## An app can VETO a close but cannot AGREE to one, and the arm that
+## tries aborts the process
+
+`veto_close` hands the window's close to the app, `close_requested` is
+the question, and the alert machinery is the answer — but there is no
+verb for the affirmative. `destroy_window(0)` is the obvious candidate
+and it is refused by assertion (crates/kaya/src/scene.rs's
+`TxOp::DestroyWindow`: "kaya: the primary window is not destroyable —
+the process owns it"). The assertion is right; the gap is that nothing
+else says yes.
+
+Measured while writing the text editor, not reasoned about: a perturbed
+run reached that arm and died with the assertion plus `fatal runtime
+error: failed to initiate panic, error 5` — the non-unwinding-context
+abort recorded under "A GUARD THAT ABORTS THE PROCESS IS THE WRONG
+SHAPE" (docs/deferred.md), so the leg has no verdict list either.
+
+THE LIVE EXPOSURE IS NINE FILES: every port of the dirty scene — one
+per language, guests/rust/dirty.rs and guests/c/dirty.c among them —
+carries `destroy_window(0)` in exactly the arm that
+agrees to discard. No scene has ever taken that arm, so nothing has
+ever run it, and the day a scene does, nine legs abort at once.
+guests/go/editor/editor.go's `quit` is the only guest that works around
+it, with `os.Exit` — the one call in that file that leaves the
+framework.
+
+## The stall scene wedges for a DAY, not forever, because several
+## runtimes catch a true permanent park
+
+The stall scene is the one guest that misuses kaya on purpose: its
+`wedge` button blocks the app thread and the scene asserts that kaya
+NOTICES. The obvious spelling is a permanent park, and it is wrong in
+this scene — every guest deliberately sleeps for 24 hours instead
+(`wedge`, `WEDGE_SECONDS` and their seven siblings).
+
+The reason is that "forever" is a different call in each of the eight
+languages and several runtimes treat a thread that can never be woken
+as a DETECTABLE DEADLOCK: they raise instead of hanging, the app dies
+with a runtime error, and the scene then measures the runtime's
+detector rather than kaya's watchdog. A day is indistinguishable from
+forever inside a leg that lasts seconds, and no runtime objects to it.
+
+Do not "simplify" any of the eight back to a real park. The note this
+entry replaces lived in all eight stall guests and named no runtime,
+so neither does this — what is established is the rule and the reason
+for the number, not a list of which detectors fire.
+
+## A range offset is a UTF-8 BYTE offset, and almost no language's own
+## search agrees
+
+kaya's ranges are UTF-8 byte offsets in every language. Almost every
+guest language's native string search answers in a DIFFERENT unit, and
+the disagreement is silent: the offset that comes back is a legal
+number on a character boundary, so nothing refuses it — the highlight
+just covers the wrong text, and only on a document containing
+non-ASCII.
+
+The ranges scene is built to catch exactly that. Its frozen document
+opens with a CJK word, which is why docs/deferred.md records that
+"every match sits six bytes further along than it sits in UTF-16": the
+document is 813 bytes and 807 UTF-16 code units. A guest that converts
+in its own unit decorates six characters early from the first match
+onward and the scene's byte-frozen assertions fail.
+
+WHAT EACH LANGUAGE'S OWN UNIT IS, since the trap is per-language and
+the guests are where it shows:
+  - Swift — NEITHER bytes nor integers. `firstRange(of:)` returns
+    `Range<String.Index>`, and BOTH conversions an author reaches for
+    first are six early: `distance(from:to:)` counts Characters
+    (grapheme clusters) and `utf16Offset(in:)` counts UTF-16 code
+    units. The route is `kayaByteRange` in
+    bindings/swift/KayaApp.swift — hand it the `Range<String.Index>`
+    you already have, `in:` the string that indexes it, and let the
+    binding convert. Never convert by hand.
+  - C# and Java — `IndexOf` / `indexOf` answer in UTF-16 code units.
+  - Python — `str.find` answers in Unicode scalars (the conversion
+    rule is written up in `highlight_ranges`' docstring,
+    bindings/python/kaya/__init__.py).
+  - Go, Rust, C, Haskell (over `BS.breakSubstring`) — already bytes,
+    so their guests hand kaya what they already had. That is why those
+    ports read as if there were nothing to think about, and why the
+    other four need this entry.
+
+docs/ranges-plan.md covers the design and says nothing about any
+language's indexing.

@@ -1,24 +1,13 @@
 // The Go guests' one entry package: a scene table, and two tails that
 // differ only in who owns `main` (main_desktop.go, main_android.go).
 //
-// ONE ARTIFACT CARRIES EVERY SCENE, ON EVERY PLATFORM, and the leg
-// names the one it wants in KAYA_SELFTEST. Android forced the shape and
-// the desktops keep it because it is better there too:
-//
-//   - Android has no choice. `-buildmode=c-shared` produces one .so per
-//     main package, and the shell picks its library at load time — so
-//     thirty-one scene guests would be thirty-one c-shared libraries in
-//     one APK, measured at 2.6 MB each, ~83 MB of native code on top of
-//     libkaya's 30 MB (docs/go-mobile-plan.md D3 step 3; scratchpad
-//     go-android-compose.md §6.3 B priced it).
-//   - The desktops used to link thirty-two binaries per lane, 84 MB of
-//     target/go-guests, because each scene owned a `main`. They were
-//     the same program with a different last line.
-//
-// So the scenes are LIBRARIES — one directory each, package named for
-// the scene, `App()` handing back a built app — and this package is the
-// only `main` in the tree beside guests/go/encodebench, which is a
-// benchmark rather than a scene.
+// ONE ARTIFACT CARRIES EVERY SCENE, ON EVERY PLATFORM, and the leg names
+// the one it wants in KAYA_SELFTEST. Android forces the shape:
+// `-buildmode=c-shared` produces one .so per main package and the shell
+// picks its library at load time (docs/go-mobile-plan.md D3). So the
+// scenes are LIBRARIES — one directory each, package named for the
+// scene, `App()` handing back a built app — and this is the only `main`
+// in the tree beside guests/go/encodebench.
 package main
 
 import (
@@ -63,32 +52,17 @@ import (
 	"dev.kaya/guests/go/window"
 )
 
-// defaultScene is what an EMPTY KAYA_SELFTEST means on a desktop, and
-// nowhere else — main_desktop.go is the only caller and states the
-// asymmetry; main_android.go refuses an empty name instead, for a
-// reason that is true only there.
-//
-// "1" is milestone2's name for a historical reason worth keeping: the
-// selftest flag's original spelling, from before the value doubled as a
-// scene selector. The Rust and JVM guests spell it the same way, and
-// the legs pass it.
+// defaultScene is what an EMPTY KAYA_SELFTEST means on a desktop and
+// nowhere else; main_android.go refuses an empty name instead. "1" is
+// milestone2's name — the selftest flag's original spelling, which the
+// Rust and JVM guests and the legs all still pass.
 const defaultScene = "1"
 
-// scenes is what this artifact carries, keyed by the name the leg
-// passes in KAYA_SELFTEST. A TABLE RATHER THAN A SWITCH, because it is
-// data: the legs arm adds a leg by finding its name here, and a gate
-// can read one key per line without parsing Go.
-//
-// EVERY SCENE THE GO TREE HAS IS IN IT, including the ones a given host
-// cannot run. That is the JVM host's stated rule
-// (android/milestone2kt/.../MainActivity.kt:83-87) and it is the right
-// one for the same reason: a scene registered but unsupported dies on
-// the capability gate that rejects it — create_window for `window` and
-// `panels`, resize_window for `split` — naming the thing it could not
-// do. A scene left OUT would die in pick() instead, saying the artifact
-// does not carry it, which is a true sentence about the wrong subject.
-// WHETHER A LEG RUNS ONE IS NOT THIS TABLE'S QUESTION:
-// tools/check-stubs.sh reads the backend, never a selector.
+// scenes is what this artifact carries, keyed by the name the leg passes
+// in KAYA_SELFTEST. EVERY SCENE THE GO TREE HAS IS IN IT, including the
+// ones a given host cannot run: an unsupported scene should die on the
+// capability gate that rejects it, naming what it could not do, rather
+// than in pick() claiming the artifact does not carry it.
 var scenes = map[string]func() *kaya.App{
 	"1":          milestone2.App,
 	"a11y":       a11y.App,
@@ -99,10 +73,6 @@ var scenes = map[string]func() *kaya.App{
 	"commands":   commands.App,
 	"confirm":    confirm.App,
 	"dirty":      dirty.App,
-	// THE FORCING ARTIFACT (docs/editor-plan.md): not a conformance
-	// scene but an APP, carried here like every other because a scene is
-	// how the matrix owns it — byte-frozen output compared across
-	// platforms, and a leg wherever it can run.
 	"editor":     editor.App,
 	"entry":      entry.App,
 	"feed":       feed.App,
@@ -111,10 +81,9 @@ var scenes = map[string]func() *kaya.App{
 	"grid":       grid.App,
 	"grow":       grow.App,
 	"layout":     layout.App,
-	// One app behind both list-detail scripts, the shape the Rust and
-	// JVM hosts already have: `split` drives resize_window and is
-	// desktop-only, `listdetail` is the bare invariant at whatever
-	// width the device picked.
+	// One app behind both list-detail scripts: `split` drives
+	// resize_window and is desktop-only, `listdetail` is the bare
+	// invariant at whatever width the device picked.
 	"listdetail": split.App,
 	"menus":      menus.App,
 	"nav":        nav.App,
@@ -139,14 +108,8 @@ var scenes = map[string]func() *kaya.App{
 }
 
 // pick is the half of the selector both hosts share: a name that is not
-// in the table is a WIRING BUG, and it dies here naming itself.
-//
-// It used to run milestone2 instead, on both the Go and the JVM APK,
-// and that is a silent wrong scene: the leg launches, a scene runs
-// happily, and every step of the script the runner asked for fails
-// against labels from a scene nobody selected. The EMPTY name is the
-// arm the two tails answer differently, so it is theirs, not this
-// function's.
+// in the table is a WIRING BUG, and it dies here naming itself. The
+// EMPTY name is the arm the two tails answer differently.
 func pick(scene string) func() *kaya.App {
 	build, carried := scenes[scene]
 	if !carried {

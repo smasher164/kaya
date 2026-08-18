@@ -20,17 +20,15 @@ let () =
   build app (fun () ->
      let items = collection_of item_record in
      let on_rotate () =
-       (* First entry to the end. The model owns the order, so the
-          handler asks it which key is first — it never counts
-          widgets. *)
+       (* First entry to the end. The model owns the order, so the handler
+          asks it which key is first — it never counts widgets. *)
        let entries = record_items items in
        let first, _ = List.hd entries in
        move_to_end (record_handle items) first
      in
      let on_lift () =
-       (* Last entry to the front: move_to_front is sugar for
-          move_before the current first key — the same wire op, keys
-          never indices. *)
+       (* Last entry to the front: move_to_front is sugar for move_before the
+          current first key — the same wire op, keys never indices. *)
        let entries = record_items items in
        let last, _ = List.nth entries (List.length entries - 1) in
        move_to_front (record_handle items) last

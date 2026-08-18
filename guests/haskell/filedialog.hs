@@ -1,24 +1,11 @@
 -- The filedialog conformance scene, Haskell port — the picker's
--- request/result grammar and the capability it hands back (DESIGN.md,
--- File dialogs).
+-- request/result grammar and the capability it hands back.
 --
--- WHAT THIS PROVES, and why it goes all the way to the bytes: the
--- design's whole claim is that kaya hands over a CAPABILITY and never
--- moves the data. So the guest does not assert that a dialog closed —
--- it opens the handle it was given, reads the file with an ORDINARY
--- Handle, and writes what it read into a signal.
+-- THE FILE IS THE GUEST'S OWN, written before anything is shown: guest
+-- and interpreter are the same process, so they agree on a path with no
+-- runner involvement (getTemporaryDirectory honours TMPDIR).
 --
--- THE FILE IS THE GUEST'S OWN, written before anything is shown, so
--- guest and interpreter agree on a path with no runner involvement —
--- they are the same process. getTemporaryDirectory honours TMPDIR,
--- which is what makes both halves land on the same place without
--- either consulting the other.
---
--- THE READ RUNS OFF THE APP THREAD, which is what openPicked tells
--- every caller to do: it blocks, and a cloud provider may download the
--- whole file before it returns. The parking is a plain empty MVar and
--- the worker a plain forkIO, as background.hs's is — kaya supplies no
--- waiting primitive and should not.
+-- THE READ RUNS OFF THE APP THREAD because openPicked blocks.
 --
 -- See guests/rust/filedialog.rs and tools/scenes/filedialog.steps.
 
@@ -39,12 +26,9 @@ main = kayaMain $ \app -> do
   pid <- getProcessID
   let dir = tmp </> ("kaya-picked-" ++ show pid)
   createDirectoryIfMissing True dir
-  -- THE DECOY IS LOAD-BEARING: with one file in the directory,
-  -- pressing Open with nothing selected returns that file, so
-  -- `file_choose picked.txt` would pass on a backend that ignored the
-  -- name entirely. Measured on GTK. "decoy" sorts before "picked", so
-  -- a backend that skips selection gets the WRONG file, and its five
-  -- bytes fail the byte assertion as well as the name.
+  -- THE DECOY MUST SORT BEFORE "picked.txt", so a backend that skips
+  -- selection gets the WRONG file (docs/traps.md, "Pressing Open with
+  -- nothing selected still returns a file").
   writeFile (dir </> "picked.txt") "picked bytes"
   writeFile (dir </> "decoy.txt") "decoy"
 
@@ -53,16 +37,12 @@ main = kayaMain $ \app -> do
     status <- signal (VStr "no file")
 
     let picked files = case files of
-          -- The empty list IS cancel. Nothing to read, so no worker
-          -- and no release.
+          -- The empty list IS cancel.
           [] -> buildTx app (writeSignal status (VStr "cancelled"))
           (first : _) -> do
             _ <- forkIO $ do
-              -- THE CLAIM, and it is made HERE rather than in the
-              -- handler on purpose: the handle crossed a thread
-              -- boundary, and it is redeemed and read with GHC's own
-              -- IO on the thread that received it. kaya is not in this
-              -- data path, and openPicked is documented to block.
+              -- Redeemed on the WORKER, not in the handler: the handle
+              -- crosses a thread boundary and openPicked blocks.
               text <- do
                 r <- try (openPicked first fileModeRead)
                 case r of
@@ -71,10 +51,9 @@ main = kayaMain $ \app -> do
                     body <- hGetContents' h
                     hClose h
                     return body
-              -- Parks holding the result, standing in for the tail of
-              -- a slow transfer. Were this work running on the app
-              -- thread, the release click could never be processed and
-              -- the whole scene would deadlock — the point.
+              -- Parks holding the result, standing in for the tail of a
+              -- slow transfer: on the app thread the release click could
+              -- never be processed and the scene would deadlock.
               takeMVar released
               post app $
                 buildTx
@@ -87,13 +66,12 @@ main = kayaMain $ \app -> do
       column
         []
         [ labelBound status [A11yId "status"], -- label#0
-          -- ADVISORY filters on every platform: a default view, never
-          -- a guarantee, so a guest still validates what it got.
+          -- Filters are ADVISORY on every platform, never a guarantee,
+          -- so a guest still validates what it got.
           buttonOn "open" (buildTx app (pickFiles [("Text", "txt")] picked)) [], -- button#0
           buttonOn "open one" (buildTx app (pickFile [("Text", "txt")] picked)) [], -- button#1
           -- tryPutMVar, NOT putMVar: putMVar BLOCKS when the MVar is
-          -- full, and a second release click would then wedge the app
-          -- thread (background.hs makes the same point).
+          -- full, and a second release click would wedge the app thread.
           buttonOn "release" (() <$ tryPutMVar released ()) [] -- button#2
         ]
     mount root

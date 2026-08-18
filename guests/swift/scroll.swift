@@ -1,8 +1,7 @@
-// The scroll conformance scene, Swift port — the viewport grows so
-// the enclosing track constrains it (an unconstrained viewport hugs
-// its content and nothing overflows); the bottom button, reachable
-// only by scrolling, proves the scrolled-to content is live. See
-// guests/rust/scroll.rs and tools/scenes/scroll.steps.
+// The scroll conformance scene, Swift port — the viewport GROWS so the
+// enclosing track constrains it (an unconstrained viewport hugs its
+// content and nothing overflows). See guests/rust/scroll.rs and
+// tools/scenes/scroll.steps.
 
 import Foundation
 

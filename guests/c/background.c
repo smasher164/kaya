@@ -1,25 +1,12 @@
 /* The background scene from C, on the function floor: work off the app
- * thread, posted back (docs/background-work-plan.md).
+ * thread, posted back (docs/background-work-plan.md). The three pieces
+ * a binding's `post` hides are the guest's here — a mutex-guarded work
+ * list, kaya_wake, and a drain before every wait — and every other C
+ * guest that posts refers back to this file.
  *
- * THIS IS WHERE THE MECHANISM IS VISIBLE. The eight sugar bindings each
- * hide it behind a `post` method — a queue in the binding's own closure
- * type, drained at the top of the loop, with kaya_wake to ring the app
- * thread. C has no binding, so the guest owns all three pieces and you
- * can read them: a mutex-guarded work list, kaya_wake, and a drain
- * before every wait. That is the floor documenting itself, exactly as
- * this guest builds its widget tree with kaya_tx_* records rather than
- * a construction chain.
- *
- * CLOSURES DO NOT CROSS THE C ABI, deliberately. All the core owes a
- * posting thread is the wake-up; a function-pointer-plus-void-star work
- * queue down here would be one uniform mechanism and the worst spelling
- * available in seven of the eight sugar languages.
- *
- * WHAT THE SCENE PROVES, and why it parks: a wrong implementation must
- * DEADLOCK rather than disagree. The worker waits until a CLICK releases
- * it, and only a live app thread can process a click — so a binding
- * that let background work occupy the app thread could not even deliver
- * its own release.
+ * THE WORKER PARKS SO A WRONG IMPLEMENTATION DEADLOCKS rather than
+ * disagreeing: only a live app thread can deliver the click that
+ * releases it.
  *
  * Built and run by the Linux container suite with KAYA_SELFTEST=background. */
 
@@ -44,23 +31,16 @@
 #define W_NEST 8
 
 /* The release latch: the app thread sets it, the worker waits on it.
- * pthread_cond_signal never blocks, which is the property every guest's
- * release needs — a handler that waited here would fail the very claim
- * the scene tests. */
+ * The release must NEVER BLOCK the app thread — a handler that waited
+ * here would fail the claim the scene tests. */
 static pthread_mutex_t release_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t release_cond = PTHREAD_COND_INITIALIZER;
 static int released = 0;
 
-/* THE POST QUEUE. The sugar bindings keep one of these privately; here
- * it is the guest's, and it is the only state two threads touch.
- *
- * NOTE WHAT A CLOSURE WAS DOING FOR THE OTHERS. Every sugar binding
- * queues a CLOSURE, so each queued item carries its own destination for
- * free. C queues plain data, so the destination has to be spelled: each
- * entry names the signal it appends to and the buffer it accumulates
- * into. Getting this wrong is not theoretical — the first version had
- * one queue writing one signal, so the nesting test's "b" landed on the
- * status accumulator and the scene read "ac" instead of "acb". */
+/* THE POST QUEUE, and the only state two threads touch. Closures do not
+ * cross the C ABI, so each entry spells its own destination — the signal
+ * it appends to and the buffer it accumulates into — where a binding's
+ * queued closure would carry that for free. */
 #define MAX_POSTED 16
 typedef struct {
     uint64_t signal;
@@ -72,13 +52,13 @@ static pthread_mutex_t post_lock = PTHREAD_MUTEX_INITIALIZER;
 static PostedWrite posted_steps[MAX_POSTED];
 static unsigned posted_count = 0;
 
-/* Accumulators. Only the app thread touches these — every one of them
- * is read and written inside a drained post — so they need no lock. */
+/* Accumulators. Only the app thread touches these, inside a drained
+ * post, so they need no lock. */
 static char landed[32] = "";
 static char nested[8] = "";
 
 /* Queue one step for the app thread and ring the doorbell. Called from
- * the WORKER thread; this is the shape App.post has in every binding. */
+ * the WORKER thread. */
 static void post_step(uint64_t signal, char *acc, size_t acc_cap, const char *step) {
     pthread_mutex_lock(&post_lock);
     if (posted_count < MAX_POSTED) {
@@ -119,15 +99,13 @@ static void drain_posted(void) {
 
 static void *worker(void *arg) {
     (void)arg;
-    /* Parks here until the scene clicks release. Were this running on
-     * the app thread, that click could never be processed and the whole
-     * scene would deadlock — the point. */
+    /* Parks until the scene clicks release. */
     pthread_mutex_lock(&release_lock);
     while (!released)
         pthread_cond_wait(&release_cond, &release_lock);
     pthread_mutex_unlock(&release_lock);
-    /* Three posts, in order. The accumulator in drain_posted makes this
-     * a test of ORDER and not merely of which one ran last. */
+    /* Three posts, in order: the accumulator in drain_posted makes this
+     * a test of ORDER, not of which one ran last. */
     post_step(SIG_STATUS, landed, sizeof landed, "1");
     post_step(SIG_STATUS, landed, sizeof landed, "2");
     post_step(SIG_STATUS, landed, sizeof landed, "3");
@@ -138,9 +116,7 @@ static void build_scene(void) {
     uint8_t buf[1024];
     KayaTx tx = {buf, 0};
 
-    /* No window title: the floor spells window props through the
-     * generic kaya_tx_set_window_prop with a source tail, no C guest
-     * sets one, and this scene asserts no title. */
+    /* No window title: this scene asserts none. */
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("idle"));
     kaya_tx_create_signal(&tx, SIG_ALIVE, kaya_str("-"));
     kaya_tx_create_signal(&tx, SIG_NESTED, kaya_str("-"));
@@ -154,9 +130,7 @@ static void build_scene(void) {
     kaya_tx_set_a11y_id(&tx, W_ALIVE, "alive");
     kaya_tx_create_widget(&tx, W_NESTED, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_NESTED, SIG_NESTED);
-    /* Authored so the CLOSING read can address it: the AX read needs an
-     * identifier, and an index read passes for an arm that ran and drew
-     * nothing. */
+    /* Authored so the closing AX read can address it by identifier. */
     kaya_tx_set_a11y_id(&tx, W_NESTED, "nested");
 
     kaya_tx_create_widget(&tx, W_START, KAYA_KIND_BUTTON);
@@ -213,8 +187,6 @@ static void *app(void *arg) {
             kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("working"));
             kaya_submit(tx.buf, tx.len);
         } else if (id == W_PING) {
-            /* Proof the app thread is still serving input while the
-             * worker is parked and has posted nothing. */
             kaya_tx_write_signal(&tx, SIG_ALIVE, kaya_str("alive"));
             kaya_submit(tx.buf, tx.len);
         } else if (id == W_RELEASE) {
@@ -238,8 +210,6 @@ static void *app(void *arg) {
 }
 
 int main(void) {
-    /* The stale-artifact guard: this guest compiled against one spec
-     * revision; the loaded library must speak the same one. */
     if (kaya_spec_hash() != KAYA_SPEC_HASH) {
         fprintf(stderr, "kaya: library/binding spec mismatch — rebuild both\n");
         return 1;

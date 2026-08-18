@@ -2,22 +2,10 @@
    representations, and the privileged read that takes one back
    (DESIGN.md, Clipboard; docs/clipboard-plan.md).
 
-   EVERY ASSERTION CROSSES A PROCESS BOUNDARY, which is the whole design
-   of this scene. kaya's representation set is closed because the
-   LOWERINGS are the hard part — CF_HTML's mandatory offset header,
-   Android's content:// URI for an image, CF_HDROP's double-NUL struct —
-   and a check where kaya reads what kaya wrote parses its own malformed
-   header perfectly happily. That is not merely less coverage: it is a
-   check that cannot fail for the reason the design exists.
-
-   THE ONE EXCEPTION IS THE CUSTOM FORMAT, deliberately. No stock tool on
-   any platform writes an app-defined type, so the guest copies one and
-   reads it back, with the foreign reader confirming from outside that
-   the bytes really are there under that id.
-
-   THE IMAGE IS ASSERTED AS A DECODED SIZE, never as bytes: every host
-   re-encodes freely between image types, so a byte count would be a
-   different number on every lane for one picture.
+   Every assertion but the custom format's is made by a FOREIGN tool, so
+   the lowerings are what gets checked rather than kaya's own parse. The
+   image is asserted as a DECODED SIZE and never as bytes — every host
+   re-encodes freely, so a byte count is a different number per lane.
 
    Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
    contract in tools/scenes/clipboard.steps. *)
@@ -25,11 +13,8 @@
 open Kaya_wire
 open Kaya_app
 
-(* A 4x4 PNG, spelled out rather than generated: the scene asserts "4x4"
-   through a foreign decoder, so the picture has to be a real encoded
-   image whose size is knowable from the script. Written to disk for the
-   seeding tool AND handed to [copy] as bytes — the same picture both
-   ways. *)
+(* A 4x4 PNG spelled out rather than generated: a foreign decoder asserts
+   its size, so the size has to be knowable from the script. *)
 let pixel_png_bytes =
   [
              0x89; 0x50; 0x4E; 0x47; 0x0D; 0x0A; 0x1A; 0x0A (* signature *);
@@ -48,25 +33,21 @@ let pixel_png =
   String.init (List.length pixel_png_bytes) (fun i ->
       Char.chr (List.nth pixel_png_bytes i))
 
-(* The app-defined format's id: reverse-DNS and space-free, because it
-   reaches every platform's own registry VERBATIM — a UTI on Apple,
-   RegisterClipboardFormat on Windows, a target atom on X11 and Wayland,
-   a MIME type on Android. *)
+(* Reverse-DNS and space-free: this id reaches every platform's own
+   registry VERBATIM (a UTI, RegisterClipboardFormat, an X11 target
+   atom, an Android MIME type). *)
 let note_id = "dev.kaya/note"
 
-(* NO QUOTES IN THE PAYLOAD, and the reason is the script rather than
-   the clipboard: the step grammar has escapes for newline, carriage
-   return and backslash in all three interpreters, but none for a quote
-   — so a quoted byte could not be spelled in the expectation. (This
-   comment cannot show the escapes literally either: OCaml reads a
-   quote inside a comment as the start of a string.) *)
+(* NO QUOTES IN THE PAYLOAD: the step grammar escapes newline, carriage
+   return and backslash but not a quote, so a quoted byte cannot be
+   spelled in the expectation. (OCaml lexes a quote inside a comment as
+   a string, so this one cannot show the escapes either.) *)
 let note_bytes = "note=1"
 
-(* Both halves compute this identically, the filedialog rule: guest and
-   interpreter are the same process, so they agree on a path with no
-   runner involvement, and the pid keeps parallel legs from colliding.
-   [Filename.get_temp_dir_name] honours TMPDIR, which is OCaml's own
-   answer and what makes the two halves agree. *)
+(* Guest and interpreter are the same process and compute this path
+   identically, with no runner involvement (the filedialog rule); the
+   pid keeps parallel legs apart, and [Filename.get_temp_dir_name]
+   honours TMPDIR, which is what makes the two halves agree. *)
 let scene_dir =
   Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "kaya-clip-%d" (Unix.getpid ()))
@@ -86,12 +67,6 @@ let () =
   let plain = ref None in
 
   build app (fun () ->
-      (* THE GESTURE LAYER'S DECLARATION, and an app writes nothing else
-         for it: the Paste command lowers to the platform's own, acts on
-         whatever is focused, and works out its own enablement. kaya has
-         no selection API, which is exactly why copy of a selection has
-         to be a command rather than something an app assembles out of
-         the data layer. *)
       window ~title:"clipboard"
         ~menus:
           [
@@ -110,28 +85,22 @@ let () =
 
       let answered clip =
         match clip with
-        (* EMPTY IS THE UNIVERSAL NO, and the guest does not try to tell
-           its four causes apart — denied, unfocused, absent, or nothing
-           this read accepted. The platforms deliberately decline to
-           say. *)
+        (* Empty cannot discriminate its causes — denied, unfocused,
+           absent, or nothing this read accepted — so the guest does not
+           claim to know which. *)
         | None -> write status (Str "empty")
         | Some (Text text) -> write status (Str (Printf.sprintf "text %s" text))
         | Some (Html html) -> write status (Str (Printf.sprintf "html %s" html))
         | Some (Custom (id, body)) ->
             write status (Str (Printf.sprintf "custom %s %s" id body))
         | Some (Image bytes) ->
-            (* STRAIGHT BACK OUT, because the assertion that matters is a
-               foreign DECODER's: the byte count differs per host for one
-               picture, and the decoded size does not. *)
             copy ~image:bytes ();
             write status (Str "image")
         | Some (Files []) -> write status (Str "files none")
         | Some (Files (first :: _)) ->
             let worker () =
-              (* OFF THE APP THREAD, which is what [open_picked]
-                 documents: it blocks, and a pasted file is no different
-                 from a picked one — it IS a picked one, the same
-                 capability arriving through a second door. *)
+              (* OFF THE APP THREAD: [open_picked] blocks, and a pasted
+                 file redeems exactly like a picked one. *)
               let text =
                 try
                   let fd, _seekable =
@@ -153,11 +122,9 @@ let () =
       in
 
       let copy_rich () =
-        (* ONE CLIP, FOUR REPRESENTATIONS. kaya derives none of them from
-           any other: whether list bullets survive html-to-text is this
-           app's decision, so it spells out both. The order they go on
-           the wire is kaya's, not this call's — descending richness,
-           which is preference order on every host that has one. *)
+        (* One clip, four representations. kaya derives NONE of them
+           from any other, so an app that wants text beside html spells
+           out both. *)
         copy ~text:"kaya clip" ~html:"<b>kaya</b> clip" ~image:pixel_png
           ~custom:[ (note_id, note_bytes) ] ();
         write status (Str "copied")
@@ -189,14 +156,12 @@ let () =
               ~on_click:(fun () -> Option.iter focus !plain)
               (* button#6 *);
             (fun () ->
-              (* DECLARES WHAT IT TAKES, so a paste lands in the hook and
-                 this app decides what to do with it. *)
+              (* A non-empty accept list is what turns the paste hook
+                 on; without one the platform inserts and the app never
+                 sees it. *)
               let w = entry ~a11y_id:"rich" () in
               set_accepts w [ accept_text ];
               on_paste app w (fun clip ->
-                  (* THE SAME SHAPE THE READ ANSWERS WITH, and free where
-                     the read is not: a gesture is its own authorisation,
-                     so no platform charges a prompt for this one. *)
                   match clip with
                   | Text text ->
                       write status (Str (Printf.sprintf "pasted %s" text))
@@ -205,26 +170,17 @@ let () =
               w)
             (* entry#0 *);
             (fun () ->
-              (* DECLARES NOTHING, so the platform's own insertion happens
-                 and the field's ordinary change path reports it — which
-                 is what a plain text editor gets for free. *)
+              (* No accept list: the platform inserts and the field's
+                 ordinary change path reports it. *)
               let w = entry ~a11y_id:"plain" () in
               plain := Some w;
               w)
             (* entry#1 *);
-            (* THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy. The
-               accept list is declared on the TEMPLATE, and that
-               declaration is what turns the node hook on: every backend
-               hands the gesture to the platform when the focused
-               widget's accept list is empty, so before a template node
-               could carry one this handler registered, dispatched and
-               could never fire (docs/tpl-props-plan.md §1). The copy's
-               OWN KEY arrives in front of the payload, and printing it
-               is what tells an instance paste from a live one.
-
-               The row's value is empty because nothing displays it: the
-               stamped entry is uncontrolled like its live siblings, and
-               staying empty through the paste is the assertion. *)
+            (* The same two doors on a STAMPED copy: the accept list is
+               declared on the TEMPLATE, and without it the node hook
+               registers, dispatches and can never fire
+               (docs/tpl-props-plan.md §1). The copy's own key arrives in
+               front of the payload. *)
             label ~a11y_id:"row-status" ~bind:row_status (* label#1 *);
             each notes (fun () ->
                 Tpl.(

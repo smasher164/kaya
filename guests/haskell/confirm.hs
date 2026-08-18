@@ -1,12 +1,7 @@
 -- The confirm conformance scene, Haskell port — the modal-alert
--- grammar via the config-list spelling (the request/result grammar's
--- first client): one button re-shows a two-action alert; the three
--- rounds take the three answer paths (action 0, action 1,
--- alertChoiceCancel — every platform-native dismissal), and the
--- status label records each result. The result handler rides the
--- REQUEST (the buttonOn precedent) and retires with its one answer;
--- ids are binding-allocated. See guests/rust/confirm.rs and
--- tools/scenes/confirm.steps.
+-- grammar. The three rounds take the three answer paths (action 0,
+-- action 1, alertChoiceCancel, which covers every platform-native
+-- dismissal). See guests/rust/confirm.rs and tools/scenes/confirm.steps.
 
 import KayaApp
 import KayaWire (Value (..), alertChoiceCancel)
@@ -20,9 +15,8 @@ main = kayaMain $ \app -> do
       column
         []
         [ labelBound s, -- label#0
-          -- The result handler rides the request (the buttonOn
-          -- precedent) and retires with its one answer; ids are
-          -- binding-allocated — no counter plumbing.
+          -- The result handler rides the request and retires with its
+          -- one answer; ids are binding-allocated.
           buttonOn "delete" $
             buildTx app $
               showAlert
@@ -41,8 +35,6 @@ main = kayaMain $ \app -> do
                               else if choice == 1 then "archived" else "deleted"
                           )
                 ),
-          -- A different dialog, a different handler: the association
-          -- is the registration itself.
           buttonOn "eject" $
             buildTx app $
               showAlert

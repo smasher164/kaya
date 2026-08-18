@@ -1,12 +1,7 @@
-// The confirm conformance scene, Swift port — the modal-alert
-// grammar via named arguments (the request/result grammar's first
-// client): one button re-shows a two-action alert; the three rounds
-// take the three answer paths (action 0, action 1,
-// KAYA_ALERT_CHOICE_CANCEL — every platform-native dismissal), and
-// the status label records each result. The result handler rides
-// the REQUEST (a trailing closure, the widget-handler precedent)
-// and retires with its one answer; ids are binding-allocated. See
-// guests/rust/confirm.rs and tools/scenes/confirm.steps.
+// The confirm conformance scene, Swift port — the modal-alert grammar:
+// three rounds take the three answer paths (action 0, action 1,
+// KAYA_ALERT_CHOICE_CANCEL, which is every platform-native dismissal).
+// See guests/rust/confirm.rs and tools/scenes/confirm.steps.
 
 import Foundation
 
@@ -22,9 +17,6 @@ app.build { tx in
         tx.button(
             "delete",
             onClick: { inner in
-                // The result handler rides the request and retires
-                // with its one answer; ids are binding-allocated —
-                // no counter plumbing.
                 inner.showAlert(
                     title: "delete item?", message: "this cannot be undone",
                     actions: ["Delete", "Archive"], cancel: "Keep"
@@ -41,8 +33,6 @@ app.build { tx in
         tx.button(
             "eject",
             onClick: { inner in
-                // A different dialog, a different handler: the
-                // association is the registration itself.
                 inner.showAlert(
                     title: "eject disk?", message: "it is still mounted",
                     actions: ["Eject"], cancel: "Hold"

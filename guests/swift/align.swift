@@ -1,10 +1,7 @@
-// The align conformance scene, Swift port — see guests/rust/align.rs
-// and tools/scenes/align.steps for the full rationale. The root
-// column centers children of three different natural widths; the row
-// aligns baselines across a label, a checkbox, and a tall no-baseline
-// image whose bottom sits ON the baseline (the CSS replaced-element
-// rule) — the construction that separates the modes on every
-// platform's control metrics.
+// The align conformance scene, Swift port. See guests/rust/align.rs and
+// tools/scenes/align.steps. The row's tall no-baseline image sits ON the
+// baseline (the CSS replaced-element rule) — the construction that
+// separates the alignment modes on every platform's control metrics.
 
 import Foundation
 

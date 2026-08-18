@@ -13,27 +13,18 @@ import java.nio.file.Paths;
 /**
  * The clipboard conformance scene from the JVM — one clip in several
  * representations, and the privileged read that takes one back
- * (DESIGN.md, Clipboard; docs/clipboard-plan.md).
+ * (DESIGN.md, Clipboard; docs/clipboard-plan.md). Canonical semantics
+ * in guests/rust/clipboard.rs; the byte-frozen contract in
+ * tools/scenes/clipboard.steps.
  *
- * <p>EVERY ASSERTION CROSSES A PROCESS BOUNDARY, which is the whole
- * design of this scene. kaya's representation set is closed because the
- * LOWERINGS are the hard part — CF_HTML's mandatory offset header,
- * Android's content:// URI for an image, CF_HDROP's double-NUL struct —
- * and a check where kaya reads what kaya wrote parses its own malformed
- * header perfectly happily. That is not merely less coverage: it is a
- * check that cannot fail for the reason the design exists.
- *
- * <p>THE ONE EXCEPTION IS THE CUSTOM FORMAT, deliberately. No stock
- * tool on any platform writes an app-defined type, so the guest copies
- * one and reads it back, with the foreign reader confirming from
- * outside that the bytes really are there under that id.
+ * <p>EVERY ASSERTION CROSSES A PROCESS BOUNDARY: a check where kaya
+ * reads what kaya wrote parses its own malformed header happily. The
+ * custom format is the one exception, since no stock tool writes an
+ * app-defined type.
  *
  * <p>THE IMAGE IS ASSERTED AS A DECODED SIZE, never as bytes: every
- * host re-encodes freely between image types, so a byte count would be
- * a different number on every lane for one picture.
- *
- * <p>Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
- * contract in tools/scenes/clipboard.steps.
+ * host re-encodes freely, so a byte count differs per lane for one
+ * picture.
  */
 final class Clipboard {
     private Clipboard() {}
@@ -41,9 +32,7 @@ final class Clipboard {
     /**
      * A 4x4 PNG, spelled out rather than generated: the scene asserts
      * "4x4" through a foreign decoder, so the picture has to be a real
-     * encoded image whose size is knowable from the script. Written to
-     * disk for the seeding tool AND handed to copy as bytes — the same
-     * picture both ways.
+     * encoded image whose size is knowable from the script.
      */
     private static final byte[] PIXEL_PNG = {
         (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
@@ -59,46 +48,34 @@ final class Clipboard {
 };
 
     /**
-     * The app-defined format's id: reverse-DNS and space-free, because
-     * it reaches every platform's own registry VERBATIM — a UTI on
-     * Apple, RegisterClipboardFormat on Windows, a target atom on X11
-     * and Wayland, a MIME type on Android.
+     * The app-defined format's id: reverse-DNS and SPACE-FREE, because
+     * it reaches every platform's own registry verbatim (a UTI, a
+     * RegisterClipboardFormat name, a target atom, a MIME type).
      */
     private static final String NOTE_ID = "dev.kaya/note";
 
     /**
-     * NO QUOTES IN THE PAYLOAD, and the reason is the script rather
-     * than the clipboard: the step grammar's escapes are \n, \r and \\
-     * in all three interpreters, with no \", so a quoted byte could not
-     * be spelled in the expectation.
+     * NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r
+     * and \\ in all three interpreters, with no \", so a quoted byte
+     * could not be spelled in the expectation.
      */
     private static final byte[] NOTE_BYTES = "note=1".getBytes(StandardCharsets.UTF_8);
 
     static void app() {
         KayaApp app = new KayaApp();
 
-        // TMPDIR FIRST, AND JAVA IS THE ONLY HALF THAT NEEDS SAYING SO.
-        // Every other language's "where is temp" honours the TMPDIR
-        // environment variable, and so the interpreter and the guest
-        // land on the same directory without either consulting the
-        // other. Java's `java.io.tmpdir` does NOT: on macOS the JDK
-        // sets it from the per-user Darwin temp dir and ignores TMPDIR
-        // entirely. Measured by the filedialog scene, the hard way. On
-        // Windows there is no TMPDIR and java.io.tmpdir is the right
-        // answer, which is why it stays as the fallback.
+        // TMPDIR FIRST, java.io.tmpdir only as the Windows fallback:
+        // Java's java.io.tmpdir ignores TMPDIR on macOS
+        // (docs/traps.md, "java.io.tmpdir").
         String tmp = System.getenv("TMPDIR");
         if (tmp == null || tmp.isEmpty()) {
             tmp = System.getProperty("java.io.tmpdir");
         }
-        // THE PHONES USE THE SHARED COLLECTIONS, exactly as the rust
-        // guest does (guests/rust/clipboard.rs, scene_root): the
-        // OUTSIDE process — the Android helper app — has to reach
-        // these files too, and no app can see another app's private
-        // cache. A JVM guest has no cfg(), so Android is detected by
-        // the specification vendor. Missed on the first android run:
-        // the interpreter expanded $TMP to the shared Documents
-        // collection while this guest wrote to the cache dir, and the
-        // seed died on the path the two sides disagreed about.
+        // THE PHONES USE THE SHARED COLLECTION, and must: the outside
+        // reader is another app, which cannot see this one's cache.
+        // The interpreter expands $TMP the same way, so a guest writing
+        // to the cache dir instead kills the seed. A JVM guest has no
+        // cfg(), so Android is detected by the vendor string.
         if (System.getProperty("java.specification.vendor", "")
                 .contains("Android")) {
             String ext = System.getenv("EXTERNAL_STORAGE");
@@ -117,37 +94,26 @@ final class Clipboard {
         app.build(tx -> {
             KayaApp.WindowRef win = tx.window(0).title("clipboard");
 
-            // THE GESTURE LAYER'S DECLARATION, and an app writes nothing
-            // else for it: the Paste command lowers to the platform's
-            // own, acts on whatever is focused, and works out its own
-            // enablement. kaya has no selection API, which is exactly
-            // why copy of a selection has to be a command rather than
-            // something an app assembles out of the data layer.
+            // kaya has no selection API, which is why copy of a
+            // selection has to be a command at all.
             KayaApp.MenuItem edit = win.menu("Edit");
             edit.item("Cut").role(KayaApp.ROLE_CUT);
             edit.item("Copy").role(KayaApp.ROLE_COPY);
             edit.item("Paste").role(KayaApp.ROLE_PASTE);
 
             KayaApp.Signal<String> status = tx.signal("ready");
-            // The stamped paste target's own status line, and the
-            // one-row collection it reports for. Declared beside status
-            // rather than inside the column body because the seeding
-            // insert below runs AFTER the mount (Reorder.java's shape),
-            // and a local declared inside the lambda could not be
-            // reached from there.
+            // Declared out here rather than in the column body because
+            // the seeding insert below runs AFTER the mount, and a
+            // local inside the lambda could not be reached from there.
             KayaApp.Signal<String> rowStatus = tx.signal("");
             KayaApp.Collection notes = tx.collection();
 
             tx.mount(tx.column(() -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.button("copy", inner -> { // button#0
-                    // ONE CLIP, FOUR REPRESENTATIONS. kaya derives none
-                    // of them from any other: whether list bullets
-                    // survive html-to-text is this app's decision, so
-                    // it spells out both. The order they go on the wire
-                    // is kaya's, not this chain's — descending
-                    // richness, which is preference order on every host
-                    // that has one.
+                    // ONE CLIP, FOUR REPRESENTATIONS: kaya derives none
+                    // of them from any other, and the wire order is
+                    // kaya's rather than this chain's.
                     inner.copy()
                             .text("kaya clip")
                             .html("<b>kaya</b> clip")
@@ -177,13 +143,9 @@ final class Clipboard {
                 tx.button("focus rich", inner -> inner.focus(fields[0])); // button#5
                 tx.button("focus plain", inner -> inner.focus(fields[1])); // button#6
 
-                // DECLARES WHAT IT TAKES, so a paste lands in the hook
-                // and this app decides what to do with it.
+                // Declares what it takes, so a paste lands in the hook.
                 fields[0] = tx.entry().accepts(KayaApp.ACCEPT_TEXT).a11yId("rich"); // entry#0
                 app.onPaste(fields[0], (t, clip) -> {
-                    // THE SAME SHAPE THE READ ANSWERS WITH, and free
-                    // where the read is not: a gesture is its own
-                    // authorisation, so no platform charges a prompt.
                     if (clip instanceof KayaApp.Representation.Text text) {
                         t.write(status, "pasted " + text.value());
                         return;
@@ -191,26 +153,16 @@ final class Clipboard {
                     t.write(status, "pasted " + clip);
                 });
 
-                // DECLARES NOTHING, so the platform's own insertion
-                // happens and the field's ordinary change path reports
-                // it — which is what a plain text editor gets for free.
+                // Declares nothing, so the platform's own insertion
+                // happens and the ordinary change path reports it.
                 fields[1] = tx.entry().a11yId("plain"); // entry#1
 
-                // THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy.
-                // The accept list is declared on the TEMPLATE, and that
-                // declaration is what turns the node hook on: every
-                // backend hands the gesture to the platform when the
-                // focused widget's accept list is empty, so before a
-                // template could carry one this handler was registered,
-                // dispatched, and unable to fire — the silent-registrar
-                // class (docs/tpl-props-plan.md §1). The copy's own key
-                // arrives with the payload, which is what tells an
-                // INSTANCE paste from a live one.
-                //
-                // The row's value is empty because nothing displays it:
-                // the stamped entry is UNCONTROLLED like its live
-                // siblings, and staying empty through the paste is the
-                // assertion.
+                // The same two doors on a STAMPED copy. The accept list
+                // must be declared on the TEMPLATE: every backend hands
+                // the gesture to the platform when the focused widget's
+                // accept list is empty, so a node hook without it is
+                // registered, dispatched and unable to fire
+                // (docs/tpl-props-plan.md §1).
                 tx.label(rowStatus).a11yId("row-status"); // label#1
                 for (var row : notes.rows()) {
                     KayaApp.Node note = row.entry(); // entry#2, one stamped copy
@@ -225,8 +177,8 @@ final class Clipboard {
                     });
                 }
             }));
-            // Seeded after the mount, Reorder.java's shape: the copy
-            // stamps from a template that is already closed.
+            // Seeded after the mount: the copy stamps from a template
+            // that is already closed.
             tx.insert(notes, "r1", "");
         });
 
@@ -238,17 +190,16 @@ final class Clipboard {
             KayaApp.Signal<String> status,
             KayaApp.Tx tx,
             KayaApp.Representation clip) {
-        // EMPTY IS THE UNIVERSAL NO, and the guest does not try to tell
-        // its four causes apart — denied, unfocused, absent, or nothing
-        // this read accepted. The platforms deliberately decline to say.
+        // EMPTY IS THE UNIVERSAL NO: denied, unfocused, absent or not
+        // accepted are indistinguishable, and the platforms decline to
+        // say which.
         if (clip == null) {
             tx.write(status, "empty");
             return;
         }
-        // INSTANCEOF PATTERNS RATHER THAN A PATTERN SWITCH: the switch
+        // INSTANCEOF PATTERNS RATHER THAN A PATTERN SWITCH: switching
         // over a sealed interface is a preview feature until JDK 21,
-        // and this file is compiled at 17 — by the desktop typecheck
-        // and by the Android APK, which shares it.
+        // and this file is compiled at 17.
         if (clip instanceof KayaApp.Representation.Text text) {
             tx.write(status, "text " + text.value());
         } else if (clip instanceof KayaApp.Representation.Html html) {
@@ -257,9 +208,8 @@ final class Clipboard {
             tx.write(status, "custom " + custom.id() + " "
                     + new String(custom.bytes(), StandardCharsets.UTF_8));
         } else if (clip instanceof KayaApp.Representation.Image image) {
-            // STRAIGHT BACK OUT, because the assertion that matters is
-            // a foreign DECODER's: the byte count differs per host for
-            // one picture, and the decoded size does not.
+            // Straight back out, so a foreign DECODER makes the
+            // assertion.
             tx.copy().image(image.bytes()).send();
             tx.write(status, "image");
         } else if (clip instanceof KayaApp.Representation.Files files) {
@@ -269,10 +219,8 @@ final class Clipboard {
             }
             KayaApp.PickedFile file = files.value().get(0);
             Thread worker = new Thread(() -> {
-                // OFF THE APP THREAD, which is what open documents: it
-                // blocks, and a pasted file is no different from a
-                // picked one — it IS a picked one, the same capability
-                // arriving through a second door.
+                // OFF THE APP THREAD: open blocks, and a pasted file is
+                // a picked one arriving through a second door.
                 String text;
                 try {
                     KayaApp.Opened opened = file.open(KayaWire.FILE_MODE_READ);
@@ -285,9 +233,9 @@ final class Clipboard {
                 String read = text;
                 app.post(t -> t.write(status, "files " + file.name() + " " + read));
             }, "clipboard-reader");
-            // The daemon flag matters: a parked non-daemon thread keeps
-            // the JVM alive, which never shows on a passing run and
-            // turns a FAILING one into a timeout instead of a report.
+            // The worker MUST be a daemon: a parked non-daemon thread
+            // keeps the JVM alive, which never shows on a passing run
+            // and turns a FAILING one into a timeout, not a report.
             worker.setDaemon(true);
             worker.start();
             tx.write(status, "reading");
@@ -295,14 +243,10 @@ final class Clipboard {
     }
 
     /**
-     * This process's id, without naming {@code ProcessHandle}.
-     *
-     * THE SAME FILE IS COMPILED INTO THE ANDROID VALIDATION APK, whose
-     * SDK has no {@code java.lang.ProcessHandle} at all — naming it is
-     * a compile error there, not a runtime one, so the desktop route
-     * has to be reached reflectively. Linux and Android both answer the
-     * question directly: {@code /proc/self} is a symlink named by the
-     * pid.
+     * This process's id, without NAMING {@code ProcessHandle}: the same
+     * file is compiled into the Android APK, whose SDK has no such
+     * class, so naming it is a compile error there. Reached
+     * reflectively; /proc/self answers directly on linux and Android.
      */
     private static long pid() {
         try {

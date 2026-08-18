@@ -1,10 +1,9 @@
-/* The menus scene from C, at the explicit wire floor: menu items
- * hand-numbered in their OWN id space, every prop an explicit set_menu_*
- * record, and the shortcut in the CANONICAL wire spelling ("primary+s":
- * lowercase, '+'-joined, primary/shift/alt order) — the core validates
- * and REJECTS non-canonical spellings, so no canonicalizer runs here.
- * Annotated semantics in guests/rust/menus.rs; the byte-frozen contract
- * in tools/scenes/menus.steps. */
+/* The menus scene from C, at the explicit wire floor. The shortcut is in
+ * the CANONICAL wire spelling ("primary+s": lowercase, '+'-joined,
+ * primary/shift/alt order) — the core REJECTS non-canonical spellings,
+ * so no canonicalizer runs here. Annotated semantics in
+ * guests/rust/menus.rs; the byte-frozen contract in
+ * tools/scenes/menus.steps. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -62,8 +61,8 @@ static void build_scene(void) {
      * rides its own binding of the SAME signal); menubar_append is the
      * window anchor. */
     {
-        /* set_window_prop, raw wire: u64 window, u32 wprop, u32 source,
-         * value. */
+        /* Packed by hand: the generated kaya_tx_set_window_prop closes
+         * the record BEFORE the value. */
         size_t start = kaya_wire_begin(&tx, KAYA_TX_SET_WINDOW_PROP);
         kaya_wire_u64(&tx, 0);
         kaya_wire_u32(&tx, KAYA_WPROP_TITLE);
@@ -77,7 +76,6 @@ static void build_scene(void) {
     kaya_tx_menu_item_create(&tx, M_SAVE, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_SAVE, "Save");
     kaya_tx_set_menu_symbol(&tx, M_SAVE, KAYA_SYMBOL_DONE);
-    /* The canonical wire spelling, hand-written at this floor. */
     kaya_tx_set_menu_shortcut(&tx, M_SAVE, "primary+s");
     kaya_tx_menu_item_create(&tx, M_EXPORT, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_EXPORT, "Export");
@@ -91,7 +89,6 @@ static void build_scene(void) {
     kaya_tx_menu_item_append(&tx, M_FILE, M_SHARE);
     kaya_tx_menubar_append(&tx, 0, M_FILE);
 
-    /* View > Details: the checkbox contract on a menu toggle. */
     kaya_tx_menu_item_create(&tx, M_VIEW, KAYA_MENU_KIND_MENU);
     kaya_tx_set_menu_label(&tx, M_VIEW, "View");
     kaya_tx_menu_item_create(&tx, M_DETAILS, KAYA_MENU_KIND_TOGGLE);
@@ -101,8 +98,8 @@ static void build_scene(void) {
     kaya_tx_menu_item_append(&tx, M_VIEW, M_DETAILS);
     kaya_tx_menubar_append(&tx, 0, M_VIEW);
 
-    /* Sort radio group: option order IS the index (Name = 0, Date = 1);
-     * value binds AFTER the options exist. */
+    /* Option order IS the index (Name = 0, Date = 1); value binds AFTER
+     * the options exist. */
     kaya_tx_menu_item_create(&tx, M_SORT, KAYA_MENU_KIND_RADIO_GROUP);
     kaya_tx_set_menu_label(&tx, M_SORT, "Sort");
     kaya_tx_menu_item_create(&tx, M_NAME, KAYA_MENU_KIND_RADIO_OPTION);
@@ -114,8 +111,8 @@ static void build_scene(void) {
     kaya_tx_bind_menu_value(&tx, M_SORT, SIG_SORT);
     kaya_tx_menubar_append(&tx, 0, M_SORT);
 
-    /* The context catalog, built live; only the attachment happens inside
-     * the template below. */
+    /* The context catalog is built LIVE; only the attachment happens
+     * inside the template below. */
     kaya_tx_menu_item_create(&tx, M_REMOVE, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_REMOVE, "Remove");
     kaya_tx_set_menu_symbol(&tx, M_REMOVE, KAYA_SYMBOL_DELETE);
@@ -130,8 +127,6 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_EXTEND, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_EXTEND, "extend menus");
 
-    /* Context anchor on a live label: the same vocabulary scoped to a
-     * noun. */
     kaya_tx_create_signal(&tx, SIG_TARGET, kaya_str("rename target"));
     kaya_tx_create_widget(&tx, W_TARGET, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_TARGET, SIG_TARGET);
@@ -140,9 +135,7 @@ static void build_scene(void) {
     kaya_tx_set_menu_symbol(&tx, M_RENAME, KAYA_SYMBOL_EDIT);
     kaya_tx_context_attach(&tx, W_TARGET, M_RENAME);
 
-    /* Two-level For: the stamped row carries the shared Remove item;
-     * activation names BOTH keys (group, then item — the on_click_node
-     * encoding). */
+    /* Two-level For: activation names BOTH keys, group then item. */
     kaya_tx_create_collection(&tx, C_GROUPS,
                               (KayaVariantSchema[]){{(uint32_t[]){KAYA_VALUE_STR}, 1}}, 1);
     kaya_tx_create_for(&tx, W_FOR_GROUPS, C_GROUPS);
@@ -166,8 +159,8 @@ static void build_scene(void) {
     kaya_tx_mount(&tx, 0, W_COLUMN);
     kaya_submit(tx.buf, tx.len);
 
-    /* Seed after mount: the stamp path attaches the shared catalog and
-     * the copy's keys. */
+    /* Seeded AFTER mount, so the stamp path attaches the shared catalog
+     * and the copy's keys. */
     {
         uint8_t seed_buf[512];
         KayaTx seed = {seed_buf, 0};
@@ -208,8 +201,8 @@ static void *app(void *arg) {
                 kaya_tx_write_signal(&tx, SIG_CAN_EXPORT, kaya_bool(1));
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_RESET) {
-                /* Reset: three REAL records — the checked/value writes reset
-                 * the backend's user-state mirror, no occurrence echoing. */
+                /* The checked/value writes reset the backend's user-state
+                 * mirror and echo no occurrence. */
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0};
                 kaya_tx_write_signal(&tx, SIG_DETAILS, kaya_bool(0));
@@ -217,8 +210,8 @@ static void *app(void *arg) {
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("ready"));
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_EXTEND) {
-                /* Append-only: rename the RETAINED File, move the promotion
-                 * hint from Share to Publish, grow the bar by Tools. */
+                /* Append-only: rename the RETAINED File, move the
+                 * promotion hint to Publish, grow the bar by Tools. */
                 uint8_t buf[1024];
                 KayaTx tx = {buf, 0};
                 kaya_tx_set_menu_primary(&tx, M_SHARE, 0);
@@ -245,8 +238,8 @@ static void *app(void *arg) {
             } else if (n_keys == 0 && id == M_RENAME) {
                 write_status("renamed");
             } else if (n_keys == 2 && id == M_REMOVE) {
-                /* The keys ARE the noun: both collection levels straight
-                 * into the instance address. */
+                /* The keys ARE the noun: both levels straight into the
+                 * instance address. */
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0};
                 kaya_tx_collection_remove(&tx, C_ITEMS, &keys[0], 1, keys[1]);
@@ -270,8 +263,6 @@ static void *app(void *arg) {
 }
 
 int main(void) {
-    /* The stale-artifact guard: this guest compiled against one spec
-     * revision; the loaded library must speak the same one. */
     if (kaya_spec_hash() != KAYA_SPEC_HASH) {
         fprintf(stderr, "kaya: library/binding spec mismatch — rebuild both\n");
         return 1;

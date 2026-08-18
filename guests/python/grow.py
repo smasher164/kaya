@@ -5,9 +5,6 @@ column 25/50/25 and the row's 1,3 divide its width 25/75. The harness
 (KAYA_SELFTEST=grow) asserts both splits, root-fills, and that the
 textarea TAKES the track its weight earned, byte-for-byte against every
 other language and backend.
-
-The `grow=` keyword is the declarative spelling; Widget.grow(weight) is
-the dynamic path this scene has no reason to use.
 """
 
 import sys

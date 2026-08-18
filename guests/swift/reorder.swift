@@ -1,17 +1,13 @@
-// The reorder scene from Swift: order as collection data, end to end.
-// Three stamped rows and two buttons that never touch a widget — each
-// handler repositions an entry by key (collection_move on the wire,
-// move_child at the toolkit), and the selftest's expect_order reads
-// the toolkit's actual child order back. The root is a row so the
-// For's container is the scene's only column-kind widget: languages
-// disagree on whether containers are created before or after their
-// children, and column#0 must name the same widget everywhere.
+// The reorder scene from Swift: order as collection data. Each handler
+// repositions an entry BY KEY (collection_move on the wire) and never
+// touches a widget. THE ROOT IS A ROW so the For's container is the
+// scene's only column-kind widget: languages disagree on whether
+// containers are created before or after their children, and column#0
+// must name the same widget everywhere.
 
 import Foundation
 
-// The struct is the schema; kaya-swift-gen reads this declaration and
-// generates reorder+Kaya.swift: the KayaRecord conformance and the
-// collection factory.
+// The struct is the schema; kaya-swift-gen generates reorder+Kaya.swift.
 struct Item: KayaGen {
     var title: String
 }
@@ -22,16 +18,13 @@ app.build { tx in
     let items = itemCollection(tx)
     let root = tx.row {
         tx.button("rotate") { tx in
-            // First entry to the end. The model owns the order, so the
-            // handler asks it which key is first — it never counts
-            // widgets.
+            // First entry to the end. The model owns the order.
             let entries = items.items(tx)
             items.moveToEnd(tx, entries[0].key)
         }
         tx.button("lift") { tx in
-            // Last entry to the front: moveToFront is sugar for
-            // moveBefore the current first key — the same wire op,
-            // keys never indices.
+            // Last entry to the front — the same wire op, keys never
+            // indices.
             let entries = items.items(tx)
             items.moveToFront(tx, entries[entries.count - 1].key)
         }

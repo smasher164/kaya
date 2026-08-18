@@ -1,14 +1,10 @@
 //! The nav conformance scene: the serial navigation grammar as
-//! assertions (DESIGN.md, Navigation). Two pushes from two buttons —
-//! detail (plain: the user's back affordance pops natively and
-//! entry_popped reports post-fact) and settings (intercept_back
-//! armed: back emits back_requested, nothing pops, and the guest
-//! confirms with pop_entry — the close-veto class transplanted to
-//! POP). The covered root is RETAINED: the status label takes writes
-//! while covered and reads back after every pop. A programmatic
-//! pop_entry does not echo entry_popped (its caller already knows) —
-//! the settings round's status stays "back requested", which pins
-//! exactly that.
+//! assertions (DESIGN.md, Navigation). Two pushes — one plain, one
+//! with intercept_back armed. The byte-frozen contract is
+//! tools/scenes/nav.steps.
+//!
+//! A programmatic `pop_entry` does NOT echo entry_popped, which is why
+//! the settings round's status stays "back requested".
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     use kaya::WindowId;
@@ -17,9 +13,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     enum Msg {
         OpenDetail,
         OpenSettings,
-        // Distinct variants per entry: the pop-to-callback association
-        // is structural (the request-bound alert precedent) — no id
-        // inspection anywhere.
+        // Distinct variants per entry: the association is structural,
+        // so no guest inspects an id anywhere.
         PoppedDetail,
         BackAskedSettings,
     }
@@ -56,14 +51,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         })
                         .id();
                     tx.mount_in(entry, pane);
-                    // The covered root keeps taking writes —
-                    // retention, observable after the pop.
+                    // The covered root keeps taking writes: retention,
+                    // observable after the pop.
                     tx.write(status, "pushed detail");
                     entry
                 });
-                // The popped handler rides the push (per-entry, the
-                // request-bound alert precedent) and retires with the
-                // one pop.
+                // Rides the push, per-entry, and retires with the pop.
                 msgs.on_entry_popped(entry, Msg::PoppedDetail);
             }
             Msg::OpenSettings => {
@@ -89,9 +82,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.write(status, "popped detail");
             }),
             Msg::BackAskedSettings => ctx.apply(|tx| {
-                // The veto class: nothing has popped; the guest
-                // agrees and confirms. No entry_popped will fire —
-                // this write is the round's final status.
+                // The veto class: nothing has popped yet. No
+                // entry_popped will follow the confirm below, so this
+                // write is the round's final status.
                 tx.write(status, "back requested");
                 tx.pop_entry();
             }),

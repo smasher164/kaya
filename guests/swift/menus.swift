@@ -1,8 +1,7 @@
 // The menus conformance scene, Swift port: the command vocabulary (a
 // File/View/Sort menu bar, context menus on a live label and on stamped
-// rows), the uncontrolled-menu echo doctrine, and a late
-// rename/append/promotion rework. Canonical semantics in
-// guests/rust/menus.rs; the byte-frozen contract in tools/scenes/menus.steps.
+// rows) and the uncontrolled-menu echo doctrine. See
+// guests/rust/menus.rs and tools/scenes/menus.steps.
 
 import Foundation
 
@@ -16,17 +15,12 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
 
     let onShare: (KayaAppTx) throws -> Void = { t in t.write(status, .str("shared")) }
 
-    // File and its Export leaf share one enablement signal: one write
-    // moves both.
     let share = tx.item("Share", primary: true, onActivate: onShare)
     let file = tx.menu(
         "File", enabled: canExport,
         items: [
-            // THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT,
-            // drawn by each platform in its own symbol set. `done` is
-            // the checkmark idiom — the vocabulary has no `save` on
-            // purpose (Apple's own catalog has no save-specific glyph
-            // either).
+            // A semantic icon is a CONCEPT drawn per platform; `done` is
+            // the checkmark idiom (docs/styling-plan.md D6).
             tx.item("Save", shortcut: "primary+s", symbol: .done) { t in
                 t.write(status, .str("saved"))
             },
@@ -36,7 +30,6 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
     let view = tx.menu(
         "View",
         items: [
-            // A toggle carries a symbol like any other leaf.
             tx.toggle("Details", checked: details, symbol: .info) { t, on in
                 t.write(status, .str(on ? "details on" : "details off"))
             }
@@ -69,16 +62,15 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
             t.write(canExport, .bool(true))
         }
         tx.button("reset menu state") { t in  // button#1
-            // The folds never echo the user's pick, so details/sort still
-            // hold false/0; these two prop writes are real checked/value
-            // records (never coalesced) that reset the user-state mirror.
+            // The folds never echo the user's pick; these writes reset
+            // the user-state mirror.
             t.write(details, .bool(false))
             t.write(sort, .f64(0.0))
             t.write(status, .str("ready"))
         }
         tx.button("extend menus") { t in  // button#2
-            // Append-only: rename the retained File, move the promotion hint
-            // from Share to Publish, grow the bar by Tools.
+            // Append-only: rename the retained File, move the promotion
+            // hint, grow the bar by Tools.
             t.menu(share, primary: false)
             t.menu(
                 file, label: "Document",
@@ -100,25 +92,17 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
 
         // Remove's activation names BOTH keys (group, then item).
         //
-        // `each` and not `forEach`: neither For hands anything back —
-        // the inner collection escapes by assignment to `itemsOut`, not
-        // through R — and a For whose result you drop is what `each` is
+        // `each` and not `forEach`: neither For hands anything back
         // (docs/tpl-props-plan.md §2 F2).
         tx.each(groups) { g in
             let items = g.collection()
             itemsOut = items
             // The For is declared INSIDE the column it belongs to and
-            // parents itself there at creation. The old spelling built
-            // it outside and mentioned the handle in the builder, which
-            // DISCARDS its expressions — the rows were never attached
-            // (the milestone2 graduation's orphan class, 2026-08-05).
+            // parents itself there at creation; a bare mention in the
+            // builder is DISCARDED (docs/traps.md, result builders).
             _ = g.column {
                 g.each(items) { r in
-                    // label#2 once g2/a stamps. `.element` is the scalar
-                    // collection's own token — its element IS the value,
-                    // so there is no field name to give — and it lowers
-                    // to the same bind_element these two lines used to
-                    // spell at the widget-kind floor.
+                    // label#2 once g2/a stamps.
                     let row = r.label(KayaField<String>.element)
                     r.contextMenu(row, catalog)
                 }

@@ -1,12 +1,8 @@
 -- The nav conformance scene, Haskell port — the serial navigation
--- grammar via the config-list spelling: @pushEntry 7 [ETitle
--- "detail"]@ plus 'mountIn' presents each screen, 'onEntryPopped'
--- hears the user's native pop, and 'onBackRequested' answers the
--- intercept_back veto with 'popEntry'. The covered root is RETAINED
--- (status keeps taking writes while covered); a programmatic
--- 'popEntry' does not echo entry_popped, so the settings round's
--- final status stays "back requested". See guests/rust/nav.rs and
--- tools/scenes/nav.steps.
+-- grammar. The covered root is RETAINED (status keeps taking writes
+-- while covered), and a programmatic 'popEntry' does NOT echo
+-- entry_popped, so the settings round's final status stays "back
+-- requested". See guests/rust/nav.rs and tools/scenes/nav.steps.
 
 import Data.Word (Word64)
 import KayaApp
@@ -27,10 +23,8 @@ main = kayaMain $ \app -> do
         [ labelBound s, -- label#0
           buttonOn "open detail" $
             buildTx app $ do
-              -- The popped handler rides the push (per-entry, the
-              -- showAlert precedent): it can only ever mean the
-              -- detail screen popped, and it retires with the one
-              -- pop.
+              -- The popped handler rides the push, so it can only ever
+              -- mean this screen, and it retires with the one pop.
               pushEntry
                 detailId
                 [ ETitle "detail",
@@ -39,14 +33,12 @@ main = kayaMain $ \app -> do
               caption <- signal (VStr "detail pane")
               pane <- column [] [labelBound caption]
               mountIn detailId pane
-              -- The covered root keeps taking writes — retention,
-              -- observable after the pop.
+              -- The covered root keeps taking writes; the pop reveals it.
               writeSignal s (VStr "pushed detail"),
           buttonOn "open settings" $
             buildTx app $ do
-              -- The veto class: nothing has popped; agree and
-              -- confirm. No entry_popped will fire — the write is
-              -- the round's final status.
+              -- The veto class: nothing has popped, so the app agrees
+              -- itself. No entry_popped fires for that programmatic pop.
               pushEntry
                 settingsId
                 [ ETitle "settings",
@@ -65,6 +57,5 @@ main = kayaMain $ \app -> do
     mount root
     return s
 
-  -- The handlers ride each push above; nothing app-global remains.
   _ <- return status
   return ()

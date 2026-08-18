@@ -1,24 +1,10 @@
-//! The styling conformance scene (docs/styling-plan.md, slice 1): the
-//! brand accent, the role tier, and the window inset, together because
-//! they are one design — brand slots fill each platform's token system,
-//! roles say what a widget MEANS, and the inset is the one layout knob
-//! the pass admitted (D3).
+//! The styling conformance scene (docs/styling-plan.md slice 1): brand
+//! accent, role tier, window inset. The byte-frozen contract is
+//! tools/scenes/styling.steps.
 //!
-//! What each piece demonstrates:
-//!   - `brand_accent(0x3584E4)` — Adwaita blue, the derivation's
-//!     empirical anchor: one hex is the whole call, the core derives
-//!     fills and foregrounds, and a platform may let its user override
-//!     the result (D2).
-//!   - `.role(Heading)` on the title label — the platform's heading
-//!     text style AND the assistive heading trait, which is the one
-//!     role the steps freeze from the real tree on every lane.
-//!   - `.role(Destructive)` / `.role(Prominent)` on the two buttons —
-//!     the platform's own emphasis chrome, and (the scene's point) NO
-//!     change to what pressing them does.
-//!   - `.inset(0.0)` — full bleed, the editor's own need, honored
-//!     unconditionally because the inset is kaya's padding (D3).
-//!
-//! The byte-frozen contract is tools/scenes/styling.steps.
+//! `Heading` is the one role with a real-tree observable on every lane,
+//! which is why the steps freeze it and not the other two. 0x3584E4 is
+//! Adwaita blue, the derivation's empirical anchor (D2).
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone)]
@@ -29,8 +15,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let status = ctx.apply(|tx| {
-        // BEFORE THE FIRST MOUNT, per the set-once wall: brand is
-        // identity, not state.
+        // BEFORE THE FIRST MOUNT, per the set-once wall.
         tx.brand_accent(0x3584E4);
         tx.window(kaya::DEFAULT_WINDOW)
             .title("styling")
@@ -40,9 +25,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let status = tx.signal("ready");
         let root = tx
             .column(|tx| {
-                // expect_ax resolves a target through its AUTHORED
-                // id into the real tree, so everything the steps read
-                // back is identified (the a11y scene's discipline).
+                // expect_ax resolves a target through its AUTHORED id,
+                // so everything the steps read back is identified.
                 tx.label(heading).role(kaya::Role::Heading).a11y_id("title"); // label#0
                 tx.label(status); // label#1
                 let delete = tx

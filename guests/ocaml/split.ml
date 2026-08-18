@@ -1,16 +1,14 @@
-(* The split conformance scene, OCaml port — adaptive list-detail via
-   labeled arguments: [~list_detail] rides the window, [push_entry
-   ~title ~on_popped] plus [mount_in] presents the detail.
+(* The split conformance scene, OCaml port — adaptive list-detail:
+   [~list_detail] rides the window, [push_entry ~title ~on_popped] plus
+   [mount_in] presents the detail.
 
-   The guest asks for the presentation ONCE and then does nothing
-   adaptive ever again. Everything after that is the platform
-   re-deciding as the size class changes: an app does not write two
-   layouts and pick one, and there is no prop for WHICH way it
-   presents. Nothing here is split-specific except that one prop.
+   THE GUEST ASKS FOR THE PRESENTATION ONCE and then does nothing adaptive
+   again: the platform re-decides as the size class changes, and there is
+   no prop for WHICH way it presents.
 
    TWO scripts drive this ONE app: [split] resizes and names the
-   presentation on each side, [listdetail] asserts the bare invariant
-   at whatever width its host gives. See guests/rust/split.rs,
+   presentation on each side, [listdetail] asserts the bare invariant at
+   whatever width its host gives. See guests/rust/split.rs,
    tools/scenes/split.steps and tools/scenes/listdetail.steps. *)
 
 open Kaya_wire
@@ -26,12 +24,8 @@ let () =
      window ~title:"split" ~list_detail:true ();
      let s = signal (Str "list pane") in
      let on_detail () =
-       (* The popped handler rides the push, per-entry — the
-          [~on_result] precedent, unchanged by the split. *)
        push_entry ~title:"detail"
-         (* Retention: the base root took this write while the detail
-            was up, on a regular window where it was VISIBLE the whole
-            time. *)
+         (* Retention: the base root took this write while the detail was up. *)
          ~on_popped:(fun () -> write s (Str "popped detail"))
          detail;
        (let caption = signal (Str "detail pane") in
@@ -41,10 +35,9 @@ let () =
      let root =
        column
          [
-           (* Authored ids so the REAL-TREE read can address these: an
-              index read passes whether or not anything reached the
-              screen, which is the gap that let a non-rendering split
-              arm look green. *)
+           (* Authored ids so the REAL-TREE read can address these: an index
+              read passes whether or not anything reached the screen, which is
+              what let a non-rendering split arm look green. *)
            label ~a11y_id:"list" ~bind:s (* label#0 *);
            button ~text:"open detail" ~on_click:on_detail;
          ]

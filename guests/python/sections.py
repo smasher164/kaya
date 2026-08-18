@@ -35,19 +35,14 @@ def go_archive():
 
 
 def open_library():
-    # THE SIDEBAR HALF of the presentation enum, in an aux window, so
-    # one shared scene covers BOTH arms. Reachability is the gate: only
-    # the desktop tail's click lands here, so the phones never see a
-    # create_window their host would reject — the guest reads no
-    # capability. `window=` on add_section is the spelling this scene
-    # forced into the binding: the other six already targeted a window
-    # while Python's section scope hardcoded the primary (2026-08-15).
+    # THE SIDEBAR HALF of the presentation enum, in an aux window, so one
+    # shared scene covers BOTH arms. Reachability is the gate: only the
+    # desktop tail's click lands here, so the phones never see a
+    # create_window their host would reject.
     kaya.create_window(LIBRARY)
     app.window(
         window_id=LIBRARY, title="library",
         sections_presentation=kaya.SECTIONS_SIDEBAR)
-    # The SIDEBAR arm carries symbols too: the source list is where a
-    # mac app most wants them.
     with app.add_section(SHELVES, title="Shelves", symbol=kaya.Symbol.SEARCH,
                          window=LIBRARY):
         shelves_ready = kaya.signal("shelves ready")
@@ -60,20 +55,15 @@ def open_library():
             kaya.label(bind=loans_ready)  # label#3
 
 
-# The window's attributes ride the window construct (the unification
-# rule). With sections the window has no root of its own — the
-# switcher IS the window content — so the scope's body carries only
-# props and the shared signal, and nothing mounts. The hint is
-# ADVISORY (`bar`: each desktop's horizontal spelling; the phones'
-# physics regardless).
+# With sections the window has no root of its own — the switcher IS the
+# window content — so this body carries only props and the shared signal,
+# and NOTHING MOUNTS. The presentation hint is ADVISORY.
 with app.window(title="sections", sections_presentation=kaya.SECTIONS_BAR):
     visits = kaya.signal("archive: 0 visits")
 
-# THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar without icons
-# is not the platform's real thing, and the glyph that means `home`
-# differs per platform — SF Symbols spells it `house`, and no shared
-# asset would be legal anyway (SF Symbols are licensed to Apple
-# platforms only).
+# The symbol is SEMANTIC, never an asset (docs/styling-plan.md D6): the
+# glyph meaning `home` differs per platform, and SF Symbols are licensed
+# to Apple platforms only.
 with app.add_section(FEED, title="Feed", symbol=kaya.Symbol.HOME):
     ready = kaya.signal("feed ready")
     with kaya.column():

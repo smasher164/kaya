@@ -1,44 +1,16 @@
--- The save conformance scene, Haskell port — the ROUND TRIP an editor
--- actually walks (docs/save-plan.md D5): open, edit, save, save-as,
--- reopen.
+-- The save conformance scene, Haskell port — the round trip an editor
+-- actually walks: open, edit, save, save-as, reopen.
 --
--- WHAT THIS PROVES, and why none of it is about a dialog closing:
+-- EVERY STATUS IS A READ-BACK OFF THE DISK, always through 'openPicked'
+-- and never through 'pickedLocalPath', which is empty on both phones.
 --
--- 1. Save-BACK works. Writing through the handle the OPEN picker handed
---    over — the thing DESIGN.md has claimed since the picker landed and
---    that no scene, leg or test has ever driven.
--- 2. A save destination is OPENABLE AT ALL. The desktops answer a save
---    dialog with a name for a file nobody has made, so opening it would
---    fail with "No such file or directory"; the core's save source
---    creates, and this is where that shows.
--- 3. The two files stay DIFFERENT. The last step reopens both handles
---    and reports both contents, so a save-as that quietly wrote back
---    into the original — the plausible bug, since the guest is holding
---    two handles that look alike — fails here and nowhere else.
--- 4. Cancel is nothing, and the dialog id RETIRES. The scene shows a
---    save dialog, cancels it, and shows another; a cancel that leaked
---    the live slot would abort on the second show.
+-- THE WORK RUNS OFF THE APP THREAD because 'openPicked' blocks; the
+-- answer comes back through 'post'.
 --
--- EVERY STATUS IS A READ-BACK OFF THE DISK, never what the guest hoped
--- it wrote: write, close, reopen through the handle kaya gave us, read
--- with an ORDINARY GHC Handle. A write that returned successfully and
--- landed nowhere is exactly the failure "save" has, and only reopening
--- can see it. The reopen goes through 'openPicked' and never through
--- 'pickedLocalPath', which is empty on both phones.
---
--- THE WORK RUNS OFF THE APP THREAD, which is what 'openPicked' tells
--- every caller to do: it blocks, and a cloud provider may download the
--- whole file first. The worker is a plain forkIO and the answer comes
--- back through 'post', as background.hs's does — kaya supplies no
--- concurrency primitive and should not. The PARKING dance that proves
--- the thread hop belongs to filedialog.hs; this scene owns the round
--- trip.
---
--- NO EXTENSIONS ON THE NAMES, deliberately. A save panel publishes its
--- name field with the extension hidden when the user's preference says
--- so, which would make `expect_save_dialog` read the stem on one machine
--- and the whole name on another. A name with no extension has no stem to
--- differ from, on any platform.
+-- NO EXTENSIONS ON THE NAMES: a save panel hides the extension when the
+-- user's Finder preference says so, so `expect_save_dialog` would read
+-- the stem on one machine and the whole name on another (the NSSavePanel
+-- entry in docs/deferred.md).
 --
 -- Canonical semantics in guests/rust/save.rs; the byte-frozen contract
 -- in tools/scenes/save.steps.
@@ -53,8 +25,7 @@ import System.FilePath ((</>))
 import System.IO (hClose, hGetContents', hPutStr)
 import System.Posix.Process (getProcessID)
 
--- | Read a handle back through kaya, with GHC's own IO. THE READ-BACK IS
--- THE ASSERTION in every step of this scene.
+-- | Read a handle back through kaya, with GHC's own IO.
 readBack :: PickedFile -> IO String
 readBack file = do
   opened <- try (openPicked file fileModeRead)
@@ -74,9 +45,6 @@ writeBack :: PickedFile -> String -> IO String
 writeBack file text = do
   opened <- try (openPicked file fileModeWrite)
   case opened of
-    -- THE FAILURE D1 EXISTS TO PREVENT reaches the label verbatim:
-    -- without the create, a save destination answers "No such file or
-    -- directory" right here.
     Left e -> return ("save failed: " ++ show (e :: SomeException))
     Right (h, _seekable) -> do
       wrote <- try (hPutStr h text)
@@ -87,9 +55,9 @@ writeBack file text = do
         Left e -> return ("write failed: " ++ show (e :: SomeException))
         Right () -> readBack file
 
--- | The handle a step needs and the scene guarantees. Reaching this
+-- | The handle a step needs and the scene guarantees. Reaching the error
 -- means the script ran out of order, which is a broken scene rather than
--- a state an app should branch on — the Rust guest's `expect` verbatim.
+-- a state an app should branch on.
 required :: String -> IORef (Maybe PickedFile) -> IO PickedFile
 required what ref = do
   held <- readIORef ref
@@ -103,20 +71,17 @@ main = kayaMain $ \app -> do
   pid <- getProcessID
   let dir = tmp </> ("kaya-save-" ++ show pid)
   createDirectoryIfMissing True dir
-  -- The file the scene opens, written before anything is shown, plus the
-  -- decoy the picker needs: with ONE file in the directory a dialog
-  -- completes with it when nothing is selected, so `file_choose` would
-  -- pass on a backend that never selected anything. "decoy" sorts first,
-  -- so that backend gets the WRONG file and its five bytes fail the byte
-  -- assertion too.
+  -- The decoy must SORT BEFORE the real file: with one file in the
+  -- directory a dialog completes with it even when nothing was selected
+  -- (docs/traps.md, "Pressing Open with nothing selected still returns a
+  -- file").
   writeFile (dir </> "draft") "first draft"
   writeFile (dir </> "decoy") "decoy"
 
-  -- The two capabilities the scene carries: the file the user OPENED and
-  -- the destination the user later NAMED. Held as handles, never as
-  -- paths — the phones have no re-openable path at all. IORefs suffice
-  -- without locking: everything that touches them runs on the app
-  -- thread.
+  -- The file the user OPENED and the destination they later NAMED, held
+  -- as handles and never as paths — the phones have no re-openable path
+  -- at all. IORefs without locking: everything that touches them runs on
+  -- the app thread.
   sourceRef <- newIORef Nothing
   destRef <- newIORef Nothing
 
@@ -124,8 +89,8 @@ main = kayaMain $ \app -> do
     window 0 [WTitle "save"]
     status <- signal (VStr "no file")
 
-    -- Every file operation runs on a thread of the guest's own, because
-    -- openPicked blocks; the answer comes back through the poster.
+    -- Off the app thread, because openPicked blocks; the answer comes
+    -- back through the poster.
     let work job = do
           _ <- forkIO $ do
             text <- job
@@ -133,16 +98,14 @@ main = kayaMain $ \app -> do
           return ()
 
         picked files = case files of
-          -- The empty list IS cancel: nothing was chosen, so nothing is
-          -- read and no source is remembered.
+          -- The empty list IS cancel.
           [] -> buildTx app (writeSignal status (VStr "open cancelled"))
           (first : _) -> do
             writeIORef sourceRef (Just first)
             work (("opened " ++) <$> readBack first)
 
-        -- CANCEL IS Nothing, narrowed by the binding rather than by a
-        -- length here. Nothing was named, so nothing is written and no
-        -- destination is remembered.
+        -- Cancel is Nothing, narrowed by the binding rather than by a
+        -- length here.
         saved Nothing = buildTx app (writeSignal status (VStr "save cancelled"))
         saved (Just file) = do
           writeIORef destRef (Just file)
@@ -152,13 +115,12 @@ main = kayaMain $ \app -> do
       column
         []
         [ labelBound status [A11yId "status"], -- label#0
-          -- NO FILTERS ON EITHER REQUEST. With allowedContentTypes set, a
+          -- NO FILTERS ON EITHER REQUEST: with allowedContentTypes set a
           -- save panel appends the first allowed extension to an
           -- extension-less name, and the names here carry none.
           buttonOn "open" (buildTx app (pickFile [] picked)) [], -- button#0
-          -- SAVE-BACK NEEDS NO DIALOG. The user already chose this file,
-          -- and the handle they chose it with is writable — the claim
-          -- this button exists to drive.
+          -- Save-back needs no dialog: the handle the open picker handed
+          -- over is writable.
           buttonOn -- button#1
             "save"
             ( do
@@ -167,12 +129,8 @@ main = kayaMain $ \app -> do
             )
             [],
           -- "copy" is the name the dialog OPENS with; the harness types
-          -- over it, which is what a save dialog is for.
+          -- over it.
           buttonOn "save as" (buildTx app (saveFile "copy" [] saved)) [], -- button#2
-          -- BOTH, in order: the file that was opened must still hold the
-          -- save-back, and the destination must hold the save-as. A save
-          -- that went to the wrong handle passes every earlier step and
-          -- fails here.
           buttonOn -- button#3
             "reopen"
             ( do

@@ -1,22 +1,13 @@
 // The stamped-accessibility scene from Swift: two entries stamped from
 // ONE template, each carrying its OWN ROW's accessibility identity, read
-// back out of the platform's real tree. The a11y scene proves the
-// wrap-native bet for LIVE widgets; this one proves it for COPIES — the
-// case none of the accessibility milestone's 719 legs ever exercised,
-// because until the template zone could spell the props
-// (docs/tpl-props-plan.md P1) no guest could name a stamped widget at
-// all.
+// back out of the platform's real tree. See guests/rust/a11yrows.rs and
+// tools/scenes/a11yrows.steps.
 //
 // A SEPARATE SCENE BY DESIGN, not by size: a For materializes as a
-// column, harness registries are creation-order, and container creation
-// order differs by language — so the a11y scene, which asserts every
-// container kind ordinally, cannot host a For without `column#0` meaning
-// different widgets on different lanes. This scene asserts no container,
-// so the For's column may land anywhere in the registry
-// (guests/haskell/reorder.hs documents the ordering rule).
-//
-// See guests/rust/a11yrows.rs for the canonical semantics; the
-// byte-frozen contract is tools/scenes/a11yrows.steps.
+// column and container creation order differs by language, so the a11y
+// scene — which asserts every container kind ordinally — cannot host
+// one. This scene asserts no container, so the For's column may land
+// anywhere in the registry.
 
 import Foundation
 
@@ -27,41 +18,18 @@ app.build { tx in
     let heads = tx.collection()
     let root = tx.column {
         tx.each(notes) { t in
-            // BOTH PROPS ELEMENT-SOURCED. The label is the point — a
-            // list row announcing its own name to assistive tech. The id
-            // is forced: expect_ax searches the real tree BY the
-            // authored identifier, so copies sharing a const id are
-            // indistinguishable to it and the read refuses them (it
-            // answered with the first copy's label for the second's
-            // index until it learned to). A shared const id stays legal
-            // in the core; it is just unreadable by that verb.
-            //
-            // `.element` is the scalar collection's own token: its
-            // element IS the value, so there is no field name to give.
+            // BOTH PROPS ELEMENT-SOURCED. The id is forced: expect_ax
+            // searches the real tree BY the authored identifier and
+            // refuses an ambiguous one (docs/tpl-props-plan.md).
             let field = t.entry()  // entry#0 and entry#1 once the rows stamp
             t.setA11yId(field, KayaField<String>.element)
             t.setA11yLabel(field, KayaField<String>.element)
         }
 
-        // THE STAMPED STYLING PROPS. A second collection rather than two
-        // widgets in the first, because expect_ax addresses the tree by
-        // IDENTIFIER and refuses an ambiguous one — a scalar row has one
-        // field to spend on an id, so a second readable copy needs its
-        // own strings.
-        //
-        // Both props are CONST here and const in every binding: what a
-        // copy MEANS and how far its prototype holds its children off its
-        // edge are facts about the prototype, not about the row's data
-        // (`setAccepts`'s rule).
-        //
-        // ONE SURFACE, and unlike Rust that is the whole zone rather than
-        // a choice. Swift's second template surface is the GENERATED
-        // per-record `<Rec>Row`, so it exists only over a record
-        // collection and not over this scalar one; and it hands out its
-        // `KayaTpl` as `row.t` (guests/swift/undo.swift reaches the zone
-        // that way), so every prop is as reachable from `for row in rows`
-        // as it is from here. Rust's `Row` and C#'s `<Rec>Row` keep
-        // theirs private, which is why those two must forward by hand.
+        // THE STAMPED STYLING PROPS, in a second collection because
+        // expect_ax refuses an ambiguous id and a scalar row has one
+        // field to spend on one. Both props are CONST: what a copy MEANS
+        // is a fact about the prototype, not about the row's data.
         tx.each(heads) { t in
             let bar = t.row {
                 let title = t.label(KayaField<String>.element)
@@ -71,18 +39,9 @@ app.build { tx in
             t.setInset(bar, 8)
         }
     }
-    // OUTSIDE THE BUILDER, BEFORE THE MOUNT. An insert is not a child,
-    // so it has no place among the container's declarations; putting it
-    // ahead of the mount keeps this guest's op order identical to
-    // guests/rust/a11yrows.rs, which is the order the scene was first
-    // read against. Seeding after the mount also stamps (reorder.swift
-    // does it), so this is the difference that has no upside rather than
-    // a rule.
-    //
-    // A note is a line of text with no identity of its own, so the key
-    // comes from the minter rather than from a name this scene would
-    // have to invent; nothing here reads the minted key back, which is
-    // what @discardableResult permits.
+    // OUTSIDE THE BUILDER, BEFORE THE MOUNT: an insert is not a child.
+    // Seeding after the mount also stamps (reorder.swift does it), so
+    // this is a difference with no upside rather than a rule.
     tx.insertFresh(notes, .str("First note"))
     tx.insertFresh(notes, .str("Second note"))
     tx.insertFresh(heads, .str("Heading one"))

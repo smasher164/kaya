@@ -1607,7 +1607,7 @@ count, so the saving is measured rather than assumed.
     the core, in a binding. That tier stays open below.
   - **The sibling suspicion was right, and a THIRD instance was still
     live at HEAD.** `guests/swift/menus.swift` was fixed by eye in
-    aadbe9e. `guests/swift/feed.swift:29-65` was not: `promote`,
+    aadbe9e. `guests/swift/feed.swift:27-55` was not: `promote`,
     `status` and `list` were built at ambient parent 0 and only
     MENTIONED inside `tx.row { }`, whose result builder discards a bare
     expression — so the mounted row had no children at all and
@@ -2491,16 +2491,33 @@ slice; the caption-left slot is its Windows home when it lands.
 ## Comments are drowning the code (maintainer, 2026-08-17)
 KEY: comment verbosity, examples readability, war stories, traps pointers
 
-STATUS 2026-08-18: in-progress — examples first. (1) is DONE: the rule is
-in CLAUDE.md/AGENTS.md's environment section. (2) is started, not swept:
-four guests are cut as a calibration sample for the maintainer to judge
-the taste on: guests/go/typeface/typeface.go,
-guests/go/filedialog/filedialog.go, guests/rust/typeface.rs and
-guests/c/entry.c — the last on the floor's gentler cut, per invariant 5.
-The remaining ~328 guest files are NOT cut, held by two blockers recorded
-with the sample: a second writer was landing the template-caption slice
-in the same working tree, and the cut moves line numbers that
-docs/sugar-pass-plan.md cites and tools/check-doc-refs.sh holds.
+STATUS 2026-08-18: the EXAMPLES are done — (1) and (2) both. The rule is
+in CLAUDE.md/AGENTS.md's environment section, rewritten to the
+maintainer's own formulation after he judged the calibration sample and
+ruled the cut must go deeper than it did: "the only things you shouldn't
+cut are things you'll need for future claude sessions that might need
+that context. everything else should be nixed, because it just makes
+things harder to read."
+
+All 332 guest files in all nine languages are swept, the four sample
+files re-cut to the deeper rule, and the C floor cut like everything
+else — the maintainer's ruling on invariant 5 is that the CODE is the
+floor's documentation, so its guests keep only agent-context lines.
+Both blockers the sample recorded are cleared: the concurrent
+template-caption slice landed (5708c98), and the line anchors
+docs/sugar-pass-plan.md and this file carry were re-read and repaired.
+
+Four measured findings that lived ONLY in a guest comment were moved to
+docs/traps.md before the files carrying them were touched: the live-zone
+`When` that stamps an empty key path (the editor's find bar is a
+For-of-one-row because of it), `destroy_window(0)`'s abort with no
+affirmative for `veto_close` (live in nine dirty guests), the stall
+scene's day-not-forever wedge, and each language's own string-offset
+unit. What is left in the guests is a pointer.
+
+WHAT IS NOT DONE: the rest of the tree. crates/, bindings/, tools/,
+swift/ and android/ have had no pass — the ruling asked for examples
+first, as their own commit, and this is that commit.
 
 The ruling: a comment describes what the code does or states a constraint
 the code cannot show — in a line or two. It never explains something the

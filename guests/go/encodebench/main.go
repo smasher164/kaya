@@ -1,8 +1,6 @@
 // The encode benchmark: pins "derives target the encoder, not a value
-// tree" (DESIGN.md, milestone 3) as a suite leg. Encodes N
-// collection_insert records through the generated wire encoder and
-// requires a floor rate with ~10x headroom — only a structural
-// regression (per-record reflection, tree building) can trip it.
+// tree" (DESIGN.md, milestone 3) as a suite leg. The floor carries
+// ~10x headroom, so only a structural regression can trip it.
 package main
 
 import (

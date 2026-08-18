@@ -1,15 +1,13 @@
 //! The menus conformance scene: the command vocabulary (a File/View/Sort
 //! menu bar, context menus on a live label and on stamped rows), the
-//! uncontrolled-menu echo doctrine, and a late rename/append/promotion
-//! rework. This is the canonical annotated port; the byte-frozen contract
-//! is tools/scenes/menus.steps.
+//! uncontrolled-menu echo doctrine, and a rename/append/promotion
+//! rework. The byte-frozen contract is tools/scenes/menus.steps.
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Task {
     title: String,
 }
 
-/// The app's event vocabulary: the occurrence-side eliminator.
 #[derive(Clone)]
 enum Msg {
     EnableExport,
@@ -37,11 +35,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .window(kaya::DEFAULT_WINDOW)
             .title("menus")
             .menu("File", |m| {
-                // THE SEMANTIC ICON (docs/styling-plan.md D6): a
-                // CONCEPT, drawn by each platform in its own symbol
-                // set. `done` is the checkmark idiom — the vocabulary
-                // has no `save` on purpose (Apple's own catalog has no
-                // save-specific glyph either).
+                // `done` is the checkmark idiom: the symbol vocabulary
+                // has no `save` (docs/styling-plan.md D6).
                 let save = m
                     .item("Save")
                     .symbol(kaya::Symbol::Done)
@@ -62,7 +57,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
         let details_item = tx
             .window(kaya::DEFAULT_WINDOW)
-            // A toggle carries a symbol like any other leaf.
             .menu("View", |m| {
                 m.toggle("Details").checked(details).symbol(kaya::Symbol::Info).id()
             })
@@ -81,8 +75,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         msgs.on_menu_select(sort_group, Msg::Sorted);
 
         let groups = tx.collection::<String>();
-        // Catalog built live: items are shared across stamped copies; the
-        // template only attaches, and each activation carries its key path.
+        // Built LIVE and shared across stamped copies: the template only
+        // attaches, and each activation carries its key path.
         let catalog =
             tx.context_catalog(|m| m.item("Remove").symbol(kaya::Symbol::Delete).id());
         msgs.on_menu_item_node(catalog.out, Msg::Remove);
@@ -105,18 +99,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_menu_item(rename, Msg::Rename);
 
                 // Remove's activation names BOTH keys (group, then item).
-                //
-                // The TRACING tier, not the for_each combinator this
-                // block used to spell: `rows` is the construction sugar
-                // (DESIGN.md, "the strongest of all") and the combinator
-                // was the floor it left. The body's result gets out
-                // through the slot idiom milestone2.rs already models —
-                // each trace yields exactly one row, so the slot is
-                // filled exactly once.
-                // The catalog rides a slot for the same reason items
-                // does: it is consumed by its one attach, the trace
-                // records once, and the compiler cannot see that a
-                // trace loop's body runs exactly once.
+                // Slots because a trace body runs exactly once and the
+                // compiler cannot see it (milestone2.rs models this).
                 let mut items = None;
                 let mut catalog = Some(catalog);
                 for mut group in groups.rows(tx) {
@@ -159,9 +143,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.write(status, "saved");
             }),
             Msg::Reset => ctx.apply(|tx| {
-                // The folds never echo the user's pick, so details/sort still
-                // hold false/0; these two prop writes are real checked/value
-                // records (never coalesced) that reset the user-state mirror.
+                // The folds never echo the user's pick, so these signals
+                // still hold false/0 and these writes are real records
+                // (never coalesced) that reset the user-state mirror.
                 tx.write(details, false);
                 tx.write(sort, 0.0);
                 tx.write(status, "ready");
@@ -179,8 +163,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
             }
             Msg::Rework => {
-                // Append-only: rename the retained File, move the promotion
-                // hint from Share to Publish, grow the bar by Tools.
+                // Append-only: rename the retained File, move the
+                // promotion hint, grow the bar by Tools.
                 let publish = ctx.apply(|tx| {
                     tx.menu(share).primary(false);
                     let publish = tx

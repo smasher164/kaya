@@ -1,12 +1,11 @@
-/* The reorder scene from C, on the function floor: order as
- * collection data with the move spelled by hand — the desugared form
- * every binding's move_before/move_to_end lowers to. Each handler
- * repositions an entry by key (collection_move on the wire, move_child
- * at the toolkit), and the selftest's expect_order reads the toolkit's
- * actual child order back. The root is a row so the For's container is
- * the scene's only column-kind widget: languages disagree on whether
- * containers are created before or after their children, and column#0
- * must name the same widget everywhere.
+/* The reorder scene from C, on the function floor: order as collection
+ * data, with each handler repositioning an entry BY KEY and the
+ * selftest's expect_order reading the toolkit's actual child order back.
+ *
+ * THE ROOT IS A ROW so the For's container is the scene's only
+ * column-kind widget: languages disagree on whether containers are
+ * created before or after their children, and column#0 must name the
+ * same widget everywhere.
  *
  * Built and run by the Linux container suite with KAYA_SELFTEST=reorder. */
 
@@ -25,7 +24,6 @@
 #define C_ITEMS 1
 #define N_TITLE 1
 
-/* The record's field indexes: the C floor's "field tokens". */
 #define F_TITLE 0
 
 /* The model, hand-kept per C's no-binding-model decision: the keys in
@@ -78,9 +76,9 @@ static void *app(void *arg) {
         if (!kaya_parse_click(rec, &id, keys, 2, &n_keys) || n_keys != 0)
             continue;
         if (id == W_ROTATE) {
-            /* First entry to the end: the model owns the order, so the
-             * handler asks it which key is first — it never counts
-             * widgets. Keys, never indices, on the wire. */
+            /* First entry to the end. The model owns the order, so the
+             * handler asks it which key is first and never counts
+             * widgets: KEYS, never indices, on the wire. */
             char moved[2];
             memcpy(moved, order[0], sizeof moved);
             for (unsigned i = 0; i + 1 < N_ITEMS; i++)
@@ -111,8 +109,6 @@ static void *app(void *arg) {
 }
 
 int main(void) {
-    /* The stale-artifact guard: this guest compiled against one spec
-     * revision; the loaded library must speak the same one. */
     if (kaya_spec_hash() != KAYA_SPEC_HASH) {
         fprintf(stderr, "kaya: library/binding spec mismatch — rebuild both\n");
         return 1;

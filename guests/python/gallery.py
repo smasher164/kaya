@@ -18,9 +18,8 @@ import kaya
 
 app = kaya.App()
 
-# A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the first
-# binary asset, embedded as source per the include_str! doctrine —
-# scenes carry their inputs, no runtime file I/O.
+# A 2x2 RGB PNG, 75 bytes, embedded as source: scenes carry their inputs
+# and do no runtime file I/O.
 TEST_PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68,
                   82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154,
                   115, 0, 0, 0, 18, 73, 68, 65, 84, 120, 156, 99, 248, 207,
@@ -39,9 +38,8 @@ def on_volume(value):
 
 
 def on_quarter():
-    # The programmatic write: fans out to the control and must NOT
-    # come back as an on_volume occurrence (property writes are
-    # configuration; only the user path and commands emit).
+    # A programmatic write fans out to the control and must NOT come back
+    # as an on_volume occurrence: only the user path and commands emit.
     pos.set(0.25)
 
 
@@ -59,10 +57,8 @@ with app.window():
             kaya.label(bind=volume)
             kaya.button("quarter", on_click=on_quarter)
         with kaya.row():
-            # The content-buffer row: a valid 2x2 PNG decodes and
-            # reports its size, and deliberately invalid bytes read 0x0
-            # — decode failure is the placeholder class, never a crash,
-            # on every backend.
+            # Deliberately invalid bytes read 0x0: decode failure is the
+            # placeholder class, never a crash, on every backend.
             kaya.image(TEST_PNG)
             kaya.image(b"not an image")
 

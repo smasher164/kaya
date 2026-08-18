@@ -1,45 +1,24 @@
 // The clipboard conformance scene, Swift port — one clip in several
 // representations, and the privileged read that takes one back
-// (DESIGN.md, Clipboard; docs/clipboard-plan.md).
-//
-// EVERY ASSERTION CROSSES A PROCESS BOUNDARY, which is the whole design
-// of this scene. kaya's representation set is closed because the
-// LOWERINGS are the hard part — CF_HTML's mandatory offset header,
-// Android's content:// URI for an image, CF_HDROP's double-NUL struct —
-// and a check where kaya reads what kaya wrote parses its own malformed
-// header perfectly happily. That is not merely less coverage: it is a
-// check that cannot fail for the reason the design exists.
-//
-// THE ONE EXCEPTION IS THE CUSTOM FORMAT, deliberately. No stock tool
-// on any platform writes an app-defined type, so the guest copies one
-// and reads it back, with the foreign reader confirming from outside
-// that the bytes really are there under that id.
-//
-// THE IMAGE IS ASSERTED AS A DECODED SIZE, never as bytes: every host
-// re-encodes freely between image types, so a byte count would be a
-// different number on every lane for one picture.
-//
-// See guests/rust/clipboard.swift's canonical semantics in
+// (DESIGN.md, Clipboard; docs/clipboard-plan.md). See
 // guests/rust/clipboard.rs and tools/scenes/clipboard.steps.
+//
+// EVERY ASSERTION CROSSES A PROCESS BOUNDARY: a check where kaya reads
+// what kaya wrote parses its own malformed header happily, so it cannot
+// fail for the reason the design exists. The custom format is the one
+// exception — no stock tool writes an app-defined type, so a foreign
+// reader confirms the bytes from outside. The image is asserted as a
+// DECODED SIZE, never as bytes, because every host re-encodes freely.
 
 import Foundation
 
 let app = KayaApp()
 
-// NOT THE TEMP DIRECTORY ON iOS. $TMP there is the app's own Documents
+// NOT THE TEMP DIRECTORY ON iOS: $TMP there is the app's own Documents
 // (kayaTempDir in swift/KayaSwiftUI.swift), because the outside process
-// that seeds and reads these files can see that collection and cannot
-// see an app's private storage. A guest that computed the temp dir
-// instead writes where nothing looks — the §7.6 android trap replayed,
-// where the shared Java guest lacked the rust guest's platform branch
-// and the seed died on the disagreed path.
-//
-// TMPDIR FIRST EVERYWHERE ELSE. NSTemporaryDirectory() answers with the
-// per-user Darwin temp directory (/var/folders/...) and does NOT honour
-// TMPDIR, so a guest that trusted it wrote its files somewhere the
-// interpreter never looked — the interpreter computes $TMP the way Rust
-// does, which is TMPDIR when set. Measured by the filedialog scene, the
-// hard way.
+// that seeds and reads these files cannot see an app's private storage.
+// TMPDIR FIRST EVERYWHERE ELSE — NSTemporaryDirectory() ignores TMPDIR
+// (docs/traps.md).
 #if os(iOS)
     let kayaTmp = (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
 #else
@@ -51,10 +30,7 @@ try? FileManager.default.createDirectory(
     atPath: sceneDir, withIntermediateDirectories: true)
 
 // A 4x4 PNG, spelled out rather than generated: the scene asserts "4x4"
-// through a foreign decoder, so the picture has to be a real encoded
-// image whose size is knowable from the script. Written to disk for the
-// seeding tool AND handed to copy() as bytes — the same picture both
-// ways.
+// through a foreign decoder, so it has to be a real encoded image.
 let pixelPNG: [UInt8] = [
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  // signature
     0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  // IHDR length + type
@@ -69,14 +45,10 @@ let pixelPNG: [UInt8] = [
 ]
 
 // The app-defined format's id: reverse-DNS and space-free, because it
-// reaches every platform's own registry VERBATIM — a UTI on Apple,
-// RegisterClipboardFormat on Windows, a target atom on X11 and Wayland,
-// a MIME type on Android.
+// reaches every platform's own registry VERBATIM.
 let noteID = "dev.kaya/note"
-// NO QUOTES IN THE PAYLOAD, and the reason is the script rather than
-// the clipboard: the step grammar's escapes are \n, \r and \\ in all
-// three interpreters, with no \" — so a quoted byte could not be
-// spelled in the expectation.
+// NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r and
+// \\ in all three interpreters, so a quoted byte has no spelling.
 let noteBytes: [UInt8] = Array("note=1".utf8)
 
 FileManager.default.createFile(
@@ -92,12 +64,6 @@ var rich: KayaWidget!
 var plain: KayaWidget!
 
 app.build { tx in
-    // THE GESTURE LAYER'S DECLARATION, and an app writes nothing else
-    // for it: the Paste command lowers to the platform's own, acts on
-    // whatever is focused, and works out its own enablement. kaya has
-    // no selection API, which is exactly why copy of a selection has to
-    // be a command rather than something an app assembles out of the
-    // data layer.
     let edit = tx.menu(
         "Edit",
         items: [
@@ -112,9 +78,8 @@ app.build { tx in
 
     func answered(_ tx: KayaAppTx, _ clip: KayaRepresentation?) throws {
         switch clip {
-        // EMPTY IS THE UNIVERSAL NO, and the guest does not try to tell
-        // its four causes apart — denied, unfocused, absent, or nothing
-        // this read accepted. The platforms deliberately decline to say.
+        // EMPTY IS THE UNIVERSAL NO; the guest does not try to tell its
+        // four causes apart, because the platforms decline to say.
         case nil:
             tx.write(status, .str("empty"))
         case .text(let text):
@@ -125,9 +90,7 @@ app.build { tx in
             tx.write(
                 status, .str("custom \(id) \(String(decoding: bytes, as: UTF8.self))"))
         case .image(let bytes):
-            // STRAIGHT BACK OUT, because the assertion that matters is
-            // a foreign DECODER's: the byte count differs per host for
-            // one picture, and the decoded size does not.
+            // Straight back out — a foreign DECODER makes the assertion.
             tx.copy().image(bytes).send()
             tx.write(status, .str("image"))
         case .files(let files):
@@ -136,10 +99,8 @@ app.build { tx in
                 return
             }
             Thread.detachNewThread {
-                // OFF THE APP THREAD, which is what open documents: it
-                // blocks, and a pasted file is no different from a
-                // picked one — it IS a picked one, the same capability
-                // arriving through a second door.
+                // OFF THE APP THREAD: open blocks, and a pasted file is a
+                // picked one arriving through a second door.
                 var text = ""
                 do {
                     let (handle, _) = try file.open()
@@ -163,12 +124,9 @@ app.build { tx in
         tx.button(
             "copy",
             onClick: { inner in  // button#0
-                // ONE CLIP, FOUR REPRESENTATIONS. kaya derives none of
-                // them from any other: whether list bullets survive
-                // html-to-text is this app's decision, so it spells out
-                // both. The order they go on the wire is kaya's, not
-                // this chain's — descending richness, which is
-                // preference order on every host that has one.
+                // ONE CLIP, FOUR REPRESENTATIONS, and kaya derives none
+                // from any other. Wire order is kaya's — descending
+                // richness — not this chain's.
                 inner.copy()
                     .text("kaya clip")
                     .html("<b>kaya</b> clip")
@@ -204,15 +162,11 @@ app.build { tx in
             "focus plain",
             onClick: { inner in inner.focus(plain) })  // button#6
 
-        // DECLARES WHAT IT TAKES, so a paste lands in the hook and this
-        // app decides what to do with it.
+        // Declares what it takes, so a paste lands in the hook.
         rich = tx.entry()  // entry#0
         tx.setAccepts(rich, [KayaAppTx.acceptText])
         tx.setA11yId(rich, "rich")
         tx.onPaste(rich) { inner, clip in
-            // THE SAME SHAPE THE READ ANSWERS WITH, and free where the
-            // read is not: a gesture is its own authorisation, so no
-            // platform charges a prompt for this one.
             if case .text(let text) = clip {
                 inner.write(status, .str("pasted \(text)"))
                 return
@@ -220,34 +174,21 @@ app.build { tx in
             inner.write(status, .str("pasted \(clip)"))
         }
 
-        // DECLARES NOTHING, so the platform's own insertion happens and
-        // the field's ordinary change path reports it — which is what a
-        // plain text editor gets for free.
+        // Declares nothing, so the platform's own insertion happens and
+        // the field's ordinary change path reports it.
         plain = tx.entry()  // entry#1
         tx.setA11yId(plain, "plain")
 
-        // THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy. The
-        // accept list is declared on the TEMPLATE, and that declaration
-        // is what turns the node hook on at all: every backend hands the
-        // gesture to the platform's own insertion when the focused
-        // widget's accept list is empty, so before a template could
-        // carry one this handler registered, dispatched and could never
-        // fire (docs/tpl-props-plan.md §1 — kaya's quietest defect
-        // class, a branch nobody has seen fire). The copy's own key
-        // arrives with the payload, and that is what tells an instance
-        // paste from a live one.
-        //
-        // The row's value is empty because nothing displays it: the
-        // stamped entry is UNCONTROLLED like its live siblings, and
-        // staying empty through the paste is the assertion.
+        // The accept list is declared on the TEMPLATE, and that
+        // declaration is what turns the node hook on at all
+        // (docs/tpl-props-plan.md §1).
         tx.setA11yId(tx.label(bind: rowStatus), "row-status")  // label#1
         let notes = tx.collection()
         tx.each(notes) { t in
             let note = t.entry()  // entry#2, one stamped copy
             t.setAccepts(note, [KayaAppTx.acceptText])
             tx.onPaste(note) { inner, keys, clip in
-                // The path is the copy's own — [.str("r1")] here — and
-                // the dispatch only routes a NON-EMPTY one to a node
+                // The dispatch only routes a NON-EMPTY path to a node
                 // handler, so the first key is there by construction.
                 if case .text(let text) = clip, case .str(let key) = keys[0] {
                     inner.write(rowStatus, .str("row \(key) pasted \(text)"))

@@ -1,11 +1,8 @@
-"""The confirm conformance scene, Python port — the modal-alert
-grammar (the request/result grammar's first client): TWO different
-dialogs from two buttons — delete (two actions) and eject (one) —
-each bound to its OWN handler at show time, so the association is
-the registration itself. The result
-handler rides the REQUEST (on_result=, the widget-handler
-precedent) and retires with its one answer; ids are
-binding-allocated, so the guest carries no correlation plumbing.
+"""The confirm conformance scene, Python port — the modal-alert grammar:
+TWO dialogs from two buttons (delete has two actions, eject one), each
+bound to its OWN handler at show time. The result handler rides the
+REQUEST and retires with its one answer; ids are binding-allocated, so
+the guest carries no correlation plumbing.
 See guests/rust/confirm.rs and tools/scenes/confirm.steps."""
 
 import sys
@@ -25,15 +22,12 @@ def delete_answered(choice):
 
 
 def eject_answered(choice):
-    # A different dialog, a different handler: the association is the
-    # registration itself — this function can never see a delete
-    # answer.
+    # A different dialog, a different handler: this function can never
+    # see a delete answer.
     status.set("held" if choice == kaya.CANCEL else "ejected")
 
 
 def ask_delete():
-    # A widget handler runs inside the ambient transaction already;
-    # the request rides the same commit as any other mutation.
     kaya.show_alert(
         title="delete item?",
         message="this cannot be undone",

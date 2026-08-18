@@ -39,6 +39,25 @@ in docs/deferred.md.
   live in tools/build-id.sh's GATES). For the INNER LOOP only — the
   matrix never sets it, so the run that goes on the record consults no
   cache and cannot be wrong because of one.
+- A COMMENT SURVIVES ONLY IF A FUTURE SESSION NEEDS IT to avoid a
+  mistake (the maintainer's rule, ratified 2026-08-18: "the only things
+  you shouldn't cut are things you'll need for future claude sessions
+  that might need that context. everything else should be nixed,
+  because it just makes things harder to read"). API narration,
+  teaching prose about how kaya works, restated invariants, arguments
+  that the code is correct, and the history of how we arrived are all
+  nixed — the reader has the call in front of them, and DESIGN.md,
+  this file and the plans hold the rest.
+  AND WHERE THE CONTENT LIVES SOMEWHERE ELSE, THE COMMENT IS A POINTER.
+  A line naming the gate that enforces it, or the trap, plan or ledger
+  entry that records it, is the whole comment; a second copy of the
+  reasoning only rots out of step with the first.
+  THE ONE THING NEVER DELETED IS A MEASURED FINDING NOBODY ELSE WROTE
+  DOWN. It moves to docs/traps.md FIRST and the pointer stays behind —
+  deleting it is the only unrecoverable move in this rule, since a
+  measurement costs a session to make again and prose costs nothing.
+  The examples are held tightest of all: a guest should read as the
+  kaya calls it makes.
 - The maintainer approves every commit and its exact message. Do not
   commit or push on your own initiative.
 

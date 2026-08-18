@@ -1,10 +1,7 @@
--- The sections conformance scene, Haskell port: two peer roots in
--- the primary window's section set — presentation context, not
--- lifecycle. The archive pane folds 'SOnSelected' into a visit
--- count, pinning the echo doctrine from both sides: the user's
--- switch emits (the harness drives the real switcher), while the
--- feed button's programmatic 'selectSection' moves the selection
--- silently. The count surviving switch round trips proves retention.
+-- The sections conformance scene, Haskell port: two peer roots in the
+-- primary window's section set. The archive pane folds 'SOnSelected'
+-- into a visit count, which pins the echo doctrine from both sides — a
+-- user's switch emits, a programmatic 'selectSection' does not.
 -- See guests/rust/sections.rs and tools/scenes/sections.steps.
 
 import Data.IORef (modifyIORef', newIORef, readIORef)
@@ -17,11 +14,9 @@ feedId = 7
 archiveId = 8
 
 -- The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
--- shared scene covers BOTH arms: the primary stays `bar`, and this
--- window opens from a handler only the desktop tail's click reaches —
--- the phone runners cut the tail, the click never fires, and
--- 'createWindow' never runs where the capability is absent. No
--- capability read needed: reachability is the gate.
+-- shared scene covers BOTH arms. It opens from a handler only the
+-- desktop tail's click reaches, so 'createWindow' never runs where the
+-- capability is absent: REACHABILITY is the gate, not a capability read.
 libraryId, shelvesId, loansId :: Word64
 libraryId = 1
 shelvesId = 2
@@ -31,17 +26,12 @@ main :: IO ()
 main = kayaMain $ \app -> do
   visitTally <- newIORef (0 :: Int)
   _ <- buildTx app $ do
-    -- One construct carries the window's attributes (the unification
-    -- rule). The hint is ADVISORY: `bar` is each desktop's horizontal
-    -- spelling and the phones' physics regardless — no observable
-    -- rides on it.
+    -- The presentation hint is ADVISORY: no observable rides on it.
     window 0 [WTitle "sections", WSectionsPresentation 1]
     visits <- signal (VStr "archive: 0 visits")
-    -- THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar without
-    -- icons is not the platform's real thing, and the glyph that means
-    -- `home` differs per platform — SF Symbols spells it `house`, and no
-    -- shared asset would be legal anyway (SF Symbols are licensed to
-    -- Apple platforms only).
+    -- A semantic icon names a CONCEPT; each platform draws it from its
+    -- own set, and no shared asset would be legal (docs/styling-plan.md
+    -- D6).
     addSection feedId [STitle "Feed", SSymbol SymbolHome]
     addSection
       archiveId
@@ -62,19 +52,12 @@ main = kayaMain $ \app -> do
             ready <- signal (VStr "feed ready")
             labelBound ready, -- label#0
           buttonOn "to archive" $
-            -- Programmatic selection: configuration, no echo —
-            -- 'SOnSelected' must NOT fire (the scene asserts the
-            -- count holds).
+            -- Programmatic selection does NOT echo: 'SOnSelected' must
+            -- not fire, and the scene asserts the count holds.
             buildTx app (selectSection archiveId), -- button#0
           buttonOn "open library" $ -- button#1
-            -- The window's attributes ride its 'createWindow' exactly
-            -- as the primary's ride 'window'; the sections carry no
-            -- 'SOnSelected', since the tail reads the presentation the
-            -- render body stamped and never switches them.
             buildTx app $ do
               createWindow libraryId [WTitle "library", WSectionsPresentation 2]
-              -- The SIDEBAR arm carries symbols too: the source list is
-              -- where a mac app most wants them.
               addSectionIn libraryId shelvesId [STitle "Shelves", SSymbol SymbolSearch]
               addSectionIn libraryId loansId [STitle "Loans", SSymbol SymbolLock]
               shelvesRoot <-

@@ -1,38 +1,15 @@
 // The background conformance scene, Go port — work off the app
 // goroutine, posted back (docs/background-work-plan.md).
 //
-// WHAT IT PROVES, and the reason for its odd shape: a wrong
-// implementation must DEADLOCK rather than disagree. The worker parks
-// until a CLICK releases it, and only a live app goroutine can process
-// a click — so a binding that let background work occupy that goroutine
-// cannot reach the end of the script at all. It could not even deliver
-// its own release.
-//
-// The parking is a plain channel receive on a channel this guest owns,
-// and the worker is a plain goroutine. kaya supplies no waiting
-// primitive and should not: the point is that a guest uses its own
-// language's concurrency and hands back only the result.
-//
-// The accumulators are the guest's own state rather than signal
-// read-backs — signals are write-only by doctrine. They need no mutex:
-// everything that touches them runs on the app goroutine, inside a
-// posted transaction.
+// THE PARKING IS LOAD-BEARING: the worker waits for a CLICK, and only a
+// live app goroutine can deliver one — so a binding that ran background
+// work on that goroutine deadlocks here rather than merely disagreeing.
 package background
 
 import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// App builds the scene and hands it back ready to be served.
-//
-// THE TAIL IS THE ONLY THING THAT DIFFERS BY PLATFORM, and it differs
-// because the hosting does: a desktop or iOS guest owns the process
-// main thread and lends it to kaya (guests/go/cmd/main_desktop.go),
-// while on Android the OS owns main and kaya starts the guest on a
-// thread of its own (guests/go/cmd/main_android.go). Both tails are
-// one package over one scene table, so everything above them — the
-// transaction, the handlers, the strings — is compiled into every
-// platform's artifact from these bytes.
 func App() *kaya.App {
 	app := kaya.NewApp()
 
@@ -48,21 +25,15 @@ func App() *kaya.App {
 		tx.Mount(tx.Column(func() {
 			tx.Label(status).A11yID("status") // label#0
 			tx.Label(alive).A11yID("alive")   // label#1
-			// Authored so the CLOSING read can address it: the AX read
-			// needs an identifier, and an index read passes for an arm
-			// that ran and drew nothing.
+			// Authored so the CLOSING read can address it: an index read
+			// passes for an arm that ran and drew nothing.
 			tx.Label(detail).A11yID("nested") // label#2
 
 			tx.Button("start", func(tx *kaya.Tx) { // button#0
 				go func() {
-					// Parks here until the scene clicks release. Were
-					// the binding running this on the app goroutine,
-					// that click could never be processed and the whole
-					// scene would deadlock — the point.
 					<-release
-					// Three posts, in order. The accumulator makes this
-					// a test of ORDER and not merely of which one ran
-					// last.
+					// Three posts, so the accumulator tests ORDER and
+					// not merely which one ran last.
 					for _, step := range []string{"1", "2", "3"} {
 						app.Post(func(tx *kaya.Tx) {
 							posted += step
@@ -72,8 +43,8 @@ func App() *kaya.App {
 				}()
 				tx.Write(status, "working")
 			})
-			// Proof the app goroutine is still serving input while the
-			// worker is parked and has posted nothing.
+			// Proof the app goroutine still serves input while the
+			// worker parks.
 			tx.Button("ping", func(tx *kaya.Tx) { // button#1
 				tx.Write(alive, "alive")
 			})
@@ -81,9 +52,8 @@ func App() *kaya.App {
 				close(release)
 			})
 			// A post from INSIDE a handler QUEUES for after; it never
-			// nests. The handler appends a, posts a closure appending b,
-			// appends c — so it commits "ac" and the posted closure then
-			// commits "acb". Nesting can only ever produce "abc".
+			// nests. So this commits "ac" and the posted closure then
+			// commits "acb" — nesting could only ever produce "abc".
 			tx.Button("nest", func(tx *kaya.Tx) { // button#3
 				nested += "a"
 				app.Post(func(tx *kaya.Tx) {

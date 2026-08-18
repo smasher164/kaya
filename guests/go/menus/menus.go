@@ -1,8 +1,7 @@
 // The menus conformance scene, Go port: the command vocabulary (a
 // File/View/Sort menu bar, context menus on a live label and on stamped
-// rows), the uncontrolled-menu echo doctrine, and a late
-// rename/append/promotion rework. Canonical semantics in
-// guests/rust/menus.rs; the byte-frozen contract in tools/scenes/menus.steps.
+// rows) and the uncontrolled-menu echo doctrine. Canonical semantics in
+// guests/rust/menus.rs; the contract in tools/scenes/menus.steps.
 package menus
 
 import (
@@ -11,16 +10,6 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// App builds the scene and hands it back ready to be served.
-//
-// THE TAIL IS THE ONLY THING THAT DIFFERS BY PLATFORM, and it differs
-// because the hosting does: a desktop or iOS guest owns the process
-// main thread and lends it to kaya (guests/go/cmd/main_desktop.go),
-// while on Android the OS owns main and kaya starts the guest on a
-// thread of its own (guests/go/cmd/main_android.go). Both tails are
-// one package over one scene table, so everything above them — the
-// transaction, the handlers, the strings — is compiled into every
-// platform's artifact from these bytes.
 func App() *kaya.App {
 	app := kaya.NewApp()
 
@@ -41,10 +30,9 @@ func App() *kaya.App {
 		// moves both.
 		win := tx.Window(0).Title("menus")
 		file := win.Menu("File").BindEnabled(canExport)
-		// THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT, drawn
-		// by each platform in its own symbol set. SymbolDone is the
-		// checkmark idiom — the vocabulary has no `save` on purpose
-		// (Apple's own catalog has no save-specific glyph either).
+		// THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT, drawn by
+		// each platform in its own symbol set. The vocabulary has no
+		// save-specific glyph on purpose.
 		file.Item("Save").Symbol(kaya.SymbolDone).Shortcut("primary+s").
 			OnActivate(func(tx *kaya.Tx) {
 				tx.Write(status, "saved")
@@ -52,7 +40,6 @@ func App() *kaya.App {
 		file.Item("Export").BindEnabled(canExport).Symbol(kaya.SymbolForward)
 		share := file.Item("Share").Primary(true).OnActivate(onShare)
 
-		// A toggle carries a symbol like any other leaf.
 		win.Menu("View").Toggle("Details").BindChecked(details).
 			Symbol(kaya.SymbolInfo).
 			OnToggle(func(tx *kaya.Tx, on bool) {
@@ -76,7 +63,7 @@ func App() *kaya.App {
 		})
 
 		groups = tx.Collection()
-		// Catalog built live: items are shared across stamped copies; the
+		// Catalog built live: items are shared across stamped copies, the
 		// template only attaches, and each activation carries its key path.
 		catalog := tx.ContextCatalog()
 		catalog.Item("Remove").Symbol(kaya.SymbolDelete).
@@ -93,8 +80,8 @@ func App() *kaya.App {
 			})
 			tx.Button("reset menu state", func(tx *kaya.Tx) { // button#1
 				// The folds never echo the user's pick, so details/sort still
-				// hold false/0; these two prop writes are real checked/value
-				// records (never coalesced) that reset the user-state mirror.
+				// hold false/0; these two prop writes reset the user-state
+				// mirror.
 				tx.Write(details, false)
 				tx.Write(sort, 0.0)
 				tx.Write(status, "ready")

@@ -1,42 +1,13 @@
-{- The text-ranges conformance scene, Haskell port: the three
-   primitives an editor cannot write for itself — HIGHLIGHT a set of
-   ranges, SELECT one, REVEAL one — driven by a search this file writes
+{- The text-ranges conformance scene, Haskell port: HIGHLIGHT a set of
+   ranges, SELECT one, REVEAL one, driven by a search this file writes
    in five lines.
 
-   THE FIVE LINES ARE THE POINT. kaya ships no find engine, no find bar
-   and no regex dialect (docs/ranges-plan.md §3): what to decorate is
-   the app's question, and every editor answers it differently. What no
-   app can write for itself is the other half — colouring a run of a
-   native text view, moving its selection, scrolling it into view — and
-   that is exactly what the framework ships.
-
-   THE OFFSETS ARE UTF-8 BYTE OFFSETS, AND HASKELL'S OWN UNIT IS NOT.
-   This is the one thing this port has to say that guests/rust/ranges.rs
-   does not: a Rust `String` is indexed in bytes, so `match_indices`
-   hands that app the ranges kaya wants for free. A Haskell 'String' is
-   a list of 'Char' — scalars — so the obvious spelling, an
-   'Data.List.isPrefixOf' walk over the document, returns 51, 197 and
-   747 where kaya's unit says 57, 203 and 753. SIX SHORT, EVERY TIME,
-   because the document opens with a CJK word, and nothing downstream
-   could tell: the offsets are legal, they are in range, they land on
-   character boundaries, and they decorate the wrong six characters.
-   So the search runs where the offsets live — over the document's UTF-8
-   encoding, with 'BS.breakSubstring', which is also what a Haskell
-   editor holds its buffer as. The same trap, one layer down, is the
-   scene's whole reason for opening in Japanese: a backend that forwards
-   kaya's byte offsets to a platform counting UTF-16 is six early too.
-
-   WHAT EACH LEG PROVES, in the order the script runs them:
-     * a set of three matches decorated at once, read back out of the
-       platform's own accessibility tree;
-     * one of them selected, likewise;
-     * the third REVEALED — asserted `offscreen` first, so the leg
-       cannot pass on a document that happened to fit;
-     * a user's keystroke DROPPING the declared set (D2: ranges are
-       app-owned and never tracked across an edit);
-     * a `select_range` REFUSED because the user is mid-composition
-       (D4), which is the one thing on this surface a backend is
-       expected not to do.
+   THE OFFSETS ARE UTF-8 BYTE OFFSETS AND HASKELL'S OWN UNIT IS NOT: a
+   'String' is a list of 'Char', so an 'isPrefixOf' walk answers in
+   scalars and is SIX SHORT on this document, which opens with a CJK
+   word. The search therefore runs over the UTF-8 encoding, with
+   'BS.breakSubstring'. The frozen numbers and what a UTF-16 counter
+   would say instead are in tools/validate-mac.sh.
 
    Canonical semantics in guests/rust/ranges.rs; the byte-frozen
    contract in tools/scenes/ranges.steps. -}
@@ -50,12 +21,9 @@ import Data.List (intercalate)
 import KayaApp
 import KayaWire (Value (..))
 
--- The document, frozen — 813 bytes, byte-identical to the other seven
--- guests' copy. Three occurrences of `alpha` and nothing else
--- containing that substring; forty short lines, so the last match is
--- far below a 240x96 viewport and REVEAL has something to do. A list
--- and not a string with gaps: every line is one visible element, so a
--- lost `\n` cannot hide inside an escape.
+-- Frozen — 813 bytes, byte-identical to the other seven guests' copy.
+-- Three occurrences of `alpha`; forty short lines, so the last match is
+-- far below a 240x96 viewport and REVEAL has something to do.
 document :: String
 document =
   intercalate
@@ -105,17 +73,14 @@ document =
 needle :: String
 needle = "alpha"
 
--- The document as kaya sees it. The binding encodes every string it
--- sends with this same encoder (KayaWire's `stringUtf8`), so these are
--- the exact bytes the offsets below index.
+-- The binding encodes every string it sends with this same encoder, so
+-- these are the exact bytes the offsets index.
 utf8 :: String -> BS.ByteString
 utf8 = BL.toStrict . toLazyByteString . stringUtf8
 
--- THE WHOLE SEARCH. Literal, forward, non-overlapping, in the byte
+-- The whole search: literal, forward, non-overlapping, in the byte
 -- domain — half-open @(start, stop)@ pairs, which is what the three
--- range verbs take. An editor that wants case folding, word boundaries
--- or a regex dialect writes those here, in the app, where its users can
--- be told what they mean.
+-- range verbs take.
 findAll :: String -> String -> [(Int, Int)]
 findAll haystack pattern = go 0 (utf8 haystack)
   where
@@ -130,10 +95,9 @@ findAll haystack pattern = go 0 (utf8 haystack)
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- The app's own copy of the document, which is the ONLY authority on
-  -- what the offsets mean. It advances on every edit, exactly as an
-  -- editor's buffer does — Build is a pure state monad, so the fold
-  -- lives in an IORef out here rather than in the transaction.
+  -- The app's own copy of the document, the ONLY authority on what the
+  -- offsets mean. Build is a pure state monad, so the fold lives in an
+  -- IORef out here rather than in the transaction.
   docRef <- newIORef document
 
   buildTx app $ do
@@ -142,19 +106,15 @@ main = kayaMain $ \app -> do
     -- constructor can only see what the Build has already bound.
     status <- signal (VStr "0 matches")
 
-    -- The editor. The a11y id is not decoration: every range assertion
-    -- reads the platform's accessibility tree, and the id is how a leg
-    -- finds this control there.
+    -- The a11y id is how a leg finds this control in the platform's
+    -- accessibility tree, which is where every range assertion reads.
     editor <-
       textareaOn
         ( \text -> do
             writeIORef docRef text
-            -- THE SEARCH RESULTS ARE STALE AND THE APP SAYS SO. kaya
-            -- has already dropped the decorations — a declared set is
-            -- bound to the text it was declared against — and this is
-            -- the app agreeing rather than being told: an editor whose
-            -- document moved has to search again before it can claim
-            -- anything about where the matches are.
+            -- kaya has already dropped the decorations: a declared set
+            -- is bound to the text it was declared against
+            -- (docs/ranges-plan.md D2), so the app re-searches.
             submitTx app (writeSignal status (VStr "0 matches"))
         )
         [A11yId "doc", A11yLabel "Document"]

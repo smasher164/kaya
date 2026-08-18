@@ -1,20 +1,12 @@
-// The uniform-abort guard: a handler abort rolls the model mirror
-// back, ships nothing, and the app continues — the same observable
-// semantics as every other binding (the negative test each language
-// carries). Runs headless: the library loads (KAYA_LIB) and records
-// submit, but Run() is never entered — the Python checks'
-// arrangement. The bindings compile into this assembly (the csproj
-// globs bindings/csharp), so the internal mirrors (SignalMirrors,
-// SignalDeps) are in reach; Dispatch is private, so the boundary test
-// covers the rollback and the dispatch wrapper stays compile-visible
-// only.
+// The uniform-abort guard, plus every C# surface fact a SCENE cannot
+// see (menu record emission, the undo group's head-of-batch rule, the
+// mirror fold an undone/redone payload drives). Run by
+// tools/check-abort.sh.
 //
-// It has since become the place for every C# surface fact a SCENE
-// cannot see — the menu constructors' record emission, and now the undo
-// group's head-of-batch rule and the mirror fold an undone/redone
-// payload drives. A scene asserts what the user sees; a marker in the
-// wrong place or a payload folded into the wrong mirror can still leave
-// one platform's scene passing.
+// Runs headless: the library loads (KAYA_LIB) and records submit, but
+// Run() is never entered. The bindings compile into this assembly (the
+// csproj globs bindings/csharp), so the internal mirrors (SignalMirrors,
+// SignalDeps) are in reach.
 
 using System;
 using System.Collections.Generic;
@@ -50,8 +42,7 @@ static class AbortCheck
         return true;
     }
 
-    // Record-frame helpers for the menu emission section: each frame
-    // is u32 length then u16 kind at offset 4, little-endian.
+    // A record frame is u32 length then u16 kind at offset 4, little-endian.
     static ushort RecKind(byte[] rec) => (ushort)(rec[4] | (rec[5] << 8));
 
     static int CountKind(List<byte[]> records, int from, ushort kind)
@@ -91,9 +82,7 @@ static class AbortCheck
         app.Build(tx => Check(
             KeysEqual(EntryKeys(tx, todos), "a", "b"), "commit did not reach the mirror"));
 
-        // Abort mid-transaction after mutating: the boundary must
-        // restore the mirrors and rethrow (rollback + propagate is the
-        // tx boundary's contract; surviving is the dispatch loop's).
+        // Abort mid-transaction after mutating: rollback, then rethrow.
         bool propagated = false;
         try
         {
@@ -116,22 +105,15 @@ static class AbortCheck
         Check(Equals(app.SignalMirrors[counter.Id], "x"),
             "abort did not restore the signal mirror");
 
-        // An aborted transaction abandons its derived-signal
-        // registrations with its records: the pending list promotes
-        // only on commit.
         Check(!app.SignalDeps.TryGetValue(counter.Id, out var deps) || deps.Count == 0,
             "aborted tx leaked derived-signal registrations");
 
-        // A post-abort commit works and sees the restored model.
         app.Build(tx => tx.Insert(todos, "c", "three"));
         app.Build(tx => Check(
             KeysEqual(EntryKeys(tx, todos), "a", "b", "c"), "post-abort commit broken"));
 
-        // The record-time mirror-read guard: while a template body is
-        // being declared (a For body, a When body), the model mirror is
-        // off-limits — the template records once and replays, so a read
-        // baked into it is silently dead data. Live-zone and build
-        // reads stay legal, pinned below.
+        // The record-time mirror-read guard (DESIGN.md, "record-time
+        // mirror-read guard"): no model read inside a template body.
         app.Build(tx =>
         {
             tx.Each(todos, t =>
@@ -145,8 +127,8 @@ static class AbortCheck
                 catch (InvalidOperationException e) { threw = e.Message.Contains("template body"); }
                 Check(threw, "Count inside a For body did not throw");
             });
-            // The When arm: OpenFors tracks Fors only — When pushes
-            // nothing there — so this pins the counter's When arm.
+            // Pinned separately because OpenFors tracks Fors only — a
+            // When pushes nothing there.
             var visible = tx.Signal(true);
             tx.When(visible, t =>
             {
@@ -155,22 +137,17 @@ static class AbortCheck
                 catch (InvalidOperationException e) { threw = e.Message.Contains("template body"); }
                 Check(threw, "Items inside a When body did not throw");
             });
-            // After the scope closes, the same transaction reads again.
             Check(KeysEqual(EntryKeys(tx, todos), "a", "b", "c"),
                 "read after the template scope closed broken");
         });
-        // A later build-tx read stays legal — explicit, even though the
-        // reads above already exercised it: the guard is template-scope
-        // only, never build-wide.
+        // Redundant on purpose: the guard is template-scope only, never
+        // build-wide.
         app.Build(tx => Check(
             KeysEqual(EntryKeys(tx, todos), "a", "b", "c"), "build-tx read after the guard broken"));
 
-        // The menu construction surface must REACH the record stream —
-        // the wire-dropped-write class: a constructor that emits
-        // nothing passes every surface gate until a scene fails live
-        // (the dropped-spacing lesson; Python's kaya_app_checks.py is
-        // the pattern). The bindings compile into this assembly, so
-        // the open transaction's Records list is in reach.
+        // The menu constructors must REACH the record stream: one that
+        // emits nothing passes every surface gate until a scene fails
+        // live.
         MenuItem file = default;
         app.Build(tx =>
         {
@@ -198,17 +175,14 @@ static class AbortCheck
                     canonical = true;
             Check(canonical, "shortcut did not reach the records canonicalized");
 
-            // The binding's one shortcut parser rejects aliases at
-            // record time — no call site can bypass it.
             bool threw = false;
             try { tx.Item("Bad", shortcut: "ctrl+s"); }
             catch (ArgumentException) { threw = true; }
             Check(threw, "an alias shortcut must die in the binding's one parser");
         });
 
-        // Append-at-any-time: the retained handle reopens in a later
-        // transaction — one create plus one append under the RETAINED
-        // parent, and never a new bar anchor.
+        // Append-at-any-time: a retained handle reopens in a later
+        // transaction, under the same parent and with no new bar anchor.
         app.Build(tx =>
         {
             int before = tx.Records.Count;
@@ -226,20 +200,14 @@ static class AbortCheck
                 "reopen re-anchored the bar");
         });
 
-        // THE UNDO SURFACE (docs/undo-plan.md D2, D5). Three facts no
-        // scene can see, for the same reason the menu section above
-        // exists: the scene asserts what the USER sees, and a group
-        // marker in the wrong place or a payload folded into the wrong
-        // mirror can still produce a passing scene on one platform.
+        // The undo surface (docs/undo-plan.md D2, D5).
         app.Build(tx =>
         {
             int before = tx.Records.Count;
             var s = tx.Signal("a");
             tx.Write(s, "b");
-            // NAMED AFTER THE WORK, which is how a handler is written —
-            // it builds first and knows what the step was afterwards —
-            // and the marker must still LEAD the batch, because the wire
-            // reads it head-of-batch.
+            // Called after the work it names, but the marker must still
+            // LEAD the batch: the wire reads it head-of-batch.
             tx.Undoable("step");
             Check(RecKind(tx.Records[before]) == KayaWire.TxKindUndoGroup,
                 "Undoable did not put the group marker at the head of the batch");
@@ -251,11 +219,8 @@ static class AbortCheck
             Check(threw, "a second Undoable must refuse — one name per step");
         });
 
-        // The fold an undone/redone payload drives, on the mirror side:
-        // the core already moved, so a mirror that does not follow makes
-        // every read-back stale. This is the ONE direction the wire
-        // travels wire-fields-to-object, so it is the one the record
-        // type's schema is used in reverse.
+        // The mirror fold an undone/redone payload drives — the one
+        // direction the wire travels fields-to-object.
         RecordCollection<Todo> notes = default;
         app.Build(tx =>
         {
@@ -264,9 +229,8 @@ static class AbortCheck
             notes.Insert(tx, "b", new Todo("tea", false));
         });
         var undone = new UndoDelta();
-        // "a" is gone (an undone insert), "b" is restored with the
-        // fields the core states, and a third entry the mirror never had
-        // comes back from nothing (an undone remove).
+        // "a" gone (an undone insert), "b" restored with the core's
+        // fields, "c" back from nothing (an undone remove).
         undone.Entries.Add(new UndoEntry
         {
             Collection = notes.Collection.Id,
@@ -310,9 +274,7 @@ static class AbortCheck
         Check(Equals(app.SignalMirrors[counter.Id], "restored"),
             "the undo fold did not follow the signal mirror");
 
-        // An aborted append drops its menu records with everything
-        // else (records die with the tx; nothing ships) and the app
-        // continues.
+        // An aborted append drops its menu records with everything else.
         propagated = false;
         try
         {

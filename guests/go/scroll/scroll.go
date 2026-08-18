@@ -1,8 +1,7 @@
-// The scroll conformance scene, Go port — the viewport grows so the
+// The scroll conformance scene, Go port — the viewport GROWS so the
 // enclosing track constrains it (an unconstrained viewport hugs its
-// content and nothing overflows); the bottom button, reachable only
-// by scrolling, proves the scrolled-to content is live. See
-// guests/rust/scroll.rs and tools/scenes/scroll.steps.
+// content and nothing overflows). See guests/rust/scroll.rs and
+// tools/scenes/scroll.steps.
 package scroll
 
 import (
@@ -11,16 +10,6 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// App builds the scene and hands it back ready to be served.
-//
-// THE TAIL IS THE ONLY THING THAT DIFFERS BY PLATFORM, and it differs
-// because the hosting does: a desktop or iOS guest owns the process
-// main thread and lends it to kaya (guests/go/cmd/main_desktop.go),
-// while on Android the OS owns main and kaya starts the guest on a
-// thread of its own (guests/go/cmd/main_android.go). Both tails are
-// one package over one scene table, so everything above them — the
-// transaction, the handlers, the strings — is compiled into every
-// platform's artifact from these bytes.
 func App() *kaya.App {
 	app := kaya.NewApp()
 

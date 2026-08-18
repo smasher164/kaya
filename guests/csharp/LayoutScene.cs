@@ -23,8 +23,7 @@ static class LayoutScene
             {
                 tx.Label(bind: probe); // label#0
 
-                // Main-axis free space: three unequal children with
-                // leftover room.
+                // Main-axis free space: three unequal children.
                 tx.Row(() =>
                 {
                     tx.Button("A");
@@ -32,8 +31,7 @@ static class LayoutScene
                     tx.Label(bind: tail); // label#1
                 });
 
-                // Cross-axis alignment: three different intrinsic
-                // heights, one grower filling the leftover row width.
+                // Cross-axis alignment: three intrinsic heights.
                 tx.Row(() =>
                 {
                     tx.Checkbox("check");
@@ -41,16 +39,14 @@ static class LayoutScene
                     tx.Slider(0.0, 1.0, 0.5, grow: 1);
                 });
 
-                // Proportional grow: two growers of unequal weight in
-                // one row.
+                // Proportional grow: two growers of unequal weight.
                 tx.Row(() =>
                 {
                     tx.Slider(0.0, 1.0, 0.25, grow: 1);
                     tx.Slider(0.0, 1.0, 0.75, grow: 3);
                 });
 
-                // Nesting: a column inside the root column, a row
-                // inside that.
+                // Nesting: a column in the root column, a row in that.
                 tx.Column(() =>
                 {
                     tx.Label(bind: nested); // label#3

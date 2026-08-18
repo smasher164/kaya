@@ -1,12 +1,9 @@
-"""The feed scene: sum-typed elements, end to end. The union IS the
-sum — `kaya.collection(Note | Todo)` declares one variant per member,
-in the union's order — and the for_each yields the eliminator: one
-`with cases.case(Cls) as el:` block per constructor (the scene holds
-the arms to totality at declaration). Mutation is match-refined the
-Python way: the isinstance that guards a patch is checked, not
-trusted — the patch witnesses the entry's current constructor, and a
-kwarg the constructor lacks raises at the call site, so a stale
-occurrence folds into nothing.
+"""The feed scene: sum-typed elements, end to end. The union IS the sum
+— `kaya.collection(Note | Todo)` declares one variant per member, in the
+union's order — and for_each yields the eliminator, one
+`with cases.case(Cls) as el:` block per constructor, held to totality at
+declaration. A patch witnesses the entry's current constructor, and a
+kwarg the constructor lacks raises at the call site.
 
 The backend selftest (KAYA_SELFTEST=feed) reads the note labels,
 toggles the todo, promotes the first note into a finished todo (same
@@ -42,8 +39,7 @@ def done_count_text(items):
 
 
 def on_promote():
-    # The first note, promoted to a finished todo: the model is asked
-    # which entry is a Note — the handler never counts widgets — and
+    # The MODEL is asked which entry is a Note — never the widgets — and
     # the update's new constructor restamps that key's copy in place.
     for key, post in feed.items():
         if isinstance(post, Note):
@@ -52,9 +48,8 @@ def on_promote():
 
 
 def on_toggle(key, checked):
-    # The match arm as a guard: the patch below witnesses the entry's
-    # current constructor, so this isinstance is checked, not trusted.
-    # A stale occurrence lands in the else and folds into nothing.
+    # The match arm as a guard: a stale occurrence lands in the else and
+    # folds into nothing.
     if isinstance(feed.get(key), Todo):
         feed.patch(key, done=checked)
 

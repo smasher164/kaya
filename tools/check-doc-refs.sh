@@ -383,7 +383,7 @@ if not plan.is_file():
 else:
     plan_text = plan.read_text(encoding="utf-8")
     _, g0, m0 = scan(plan, plan_text)
-    broken, n3 = re.subn(r"rust/undo\.rs:207", "rust/undo-NO-SUCH.rs:207",
+    broken, n3 = re.subn(r"rust/undo\.rs:135", "rust/undo-NO-SUCH.rs:135",
                          plan_text)
     print(f"check-doc-refs: self-test N3 broke 1 member of a real brace group "
           f"({g0} group(s), {m0} member(s) expanded), {n3} substitution(s)")
@@ -438,7 +438,7 @@ if len(findings_in(under)) != len(findings_in(sample_text)):
 # that quietly dropped the `:207` again would show here rather than in
 # six months.
 if plan.is_file():
-    deep, n6 = re.subn(r"rust/undo\.rs:207", "rust/undo.rs:999999", plan_text)
+    deep, n6 = re.subn(r"rust/undo\.rs:135", "rust/undo.rs:999999", plan_text)
     print(f"check-doc-refs: self-test N6b pushed a real brace member's line "
           f"anchor past the end of guests/rust/undo.rs, {n6} substitution(s)")
     if n6 < 1:

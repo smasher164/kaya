@@ -1,22 +1,17 @@
 // The sections conformance scene, C# port: two peer roots in the
-// primary window's section set — presentation context, not
-// lifecycle. The archive pane folds onSelected into a visit count,
-// pinning the echo doctrine from both sides: the user's switch emits
-// (the harness drives the real switcher), while the feed button's
-// programmatic SelectSection moves the selection silently. The count
-// surviving switch round trips proves retention. See
+// primary window's section set. The archive pane folds onSelected into
+// a visit count, pinning the echo doctrine from both sides — a user's
+// switch emits, a programmatic SelectSection does not. See
 // guests/rust/sections.rs and tools/scenes/sections.steps.
 
 static class SectionsScene
 {
     const ulong Feed = 7;
     const ulong Archive = 8;
-    // The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
-    // shared scene covers BOTH arms: the primary stays `bar`, and this
-    // window opens from a handler only the desktop tail's click reaches —
-    // the phone runners cut the tail, the click never fires, and
-    // CreateWindow never runs where the capability is absent. No
-    // capability read needed: reachability is the gate.
+    // The SIDEBAR half, in an AUX WINDOW so one shared scene covers both
+    // arms. It opens from a handler only the desktop tail's click
+    // reaches, so CreateWindow never runs where the capability is
+    // absent: reachability is the gate, no capability read needed.
     const ulong Library = 1;
     const ulong Shelves = 2;
     const ulong Loans = 3;
@@ -29,19 +24,13 @@ static class SectionsScene
         Signal visits = default;
         app.Build(tx =>
         {
-            // One construct carries the window's attributes (the
-            // unification rule). The hint is ADVISORY: `bar` is each
-            // desktop's horizontal spelling and the phones' physics
-            // regardless — no observable rides on it.
+            // The presentation is ADVISORY: no observable rides on it.
             tx.Window(title: "sections",
                 sectionsPresentation: KayaWire.SectionsPresentationBar);
             visits = tx.Signal("archive: 0 visits");
 
-            // THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar
-            // without icons is not the platform's real thing, and the
-            // glyph that means `home` differs per platform — SF Symbols
-            // spells it `house`, and no shared asset would be legal
-            // anyway (SF Symbols are licensed to Apple platforms only).
+            // A symbol names a CONCEPT; each platform draws it from its
+            // own set (docs/styling-plan.md D6).
             tx.AddSection(Feed, title: "Feed", symbol: Symbol.Home);
             tx.AddSection(Archive, title: "Archive", symbol: Symbol.Star,
                 onSelected: inner =>
@@ -56,22 +45,15 @@ static class SectionsScene
                 tx.Label(bind: ready); // label#0
                 tx.Button("to archive", onClick: inner => // button#0
                 {
-                    // Programmatic selection: configuration, no echo
-                    // — onSelected must NOT fire (the scene asserts
-                    // the count holds).
+                    // Programmatic: onSelected must NOT fire.
                     inner.SelectSection(Archive);
                 });
                 tx.Button("open library", onClick: inner => // button#1
                 {
-                    // The window's attributes ride its one construct, so
-                    // the presentation goes on CreateWindow exactly as the
-                    // primary's goes on Window.
                     inner.CreateWindow(Library, title: "library",
                         sectionsPresentation: KayaWire.SectionsPresentationSidebar);
                     // window: is the add-into-a-window spelling; the
                     // default 0 above is the primary.
-                    // The SIDEBAR arm carries symbols too: the source
-                    // list is where a mac app most wants them.
                     inner.AddSection(Shelves, title: "Shelves",
                         symbol: Symbol.Search, window: Library);
                     inner.AddSection(Loans, title: "Loans",

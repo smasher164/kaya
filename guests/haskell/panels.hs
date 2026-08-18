@@ -14,9 +14,8 @@ main = kayaMain $ \app -> do
     root <- column [] [labelBound s] -- label#0
     mount root
 
-    -- The veto handler binds to the inspector at its declaration
-    -- (handlers scope to the thing that creates them): it can only
-    -- ever mean this window's close.
+    -- The veto handler binds to the inspector at its declaration, so it
+    -- can only ever mean this window's close.
     createWindow
       1
       [ WTitle "inspector",
@@ -33,7 +32,5 @@ main = kayaMain $ \app -> do
     mountIn 1 aux
     return s
 
-  -- The handler rides the declaration above; nothing app-global
-  -- remains.
   _ <- return status
   return ()

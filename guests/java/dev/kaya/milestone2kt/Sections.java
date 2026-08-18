@@ -5,23 +5,18 @@ import dev.kaya.KayaWire;
 
 /**
  * The sections conformance scene from the JVM: two peer roots in the
- * primary window's section set — presentation context, not
- * lifecycle. The archive pane folds onSelected into a visit count,
- * pinning the echo doctrine from both sides: the user's switch emits
- * (the harness drives the real switcher), while the feed button's
- * programmatic selectSection moves the selection silently. The count
- * surviving switch round trips proves retention. See
- * guests/rust/sections.rs and tools/scenes/sections.steps.
+ * primary window's section set. The visit count pins the echo doctrine
+ * from both sides — the user's switch emits, a programmatic
+ * selectSection does not. See guests/rust/sections.rs and
+ * tools/scenes/sections.steps.
  */
 final class Sections {
     private static final long FEED = 7;
     private static final long ARCHIVE = 8;
-    // The SIDEBAR half of the presentation enum, in an AUX WINDOW so
-    // one shared scene covers BOTH arms: the primary stays `bar`, and
-    // this window opens from a handler only the desktop tail's click
-    // reaches — the phone runners cut the tail, the click never fires,
-    // and createWindow never runs where the capability is absent. No
-    // capability read needed: reachability is the gate.
+    // The SIDEBAR arm lives in an AUX WINDOW, opened only from the
+    // desktop tail's click: the phone runners cut that tail, so
+    // createWindow never runs where the capability is absent.
+    // Reachability is the gate — no capability read needed.
     private static final long LIBRARY = 1;
     private static final long SHELVES = 2;
     private static final long LOANS = 3;
@@ -32,20 +27,16 @@ final class Sections {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            // One construct carries the window's attributes (the
-            // unification rule). The hint is ADVISORY: `bar` is each
-            // desktop's horizontal spelling and the phones' physics
-            // regardless — no observable rides on it.
+            // The presentation hint is ADVISORY: no observable rides
+            // on it.
             tx.window(0)
                     .title("sections")
                     .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_BAR);
             KayaApp.Signal<String> visits = tx.signal("archive: 0 visits");
 
-            // THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar
-            // without icons is not the platform's real thing, and the
-            // glyph that means `home` differs per platform — SF Symbols
-            // spells it `house`, and no shared asset would be legal
-            // anyway (SF Symbols are licensed to Apple platforms only).
+            // Symbols are CONCEPTS, drawn per platform: SF Symbols
+            // spells HOME `house`, and no shared asset would be legal
+            // anyway (docs/styling-plan.md D6).
             long feed = tx.addSection(FEED).title("Feed")
                     .symbol(KayaApp.Symbol.HOME)
                     .id();
@@ -62,17 +53,13 @@ final class Sections {
                 KayaApp.Signal<String> ready = tx.signal("feed ready");
                 tx.label(ready); // label#0
                 tx.button("to archive", inner -> { // button#0
-                    // Programmatic selection: configuration, no echo
-                    // — onSelected must NOT fire (the scene asserts
-                    // the count holds).
+                    // Programmatic selection: onSelected must NOT fire.
                     inner.selectSection(ARCHIVE);
                 });
                 tx.button("open library", inner -> { // button#1
                     inner.createWindow(LIBRARY)
                             .title("library")
                             .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_SIDEBAR);
-                    // The SIDEBAR arm carries symbols too: the source
-                    // list is where a mac app most wants them.
                     long shelves = inner.addSectionIn(LIBRARY, SHELVES)
                             .title("Shelves")
                             .symbol(KayaApp.Symbol.SEARCH)

@@ -1,11 +1,9 @@
-// The feed scene from Swift: sum-typed elements, end to end. The enum
-// is the sum, its cases the constructors — kaya-swift-gen reads this
-// declaration and generates feed+Kaya.swift: the prototypes and
-// init(variant:values:), typed field tokens, the collection factory,
-// and the compile-total postEachSum eliminator (one required labeled
-// parameter per constructor). Handlers eliminate with `if case` — a
-// refinement the witnessed updateField checks rather than trusts, so
-// a stale occurrence folds into nothing.
+// The feed scene from Swift: sum-typed elements, end to end. The enum is
+// the sum; kaya-swift-gen reads this declaration and generates
+// feed+Kaya.swift (prototypes, init(variant:values:), typed field
+// tokens, the collection factory, and the compile-total postEachSum
+// eliminator). Handlers eliminate with `if case`, and the witnessed
+// updateField checks that refinement rather than trusting it.
 
 import Foundation
 
@@ -26,16 +24,11 @@ app.build { tx in
         return .str("\(n) done")
     }
 
-    // FIXED (scratch only): every child is declared WHERE IT STANDS,
-    // inside the row that holds it. A widget parents into its container
-    // AT CREATION (app.rs:1239 reads the ambient frame), so declaring it
-    // outside and MENTIONING it inside parents nothing -- the result
-    // builder's buildExpression discards a bare expression.
+    // Every child is declared WHERE IT STANDS: a widget parents at
+    // CREATION, and a bare expression never reaches buildExpression
+    // (docs/traps.md, result builders).
     let root = tx.row {
     tx.button("promote") { tx in
-        // The first note, promoted to a finished todo: the model is
-        // asked which entry is a Note, and the update's new
-        // constructor restamps that key's copy in place.
         for entry in feed.items(tx) {
             if case .note(let text) = entry.value {
                 feed.update(tx, entry.key, .todo(title: text, done: true))
@@ -44,9 +37,6 @@ app.build { tx in
         }
     }
     tx.label(bind: doneCount)
-    // The generated eliminator: one required labeled parameter per
-    // constructor, so a missing arm is a missing argument — a compile
-    // error. The arms' tokens are typed; no label strings.
     _ = postEachSum(
         tx, feed,
         note: { note in
@@ -55,10 +45,8 @@ app.build { tx in
         todo: { todo in
             _ = todo.row {
                 todo.checkbox(todo.done) { tx, keys, checked in
-                    // The generated refined patch: optional chaining
-                    // re-eliminates at write time (a stale occurrence
-                    // folds into nil), and the update stays witnessed
-                    // underneath.
+                    // Optional chaining re-eliminates at write time: a
+                    // stale occurrence folds into nil.
                     postAsTodo(tx, feed, keys[0])?.done(checked)
                 }
                 todo.label(todo.title)

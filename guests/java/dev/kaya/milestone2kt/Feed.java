@@ -6,16 +6,11 @@ import dev.kaya.KayaRecords;
 
 /**
  * The feed scene from the JVM: sum-typed elements, end to end. The
- * sealed interface is the sum, its permitted records the constructors;
- * the template hands the core a product of typed arms (checked
- * complete at declaration, and again by the scene), and handlers
- * eliminate with instanceof pattern matching — a refinement the
- * witnessed updateField checks rather than trusts, so a stale
- * occurrence folds into nothing.
+ * sealed interface is the sum and its permitted records are the
+ * constructors. See guests/rust/feed.rs and tools/scenes/feed.steps.
  */
 final class Feed {
-    /** The sealed interface is the sum; the records its constructors.
-     * The annotation processor reads this declaration and generates
+    /** The annotation processor reads this declaration and generates
      * PostKaya: the collection factory and the staged eliminator. */
     @KayaGen(key = "String")
     sealed interface Post permits Note, Todo {}
@@ -41,10 +36,8 @@ final class Feed {
 
             tx.mount(tx.row(() -> {
                 tx.button("promote", t -> {
-                    // The first note, promoted to a finished todo:
-                    // the model is asked which entry is a Note,
-                    // and the update's new constructor restamps
-                    // that key's copy in place.
+                    // The first note, promoted to a finished todo: the
+                    // update's new constructor restamps that key's copy.
                     for (KayaRecords.Entry<String, Post> entry : feed.items(t)) {
                         if (entry.value instanceof Note note) {
                             feed.update(t, entry.key, new Todo(note.text(), true));
@@ -53,10 +46,9 @@ final class Feed {
                     }
                 });
                 tx.label(doneCount);
-                // The generated staged eliminator: each stage
-                // offers exactly the next constructor's arm, so a
-                // missing arm is a missing method — a compile
-                // error.
+                // The generated staged eliminator: each stage offers
+                // exactly the next constructor's arm, so a missing arm
+                // is a compile error.
                 PostKaya.eachSum(tx, feed)
                             .note((t, note) -> {
                                 note.label(t, Note::text);
@@ -65,12 +57,9 @@ final class Feed {
                                 t.row(() -> {
                                     todo.checkbox(t, Todo::done,
                                             (KayaApp.Tx t2, String key, boolean checked) -> {
-                                                // The generated refined patch:
-                                                // the Optional re-eliminates at
-                                                // write time (a stale occurrence
-                                                // folds into the empty), and the
-                                                // update stays witnessed
-                                                // underneath.
+                                                // The refined patch re-eliminates
+                                                // at write time, so a stale
+                                                // occurrence folds into the empty.
                                                 PostKaya.asTodo(t2, feed, key)
                                                         .ifPresent(p -> p.done(checked));
                                             });

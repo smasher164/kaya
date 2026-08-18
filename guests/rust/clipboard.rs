@@ -1,55 +1,19 @@
 //! The clipboard conformance scene: one clip in several
 //! representations, and the privileged read that takes one back
-//! (DESIGN.md, Clipboard; docs/clipboard-plan.md).
+//! (DESIGN.md, Clipboard; docs/clipboard-plan.md). The byte-frozen
+//! contract, and why every assertion crosses a process boundary, is
+//! tools/scenes/clipboard.steps.
 //!
-//! EVERY ASSERTION CROSSES A PROCESS BOUNDARY, and that is the whole
-//! design of this scene. kaya's representation set is closed because
-//! the LOWERINGS are the hard part — CF_HTML's mandatory offset header,
-//! Android's content:// URI for an image, CF_HDROP's double-NUL
-//! struct — and a check where kaya reads what kaya wrote parses its own
-//! malformed header perfectly happily. That is not merely less
-//! coverage: it is a check that cannot fail for the reason the design
-//! exists, which is worse than none because it looks like coverage.
-//!
-//! So what this guest copies is read back by `pbpaste` and `sips`, and
-//! what it reads was put there by `pbcopy` and `osascript` — the
-//! platform's own tools, in their own processes, on the other side of
-//! the boundary the design is about.
-//!
-//! THE ONE EXCEPTION IS THE CUSTOM FORMAT, deliberately. No stock tool
-//! on any platform writes an app-defined type, and a helper kaya wrote
-//! would be foreign in name only. A custom format's whole specification
-//! is that it round-trips within the app and that kaya does nothing
-//! clever with the bytes — so the guest copies one and reads it back,
-//! with the foreign reader confirming the bytes really are on the
-//! clipboard under that id.
-//!
-//! THE PASTED FILE GOES ALL THE WAY TO THE BYTES, the filedialog
-//! scene's claim in the other direction: a file arriving on the
-//! clipboard is the SAME capability the picker returns, so the guest
-//! redeems the handle with `kaya_open_picked` and reads it with
-//! ordinary `std::fs`. The read runs off the app thread for the reason
-//! `PickedFile::open` documents — it blocks, and a cloud provider may
-//! download the file first.
-//!
-//! THE IMAGE IS ASSERTED AS A DECODED SIZE, never as bytes. Every host
-//! re-encodes freely between image types (macOS synthesizes tiff, jpeg,
-//! gif and four more from one png on demand), so a byte count would be
-//! a different number on every platform for the same picture. The
-//! guest reads the image and copies it straight back, and the foreign
-//! decoder reports "4x4" — which is the same string on every lane.
+//! The read of a pasted file runs OFF THE APP THREAD, which is what
+//! `PickedFile::open` documents: it blocks.
 
 use std::io::Read;
 
-/// The scene's own directory, computed identically on both sides — the
-/// filedialog rule, and for the same reason: guest and interpreter are
-/// the same process, so they can agree on a path with no runner
-/// involvement, and the pid keeps parallel legs from colliding.
-///
-/// The phones need the shared collections rather than the temp dir,
-/// because the OUTSIDE process has to reach these files too: an
-/// Android helper app and `simctl` see the shared Documents
-/// collection, and neither can see another app's private cache.
+/// The scene's own directory, computed identically on both sides; the
+/// pid keeps parallel legs from colliding. The phones must use the
+/// shared collections, not the temp dir — the OUTSIDE process has to
+/// reach these files and cannot see an app's private cache
+/// (guests/rust/filedialog.rs carries the per-platform reasoning).
 #[cfg(target_os = "android")]
 fn scene_root() -> std::path::PathBuf {
     let root = std::env::var("EXTERNAL_STORAGE").unwrap_or_else(|_| "/sdcard".into());
@@ -72,10 +36,8 @@ fn scene_dir() -> std::path::PathBuf {
 }
 
 /// A 4x4 PNG, spelled out rather than generated: the scene asserts
-/// "4x4" through a foreign decoder, so the picture has to be a real
-/// encoded image and its size has to be knowable from the script.
-/// Written to disk for the seeding tool to read, and handed to `copy`
-/// as bytes — the same picture on both paths.
+/// "4x4" through a foreign decoder, so the size has to be knowable from
+/// the script.
 const PIXEL_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
     0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
@@ -89,16 +51,12 @@ const PIXEL_PNG: &[u8] = &[
     0x44, 0xAE, 0x42, 0x60, 0x82, // IEND + crc
 ];
 
-/// The app-defined format's id. Reverse-DNS and space-free because it
-/// reaches every platform's own registry VERBATIM — a UTI on Apple,
-/// RegisterClipboardFormat on Windows, a target atom on X11 and
-/// Wayland, a MIME type on Android. That is kaya's whole promise here.
+/// The app-defined format's id. Reverse-DNS and space-free: it reaches
+/// every platform's own registry VERBATIM.
 const NOTE_ID: &str = "dev.kaya/note";
-/// NO QUOTES IN THE PAYLOAD, and the reason is the script rather than
-/// the clipboard: the step grammar's escapes are `\n`, `\r` and `\\`
-/// in all three interpreters, with no `\"` — so a quoted byte could not
-/// be spelled in the expectation. The bytes are arbitrary either way,
-/// which is the property under test.
+/// NO QUOTES IN THE PAYLOAD: the step grammar's escapes are `\n`, `\r`
+/// and `\\` with no `\"`, so a quoted byte could not be spelled in the
+/// expectation.
 const NOTE_BYTES: &[u8] = b"note=1";
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
@@ -117,7 +75,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     }
 
     // The files the outside process will seed from, written before
-    // anything is shown — the filedialog rule again.
+    // anything is shown.
     let dir = scene_dir();
     std::fs::create_dir_all(&dir).expect("failed to make the scene's directory");
     std::fs::write(dir.join("pixel.png"), PIXEL_PNG).expect("failed to write the picture");
@@ -125,13 +83,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 
     let msgs = kaya::Messages::<Msg>::new();
     let (status, row_status, rich_field, plain_field) = ctx.apply(|tx| {
-        // THE GESTURE LAYER'S DECLARATION, and an app writes nothing
-        // else for it: the Paste command lowers to the platform's own,
-        // acts on whatever is focused, and works out its own enablement
-        // from what the clipboard offers and what the focused widget
-        // takes. kaya has no selection API, which is exactly why copy
-        // of a selection has to be a command rather than something an
-        // app assembles out of the data layer.
         tx.window(kaya::DEFAULT_WINDOW).title("clipboard").menu("Edit", |m| {
             m.item("Cut").role(kaya::MenuRole::Cut).id();
             m.item("Copy").role(kaya::MenuRole::Copy).id();
@@ -159,8 +110,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let focus_plain = tx.button("focus plain").id(); // button#6
                 msgs.on_click(focus_plain, Msg::FocusPlain);
 
-                // DECLARES WHAT IT TAKES, so a paste lands in the hook
-                // and this app decides what to do with it.
+                // Declares what it takes, so a paste lands in the hook.
                 let field = tx
                     .entry()
                     .accepts(&[kaya::Accepts::Text])
@@ -169,21 +119,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_paste(field, Msg::Pasted);
                 rich_field = Some(field);
 
-                // DECLARES NOTHING, so the platform's own insertion
-                // happens and the field's ordinary change path reports
-                // it — which is what a plain text editor gets for free.
+                // Declares nothing, so the platform's own insertion
+                // happens and the ordinary change path reports it.
                 plain_field = Some(tx.entry().a11y_id("plain").id()); // entry#1
 
-                // A STAMPED paste target: the same two-door contract
-                // one tier down. The accept list comes from the
-                // TEMPLATE — the prop no binding could spell before
-                // docs/tpl-props-plan.md P1 — and its paste arrives as
-                // an INSTANCE occurrence carrying the copy's own key,
-                // which is what row_status prints. This is the branch
-                // no backend had ever fired: the registrar existed, the
-                // dispatch existed, and no stamped copy could declare
-                // what it accepts, so the hook waited forever (the
-                // silent-registrar class).
+                // A STAMPED paste target: the accept list comes from the
+                // TEMPLATE (docs/tpl-props-plan.md P1), and without it
+                // the hook registers and waits forever.
                 tx.label(row_status).a11y_id("row-status"); // label#1
                 let rows = tx.collection::<String>();
                 for mut r in rows.rows(tx) {
@@ -201,12 +143,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::CopyRich => {
-                // ONE CLIP, FOUR REPRESENTATIONS. kaya derives none of
-                // them from any other: whether list bullets survive
-                // html-to-text is this app's decision, so it spells out
-                // both. The order the values go on the wire is kaya's,
-                // not this call's — descending richness, which is
-                // preference order on every host that has one.
+                // One clip, four representations: kaya derives none of
+                // them from any other, and the wire order is kaya's
+                // (descending richness), not this call's.
                 ctx.apply(|tx| {
                     tx.copy()
                         .text("kaya clip")
@@ -235,18 +174,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::FocusRich => ctx.apply(|tx| tx.focus(rich_field)),
             Msg::FocusPlain => ctx.apply(|tx| tx.focus(plain_field)),
-            // THE SAME SHAPE THE READ ANSWERS WITH, and free where the
-            // read is not: a gesture is its own authorisation, so no
-            // platform charges a prompt for this one.
             Msg::Pasted(kaya::Representation::Text(text)) => {
                 ctx.apply(|tx| tx.write(status, format!("pasted {text}")));
             }
             Msg::Pasted(other) => {
                 ctx.apply(|tx| tx.write(status, format!("pasted {other:?}")));
             }
-            // The copy's own key rides the payload — [Str("r1")] here —
-            // and printing it is the proof the paste dispatched as an
-            // instance occurrence rather than a live one.
+            // The copy's own key rides the payload — [Str("r1")] here.
             Msg::RowPasted(path, kaya::Representation::Text(text)) => {
                 let key = match path.first() {
                     Some(kaya::Value::Str(k)) => k.clone(),
@@ -258,10 +192,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 ctx.apply(|tx| tx.write(row_status, format!("row {path:?} pasted {other:?}")));
             }
             Msg::Answer(clip) => match clip {
-                // EMPTY IS THE UNIVERSAL NO, and the guest does not try
-                // to tell its four causes apart — denied, unfocused,
-                // absent, or nothing this read accepted. The platforms
-                // deliberately decline to say which.
+                // Empty is the universal no, and its four causes —
+                // denied, unfocused, absent, not accepted — cannot be
+                // told apart: the platforms decline to say which.
                 None => ctx.apply(|tx| tx.write(status, "empty")),
                 Some(kaya::Representation::Text(text)) => {
                     ctx.apply(|tx| tx.write(status, format!("text {text}")));
@@ -274,10 +207,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     ctx.apply(|tx| tx.write(status, format!("custom {id} {body}")));
                 }
                 Some(kaya::Representation::Image(bytes)) => {
-                    // STRAIGHT BACK OUT, because the assertion that
-                    // matters is a foreign DECODER's: the byte count
-                    // differs per host for one picture, and the decoded
-                    // size does not.
+                    // Straight back out: the assertion is a foreign
+                    // DECODER's, since a byte count differs per host for
+                    // one picture and a decoded size does not.
                     let bytes = bytes.0.to_vec();
                     ctx.apply(|tx| {
                         tx.copy().image(bytes).send();
@@ -289,11 +221,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         ctx.apply(|tx| tx.write(status, "files none"));
                         continue;
                     };
-                    // OFF THE APP THREAD, which is what
-                    // `PickedFile::open` documents: it blocks, and a
-                    // pasted file is no different from a picked one —
-                    // it IS a picked one, the same capability arriving
-                    // through a second door.
+                    // Off the app thread: `open` blocks.
                     let poster = ctx.poster();
                     std::thread::Builder::new()
                         .name("clipboard-reader".into())

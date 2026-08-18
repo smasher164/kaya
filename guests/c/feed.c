@@ -1,10 +1,8 @@
-/* The feed scene from C, on the function floor: sum-typed elements
- * with the discriminants spelled by hand — the desugared form every
- * binding's sum surface lowers to. The collection declares two variant
- * schemas, the For declares one case per constructor (totality is the
- * scene's check either way), promote re-sends an entry under the other
- * constructor (the core restamps it in place), and the toggle's field
- * write carries the witnessed variant.
+/* The feed scene from C, on the function floor: sum-typed elements with
+ * the discriminants spelled by hand. The collection declares two variant
+ * schemas, the For declares one case per constructor, promote re-sends
+ * an entry under the other constructor (the core restamps it in place),
+ * and the toggle's field write carries the witnessed variant.
  *
  * Built and run by the Linux container suite with KAYA_SELFTEST=feed. */
 
@@ -27,8 +25,7 @@
 #define N_TODO_CHECK 3
 #define N_TODO_TITLE 4
 
-/* The constructors' discriminants and field indexes: the C floor's
- * "sum tokens". */
+/* The constructors' discriminants and field indexes. */
 #define V_NOTE 0
 #define V_TODO 1
 #define F_NOTE_TEXT 0
@@ -130,8 +127,8 @@ static void *app(void *arg) {
                 if (keys[0].s_len != strlen(posts[i].key) ||
                     memcmp(keys[0].s, posts[i].key, keys[0].s_len) != 0)
                     continue;
-                /* The variant check is the refinement, and the write
-                 * carries it as the witness. */
+                /* The variant check is the refinement; the write carries
+                 * it as the witness. */
                 if (posts[i].variant != V_TODO)
                     break;
                 posts[i].done = payload.i != 0;
@@ -169,8 +166,6 @@ static void *app(void *arg) {
 }
 
 int main(void) {
-    /* The stale-artifact guard: this guest compiled against one spec
-     * revision; the loaded library must speak the same one. */
     if (kaya_spec_hash() != KAYA_SPEC_HASH) {
         fprintf(stderr, "kaya: library/binding spec mismatch — rebuild both\n");
         return 1;

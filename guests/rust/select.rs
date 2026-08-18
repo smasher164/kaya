@@ -1,8 +1,6 @@
-//! The select conformance scene: a dropdown over three colors and a
-//! label folding each pick — the control owns its selection and
-//! reports each change as an occurrence (the new 0-based index); the
-//! app answers by writing the paired signal, the slider contract with
-//! an index.
+//! The select conformance scene: the control owns its selection and
+//! reports each change as a 0-based index — the slider contract with
+//! an index. The contract is tools/scenes/select.steps.
 
 const OPTIONS: [&str; 3] = ["Red", "Green", "Blue"];
 

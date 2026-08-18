@@ -3,19 +3,14 @@ package dev.kaya.milestone2kt;
 import dev.kaya.KayaApp;
 
 /**
- * The gallery scene from the JVM: a row with a checkbox and its status
- * label, and a row with a slider and its volume label. Both controls
- * own their state and report each change; the app answers by writing
- * the paired signal — the entry's uncontrolled contract, with a bool
- * and a double.
+ * The gallery scene from the JVM: a checkbox and a slider, each with a
+ * paired label — the uncontrolled contract with a bool and a double.
+ * See guests/rust/gallery.rs and tools/scenes/gallery.steps.
  */
 final class Gallery {
     static void app() {
         KayaApp app = new KayaApp();
 
-        // The construction sugar: constructors carry their handlers,
-        // containers take their children, and the build body reads as
-        // the tree.
         app.build(tx -> {
             KayaApp.Signal<String> status = tx.signal("urgent: false");
             KayaApp.Signal<String> volume = tx.signal("volume: 50%");
@@ -28,21 +23,18 @@ final class Gallery {
                     tx.label(status);
                 });
                 tx.row(() -> {
-                    // Integer percent, so every language's formatting
-                    // agrees.
+                    // Integer percent: every language's formatting has
+                    // to agree byte for byte.
                     tx.slider(0.0, 1.0, pos, (t, value) ->
                             t.write(volume, "volume: " + Math.round(value * 100) + "%"));
                     tx.label(volume);
-                    // The programmatic write: fans out to the control
-                    // and must NOT come back as a volume occurrence.
+                    // A programmatic write fans out to the control and
+                    // must NOT come back as an occurrence.
                     tx.button("quarter", t -> t.write(pos, 0.25));
                 });
                 tx.row(() -> {
-                    // The content-buffer row: a valid 2x2 PNG decodes
-                    // and reports its size, and deliberately invalid
-                    // bytes read 0x0 — decode failure is the
-                    // placeholder class, never a crash, on every
-                    // backend.
+                    // The second image's bytes are invalid on purpose:
+                    // a decode failure reads 0x0 and never crashes.
                     tx.image(TEST_PNG);
                     tx.image("not an image"
                             .getBytes(java.nio.charset.StandardCharsets.US_ASCII));
@@ -54,9 +46,8 @@ final class Gallery {
         app.dispatchLoop();
     }
 
-    /** A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the first
-     * binary asset, embedded as source per the include_str! doctrine —
-     * scenes carry their inputs, no runtime file I/O. */
+    /** A 2x2 RGB PNG: scenes carry their inputs as source, never as
+     * runtime file I/O. */
     private static final byte[] TEST_PNG = {
         (byte) 137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
         0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, (byte) 253, (byte) 212, (byte) 154,

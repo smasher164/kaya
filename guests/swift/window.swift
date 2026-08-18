@@ -1,10 +1,7 @@
-// The window conformance scene, Swift port — see guests/rust/window.rs
-// for the full rationale. The title must MATERIALIZE (the runner reads
-// the real title bar, never the model's copy), and the advisory size
-// request must be honored on a desktop — 640x400, deliberately off the
-// 540x330 default so an ignored request cannot pass by luck. A desktop
-// scene: phones reject the size by physics, so runners register it on
-// the desktops only (DESIGN.md, Presentation contexts).
+// The window conformance scene, Swift port — see guests/rust/window.rs.
+// The title must MATERIALIZE (the runner reads the real title bar), and
+// 640x400 is deliberately off the 540x330 default so an ignored size
+// request cannot pass by luck. Desktop-only: phones reject the size.
 
 import Foundation
 

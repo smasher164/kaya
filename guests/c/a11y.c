@@ -1,17 +1,11 @@
 /* The accessibility conformance scene from C, on the function floor:
- * the two universal props (kaya_tx_set_a11y_id / _label) and the verb
- * that reads them back out of the PLATFORM'S OWN accessibility tree
- * rather than kaya's model.
+ * the two universal props (kaya_tx_set_a11y_id / _label), read back out
+ * of the PLATFORM'S OWN accessibility tree rather than kaya's model.
  *
- * The floor is the point here. Every other language spells these props
- * as sugar — a chain, a kwarg, a labeled argument — and C spells them
- * as what they are underneath: one call, one record, per prop per
- * widget. Nothing else in this file differs from those guests.
- *
- * Every widget kind appears, and exactly one container of each
- * container kind — the props are universal, and container targets are
- * stable only while a scene keeps one of each. See guests/rust/a11y.rs
- * for the full note; the byte-frozen contract is
+ * EVERY WIDGET KIND APPEARS, AND EXACTLY ONE CONTAINER OF EACH
+ * CONTAINER KIND: the script addresses containers ordinally, so a
+ * second one of any kind moves the targets. The full note is in
+ * guests/rust/a11y.rs; the byte-frozen contract is
  * tools/scenes/a11y.steps.
  *
  * Built and run by the Linux container suite with KAYA_SELFTEST=a11y. */
@@ -48,8 +42,7 @@
 #define W_CANCEL 23
 #define W_OK 24
 
-/* A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the gallery
- * scene's asset, embedded as source per the include_str! doctrine —
+/* A 2x2 RGB PNG (red/green over blue/white), embedded as source:
  * scenes carry their inputs, no runtime file I/O. */
 static const uint8_t TEST_PNG[75] = {
     137, 80,  78,  71,  13,  10,  26,  10,  0,   0,   0,   13,  73,
@@ -107,9 +100,8 @@ static void build_scene(void) {
     kaya_tx_set_a11y_id(&tx, W_LOGO, "logo");
     kaya_tx_set_a11y_label(&tx, W_LOGO, "Logo");
 
-    /* The two CHOICE kinds: their option children are labels (the
-     * floor's spelling of an option list), and the choice itself
-     * carries the authored name. */
+    /* The two CHOICE kinds: their option children are labels, and the
+     * choice itself carries the authored name. */
     kaya_tx_create_widget(&tx, W_COLOR, KAYA_KIND_SELECT);
     kaya_tx_create_widget(&tx, W_COLOR_RED, KAYA_KIND_LABEL);
     kaya_tx_set_text(&tx, W_COLOR_RED, "Red");
@@ -131,8 +123,7 @@ static void build_scene(void) {
     kaya_tx_set_a11y_id(&tx, W_SIZE, "size");
     kaya_tx_set_a11y_label(&tx, W_SIZE, "Size");
 
-    /* Containers are GROUPS to an assistive client, and naming one is
-     * how an app declares it a group. */
+    /* Naming a container is how an app declares it a GROUP. */
     kaya_tx_create_widget(&tx, W_CELLS, KAYA_KIND_GRID);
     kaya_tx_set_columns(&tx, W_CELLS, 2.0);
     kaya_tx_set_a11y_id(&tx, W_CELLS, "cells");
@@ -185,9 +176,7 @@ static void build_scene(void) {
 static void *app(void *arg) {
     (void)arg;
     build_scene();
-    /* A static scene: nothing here needs a handler, so the occurrence
-     * loop exists purely to block until shutdown (the keep-alive idiom
-     * every handler-less scene uses). */
+    /* No handler: the loop blocks until shutdown. */
     const uint8_t *rec;
     while (kaya_next_occurrence(&rec) != 0) {
     }
@@ -195,8 +184,6 @@ static void *app(void *arg) {
 }
 
 int main(void) {
-    /* The stale-artifact guard: this guest compiled against one spec
-     * revision; the loaded library must speak the same one. */
     if (kaya_spec_hash() != KAYA_SPEC_HASH) {
         fprintf(stderr, "kaya: library/binding spec mismatch — rebuild both\n");
         return 1;

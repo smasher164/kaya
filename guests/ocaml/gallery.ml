@@ -1,18 +1,14 @@
-(* The gallery scene from OCaml, on the let surface with the
-   construction sugar: a row with a checkbox and its status label, and
-   a row with a slider and its volume label. Constructors carry their
-   handlers, containers take their children, and the tree reads as a
-   tree. Both controls own their state and report each change — the
-   entry's uncontrolled contract, with a bool and a float.
+(* The gallery scene from OCaml: a checkbox and a slider, both owning
+   their state and reporting each change — the entry scene's
+   uncontrolled contract, with a bool and a float.
 
    Build like milestone2.ml, then run with KAYA_SELFTEST=gallery. *)
 
 open Kaya_wire
 open Kaya_app
 
-(* A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the first
-   binary asset, embedded as source per the include_str! doctrine —
-   scenes carry their inputs, no runtime file I/O. *)
+(* A 2x2 RGB PNG, 75 bytes. Embedded as source per the include_str!
+   doctrine: scenes carry their inputs, no runtime file I/O. *)
 let test_png =
   Bytes.of_string
     "\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\
@@ -38,8 +34,8 @@ let () =
          (Str (Printf.sprintf "volume: %d%%"
                  (int_of_float (Float.round (v *. 100.)))))
      in
-     (* The programmatic write: fans out to the control and must NOT
-        come back as an on_volume occurrence. *)
+     (* A programmatic write fans out to the control and must NOT come
+        back as an on_volume occurrence. *)
      let on_quarter () = write pos (F64 0.25) in
 
      let root =
@@ -52,10 +48,8 @@ let () =
                label ~bind:volume;
                button ~text:"quarter" ~on_click:on_quarter;
              ];
-           (* The content-buffer row: a valid 2x2 PNG decodes and
-              reports its size, and deliberately invalid bytes read
-              0x0 — decode failure is the placeholder class, never a
-              crash, on every backend. *)
+           (* Deliberately invalid bytes beside valid ones: decode failure is
+              the placeholder class, never a crash, on every backend. *)
            row
              [
                image ~source:test_png;

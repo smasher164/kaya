@@ -1,11 +1,9 @@
 (* The sections conformance scene, OCaml port: two peer roots in the
-   primary window's section set — presentation context, not
-   lifecycle. The archive pane folds [~on_selected] into a visit
-   count, pinning the echo doctrine from both sides: the user's
-   switch emits (the harness drives the real switcher), while the
-   feed button's programmatic [select_section] moves the selection
-   silently. The count surviving switch round trips proves retention.
-   See guests/rust/sections.rs and tools/scenes/sections.steps. *)
+   primary window's section set — presentation context, not lifecycle.
+   The archive pane folds [~on_selected] into a visit count, pinning the
+   echo doctrine from both sides: a user's switch emits, a programmatic
+   [select_section] does not. See guests/rust/sections.rs and
+   tools/scenes/sections.steps. *)
 
 open Kaya_wire
 open Kaya_app
@@ -14,11 +12,9 @@ let feed = 7L
 let archive = 8L
 
 (* The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
-   shared scene covers BOTH arms: the primary stays `bar`, and this
-   window opens from a handler only the desktop tail's click reaches —
-   the phone runners cut the tail, the click never fires, and
-   [create_window] never runs where the capability is absent. No
-   capability read needed: reachability is the gate. *)
+   shared scene covers BOTH arms. REACHABILITY IS THE GATE, not a
+   capability read: this window opens from a handler only the desktop
+   tail's click reaches, and the phone runners cut that tail. *)
 let library = 1L
 let shelves = 2L
 let loans = 3L
@@ -28,10 +24,9 @@ let () =
 
   let visit_count = ref 0 in
   build app (fun () ->
-     (* One construct carries the window's attributes (the
-        unification rule). The hint is ADVISORY: `bar` is each
-        desktop's horizontal spelling and the phones' physics
-        regardless — no observable rides on it. *)
+     (* One construct carries the window's attributes. The hint is
+        ADVISORY: `bar` is each desktop's horizontal spelling and the
+        phones' physics regardless, and no observable rides on it. *)
      let () =
        window ~title:"sections"
          ~sections_presentation:
@@ -45,18 +40,17 @@ let () =
          (Str (Printf.sprintf "archive: %d visits" !visit_count))
         
      in
-     (* THE SEMANTIC ICON (docs/styling-plan.md D6): a tab bar without
-        icons is not the platform's real thing, and the glyph that
-        means [Home] differs per platform — SF Symbols spells it
-        `house`, and no shared asset would be legal anyway (SF Symbols
-        are licensed to Apple platforms only). *)
+     (* A tab bar without icons is not the platform's real thing, and no
+        shared asset would be legal — SF Symbols are licensed to Apple
+        platforms only, so the symbol names a CONCEPT
+        (docs/styling-plan.md D6). *)
      add_section ~title:"Feed" ~symbol:Home feed;
      add_section ~title:"Archive" ~symbol:Star ~on_selected:on_archive_shown
        archive;
      let go_archive () =
-       (* Programmatic selection: configuration, no echo —
-          [~on_selected] must NOT fire (the scene asserts the count
-          holds). *)
+       (* Programmatic selection is configuration and does NOT echo:
+          [~on_selected] must not fire, and the scene asserts the count
+          holds. *)
        select_section archive
      in
      let open_library () =
@@ -64,8 +58,6 @@ let () =
          ~sections_presentation:
            (Int64.of_int Kaya_wire.sections_presentation_sidebar)
          library;
-       (* The SIDEBAR arm carries symbols too: the source list is where
-          a mac app most wants them. *)
        add_section ~window:library ~title:"Shelves" ~symbol:Search shelves;
        add_section ~window:library ~title:"Loans" ~symbol:Lock loans;
        let shelves_ready = signal (Str "shelves ready") in

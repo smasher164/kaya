@@ -37,18 +37,14 @@ with app.window(title="commands"):
     details = kaya.signal(False)
     sort = kaya.signal(0.0)
 
-    # The settings command declares its own punctuation chord and the
-    # role that tells macOS where users look for it. An ordinary command
-    # sits beside it so the menu that declared it is not left empty once
-    # the platform moves it.
+    # An ordinary command sits beside Settings so the menu that declared
+    # it is not left empty once macOS moves the settings item away.
     with app.menu("File"):
         kaya.item("Reload")
         kaya.item("Settings…", shortcut="primary+comma",
                   role=kaya.ROLE_SETTINGS, on_activate=on_settings)
 
-    # A checkable command carrying its own key, and a group whose
-    # options each answer their own chord. Option order IS the index
-    # vocabulary: Name = 0, Date = 1.
+    # Option order IS the index vocabulary: Name = 0, Date = 1.
     with app.menu("View"):
         kaya.toggle("Details", checked=details, shortcut="primary+backslash",
                     on_toggle=on_details)

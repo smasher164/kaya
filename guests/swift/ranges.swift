@@ -1,46 +1,20 @@
 // The text-ranges conformance scene from Swift: the three primitives an
 // editor cannot write for itself — HIGHLIGHT a set of ranges, SELECT
-// one, REVEAL one — driven by a search this file writes in six lines.
-// See guests/rust/ranges.rs and tools/scenes/ranges.steps.
+// one, REVEAL one. See guests/rust/ranges.rs and
+// tools/scenes/ranges.steps.
 //
-// WHAT SWIFT ADDS TO THE PORT, and it is the whole reason this file is
-// not a transcription: Swift is the only guest language whose strings
-// are indexed by NEITHER bytes nor an integer. `range(of:)` hands back
-// `Range<String.Index>`, kaya's ranges are UTF-8 byte offsets, and the
-// two conversions an author reaches for first — `distance(from:to:)`
-// over Characters, and `utf16Offset(in:)` — are both SIX EARLY on this
-// document and both silent. So the app hands kaya the ranges it already
-// has, `in:` the string they index, and the binding converts
-// (kayaByteRange in bindings/swift/KayaApp.swift). The document opens
-// with a CJK word for exactly this reason: every match sits six bytes
-// further along than it sits in UTF-16, and the scene's frozen offsets
-// say so.
-//
-// WHAT EACH LEG PROVES, in the order the script runs them:
-//   * a set of three matches decorated at once, read back out of the
-//     platform's own accessibility tree;
-//   * one of them selected, likewise;
-//   * the third REVEALED — asserted `offscreen` first, so the leg
-//     cannot pass on a document that happened to fit;
-//   * a user's keystroke DROPPING the declared set (D2: ranges are
-//     app-owned and never tracked across an edit);
-//   * a `select_range` REFUSED because the user is mid-composition
-//     (D4), which is the one thing on this surface a backend is
-//     expected not to do.
+// Hand kaya the `Range<String.Index>` and let kayaByteRange convert it
+// (bindings/swift/KayaApp.swift). Converting by hand is six bytes wrong
+// on this document, silently — docs/traps.md, "Swift's String is
+// indexed by neither bytes nor integers".
 
 import Foundation
 
-/// The document, frozen — the same bytes as every other language's
-/// guest, because the offsets the script asserts are byte offsets into
-/// it. Three occurrences of `alpha` and nothing else containing that
-/// substring; forty short lines, so the last match is far below a
-/// 240x96 viewport and REVEAL has something to do.
-///
-/// A `"""` literal and not a `\n`-joined array: what a multi-line
-/// literal contains is exactly what a reader sees, which is the property
-/// that matters when a byte count is part of the contract (813 bytes,
-/// 807 UTF-16 code units). Swift strips the newline after the opening
-/// delimiter and the closing delimiter's indentation, and nothing else.
+/// Frozen: the same bytes as every other language's guest, because the
+/// script's offsets are byte offsets into it. The CJK word in line 00
+/// is what makes bytes and UTF-16 disagree (813 vs 807), and the forty
+/// short lines put the last `alpha` below a 240x96 viewport so REVEAL
+/// has something to do.
 let doc0 = """
     line 00: 日本語 preface
     line 01: gamma kappa
@@ -86,17 +60,10 @@ let doc0 = """
 
 let needle = "alpha"
 
-/// THE WHOLE SEARCH. Literal, forward, non-overlapping — Foundation's
-/// own range search, yielding the `Range<String.Index>` values Swift
-/// hands out everywhere, which is what kaya's range verbs take. An
-/// editor that wants case folding, word boundaries or a regex dialect
-/// writes those here, in the app, where its users can be told what they
-/// mean.
-///
-/// `.literal` is not decoration: without it Foundation compares by
-/// canonical equivalence, so the search's own notion of a match would
-/// differ from the document's bytes — the last thing a scene about
-/// offsets wants.
+/// THE WHOLE SEARCH: literal, forward, non-overlapping. `.literal` is
+/// not decoration — without it Foundation compares by canonical
+/// equivalence, so the search's notion of a match would differ from the
+/// document's bytes.
 func findAll(_ text: String, _ needle: String) -> [Range<String.Index>] {
     var hits: [Range<String.Index>] = []
     var from = text.startIndex
@@ -109,37 +76,30 @@ func findAll(_ text: String, _ needle: String) -> [Range<String.Index>] {
 
 let app = KayaApp()
 
-// The app's own copy of the document, which is the ONLY authority on
-// what the offsets mean. It advances on every edit, exactly as an
-// editor's buffer does — and a `String.Index` is only meaningful against
-// the string it came from, which is why every range call below names
-// this one.
+// The app's own copy, the ONLY authority on what the offsets mean. A
+// `String.Index` is meaningful only against the string it came from,
+// which is why every range call below names this one.
 var doc = doc0
 
 app.build { tx in
     tx.window(title: "ranges")
     let status = tx.signal(.str("0 matches"))
 
-    // The handle the four buttons need. A widget parents into its
-    // container AT CREATION, so the editor is built inside the column
-    // body like every other child and rides out through this var.
+    // The handle the four buttons need. A widget parents at CREATION
+    // (docs/traps.md, result builders), so the editor rides out of the
+    // column body through this var.
     var editor: KayaWidget! = nil
 
     let root = tx.column {
         editor = tx.textarea { t, text in
             doc = text
-            // THE SEARCH RESULTS ARE STALE AND THE APP SAYS SO. kaya has
-            // already dropped the decorations — a declared set is bound
-            // to the text it was declared against — and this is the app
-            // agreeing rather than being told: an editor whose document
-            // moved has to search again before it can claim anything
-            // about where the matches are.
+            // THE SEARCH RESULTS ARE STALE AND THE APP SAYS SO: kaya has
+            // already dropped the decorations, a declared set being bound
+            // to the text it was declared against (D2).
             t.write(status, .str("0 matches"))
         }
-        // The editor, seeded with the document the app opened. The a11y
-        // id is not decoration: every range assertion reads the
-        // platform's accessibility tree, and the id is how a leg finds
-        // this control there.
+        // The a11y id is load-bearing: every range assertion reads the
+        // platform's accessibility tree and finds this control by id.
         tx.setText(editor, doc0)
         tx.setA11yId(editor, "doc")
         tx.setA11yLabel(editor, "Document")

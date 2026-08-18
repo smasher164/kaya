@@ -1,53 +1,27 @@
 (* The text-ranges conformance scene, OCaml port of guests/rust/ranges.rs
-   against the byte-frozen tools/scenes/ranges.steps: the three
-   primitives an editor cannot write for itself — HIGHLIGHT a set of
-   ranges, SELECT one, REVEAL one — driven by a search this file writes
-   in five lines.
+   against the byte-frozen tools/scenes/ranges.steps: highlight a set of
+   ranges, select one, reveal one, driven by the search in [find_all].
 
-   THE FIVE LINES ARE THE POINT. kaya ships no find engine, no find bar
-   and no regex dialect: what to decorate is the app's question, and
-   every editor answers it differently. What no app can write for itself
-   is the other half — colouring a run of a native text view, moving its
-   selection, scrolling it into view — and that is what the framework
-   ships. [find_all] below is the whole search.
-
-   THE OFFSETS ARE ORDINARY OCAML STRING INDICES. An OCaml [string] is a
-   byte sequence, so [String.length] and a literal scan already count
-   UTF-8 bytes — kaya's unit, on the wire and in every binding — and this
-   guest hands the range pairs it computed straight to
-   [highlight_ranges]. The document opens with a CJK word for a reason:
-   every match therefore sits SIX BYTES further along than it sits in
-   UTF-16, the unit four of the five backends count. A backend that
-   forwarded kaya's byte offsets as if they were its own would decorate
-   six characters early, and the scene's frozen offsets say so.
-
-   WHAT EACH LEG PROVES, in the order the script runs them:
-     * a set of three matches decorated at once, read back out of the
-       platform's own accessibility tree;
-     * one of them selected, likewise;
-     * the third REVEALED — asserted [offscreen] first, so the leg
-       cannot pass on a document that happened to fit;
-     * a user's keystroke DROPPING the declared set (D2: ranges are
-       app-owned and never tracked across an edit);
-     * a [select_range] REFUSED because the user is mid-composition
-       (D4), which is the one thing on this surface a backend is
-       expected not to do.
+   THE OFFSETS ARE UTF-8 BYTES, kaya's unit everywhere, and an OCaml
+   [string] is already a byte sequence — so [String.length] and the scan
+   below hand [highlight_ranges] the right numbers unchanged. The
+   document opens with a CJK word deliberately: every match then sits
+   SIX BYTES further along than it does in UTF-16, the unit four of the
+   five backends count, so a backend that forwards kaya's offsets as its
+   own decorates six characters early and the frozen offsets say so.
 
    Build with [dune build], then run with KAYA_SELFTEST=ranges. *)
 
 open Kaya_wire
 open Kaya_app
 
-(* The document, frozen and byte-identical to every other language's
-   copy (813 bytes; the scene compares its offsets byte-for-byte on
-   every lane). Three occurrences of [alpha] and nothing else containing
-   that substring; forty short lines, so the last match is far below the
-   viewport and REVEAL has something to do.
+(* The document, byte-identical to every other language's copy (813
+   bytes): three occurrences of [alpha] and forty short lines, so the
+   last match is below the viewport and REVEAL has something to do.
 
-   A QUOTED STRING LITERAL, not a "..." one: [{doc|…|doc}] takes its
-   bytes verbatim, so no escape and no line-continuation rule stands
-   between this source file's UTF-8 and the document the offsets are
-   measured against. *)
+   A QUOTED string literal rather than a "..." one, because [{doc|…|doc}]
+   takes its bytes verbatim — no escape rule stands between this file's
+   UTF-8 and the offsets the scene asserts. *)
 let doc_source =
   {doc|line 00: 日本語 preface
 line 01: gamma kappa
@@ -92,12 +66,9 @@ line 39: the last line|doc}
 
 let needle = "alpha"
 
-(* THE WHOLE SEARCH. Literal, forward, non-overlapping, in the byte
-   offsets kaya's ranges are made of — [String.sub] over a byte string
-   is exactly the comparison [match_indices] makes in the Rust guest,
-   and the pairs come out identical. An editor that wants case folding,
-   word boundaries or a regex dialect writes those here, in the app,
-   where its users can be told what they mean. *)
+(* The whole search: literal, forward, non-overlapping, in byte offsets.
+   kaya ships no find engine — case folding, word boundaries and regex
+   dialect are the app's to write, here. *)
 let find_all doc needle =
   let n = String.length needle in
   let last = String.length doc - n in
@@ -111,30 +82,23 @@ let find_all doc needle =
 let () =
   let app = Kaya_app.create () in
 
-  (* The app's own copy of the document, which is the ONLY authority on
-     what the offsets mean. It advances on every edit, exactly as an
-     editor's buffer does — kaya is never asked what the text is. *)
+  (* The app's own copy is the ONLY authority on what the offsets mean;
+     kaya is never asked what the text is. *)
   let doc = ref doc_source in
 
   build app (fun () ->
       window ~title:"ranges" ();
       let status = signal (Str "0 matches") in
 
-      (* The editor realizes here because every handler below needs its
-         handle; [w editor] slots it into the child list. The a11y id is
-         not decoration: every range assertion reads the platform's
-         accessibility tree, and the id is how a leg finds this control
-         there. *)
+      (* Every range assertion reads the platform's accessibility tree, and
+         the a11y id is how a leg finds this control there. *)
       let editor =
         textarea ~a11y_id:"doc" ~a11y_label:"Document"
           ~on_change:(fun text ->
             doc := text;
-            (* THE SEARCH RESULTS ARE STALE AND THE APP SAYS SO. kaya has
-               already dropped the decorations — a declared set is bound
-               to the text it was declared against — and this is the app
-               agreeing rather than being told: an editor whose document
-               moved has to search again before it can claim anything
-               about where the matches are. *)
+            (* kaya has already dropped the decorations — a declared set
+               is bound to the text it was declared against (D2) — so the
+               app must search again before claiming anything. *)
             write status (Str "0 matches"))
           ()
       in
@@ -165,13 +129,13 @@ let () =
                      match List.rev (find_all !doc needle) with
                      | last :: _ -> reveal_range editor last
                      | [] -> ());
-                 (* button#2 — focus editor, so the keystroke the script
-                    types next goes in through the platform's own input
-                    path and is a USER edit, not a write kaya made. *)
+                 (* button#2 — focus editor, so the script's next
+                    keystroke is a USER edit through the platform's own
+                    input path, not a write kaya made. *)
                  button ~text:"focus editor" ~on_click:(fun () -> focus editor);
-                 (* button#3 — select first, which the script clicks while
-                    a composition is live: the backend refuses it and the
-                    caret stays where the marked text parked it. *)
+                 (* button#3 — select first, clicked while a composition
+                    is live: the backend refuses it (D4) and the caret
+                    stays where the marked text parked it. *)
                  button ~text:"select first"
                    ~on_click:(fun () ->
                      match find_all !doc needle with

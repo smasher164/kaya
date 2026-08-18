@@ -18,9 +18,8 @@ static class A11yScene
         {
             var form = tx.Column(() =>
             {
-                // Caption-bearing controls: identified, but
-                // deliberately NOT labelled. The platform must speak
-                // the caption.
+                // Caption-bearing controls: identified, deliberately NOT
+                // labelled — the platform must speak the caption.
                 var save = tx.Button("Save");
                 tx.SetA11yId(save, "save");
                 tx.SetA11yHint(save, "save the draft");
@@ -54,8 +53,8 @@ static class A11yScene
                 var size = tx.Radio(new[] { "Small", "Large" });
                 tx.SetA11yId(size, "size");
                 tx.SetA11yLabel(size, "Size");
-                // Containers are GROUPS to an assistive client, and
-                // naming one is how an app declares it a group.
+                // Containers are GROUPS to an assistive client; naming
+                // one is how an app declares it a group.
                 var cells = tx.Grid(2, () =>
                 {
                     tx.Label("Name");
@@ -82,9 +81,8 @@ static class A11yScene
         System.Environment.Exit(app.Run());
     }
 
-    // A 2x2 RGB PNG (red/green over blue/white), 75 bytes: the gallery
-    // scene's asset, embedded as source per the include_str! doctrine —
-    // scenes carry their inputs, no runtime file I/O.
+    // A 2x2 RGB PNG, 75 bytes, embedded as source: a scene carries its
+    // inputs and does no runtime file I/O.
     static readonly byte[] TestPng =
     {
         137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,

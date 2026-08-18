@@ -1,13 +1,8 @@
-// The panels conformance scene, Swift port — see guests/rust/panels.rs
-// for the full rationale. A main window and an inspector; the
-// inspector arms vetoClose, so the chrome close EMITS close_requested
-// and closes nothing — the guest answers by recording the request in
-// the status label and destroying the window (the request/confirm veto
-// class, DESIGN.md's Presentation contexts). Desktop-only: phone hosts
-// reject createWindow at the root by capability.
-//
-// The named arguments on createWindow are the Swift spelling of the
-// window sugar; app.onCloseRequested is the event surface.
+// The panels conformance scene, Swift port — see guests/rust/panels.rs.
+// The inspector arms vetoClose, so the chrome close EMITS
+// close_requested and closes nothing; the guest records the request and
+// destroys the window. DESKTOP-ONLY: phone hosts reject createWindow at
+// the root by capability.
 
 import Foundation
 
@@ -23,9 +18,6 @@ app.build { tx in
     }
     tx.mount(root)
 
-    // The veto handler binds to the inspector at its declaration
-    // (handlers scope to the thing that creates them): it can only
-    // ever mean this window's close.
     tx.createWindow(
         1, title: "inspector", width: 480.0, height: 320.0, vetoClose: true,
         onCloseRequested: { tx2 in

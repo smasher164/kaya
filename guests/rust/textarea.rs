@@ -1,9 +1,7 @@
-//! The textarea conformance scene: the multi-line entry — the
-//! entry's uncontrolled round trip with the one observable that
-//! separates it: a newline rides the text both ways. The label folds
-//! each edit into a line count; clear empties the editor through its
-//! own command (echoing text_changed("") — the command contract) and
-//! focus lands back in it.
+//! The textarea conformance scene: the entry's uncontrolled round trip
+//! with the one observable that separates it — a newline rides the text
+//! both ways. `clear` echoes text_changed(""), per the command
+//! contract. The contract is tools/scenes/textarea.steps.
 
 #[derive(Clone)]
 enum Msg {

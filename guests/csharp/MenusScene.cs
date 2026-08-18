@@ -1,7 +1,6 @@
 // The menus conformance scene, C# port: the command vocabulary (a
 // File/View/Sort menu bar, context menus on a live label and on stamped
-// rows), the uncontrolled-menu echo doctrine, and a late
-// rename/append/promotion rework. Canonical semantics in
+// rows) and the uncontrolled-menu echo doctrine. Canonical semantics in
 // guests/rust/menus.rs; the byte-frozen contract in tools/scenes/menus.steps.
 
 using System;
@@ -30,11 +29,9 @@ static class MenusScene
             var share = tx.Item("Share", primary: true, onActivate: onShare);
             var file = tx.Menu("File", enabled: canExport, items: new[]
             {
-                // THE SEMANTIC ICON (docs/styling-plan.md D6): a
-                // CONCEPT, drawn by each platform in its own symbol
-                // set. Done is the checkmark idiom — the vocabulary
-                // has no `save` on purpose (Apple's own catalog has no
-                // save-specific glyph either).
+                // A symbol names a CONCEPT, drawn by each platform in
+                // its own set (docs/styling-plan.md D6). There is no
+                // `save` in the vocabulary; Done is the checkmark idiom.
                 tx.Item("Save", shortcut: "primary+s", symbol: Symbol.Done,
                     onActivate: t => t.Write(status, "saved")),
                 tx.Item("Export", enabled: canExport, symbol: Symbol.Forward),
@@ -42,7 +39,6 @@ static class MenusScene
             });
             var view = tx.Menu("View", items: new[]
             {
-                // A toggle carries a symbol like any other leaf.
                 tx.Toggle("Details", isChecked: details, symbol: Symbol.Info,
                     onToggle: (t, on) => t.Write(status, on ? "details on" : "details off")),
             });
@@ -55,7 +51,7 @@ static class MenusScene
             tx.Window(title: "menus", menus: new[] { file, view, sortGroup });
 
             groups = tx.Collection();
-            // Catalog built live: items are shared across stamped copies; the
+            // Built live: the items are shared across stamped copies, the
             // template only attaches, and each activation carries its key path.
             var catalog = tx.ContextCatalog(
                 tx.Item("Remove", symbol: Symbol.Delete, onActivate: (t, keys) =>
@@ -73,10 +69,9 @@ static class MenusScene
                     t.Write(canExport, true));
                 tx.Button("reset menu state", t => // button#1
                 {
-                    // The folds never echo the user's pick, so details/sort
-                    // still hold false/0; these two prop writes are real
-                    // checked/value records (never coalesced) that reset the
-                    // backend's user-state mirror.
+                    // Menus are uncontrolled: the folds never echo the
+                    // user's pick, so details/sort still hold false/0 and
+                    // these writes are real records, never coalesced away.
                     t.Write(details, false);
                     t.Write(sort, 0.0);
                     t.Write(status, "ready");
