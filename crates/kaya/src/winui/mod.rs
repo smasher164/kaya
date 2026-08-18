@@ -31,6 +31,11 @@ use std::sync::OnceLock;
 use windows_core::{HSTRING, Interface as _};
 
 use bindings::Microsoft::UI::Dispatching::{DispatcherQueue, DispatcherQueueHandler};
+// The WINDOW's own caption height, which is a windowing fact and not a
+// XAML one: the `TitleBar` control sizes its own band and leaves the
+// system's caption buttons where they were (microsoft-ui-xaml#9863), so
+// the two halves of one band are reconciled here or nowhere.
+use bindings::Microsoft::UI::Windowing::TitleBarHeightOption;
 use bindings::Microsoft::UI::Xaml::Controls::{
     AppBarButton, Button, CheckBox, ColumnDefinition, ComboBox, ComboBoxItem, CommandBar,
     ContentDialog,
@@ -573,10 +578,36 @@ struct CoreState {
     /// never has one and keeps the standard system caption it always
     /// had.
     ///
-    /// Kept because `refresh_caption` has to reach it — the control is a
-    /// SECOND SINK for the composed caption, never a second author of
-    /// it (see the doc comment there).
+    /// Kept because `refresh_caption` has to reach it — the caption text
+    /// it hosts is a SECOND SINK for the composed caption, never a second
+    /// author of it (see the doc comment there).
     window_titlebars: HashMap<u64, TitleBar>,
+    /// The caption's TITLE TEXT, in the control's CENTRE slot.
+    ///
+    /// WHY NOT THE CONTROL'S `Title` PROPERTY, which is the obvious
+    /// place: the control lays that property out immediately after
+    /// `LeftHeader`, and as of the one-band revision `LeftHeader` is the
+    /// window's MENU. The first capture of that arrangement is the whole
+    /// argument — the band read `File  Edit  View  toolbar`, and the
+    /// title was indistinguishable from a fourth menu item. The band the
+    /// ruling asks for is menu left, title centre, commands right, and
+    /// the control already declares a centred slot for the middle one:
+    /// `TitleBarContentHorizontalAlignment` is `Center`
+    /// (`TitleBar_themeresources.xaml:97`). This is also the arrangement
+    /// Windows' own menu-in-caption applications use — Visual Studio and
+    /// the Office apps both centre the document title over a left-hand
+    /// menu.
+    ///
+    /// IT ALSO RETIRES A TRAP RATHER THAN MANAGING IT. `TitleBar` writes
+    /// `appWindow.Title` from its own `Title` property, so filling that
+    /// property made the control a caption WRITER that had to be fed the
+    /// composed string to stop it clobbering the dirty marker. Left empty
+    /// from birth, it never writes at all: `UpdateTitle`'s only write is
+    /// guarded by a non-empty title and `ResetTitle` fires only on a
+    /// non-empty→empty transition (microsoft-ui-xaml @
+    /// winui3/release/2.2.0, `TitleBar.cpp:483-516`). One author, and now
+    /// no rival.
+    window_caption_texts: HashMap<u64, TextBlock>,
     /// (window, item id) -> the promoted action's `AppBarButton`.
     ///
     /// THE WRITE SIDE ONLY, and that is the whole discipline of this
@@ -2131,24 +2162,28 @@ fn window_caption(core: &CoreState, window: u64) -> String {
 /// window's title, the nav stack, the dirty flag) is always correct
 /// and never needs to know which one moved.
 ///
-/// TWO SINKS NOW, STILL ONE AUTHOR (the 2026-08-17 titlebar revision).
-/// A promoted window wears a `TitleBar` control, and that control is a
-/// caption WRITER in its own right: `TitleBar::UpdateTitle` does
+/// TWO SINKS, STILL ONE AUTHOR (the 2026-08-17 titlebar revision). A
+/// promoted window draws its own caption text, so the composed string
+/// goes to the window AND to the TextBlock in the caption's centre slot.
+/// Two places it is DISPLAYED; one place it is decided.
+///
+/// AND THE CONTROL IS NOT ONE OF THEM, which is deliberate.
+/// `TitleBar::UpdateTitle` does
 /// `if (currentTitle != titleText) { appWindow.Title(titleText); }`
 /// (microsoft-ui-xaml @ winui3/release/2.2.0,
-/// `src/controls/dev/TitleBar/TitleBar.cpp:505-513`). So handing it the
-/// window's DECLARED title would make it overwrite the composed caption
-/// the line above just wrote — and the first casualty would be the
-/// dirty marker, silently, since `Stage::window_dirty` reads the live
-/// `Window::Title()` and asks whether it starts with `*`. It is handed
-/// the composed string instead, which makes its write a no-op and
-/// leaves the composition with exactly one author.
+/// `src/controls/dev/TitleBar/TitleBar.cpp:505-513`) — so a `TitleBar`
+/// whose `Title` property is filled is a caption WRITER in its own
+/// right, and the first casualty of two writers is the dirty marker,
+/// silently, since `Stage::window_dirty` reads the live `Window::Title()`
+/// and asks whether it starts with `*`. The property is left empty from
+/// birth and the text is drawn by `window_caption_texts` instead: the
+/// rival writer is not managed, it never exists.
 fn refresh_caption(core: &CoreState, window: u64) -> windows_core::Result<()> {
     let caption = HSTRING::from(window_caption(core, window));
     let target = winui_window(core, window)?;
     target.SetTitle(&caption)?;
-    if let Some(titlebar) = core.window_titlebars.get(&window) {
-        titlebar.SetTitle(&caption)?;
+    if let Some(text) = core.window_caption_texts.get(&window) {
+        text.SetText(&caption)?;
     }
     Ok(())
 }
@@ -2681,9 +2716,17 @@ fn resolve_menu_path(core: &CoreState, path: &str, roots: &[u64]) -> Option<u64>
 /// the toolbar slice — which is the property that lets this row exist in
 /// EVERY windowed scene's shell without moving a single other leg's
 /// measurements. `refresh_toolbar` mints the `TitleBar` into it on the
-/// first promotion, and the MenuBar's row is unchanged in every way that
-/// shows: it is row 1 of three instead of row 0 of three, under an
-/// EMPTY row that measures zero.
+/// first promotion.
+///
+/// THE MENUBAR IS BORN IN ROW 1 AND MAY LEAVE IT (the 2026-08-17 one-band
+/// revision). A window that promotes an action wears one band: the menu
+/// migrates into that window's `TitleBar.LeftHeader` and this row goes
+/// EMPTY, which is to say it measures zero and the separate menu row is
+/// gone. A window that promotes nothing has no caption control to migrate
+/// into and keeps its menu here, under the system caption — the same
+/// derivation ("extended is derived from toolbar presence") seen from the
+/// menu's side. `rehost_menubar` owns both directions and is the only
+/// place the bar changes parents.
 fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     use windows_core::Interface as _;
     if core.menubars.contains_key(&window) {
@@ -2733,6 +2776,30 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     core.menu_shells.insert(window, shell);
     Ok(())
 }
+
+/// THE CAPTION BAND'S METRICS, and every one of them is the platform's
+/// own number read out of the pinned controls' theme resources
+/// (microsoft-ui-xaml @ winui3/release/2.2.0). kaya invents none of them
+/// and exposes none of them: they exist because two runs of buttons —
+/// the system's caption cluster and the app's promoted commands — have
+/// to sit in ONE band, and the first version of this arm put them in two.
+///
+/// THE MAINTAINER'S WORDS FOR THAT VERSION, kept because they are the
+/// acceptance test: "the toolbar icons are on the same row as the
+/// close/minimize/expand, but they are aligned and sized completely
+/// differently. they look like you just randomly threw them onto the
+/// middle of the screen." Measured, that was 68x48 command cells centred
+/// 9 DIP below a 46x32 system cluster.
+///
+/// `CAPTION_COMMAND_CELL` — the width one promoted command occupies.
+/// `AppBarButton`'s own default is 68 (`DefaultAppBarButtonStyle`'s
+/// `<Setter Property="Width" Value="68"/>`), which is a TOOLBAR metric:
+/// it is sized for a strip of its own, where the label sits under the
+/// icon. In a caption band the cell is square and its side is the band —
+/// `AppBarThemeCompactHeight` (48), the same resource the CommandBar's
+/// own "…" overflow button takes for its `MinHeight`, so the run of
+/// cells is uniform including the affordance kaya does not mint.
+const CAPTION_COMMAND_CELL: f64 = 48.0;
 
 /// The shell Grid's rows, named because two functions have to agree
 /// about them and a bare `1` in each is how they stop agreeing.
@@ -2807,25 +2874,45 @@ fn promoted_items(core: &CoreState, window: u64) -> Vec<u64> {
 /// surface for "extended" and no knob to set: promoting an action is the
 /// whole declaration.
 ///
-/// THE HEIGHT IS DERIVED TOO, and by the control rather than by kaya:
+/// ONE BAND, which is the 2026-08-17 revision's second half. The window
+/// wears exactly one horizontal band of chrome and everything the app
+/// declared is in it: the MENU migrates out of its own row into
+/// `LeftHeader` (`rehost_menubar`), the title is the control's own, the
+/// commands are right in `RightHeader`. The menu's row is left empty, and
+/// an empty Auto row measures zero — so "the separate menu row is
+/// deleted" is a fact about the geometry and not only about the picture.
+///
+/// THE HEIGHT IS DERIVED, AND NOW BOTH HALVES OF THE BAND ARE TOLD.
 /// `TitleBar::UpdateHeight` goes to the compact state (32px) when
 /// Content, LeftHeader and RightHeader are ALL null and to the expanded
-/// state (48px) otherwise
-/// (microsoft-ui-xaml @ winui3/release/2.2.0,
-/// `src/controls/dev/TitleBar/TitleBar.cpp:433`, heights from
-/// `TitleBar_themeresources.xaml:77-78`). Filling `RightHeader` with the
-/// bar is what makes the caption tall. kaya sets no height, and takes
-/// neither `AppWindowTitleBar.PreferredHeightOption` nor any style.
+/// state (48px) otherwise (microsoft-ui-xaml @ winui3/release/2.2.0,
+/// `src/controls/dev/TitleBar/TitleBar.cpp:493`, heights from
+/// `TitleBar_themeresources.xaml:77-78`). Filling the slots is what makes
+/// the caption tall, and kaya still writes no height on the control.
 ///
-/// WHAT KAYA WRITES IS THE LIST AND NOTHING ELSE. The 48px transparent
-/// bar that takes the window's own surface, the 20px→16px icon
-/// rescaling, the "…" affordance, the dynamic overflow at width
+/// BUT THE CONTROL DOES NOT TELL THE WINDOW, and that omission is what
+/// the first version of this arm shipped: the XAML band went to 48 while
+/// the system's caption buttons stayed in their standard 32 band, so two
+/// runs of buttons shared one row with their centres 9 DIP apart. That is
+/// upstream microsoft-ui-xaml#9863, and the app-side answer is
+/// `AppWindowTitleBar.PreferredHeightOption` — written here as `Tall`
+/// exactly when this window's caption is extended and `Standard` when the
+/// promotion empties. Same derivation `ExtendsContentIntoTitleBar`
+/// follows, both directions, same path, no knob, no app surface.
+///
+/// WHAT KAYA WRITES IS THE LIST, THE BAND, AND NOTHING ELSE. The
+/// transparent bar that takes the window's own surface, the 20px→16px
+/// icon rescaling, the "…" affordance, the dynamic overflow at width
 /// breakpoints, the label hidden while the bar is closed and re-laid
-/// beside the icon in the overflow — every one of those is the default
-/// of having the control (measured against the pinned WinUI 2.2.1
+/// beside the icon in the overflow — every one of those is still the
+/// default of having the control (measured against the pinned WinUI 2.2.1
 /// metadata and the 2.2.0 theme resources, scratchpad/chrome/
-/// toolbar-winui.md §3). Not one styling knob is set here, which is the
-/// slice's whole claim on this platform.
+/// toolbar-winui.md §3). The one metric written per button is
+/// `CAPTION_COMMAND_CELL`; that constant carries why a 68px toolbar cell
+/// is the wrong cell in a caption band and where 48 comes from. Restyling
+/// the platform's control to the platform's OWN caption metrics is
+/// lowering fidelity, not a styling knob — it is the difference between
+/// commands that are part of the caption and commands dropped onto it.
 ///
 /// THE DRAG REGIONS ARE THE CONTROL'S JOB, and the reason to use the
 /// control at all: C1's recorded failure mode for a custom caption is
@@ -2921,21 +3008,29 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             };
             let target = winui_window(core, window)?;
 
-            // THE TITLE IS NOT WRITTEN HERE. The control has a `Title`
-            // and the obvious thing is to fill it at mint — which the
-            // lane's own door refused, by name and with the fix in the
-            // sentence: "writes a window caption outside
-            // refresh_caption: line 2906 (`titlebar.SetTitle`)". It is
-            // right. A caption composed in two places is the five-writer
-            // defect docs/dirty-plan.md D2 was written about, and this
-            // control is a caption writer in its own right (see
-            // refresh_caption's doc comment). So the mint leaves the
-            // title empty and the ONE writer fills it, below, on this
+            // THE TITLE IS NOT WRITTEN HERE, and the control's own
+            // `Title` property is never written at all. A caption
+            // composed in two places is the five-writer defect
+            // docs/dirty-plan.md D2 was written about, and a filled
+            // `Title` makes the control one of the writers (see
+            // refresh_caption). The mint puts an EMPTY TextBlock in the
+            // centre slot and the ONE writer fills it, below, on this
             // rebuild and on every later one.
             let titlebar = TitleBar::new()?;
             let tb_el: FrameworkElement = titlebar.cast()?;
             Grid::SetRow(&tb_el, TITLEBAR_ROW)?;
             shell.Children()?.Append(&titlebar.cast::<UIElement>()?)?;
+
+            // THE CAPTION TEXT, in the control's centre slot, wearing the
+            // control's own caption type. `CaptionTextBlockStyle` is the
+            // key `PART_TitleText` itself uses (`TitleBar-v220.xaml:238`),
+            // so the title is the platform's caption type at the
+            // platform's caption size — no font, no size, no colour
+            // chosen here.
+            let caption_text = TextBlock::new()?;
+            caption_text.SetStyle(&theme_resource::<Style>("CaptionTextBlockStyle")?)?;
+            titlebar.SetContent(&caption_text.cast::<UIElement>()?)?;
+            core.window_caption_texts.insert(window, caption_text);
 
             let bar = CommandBar::new()?;
             titlebar.SetRightHeader(&bar.cast::<UIElement>()?)?;
@@ -2966,6 +3061,12 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         };
         let enabled = menu_effective_enabled(core, id);
         let button = AppBarButton::new()?;
+        // THE CAPTION CELL. The only metric this arm writes, and it is
+        // written because the button's own default is a metric for a
+        // different place — see CAPTION_COMMAND_CELL. Everything else
+        // about the button, including its height, comes from the closed
+        // CommandBar it sits in.
+        button.SetWidth(CAPTION_COMMAND_CELL)?;
         // THE LABEL IS THE BUTTON'S NAME, not decoration: a closed
         // CommandBar draws icons only (it overwrites each button's
         // IsCompact as it opens and closes), so `Label` is what the
@@ -3011,11 +3112,32 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         if target.ExtendsContentIntoTitleBar()? != extended {
             target.SetExtendsContentIntoTitleBar(extended)?;
         }
+        // THE SYSTEM'S HALF OF THE BAND, derived from the same number.
+        // The XAML control sizes itself; the caption BUTTONS are the
+        // window's, and this is the only thing that moves them. Read
+        // before write for the same reason as the line above.
+        let caption = target.AppWindow()?.TitleBar()?;
+        let wanted = if extended {
+            TitleBarHeightOption::Tall
+        } else {
+            TitleBarHeightOption::Standard
+        };
+        if caption.PreferredHeightOption()? != wanted {
+            caption.SetPreferredHeightOption(wanted)?;
+        }
+        // ONE BAND: the menu rides in the caption exactly while there is
+        // a caption to ride in, and goes back to its own row when the
+        // promotion empties. Before RecomputeDragRegions, deliberately —
+        // the move changes LeftHeader's extent, and the rects published
+        // below have to be the ones the bar ends up occupying.
+        rehost_menubar(core, window, extended)?;
         // The bar's width just changed and it lives in RightHeader,
         // which the control's automatic refresh does not watch (see the
         // doc comment). Without this the passthrough rects describe the
         // PREVIOUS set of buttons: the window would still drag, and the
-        // buttons under the stale hole would be the wrong ones.
+        // buttons under the stale hole would be the wrong ones. The menu
+        // has the same problem for the same reason — the control watches
+        // `Content`'s LayoutUpdated and neither header's.
         titlebar.RecomputeDragRegions()?;
         // THE ONE CAPTION WRITER FILLS THE CONTROL'S TITLE, here and on
         // every rebuild. Idempotent by construction (it derives the
@@ -3024,6 +3146,117 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         // `appWindow.Title` write is a no-op.
         refresh_caption(core, window)?;
     }
+    Ok(())
+}
+
+/// THE MENU'S PARENT IS DERIVED, exactly like the caption it moves into.
+/// A window that promotes an action wears ONE band, and the menu is part
+/// of it: the same `MenuBar` object leaves its shell row and becomes the
+/// caption's `LeftHeader`. When the promotion empties, it goes back. A
+/// window that never promotes has no caption control to migrate into and
+/// never leaves the row — which is "extended is derived from toolbar
+/// presence" read from the menu's side.
+///
+/// THE SAME OBJECT MOVES, which is the whole reason this is a mount-point
+/// change and not a rebuild. Every harness read of the menus — the item
+/// walk, `expect_menu`, the enablement reads — goes through
+/// `core.menubars`, and that map still holds the bar it always held. A
+/// menu that was rebuilt into a different control would have to prove all
+/// of that again; a menu that changed parents proves it by being the same
+/// pointer.
+///
+/// XAML REFUSES RE-PARENTING AND DOES NOT WARN. Appending an element that
+/// still has a parent takes a non-unwinding panic through the XAML layer
+/// and ABORTS THE PROCESS (`release_split`'s docstring records the same
+/// trap from the split arm). So each direction detaches before it
+/// attaches, and the state is read off the tree rather than tracked
+/// beside it — `IndexOf` on the shell's own children is the question
+/// "where is this bar right now", and a bookkeeping bool would be a
+/// second answer that can disagree.
+///
+/// THE MENU STAYS CLICKABLE IN THE CAPTION, and that is not a hope:
+/// `TitleBar::UpdateInteractableElementsList` pushes the whole
+/// `PART_LeftHeaderPresenter` area onto the passthrough list whenever
+/// `LeftHeader()` is non-null (microsoft-ui-xaml @ winui3/release/2.2.0,
+/// `src/controls/dev/TitleBar/TitleBar.cpp:849-858`), and
+/// `UpdateDragRegion` hands those rects to `InputNonClientPointerSource`.
+/// The rects are only as fresh as the last recompute, which is why the
+/// caller does this move BEFORE `RecomputeDragRegions`. Proved by
+/// clicking, not by reading: the menus legs open `File` in the caption.
+fn rehost_menubar(core: &CoreState, window: u64, in_caption: bool) -> windows_core::Result<()> {
+    let Some(bar) = core.menubars.get(&window) else {
+        return Ok(());
+    };
+    let Some(shell) = core.menu_shells.get(&window) else {
+        return Ok(());
+    };
+    let bar_el: UIElement = bar.cast()?;
+    let bar_fe: FrameworkElement = bar.cast()?;
+    let children = shell.Children()?;
+    let mut at = 0u32;
+    let in_row = children.IndexOf(&bar_el, &mut at)?;
+    let titlebar = core.window_titlebars.get(&window);
+    // A window with no caption control has nowhere else to put it. This
+    // is the shape EVERY non-promoting window has, so it is a branch and
+    // not an assumption.
+    let in_caption = in_caption && titlebar.is_some();
+    match (in_caption, in_row, titlebar) {
+        (true, true, Some(titlebar)) => {
+            children.RemoveAt(at)?;
+            titlebar.SetLeftHeader(&bar_el)?;
+        }
+        (false, false, titlebar) => {
+            if let Some(titlebar) = titlebar {
+                titlebar.SetLeftHeader(None::<&UIElement>)?;
+            }
+            Grid::SetRow(&bar_fe, MENUBAR_ROW)?;
+            children.Append(&bar_el)?;
+        }
+        // Already where it belongs. Idempotent because this runs on
+        // EVERY catalog rebuild, and a move that re-ran would detach and
+        // re-attach a live control for nothing.
+        _ => {}
+    }
+
+    // THE POST-CONDITION, AND IT IS A WALL BECAUSE NOTHING ELSE IS ONE.
+    // MEASURED, not feared: with `SetLeftHeader` deleted from the arm
+    // above — one substitution, printed and asserted — the bar is
+    // detached from its row and attached to nothing, the window shows NO
+    // MENU AT ALL, and `menus_rust` PASSED (2s).
+    //
+    // The reason is structural and worth stating where the next reader
+    // will be: every menu question this backend answers goes through
+    // `core.menubars` (the bar OBJECT) or `core.menu_natives` (the item
+    // objects). `menu_presentation` asks the bar how many Items it
+    // holds; `menu_state` asks a MenuFlyoutItem for its flag; activation
+    // invokes that same item. Not one of them asks whether the bar is in
+    // a TREE, and no harness verb could ask it uniformly — the question
+    // "where does this window's menu live" has no answer on the other
+    // four backends. So the shared scenes structurally cannot see this,
+    // exactly as they could not see an unearned extended caption
+    // (`refresh_toolbar`'s mint carries that sibling assertion), and the
+    // check goes here, on the path every promoted window runs.
+    let wanted_here: Option<windows_core::IUnknown> = titlebar
+        .and_then(|titlebar| titlebar.LeftHeader().ok())
+        .and_then(|hosted| hosted.cast::<windows_core::IUnknown>().ok());
+    let in_caption_now = wanted_here == Some(bar.cast::<windows_core::IUnknown>()?);
+    let in_row_now = children.IndexOf(&bar_el, &mut at)?;
+    assert!(
+        in_caption_now == in_caption && in_row_now == !in_caption,
+        "kaya: winui: window {window}'s MenuBar ended a rebuild somewhere \
+         other than where the one-band derivation puts it. Wanted {}; \
+         found caption={in_caption_now} row={in_row_now}. A promoted \
+         window's menu rides in its TitleBar's LeftHeader and every other \
+         window's rides in the shell's MENUBAR_ROW; a bar in NEITHER is \
+         invisible, and no scene can say so — the menu reads walk \
+         core.menubars and core.menu_natives, which answer the same \
+         whether or not the bar is in a tree.",
+        if in_caption {
+            "the caption's LeftHeader"
+        } else {
+            "the shell's menu row"
+        }
+    );
     Ok(())
 }
 
@@ -8434,6 +8667,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.menu_shells.remove(&window.0);
             core.toolbars.remove(&window.0);
             core.window_titlebars.remove(&window.0);
+            core.window_caption_texts.remove(&window.0);
             core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
         ApplyOp::PushEntry { window, entry } => {
@@ -10306,6 +10540,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             menu_shells: HashMap::new(),
             toolbars: HashMap::new(),
             window_titlebars: HashMap::new(),
+            window_caption_texts: HashMap::new(),
             toolbar_buttons: HashMap::new(),
             menu_shortcuts: HashMap::new(),
             open_context: None,

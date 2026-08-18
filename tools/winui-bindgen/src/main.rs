@@ -463,15 +463,46 @@ fn main() {
         //     icon and reads no template state; both are types this arm
         //     never names, and windows-bindgen leaves their accessors as
         //     vtable pads, which is the honest record of "not used here".
-        //   Microsoft.UI.Windowing.AppWindow / AppWindowTitleBar /
-        //     TitleBarHeightOption — the `PreferredHeightOption = Tall`
-        //     route. NOT taken: the control derives its own 32→48px
-        //     height from whether its slots are occupied
-        //     (TitleBar.cpp:433 UpdateHeight), and upstream
-        //     microsoft-ui-xaml#9863 says the two heights do not agree
-        //     anyway. kaya sets no height on this platform at all, which
-        //     is the same claim the CommandBar entries make.
         "Microsoft.UI.Xaml.Controls.TitleBar".to_string(),
+        // THE WINDOW'S OWN CAPTION HEIGHT (the 2026-08-17 one-band
+        // revision). This entry was refused by the first titlebar arm,
+        // in a comment right here that said kaya "sets no height on this
+        // platform at all" — and the picture that arm shipped is what
+        // refusing it looks like: the control took its 48px EXPANDED
+        // state the moment a slot was filled (TitleBar.cpp:493
+        // UpdateHeight), the system caption buttons stayed in the
+        // standard 32px band, and the two runs of buttons in one row sat
+        // on centres 9 DIP apart. Upstream microsoft-ui-xaml#9863 is
+        // that exact mismatch, and its app-side answer is this property:
+        // the XAML control does not tell the WINDOW what its caption is,
+        // so the app must.
+        //
+        // IT IS NOT A HEIGHT KNOB AND NOT A STYLE. `PreferredHeightOption`
+        // takes one of three named options; kaya writes `Tall` on exactly
+        // the windows whose caption it has already extended, and
+        // `Standard` when that promotion empties — the same derivation,
+        // in both directions, that `ExtendsContentIntoTitleBar` follows.
+        // No app-facing vocabulary is added and no number is invented:
+        // 48 is the platform's own Tall band, matching the control's own
+        // expanded state.
+        //
+        //   AppWindow            — reached from `Window.AppWindow`, which
+        //     without this entry is a `usize` vtable pad (bindings.rs's
+        //     IWindow2). It is the ONLY route: the window's caption is a
+        //     windowing fact, not a XAML one.
+        //   AppWindowTitleBar    — where the option lives.
+        //   TitleBarHeightOption — the enum. THE TRANSITIVITY TRAP AGAIN:
+        //     unfiltered, its setter would come back as a pad and the
+        //     whole entry would read as "WinUI cannot set this", which is
+        //     how the CommandBar collections went missing once already.
+        // NOT filtered, deliberately: every other Windowing type
+        // (AppWindowPresenter, OverlappedPresenter, DisplayArea, the
+        // Changed/Closing event args) — kaya positions, sizes and closes
+        // its windows through XAML and the HWND subclass, and those
+        // accessors stay pads, which is the honest record of it.
+        "Microsoft.UI.Windowing.AppWindow".to_string(),
+        "Microsoft.UI.Windowing.AppWindowTitleBar".to_string(),
+        "Microsoft.UI.Windowing.TitleBarHeightOption".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     windows_bindgen::bindgen(args);
