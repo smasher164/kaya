@@ -90,11 +90,6 @@ use bindings::Microsoft::UI::Xaml::Media::FontFamily;
 #[cfg(feature = "harness")]
 use bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationControlType;
 use bindings::Microsoft::UI::Xaml::Media::Imaging::BitmapImage;
-// The app identity's caption sink (docs/app-identity-plan.md I3). The
-// ONE IconSource subclass that reaches bytes: BitmapIconSource's only
-// picture slot is a Uri, so it would force a temp file — see the entry
-// in tools/winui-bindgen for the measurement.
-use bindings::Microsoft::UI::Xaml::Controls::ImageIconSource;
 use bindings::Windows::Foundation::{IReference, PropertyValue};
 use bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 use bindings::Microsoft::UI::Xaml::{
@@ -3232,7 +3227,121 @@ fn assert_caption_command_geometry(titlebar: &TitleBar) -> windows_core::Result<
 fn mint_caption_titlebar() -> windows_core::Result<TitleBar> {
     apply_caption_drag_strip()?;
     apply_caption_ellipsis_box()?;
-    TitleBar::new()
+    let titlebar = TitleBar::new()?;
+    // THE FAR-LEFT SLOT IS MINTED WITH THE BAND, so that "what is in
+    // LeftHeader" has exactly one answer on a promoted window from the
+    // moment it exists — see `caption_left_header`.
+    titlebar.SetLeftHeader(&mint_caption_left_header()?.cast::<UIElement>()?)?;
+    Ok(titlebar)
+}
+
+/// The mark's box and the gap after it, both the `TitleBar` control's own
+/// numbers for its own icon: `TitleBarIconMaxWidth` and
+/// `TitleBarIconMaxHeight` are 16, `TitleBarIconMargin` is `0,0,16,0`
+/// (`v220-TitleBar_themeresources.xaml:88-92`). kaya draws the mark in the
+/// column the control cannot put it in; it does not pick a size for it.
+const CAPTION_MARK_BOX: f64 = 16.0;
+const CAPTION_MARK_GAP: f64 = 16.0;
+
+/// The band a promoted caption is arranged in: `TitleBarExpandedHeight`,
+/// the control's own 48 (`v220-TitleBar_themeresources.xaml:78`), which is
+/// also the height the window's own caption cluster is given in `Tall`
+/// mode — the two halves of this band are one band because they are both
+/// this number (the one-band revision).
+const CAPTION_BAND_HEIGHT: f64 = 48.0;
+
+/// THE MARK'S LEADING GAP, AND IT IS DERIVED RATHER THAN CHOSEN.
+///
+/// The maintainer's acceptance criterion (2026-08-18): "ensure the icon on
+/// the toolbar is inset somewhat so that the top and left spacing is
+/// equal, so it mirrors how the X looks on the right. this is how vscode's
+/// icon looks."
+///
+/// A `CAPTION_MARK_BOX` box centred in a `CAPTION_BAND_HEIGHT` band sits
+/// exactly this far below the band's top — that is what vertical centring
+/// MEANS — so the same number to the left of it makes the two insets equal
+/// by construction, with nothing invented. The corner then reads the way
+/// the opposite one does: the system's Close cell is 48x48 flush into its
+/// corner with a ~10 DIP glyph centred in it, so its glyph carries ~19 DIP
+/// of air above and to the right; the mark carries 16 above and 16 to the
+/// left, which is the same shape at the size the platform gives an icon.
+///
+/// It also makes the mark's cell 16+16+16 = 48 DIP wide: one caption cell,
+/// the same cell the system's minimize/maximize/close and kaya's own
+/// promoted commands occupy.
+///
+/// The equality is not left to this comment — `assert_caption_mark_geometry`
+/// measures both insets off the arrangement and fails if they part, which
+/// is also what would catch a band that stopped being 48 DIP tall.
+const CAPTION_MARK_LEAD: f64 = (CAPTION_BAND_HEIGHT - CAPTION_MARK_BOX) / 2.0;
+
+/// The two things that live at the caption's far left, in the order the
+/// ruling puts them: the app's mark, then the window's menu.
+const CAPTION_MARK_COLUMN: i32 = 0;
+const CAPTION_MENU_COLUMN: i32 = 1;
+
+/// `LeftHeader` takes ONE element and this band has two things that belong
+/// at its left edge, so kaya owns a container there and both ride in it.
+///
+/// TWO AUTO COLUMNS, WHICH IS WHY THIS IS FREE. An Auto column measures
+/// exactly what its child asks for and an empty one measures ZERO, so a
+/// caption with no mark — every window in every scene that declares no
+/// identity — is arranged exactly as it was before this container existed.
+/// That is the claim the lane's caption-centre phase re-measures.
+///
+/// THE MARK'S WIDTH DOES NOT MOVE THE TITLE'S CLAMP, and the arithmetic is
+/// the template's: the control's own icon column (5) and the left-header
+/// column (3) are BOTH left of the content slot (8). Moving 16 DIP of mark
+/// plus its 16 DIP margin out of column 5 and into column 3 leaves the
+/// slot's left edge where it was, so `center_caption_title`'s `span0` — a
+/// max of the slot's edge and the menu's right edge plus the gap — is
+/// unchanged. Measured both ways; see the caption-centre sweep.
+fn mint_caption_left_header() -> windows_core::Result<Grid> {
+    let holder = Grid::new()?;
+    let columns = holder.ColumnDefinitions()?;
+    for _ in 0..2 {
+        let def = ColumnDefinition::new()?;
+        def.SetWidth(GridLength {
+            Value: 1.0,
+            GridUnitType: GridUnitType::Auto,
+        })?;
+        columns.Append(&def)?;
+    }
+    // The control centres `LeftHeader` in the band already
+    // (`TitleBarLeftHeaderVerticalAlignment`); this says the same thing
+    // about the container's own contents, so a mark 16 DIP tall and a menu
+    // 32 DIP tall share the band's centre line rather than stretching to
+    // it.
+    holder.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+    Ok(holder)
+}
+
+/// kaya's far-left container, read back off the band.
+///
+/// A READ AND NOT A MAP, for the reason `rehost_menubar` gives about the
+/// menu's own parent: the tree is the state, and a second copy of it kept
+/// beside the tree is a second answer that can disagree. The mint above
+/// puts it there and nothing else ever writes `LeftHeader`, so a band
+/// without it is a defect rather than a case to handle.
+fn caption_left_header(window: u64, titlebar: &TitleBar) -> windows_core::Result<Grid> {
+    match titlebar
+        .LeftHeader()
+        .ok()
+        .and_then(|header| header.cast::<Grid>().ok())
+    {
+        Some(holder) => Ok(holder),
+        None => panic!(
+            "kaya: winui: window {window}'s TitleBar has no far-left container in its \
+             LeftHeader. mint_caption_titlebar puts one there when the band is minted, \
+             and it is the only thing this backend ever writes to that slot: the app's \
+             mark rides in its first column and the window's MenuBar in its second (the \
+             ruling of 2026-08-18 — the mark goes BEFORE the menu, which the control's \
+             own IconSource cannot do because it lays that out in template column 5, \
+             after LeftHeader's column 3). A LeftHeader holding something else means a \
+             second writer appeared; a LeftHeader holding nothing means the mint was \
+             bypassed."
+        ),
+    }
 }
 
 /// The height of the box the CommandBar's "…" glyph is drawn in, in DIP.
@@ -3450,6 +3559,150 @@ fn element_origin_x(element: &FrameworkElement, within: &UIElement) -> windows_c
         .TransformToVisual(within)?
         .TransformPoint(Point { X: 0.0, Y: 0.0 })?;
     Ok(f64::from(origin.X))
+}
+
+/// The y of an element's own origin, in another element's coordinates.
+fn element_origin_y(element: &FrameworkElement, within: &UIElement) -> windows_core::Result<f64> {
+    let origin = element
+        .TransformToVisual(within)?
+        .TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+    Ok(f64::from(origin.Y))
+}
+
+/// THE MARK IS AT THE CAPTION'S FAR LEFT, ARRANGED, AND BEFORE THE MENU —
+/// asserted against the arrangement XAML produced, on every promoted
+/// window that declared an identity.
+///
+/// WHY THIS WALL EXISTS AT ALL: the harness read cannot see this. The
+/// identity scene's `expect_app_icon` reads `WM_GETICON` on the HWND —
+/// USER32's per-window icon, which is what the taskbar and alt-tab draw —
+/// and that answer is IDENTICAL whether the caption's mark was composed,
+/// composed in the wrong column, or never composed at all. Measured, not
+/// assumed: with the compose call deleted the scene still passes (see the
+/// watched negative in this arm's report). And no harness verb could ask
+/// it uniformly, for the reason `rehost_menubar`'s wall gives about the
+/// menu — "where does this window's mark live in its caption" has no
+/// answer on the other four backends, which draw their own bands. So the
+/// wall goes where the failure is, in the backend, on the path every
+/// promoted window's layout runs.
+///
+/// IT MEASURES FOUR THINGS AND NAMES ALL OF THEM. The mark is in the
+/// container; it is ARRANGED (a picture that failed to decode still
+/// arranges at its declared box, so this is the weakest of the four and it
+/// is stated as such); it is the FIRST thing in the band, ending before
+/// the menu begins; and it shares the band's centre line, which is the
+/// "sized and aligned to the band" half of the ruling.
+///
+/// DEFERRED LIKE ITS SIBLING: it returns `false` while there is nothing
+/// arranged to measure, which leaves the post-condition ARMED rather than
+/// passing vacuously — a check that answers "0x0, fine" is the census that
+/// read nothing and agreed with everything.
+fn assert_caption_mark_geometry(window: u64, titlebar: &TitleBar) -> windows_core::Result<bool> {
+    if APP_ICON_BITMAP.with_borrow(|slot| slot.is_none()) {
+        // No identity declared, or one with a name and no picture: this
+        // band is supposed to have no mark in it.
+        return Ok(true);
+    }
+    let band_height = titlebar.ActualHeight()?;
+    if band_height <= 0.0 {
+        return Ok(false);
+    }
+    let holder = caption_left_header(window, titlebar)?;
+    let children = holder.Children()?;
+    let mut mark: Option<Image> = None;
+    let mut menu: Option<MenuBar> = None;
+    let count = children.Size()?;
+    for i in 0..count {
+        let child = children.GetAt(i)?;
+        if let Ok(image) = child.cast::<Image>() {
+            mark = Some(image);
+        } else if let Ok(bar) = child.cast::<MenuBar>() {
+            menu = Some(bar);
+        }
+    }
+    let Some(mark) = mark else {
+        panic!(
+            "kaya: winui: window {window} declared an app identity with a picture, and \
+             its promoted caption's far-left container holds {count} element(s), none of \
+             which is the Image that carries the mark (a MenuBar was {} among them). The \
+             mark belongs in that container's first column, BEFORE the menu — the ruling \
+             of 2026-08-18 — and refresh_caption_mark is what puts it there, from the \
+             declaration, from a window's creation and from the caption's mint. No scene \
+             can see this: expect_app_icon reads WM_GETICON, which is the WINDOW's icon \
+             and answers the same with no caption mark at all.",
+            if menu.is_some() { "found" } else { "not found" }
+        )
+    };
+    let mark_fe: FrameworkElement = mark.cast()?;
+    let width = mark.ActualWidth()?;
+    let height = mark.ActualHeight()?;
+    if width <= 0.0 || height <= 0.0 {
+        return Ok(false);
+    }
+    let within: UIElement = titlebar.cast()?;
+    let x = element_origin_x(&mark_fe, &within)?;
+    let y = element_origin_y(&mark_fe, &within)?;
+    assert!(
+        (width - CAPTION_MARK_BOX).abs() < 0.5 && (height - CAPTION_MARK_BOX).abs() < 0.5,
+        "kaya: winui: window {window}'s caption mark is arranged {width}x{height} DIP \
+         where the band's own icon box is {CAPTION_MARK_BOX} — TitleBarIconMaxWidth and \
+         TitleBarIconMaxHeight, the numbers the control's own PART_Icon wears \
+         (v220-TitleBar_themeresources.xaml:88-89). kaya writes that box in \
+         refresh_caption_mark and picks no size of its own; a different arranged size \
+         means something else is sizing it."
+    );
+    // THE TWO INSETS ARE EQUAL, which is the corner-mirror criterion of
+    // 2026-08-18 measured rather than trusted: the mark's gap from the
+    // band's left edge and its gap from the band's top are the same
+    // number, so the caption's left corner reads the way its right one
+    // does. Both are read off the ARRANGEMENT, in the band's own
+    // coordinates, and the wall is what makes `CAPTION_MARK_LEAD`'s
+    // derivation from the band height true rather than merely intended —
+    // a band that stopped being CAPTION_BAND_HEIGHT tall parts them.
+    assert!(
+        (x - y).abs() <= 0.5,
+        "kaya: winui: window {window}'s caption mark is arranged {x} DIP from the band's \
+         left edge and {y} DIP from its top, and those two have to be the same number: \
+         the mark mirrors the system's Close cell in the opposite corner, which is what \
+         VS Code's icon does and what the maintainer's criterion of 2026-08-18 asks for. \
+         The top inset is not chosen — it is what centring a {CAPTION_MARK_BOX} DIP box \
+         in a {band_height} DIP band produces — so the left one is written to match it \
+         (CAPTION_MARK_LEAD, derived from CAPTION_BAND_HEIGHT). They part when the band \
+         is not the height that constant assumes, or when something else has put a \
+         margin on the mark."
+    );
+    let centre = y + height / 2.0;
+    let band_centre = band_height / 2.0;
+    assert!(
+        (centre - band_centre).abs() <= 1.0,
+        "kaya: winui: window {window}'s caption mark sits on centre line {centre} in a \
+         band {band_height} DIP tall, whose centre is {band_centre}. The mark is \
+         VerticalAlignment=Center inside a container that is itself centred by the \
+         control's own TitleBarLeftHeaderVerticalAlignment, so those two agree unless \
+         something stretched one of them. The complaint this band was rebuilt for was \
+         furniture that did not share the system cluster's centre line."
+    );
+    if let Some(menu) = menu {
+        let menu_fe: FrameworkElement = menu.cast()?;
+        let menu_x = element_origin_x(&menu_fe, &within)?;
+        let menu_width = menu.ActualWidth()?;
+        if menu_width > 0.0 {
+            assert!(
+                x + width <= menu_x + 0.5,
+                "kaya: winui: window {window}'s caption mark is arranged at x={x} and is \
+                 {width} DIP wide, so it ends at {}, while the window's menu begins at \
+                 x={menu_x}. The mark goes BEFORE the menu at the caption's far left — \
+                 the ruling of 2026-08-18, and the convention the system caption draws \
+                 unprompted on every window that has no custom one. This is the exact \
+                 arrangement TitleBar.IconSource produces and cannot be talked out of \
+                 (the control lays its own icon out in template column 5 and LeftHeader \
+                 in column 3), which is why kaya composes the mark into the container \
+                 instead.",
+                x + width
+            );
+        }
+    }
+    Ok(true)
 }
 
 /// THE TITLE CENTRES ON THE WINDOW, not on the space left over between the
@@ -4010,7 +4263,10 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
                         // The armed post-condition, fired on the first pass
                         // that has something arranged to measure. Costs one
                         // bool test on every other pass.
-                        if CAPTION_GEOMETRY_ARMED.get() && assert_caption_command_geometry(&titlebar)? {
+                        if CAPTION_GEOMETRY_ARMED.get()
+                            && assert_caption_command_geometry(&titlebar)?
+                            && assert_caption_mark_geometry(window, &titlebar)?
+                        {
                             CAPTION_GEOMETRY_ARMED.set(false);
                         }
                         Ok(())
@@ -4212,13 +4468,28 @@ fn rehost_menubar(core: &CoreState, window: u64, in_caption: bool) -> windows_co
     match (in_caption, in_row, titlebar) {
         (true, true, Some(titlebar)) => {
             children.RemoveAt(at)?;
-            titlebar.SetLeftHeader(&bar_el)?;
+            // INTO THE CONTAINER'S SECOND COLUMN, not into `LeftHeader`
+            // itself: the first column is the app's mark, which goes
+            // BEFORE the menu (the ruling of 2026-08-18). `LeftHeader` is
+            // written once, at the mint, and by nothing else.
+            Grid::SetColumn(&bar_fe, CAPTION_MENU_COLUMN)?;
+            caption_left_header(window, titlebar)?
+                .Children()?
+                .Append(&bar_el)?;
         }
         (false, false, titlebar) => {
             if let Some(titlebar) = titlebar {
-                titlebar.SetLeftHeader(None::<&UIElement>)?;
+                let kids = caption_left_header(window, titlebar)?.Children()?;
+                let mut here = 0u32;
+                if kids.IndexOf(&bar_el, &mut here)? {
+                    kids.RemoveAt(here)?;
+                }
             }
             Grid::SetRow(&bar_fe, MENUBAR_ROW)?;
+            // The column it wore in the caption travels with the element;
+            // the shell's grid has one column, and a child left claiming
+            // column 1 there is a child in a column that does not exist.
+            Grid::SetColumn(&bar_fe, 0)?;
             children.Append(&bar_el)?;
         }
         // Already where it belongs. Idempotent because this runs on
@@ -4245,23 +4516,29 @@ fn rehost_menubar(core: &CoreState, window: u64, in_caption: bool) -> windows_co
     // exactly as they could not see an unearned extended caption
     // (`refresh_toolbar`'s mint carries that sibling assertion), and the
     // check goes here, on the path every promoted window runs.
-    let wanted_here: Option<windows_core::IUnknown> = titlebar
-        .and_then(|titlebar| titlebar.LeftHeader().ok())
-        .and_then(|hosted| hosted.cast::<windows_core::IUnknown>().ok());
-    let in_caption_now = wanted_here == Some(bar.cast::<windows_core::IUnknown>()?);
+    let in_caption_now = match titlebar {
+        Some(titlebar) => {
+            let kids = caption_left_header(window, titlebar)?.Children()?;
+            let mut here = 0u32;
+            kids.IndexOf(&bar_el, &mut here)?
+        }
+        None => false,
+    };
     let in_row_now = children.IndexOf(&bar_el, &mut at)?;
     assert!(
         in_caption_now == in_caption && in_row_now == !in_caption,
         "kaya: winui: window {window}'s MenuBar ended a rebuild somewhere \
          other than where the one-band derivation puts it. Wanted {}; \
          found caption={in_caption_now} row={in_row_now}. A promoted \
-         window's menu rides in its TitleBar's LeftHeader and every other \
-         window's rides in the shell's MENUBAR_ROW; a bar in NEITHER is \
-         invisible, and no scene can say so — the menu reads walk \
-         core.menubars and core.menu_natives, which answer the same \
-         whether or not the bar is in a tree.",
+         window's menu rides in the far-left container inside its \
+         TitleBar's LeftHeader — beside the app's mark, which takes that \
+         container's first column — and every other window's rides in the \
+         shell's MENUBAR_ROW; a bar in NEITHER is invisible, and no scene \
+         can say so — the menu reads walk core.menubars and \
+         core.menu_natives, which answer the same whether or not the bar \
+         is in a tree.",
         if in_caption {
-            "the caption's LeftHeader"
+            "the caption's far-left container"
         } else {
             "the shell's menu row"
         }
@@ -11062,6 +11339,22 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             std::mem::forget(core);
         }
     });
+    // THE IDENTITY'S DECODED PICTURE IS UNDER THE SAME RULE, and it is
+    // here because it cost a session's worth of bisecting to find where
+    // it belonged. `APP_ICON_BITMAP` is a `BitmapImage` — a XAML object —
+    // in a thread-local, and its TLS destructor runs after the line above
+    // has already declared the apartment dead. Releasing it there aborts
+    // the process: MEASURED as `ucrtbase.dll` `0xc0000409` subcode 7
+    // (`FAST_FAIL_FATAL_APP_EXIT`, the CRT's own `abort`) in the Windows
+    // event log, on every identity leg, AFTER the scene had printed
+    // `KAYA_SELFTEST: OK` — so the scene passed, the leg failed on the
+    // exit code alone, and nothing anywhere printed a reason. The picture
+    // is leaked exactly like the core above; the process reclaims it.
+    APP_ICON_BITMAP.with_borrow_mut(|slot| {
+        if let Some(bitmap) = slot.take() {
+            std::mem::forget(bitmap);
+        }
+    });
     // Unwind the App Runtime while the process is still healthy; leaving
     // it for DLL_PROCESS_DETACH crashes inside Microsoft.UI.Xaml.dll in
     // hosted processes (observed with python.exe).
@@ -11160,12 +11453,19 @@ thread_local! {
     /// look like" has one answer in this backend.
     static APP_IDENTITY: RefCell<Option<crate::protocol::AppIdentity>> =
         const { RefCell::new(None) };
-    /// The caption sink's ready-made source, built ONCE from the bytes.
+    /// The caption sink's ready-made picture, built ONCE from the bytes.
     /// A XAML object in a thread-local, on the UI thread only, exactly
     /// like CORE — and one object shared by every caption rather than a
     /// decode per window, because the decode is the expensive half and
     /// the picture is the same on all of them.
-    static APP_ICON_SOURCE: RefCell<Option<ImageIconSource>> = const { RefCell::new(None) };
+    ///
+    /// A `BitmapImage` RATHER THAN AN `ImageIconSource`, and the reason is
+    /// the ruling of 2026-08-18: the mark is composed into `LeftHeader` as
+    /// an `Image` of kaya's own, so what has to be shared between the
+    /// windows is the SOURCE, not an icon element. An `ImageSource` is not
+    /// a `UIElement` and has no parent, so one of these can hang off every
+    /// promoted window's mark at once — an element could not.
+    static APP_ICON_BITMAP: RefCell<Option<BitmapImage>> = const { RefCell::new(None) };
     /// The window sink's `IconId`, as its raw handle value. 0 = none,
     /// which is also what `IconId::default()` carries, so the absence
     /// and the zero are the same fact rather than two.
@@ -11371,15 +11671,16 @@ fn hicon_from_bytes(bytes: &[u8]) -> Result<isize, String> {
     Ok(icon)
 }
 
-/// The XAML caption sink's source: the `Image` widget's blob arm
-/// (mod.rs's `Prop::Source`) with `ImageIconSource` on the end.
+/// The XAML caption sink's picture: the `Image` widget's blob arm
+/// (mod.rs's `Prop::Source`), unchanged, because that is exactly what the
+/// caption's mark is — an `Image` in the band.
 ///
-/// `BitmapIconSource` is the trap and it is worth naming here rather
-/// than only in the bindgen filter: its ONLY picture slot is
-/// `UriSource : Windows.Foundation.Uri`, so the obvious-looking class
-/// would force a temp file. `ImageIconSource.ImageSource` reaches
-/// `BitmapImage`, which takes an in-memory stream.
-fn image_icon_source_from_bytes(bytes: &[u8]) -> windows_core::Result<ImageIconSource> {
+/// NOTHING IS DECODED BY KAYA HERE EITHER. The bytes go to
+/// `BitmapImage.SetSource`, which is the platform's second decoder on the
+/// same blob (`CreateIconFromResourceEx` is the first, one function up),
+/// and that is what makes the two sinks independent readings of one
+/// declaration rather than two copies of one conversion.
+fn caption_mark_bitmap(bytes: &[u8]) -> windows_core::Result<BitmapImage> {
     let stream = InMemoryRandomAccessStream::new()?;
     let writer = DataWriter::CreateDataWriter(&stream)?;
     writer.WriteBytes(bytes)?;
@@ -11388,9 +11689,7 @@ fn image_icon_source_from_bytes(bytes: &[u8]) -> windows_core::Result<ImageIconS
     stream.Seek(0)?;
     let bitmap = BitmapImage::new()?;
     bitmap.SetSource(&stream)?;
-    let source = ImageIconSource::new()?;
-    source.SetImageSource(&bitmap)?;
-    Ok(source)
+    Ok(bitmap)
 }
 
 /// The identity's arrival: decode once, then reach every sink that
@@ -11433,8 +11732,8 @@ fn apply_app_identity(
         // still showing the app's mark on the system caption, the
         // taskbar and alt-tab. The scene's read is of the WINDOW's icon,
         // so a caption that silently missed cannot pass it.
-        match image_icon_source_from_bytes(&blob.0) {
-            Ok(source) => APP_ICON_SOURCE.with_borrow_mut(|slot| *slot = Some(source)),
+        match caption_mark_bitmap(&blob.0) {
+            Ok(bitmap) => APP_ICON_BITMAP.with_borrow_mut(|slot| *slot = Some(bitmap)),
             Err(e) => eprintln!(
                 "kaya: winui: the app identity's caption icon did not build: {}",
                 e.message()
@@ -11477,18 +11776,99 @@ fn apply_identity_to_window(core: &CoreState, window: u64) -> windows_core::Resu
         // has exactly one picture by ruling — one mark, every surface.
         app_window.SetIconWithIconId(bindings::Microsoft::UI::IconId { Value: icon })?;
     }
-    if let Some(titlebar) = core.window_titlebars.get(&window) {
-        APP_ICON_SOURCE.with_borrow(|slot| match slot {
-            Some(source) => titlebar.SetIconSource(source),
-            None => Ok(()),
-        })?;
-    }
+    refresh_caption_mark(core, window)?;
     // THE NAME REACHES THE CAPTION THROUGH THE ONE CAPTION WRITER, never
     // through `TitleBar.Title`: that property makes the control a rival
     // author of the window's title and the first casualty is the dirty
     // marker (see `refresh_caption`'s doc comment). A rival caption
     // author is a bug this tree has already paid for once.
     refresh_caption(core, window)
+}
+
+/// The app's mark at the FAR LEFT of a promoted caption, ahead of the
+/// menu — the maintainer's ruling of 2026-08-18, and the convention every
+/// Windows program has honoured since 1995.
+///
+/// WHY NOT `TitleBar.IconSource`, WHICH EXISTS FOR EXACTLY THIS. Because
+/// the control lays its own icon out in **column 5** and `LeftHeader` in
+/// **column 3** (`TitleBar-v220.xaml:213-230`), and kaya's `LeftHeader` is
+/// the window's MENU (the one-band revision). Measured on the guest
+/// before this arm: the mark sat at x=97 in a band whose menu ended at 83,
+/// i.e. `File`, then the mark, then the title — the ledger's finding of
+/// 2026-08-18. The property is not wrong; it is in the wrong column for a
+/// band with a menu in it, and no property can move it.
+///
+/// AND `IconSource` IS NOT KEPT FOR THE OTHER WINDOWS EITHER, which is the
+/// half worth stating: a `TitleBar` is minted by the first promotion and by
+/// nothing else (`refresh_toolbar`), so `IconSource` is reachable ONLY on
+/// promoted windows — the very windows where it lands after the menu. An
+/// unpromoted window has no `TitleBar` at all: the SYSTEM caption draws its
+/// mark, at the far left, from the window icon the other sink sets. So
+/// there is no window on which `IconSource` lands the convention correctly,
+/// and one path serves both: the system's own icon where the system draws
+/// the caption, kaya's `LeftHeader` where kaya draws it.
+///
+/// THE METRICS ARE THE CONTROL'S OWN, not chosen here: the box is
+/// `TitleBarIconMaxWidth`/`Height` (16) and the gap to what follows is
+/// `TitleBarIconMargin` (0,0,16,0), which is what `PART_Icon` wears; the
+/// vertical centring is `TitleBarLeftHeaderVerticalAlignment`, which is
+/// Center and which the menu beside it already rides
+/// (`v220-TitleBar_themeresources.xaml:88-96`). A mark that measured
+/// anything else would be the "randomly thrown onto the middle of the
+/// screen" complaint that produced the one-band revision, one element over.
+///
+/// IDEMPOTENT, AND IT HAS TO BE: this runs on the declaration, on every
+/// window creation and on every caption mint, and XAML ABORTS THE PROCESS
+/// when an element that still has a parent is appended somewhere else
+/// (`rehost_menubar`'s docstring records the same trap). So the question
+/// "is the mark already in this band" is asked of the TREE — the holder's
+/// own children — and never of a bookkeeping flag beside it.
+fn refresh_caption_mark(core: &CoreState, window: u64) -> windows_core::Result<()> {
+    let Some(titlebar) = core.window_titlebars.get(&window) else {
+        // No custom caption: the system draws this window's mark from the
+        // window icon, which is the other sink's job.
+        return Ok(());
+    };
+    let Some(bitmap) = APP_ICON_BITMAP.with_borrow(|slot| slot.clone()) else {
+        // No identity, or an identity with a name and no picture.
+        return Ok(());
+    };
+    let holder = caption_left_header(window, titlebar)?;
+    let children = holder.Children()?;
+    for i in 0..children.Size()? {
+        if children.GetAt(i)?.cast::<Image>().is_ok() {
+            return Ok(());
+        }
+    }
+    let mark = Image::new()?;
+    mark.SetSource(&bitmap)?;
+    mark.SetWidth(CAPTION_MARK_BOX)?;
+    mark.SetHeight(CAPTION_MARK_BOX)?;
+    mark.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+    mark.SetMargin(Thickness {
+        Left: CAPTION_MARK_LEAD,
+        Top: 0.0,
+        Right: CAPTION_MARK_GAP,
+        Bottom: 0.0,
+    })?;
+    // THE MARK SAYS THE APP'S NAME TO AN ASSISTIVE CLIENT, for the same
+    // reason `symbol_icon` names its glyphs: a picture that carries meaning
+    // has to say what it means, and on this platform that is
+    // `AutomationProperties.Name`. The name is the DECLARED one — the same
+    // string the caption, the taskbar tooltip and alt-tab read — so a
+    // screen reader and the glass agree by construction. It is also what
+    // makes the mark findable from outside the process, which is what the
+    // caption probe beside this file reads.
+    let name = APP_IDENTITY.with_borrow(|slot| slot.as_ref().map(|id| id.name.clone()));
+    if let Some(name) = name {
+        bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
+            &mark,
+            &HSTRING::from(name),
+        )?;
+    }
+    Grid::SetColumn(&mark.cast::<FrameworkElement>()?, CAPTION_MARK_COLUMN)?;
+    children.Append(&mark.cast::<UIElement>()?)?;
+    Ok(())
 }
 
 /// The window-icon read's constants, from the Win32 documentation:

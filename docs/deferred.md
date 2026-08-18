@@ -2587,6 +2587,32 @@ declared identity (name + icon bytes, likely the wire blob channel the
 typeface uses) lowered per platform. Design question for a future
 slice; the caption-left slot is its Windows home when it lands.
 
+## The caption mark's system-menu affordance waits on two bindings (found 2026-08-18)
+KEY: caption icon, system menu, NonClientRegionKind, InputNonClientPointerSource
+
+Every precedent's caption icon opens the system menu on click (the
+Win95-lineage affordance). kaya's mark cannot yet: the TitleBar control
+publishes the LeftHeader as passthrough to the input system, so real
+pointer input never reaches kaya's hit-test (measured: a synthesized
+click produced zero WM_NCHITTEST while the drag surface produced five —
+the wndproc CAN answer HTSYSMENU; input never asks). The clean route is
+SetRegionRects(NonClientRegionKind.Icon, ...) — the Icon kind is
+MEASURED PRESENT in the pinned winmd and absent from the generated
+bindings. Closing it: two winui-bindgen filter entries, then the
+precedence measurement the report says cannot be made until the binding
+exists (scratchpad/chrome/winui-icon-position.md).
+
+## The identity scene cannot SEE the promoted caption's mark (proved 2026-08-18)
+KEY: identity read, LeftHeader mark, read gap, wall-only guard
+
+The identity read walks WM_GETICON and the window class — honest for the
+window icon and the taskbar, blind to the LeftHeader-composed mark on a
+promoted window. Proved, not asserted: mark dropped AND the in-process
+wall disabled → the scene PASSES with a byte-identical verdict. The wall
+(armed per layout pass) is the standing guard; the harness-level read is
+the gap. Closing it: a UIA read of the caption band's mark element,
+likely alongside the system-menu binding work above.
+
 ## Comments are drowning the code (maintainer, 2026-08-17)
 KEY: comment verbosity, examples readability, war stories, traps pointers
 
