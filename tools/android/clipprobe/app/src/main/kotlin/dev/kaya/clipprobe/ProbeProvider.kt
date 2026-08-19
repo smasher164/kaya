@@ -7,12 +7,9 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import java.io.File
 
-// The byte side of an Android clip. ClipData.Item carries text,
-// htmlText, a Uri or an Intent — NO byte array — so image and custom
-// payloads ride content:// URIs served by a provider, and the
-// consumer's read is contentResolver.getType + openInputStream. This
-// is the pattern the Compose arm will use; the probe measures it
-// first, grants included.
+// The byte side of an Android clip: ClipData.Item carries no byte
+// array, so image and custom payloads ride content:// URIs served by a
+// provider (docs/clipboard-plan.md §7).
 class ProbeProvider : ContentProvider() {
     override fun onCreate() = true
 

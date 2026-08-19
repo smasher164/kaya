@@ -1,30 +1,13 @@
 // ClipProbe — what does iOS charge for a clipboard read, and does the
 // harness's seeding count as "another app"?
 //
-// THE QUESTION THAT DECIDES THE iOS ARM. Since iOS 16 a programmatic
-// read of the pasteboard prompts the user when the content came FROM
-// ANOTHER APP; reading what your own app put there does not. The
-// exemptions are the system paste affordances (the Paste menu command,
-// the hardware shortcut, UIPasteControl).
-//
-// The lane's only way to seed the clipboard from outside is
-// `xcrun simctl pbcopy`. If that counts as another app — and there is
-// every reason to think it does, since the whole point is that the
-// content did not come from us — then the iOS paste leg has to DRIVE A
-// PERMISSION PROMPT, which means tools/ios/simdrive again, exactly as
-// the document picker did.
-//
-//  Q1 What do the PROMPT-FREE queries report for simctl-seeded content?
-//     hasStrings / numberOfItems / types are documented as not
-//     requiring permission, and the clipboard-offers signal in
-//     docs/clipboard-plan.md depends on that being true.
-//  Q2 Does reading `.string` return the content, return nil, or block?
-//     A prompt would show as nil-or-slow plus an alert on screen.
-//  Q3 Does reading our OWN content prompt? The plan assumes not, and
-//     it decides whether a copy-then-read scene can be written without
-//     any prompt driving at all.
-//  Q4 What does detectPatterns report? It is the documented
-//     prompt-free way to learn what is there.
+// THE QUESTION THAT DECIDES THE iOS ARM: since iOS 16 a programmatic
+// read of the pasteboard prompts when the content came FROM ANOTHER APP,
+// and the lane's only way to seed from outside is `xcrun simctl pbcopy`.
+// If that counts as another app, the paste leg has to DRIVE A PERMISSION
+// PROMPT — tools/ios/simdrive again, as with the document picker. The
+// questions and their answers are docs/clipboard-plan.md; the Q-labels
+// below mark which reading is which.
 //
 // Answers land on stdout under "PROBE". Not a lane; nothing builds it
 // but build.sh beside it.

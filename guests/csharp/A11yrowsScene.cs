@@ -1,14 +1,10 @@
 // The stamped-accessibility scene from C#: two entries stamped from one
 // template, each carrying its OWN ROW's identity, read back out of the
-// platform's real tree (docs/tpl-props-plan.md P1).
-//
-// It may not be folded into the a11y scene: a For materializes as a
-// column, harness registries are creation-order, and container creation
-// order differs by language — so a scene that asserts containers
-// ordinally cannot host a For. This one asserts no container.
-//
-// Canonical semantics in guests/rust/a11yrows.rs; the byte-frozen
-// contract is tools/scenes/a11yrows.steps.
+// platform's real tree (docs/tpl-props-plan.md P1). It may not be folded
+// into the a11y scene: a For materializes as a column and container
+// creation order differs by language, so a scene asserting containers
+// ordinally cannot host one. See guests/rust/a11yrows.rs,
+// tools/scenes/a11yrows.steps.
 
 static class A11yrowsScene
 {
@@ -40,13 +36,11 @@ static class A11yrowsScene
                 // scalar row has one field to spend on an id, so a second
                 // readable copy needs its own strings.
                 //
-                // A RECORD collection, traced through the generated
-                // <Rec>Row façade rather than tx.Each, deliberately: that
-                // façade forwards to Tpl one method at a time by hand, so
-                // only a trace through it proves the forwards are real.
+                // Traced through the generated <Rec>Row façade rather than
+                // tx.Each deliberately: that façade forwards to Tpl one
+                // method at a time by hand.
                 //
-                // Both props are const here and const in every binding —
-                // they are facts about the prototype, not the row's data.
+                // Both props are const here and const in every binding.
                 var heads = ItemKaya.Collection(tx);
                 foreach (var head in heads.Rows())
                 {

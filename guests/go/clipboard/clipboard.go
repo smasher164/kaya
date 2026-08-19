@@ -59,8 +59,8 @@ func sceneRoot() string {
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	// Both halves compute this identically — guest and interpreter are
-	// one process — and the pid keeps parallel legs from colliding.
+	// Both halves compute this identically, and the pid keeps parallel
+	// legs from colliding.
 	dir := filepath.Join(sceneRoot(), "kaya-clip-"+strconv.Itoa(os.Getpid()))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		panic("failed to make the scene's directory: " + err.Error())
@@ -97,9 +97,8 @@ func App() *kaya.App {
 			case kaya.CustomClip:
 				tx.Write(status, fmt.Sprintf("custom %s %s", clip.ID, clip.Bytes))
 			case kaya.ImageClip:
-				// STRAIGHT BACK OUT: the assertion that matters is a
-				// foreign DECODER's, because the byte count differs per
-				// host for one picture.
+				// STRAIGHT BACK OUT: the assertion that matters is a foreign
+				// DECODER's, because the byte count differs per host.
 				tx.Copy().Image(clip.Bytes).Send()
 				tx.Write(status, "image")
 			case kaya.FilesClip:
@@ -165,7 +164,6 @@ func App() *kaya.App {
 				tx.Focus(plain)
 			})
 
-			// Declares what it takes, so a paste lands in the hook.
 			rich = tx.Entry(nil).Accepts(kaya.AcceptText).A11yID("rich") // entry#0
 			app.OnPaste(rich, func(tx *kaya.Tx, clip kaya.Representation) {
 				if text, ok := clip.(kaya.TextClip); ok {
@@ -175,16 +173,12 @@ func App() *kaya.App {
 				tx.Write(status, fmt.Sprintf("pasted %v", clip))
 			})
 
-			// Declares NOTHING, so the platform's own insertion happens
-			// and the field's ordinary change path reports it.
 			plain = tx.Entry(nil).A11yID("plain") // entry#1
 
 			// THE SAME TWO DOORS ONE TIER DOWN, on a STAMPED copy: the
 			// accept list is declared on the TEMPLATE, which is the
-			// declaration that turns the node hook on. The row's value is
-			// empty because nothing displays it — the stamped entry is
-			// uncontrolled, and staying empty through the paste is the
-			// assertion.
+			// declaration that turns the node hook on. The row's value stays
+			// empty through the paste, and that is the assertion.
 			tx.Label(rowStatus).A11yID("row-status") // label#1
 			notes := tx.Collection()
 			for row := range notes.Rows(tx) {

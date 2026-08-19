@@ -60,8 +60,8 @@ NOTE_BYTES = b"note=1"
 
 
 def copy_rich():
-    # One clip, four representations; kaya derives none from any other, so
-    # the app spells out both text and html. Wire order is kaya's.
+    # One clip, four representations; kaya derives none from any other.
+    # Wire order is kaya's.
     kaya.copy(text="kaya clip", html="<b>kaya</b> clip",
               image=PIXEL_PNG, custom={NOTE_ID: NOTE_BYTES})
     status.set("copied")
@@ -124,8 +124,6 @@ def read_files():
 
 
 def pasted(clip):
-    # The same shape the read answers with, and unprivileged: a gesture
-    # is its own authorisation.
     match clip:
         case kaya.Representation.Text(text):
             status.set(f"pasted {text}")
@@ -158,8 +156,6 @@ with app.window(title="clipboard"):
         kaya.button("read text", on_click=read_text)       # button#2
         kaya.button("read image", on_click=read_image)     # button#3
         kaya.button("read files", on_click=read_files)     # button#4
-        # The lambdas name fields declared BELOW; the declaration order is
-        # the scene's, and a handler runs long after the column is built.
         kaya.button("focus rich",
                     on_click=lambda: rich.focus())         # button#5
         kaya.button("focus plain",

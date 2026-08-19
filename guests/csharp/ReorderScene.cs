@@ -5,12 +5,7 @@
 // column-kind widget: languages disagree on whether containers are
 // created before or after their children, and column#0 must name the
 // same widget everywhere.
-//
-//     KAYA_SELFTEST=reorder KAYA_LIB=target/debug/libkaya.dylib \
-//         dotnet run --project guests/csharp
 
-// The record is the schema; kaya-csgen reads this declaration and
-// generates ItemKaya, the collection factory.
 [KayaGen]
 record Item(string Title);
 

@@ -47,8 +47,7 @@ noteBytes = BC.pack "note=1"
 main :: IO ()
 main = kayaMain $ \app -> do
   -- Guest and interpreter are the same process and compute this path
-  -- identically, with no runner involvement; the pid keeps parallel legs
-  -- from colliding.
+  -- identically; the pid keeps parallel legs from colliding.
   tmp <- getTemporaryDirectory
   pid <- getProcessID
   let dir = tmp </> ("kaya-clip-" ++ show pid)
@@ -124,12 +123,9 @@ main = kayaMain $ \app -> do
           pure noteList
         ]
     mount root
-    -- Stamped after every live widget is created, so the copy of the
-    -- template entry is entry#2.
     insert notes (VStr "r1") (VStr "")
     return (status, rich, rowStatus, note)
 
-  -- Registered in IO after the build, the way onChange is.
   onPaste app rich $ \clip -> case clip of
     RText text -> buildTx app (writeSignal status (VStr ("pasted " ++ text)))
     _ -> buildTx app (writeSignal status (VStr "pasted other"))

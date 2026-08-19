@@ -1,10 +1,6 @@
 -- The filedialog conformance scene, Haskell port — the picker's
 -- request/result grammar and the capability it hands back.
 --
--- THE FILE IS THE GUEST'S OWN, written before anything is shown: guest
--- and interpreter are the same process, so they agree on a path with no
--- runner involvement (getTemporaryDirectory honours TMPDIR).
---
 -- THE READ RUNS OFF THE APP THREAD because openPicked blocks.
 --
 -- See guests/rust/filedialog.rs and tools/scenes/filedialog.steps.
@@ -59,15 +55,12 @@ main = kayaMain $ \app -> do
                 buildTx
                   app
                   (writeSignal status (VStr (show (length files) ++ " " ++ text)))
-            -- The handler RETURNED without reading.
             buildTx app (writeSignal status (VStr "reading"))
 
     root <-
       column
         []
         [ labelBound status [A11yId "status"], -- label#0
-          -- Filters are ADVISORY on every platform, never a guarantee,
-          -- so a guest still validates what it got.
           buttonOn "open" (buildTx app (pickFiles [("Text", "txt")] picked)) [], -- button#0
           buttonOn "open one" (buildTx app (pickFile [("Text", "txt")] picked)) [], -- button#1
           -- tryPutMVar, NOT putMVar: putMVar BLOCKS when the MVar is

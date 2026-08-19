@@ -26,8 +26,6 @@ app.build { tx in
             onClick: { inner in  // button#0
             inner.pushEntry(
                 DETAIL, title: "detail",
-                // Retention: the base root takes this write with the
-                // detail up.
                 onPopped: { tx2 in tx2.write(status, .str("popped detail")) })
             let pane = inner.column {
                 let caption = inner.signal(.str("detail pane"))

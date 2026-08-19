@@ -1,10 +1,8 @@
 // Records: the struct is the schema. CollectionOf reflects over T once
-// at declaration — exported wire-typed fields (string, bool, int64,
-// float64) in declaration order become the schema; anything else (a
-// handler, say) is guest-only, living in the model and never reaching
-// the wire. The precomputed field indexes make the per-insert path a
-// loop over cached accessors, and one declaration drives the schema,
-// the conversions, and the field tokens, so none can drift.
+// at declaration — exported wire-typed fields in declaration order
+// become the schema; anything else is guest-only and never reaches the
+// wire. One declaration drives the schema, the conversions and the
+// field tokens, so none can drift.
 package kaya
 
 import (
@@ -14,16 +12,14 @@ import (
 )
 
 // Field is a typed projection: one field of a record type, by wire
-// position. The type parameter pins the Go type, so BindCheckedField
-// rejects a Field[string] at compile time — the earliest of the three
-// agreeing layers (the scene re-checks at declaration, the core's
+// position. The type parameter pins the Go type, the earliest of the
+// three agreeing layers (the scene re-checks at declaration, the core's
 // setters at write).
 type Field[V any] struct{ index uint32 }
 
-// FieldAt mints the token at a known wire index, for generated code
-// only (kaya-gen computes indices from the struct declaration;
-// hand-written code should use the checked selector forms instead —
-// a hand-minted index is unchecked).
+// FieldAt mints the token at a known wire index, FOR GENERATED CODE
+// ONLY: a hand-minted index is unchecked, so hand-written code uses the
+// checked selector forms.
 func FieldAt[V any](index uint32) Field[V] { return Field[V]{index: index} }
 
 // Key is the collection-key constraint: the protocol admits string and
@@ -33,12 +29,9 @@ type Key interface {
 	~string | ~int64
 }
 
-// RecordCollection is a Collection whose entries are T records keyed
-// by K — the key type rides the handle, so inserts, reads, and handler
-// keys are typed end to end (methods lean on the receiver's type
-// parameters; Go still has no parameterized methods as of 1.26). The
-// plain Collection rides along embedded, so ForEach and At take it
-// unchanged.
+// RecordCollection is a Collection whose entries are T records keyed by
+// K. The plain Collection rides along embedded, so ForEach and At take
+// it unchanged.
 type RecordCollection[K Key, T any] struct {
 	Collection
 	info *recordInfo
@@ -75,12 +68,9 @@ func wireTag(t reflect.Type) (uint32, bool) {
 	return 0, false
 }
 
-// blobWire registers a blob's bytes at encode time and returns the
-// wire handle. Handles are single-submit, so every operation that
-// carries blob bytes re-registers: one copy into core memory per
-// write; the model keeps the guest's own bytes. The clear-error
-// guard: anything but a byte slice in a blob position fails here, by
-// name, instead of deep in the wire encoder.
+// blobWire registers a blob's bytes at encode time and returns the wire
+// handle. Handles are single-submit, so every operation carrying blob
+// bytes re-registers; the model keeps the guest's own bytes.
 func blobWire(v any) BlobHandle {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Slice || rv.Type().Elem().Kind() != reflect.Uint8 {
@@ -91,8 +81,7 @@ func blobWire(v any) BlobHandle {
 }
 
 // scalarWire is the signal-value encode step: byte slices become
-// registered blob handles (see blobWire); every other scalar rides
-// the record as is.
+// registered blob handles, every other scalar rides as is.
 func scalarWire(v any) any {
 	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
 		return blobWire(v)
@@ -100,9 +89,8 @@ func scalarWire(v any) any {
 	return v
 }
 
-// One reflection walk per record type, ever — UpdateField and the
-// template constructors resolve projections per event, so the walk
-// must not re-run there.
+// One reflection walk per record type, ever: UpdateField and the
+// template constructors resolve projections per event.
 var recordInfos sync.Map // reflect.Type -> *recordInfo
 
 func recordInfoOf[T any]() *recordInfo {
@@ -143,9 +131,8 @@ func CollectionOf[K Key, T any](tx *Tx) RecordCollection[K, T] {
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
-	// How an undone entry of this collection becomes a T again: the
-	// payload is wire values, the mirror holds records, and this
-	// declaration is the only place that knows both.
+	// How an undone entry becomes a T again: the payload is wire values,
+	// the mirror holds records, and this is the only place knowing both.
 	tx.app.shapes[c.id] = undoShape{
 		key: restoreKey[K](),
 		value: func(_ uint32, fields []any) any {
@@ -156,10 +143,9 @@ func CollectionOf[K Key, T any](tx *Tx) RecordCollection[K, T] {
 	return RecordCollection[K, T]{c, info}
 }
 
-// restoreKey coerces an undone entry's wire key to the key type this
-// collection's model holds: the wire has string and int64, a guest may
-// have declared a named type over either, and the mirror compares keys
-// with == over boxed values, where string("a") and ID("a") differ.
+// restoreKey coerces an undone entry's wire key to the type the model
+// holds: the mirror compares boxed keys with ==, where string("a") and
+// a named ID("a") differ.
 func restoreKey[K Key]() func(any) any {
 	want := reflect.TypeFor[K]()
 	return func(key any) any {
@@ -172,10 +158,9 @@ func restoreKey[K Key]() func(any) any {
 }
 
 // restoreRecord rebuilds one record from an undone entry's wire fields,
-// positionally, through the same field indexes the forward encode uses.
-// A field the payload cannot fill is a broken encoder, not bad input,
-// so it panics naming the field rather than leaving a half-built record
-// in the mirror.
+// through the same field indexes the forward encode uses. A field the
+// payload cannot fill is a broken encoder, so it panics naming the
+// field rather than leaving a half-built record in the mirror.
 func restoreRecord(t reflect.Type, info *recordInfo, fields []any) any {
 	if len(fields) != len(info.indexes) {
 		panic(fmt.Sprintf(
@@ -204,11 +189,9 @@ func restoreRecord(t reflect.Type, info *recordInfo, fields []any) any {
 }
 
 // FieldBy is the field token for the field a projection selects:
-// kaya.FieldBy(func(t *Todo) *bool { return &t.Done }). The projection
-// is a real field access, so the name and type are compiler-checked
-// and renames refactor with the code — no strings restating what the
-// struct already declares. Resolution compares the projected address
-// against each field's on a prototype, once, at declaration.
+// kaya.FieldBy(func(t *Todo) *bool { return &t.Done }). Resolution
+// compares the projected address against each field's on a prototype,
+// once, at declaration.
 func FieldBy[T any, V any](project func(*T) *V) Field[V] {
 	prototype := new(T)
 	target := reflect.ValueOf(project(prototype)).Pointer()
@@ -232,10 +215,8 @@ func (info *recordInfo) values(value any) []any {
 	return out
 }
 
-// encode is one field's wire value. Blob fields register their bytes
-// now, at encode time — handles are single-submit, so insert, update,
-// and update_field all re-register (one copy into core memory per
-// write; the model keeps the guest's own bytes).
+// encode is one field's wire value. Blob fields register their bytes at
+// encode time; handles are single-submit, so every write re-registers.
 func (info *recordInfo) encode(field uint32, v any) any {
 	if info.schema[field] == ValueBlob {
 		return blobWire(v)
@@ -244,48 +225,36 @@ func (info *recordInfo) encode(field uint32, v any) any {
 }
 
 // Insert a record; the model keeps the T itself, the wire carries its
-// fields positionally. Through Tx.insertEntry, the one insert path — so
-// an explicit numeric key is shown to the fresh-key minter here exactly
-// as it is on the untyped and sum surfaces.
+// fields positionally. Through Tx.insertEntry — the one insert path, so
+// an explicit numeric key reaches the fresh-key minter here too.
 func (c RecordCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	tx.insertEntry(c.Collection, key, 0, value, c.info.values(value))
 }
 
-// handle is the plain (collection, path) handle behind a typed
-// collection: what the minter counts per. Unexported, so FreshCollection
-// below is closed to kaya's own collections.
+// handle is the plain (collection, path) handle the minter counts per.
+// Unexported, so FreshCollection below is closed to kaya's own types.
 func (c RecordCollection[K, T]) handle() Collection { return c.Collection }
 
 // FreshCollection is a typed collection InsertFresh can mint into: one
 // whose keys ARE the minted I64. THE KEY TYPE IS THE WALL — a
-// RecordCollection[string, T] does not satisfy this, so a collection
-// declared with string identities fails to compile at the call rather
-// than growing a second kind of name for the same datum. The untyped
-// scalar surface has its own spelling, Tx.InsertFresh.
+// RecordCollection[string, T] does not satisfy this and fails to
+// compile at the call.
 type FreshCollection[T any] interface {
 	Insert(tx *Tx, key int64, value T)
 	handle() Collection
 }
 
-// InsertFresh inserts a value under a key the binding authors, and hands
-// the key back: the typed twin of Tx.InsertFresh, over records and sums
-// alike, and the same contract in every particular (one counter per
-// collection instance, counter+1, absorption on every explicit insert,
-// no decrement — see Tx.InsertFresh for the whole of it).
+// InsertFresh inserts a value under a key the binding authors and hands
+// the key back: the typed twin of Tx.InsertFresh, same contract.
 //
-// A FREE FUNCTION BECAUSE THE KEY TYPE IS THE POINT. Go cannot constrain
-// a method to one instantiation of its receiver's type parameters, and a
-// method returning K would have to convert the minted number into
-// whatever K is — which for a string key is a silent one-rune key, the
-// exact class of quiet wrongness the minter exists to remove. Written as
-// a function, the constraint is checked where the guest writes it.
+// A FREE FUNCTION because Go cannot constrain a method to one
+// instantiation of its receiver's type parameters: a method returning K
+// would convert the minted number into whatever K is, which for a string
+// key is a silent one-rune key.
 //
-// A RECORD COLLECTION INFERS BOTH PARAMETERS from the arguments. A SUM
-// COLLECTION NAMES ITS SUM — kaya.InsertFresh[Feed](tx, items, Note{…})
-// — because the value is one constructor and T is the sealed interface
-// they share: inference reads T off the value and would fix it to the
-// constructor. Insert has the same shape and takes it from the receiver;
-// here the sum is spelled once, at the call.
+// A record collection infers both parameters. A SUM COLLECTION NAMES ITS
+// SUM — kaya.InsertFresh[Feed](tx, items, Note{…}) — because inference
+// would otherwise read T off the value and fix it to the constructor.
 func InsertFresh[T any, C FreshCollection[T]](tx *Tx, c C, value T) int64 {
 	h := c.handle()
 	key := tx.app.mintKey(h.id, h.path)
@@ -300,11 +269,9 @@ func (c RecordCollection[K, T]) Update(tx *Tx, key K, value T) {
 	tx.recomputeDerived(c.id, c.path)
 }
 
-// MoveBefore repositions an entry before another's: order is
-// collection data, so the model reorders and the wire carries the
-// same keys-only delta. Keys, never indices. A missing key or anchor
-// panics at the call site — the same check the scene makes; moving an
-// entry before itself is a no-op, and nothing travels.
+// MoveBefore repositions an entry before another's. Keys, never
+// indices; a missing key or anchor panics at the call site, and moving
+// an entry before itself is a no-op.
 func (c RecordCollection[K, T]) MoveBefore(tx *Tx, key, anchor K) {
 	tx.MoveBefore(c.Collection, key, anchor)
 }
@@ -314,20 +281,17 @@ func (c RecordCollection[K, T]) MoveToEnd(tx *Tx, key K) {
 	tx.MoveToEnd(c.Collection, key)
 }
 
-// MoveToFront repositions an entry at the front: sugar for MoveBefore
-// the current first key, lowering to the same wire op.
+// MoveToFront repositions an entry at the front.
 func (c RecordCollection[K, T]) MoveToFront(tx *Tx, key K) {
 	tx.MoveToFront(c.Collection, key)
 }
 
-// MoveAfter repositions an entry directly after another's: sugar for
-// MoveBefore the anchor's successor (MoveToEnd when the anchor is
-// last), lowering to the same wire op.
+// MoveAfter repositions an entry directly after another's.
 func (c RecordCollection[K, T]) MoveAfter(tx *Tx, key, anchor K) {
 	tx.MoveAfter(c.Collection, key, anchor)
 }
 
-// Items is the typed model: what this guest wrote, in insertion order.
+// Items is the typed model, in insertion order.
 func (c RecordCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 	tx.app.guardMirrorRead()
 	in := tx.app.instanceOf(c.id, c.path)
@@ -342,10 +306,7 @@ func (c RecordCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 }
 
 // UpdateField sends one field's delta — the rest of the record never
-// travels — and mutates the same field of the model's copy. A generic
-// method (Go 1.27): V comes from the projection, K and T from the
-// receiver. The projection is the field reference — no token to
-// declare; hoist one with FieldBy if you prefer a name.
+// travels — and mutates the same field of the model's copy.
 func (c RecordCollection[K, T]) UpdateField[V any](tx *Tx, key K, project func(*T) *V, value V) {
 	c.UpdateFieldAt(tx, key, FieldBy(project), value)
 }
@@ -371,11 +332,9 @@ func (c RecordCollection[K, T]) UpdateFieldAt[V any](tx *Tx, key K, f Field[V], 
 	tx.recomputeDerived(c.id, c.path)
 }
 
-// Derive returns a signal the binding recomputes from this
-// collection's entries after every mutation, written into the same
-// transaction — the items-left label with no handler remembering to
-// update it. The compute is pure presentation: entries in, one value
-// out; the core sees an ordinary signal (a Go 1.27 generic method).
+// Derive returns a signal the binding recomputes from this collection's
+// entries after every mutation, written into the same transaction. The
+// core sees an ordinary signal.
 func (c RecordCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []RecordEntry[K, T]) V) Signal[V] {
 	s := tx.Signal(compute(c.Items(tx)))
 	tx.pendingDerived = append(tx.pendingDerived, pendingDerived{c.id, func(tx *Tx) {
@@ -424,11 +383,9 @@ func (t *Tpl) BindCheckedField(n Node, level uint32, f Field[bool]) {
 
 // BindValueField binds a slider's position, a progress bar's fraction
 // or a choice widget's selected index to one field of the element;
-// Field[float64] only. THE INDEX RIDES A float64 like every other
-// number on this property: the scene checks a bound field's wire type
-// against the property's exactly, and `value` is F64 there, so a
-// select's 0-based index is a float64 field and an int64 one dies at
-// startup. The constraint refuses it at compile time instead.
+// Field[float64] only. THE INDEX RIDES A float64: the scene checks a
+// bound field's wire type against the property's exactly, and `value`
+// is F64 there, so an int64 index would die at startup.
 func (t *Tpl) BindValueField(n Node, level uint32, f Field[float64]) {
 	t.tx.emit(TxBindValueElement(n.id, level, f.index))
 }
@@ -439,23 +396,16 @@ func (t *Tpl) BindSourceField(n Node, level uint32, f Field[[]byte]) {
 	t.tx.emit(TxBindSourceElement(n.id, level, f.index))
 }
 
-// The record surface's four lowerings, one per wire value type: the
-// protocol's whole binding universe as one union-constrained argument
-// (Go 1.27 generic methods; the type switch discriminates). They are
-// the *Tpl.apply* helpers plus the arm only a record type can offer —
-// the raw field PROJECTION, func(*T) *V, resolved once at declaration
-// by FieldBy.
+// The record surface's four lowerings, one per wire value type, plus
+// the arm only a record type can offer — the raw field PROJECTION,
+// func(*T) *V, resolved once at declaration by FieldBy.
 //
-// ARM ORDER IS FIXED and the CONSTANT ARM IS THE DEFAULT, in all four.
+// ARM ORDER IS FIXED AND THE CONSTANT ARM IS THE DEFAULT, in all four.
 // The constraint approximates (~string, not string), so a guest's named
-// type — `type Title string` — is admitted by the signature and matches
-// no `case string:`; before 2026-08-10 Label and Checkbox each had one,
-// and such a value fell past every arm to produce a widget with no text
-// and no error. That is this zone's own silent-drop failure class, so
-// the const arm goes last and catches whatever the bindings did not.
-// T appears only inside S's constraint, which is a union and so has no
-// core type: inference cannot reach it, and every caller spells it —
-// t.applyRecordText[T](n, src).
+// type is admitted by the signature and matches no `case string:` — it
+// must fall to the default, or it produces a widget with no text and no
+// error. T appears only inside S's constraint, which is a union with no
+// core type, so every caller spells it: t.applyRecordText[T](n, src).
 
 func (t *Tpl) applyRecordText[T any, S interface {
 	~string | Signal[string] | func(*T) *string | Field[string]
@@ -518,11 +468,9 @@ func (t *Tpl) applyRecordBlob[T any, S interface {
 	}
 }
 
-// applyRecordStrProp is those same four arms for a string PROP rather
-// than a constructor's value: the three wire ops arrive as arguments,
-// because the a11y props differ from each other in nothing else. It is
-// Tpl.applyStrProp with the two arms this surface adds anywhere — the
-// projection, and the constant that must go LAST for ~string's sake.
+// applyRecordStrProp is those same four arms for a string PROP: the
+// three wire ops arrive as arguments, because the a11y props differ
+// from each other in nothing else.
 func (t *Tpl) applyRecordStrProp[T any, S interface {
 	~string | Signal[string] | func(*T) *string | Field[string]
 }](n Node, src S,
@@ -545,10 +493,8 @@ func (t *Tpl) applyRecordStrProp[T any, S interface {
 // The typed template constructors. Each takes the *Tpl as its first
 // argument rather than being a method on it, because the record type T
 // must come from THIS receiver for a field projection to resolve
-// against a schema; the plain *Tpl twins of all of these are on the
-// base surface (Tpl.LabelBound, Tpl.Slider, ...), and what these add is
-// exactly two things — the projection arm, and a handler whose key is
-// the receiver's K instead of an []any the guest has to cast.
+// against a schema. What they add over the plain *Tpl twins is the
+// projection arm and a handler keyed by K rather than []any.
 
 // Label creates a label bound to any addressable source: a constant, a
 // signal, a field projection, or a pre-resolved token.
@@ -561,8 +507,7 @@ func (c RecordCollection[K, T]) Label[S interface {
 }
 
 // Button creates a button whose caption comes from any addressable
-// source, with its click handler (nil for none) — the per-row action
-// button, whose caption can name the row it acts on.
+// source, with its click handler (nil for none).
 func (c RecordCollection[K, T]) Button[S interface {
 	~string | Signal[string] | func(*T) *string | Field[string]
 }](t *Tpl, src S, onClick func(*Tx, K)) Node {
@@ -576,10 +521,9 @@ func (c RecordCollection[K, T]) Button[S interface {
 	return n
 }
 
-// Checkbox creates a checkbox bound to any addressable source, with
-// its toggle handler (nil for none). The receiver's K types the
-// handler's key — the copy the toggle came from (the depth-1 case;
-// deeper nestings keep the []any path via OnToggleNode).
+// Checkbox creates a checkbox bound to any addressable source, with its
+// toggle handler (nil for none). The receiver's K types the handler's
+// key; deeper nestings keep the []any path via OnToggleNode.
 func (c RecordCollection[K, T]) Checkbox[S interface {
 	~bool | Signal[bool] | func(*T) *bool | Field[bool]
 }](t *Tpl, src S, onToggle func(*Tx, K, bool)) Node {
@@ -605,8 +549,7 @@ func (c RecordCollection[K, T]) Entry(t *Tpl, onChange func(*Tx, K, string)) Nod
 // EntryBound creates a text field whose INITIAL text comes from any
 // addressable source, with its change handler (nil for none). The seed
 // is one write per stamped copy and the copy owns its text afterwards
-// (Tpl.EntryBound has the whole contract, including what a later
-// UpdateField on the same field does to it).
+// (Tpl.EntryBound has the whole contract).
 func (c RecordCollection[K, T]) EntryBound[S interface {
 	~string | Signal[string] | func(*T) *string | Field[string]
 }](t *Tpl, src S, onChange func(*Tx, K, string)) Node {
@@ -617,16 +560,14 @@ func (c RecordCollection[K, T]) EntryBound[S interface {
 }
 
 // Textarea creates an empty multi-line editor with its change handler
-// (nil for none) — Entry's contract over the platform's real
-// multi-line control.
+// (nil for none) — Entry's contract, one kind over.
 func (c RecordCollection[K, T]) Textarea(t *Tpl, onChange func(*Tx, K, string)) Node {
 	n := t.Widget(KindTextarea)
 	c.onChangeOf(t, n, onChange)
 	return n
 }
 
-// TextareaBound seeds each copy's editor from any addressable source —
-// EntryBound's reasoning, one kind over.
+// TextareaBound seeds each copy's editor from any addressable source.
 func (c RecordCollection[K, T]) TextareaBound[S interface {
 	~string | Signal[string] | func(*T) *string | Field[string]
 }](t *Tpl, src S, onChange func(*Tx, K, string)) Node {
@@ -637,8 +578,7 @@ func (c RecordCollection[K, T]) TextareaBound[S interface {
 }
 
 // onChangeOf is the text-edit registration the four text constructors
-// share: the copy's keys arrive as an []any and the receiver's K names
-// the depth-1 one, which is the cast this surface exists to make once.
+// share, with the depth-1 key cast to K.
 func (c RecordCollection[K, T]) onChangeOf(t *Tpl, n Node, onChange func(*Tx, K, string)) {
 	if onChange == nil {
 		return
@@ -649,8 +589,7 @@ func (c RecordCollection[K, T]) onChangeOf(t *Tpl, n Node, onChange func(*Tx, K,
 }
 
 // Progress creates a progress bar bound to any addressable source:
-// display-only, like Label and Image, and the per-row fraction is the
-// reading a list of them is for. 0..=1, domain-checked at the root.
+// display-only, 0..=1, domain-checked at the root.
 func (c RecordCollection[K, T]) Progress[S interface {
 	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
 }](t *Tpl, src S) Node {
@@ -660,8 +599,8 @@ func (c RecordCollection[K, T]) Progress[S interface {
 }
 
 // Slider creates a slider over min..max whose POSITION comes from any
-// addressable source, with its change handler (nil for none). The
-// range describes the prototype and stays constant; see Tpl.Slider.
+// addressable source, with its change handler (nil for none). The range
+// describes the prototype and stays constant (Tpl.Slider).
 func (c RecordCollection[K, T]) Slider[S interface {
 	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
 }](t *Tpl, min, max float64, src S, onChange func(*Tx, K, float64)) Node {
@@ -675,10 +614,9 @@ func (c RecordCollection[K, T]) Slider[S interface {
 
 // Select creates a dropdown over fixed options whose SELECTED INDEX
 // comes from any addressable source, with its pick handler (nil for
-// none): onSelect receives each USER pick's new 0-based index for the
-// copy K names (programmatic writes never echo). The option list stays
-// constant — see Tpl.Select for why it cannot be otherwise — and the
-// index rides a float64 field; see Tpl.BindValueField.
+// none): onSelect receives each USER pick's 0-based index (programmatic
+// writes never echo). The option list stays constant (Tpl.Select) and
+// the index rides a float64 field (Tpl.BindValueField).
 func (c RecordCollection[K, T]) Select[S interface {
 	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
 }](t *Tpl, options []string, src S, onSelect func(*Tx, K, int)) Node {
@@ -693,9 +631,7 @@ func (c RecordCollection[K, T]) Radio[S interface {
 	return c.choice(t, KindRadio, options, src, onSelect)
 }
 
-// choice is the shared body of the two choice constructors: the option
-// children, then the sourced index, then the pick handler with its
-// float64 narrowed to the index it always was.
+// choice is the shared body of the two choice constructors.
 func (c RecordCollection[K, T]) choice[S interface {
 	~float64 | Signal[float64] | func(*T) *float64 | Field[float64]
 }](t *Tpl, kind uint32, options []string, src S, onSelect func(*Tx, K, int)) Node {
@@ -708,8 +644,7 @@ func (c RecordCollection[K, T]) choice[S interface {
 }
 
 // onValueOf is the value-change registration the slider and the two
-// choice constructors share — App.OnValueChangedNode with the depth-1
-// key cast, the node twin the dispatch loop gained in this same pass.
+// choice constructors share, with the depth-1 key cast to K.
 func (c RecordCollection[K, T]) onValueOf(t *Tpl, n Node, onChange func(*Tx, K, float64)) {
 	if onChange == nil {
 		return
@@ -719,10 +654,9 @@ func (c RecordCollection[K, T]) onValueOf(t *Tpl, n Node, onChange func(*Tx, K, 
 	})
 }
 
-// Image creates an image bound to any addressable source: encoded
-// bytes (registered once, at declaration — the blueprint's stamped
-// copies share the value), a blob signal, a field projection, or a
-// pre-resolved token — the same union-constrained shape as Label.
+// Image creates an image bound to any addressable source. Constant
+// bytes register ONCE, at declaration, so the blueprint's stamped
+// copies share the value.
 func (c RecordCollection[K, T]) Image[S interface {
 	~[]byte | Signal[[]byte] | func(*T) *[]byte | Field[[]byte]
 }](t *Tpl, src S) Node {
@@ -732,19 +666,14 @@ func (c RecordCollection[K, T]) Image[S interface {
 }
 
 // The typed template PROPS. They take the node the constructors handed
-// back, so they read as a second statement rather than as a chain —
-// Tpl.SetGrow's shape, for its reason (a Node is a plain id and has no
-// transaction to chain from). One union method per prop rather than the
-// base surface's Set/Bind pair, because the projection arm is what
-// makes this surface worth reaching for and a union already admits the
-// constant:
+// back, because a Node is a plain id with no transaction to chain from.
+// One union method per prop rather than the base surface's Set/Bind
+// pair, since a union already admits the constant:
 //
 //	todos.A11yLabel(t, done, func(x *Todo) *string { return &x.Title })
 //
-// Accepts has no method here, and its absence is the design: it is
-// CONST ONLY (Tpl.SetAccepts says why), so this surface would add
-// nothing to it — a guest holding this collection holds the *Tpl too,
-// and spells it t.SetAccepts(n, kaya.AcceptText).
+// Accepts has no method here deliberately: it is CONST ONLY
+// (Tpl.SetAccepts), so this surface would add nothing to it.
 
 // A11yID addresses each stamped copy from any addressable source; see
 // Tpl.SetA11yID on why a constant here is usually the wrong half.
@@ -754,16 +683,14 @@ func (c RecordCollection[K, T]) A11yID[S interface {
 	t.applyRecordStrProp[T](n, src, TxSetA11yId, TxBindA11yId, TxBindA11yIdElement)
 }
 
-// A11yLabel speaks each stamped copy from any addressable source — the
-// row's own field being the case the prop exists for (Tpl.BindA11yLabel
-// has the example).
+// A11yLabel speaks each stamped copy from any addressable source.
 func (c RecordCollection[K, T]) A11yLabel[S interface {
 	~string | Signal[string] | func(*T) *string | Field[string]
 }](t *Tpl, n Node, src S) {
 	t.applyRecordStrProp[T](n, src, TxSetA11yLabel, TxBindA11yLabel, TxBindA11yLabelElement)
 }
 
-// A11yHint says what activating each stamped copy does — activation
+// A11yHint says what activating each stamped copy does; activation
 // kinds only, refused by the root at declare time (Tpl.SetA11yHint).
 func (c RecordCollection[K, T]) A11yHint[S interface {
 	~string | Signal[string] | func(*T) *string | Field[string]

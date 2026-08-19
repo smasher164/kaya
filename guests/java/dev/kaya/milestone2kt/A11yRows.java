@@ -4,14 +4,14 @@ import dev.kaya.KayaApp;
 
 /**
  * The stamped-accessibility scene from the JVM: two entries stamped
- * from ONE template, each carrying its own row's accessibility
- * identity. Canonical semantics in guests/rust/a11yrows.rs; the
- * byte-frozen contract is tools/scenes/a11yrows.steps.
+ * from ONE template, each carrying its own row's accessibility identity.
+ * Canonical semantics in guests/rust/a11yrows.rs; the byte-frozen
+ * contract is tools/scenes/a11yrows.steps.
  *
  * <p>SEPARATE FROM THE a11y SCENE ON PURPOSE: a For materializes as a
  * column and container registries are creation-order, so a For inside
  * the a11y scene would make {@code column#0} name different widgets on
- * different lanes. This scene asserts no container.
+ * different lanes.
  */
 final class A11yRows {
     static void app() {
@@ -32,12 +32,10 @@ final class A11yRows {
                     note.setA11yLabel(field, note.value());
                 }
 
-                // The stamped styling props, on a SECOND collection: a
-                // scalar row has one field to spend on an id, so a
-                // second readable copy needs strings of its own. Java's
-                // container body is a Runnable that receives nothing,
-                // so role and inset are both spelled on the row surface
-                // where Rust splits them across Tpl and the row trace.
+                                // The stamped styling props, on a SECOND collection: a
+                                // scalar row has one field to spend on an id. Java's
+                                // container body is a Runnable that receives nothing, so
+                                // role and inset are both spelled on the row surface.
                 for (var head : heads.rows()) {
                     KayaApp.Node bar = head.row(() -> {
                         KayaApp.Node title = head.label(head.value());
@@ -48,8 +46,6 @@ final class A11yRows {
                 }
             }));
 
-            // Seeded after the mount: every copy stamps from a template
-            // that is already closed.
             tx.insertFresh(notes, "First note");
             tx.insertFresh(notes, "Second note");
             tx.insertFresh(heads, "Heading one");

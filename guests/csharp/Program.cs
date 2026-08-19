@@ -1,6 +1,5 @@
 // One guest binary hosts every scene: the KAYA_SELFTEST value doubles
-// as the scene selector, and "1" (the plain selftest flag) falls to the
-// default arm, the milestone-2 scene.
+// as the scene selector, and "1" falls to the default arm, milestone-2.
 static class Program
 {
     static void Main()

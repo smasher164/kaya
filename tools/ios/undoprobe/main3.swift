@@ -2,20 +2,10 @@
 // drives, decided by a discriminator instead of by the alert's title.
 //
 // Round 2 could not prove it: `accessibilityActivate` on the alert's
-// Undo button returned false, so the button was never pressed and the
-// only evidence was the title string ("Undo Typing"), which is an
-// inference. This round asks the question a different way — arm ONLY
-// the WINDOW's undoManager, with a name of its own, and shake:
-//
-//   K1 field stack EMPTY, window manager armed "App Step"
-//      -> an alert titled "Undo App Step" means the shake walks the
-//         responder chain (fall-through, mac's behaviour).
-//      -> NO alert means the shake sees the focused text's private
-//         manager and nothing else.
-//   K2 field stack FULL, window manager armed "App Step"
-//      -> the title says which one wins when both have content.
-//   K3 the alert's own view tree, so a later session knows what is
-//      tappable if it needs to drive the button for real.
+// Undo button returned false, so the only evidence was the title string
+// ("Undo Typing"), which is an inference. This round arms ONLY the
+// WINDOW's undoManager, with a name of its own, and shakes — so the
+// alert's title (or its absence) discriminates. K-labels below.
 //
 // THROWAWAY. Nothing builds it but build3.sh beside it.
 import SwiftUI

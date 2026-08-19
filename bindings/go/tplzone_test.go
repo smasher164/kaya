@@ -15,26 +15,11 @@ import (
 	"testing"
 )
 
-// A LIVE ARM WITHOUT A NODE ARM IS A SILENT DROP, and it is invisible.
-//
-// The dispatch loop splits every occurrence that a template can produce
-// into two cases on the same record kind: `len(keys) == 0` is the live
-// widget, and the bare case is the stamped copy, whose key path names
-// which copy it was. Written that way the two look like a pair, but
-// nothing holds them to it — and until 2026-08-10 value changes had
-// only the live half. A stamped slider's move, or a stamped select's
-// pick, therefore matched NO case at all: not a missing handler, not an
-// error, not a log line. It fell out of the switch.
-//
-// Nothing found it for months because no scene puts a slider inside a
-// collection — because until the same day there was no template slider
-// constructor to put there. That is the shape this guard exists for: a
-// hole one surface wide, held open by a second surface's absence, which
-// no scene can fail and no compiler can see.
-//
-// So the rule is mechanical and needs no list: whatever occurrence
-// kinds this loop learns to route, a live arm gated on an empty key
-// path obliges a node arm on the same kind.
+// A live arm without a node arm is a SILENT DROP — the stamped copy's
+// occurrence matches no case at all (docs/sugar-pass-plan.md §D2). The
+// rule needs no list: whatever occurrence kinds the dispatch loop learns
+// to route, a live arm gated on an empty key path obliges a node arm on
+// the same kind.
 func armlessKinds(src string) []string {
 	live := regexp.MustCompile(`case kind == (occ[A-Za-z]+) && len\(keys\) == 0:`)
 	found := live.FindAllStringSubmatch(src, -1)
@@ -59,9 +44,8 @@ func TestEveryLiveDispatchArmHasATemplateNodeSibling(t *testing.T) {
 	}
 	body := string(src)
 
-	// THE READER IS WATCHED FIRST. A pattern that stopped matching the
-	// switch would report no missing arms and agree with everything,
-	// which is the one shape a guard must never have.
+	// The reader is watched first: a pattern that stopped matching the
+	// switch would report no missing arms and agree with everything.
 	if n := liveArmCount(body); n < 4 {
 		t.Fatalf("found %d live dispatch arms in app.go, fewer than the 4 this "+
 			"loop is known to have — the pattern has stopped seeing the switch "+
@@ -75,10 +59,8 @@ func TestEveryLiveDispatchArmHasATemplateNodeSibling(t *testing.T) {
 			missing)
 	}
 
-	// AND THE GUARD IS WATCHED FAILING. A pairing check nobody has seen
-	// go red is a belief, not a test: this one is asked the same
-	// question about a source with the value-changed node arm cut back
-	// out, which is exactly the state the binding shipped in.
+	// And the guard is watched FAILING, against a source with the
+	// value-changed node arm cut back out.
 	cut := "\t\tcase kind == occValueChanged:\n"
 	perturbed := strings.Replace(body, cut, "", 1)
 	if n := strings.Count(body, cut); n != 1 {
@@ -94,14 +76,9 @@ func TestEveryLiveDispatchArmHasATemplateNodeSibling(t *testing.T) {
 	}
 }
 
-// THE SUGAR IS A SPELLING CHANGE AND NOTHING ELSE, which is a claim
-// about bytes rather than about intent. tools/scenes/*.steps are shared
-// verbatim across every platform and their expected strings are
-// compared byte-for-byte, so the undo scene's per-row field and the
-// text editor's find bar may move off `Widget(KindEntry)` onto `Entry()`
-// only if the two record the same thing. They do, by construction —
-// Entry's whole body is that call — and this pins it, because "by
-// construction" is what a future body silently stops being.
+// The sugar is a spelling change and nothing else — a claim about bytes.
+// Two guests moved off `Widget(KindEntry)` onto `Entry()`, which is only
+// legal if the two record the same thing.
 func TestTemplateEntrySugarRecordsWhatTheFloorRecorded(t *testing.T) {
 	floor := templateRecords(t, func(t *Tpl) { t.Widget(KindEntry) })
 	sugar := templateRecords(t, func(t *Tpl) { t.Entry() })
@@ -123,9 +100,8 @@ func TestTemplateEntrySugarRecordsWhatTheFloorRecorded(t *testing.T) {
 }
 
 // templateRecords queues one collection and one For over it, runs body
-// as the template, and returns the frames. A FRESH App per call, so
-// both runs allocate from the same id counters and the comparison is
-// over the records rather than over the numbering.
+// as the template, and returns the frames. A FRESH App per call, so both
+// runs allocate from the same id counters.
 func templateRecords(t *testing.T, body func(*Tpl)) [][]byte {
 	t.Helper()
 	app := NewApp()
@@ -154,10 +130,8 @@ type setProp struct {
 }
 
 // decodeSetProp reads the record rather than re-calling the helper that
-// wrote it, because the defect it exists to catch is a call to the
-// WRONG helper: seven prop writes of one shape sit beside each other on
-// *Tpl, and BindA11yLabel emitting the a11y_id op would compile,
-// record, stamp, and tell assistive tech the wrong name for every row.
+// wrote it: the defect it catches is a call to the WRONG helper, and
+// seven prop writes of one shape sit beside each other on *Tpl.
 func decodeSetProp(t *testing.T, rec []byte) setProp {
 	t.Helper()
 	if kind := binary.LittleEndian.Uint16(rec[4:]); kind != txSetProperty {
@@ -170,17 +144,10 @@ func decodeSetProp(t *testing.T, rec []byte) setProp {
 	}
 	switch p.source {
 	case SourceConst:
-		// The tag is part of the claim: the four string props ride a
-		// ValueStr, and a prop that reached the wire as some other type
-		// would be refused by the root rather than misread here.
-		//
-		// AND THE VALUE ITSELF, for the numeric tags. A setter that
-		// forwards to the right emitter but drops its argument — sends
-		// the zero, or the wrong one of two adjacent parameters — is
-		// the failure the prop number cannot see, and role's whole
-		// vocabulary is three small integers where 0 means "no role at
-		// all". The string props already pin their text here; these are
-		// the same claim one tag over.
+		// The tag AND the value are part of the claim: a setter that
+		// reaches the right emitter but drops its argument is the
+		// failure the prop number cannot see, and role's whole
+		// vocabulary is three small integers where 0 means "no role".
 		p.tag = binary.LittleEndian.Uint32(rec[24:])
 		switch p.tag {
 		case ValueStr:
@@ -202,8 +169,7 @@ func decodeSetProp(t *testing.T, rec []byte) setProp {
 
 // propWrite runs write inside a template over a fresh entry node and
 // returns the ONE set_property record it queued. A case may queue other
-// records first (minting the signal it binds); exactly one property
-// write is the claim.
+// records first (minting the signal it binds).
 func propWrite(t *testing.T, write func(*Tx, *Tpl, Node) setProp) (setProp, setProp) {
 	t.Helper()
 	app := NewApp()
@@ -230,9 +196,8 @@ func propWrite(t *testing.T, write func(*Tx, *Tpl, Node) setProp) (setProp, setP
 }
 
 func TestTemplatePropsCarryTheirOwnPropAndSource(t *testing.T) {
-	// A NON-ZERO FIELD INDEX, so an arm that dropped the token and bound
-	// field 0 — the scalar row's own value, and the index every other
-	// element binding in this zone happens to use — fails here.
+	// A NON-ZERO field index, so an arm that dropped the token and bound
+	// field 0 fails here.
 	token := FieldAt[string](3)
 
 	cases := []struct {
@@ -288,22 +253,14 @@ func TestTemplatePropsCarryTheirOwnPropAndSource(t *testing.T) {
 			return setProp{widget: n.id, prop: PropAccepts, source: SourceConst,
 				tag: ValueStr, text: "text com.example.note"}
 		}},
-		// The grow weight rides the same header; it is here so the table
-		// covers every prop the zone carries rather than the new ones
-		// alone.
 		{"SetGrow", func(_ *Tx, tp *Tpl, n Node) setProp {
 			tp.SetGrow(n, 1)
 			return setProp{widget: n.id, prop: PropGrow, source: SourceConst,
 				tag: ValueF64, f64: 1}
 		}},
-		// THE TWO STYLING PROPS, and the pair is exactly why this table
-		// decodes rather than re-calls: role and inset are adjacent
-		// integers in one PROPS table (16 and 17), both const, both one
-		// emit line apart on *Tpl — so SetInset reaching for TxSetRole
-		// would compile, record, stamp, and give a stamped row an
-		// emphasis of 8 instead of a margin. The prop NUMBER and the
-		// value TAG together are what tell them apart, and the tag is
-		// the half that also catches a role sent as a float.
+		// Role and inset are adjacent integers in one PROPS table (16 and
+		// 17), both const, one emit line apart on *Tpl — the prop NUMBER
+		// and the value TAG together are what tell them apart.
 		{"SetRole", func(_ *Tx, tp *Tpl, n Node) setProp {
 			tp.SetRole(n, RoleHeading)
 			return setProp{widget: n.id, prop: PropRole, source: SourceConst,
@@ -324,10 +281,9 @@ func TestTemplatePropsCarryTheirOwnPropAndSource(t *testing.T) {
 	}
 }
 
-// The typed surface's third arm — the raw field PROJECTION — is the
-// whole of what RecordCollection adds to a prop, so it is pinned where
-// it can go wrong: resolving to the wrong field index binds a stamped
-// copy's spoken name to a neighbouring column, silently and per row.
+// The typed surface's third arm, the raw field PROJECTION: resolving to
+// the wrong field index binds a row's spoken name to a neighbouring
+// column, silently and per row.
 type propRec struct {
 	Title string
 	Note  string
@@ -356,9 +312,8 @@ func TestRecordSurfaceResolvesAPropProjectionToItsOwnField(t *testing.T) {
 		t.Errorf("the Note projection recorded %+v, want a11y_label bound to "+
 			"element field 1 at level 0", props[0])
 	}
-	// The const arm is the DEFAULT arm on this surface, so a plain
-	// string must not fall past the three source arms into nothing —
-	// the silent-drop failure applyRecordText was fixed for.
+	// The const arm is the DEFAULT arm here, so a plain string must not
+	// fall past the three source arms into nothing.
 	if props[1].prop != PropA11yId || props[1].source != SourceConst || props[1].text != "row" {
 		t.Errorf("the constant identifier recorded %+v, want a11y_id const \"row\"", props[1])
 	}
@@ -366,20 +321,13 @@ func TestRecordSurfaceResolvesAPropProjectionToItsOwnField(t *testing.T) {
 
 // --- the props reach the two SEALED surfaces ---------------------------
 //
-// The template zone hands a guest five surfaces, and three of them can
-// always fall back on the recorder: Row EMBEDS *Tpl, RecordCollection
-// TAKES one, and *Tpl is one. The other two are sealed on purpose —
-// SumCase keeps its *Tpl unexported so an arm cannot reach past its own
-// refinement (sums.go), and the generated <name>Row keeps its as a
-// private struct field — so on those two a prop that is not forwarded
-// cannot be spelled at ANY tier, floor included. Grow spent a milestone
-// in exactly that state, reachable on three surfaces of five, and
-// nothing in the tree said so.
+// Two of the zone's five surfaces seal their *Tpl away — SumCase, and
+// the generated <name>Row — so on those a prop that is not forwarded
+// cannot be spelled at ANY tier, floor included.
 
 // Prop writes that a refined surface deliberately does not forward.
 // Each is the FLOOR spelling of a constructor's element binding, and a
-// refined surface offers the constructor instead (SumCase.Label takes
-// the field selector; the generated row takes the token).
+// refined surface offers the constructor instead.
 var notForwarded = map[string]string{
 	"TextElement":  "Tpl.BindTextElement, the floor under Label",
 	"TextField":    "Tpl.BindTextField, the floor under Label",
@@ -389,12 +337,9 @@ var notForwarded = map[string]string{
 }
 
 // props reads the prop writes a surface declares: a method whose FIRST
-// PARAMETER IS THE NODE it writes to, which is what makes it a prop
-// write rather than a constructor. Each is filed under its prop AND the
-// flavor its name declares — Set is the constant, Bind is the source —
-// because a prop reachable in one flavor only is still a hole: an arm
-// that can give every copy the same spoken name but cannot give it the
-// row's own has lost the case the a11y pair exists for.
+// PARAMETER IS THE NODE it writes to. Each is filed under its prop AND
+// its flavor (Set is the constant, Bind is the source), because a prop
+// reachable in one flavor only is still a hole.
 func props(src, decl string) map[string]bool {
 	re := regexp.MustCompile(`(?m)^` + decl + `(?:\[[^()]*?\])?\(n (?:kaya\.)?Node[,)]`)
 	out := map[string]bool{}
@@ -427,8 +372,7 @@ func missingProps(base, refined, decl string) []string {
 
 // The base surface and the two sealed ones, each with the declaration
 // it spells a prop write with. The generated one is read from the
-// EMITTER: its outputs are checked-in files in the guests' own
-// packages, and the emitter is the one place they all agree.
+// EMITTER, the one place its checked-in outputs all agree.
 const (
 	baseDecl    = `func \(t \*Tpl\) ((?:Set|Bind)[A-Za-z0-9]*)`
 	sumCaseDecl = `func \(sc SumCase\[K, V\]\) ((?:Set|Bind)[A-Za-z0-9]*)`
@@ -443,9 +387,8 @@ func TestEveryTemplatePropReachesTheSealedSurfaces(t *testing.T) {
 	arm := readSource(t, "sums.go")
 	gen := readSource(t, "../../cmd/kaya-gen/main.go")
 
-	// THE READER IS WATCHED FIRST. A pattern that stopped matching the
-	// base surface would find no props, demand nothing of either sealed
-	// surface, and agree with everything.
+	// The reader is watched first: a pattern that stopped matching the
+	// base surface would demand nothing of either sealed surface.
 	if n := len(props(base, baseDecl)); n < 10 {
 		t.Fatalf("found %d prop writes on *Tpl, fewer than the 10 the zone is "+
 			"known to carry (grow, accepts, role and inset as constants, the "+
@@ -465,7 +408,7 @@ func TestEveryTemplatePropReachesTheSealedSurfaces(t *testing.T) {
 		}
 	}
 
-	// AND THE GUARD IS WATCHED FAILING, once per surface, against a copy
+	// And the guard is watched FAILING, once per surface, against a copy
 	// with one forward cut back out.
 	for _, p := range []struct {
 		what, src, decl, cut, want string
@@ -473,9 +416,8 @@ func TestEveryTemplatePropReachesTheSealedSurfaces(t *testing.T) {
 		{"SumCase", arm, sumCaseDecl,
 			"func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }\n",
 			"Accepts (const)"},
-		// The SOURCED half alone, cut from the surface that keeps the two
-		// under one name: the const forward stays, and the prop is still
-		// short of the flavor the row's own field needs.
+		// The SOURCED half alone, cut from the surface that keeps both
+		// under one name.
 		{"the generated row", gen, genRowDecl,
 			"\tw(\"func (r %sRow) A11yLabel(n kaya.Node, f kaya.Field[string]) { r.c.A11yLabel(r.t, n, f) }\", lowerFirst(name))\n",
 			"A11yLabel (sourced)"},

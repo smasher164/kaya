@@ -26,8 +26,6 @@ func App() *kaya.App {
 
 		onShare := func(tx *kaya.Tx) { tx.Write(status, "shared") }
 
-		// File and its Export leaf share one enablement signal: one write
-		// moves both.
 		win := tx.Window(0).Title("menus")
 		file := win.Menu("File").BindEnabled(canExport)
 		// THE SEMANTIC ICON (docs/styling-plan.md D6): a CONCEPT, drawn by
@@ -63,8 +61,6 @@ func App() *kaya.App {
 		})
 
 		groups = tx.Collection()
-		// Catalog built live: items are shared across stamped copies, the
-		// template only attaches, and each activation carries its key path.
 		catalog := tx.ContextCatalog()
 		catalog.Item("Remove").Symbol(kaya.SymbolDelete).
 			OnActivateNode(func(tx *kaya.Tx, keys []any) {
@@ -79,9 +75,8 @@ func App() *kaya.App {
 				tx.Write(canExport, true)
 			})
 			tx.Button("reset menu state", func(tx *kaya.Tx) { // button#1
-				// The folds never echo the user's pick, so details/sort still
-				// hold false/0; these two prop writes reset the user-state
-				// mirror.
+				// The folds never echo the user's pick, so these two prop
+				// writes reset the user-state mirror.
 				tx.Write(details, false)
 				tx.Write(sort, 0.0)
 				tx.Write(status, "ready")
@@ -103,7 +98,6 @@ func App() *kaya.App {
 					tx.Write(status, "renamed")
 				})
 
-			// Remove's activation names BOTH keys (group, then item).
 			for g := range groups.Rows(tx) {
 				g.Column(func() {
 					items = g.Collection()

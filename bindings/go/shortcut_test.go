@@ -1,11 +1,9 @@
 package kaya
 
-// The generated shortcut canonicalizer's negative table (the one
-// binding-tier parser; DESIGN.md, Menus): spelling is canonicalized
-// here, POLICY (escape, shift-only/bare alphanumerics, the reserved
-// floor) dies at the core on the canonical form. The vectors mirror
-// kaya-bindgen's reference table (tools/kaya-bindgen/src/main.rs) —
-// the shared statement of the algorithm every emitter transcribes.
+// The generated shortcut canonicalizer's table (DESIGN.md, Menus):
+// spelling is canonicalized here, POLICY dies at the core on the
+// canonical form. The vectors mirror kaya-bindgen's reference table
+// (tools/kaya-bindgen/src/main.rs).
 
 import (
 	"bytes"
@@ -74,9 +72,6 @@ func TestCanonicalizeShortcutRejects(t *testing.T) {
 	}
 }
 
-// TxSetMenuShortcut routes through the canonicalizer — no call site
-// can bypass it: a case-variant spelling packs the canonical bytes,
-// and a bad one panics before any record is framed.
 func TestTxSetMenuShortcutCanonicalizes(t *testing.T) {
 	if !bytes.Equal(TxSetMenuShortcut(7, "SHIFT+PRIMARY+S"), TxSetMenuShortcut(7, "primary+shift+s")) {
 		t.Error("TxSetMenuShortcut did not canonicalize the spelling")

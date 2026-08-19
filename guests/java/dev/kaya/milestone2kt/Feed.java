@@ -46,9 +46,6 @@ final class Feed {
                     }
                 });
                 tx.label(doneCount);
-                // The generated staged eliminator: each stage offers
-                // exactly the next constructor's arm, so a missing arm
-                // is a compile error.
                 PostKaya.eachSum(tx, feed)
                             .note((t, note) -> {
                                 note.label(t, Note::text);

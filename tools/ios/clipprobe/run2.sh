@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain.
-# A shell entered before the flake last changed is a bystander
-# toolchain; the marker carries the fingerprint the shell was built
-# from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -14,24 +11,17 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# ClipProbe II, the campaign the ARM is written from (main2.swift has
-# the cell list). Three campaigns, selectable:
+# ClipProbe II, the campaign the iOS clipboard arm is written from
+# (main2.swift has the cell list).
 #
-#   run2.sh [a|b|c|all] [udid]
+#   run2.sh [a|b|c|s|all] [udid]
 #
-#  A  the app writes the five-representation union clip; the app is
-#     TERMINATED; pbsync device->host; the host reads every kind back
-#     with the mac lane's own tools. Measures: the slashed custom id's
-#     write path, what pbsync carries, persistence past process exit.
-#  B  the host seeds each kind (mac-arm spellings on the host
-#     pasteboard, pbsync host->device) and the app's recv mode lists
-#     types WITHOUT touching data. Measures: what arrives, under which
-#     type strings, and that a types-only look is prompt-free.
-#  C  the prompt: seed foreign text, run read mode (background-queue
-#     reads, main-thread heartbeat), photograph the alert, DESCRIBE it
-#     through simdrive, press "Allow Paste" through simdrive's new
-#     press verb, then measure Allow's persistence (second read) and a
-#     re-seed's charge (third read).
+#  A  the app writes the union clip, is TERMINATED, pbsync device->host,
+#     the host reads every kind back.
+#  B  the host seeds each kind, the app's recv mode lists types WITHOUT
+#     touching data.
+#  C  the paste prompt, photographed and driven through simdrive.
+#  S  a simctl-spawned reader against the app's union clip.
 #
 # Throwaway; nothing in the validation ladder calls this. Results on
 # stdout plus screenshots in target/ios-clipprobe2/.
@@ -99,8 +89,7 @@ xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
 xcrun simctl uninstall "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
 xcrun simctl install "$UDID" "$APP" || exit 1
 
-# Launch a mode, collect its console into a log, leave it running when
-# hold=1 (campaign C drives it while it lives).
+# hold=1 leaves the app running (campaign C drives it while it lives).
 launch_mode() {
     local mode="$1" log="$2" hold="${3:-0}"
     SIMCTL_CHILD_KAYA_CLIPPROBE_MODE="$mode" \

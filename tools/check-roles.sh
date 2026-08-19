@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,51 +9,31 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# THE ROLE VOCABULARY REACHES EVERY BACKEND, or the role is a menu item
-# that does nothing and says nothing.
-#
-# `MENU_ROLES` (crates/kaya/src/scene.rs) is the closed vocabulary the
-# root validates an authored role against. It is ONE LINE, it is not in
-# the spec hash, and adding an entry to it regenerates nothing — so
-# before this gate existed a new role could ship with the root accepting
-# it and all four backends ignoring it. The four sites are a matched set
-# nobody is reminded of:
+# THE ROLE VOCABULARY REACHES EVERY BACKEND. `MENU_ROLES`
+# (crates/kaya/src/scene.rs) is one line, it is not in the spec hash,
+# and adding an entry regenerates nothing, so the four sites are a
+# matched set nobody is reminded of:
 #
 #   crates/kaya/src/gtk.rs        role_enabled / perform_role
 #   crates/kaya/src/winui/mod.rs  role_enabled / perform_clipboard_role
 #   swift/KayaSwiftUI.swift       kayaRoleEnabled / kayaPerformClipboardRole
 #   android/…/KayaCompose.kt      kayaRoleEnabled / kayaPerformClipboardRole
 #
-# AND THE FAILURE IS SILENT IN THE WORST WAY. A role a backend does not
-# know answers `true` from its enablement default and falls through its
-# perform switch to ordinary action dispatch: the item looks live, the
-# user picks it, the platform command never runs, and the guest gets a
-# `menu_activated` for a command it never wrote a handler for. That is
-# the exact shape the clipboard slice hit from the other side — a paste
-# leg failing SILENTLY because `performActionForItem` leaves a disabled
-# item inert (docs/traps.md) — so the rule is stated once, here, for
-# every role that will ever exist.
+# A role a backend does not know enables by default and falls through to
+# plain action dispatch: the item looks live, does nothing, and reports
+# a menu_activated the app never asked for.
 #
-# THE THIRD CLAUSE IS THE ONE D6 NAMED (docs/undo-plan.md): both Rust
-# backends refresh role enablement through a HARD-CODED role set —
-# `matches!(item.role.as_str(), "cut" | "copy" | "paste")` — and an item
-# whose role is not in that set never has its enablement recomputed at
-# all. On GTK the GAction's enabled flag is also what refuses a harness
-# activation, so a missing role there is a menu item that cannot be
-# activated by anything. Any such set must therefore name EVERY role.
-# The two interpreters carry no such set (their refresh loops are
-# role-agnostic and delegate to kayaRoleEnabled), which is why the
-# clause is written about the SETS THAT EXIST rather than about a site
-# each backend must have: a backend with no hard-coded set has nothing
-# to fall behind.
+# THIRD CLAUSE (docs/undo-plan.md D6): both Rust backends refresh
+# enablement through a hard-coded role set, and an item outside it never
+# has its enablement recomputed — on GTK that is an item nothing can
+# activate. Written about the SETS THAT EXIST, because a backend with no
+# such set has nothing to fall behind.
 #
-# `settings` is EXEMPT from the first two clauses, and the exemption is
-# a statement rather than a hole: it is a PLACEMENT role — it moves an
-# item into macOS's application menu (KayaSwiftUI.swift's catalog build)
-# and every other host leaves the item where the app put it — so it has
-# no enablement question and no command to perform. The exemption is
-# guarded in turn: a placement role no backend names AT ALL is an
-# unimplemented role wearing an exemption, and fails.
+# `settings` is a PLACEMENT role — it moves an item into macOS's
+# application menu and every other host leaves it alone — so it has no
+# enablement question and no command to perform, and is exempt from the
+# first two clauses. The exemption is guarded in turn: a placement role
+# no backend names AT ALL fails.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -102,10 +76,8 @@ PLACEMENT = {"settings"}
 gesture = [r for r in roles if r not in PLACEMENT]
 
 # --- Reading a function body out of a backend. -----------------------
-# Brace matching, with comments and string literals skipped so a `{` in
-# either cannot end a body early. Returns None when the anchor is gone,
-# which is a FAILURE rather than a pass: a gate that stops finding what
-# it reads reports a clean bill about nothing.
+# Returns None when the anchor is gone, which the caller treats as a
+# FAILURE: a gate that stops finding what it reads checks nothing.
 def body(text, pattern, at=0, opener="{", closer="}"):
     m = re.compile(pattern).search(text, at)
     if not m:
@@ -153,21 +125,13 @@ def span(text, i, opener="{", closer="}"):
     return None
 
 # Each backend's PAIR: the enablement question and the perform path.
-# The anchors are regexes rather than literal names for two reasons. A
-# rename that keeps the shape (perform_role -> perform_clipboard_role,
-# both spellings already in the tree) must not read as a missing site,
-# while a rename that loses the shape must — and a backend is free to
-# SPLIT either half across several functions, which is not a hedge but
-# the tree as it is: the mac arm answers cut/copy/paste in
-# kayaPerformClipboardRole and undo/redo in kayaPerformUndoRole, because
-# an undo is not a clipboard command. So each half is the UNION of the
-# functions matching its anchor, and a role has to be named somewhere in
-# that union.
+# Anchors are regexes, not literal names — a backend may SPLIT either
+# half across several functions (the mac arm answers cut/copy/paste in
+# kayaPerformClipboardRole and undo/redo in kayaPerformUndoRole), so
+# each half is the UNION of the functions matching its anchor.
 #
-# What the union does NOT prove is that the arm is reached — a perform
-# function nobody calls satisfies this. That is the SCENE's job
-# (tools/scenes/undo.steps drives Edit>Undo through the real chrome);
-# this gate's job is the vocabulary, which is what silently falls behind.
+# The union does NOT prove the arm is reached; that is the scene's job
+# (tools/scenes/undo.steps). This gate's job is the vocabulary.
 BACKENDS = [
     (gtk, "role_enabled", r"\bfn +role_enabled\b",
           "perform_role", r"\bfn +perform[a-z_]*_role\b"),
@@ -200,12 +164,9 @@ for path, ask_name, ask_pat, do_name, do_pat in BACKENDS:
                 f"falls through to plain action dispatch, so the item looks live, "
                 f"does nothing, and reports a menu_activated the app never asked for")
 
-# --- The hard-coded role SETS (D6's four silent-failure sites). ------
-# A `matches!` naming at least one gesture role is a role FILTER: the
-# enablement refresh skips every item whose role is not in it. Such a
-# set must be total. A backend with no such set is not failing this
-# clause — it has no set to fall behind — and the two interpreters are
-# deliberately in that position.
+# --- The hard-coded role SETS. ---------------------------------------
+# A `matches!` naming at least one gesture role is a role FILTER, and it
+# must be total. A backend with no such set is not failing this clause.
 for path in (gtk, winui):
     text = read(path)
     for m in re.finditer(r"matches!\(", text):
@@ -227,18 +188,15 @@ for path in (gtk, winui):
             f"flag also refuses an activation (GTK's GAction, WinUI's disabled "
             f"item) the item cannot be activated by anything")
 
-# --- The exemption is guarded too. -----------------------------------
-# A placement role that no backend names anywhere is not exempt, it is
-# unimplemented — and the exemption above would be hiding it.
+# --- The exemption is guarded too: a placement role no backend names
+# anywhere is not exempt, it is unimplemented. -------------------------
 for role in roles:
     if role not in PLACEMENT:
         continue
-    # ROLE-SHAPED LINES ONLY, not a bare substring: D6's symbol
-    # vocabulary put the string "settings" into every backend's symbol
-    # TABLE (2026-08-16), and a whole-file search then counted those
-    # rows as the role being "named" — which made the settings-drop
-    # self-test unable to fire. A line that names the string beside the
-    # word role is the role machinery; a symbol row is not.
+    # ROLE-SHAPED LINES ONLY, not a bare substring: the symbol
+    # vocabulary put "settings" into every backend's symbol TABLE
+    # (2026-08-16), a whole-file search counted those rows as the role
+    # being named, and the settings-drop self-test could not fire.
     def names_role(p, role=role):
         for line in read(p).splitlines():
             if f'"{role}"' in line and re.search(r"(?i)role", line):
@@ -257,13 +215,9 @@ PY
 }
 
 # THE GUARD GUARDS ITSELF, on DOCTORED COPIES OF THE REAL FILES rather
-# than on synthetic samples: a fixture only ever proves the pattern
-# matches the fixture, which is how the wayland seat guard passed
-# VACUOUSLY TWICE (docs/traps.md). Every perturbation prints its
-# substitution count and is refused if it did not apply — an unchanged
-# copy is a FAILED self-test, not a passed one — and every refusal is
-# checked for its REASON, since an exit code alone is satisfied by any
-# unrelated finding.
+# than on synthetic samples (docs/traps.md, the wayland seat guard).
+# Every perturbation prints its substitution count and is refused if it
+# did not apply, and every refusal is checked for its REASON.
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
@@ -305,20 +259,12 @@ refuses() {
     esac
 }
 
-# THE ACCEPT DIRECTION IS ITS OWN SELF-TEST HERE, and deliberately not
-# "the live tree passes". This gate is DESIGNED to be red across a
-# milestone: a role joins MENU_ROLES first and the four arms follow
-# (docs/undo-plan.md D6, the clipboard hold-open pattern), so the live
-# tree is legitimately failing while the fan-out is open. A rule that
-# refused everything would then be indistinguishable from the hold-open.
-#
-# So the accept direction runs the REAL backends against a scene.rs
-# holding the vocabulary the backends have ALREADY fanned out to. Which
-# roles those are is decided BY THIS CHECKER, one role at a time, rather
-# than by a second implementation of "is it there": the first cut asked
-# whether the file contained the string anywhere, and `depth_stub("undo")`
-# answered yes in three backends that implement nothing — a self-test
-# that would have called the milestone finished.
+# THE ACCEPT DIRECTION IS ITS OWN SELF-TEST, deliberately not "the live
+# tree passes": this gate is DESIGNED to be red across a milestone, with
+# a role joining MENU_ROLES first and the four arms following. So it
+# runs the REAL backends against a scene.rs holding only the vocabulary
+# they have ALREADY fanned out to — decided BY THIS CHECKER, one role at
+# a time, never by a second implementation of "is it there".
 
 # Write a scene.rs whose MENU_ROLES holds exactly the named roles.
 # <source scene.rs> <destination> <role>...
@@ -354,8 +300,8 @@ for role in $vocabulary; do
     fi
 done
 echo "check-roles: fanned out everywhere: $settled" >&2
-# Two is the floor: with one role the accept direction would be a rule
-# about `settings`, which is exempt from the clauses that matter.
+# Two is the floor: one role would make this a rule about `settings`,
+# which is exempt from the clauses that matter.
 if [ "$(printf '%s\n' $settled | wc -w)" -lt 3 ]; then
     echo "check-roles: SELF-TEST FAIL (only \"$settled\" have fanned out — the" \
         "accept direction would prove nothing)" >&2
@@ -370,9 +316,8 @@ if ! check "$T/scene-settled.rs" "$GTK" "$WINUI" "$SWIFTUI" "$COMPOSE" >/dev/nul
     exit 1
 fi
 
-# A ROLE THE BACKENDS DO NOT KNOW MUST FAIL IN ALL FOUR — the case this
-# gate exists for, proven on a role nobody has ever implemented rather
-# than on the milestone's own.
+# A ROLE THE BACKENDS DO NOT KNOW MUST FAIL IN ALL FOUR, proven on a
+# role nobody has ever implemented.
 hits="$(perturb "$T/scene-settled.rs" \
     '(MENU_ROLES\s*:\s*&\[&str\]\s*=\s*&\[[^\]]*)\]' '\1, "frobnicate"]' \
     "$T/scene-new-role.rs")"
@@ -383,9 +328,8 @@ for backend in "$GTK" "$WINUI" "$SWIFTUI" "$COMPOSE"; do
 done
 
 # A BACKEND THAT LOSES A ROLE FROM ITS ENABLEMENT QUESTION MUST FAIL.
-# The arm head is what moves — that is how a role is dropped in
-# practice — and every mention inside the function goes with it, since a
-# body that still names the role would satisfy the clause honestly.
+# Every mention goes, since a body that still names the role would
+# satisfy the clause honestly.
 drop_role() { # source role destination
     python3 -c '
 import re
@@ -421,22 +365,17 @@ refuses "$T/scene-settled.rs" "$GTK" "$WINUI" "$SWIFTUI" "$T/compose-no-paste.kt
     'kayaPerformClipboardRole never names the role "paste"' \
     "a Compose arm that forgot paste"
 
-# A HARD-CODED ROLE SET THAT FELL BEHIND MUST FAIL — the recorded site
-# (gtk.rs's refresh filter), perturbed by dropping one role from the set
-# alone, everything else about the backend intact.
-# The set as the FAN-OUT left it (undo/redo joined 2026-08-04); the
-# perturbation drops one role from the full set so the shape matches
-# the file as it IS — the self-test refused an unchanged copy when
-# this pattern lagged the fan-out, which is exactly its job.
+# A HARD-CODED ROLE SET THAT FELL BEHIND MUST FAIL. The pattern must
+# match gtk.rs's filter as it IS — when it lagged the fan-out the
+# self-test refused an unchanged copy, which is exactly its job.
 hits="$(perturb "$GTK" 'matches!\(item\.role\.as_str\(\), "cut" \| "copy" \| "paste" \| "undo" \| "redo"\)' \
     'matches!(item.role.as_str(), "cut" | "copy" | "paste" | "undo")' "$T/gtk-short-set.rs")"
 applied "$hits" "the gtk role-set perturbation"
 refuses "$T/scene-settled.rs" "$T/gtk-short-set.rs" "$WINUI" "$SWIFTUI" "$COMPOSE" \
     "a hard-coded role set names" "a GTK enablement filter that lost a role"
 
-# AND A SITE THAT MOVED MUST FAIL RATHER THAN GO QUIET, the vacuity
-# half: this gate reads four backends by anchor, and an anchor it stops
-# finding would otherwise report a clean bill about nothing.
+# AND A SITE THAT MOVED MUST FAIL RATHER THAN GO QUIET: an anchor this
+# gate stops finding would report a clean bill about nothing.
 hits="$(perturb "$WINUI" 'fn role_enabled\(core: &CoreState' 'fn role_can_act(core: &CoreState' \
     "$T/winui-moved.rs")"
 applied "$hits" "the winui anchor-rename perturbation"

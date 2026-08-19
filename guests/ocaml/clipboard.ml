@@ -2,10 +2,9 @@
    representations, and the privileged read that takes one back
    (DESIGN.md, Clipboard; docs/clipboard-plan.md).
 
-   Every assertion but the custom format's is made by a FOREIGN tool, so
-   the lowerings are what gets checked rather than kaya's own parse. The
-   image is asserted as a DECODED SIZE and never as bytes — every host
-   re-encodes freely, so a byte count is a different number per lane.
+   Every assertion but the custom format's is made by a FOREIGN tool.
+   The image is asserted as a DECODED SIZE and never as bytes — every
+   host re-encodes freely.
 
    Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
    contract in tools/scenes/clipboard.steps. *)
@@ -45,9 +44,8 @@ let note_id = "dev.kaya/note"
 let note_bytes = "note=1"
 
 (* Guest and interpreter are the same process and compute this path
-   identically, with no runner involvement (the filedialog rule); the
-   pid keeps parallel legs apart, and [Filename.get_temp_dir_name]
-   honours TMPDIR, which is what makes the two halves agree. *)
+   identically; the pid keeps parallel legs apart, and
+   [Filename.get_temp_dir_name] honours TMPDIR. *)
 let scene_dir =
   Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "kaya-clip-%d" (Unix.getpid ()))

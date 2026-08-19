@@ -44,8 +44,6 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
 
     let groups = tx.collection()
     var itemsOut: KayaCollection!
-    // Catalog built live: items are shared across stamped copies; the
-    // template only attaches, and each activation carries its key path.
     let catalog = tx.contextCatalog(items: [
         tx.item("Remove", symbol: .delete) { t, keys in
             guard case .str(let group) = keys[0], case .str(let item) = keys[1] else {
@@ -90,10 +88,6 @@ let (groups, items) = app.build { tx -> (KayaCollection, KayaCollection) in
                 }
             ])
 
-        // Remove's activation names BOTH keys (group, then item).
-        //
-        // `each` and not `forEach`: neither For hands anything back
-        // (docs/tpl-props-plan.md §2 F2).
         tx.each(groups) { g in
             let items = g.collection()
             itemsOut = items

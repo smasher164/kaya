@@ -24,28 +24,23 @@ final class Layout {
             tx.mount(tx.column(() -> {
                 tx.label(probe); // label#0
 
-                // Main-axis free space: unequal children, room left.
                 tx.row(() -> {
                     tx.button("A");
                     tx.button("longer");
                     tx.label(tail); // label#1
                 });
 
-                // Cross-axis alignment: three intrinsic heights, one
-                // grower taking the leftover width.
                 tx.row(() -> {
                     tx.checkbox("check", null);
                     tx.label(mixed); // label#2
                     tx.slider(0.0, 1.0, 0.5, null).grow(1.0);
                 });
 
-                // Proportional grow: unequal weights in one row.
                 tx.row(() -> {
                     tx.slider(0.0, 1.0, 0.25, null).grow(1.0);
                     tx.slider(0.0, 1.0, 0.75, null).grow(3.0);
                 });
 
-                // Nesting: a column in the root column, a row in that.
                 tx.column(() -> {
                     tx.label(nested); // label#3
                     tx.row(() -> {

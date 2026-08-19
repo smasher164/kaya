@@ -6,15 +6,9 @@ fn main() {
     // dynamic UCRT (OS-shipped and OS-serviced). No-op elsewhere.
     static_vcruntime::metabuild();
 
-    // Bake the identity of the sources this core is being compiled from,
-    // so a runner can ask a BUILT FILE where it came from rather than
-    // trusting that the build it just asked for actually happened
-    // (tools/build-id.sh states the failure this answers).
-    //
-    // The hash comes from that one script, shelled out to rather than
-    // reimplemented here: two implementations of "the id" would agree
-    // right up until they didn't, and the disagreement would surface as
-    // a lane failing with both sides insisting they are current.
+    // Bake the id of the sources this core is compiled from. The hash
+    // comes from tools/build-id.sh, shelled out to rather than
+    // reimplemented, so the two cannot disagree.
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
         .join("../..")
         .canonicalize()
@@ -22,10 +16,9 @@ fn main() {
     let script = root.join("tools/build-id.sh");
     let id = if script.is_file() {
         // build.rs re-runs only when something it DECLARES changes, and
-        // its output here is a function of the whole source set — so the
-        // source set is what it declares. Miss this and the baked id
-        // silently keeps a value the sources have moved away from, which
-        // is worse than carrying no id at all.
+        // the id is a function of the whole source set — so the whole
+        // source set is declared. Miss this and the baked id silently
+        // keeps a value the sources have moved away from.
         for input in ["crates", "Cargo.toml", "Cargo.lock"] {
             println!("cargo::rerun-if-changed={}", root.join(input).display());
         }
@@ -46,9 +39,8 @@ fn main() {
             .to_string()
     } else {
         // No tools/ directory: kaya built as a dependency from a
-        // published package, where "which tree did this come from" is
-        // answered by the package version. Zeros — and the verifier
-        // reports NO build id rather than pretending to know one.
+        // published package. Zeros, so the verifier reports NO build id
+        // rather than pretending to know one.
         "0000000000000000".to_string()
     };
     // The marker in capi.rs is a fixed-size array, so a width change
@@ -64,25 +56,12 @@ fn main() {
 }
 
 /// Fail the BUILD when the binding generator has moved since the
-/// bindings it produced were written.
+/// bindings it produced were written (docs/traps.md).
 ///
-/// A gate you have to remember is not a guard. `gen-bindings.sh
-/// --check` is the authoritative answer and every lane runs it, but a
-/// generator edited and never rerun is invisible until someone does:
-/// the checked-in bindings still compile, the guest still runs, and the
-/// decoder arm just added is simply absent. That shape cost two
-/// debugging rounds in one afternoon (docs/traps.md) — an OCaml and
-/// then a Haskell picker decoding every result as cancel. Since
-/// EVERYTHING downstream builds this crate first, refusing here is the
-/// earliest possible answer and the one nobody can skip.
-///
-/// Two exemptions, both necessary rather than convenient:
-///   - no tools/ directory: kaya built as a published dependency, where
-///     there is no generator to be out of date with.
-///   - KAYA_REGENERATING: gen-bindings.sh sets it, because the
-///     generator DEPENDS on this crate — without the exemption a
-///     generator edit would deadlock, failing the build of the very
-///     tool that fixes it.
+/// Two exemptions: no tools/ directory (kaya built as a published
+/// dependency), and KAYA_REGENERATING, which gen-bindings.sh sets
+/// because the generator depends on this crate — without it a
+/// generator edit would fail the build of the tool that fixes it.
 fn refuse_a_stale_generator(root: &std::path::Path) {
     if std::env::var_os("KAYA_REGENERATING").is_some() {
         return;
@@ -102,7 +81,7 @@ fn refuse_a_stale_generator(root: &std::path::Path) {
         .collect();
     // Sorted, and by CONTENT: the shell glob that writes the stamp is
     // sorted too, and a touched file with the same bytes is not a
-    // different generator (the mtime-versus-hash lesson, docs/traps.md).
+    // different generator (docs/traps.md, mtime versus hash).
     sources.sort();
     let mut joined = Vec::new();
     for path in &sources {

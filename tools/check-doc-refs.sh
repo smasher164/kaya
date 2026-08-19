@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -20,85 +15,50 @@ fi
 #
 #   tools/check-doc-refs.sh                 every tracked .md in the tree
 #   tools/check-doc-refs.sh --also PATH     scan one more file BESIDE the
-#                                           real set — THE TEST SEAM. The
-#                                           watched negatives plant their
-#                                           dead reference in a COPY and
-#                                           point this at the copy, so the
-#                                           real docs are never edited to
-#                                           prove a gate red, and the
-#                                           census below still measures
-#                                           the whole set.
-#
-# WHY, measured 2026-08-17 alongside the ledger gate. docs/traps.md
-# claimed "the modern generation has no dedicated leg yet" after it had
-# one; comments pointed at scenes and behaviours that had moved. The
-# ledger half of that failure is tools/check-ledger.sh; this is the other
-# half — a citation that names a file. Prose rots quietly, but a PATH is
-# the one part of prose a machine can hold to the tree, and a reader who
-# opens a cited path and finds nothing there stops trusting the document
-# rather than the sentence.
+#                                           real set — THE TEST SEAM, so
+#                                           the watched negatives plant
+#                                           their dead reference in a
+#                                           COPY and the real docs are
+#                                           never edited to prove a gate
+#                                           red.
 #
 # WHAT COUNTS AS A REFERENCE: a word starting with one of the repo's
 # source roots — tools/ crates/ guests/ docs/ swift/ android/ bindings/ —
-# wherever it appears, backticked or bare. Trailing punctuation and a
-# possessive `'s` end the token; a `<placeholder>` right after it
-# (`tools/guest/run_<scene>_<lang>.cmd`) makes it a FAMILY name rather
-# than a file, and families are not checked.
+# backticked or bare. Trailing punctuation and a possessive `'s` end the
+# token; a `<placeholder>` right after it makes it a FAMILY name, and
+# families are not checked.
 #
-# A `:123` OR `:123-456` SUFFIX ENDS THE TOKEN AND IS THEN READ, which is
-# the second clause: the file must exist AND must be long enough for the
-# line the sentence points at. Added 2026-08-17 out of the ledger audit's
-# F4 — `check-doc-refs` validated that a path EXISTS and could not check
-# `:1732`, so every line number in the corpus was a claim nobody held to
-# anything, and two dead ones were found by hand in one afternoon.
+# A `:123` OR `:123-456` SUFFIX ENDS THE TOKEN AND IS THEN READ: the file
+# must exist AND be long enough for the line the sentence points at.
+# WHAT IT CATCHES IS THE FILE THAT SHRANK, and only that — an in-range
+# line number whose content moved is not catchable this way, and the gate
+# does not pretend otherwise.
 #
-# WHAT IT CATCHES IS THE FILE THAT SHRANK, and that is the whole claim:
-# a reference to line 1732 of a 900-line file is dead for certain. A
-# reference to line 12 of a file whose line 12 now says something else is
-# NOT catchable this way and this gate does not pretend to — an
-# in-range line number is checked for nothing, and the gate says so
-# rather than leaving the reader to assume the number was verified.
-# Cheap, one-sided, and it costs no maintenance: nothing has to be
-# registered for a new citation to be covered.
+# THREE SHAPES BEYOND THE PLAIN PATH:
 #
-# THREE SHAPES BEYOND THE PLAIN PATH, each measured in the tree rather
-# than imagined:
+#   GLOBS — required to match AT LEAST ONE path: a glob that has stopped
+#     matching is exactly as dead as a missing file.
+#   BRACE GROUPS — `guests/{go/undo/undo.go:309, rust/undo.rs:207, …}`.
+#     Expanded and checked member by member. Left alone, the tokenizer
+#     would read `swift/undo.swift` out of the middle of one and report a
+#     file that was never claimed to exist.
+#   ELISIONS — `android/kaya/.../KayaCompose.kt`. NOT exempt: write the
+#     path out.
 #
-#   GLOBS — `tools/scenes/*.steps`, `tools/check-*.sh`. Resolved by
-#     globbing and required to match AT LEAST ONE path, which is strictly
-#     better than exempting them: a glob that has stopped matching is
-#     exactly as dead as a missing file.
-#   BRACE GROUPS — `guests/{go/undo/undo.go:309, rust/undo.rs:207, …}`,
-#     `tools/{win,mac,ios,android}`. Expanded and checked member by
-#     member (11 real paths behind 2 groups today). Left alone, the
-#     tokenizer would read `swift/undo.swift` out of the middle of one
-#     and report a file that was never claimed to exist.
-#   ELISIONS — `android/kaya/.../KayaCompose.kt`. NOT exempt: a `...`
-#     inside a path is an abbreviation the reader cannot follow, and the
-#     fix is to write the path out.
+# THE HISTORICAL-MENTION CONVENTION, and nothing else — every exemption
+# is a place a dead reference can hide:
 #
-# THE HISTORICAL-MENTION CONVENTION, kept as small as it can honestly
-# be, because every exemption is a place a dead reference can hide:
+#   1. Inside ~~strikethrough~~ (a struck sentence claims nothing).
+#   2. Inside a ``` fenced block (a quote may not be edited to suit a
+#      gate).
+#   3. Followed by the literal marker `(gone)`, for a live sentence that
+#      must name a file the tree no longer has.
 #
-#   1. Inside ~~strikethrough~~. The ledger already strikes what is no
-#      longer true, and a struck sentence is not making a claim.
-#   2. Inside a ``` fenced block. Those quote OLD output and old
-#      commands verbatim, and a quote may not be edited to suit a gate.
-#   3. Followed by the literal marker `(gone)`. That is the escape for a
-#      live sentence that must name a file the tree no longer has — one
-#      marker, spelled one way, so a reader and this gate see the same
-#      thing.
-#
-# Nothing else. In particular a reference is not exempted for being in a
-# "historical" document: every doc in docs/ is a record of something that
-# already happened, so that rule would exempt the whole corpus.
+# In particular a reference is not exempted for being in a "historical"
+# document: every doc in docs/ records something that already happened.
 #
 # THE EXEMPTIONS ARE COUNTED AND PRINTED on every run, and the gate
 # REFUSES A VERDICT if the exempt references outnumber the checked ones.
-# An exemption nobody is watching grows until the gate reads nothing,
-# which is the census failure one directory over (check-gates,
-# tpl-surfaces): a reader that checked almost nothing agrees with
-# everything.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -122,8 +82,7 @@ while args:
         sys.exit("usage: check-doc-refs.sh [--also PATH]...")
 for p in extra:
     # A mistyped seam path would otherwise be SKIPPED and the run would
-    # go green about a file it never opened — the negative test's own
-    # false pass.
+    # go green about a file it never opened.
     if not p.is_file():
         sys.exit(f"check-doc-refs: --also {p} is not a file")
 
@@ -151,10 +110,9 @@ FENCE = re.compile(r"^\s*```")
 STRIKE = re.compile(r"~~.+?~~", re.S)
 GONE = "(gone)"
 # The line clause's verdict, named once: the printer below tells the two
-# failures apart by it, because they want DIFFERENT fixes. A missing file
-# wants the path corrected or struck; an over-length line wants the
-# NUMBER corrected, and telling that reader to mark the path `(gone)`
-# would send them to remove a citation that is otherwise fine.
+# failures apart by it, because they want DIFFERENT fixes — a missing
+# file wants the path corrected or struck, an over-length line wants the
+# NUMBER corrected.
 SHRANK = "the file SHRANK past this citation"
 
 
@@ -246,7 +204,7 @@ def scan(path, text):
             token = m.group(0)
             # The anchor is consumed BEFORE the exemption markers are
             # looked for, so `tools/gone.sh:40 (gone)` still reads as
-            # exempt rather than as a live reference to a dead file.
+            # exempt.
             suffix, want, rest = anchor(line[m.end():])
             why = None
             if in_fence:
@@ -358,8 +316,7 @@ if not any("check-there-is-no-such-file" in t for _, t, _ in findings_in(planted
          "clause is vacuous")
 
 # N2 — a glob that matches nothing must be reported. Perturbed from a
-# glob the docs really carry, so the clause is proven against the real
-# spelling rather than an invented one.
+# glob the docs really carry.
 globbed, n2 = re.subn(r"tools/scenes/\*\.steps", "tools/scenes/*.stepz",
                       sample_text)
 print(f"check-doc-refs: self-test N2 broke a real glob in a copy of "
@@ -374,8 +331,8 @@ elif not any("stepz" in t for _, t, _ in findings_in(globbed)):
 
 # N3 — the brace expansion must be LIVE. A member of a real brace group
 # is perturbed to a dead path; if the expansion silently stopped
-# happening, this comes back green and the eleven paths behind today's
-# two groups are checked by nobody.
+# happening, this comes back green and the paths behind today's groups
+# are checked by nobody.
 plan = root / "docs" / "sugar-pass-plan.md"
 if not plan.is_file():
     fail("self-test N3 impossible: docs/sugar-pass-plan.md is gone and it is "
@@ -433,10 +390,10 @@ if len(findings_in(under)) != len(findings_in(sample_text)):
     fail("self-test N6: a citation to a line the file HAS was reported — the "
          "line clause fires on references that are fine")
 
-# N6b — and it reaches INSIDE a brace group, where 25 of the corpus's 31
-# line anchors live. Perturbed from the real member, so a brace expansion
-# that quietly dropped the `:207` again would show here rather than in
-# six months.
+# N6b — and it reaches INSIDE a brace group, where 7 of the corpus's 92
+# line anchors live (measured 2026-08-19). Perturbed from the real
+# member, so a brace expansion that quietly dropped the anchor would
+# show here rather than in six months.
 if plan.is_file():
     deep, n6 = re.subn(r"rust/undo\.rs:135", "rust/undo.rs:999999", plan_text)
     print(f"check-doc-refs: self-test N6b pushed a real brace member's line "
@@ -450,18 +407,15 @@ if plan.is_file():
              "their anchors")
 
 # N5 — THE CENSUS REFUSAL. A run that read almost nothing must refuse a
-# verdict rather than print one.
-# 27 files and 510 checkable references today, so the floors sit at
-# roughly half of each: low enough that pruning a plan doc is not a false
-# refusal, high enough that a tokenizer which stopped matching cannot
-# report a clean scan.
+# verdict rather than print one. 30 files and 841 checkable references
+# today (measured 2026-08-19); the floors below are low enough that
+# pruning a plan doc is not a false refusal, high enough that a
+# tokenizer which stopped matching cannot report a clean scan.
 #
-# THE ANCHOR FLOOR IS 1, not a fraction: the corpus carries 31 line
-# anchors across three documents, and a doc prune could honestly take
-# most of them, but it cannot take all of them by accident. Zero
-# anchors beside a full reference count means the SUFFIX stopped being
-# read — the line clause silently checking nothing, which is the exact
-# failure the rest of this census exists to refuse.
+# THE ANCHOR FLOOR IS 1, not a fraction: the corpus carries 92 line
+# anchors across five documents, and a doc prune could honestly take
+# most of them, but it cannot take all of them by accident. Zero anchors
+# beside a full reference count means the SUFFIX stopped being read.
 FLOOR_FILES, FLOOR_REFS = 12, 250
 
 

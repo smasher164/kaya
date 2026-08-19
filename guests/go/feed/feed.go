@@ -1,9 +1,8 @@
 // The feed scene from Go: sum-typed elements, end to end. The sealed
 // marker interface is the sum, the structs its constructors, and
-// elimination is Go-shaped on both sides — typed case arms author the
-// template blueprints, and handlers type-switch on the model's current
-// value, a refinement the witnessed UpdateField checks rather than
-// trusts, so a stale occurrence folds into nothing.
+// handlers type-switch on the model's current value — a refinement the
+// witnessed UpdateField checks rather than trusts, so a stale occurrence
+// folds into nothing.
 package feed
 
 import (
@@ -53,8 +52,6 @@ func App() *kaya.App {
 				}
 			})
 			tx.Label(doneCount)
-			// The generated eliminator: one required arm per
-			// constructor, so a missing arm is a missing argument.
 			PostEachSum(tx, feed,
 				func(note kaya.SumCase[string, Note]) {
 					note.Label(func(n *Note) *string { return &n.Text })
@@ -65,8 +62,7 @@ func App() *kaya.App {
 							func(tx *kaya.Tx, key string, checked bool) {
 								// The generated refined patch: the
 								// comma-ok re-eliminates at write
-								// time, so a stale occurrence folds
-								// into the !ok arm.
+								// time.
 								if todo, ok := PostAsTodo(tx, feed, key); ok {
 									todo.Done(checked)
 								}

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,11 +11,10 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# Round 3: ONE MODE PER INVOCATION, because rounds 1-2 ran the modes back
-# to back and every difference tracked launch order (only the first
-# launch became the active app). Usage:
+# ONE MODE PER INVOCATION: only the first launch of a run becomes the
+# active app, so back-to-back modes differ by launch order.
 #   tools/mac/undoprobe/build3.sh [nohook|hook]
-# THROWAWAY, not a lane. See main3.swift's header.
+# Throwaway probe, not a lane. See main3.swift's header.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -54,8 +48,7 @@ cat >"$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 echo "=== mode=$MODE ==="
-# `if !` and not an rc capture: set -e is on, so the failing command
-# would take the script down before anything could read $?.
+# `if !` and not an rc capture: set -e would take the script down first.
 if ! KAYA_UNDOPROBE_MODE="$MODE" "$APP/Contents/MacOS/UndoProbe3"; then
     echo "UndoProbe3: exited nonzero in mode=$MODE"
 fi

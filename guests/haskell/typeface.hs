@@ -14,14 +14,8 @@ main = kayaMain $ \app -> do
   draftRef <- newIORef ""
   -- Opened out here rather than below: Build is a pure state monad, so
   -- the one IO the brand call needs happens before the transaction
-  -- opens.
-  --
-  -- ONE CALL, AND NO FILE I/O IN THE GUEST. The path, the environment
-  -- override and the sentence for a miss were all hand-written here (and
-  -- in seven sibling scenes) until asset arrived; they live in the core
-  -- now (crates/kaya/src/assets.rs), which is also why the bytes never
-  -- enter this guest's heap — the handle goes straight to the blob
-  -- channel.
+  -- opens. The bytes never enter this guest's heap — the handle goes
+  -- straight to the blob channel.
   font <- asset "fonts/sora-wght.ttf"
   buildTx app $ do
     -- BEFORE THE FIRST MOUNT, per the set-once wall: brand is identity,
@@ -55,7 +49,4 @@ main = kayaMain $ \app -> do
             )
         ]
     mount root
-  -- The close is explicit and the redemption has already happened:
-  -- buildTx ran the transaction's IO, so brandTypeface registered the
-  -- bytes into the pending blob table, which keeps its own reference.
   assetClose font

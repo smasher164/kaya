@@ -14,8 +14,6 @@ main = kayaMain $ \app -> do
     root <- column [] [labelBound s] -- label#0
     mount root
 
-    -- The veto handler binds to the inspector at its declaration, so it
-    -- can only ever mean this window's close.
     createWindow
       1
       [ WTitle "inspector",

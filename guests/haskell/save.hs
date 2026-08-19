@@ -4,13 +4,11 @@
 -- EVERY STATUS IS A READ-BACK OFF THE DISK, always through 'openPicked'
 -- and never through 'pickedLocalPath', which is empty on both phones.
 --
--- THE WORK RUNS OFF THE APP THREAD because 'openPicked' blocks; the
--- answer comes back through 'post'.
+-- THE WORK RUNS OFF THE APP THREAD because 'openPicked' blocks.
 --
 -- NO EXTENSIONS ON THE NAMES: a save panel hides the extension when the
--- user's Finder preference says so, so `expect_save_dialog` would read
--- the stem on one machine and the whole name on another (the NSSavePanel
--- entry in docs/deferred.md).
+-- user's Finder preference says so (the NSSavePanel entry in
+-- docs/deferred.md).
 --
 -- Canonical semantics in guests/rust/save.rs; the byte-frozen contract
 -- in tools/scenes/save.steps.
@@ -98,14 +96,11 @@ main = kayaMain $ \app -> do
           return ()
 
         picked files = case files of
-          -- The empty list IS cancel.
           [] -> buildTx app (writeSignal status (VStr "open cancelled"))
           (first : _) -> do
             writeIORef sourceRef (Just first)
             work (("opened " ++) <$> readBack first)
 
-        -- Cancel is Nothing, narrowed by the binding rather than by a
-        -- length here.
         saved Nothing = buildTx app (writeSignal status (VStr "save cancelled"))
         saved (Just file) = do
           writeIORef destRef (Just file)
@@ -128,8 +123,6 @@ main = kayaMain $ \app -> do
                 work (("saved " ++) <$> writeBack file "second draft")
             )
             [],
-          -- "copy" is the name the dialog OPENS with; the harness types
-          -- over it.
           buttonOn "save as" (buildTx app (saveFile "copy" [] saved)) [], -- button#2
           buttonOn -- button#3
             "reopen"

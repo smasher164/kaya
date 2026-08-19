@@ -55,8 +55,6 @@ main = kayaMain $ \app -> do
                     IPrimary True,
                     IOnActivate (submitTx app (writeSignal status (VStr "found")))
                   ],
-                -- Everything from here down is catalog, not chrome, on
-                -- every platform.
                 item "Replace" [ISymbol SymbolEdit]
               ],
             menu

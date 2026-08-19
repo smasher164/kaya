@@ -1,96 +1,27 @@
 // Android's attach surface for a Go guest: the JNI entry a shim
 // Activity calls on the UI thread, and the two ways it learns what to
 // boot — a registration (AndroidMain) or the app's own `main`, pulled
-// out of the app's package by mainmain_android.go.
+// out of the app's package by mainmain_android.go. The hosting is
+// inverted here (Android has no native process entry, so kaya_run
+// panics and the app enters at onCreate): docs/go-mobile-plan.md §D3.
 //
-// THE HOSTING IS INVERTED HERE and that is the only reason this file
-// exists. On the desktops and iOS the guest owns main and lends it to
-// kaya (App.Run -> kaya_run). Android has no native process entry —
-// Zygote forks the process and ActivityThread owns main — so kaya_run
-// is a hard panic there (crates/kaya/src/capi.rs:815-818) and the app
-// enters at Activity.onCreate. The Activity calls in, kaya starts the
-// guest on a thread of its own, and the UI thread goes straight back to
-// the Looper. Nothing about the guest's own code changes: kaya's guest
-// has never run on the UI thread on any platform (DESIGN.md:2332-2334),
-// it runs on its own blockable thread and talks to the interface
-// through a byte transport.
+// THE SYMBOL NAME IS THE WHOLE CONTRACT with
+// android/kaya/src/main/kotlin/dev/kaya/KayaGo.kt, resolved by name out
+// of the guest's own .so; tools/android/run-emulator.sh checks it. The
+// short JNI name carries no argument mangling, so that class must
+// declare exactly ONE native `attach` — an overload makes both
+// unresolvable until the names carry their signatures.
 //
-// THE CONTRACT WITH THE KOTLIN SIDE, in full, because the shim lives in
-// android/ and this file is what it has to match — KayaRing.kt's own
-// shape, one line longer:
-//
-//	object KayaGo {
-//	    @JvmStatic external fun attach(activity: Activity): Int
-//	}
-//
-// resolved BY NAME out of the guest's own .so, which is why the symbol
-// is spelled Java_dev_kaya_KayaGo_attach here and why it lives in the
-// binding rather than in each guest — a name the guest could retype is
-// a name that can drift from the class that declares it, and the
-// failure is an UnsatisfiedLinkError on a device rather than anything a
-// gate could see.
-//
-// Three details that decide whether the two sides meet:
-//
-//   - `object` + `@JvmStatic` makes it a STATIC method on
-//     dev.kaya.KayaGo, so JNI passes (JNIEnv*, jclass, jobject
-//     activity). An instance method would pass (JNIEnv*, jobject this,
-//     jobject activity) — the same three pointers, so either resolves,
-//     but static is what KayaRing does and what the doc below assumes.
-//   - The short symbol name carries NO argument mangling, so the class
-//     must declare exactly one native `attach`. An overload makes both
-//     unresolvable until the names carry their signatures.
-//   - jint is int32_t and JNICALL is empty on Android, so the JNI
-//     signature IS (void*, void*, void*) -> int32_t at the ABI. cgo's
-//     plain spelling below is that, and no jni.h is involved anywhere.
-//
-// The shim's four lines, in order, and every one of them load-bearing:
-//
-//	System.loadLibrary("kaya")     // libkaya.so, from jniLibs
-//	System.loadLibrary("<guest>")  // the Go c-shared .so; Go's ELF
-//	                               // constructors run here and the Go
-//	                               // runtime boots on a thread it makes
-//	KayaRing.attach(this)          // registers the KayaPresent natives
-//	                               // the Compose pump needs; it takes
-//	                               // NO core ends, so the occurrence
-//	                               // sink stays OccSink::Ring — which
-//	                               // is exactly what a direct-ring
-//	                               // consumer like Go wants
-//	KayaCompose.mount(this)        // the interpreter and its pump
-//	KayaGo.attach(this)            // HERE
-//
-// That is the JVM guest's shape with one line changed, which is the
-// whole point: android/milestone2kt/.../MainActivity.kt:29-90 already
-// does loadLibrary + KayaRing.attach + KayaCompose.mount and then
-// starts the guest on a thread it makes (`Thread(scene, "kaya-app")`).
-// A Go guest cannot be started by `new Thread` because the JVM has no
-// way to call a Go function, so the thread is started on the Go side
-// and the JNI entry is what asks for it.
-//
-// THIS FILE IS NOT BUILD-TAGGED, deliberately. A //go:build android
-// constraint would mean nothing compiles this surface until somebody
-// cross-builds for Android, and cfg-gated code that no ordinary build
-// compiles is precisely the hole tools/check-targets.sh exists to
-// patch on the Rust side ("a trait method missed in gtk.rs alone used
-// to survive every fast gate and die in the matrix"). Untagged, every
-// `go build` of every Go guest on every platform type-checks it, which
-// is the most basic thing anyone does here. The cost is one dead
-// exported symbol in the desktop and iOS binaries.
-//
-// The ONE thing that could not stay untagged is the `//go:linkname
-// mainMain main.main` pull, because untagged it would make every
-// consumer of this binding on every platform need a `main.main` at link
-// time. It lives in mainmain_android.go behind a `guestMain()` whose
-// `!android` twin answers nil, so the CALL SITE below is still compiled
-// everywhere and the tagged file is compiled by tools/check-targets.sh
-// on every gate sweep rather than only by the Android lane.
+// THIS FILE IS NOT BUILD-TAGGED, deliberately: untagged, every `go
+// build` on every platform type-checks the attach surface, at the cost
+// of one dead exported symbol off Android. Only the `//go:linkname`
+// pull had to be tagged, and it lives in mainmain_android.go.
 package kaya
 
 /*
 // DELIBERATELY EMPTY. A file carrying //export has its preamble copied
 // into two generated C files, so it may contain declarations only —
-// never a definition. Nothing here needs either: the JNI types are
-// spelled in Go below.
+// never a definition.
 */
 import "C"
 
@@ -99,12 +30,9 @@ import (
 	"unsafe"
 )
 
-// presentGuest is attach's answer to the Kotlin side's "who presents?"
-// — always the Compose interpreter, because there is one backend per
-// platform. The mirror of PRESENT_GUEST in crates/kaya/src/android.rs.
+// presentGuest mirrors PRESENT_GUEST in crates/kaya/src/android.rs.
 const presentGuest int32 = 1
 
-// The guest's app function and whether a thread is already running it.
 // Written once from an init(), read once from the UI thread inside
 // attach, so no lock: Go finishes every package init while the library
 // is loading, and loadLibrary happens-before the onCreate that attaches.
@@ -114,59 +42,16 @@ var (
 )
 
 // AndroidMain names the function kaya boots when the shim Activity
-// attaches, FOR THE ONE SHAPE THAT NEEDS TO SAY IT — a library that
-// carries several apps. An ordinary app does not call this and does not
-// write an Android-specific file at all; see "THE TWO SHAPES" below.
+// attaches. Only a library carrying SEVERAL apps needs it (one .so has
+// exactly one main.main); an ordinary app writes one main.go and kaya
+// finds its main. The two shapes: docs/go-mobile-plan.md §D3.
 //
-// Call it from an init() in the guest's main package:
+// Call it from an init(), not from main: `-buildmode=c-shared` never
+// calls the library's main, so a registration in main registers nothing.
 //
 //	func init() { kaya.AndroidMain(app) }
-//	func main() {}  // never called: -buildmode=c-shared has no entry
 //
-// AN init() RATHER THAN main() IS NOT A STYLE CHOICE. `go build
-// -buildmode=c-shared` requires exactly one main package and then never
-// calls its main — the only callable symbols are the cgo //export ones
-// — so a guest that did its registration in main would register
-// nothing.
-//
-// `app` runs on the app thread and does exactly what a desktop guest's
-// main does minus the process exit: build the scene, register the
-// handlers, and end in App.Run(). It is the same function shape the JVM
-// guest hands `new Thread(...)` (guests/java/.../Milestone2.java's
-// `static void app()`, ending in app.dispatchLoop()).
-//
-// # THE TWO SHAPES
-//
-// An Android guest reaches kaya one of two ways, and attach prefers the
-// first when both are present:
-//
-//  1. REGISTRATION — this function. For a library that hosts MORE THAN
-//     ONE app: `-buildmode=c-shared` allows exactly one main package per
-//     .so, so one library has exactly one `main.main` and it cannot be
-//     thirty-one scenes. kaya's own validation artifact is that library
-//     (guests/go/cmd), which is why the test suite uses this path and an
-//     app does not.
-//
-//  2. THE APP'S OWN main — nothing to call, nothing to write. kaya pulls
-//     `main.main` out of the app's package with `//go:linkname`
-//     (mainmain_android.go) and runs it on the app thread. THIS IS WHAT
-//     AN APP AUTHOR USES: one main.go, no build tags, no second entry
-//     point, the same file that builds for mac, linux, windows and iOS:
-//
-//     package main
-//
-//     import "os"
-//
-//     func main() { os.Exit(build().Run()) }
-//
-//     App.Run blocks on every platform including this one (see its
-//     doc), so that line is the whole contract and it does not change
-//     shape per host.
-//
-// REGISTRATION WINS WHEN BOTH ARE PRESENT, because a guest that called
-// AndroidMain said something specific about which function is the app,
-// while `main.main` is what every main package has whether it means
-// anything or not — guests/go/cmd's is `func main() {}`.
+// `app` runs on the app thread and ends in App.Run().
 func AndroidMain(app func()) {
 	if app == nil {
 		panic("kaya: AndroidMain was handed a nil app")
@@ -176,18 +61,10 @@ func AndroidMain(app func()) {
 
 // androidEntry answers which function is the app, and whether it came
 // from the app's own `main` rather than a registration. A REGISTRATION
-// WINS: a guest that called AndroidMain said something specific about
-// which function is the app, while `main.main` is what every main
-// package has whether it means anything or not — guests/go/cmd's is
-// `func main() {}` beside its init's AndroidMain call, and if the order
-// were the other way round the whole validation APK would boot an empty
-// function.
-//
-// Its own function, taking both sources as arguments, so that the rule
-// is testable on a host where neither exists: attach cannot be called
-// off Android, and guestMain answers nil there, so an inline `if` would
-// be a rule nothing could ever check (app_test.go's
-// TestAndroidEntryPrefersARegistration).
+// WINS — guests/go/cmd's `main.main` is `func main() {}` beside its
+// init's AndroidMain call, so the other order boots an empty function.
+// Taking both sources as arguments is what makes the rule testable off
+// Android (app_test.go's TestAndroidEntryPrefersARegistration).
 func androidEntry(registered func(), fromMainMain func() func()) (app func(), fromMain bool) {
 	if registered != nil {
 		return registered, false
@@ -198,103 +75,54 @@ func androidEntry(registered func(), fromMainMain func() func()) (app func(), fr
 
 // Java_dev_kaya_KayaGo_attach is Android's entry, called by the shim
 // Activity from onCreate ON THE UI THREAD. It starts the guest on a
-// thread of its own and RETURNS THAT THREAD to the Looper — the
-// host-owns-the-loop shape every Android app has by construction.
+// thread of its own and returns that thread to the Looper.
 //
-// It answers with who presents, the same jint Kaya.attach answers, but
-// the shim has already mounted by then and does not branch on it: the
-// order above is the JVM guest's PROVEN one (mount, then start the
-// guest), and the value is a fingerprint rather than a decision. Both
-// orders work — a transaction submitted before the pump exists waits in
-// the channel — and this is the one that is green in the matrix today.
-//
-// The three JNI arguments are accepted and unused. kaya's Android
-// anchor — the JavaVM and the global reference to dev.kaya.KayaPresent,
-// which a thread attached later cannot resolve for itself — was already
-// taken by KayaRing.attach on this same thread
-// (crates/kaya/src/android.rs:107-118), so there is nothing left here
-// for a Go guest to capture, and capturing a JNIEnv would be wrong
-// anyway: a JNIEnv belongs to the thread it was handed to, and this one
-// is about to go back to the Looper.
+// The three JNI arguments are accepted and unused: KayaRing.attach took
+// kaya's Android anchor on this same thread already, and a JNIEnv
+// belongs to the thread it was handed to, which is about to go back to
+// the Looper.
 //
 //export Java_dev_kaya_KayaGo_attach
 func Java_dev_kaya_KayaGo_attach(env, class, activity unsafe.Pointer) int32 {
-	// Named and discarded, the way crates/kaya/src/android.rs:85 spells
-	// the same thing (`let _ = &activity;`): the arguments are part of
-	// the contract even where this tier has no use for them.
 	_, _, _ = env, class, activity
-	// EVERY WALL BELOW IS A PANIC, AND A GO PANIC ON ANDROID IS SILENT
-	// unless something writes it to the log first — measured, with the
-	// numbers, in logcat_android.go. This defer is what makes the three
-	// walls in this function say anything at all on the one platform
-	// where they are the only diagnosis anybody gets.
+	// Every wall below is a panic, and a Go panic on Android is silent
+	// unless something logs it first (logcat_android.go).
 	defer androidReport()
 	app, fromMain := androidEntry(androidApp, guestMain)
 	if app == nil {
-		// Only reachable in a build where guestMain has no linkname to
-		// answer with — which today means a build that is not for
-		// Android, and nothing outside an Android app can call this.
-		// Kept because android.go is untagged and app() must not be nil.
+		// Reachable only where guestMain has no linkname to answer with,
+		// i.e. a non-Android build. Kept because this file is untagged.
 		panic("kaya: no app to start — an Android guest either registers one " +
 			"with kaya.AndroidMain(app) from an init() (a library carrying " +
 			"several apps) or lets kaya run its own main (an ordinary app, " +
 			"one main.go, no build tags)")
 	}
 	if androidAttached {
-		// A SECOND GUEST WOULD BE SILENT AND WRONG: it would build the
-		// scene again over the top of the first one and consume the same
-		// single-consumer occurrence ring from two threads. Android
-		// re-runs onCreate on a configuration change, so this is
-		// reachable by rotating the device — the Activity has to survive
-		// that itself (android:configChanges, or a process-scoped
-		// holder), and kaya says so rather than quietly doubling.
+		// Reachable by rotating the device (onCreate re-runs); a second
+		// guest would consume the single-consumer ring from two threads.
 		panic("kaya: already attached — onCreate ran twice (a configuration " +
 			"change recreates the Activity); the shell must not attach a " +
 			"second time")
 	}
-	// The stale-artifact guard, which on the desktops rides kaya_run and
-	// therefore never runs here. It is worth MORE on Android than
-	// anywhere else: the APK's jniLibs is a checked-in directory that
-	// only ever accumulates, so a libkaya.so from another tree is the
-	// easy mistake, and the ring records would decode against the wrong
-	// constants with nothing to say about it.
+	// The stale-artifact guard rides kaya_run on the desktops and so
+	// never runs here; the APK's jniLibs only ever accumulates.
 	checkSpec()
 	androidAttached = true
 	go func() {
-		// The app thread's own panic route to the log. It carries more
-		// than kaya's walls: everything the GUEST does — Build, every
-		// handler, every scene — runs on this goroutine, so this is
-		// where a Go app's own panic becomes something a developer can
-		// read rather than a process that vanished.
 		defer androidReport()
-		// The app thread is a REAL OS THREAD, locked for the same reason
-		// every other language's is: it parks inside a C call
-		// (kaya_wait_occurrences -> a pthread condvar) and the ring is
-		// single-consumer. Locking also keeps any later JNI work on one
-		// thread rather than scattering AttachCurrentThread across the
-		// runtime's Ms.
-		//
-		// This is the ONLY LockOSThread on this host. The desktops get
+		// The app thread must be a REAL OS THREAD: it parks inside a C
+		// call (kaya_wait_occurrences) and the ring is single-consumer.
+		// This is the ONLY LockOSThread on this host — the desktops get
 		// theirs from the binding's init (runtime.go), which is skipped
-		// here on purpose: an init runs while System.loadLibrary is
-		// still executing, on a thread the Go runtime made for itself,
-		// and the goroutine it would lock is the library's main
-		// goroutine — which exits the moment package initialization
+		// here because a package init runs on the library's main
+		// goroutine, and that goroutine exits when initialization
 		// finishes, taking the locked thread with it.
 		runtime.LockOSThread()
 		app()
-		// THE ENTRY CAME BACK. On the desktops that is the process
-		// ending and the exit code says so; here nothing is watching,
-		// the Activity is still up, and the screen simply stays empty —
-		// so kaya says it instead of letting Android say nothing.
-		//
-		// The distinction that makes this worth a panic rather than a
-		// log: an app that SERVED and then returned had a life and
-		// ended it (a quit command), which is ordinary. An app that
-		// returned WITHOUT EVER SERVING never started — the shape that
-		// produces it is `func main() {}`, which is exactly what a main
-		// package looks like when its author expected something else to
-		// be the entry.
+		// An app that SERVED and then returned quit, which is ordinary.
+		// Returning without ever serving is `func main() {}` — a main
+		// package whose author expected something else to be the entry
+		// — and on Android nothing is watching, so kaya says it.
 		if !served.Load() {
 			shape := "kaya ran the app's own main (main.main) and it returned " +
 				"without serving"

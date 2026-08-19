@@ -27,8 +27,6 @@ final class Sections {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            // The presentation hint is ADVISORY: no observable rides
-            // on it.
             tx.window(0)
                     .title("sections")
                     .sectionsPresentation(KayaWire.SECTIONS_PRESENTATION_BAR);

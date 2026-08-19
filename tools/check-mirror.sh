@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,12 +10,8 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# CLAUDE.md and AGENTS.md are the same doctrine for two agent harnesses
-# and claim to mirror each other; only line 3 (the mirror comment) may
-# differ. They drifted once — AGENTS.md kept describing the deleted
-# AppKit era for two milestones after CLAUDE.md moved on (caught
-# 2026-07-23 by a fresh onboarding pass, exactly the reader the file
-# exists for) — so the mirror claim is now checked, not remembered.
+# CLAUDE.md and AGENTS.md are true mirrors; only line 3 (the mirror
+# comment) may differ.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -48,9 +39,7 @@ sys.exit(1)
 EOF
 }
 
-# Self-test: a pair that diverges beyond line 3 must be flagged, and a
-# pair differing only on line 3 must pass — otherwise the comparison
-# itself is broken and the green gate below would be a lie.
+# Self-test: divergence beyond line 3 flagged, a line-3-only diff not.
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 printf 'title\n\n<!-- mirror A -->\nsame\n' >"$T/a.md"

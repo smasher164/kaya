@@ -104,7 +104,6 @@ main = kayaMain $ \app -> do
             ]
         ]
 
-    -- Remove's activation names BOTH keys (group, then item).
     (groupList, itemsColl) <- forEach groups $ do
       itemsColl <- collection
       itemList <- each itemsColl $ do
@@ -124,15 +123,14 @@ main = kayaMain $ \app -> do
           buttonOn "enable export" $ -- button#0
             submitTx app (writeSignal canExport (VBool True)),
           buttonOn "reset menu state" $ -- button#1
-            -- The folds never echo the user's pick, so details/sort still
-            -- hold False/0 and these two writes are real records rather
-            -- than no-ops the core could coalesce away.
+            -- The folds never echo the user's pick, so these two writes
+            -- are real records rather than no-ops the core could
+            -- coalesce away.
             submitTx app $ do
               writeSignal details (VBool False)
               writeSignal sort (VF64 0.0)
               writeSignal status (VStr "ready"),
           buttonOn "extend menus" $ -- button#2
-            -- Append-only: the bar grows and nothing is removed.
             submitTx app $ do
               setMenuPrimary share False
               setMenuLabel file "Document"

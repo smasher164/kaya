@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -19,32 +13,17 @@ fi
 # THE THREE LISTS OF GATES MUST BE ONE LIST.
 #
 #   what tools/gates.sh RUNS   — the executable list
-#   what tools/validate-mac.sh RUNS — which must be exactly the above,
-#                              by delegation and not by copy
-#   what CLAUDE.md DOCUMENTS   — rung 2 of the validation ladder, the
-#                              list a session with no context reads and
-#                              believes
+#   what tools/validate-mac.sh RUNS — exactly the above, by DELEGATION
+#                              and not by copy
+#   what CLAUDE.md DOCUMENTS   — rung 2, the list a session with no
+#                              context reads and believes
 #
-# THE DEFECT THIS EXISTS FOR, measured at 0dae894 before the sweep
-# landed. validate-mac.sh ran 26 gate scripts; CLAUDE.md's rung 2 named
-# 23, and omitted FOUR that the lane actually ran — check-case.sh,
-# check-jni.sh, check-native-undo.sh, check-roles.sh. So an agent that
-# "ran the fast gates" out of CLAUDE.md ran 22 of 26 and reported a
-# sweep. That is an under-run with a paper trail, in the file whose
-# mirror-drift is itself guarded: check-mirror.sh cannot see it, because
-# it compares CLAUDE.md to AGENTS.md and both mirrors were equally
-# stale.
+# Plus the CENSUS clause: every gate script ON DISK is either in the
+# list or in gates.sh's EXCLUDED table WITH A REASON. A gate in neither
+# is a gate nobody runs, and nothing else in the tree can see that.
 #
-# Plus the census clause, which is the one that would have caught those
-# four: every gate script ON DISK is either in the list or in
-# gates.sh's EXCLUDED table WITH A REASON. A gate that exists and is in
-# neither is a gate nobody runs, and nothing else in the tree can see
-# that.
-#
-# check-gates reads CLAUDE.md alone and not AGENTS.md: the two are true
-# mirrors and check-mirror.sh is what holds that. Checking both here
-# would report the same drift twice and would not catch anything the
-# pair of gates does not already catch.
+# CLAUDE.md alone, not AGENTS.md: the two are true mirrors and
+# check-mirror.sh is what holds that.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -68,11 +47,9 @@ def fail(msg):
     status = 1
 
 
-# A GATE'S SCRIPT PATH IS ITS NAME EVERYWHERE — in gates.sh's list, in
-# CLAUDE.md's prose, and on disk — so one pattern serves all three
-# readers. The naming clause below then FORCES every gate into a shape
-# this pattern can see, which is what stops the prose scan from going
-# quietly blind the day someone adds tools/verify-something.sh.
+# A GATE'S SCRIPT PATH IS ITS NAME EVERYWHERE, so one pattern serves all
+# three readers. The naming clause below FORCES every gate into a shape
+# this pattern can see, or the prose scan goes quietly blind.
 SHELL_GATE = r"tools/(?:check-[a-z0-9-]+|gen-[a-z0-9-]+|swift-typecheck|java-typecheck)\.sh"
 PY_GATE = r"bindings/python/[a-z0-9_]+\.py"
 TOKEN = re.compile(f"{SHELL_GATE}|{PY_GATE}")
@@ -174,14 +151,10 @@ on_disk = sorted(
 
 # --------------------------------------------------- 0. the self-tests
 #
-# Every clause below is a set comparison, and a set comparison that
-# parsed nothing agrees with everything. So each one is watched failing
-# FIRST, against the real bytes of the real files — CLAUDE.md's actual
-# rung-2 block and validate-mac.sh's actual text — doctored in memory,
-# with the substitution count printed. Zero substitutions is a FAILED
-# self-test, never a passed one: this is the rule check-tx-liveness and
-# the wayland seat guard both learned the hard way (three clauses passed
-# with the guard deleted; a pattern that never matched passed twice).
+# A set comparison that parsed nothing agrees with everything, so each
+# clause is watched failing FIRST against the real bytes of the real
+# files, doctored in memory, with the substitution count printed. Zero
+# substitutions is a FAILED self-test (docs/traps.md).
 
 listed_scripts = [script_of(g["cmd"]) for g in GATES]
 if None in listed_scripts:
@@ -195,11 +168,9 @@ if None in listed_scripts:
     print("check-gates: FINDINGS ABOVE", file=sys.stderr)
     sys.exit(1)
 
-# CLAUDE.md documents the EXCLUDED gates too — check-gtk.sh is named
-# there precisely so a reader knows it exists and why the lane does not
-# run it — so the prose is compared against run-plus-excluded. Leaving
-# the excluded ones out would have made rung 2 the one list allowed to
-# forget a gate, which is the drift this gate is for.
+# CLAUDE.md documents the EXCLUDED gates too, so the prose is compared
+# against run-plus-excluded: otherwise rung 2 would be the one list
+# allowed to forget a gate.
 known = listed_scripts + sorted(EXCLUDED)
 doc_names = documented(block)
 shared = sorted(set(known) & doc_names)
@@ -209,7 +180,7 @@ if not shared:
 else:
     victim = shared[0]
     # N1 — a gate dropped from the PROSE must be reported, naming both
-    # lists. The perturbation is applied to CLAUDE.md's real bytes.
+    # lists. Applied to CLAUDE.md's real bytes.
     doctored, n = re.subn(re.escape(victim), "tools/check-REMOVED-BY-SELFTEST.sh", block)
     print(f"check-gates: self-test N1 removed {victim} from CLAUDE.md's rung-2 "
           f"block, {n} substitution(s)")
@@ -225,8 +196,8 @@ else:
         if not any("CLAUDE.md" in ln and "gates.sh" in ln for ln in lines):
             fail("self-test N1: the drift message does not name both lists")
 
-    # N2 — the same drift from the other side: a gate dropped from the
-    # EXECUTABLE list must be reported as documented-but-not-run.
+    # N2 — the other side: a gate dropped from the EXECUTABLE list must
+    # be reported as documented-but-not-run.
     shrunk = [s for s in known if s != victim]
     print(f"check-gates: self-test N2 removed {victim} from the executable "
           f"list, {len(known) - len(shrunk)} entr(y|ies)")
@@ -240,8 +211,7 @@ else:
                  f"comparison did not report it")
 
 # N3 — a gate invoked DIRECTLY by validate-mac must be reported. The
-# perturbation plants one back into validate-mac.sh's real text, which
-# is exactly the edit this clause exists to refuse.
+# perturbation plants one into validate-mac.sh's real text.
 planted, n = re.subn(r"(?m)^tools/gates\.sh\b",
                      "tools/check-mirror.sh || exit 1\ntools/gates.sh", mac_text)
 print(f"check-gates: self-test N3 planted a direct gate call in "
@@ -295,10 +265,8 @@ if not re.search(r"(?m)^tools/gates\.sh\b", mac_text):
     fail("tools/validate-mac.sh does not call tools/gates.sh — the lane runs "
          "no gate sweep at all")
 
-# The driver's own arithmetic: an under-run, a failing gate and a missing
-# script must each come back red. This is the count-in/count-out clause,
-# watched failing on every run of this gate rather than the day someone
-# remembers to check.
+# The driver's own arithmetic: an under-run, a failing gate and a
+# missing script must each come back red, watched on every run.
 proof = subprocess.run([str(root / "tools" / "gates.sh"), "--selftest"],
                        cwd=root, stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, text=True, check=False)

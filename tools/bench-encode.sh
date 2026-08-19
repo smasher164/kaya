@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,17 +9,14 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# The encode-benchmark leg: pins "derives target the encoder, not a
-# value tree" (DESIGN.md, milestone 3) as a suite gate. Each FFI
-# binding encodes 200k collection_insert records through its generated
-# wire encoder and must clear a floor rate with ~10x headroom — only a
-# structural regression (per-record reflection, tree building) trips
-# it. Rust is exempt: its guest surface hands TxOps over an in-process
-# channel and never serializes; C is the floor and its encoder is the
-# struct layout itself.
+# The encode-benchmark leg (DESIGN.md, milestone 3: "derives target the
+# encoder, not a value tree"): each FFI binding encodes 200k
+# collection_insert records through its generated wire encoder and must
+# clear a floor rate with ~10x headroom. Rust is exempt — its guest
+# surface never serializes; C is the floor.
 #
-# Expects the guests already built (validate-mac builds them first);
-# each program prints "ENCODE_BENCH: OK (<lang>: <rate> rec/s)".
+# Expects the guests already built; each prints
+# "ENCODE_BENCH: OK (<lang>: <rate> rec/s)".
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

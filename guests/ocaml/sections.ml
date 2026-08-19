@@ -24,9 +24,6 @@ let () =
 
   let visit_count = ref 0 in
   build app (fun () ->
-     (* One construct carries the window's attributes. The hint is
-        ADVISORY: `bar` is each desktop's horizontal spelling and the
-        phones' physics regardless, and no observable rides on it. *)
      let () =
        window ~title:"sections"
          ~sections_presentation:

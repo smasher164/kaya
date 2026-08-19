@@ -3,11 +3,10 @@
    identity, and a second collection whose stamped row INSETS its
    children and whose stamped label says it is a HEADING.
 
-   A SCENE OF ITS OWN because this binding creates a container AFTER its
-   children (guests/haskell/reorder.hs writes the rule down), so a For
-   added to the a11y scene — which asserts every container kind
-   ordinally — would make column#0 name a different widget here than in
-   Rust. This scene asserts no container at all.
+   A SCENE OF ITS OWN because this binding creates a container AFTER
+   its children (guests/haskell/reorder.hs writes the rule down), so a
+   For added to the a11y scene would make column#0 name a different
+   widget here than in Rust.
 
    Canonical semantics in guests/rust/a11yrows.rs; the byte-frozen
    contract in tools/scenes/a11yrows.steps. -}
@@ -26,8 +25,7 @@ main = kayaMain $ \app -> do
     --
     -- A scalar row has exactly one field to spend on an id, so the
     -- stamped styling props need a collection of their own. Both of
-    -- THOSE are const: what a copy means, and how far its prototype
-    -- holds children off its edge, are facts about the PROTOTYPE.
+    -- THOSE are const: facts about the PROTOTYPE.
     heads <- collection
 
     root <-

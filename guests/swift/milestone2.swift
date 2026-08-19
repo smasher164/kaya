@@ -23,7 +23,6 @@ var steps = 0
 let (status, items, removeButton) = app.build {
     tx -> (KayaSignal, KayaCollection, KayaNodeHandle) in
     let status = tx.signal(.str("step 0"))
-    // The step count as a signal, so the banner's condition is derived.
     let stepCount = tx.signal(.i64(0))
     let groups = tx.collection()
 
@@ -50,7 +49,6 @@ let (status, items, removeButton) = app.build {
             t.write(status, .str("step \(steps)"))
         }
         tx.label(bind: status)
-        // The When and the Fors parent themselves where they stand.
         tx.when(stepCount == 1) { t in t.label("extras on") }.0
         tx.each(groups) { g in
             _ = g.column {

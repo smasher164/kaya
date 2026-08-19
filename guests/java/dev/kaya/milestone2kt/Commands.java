@@ -6,8 +6,7 @@ import dev.kaya.KayaApp;
  * The standard-commands scene, JVM port: a chord on every leaf kind,
  * the punctuation keys those chords need, and the `settings` role —
  * which macOS shows in the application menu while the item stays
- * addressable where it was declared. Canonical semantics in
- * guests/rust/commands.rs; the byte-frozen contract in
+ * addressable where it was declared. See guests/rust/commands.rs and
  * tools/scenes/commands.steps.
  */
 final class Commands {

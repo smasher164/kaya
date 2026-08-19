@@ -37,8 +37,6 @@ with app.window(title="commands"):
     details = kaya.signal(False)
     sort = kaya.signal(0.0)
 
-    # An ordinary command sits beside Settings so the menu that declared
-    # it is not left empty once macOS moves the settings item away.
     with app.menu("File"):
         kaya.item("Reload")
         kaya.item("Settings…", shortcut="primary+comma",

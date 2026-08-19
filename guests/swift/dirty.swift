@@ -15,7 +15,6 @@ var doc: KayaSignal!
 var status: KayaSignal!
 
 app.build { tx in
-    // `dirty:` and `vetoClose:` are orthogonal — either can be set alone.
     tx.window(
         title: "dirty", vetoClose: true,
         onCloseRequested: { tx in
@@ -42,7 +41,6 @@ app.build { tx in
         tx.label(bind: doc)  // label#0
         tx.label(bind: status)  // label#1
         tx.button("edit") { tx in  // button#0
-            // ONE TRANSACTION, THREE STATEMENTS. Neither implies the other.
             tx.write(doc, .str("notes and a line"))
             tx.write(status, .str("unsaved"))
             tx.window(dirty: true)

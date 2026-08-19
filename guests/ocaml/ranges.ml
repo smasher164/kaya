@@ -19,9 +19,9 @@ open Kaya_app
    bytes): three occurrences of [alpha] and forty short lines, so the
    last match is below the viewport and REVEAL has something to do.
 
-   A QUOTED string literal rather than a "..." one, because [{doc|…|doc}]
-   takes its bytes verbatim — no escape rule stands between this file's
-   UTF-8 and the offsets the scene asserts. *)
+   A QUOTED string literal, because [{doc|...|doc}] takes its bytes
+   verbatim — no escape rule stands between this file's UTF-8 and the
+   offsets the scene asserts. *)
 let doc_source =
   {doc|line 00: 日本語 preface
 line 01: gamma kappa

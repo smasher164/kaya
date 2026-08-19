@@ -1,39 +1,6 @@
 //! The brand-accent derivation (docs/styling-plan.md D1): one seed hex
 //! in, per-appearance VALUES out, computed here once so no backend
-//! re-derives — and so the one place the color math lives is the one
-//! place it can be property-tested.
-//!
-//! THE SHAPE OF THE PROBLEM, from the adaptive-color research (each
-//! claim cited there; the measured ones re-stated as measured): no
-//! platform computes a foreground to fit an accent — every platform
-//! shifts the ACCENT until a fixed foreground works. The two that do
-//! compute foregrounds disagree: SwiftUI flips its automatic label at
-//! relative luminance 0.5 (measured), Material's tone system encodes
-//! the flip at tone 60 with its light-foreground gate at 0.281. Between
-//! perceptual lightness L* 60 and L* 76 those rules give DIFFERENT
-//! answers for the same fill — the DANGER BAND — so the safe design is
-//! a clamp that keeps every fill kaya produces out of the band, at
-//! which point the platforms' rules all agree with kaya's own and with
-//! each other on every value that can actually occur.
-//!
-//! Three numbers per appearance, plus a small interaction ramp:
-//!
-//! - `fill` — the accent as a BACKGROUND (a filled button). Light
-//!   appearance: L* clamped to at most 60. Dark appearance: a fill
-//!   inside the band is pushed UP past L* 76.1 (the Material tone-80 /
-//!   WinUI Light2 model: dark UIs want lighter accents), one below it
-//!   is left alone (the libadwaita/Apple model — still below 60, still
-//!   takes white text).
-//! - `on_fill` — the fixed foreground: white below L* 60, black at or
-//!   above. Reproduces 8 of 9 GNOME accent pairings, both Apple blues,
-//!   and both WinUI theme pairings; agrees with SwiftUI's luminance
-//!   rule and Material's tone rule on every clamped fill.
-//! - `standalone` — accent-colored TEXT on a neutral surface, which
-//!   needs a different number than a fill: libadwaita's rule verbatim,
-//!   Oklab lightness clamped to at most 0.5 in light and at least 0.85
-//!   in dark.
-//! - hover/pressed — the fill nudged by the platforms' common ramp
-//!   direction (darker in light, lighter in dark), fixed deltas.
+//! re-derives.
 //!
 //! Everything is computed in f64 and returned as packed 0xRRGGBB u32s,
 //! the wire's color word.
@@ -48,10 +15,8 @@ pub struct DerivedAccent {
     pub pressed: u32,
 }
 
-/// Both appearances, from one request. `seed` rides along for the one
-/// backend whose platform has its own documented derivation (Material
-/// derives a full role scheme from the seed; kaya defers to a
-/// platform's derivation where one exists rather than fighting it).
+/// Both appearances, from one request. `seed` rides along for Material,
+/// which derives a full role scheme from the seed itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BrandAccent {
     pub seed: u32,
@@ -60,12 +25,9 @@ pub struct BrandAccent {
 }
 
 /// The whole derivation. `light_override`/`dark_override` are D1's
-/// optional per-appearance author values — used AS the appearance's
-/// starting color when present (Apple-model brand books legitimately
-/// specify a dark variant), still clamped like anything else: an
-/// authored override may not enter the danger band either, because the
-/// platforms' foreground rules disagree there no matter who chose the
-/// color.
+/// optional per-appearance author values, used AS that appearance's
+/// starting color and still clamped: an authored override may not
+/// enter the danger band either.
 pub fn derive(seed: u32, light_override: Option<u32>, dark_override: Option<u32>) -> BrandAccent {
     BrandAccent {
         seed,
@@ -110,9 +72,9 @@ fn derive_one(rgb: u32, appearance: Appearance) -> DerivedAccent {
                 rgb
             }
         }
-        // Dark: a fill INSIDE the band is pushed up past it (dark UIs
-        // want lighter accents — the tone-80 model); below the band it
-        // is left alone (the libadwaita/Apple model).
+        // Dark: a fill INSIDE the band is pushed up past it (the
+        // Material tone-80 / WinUI Light2 model — dark UIs want
+        // lighter accents); below the band it is left alone.
         Appearance::Dark => {
             if lstar >= BAND_LO && lstar < BAND_HI {
                 let mut target = BAND_HI + 0.5;
@@ -129,15 +91,13 @@ fn derive_one(rgb: u32, appearance: Appearance) -> DerivedAccent {
     };
     let fill_l = cie_lstar(fill);
     let on_fill = if fill_l < BAND_LO { 0xFFFFFF } else { 0x000000 };
-    // libadwaita's standalone rule verbatim, in Oklab lightness: text
-    // colored LIKE the accent on a neutral surface.
+    // libadwaita's standalone rule verbatim, in Oklab lightness.
     let standalone = match appearance {
         Appearance::Light => clamp_oklab_l_max(rgb, 0.5),
         Appearance::Dark => clamp_oklab_l_min(rgb, 0.85),
     };
-    // The interaction ramp: darker under the pointer in light, lighter
-    // in dark — the direction every platform's own ramp takes. Fixed
-    // deltas; the clamp above already guarantees room on that side.
+    // The interaction ramp: darker in light, lighter in dark — the
+    // direction every platform's own ramp takes.
     let (d_hover, d_pressed) = match appearance {
         Appearance::Light => (-4.0, -8.0),
         Appearance::Dark => (4.0, 8.0),
@@ -152,10 +112,7 @@ fn derive_one(rgb: u32, appearance: Appearance) -> DerivedAccent {
 }
 
 // --- color math -------------------------------------------------------
-//
-// sRGB <-> linear, CIE L* (via relative luminance), and Oklab L. All
-// standard constants; nothing clever. Round-trips are watched by the
-// property tests below.
+// sRGB <-> linear, CIE L* (via relative luminance), and Oklab L.
 
 fn srgb_channels(rgb: u32) -> (f64, f64, f64) {
     (
@@ -209,12 +166,9 @@ fn lstar_to_y(lstar: f64) -> f64 {
     }
 }
 
-/// Re-light a color to a target L*, preserving hue and saturation by
-/// scaling in linear space toward black or white. Scaling toward black
-/// preserves chromaticity exactly; lightening blends toward white,
-/// which desaturates gently — the same direction every platform's own
-/// tint ramps take, and the reason a pushed-up dark fill reads as "the
-/// brand, lighter" rather than a different hue.
+/// Re-light a color to a target L* by scaling in linear space toward
+/// black or white. Darkening preserves chromaticity exactly; lightening
+/// blends toward white, which desaturates gently.
 fn set_lstar(rgb: u32, target: f64) -> u32 {
     let y = rel_luminance(rgb).max(1e-6);
     let ty = lstar_to_y(target);
@@ -251,9 +205,8 @@ pub fn oklab_l(rgb: u32) -> f64 {
 }
 
 fn clamp_oklab_l_max(rgb: u32, max: f64) -> u32 {
-    // Binary-search the L* re-light that lands the Oklab L on target:
-    // the two lightness scales are monotone in each other, so the
-    // search converges; 20 iterations is far past u8 precision.
+    // Binary-search the L* re-light that lands the Oklab L on target;
+    // 20 iterations is far past u8 precision.
     if oklab_l(rgb) <= max {
         return rgb;
     }
@@ -287,10 +240,9 @@ fn search_oklab(rgb: u32, target: f64) -> u32 {
 mod tests {
     use super::*;
 
-    /// THE INVARIANT THE MODULE EXISTS FOR: no fill, in either
-    /// appearance, from any seed, rests inside the danger band. Swept
-    /// over the whole hue circle at every lightness rather than a few
-    /// hand-picked hexes — the failure mode is a specific (hue,
+    /// No fill, in either appearance, from any seed, rests inside the
+    /// danger band. Swept over the whole hue circle rather than a few
+    /// hand-picked hexes: the failure mode is a specific (hue,
     /// lightness) pair nobody hand-picks.
     #[test]
     fn no_fill_ever_rests_in_the_danger_band() {
@@ -308,10 +260,8 @@ mod tests {
         }
     }
 
-    /// The foreground rule agrees with BOTH platform rules on every
-    /// fill kaya produces: SwiftUI's luminance-0.5 flip and Material's
-    /// tone-60 flip give the same answer as on_fill, which is the whole
-    /// point of the clamp.
+    /// SwiftUI's luminance-0.5 flip and Material's tone-60 flip give
+    /// the same answer as on_fill on every fill kaya produces.
     #[test]
     fn on_fill_agrees_with_both_platform_rules_on_every_produced_fill() {
         for rgb in sweep() {
@@ -325,9 +275,8 @@ mod tests {
         }
     }
 
-    /// The standalone clamp lands where libadwaita's rule says: at most
-    /// 0.5 Oklab L in light, at least 0.85 in dark (small tolerance for
-    /// u8 quantization).
+    /// libadwaita's rule: at most 0.5 Oklab L in light, at least 0.85
+    /// in dark (small tolerance for u8 quantization).
     #[test]
     fn standalone_obeys_the_libadwaita_clamp() {
         for rgb in sweep() {
@@ -360,9 +309,8 @@ mod tests {
         }
     }
 
-    /// Grey has no hue to preserve and must still derive cleanly (the
-    /// division-by-luminance path has a 1e-6 floor — black in, black
-    /// out, no NaN).
+    /// Grey has no hue to preserve and must still derive cleanly: the
+    /// division-by-luminance path has a 1e-6 floor, so no NaN.
     #[test]
     fn achromatic_and_extreme_seeds_derive() {
         for rgb in [0x000000, 0xFFFFFF, 0x808080, 0x000001] {
@@ -373,12 +321,12 @@ mod tests {
     }
 
     /// 8 of 9 GNOME accents and both Apple blues take white — the
-    /// research's empirical anchor for the on_fill threshold, pinned
-    /// here so a threshold change has to look these in the eye.
+    /// empirical anchor for the on_fill threshold, pinned here so a
+    /// threshold change has to look these in the eye.
     #[test]
     fn the_platform_pairings_reproduce() {
-        // libadwaita's blue/teal/green/yellow/orange/red/pink/purple/slate
-        // (accent-bg values, 1.7): all take white except yellow.
+        // libadwaita 1.7 accent-bg values: blue, teal, green, orange,
+        // red, pink, purple, slate.
         let white_takers = [
             0x3584E4, 0x2190A4, 0x3A944A, 0xED5B00, 0xE62D42, 0xD56199, 0x9141AC, 0x6F8396,
         ];
@@ -389,16 +337,16 @@ mod tests {
                 "{rgb:06x} should take white"
             );
         }
-        // Adwaita yellow is the one black-taker.
+        // Adwaita yellow, the one raw value that takes black: kaya's
+        // clamp drops its fill below L* 60, so here it takes white.
         assert_eq!(derive(0xC88800, None, None).light.on_fill, 0xFFFFFF);
         // Apple's two blues (light/dark system blue).
         assert_eq!(derive(0x007AFF, None, None).light.on_fill, 0xFFFFFF);
         assert_eq!(derive(0x0A84FF, None, None).light.on_fill, 0xFFFFFF);
     }
 
-    /// The sweep: 12 hues x 3 saturations x 20 lightness steps, plus
-    /// the u8 corners — 733 seeds, enough that a band leak has nowhere
-    /// to hide between samples.
+    /// 12 hues x 3 saturations x 20 lightness steps, plus the u8
+    /// corners, so a band leak has nowhere to hide between samples.
     fn sweep() -> Vec<u32> {
         let mut out = vec![0x000000, 0xFFFFFF, 0xFF0000, 0x00FF00, 0x0000FF];
         for h in 0..12 {

@@ -1,17 +1,13 @@
 //! THROWAWAY guest for the WinUI undo probe (docs/undo-plan.md §0,
-//! probe plan P3-win / P4 / P5). Not a scene, not a conformance
-//! surface, and deliberately outside guests/rust: it exists only to
-//! stand up a real kaya window containing
+//! probe plan P3-win / P4 / P5). Not a scene and not a conformance
+//! surface: it stands up one Entry and one Edit>Undo item carrying
+//! `primary+z`, built through the ordinary menu API so the catalog, the
+//! KeyboardAccelerator and `core.menu_shortcuts` exist as they would in
+//! a shipped app.
 //!
-//!   * one Entry (the TextBox whose native undo stack is the subject),
-//!   * one menu item Edit>Undo carrying the chord `primary+z` (Ctrl+Z),
-//!     built through the ordinary menu API so the catalog, the
-//!     KeyboardAccelerator and `core.menu_shortcuts` all exist exactly
-//!     as they would in a shipped app.
-//!
-//! Everything the app observes is printed with a PROBEGUEST prefix, so
-//! the measurement can tell an occurrence the app saw from a native
-//! state the backend read.
+//! Everything the app observes prints with a PROBEGUEST prefix, so the
+//! measurement can tell an occurrence the app saw from a native state
+//! the backend read.
 
 #[derive(Clone)]
 enum Msg {
@@ -44,13 +40,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 // every text site, so the same questions are asked of it.
                 let notes = tx.textarea().id();
                 msgs.on_change(notes, Msg::Note);
-                // (An app-declared context menu on a text widget was
-                // tried here and is REFUSED at the root:
-                // scene.rs:1435 — "context_attach rejected on Textarea
-                // — the editable text controls keep their native edit
-                // menus (dress)". The guest dies on the scene that
-                // tries it, so the native Undo affordance measured
-                // below cannot be displaced by an app menu.)
+                // (An app-declared context menu on a text widget is
+                // REFUSED at the root — scene.rs, "context_attach
+                // rejected on Textarea" — so the native Undo affordance
+                // measured below cannot be displaced by an app menu.)
             })
             .into_parts();
         tx.mount(root);

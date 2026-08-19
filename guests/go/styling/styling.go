@@ -25,8 +25,7 @@ func App() *kaya.App {
 
 		tx.Mount(tx.Column(func() {
 			// expect_ax resolves a target through its AUTHORED id into
-			// the real tree, so everything the steps read back is
-			// identified.
+			// the real tree.
 			tx.Label(heading).Role(kaya.RoleHeading).A11yID("title") // label#0
 			tx.Label(status)                                         // label#1
 			tx.Button("Delete", func(tx *kaya.Tx) {                  // button#0

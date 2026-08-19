@@ -14,20 +14,21 @@ var status: KayaSignal!
 // The fold: widget-owned state arrives as occurrences.
 var draft = ""
 
-app.build { tx in
-    // BEFORE THE FIRST MOUNT, per the set-once wall. The blob registers
-    // with the platform's app-font machinery and the "Sora" request
-    // resolves to it — register, then resolve.
-    //
-    // ONE CALL, AND NO FILE I/O IN THE GUEST. The path, the environment
-    // override and the sentence for a miss were all hand-written here
-    // (and in seven sibling scenes) until asset() arrived; they live in
-    // the core now (crates/kaya/src/assets.rs), which is also why the
-    // bytes never enter this guest's heap — the handle goes straight to
-    // the blob channel. The release is explicit and the redemption has
-    // already happened by then: brandTypeface registered the bytes into
-    // the pending blob table, which keeps its own reference.
-    let font = KayaAsset("fonts/sora-wght.ttf")
+try app.build { tx in
+        // BEFORE THE FIRST MOUNT, per the set-once wall. The blob registers
+        // with the platform's app-font machinery and the "Sora" request
+        // resolves to it — register, then resolve. The bytes never enter
+        // this guest's heap, and the release is explicit, safe because
+        // brandTypeface has already registered them into the pending blob
+        // table, which keeps its own reference.
+        //
+        // `try` AND NO `catch`, which is the whole of this scene's opinion
+        // about a miss: a font the build did not ship is a wall at startup,
+        // and there is nothing this guest could usefully do on the other
+        // side of it. The throw carries the core's sentence out through
+        // `build` — which rolls the transaction back — and off the top of
+        // the program. The assets scene is where the catch is exercised.
+    let font = try KayaAsset("fonts/sora-wght.ttf")
     tx.brandTypeface("Sora", font: font)
     font.close()
     tx.window(title: "typeface", width: 480, height: 360)

@@ -1,9 +1,7 @@
 // The styling conformance scene, C# port — the brand accent, the role
-// tier and the window inset, together because they are one design
-// (docs/styling-plan.md slice 1, D2/D3). A role changes a widget's
-// chrome and its assistive trait, never what pressing it does.
-//
-// See guests/rust/styling.rs; the byte-frozen contract is
+// tier and the window inset (docs/styling-plan.md slice 1, D2/D3). A
+// role changes a widget's chrome and its assistive trait, never what
+// pressing it does. See guests/rust/styling.rs;
 // tools/scenes/styling.steps.
 
 static class StylingScene

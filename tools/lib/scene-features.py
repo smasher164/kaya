@@ -16,24 +16,17 @@ was green. Both gates passed on a tree where the android lane was about
 to walk into `error("...not yet materialized...")` on its first
 Edit>Undo. Nothing structural stood between the reshape and the matrix.
 
-So the rule moves one level down, off the scene NAME and onto the scene's
-VERBS. A .steps script is a list of demands on a backend; this module
-reads those demands and answers two questions with one derivation:
+So the rule keys on the scene's VERBS, not its NAME:
 
     --check    which runners run a scene whose features their backend
-               refuses (check-steps' new cross-check)
+               refuses
     --exempt   which (runner, scene) pairs a stub legitimately holds
                open, so check-steps stops DEMANDING those legs
+    --dump     the derivation itself
 
-They are complements of one predicate, and they must stay complements:
-if the cross-check fails a pair the exemption does not cover, no tree can
-satisfy both gates at once and the next agent deletes a clause to get
-green. Mid-slice, a Compose stub on `undo` holds BOTH the `undo` legs and
-the `todos` legs off the android runner, and the JNI landing hands both
-back the same day.
-
---dump prints the derivation itself, which is the only honest way to
-review it.
+--check and --exempt are complements of ONE predicate and must stay
+complements: a pair failed by one and not covered by the other is a tree
+no gate can satisfy, and the next agent deletes a clause to get green.
 """
 
 import argparse
@@ -54,14 +47,10 @@ RUNNERS = [
 ]
 
 # A menu item's LEAF LABEL, lowercased, against the closed role
-# vocabulary — and then the role against the feature that implements it.
-#
-# The key set is PINNED to MENU_ROLES in crates/kaya/src/scene.rs
-# (see check_roles_table below), so a role cannot join the vocabulary
-# without this table saying which feature it belongs to. `None` is a
-# real answer and has to be spelled: `settings` is a role every backend
-# has carried since the commands milestone and there is no `settings`
-# feature anyone could stub.
+# vocabulary, and then the role against the feature that implements it.
+# PINNED to MENU_ROLES in crates/kaya/src/scene.rs by check_roles_table
+# below. `None` is a real answer and has to be spelled: no backend could
+# stub a `settings` feature.
 ROLE_FEATURE = {
     "undo": "undo",
     "redo": "undo",
@@ -72,32 +61,20 @@ ROLE_FEATURE = {
 }
 
 # Verbs that name a feature outright, with no menu item in between.
+# Several of these features happen to share their scene's name TODAY, so
+# the name-fallback below would derive them anyway; they are keyed on the
+# VERB for this table's whole reason — the day another scene demands the
+# same lowering without being called after it, a backend still declaring
+# the depth stub must hold those legs off too.
 VERB_FEATURE = {
     "expect_clipboard": "clipboard",
     "clipboard_seed": "clipboard",
-    # The save dialog's three verbs. Keyed on the VERB and not on the
-    # scene name for the reason the module note gives: tools/scenes are
-    # shared verbatim, so the day an editor scene saves a document it
-    # demands this feature without being called `save`, and a backend
-    # still declaring depth_stub("save") must hold those legs off too.
     "expect_save_dialog": "save",
     "file_dialog_name": "save",
     "file_save": "save",
-    # The brand typeface's one observation (docs/styling-plan.md Slice
-    # 2b). Keyed on the verb for this table's whole reason: `typeface`
-    # is the scene's name TODAY, and the name-fallback below would
-    # therefore derive the feature anyway — but the day any other scene
-    # asserts a resolved family it demands the same lowering without
-    # being called after it, and a backend still declaring
-    # depth_stub("typeface") must hold those legs off too.
+    # docs/styling-plan.md Slice 2b.
     "expect_typeface": "typeface",
-    # The app identity's one observation (docs/app-identity-plan.md I8).
-    # Keyed on the verb for this table's whole reason: `identity` is the
-    # scene's name TODAY and the name-fallback below would derive the
-    # feature anyway — but the day the editor scene declares who it is,
-    # it demands the same lowering without being called after it, and a
-    # backend still declaring depth_stub("identity") must hold those
-    # legs off too.
+    # docs/app-identity-plan.md I8.
     "expect_app_icon": "identity",
 }
 
@@ -110,11 +87,9 @@ VERB_FEATURE = {
 # the verb, not a chord table here that guesses at platform conventions.
 MENU_VERBS = ("menu_activate", "expect_menu", "expect_menu_presentation")
 
-# Every language's spelling of the depth-stub declaration. Suffix-matched
-# because each keeps its own casing and prefix: `depth_stub` in Rust,
-# `depthStub` in Kotlin, `kayaDepthStub` in Swift (whose file-scope
-# functions are all kaya-prefixed to stay out of the host's symbol
-# space). check-stubs and check-steps grep the same three shapes.
+# Every language's spelling of the depth-stub declaration, suffix-matched
+# because each keeps its own casing and prefix. check-stubs and
+# check-steps grep the same three shapes.
 def stub_spellings(feature: str, platform: str) -> list[str]:
     out = [f'epth_stub("{feature}")', f'epthStub("{feature}")']
     if platform:
@@ -127,8 +102,7 @@ LANGS = ("rust", "python", "go", "csharp", "java", "swift", "ocaml",
 
 
 def significant(text: str):
-    """The script's real lines, numbered from 1. Comments and blanks are
-    not demands on anything."""
+    """The script's real lines, numbered from 1."""
     for n, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
         if line and not line.startswith("#"):
@@ -138,17 +112,11 @@ def significant(text: str):
 def features(text: str, scene: str) -> dict:
     """feature -> (line number, the line that demanded it).
 
-    The VERBS are read first and the scene's own NAME is only a fallback,
-    which matters for one reason: a scene whose name already equals a
-    feature would otherwise MASK the verb rule that derives it, and a
-    broken rule would look identical to a working one in --dump. The
-    clipboard rows are the ones this keeps honest — `clipboard.steps` is
-    named after the feature it needs, so name-first bookkeeping would
-    have hidden a dead rule for as long as anyone cared to look.
-
-    The name stays in the set because that is the rule the two gates
-    already enforced, restated here so one predicate answers for both
-    halves rather than two greps drifting apart.
+    THE VERBS ARE READ FIRST and the scene's own NAME is only a fallback:
+    a scene whose name already equals a feature would otherwise MASK the
+    verb rule that derives it, and a dead rule would look identical to a
+    live one in --dump. The name stays in the set because that is the
+    rule the two gates already enforced.
     """
     out: dict = {}
     for n, line in significant(text):
@@ -188,11 +156,8 @@ def runs_scene(runner_text: str, scene: str) -> bool:
 def check_roles_table(root: pathlib.Path, bad: list) -> None:
     """ROLE_FEATURE must cover MENU_ROLES exactly.
 
-    Without this the table is a snapshot that goes stale in silence: a
-    seventh role ships, no scene verb maps to a feature, and this whole
-    module answers "no features needed" for the scene that needs the new
-    one. The pin costs one regex and turns a silent hole into a failure
-    at the commit that opens it.
+    Without the pin a seventh role ships, no verb maps to a feature, and
+    this module answers "no features needed" for the scene that needs it.
     """
     src = root / "crates/kaya/src/scene.rs"
     if not src.exists():
@@ -221,10 +186,7 @@ def check_feature_names(root: pathlib.Path, scenes: dict, bad: list) -> None:
 
     A depth stub is spelled `depth_stub("<scene>")` and nothing else, so
     a feature that names no scene can never be stubbed and every rule
-    about it is vacuous — the exact shape of the four-milestone false
-    green that made the CALL spelling mandatory in the first place
-    (tools/lib/hand-rolled-stubs.py). A typo here would be invisible
-    otherwise.
+    about it is vacuous. A typo here would be invisible otherwise.
     """
     known = set(scenes)
     for feat in sorted({f for f in ROLE_FEATURE.values() if f} |
@@ -239,12 +201,9 @@ def check_rules_fire(scenes: dict, bad: list) -> None:
     """Every feature in the tables must be DERIVED FROM A VERB by some
     scene in the tree.
 
-    A rule nobody has watched fire is the failure this whole module was
-    written for, one level up: the CALL spelling became mandatory only
-    after four milestones in which check-stubs could not possibly fail.
-    If the clipboard rows stop matching anything — a verb renamed, a menu
-    label re-cased, a scene retired — this says so at the commit that did
-    it instead of going quiet and passing forever.
+    A rule that matches nothing — a verb renamed, a menu label re-cased,
+    a scene retired — can only ever pass, which is the failure the CALL
+    spelling was made mandatory for one level up (docs/traps.md).
     """
     derived = {feat for feats in scenes.values()
                for feat, (n, _) in feats.items() if n > 0}
@@ -261,11 +220,10 @@ def check_rules_fire(scenes: dict, bad: list) -> None:
 def check_backend_table(root: pathlib.Path, bad: list) -> None:
     """The backend roster here and in the two sibling helpers must agree.
 
-    Five copies of this table now exist (check() in check-stubs.sh,
-    the runner list in check-steps.sh, BACKENDS in hand-rolled-stubs.py,
-    BACKENDS in stub-ledger.py, RUNNERS here). A sixth backend joining
-    one and not the others is a hole nobody would see, so the three
-    python copies at least pin each other.
+    FIVE copies of this table exist (check() in check-stubs.sh, the
+    runner list in check-steps.sh, BACKENDS in hand-rolled-stubs.py,
+    BACKENDS in stub-ledger.py, RUNNERS here); the three python ones at
+    least pin each other.
     """
     for name in ("tools/lib/hand-rolled-stubs.py", "tools/lib/stub-ledger.py"):
         other = root / name
@@ -345,9 +303,7 @@ def main() -> int:
                     continue
                 # The name-keyed pair is reported here TOO, even though
                 # check-stubs owns it: when a stub goes back in, one
-                # reading has to show the whole blast radius. Half the
-                # answer in each of two gates is how the todos leg went
-                # unnoticed in the first place.
+                # reading has to show the whole blast radius.
                 where = (f"tools/scenes/{scene}.steps:{n} needs it:\n    {line}"
                          if n else f"tools/scenes/{scene}.steps IS that scene")
                 bad.append(

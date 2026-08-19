@@ -1,17 +1,12 @@
 //! The interaction test harness: scene scripts as data, one
 //! interpreter for every Rust backend.
 //!
-//! A scene's selftest used to be a hand-written driver per backend per
-//! scene — sleep, poke a control through its own event path, sleep,
-//! read a label, compare. That knowledge now lives once, in
-//! tools/scenes/<scene>.steps (embedded here at build time, so a Rust
-//! backend can never run a stale script), and each backend supplies
-//! only its native calls through [`Stage`]: how to click its button,
-//! flip its checkbox, read its label — code it already had, minus the
-//! choreography. The SwiftUI and Compose halves interpret the same
-//! grammar in Swift and Kotlin (they own their node trees on the far
-//! side of the C ABI); the suites hand them the script text through
-//! the environment.
+//! The choreography lives once, in tools/scenes/<scene>.steps; each
+//! backend supplies only its native calls through [`Stage`]. The
+//! SwiftUI and Compose halves interpret the same grammar in Swift and
+//! Kotlin, since they own their node trees on the far side of the C
+//! ABI, and the suites hand them the script text through the
+//! environment.
 //!
 //! The grammar is line-oriented; `;` is accepted as a line separator
 //! for transports that cannot carry newlines:
@@ -36,49 +31,33 @@
 //!   expect_toolbar_item "<label>" "<symbol>"|enabled|disabled
 //!   shortcut "<spelling>"
 //!
-//! Targets are (kind, creation index) — stamped copies enter the count
-//! in creation order, so `button#last` is "the most recently stamped
-//! button", today's milestone-2 idiom. Every step is logged with its
-//! offset from the run's start (`KAYA_HARNESS: +<ms> <step>`): the
-//! transcript is the timeline a recording mode will extract frames by,
-//! relative offsets only, no wall clock.
+//! Targets are (kind, creation index); stamped copies enter the count
+//! in creation order, so `button#last` is the most recently stamped
+//! button. Every step is logged with its offset from the run's start
+//! (`KAYA_HARNESS: +<ms> <step>`) — relative offsets only, no wall
+//! clock, because that transcript is a recording mode's timeline.
 //!
-//! `kind#index` is HARNESS grammar and nothing else. App code never
-//! addresses positionally — an app holds the WidgetId its constructor
-//! returned, or names collection rows by their domain keys — and no
-//! binding exposes an index lookup. The harness gets indices because
-//! it drives scenes from OUTSIDE the process, across eight language
-//! guests sharing one byte-identical script, where a handle cannot
-//! exist; even here the indexability policy bites — leaf kinds index
-//! stably because body order is screen order in every language, while
-//! container creation order is not, so tools/check-steps.sh rejects
-//! every container target except the unique-by-convention
-//! `column#0`/`row#0`.
+//! `kind#index` is HARNESS grammar and nothing else: app code never
+//! addresses positionally and no binding exposes an index lookup. Leaf
+//! kinds index stably because body order is screen order in every
+//! language; container creation order is not, so tools/check-steps.sh
+//! rejects every container target except `column#0`/`row#0`.
 
 use std::time::{Duration, Instant};
 
 /// The scene scripts, embedded from tools/scenes at build time.
 pub fn script(scene: &str) -> Option<&'static str> {
-    // TWO transports, one per platform shape, and NO registry.
+    // TWO transports, one per platform shape, and NO registry — an
+    // unknown scene must return None and fail spawn loudly, never fall
+    // back to another scene's script.
     //
-    // 1. KAYA_SELFTEST_SCRIPT — the script's TEXT. The interpreters
-    //    need this: an iOS bundle or an Android intent has no shared
+    // 1. KAYA_SELFTEST_SCRIPT — the script's TEXT, for the
+    //    interpreters: an iOS bundle or an Android intent has no shared
     //    filesystem with the runner. (Android's intent extras cannot
     //    carry newlines, hence the `;` stand-in in the grammar.)
-    // 2. KAYA_SCENES_DIR/<scene>.steps — the FILE. The Rust backends
-    //    run where a filesystem exists, so they read the live .steps
-    //    rather than a copy. On Windows the runner ships tools/scenes
-    //    to the VM and points this at it; on Linux the repo is already
-    //    mounted.
+    // 2. KAYA_SCENES_DIR/<scene>.steps — the FILE, read live by the
+    //    Rust backends.
     //
-    // This replaced a hand-written `match scene` of include_str! arms
-    // that ended in `_ => milestone2.steps` — a CATCH-ALL. An unknown
-    // scene therefore ran the WRONG SCENE's script rather than failing:
-    // a GTK run of the a11y scene silently executed milestone2's steps
-    // and reported assertion failures about labels the scene never had
-    // (2026-07-25). A missing scene now returns None and spawn fails
-    // loudly, and a scene is just a file rather than a registry entry —
-    // the same forgotten-list class check-steps already polices.
     // `KAYA_SELFTEST=1` is the original plain selftest flag and still
     // names the milestone-2 scene; the runners use it for those legs.
     let scene = if scene == "1" { "milestone2" } else { scene };
@@ -87,10 +66,8 @@ pub fn script(scene: &str) -> Option<&'static str> {
             return Some(Box::leak(text.into_boxed_str()));
         }
     }
-    // Default: the repo's own tools/scenes, resolved at COMPILE time so
-    // local runs and `cargo test` work with no environment at all.
-    // KAYA_SCENES_DIR overrides it wherever the binary is deployed away
-    // from the source tree.
+    // The repo's own tools/scenes, resolved at COMPILE time so local
+    // runs and `cargo test` need no environment.
     let dir = std::env::var("KAYA_SCENES_DIR").unwrap_or_else(|_| {
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/scenes").to_owned()
     });
@@ -116,12 +93,9 @@ pub enum TargetKind {
     Entry,
     Label,
     Column,
-    /// Rows are targetable under the same convention as columns: only
-    /// index 0, only in a scene that keeps exactly one row, because
-    /// container creation order legitimately differs per language
-    /// (tools/check-steps.sh holds the line). Landed for the
-    /// horizontal grow assertion — before this, a backend that grew
-    /// only columns would have passed the whole matrix.
+    /// Rows are targetable under the columns convention: only index 0,
+    /// only in a scene that keeps exactly one row, because container
+    /// creation order differs per language (tools/check-steps.sh).
     Row,
     Image,
     Progress,
@@ -200,49 +174,28 @@ pub enum Step {
     /// broken, not that kaya NOTICED.
     ExpectStall,
     /// The watchdog has NOTHING to report about a healthy app — the
-    /// other half of the same claim, and the half nothing asserted for
-    /// four milestones.
-    ///
-    /// A diagnostic that fires when it should is only half a
-    /// diagnostic; one that fires when it should not is worse than none,
-    /// because it is read as evidence. Exactly that shipped: the
-    /// watchdog counted occurrences into the transport and counted the
-    /// ones the CORE handed over, so the five languages that read the
-    /// ring directly (go, csharp, ocaml, haskell, java) reported a stall
-    /// on every healthy run, and a matrix failure in one of them sent a
-    /// session hunting a blocked main thread that did not exist. The
-    /// stall scene passed throughout, because it only ever asked for the
-    /// positive.
+    /// other half of ExpectStall's claim. A diagnostic that fires when
+    /// it should not is worse than none, because it is read as evidence
+    /// (docs/traps.md, "A watchdog that reports a stall on a HEALTHY
+    /// app").
     ExpectNoStall,
     Click(Target),
     Toggle(Target, bool),
     SetValue(Target, f64),
     SetText(Target, String),
     /// Type the text at the FOCUSED widget as REAL PLATFORM KEYSTROKES
-    /// — the one verb `set_text` cannot stand in for, because the two
-    /// differ in exactly the thing the undo tier is about.
-    ///
-    /// `set_text` is a programmatic write, and by docs/undo-plan.md's D7
-    /// a programmatic write CLEARS the field's native undo history on
-    /// every platform (GTK's irreversible-action bracketing, WinUI's
-    /// measured wipe, iOS's automatic one, AppKit's removeAllActions,
-    /// Compose's TextFieldState). So a scene built out of set_text
-    /// cannot observe the delegated tier at all: it destroys the very
-    /// history it wants to assert. This verb puts characters on the
-    /// platform's own input path instead, so the native stack fills the
-    /// way a user's typing fills it and each character emits the
-    /// ordinary text_changed the core banks its episode from.
+    /// — the one verb `set_text` cannot stand in for. A programmatic
+    /// write CLEARS the field's native undo history on every platform
+    /// (docs/undo-plan.md D7), so a scene built out of set_text destroys
+    /// the very history it wants to assert.
     ///
     /// THE TARGET IS WHATEVER HOLDS FOCUS, and it takes no target
-    /// argument on purpose: "who receives this key" is the platform's
-    /// answer, and it is the same question D6's routing asks. A scene
-    /// puts focus somewhere first (the guest's focus command, or a
-    /// click) and says so with `expect_focused` — an assertion, so it
-    /// waits — before typing.
+    /// argument on purpose. A scene puts focus somewhere first and says
+    /// so with `expect_focused` — an assertion, so it waits — before
+    /// typing.
     ///
-    /// An action, silent like click: it APPENDS to whatever the widget
-    /// already holds and clears nothing. Two `type` steps in a row are
-    /// one run of typing.
+    /// An action, silent like click: it APPENDS and clears nothing, so
+    /// two `type` steps in a row are one run of typing.
     Type(String),
     Expect(Target, String),
     /// Expect the container's label children to read, in child order,
@@ -257,88 +210,60 @@ pub enum Step {
     /// percentages of the main axis — the observation layout weights
     /// are verified by.
     ///
-    /// Shares, never sizes: absolute geometry is a *metric*, which
-    /// DESIGN leaves platform-flavored, so a size assertion could not
-    /// be shared byte-for-byte the way every other expect is. A share
-    /// is *semantics*, and identical everywhere by construction — give
-    /// a container none but growing children and the split is exactly
-    /// weight/Σweight whatever the platform's control metrics are.
+    /// SHARES, NEVER SIZES: absolute geometry is a metric, which DESIGN
+    /// leaves platform-flavored, so a size assertion could not be
+    /// compared byte-for-byte. A share is semantics and identical
+    /// everywhere — give a container none but growing children and the
+    /// split is exactly weight/Σweight.
     ExpectShares(Target, String),
-    /// Expect the mounted root to fill the window's content area — the
-    /// observation "the root fills its window" (a DESIGN normalization)
-    /// is verified by, and the one thing shares can NEVER see: a share
-    /// is a percentage of the children's sum, which is total-invariant,
-    /// so a root that hugs its content at a fraction of the window
-    /// still splits 25/75 and passes every share assertion. That blind
-    /// spot shipped twice (GTK's root hugged top-left; UIKit's root was
-    /// pinned top+leading only) and both times only a recording caught
-    /// it — this step is the gate that does instead.
+    /// Expect the mounted root to fill the window's content area. The
+    /// one thing shares can NEVER see: a share is a percentage of the
+    /// children's sum, which is total-invariant, so a root that hugs
+    /// its content at a fraction of the window still splits 25/75 and
+    /// passes every share assertion.
     ExpectRootFills,
     /// The window content inset, MEASURED: the gap between the padding
     /// container's outer extent and the offer its children receive,
-    /// halved, in whole layout units. The one observation that can
-    /// tell inset 0 from inset 16 (expect_root_fills compares the root
-    /// against the offer, so it reads "fills" at every inset) — and
-    /// deliberately RELATIVE, because absolute offers cannot be
-    /// byte-frozen across platforms: GTK's CSD headerbar sits inside
-    /// the window's height where macOS's titlebar sits outside it, so
-    /// the same window size yields different offers and the identical
-    /// number everywhere is the inset itself (docs/styling-plan.md D3).
-    /// `expect_inset N` reads the WINDOW's pair; `expect_inset
-    /// <target> N` reads a CONTAINER's own (docs/styling-plan.md D3
-    /// one level down — the prop born from the editor's full-bleed
-    /// window taking the status row's margin with it). Same relative
-    /// measurement at both scopes.
+    /// halved, in whole layout units. The one observation that can tell
+    /// inset 0 from inset 16 (expect_root_fills reads "fills" at every
+    /// inset), and deliberately RELATIVE: GTK's CSD headerbar sits
+    /// inside the window's height where macOS's titlebar sits outside
+    /// it, so absolute offers cannot be byte-frozen and only the inset
+    /// itself is the same number everywhere (docs/styling-plan.md D3).
+    /// `expect_inset N` reads the WINDOW's pair; `expect_inset <target>
+    /// N` reads a CONTAINER's own.
     ExpectInset { target: Option<Target>, units: u32 },
     /// The RESOLVED typeface family, read off the real views rather
     /// than echoed back from the request (docs/styling-plan.md Slice
-    /// 2b). The whole risk of a family swap is the silent fallback:
-    /// every platform's font API renders SOMETHING for a family it
-    /// does not have, so a typo, a stale lowering and a working swap
-    /// are indistinguishable to every other observation this harness
-    /// owns. This step is the one that can tell them apart, and it can
-    /// only do that by asking the TEXT SYSTEM what family it ended up
-    /// with — never the model, never the wire record.
+    /// 2b). Every platform's font API renders SOMETHING for a family it
+    /// does not have, so only asking the TEXT SYSTEM what family it
+    /// ended up with can tell a typo, a stale lowering and a working
+    /// swap apart — never the model, never the wire record.
     ///
-    /// Compared byte-for-byte across platforms like every observation,
-    /// which is why the scene names a family that exists everywhere it
-    /// runs. A backend that resolved nothing reports its platform's own
-    /// default family, which is a REAL answer and reads as a mismatch,
-    /// not as a pass.
+    /// Compared byte-for-byte across platforms, so the scene names a
+    /// family that exists everywhere it runs. A backend that resolved
+    /// nothing reports its platform's default, which reads as a
+    /// mismatch rather than a pass.
     ExpectTypeface(String),
     /// The app icon's SAMPLED PIXELS, read off the artifact the shell
     /// will draw rather than echoed back from the declaration
-    /// (docs/app-identity-plan.md I8). An icon read has three tiers and
-    /// only the third is worth shipping: echoing kaya's own model is
-    /// worthless, echoing the property just written proves the call did
-    /// not throw, and a read of the picture the platform is HOLDING is
-    /// the only one that fails when the conversion failed.
+    /// (docs/app-identity-plan.md I8) — the only read that fails when
+    /// the conversion failed.
     ///
-    /// FOUR SAMPLES, NOT A HASH, and the reason is the conversion this
-    /// slice promises: one PNG goes in and each platform converts it
-    /// (an HICON here, an NSImage on mac, a GdkTexture on Linux), so a
-    /// hash of the result cannot be one frozen string across platforms
-    /// while four unmistakable colours can. The spelling is the four
-    /// quadrant centres — top-left, top-right, bottom-left,
-    /// bottom-right — as `RRGGBB` in uppercase hex, `/`-joined.
-    ///
-    /// A LOWERING THAT NEVER APPLIED reports the platform's own default
-    /// icon, or says in its own words that the window holds none, and
-    /// neither can collide with four declared colours.
+    /// FOUR SAMPLES, NOT A HASH: one PNG goes in and each platform
+    /// converts it (an HICON, an NSImage, a GdkTexture), so a hash
+    /// cannot be one frozen string across platforms while four
+    /// unmistakable colours can. The spelling is the four quadrant
+    /// centres — top-left, top-right, bottom-left, bottom-right — as
+    /// `RRGGBB` in uppercase hex, `/`-joined.
     ExpectAppIcon(String),
     /// Expect the container's children to span its content box along
     /// the main axis — the leftover-consumption half of the grow
-    /// contract, and the second blind spot shares can never see:
-    /// growers that hold their weight RATIO at natural size pass every
-    /// share assertion (shares are percentages of the children's sum,
-    /// which is total-invariant) while consuming none of the leftover.
-    /// root_fills cannot see it either — it stops at the root, and the
-    /// root can be forced full-size by its window while its children
-    /// pool the leftover in container slack. That exact combination
-    /// shipped: AppKit's gravity-areas distribution left the bottom
-    /// pull unenforced, growers sat at ratio'd minimums, every gate
-    /// stayed green, and only a 540x330 window made it visible where
-    /// 320x160 had hidden it. This step is the gate that sees it.
+    /// contract, and the second blind spot shares cannot see: growers
+    /// that hold their weight RATIO at natural size pass every share
+    /// assertion while consuming none of the leftover. root_fills
+    /// cannot see it either, since the root can be forced full-size by
+    /// its window while its children pool the leftover in slack.
     ExpectFills(Target),
     /// Expect the container's children to sit at the given cross-axis
     /// placement — the observation the `align` prop is verified by.
@@ -365,34 +290,19 @@ pub enum Step {
     /// Expect the section row titled `.0` to draw the SEMANTIC ICON
     /// named `.1`, read from the REAL rendered switcher row.
     ///
-    /// THE GAP THIS CLOSES, and it is measured rather than imagined: the
-    /// SwiftUI section-symbol decode read the I64 at `body+20`
-    /// (alignment padding) instead of `+24`, so `section.symbol` was
-    /// garbage, no glyph rendered, and every lane stayed green for a day
-    /// — the sections scene declared four symbols and asserted none of
-    /// them. A capture caught it. `expect_menu_symbol` had already
-    /// closed exactly this hole one construct over; this is the same
-    /// verb at the sections switcher.
+    /// The observation is the SEMANTIC NAME (`"home"`): a scene shared
+    /// verbatim by five lanes cannot compare `house` against
+    /// `go-home-symbolic` against `Home`. Each backend reads what its
+    /// row actually draws and inverts it back to kaya's vocabulary;
+    /// where a platform hands out no glyph object, the rendering arm
+    /// publishes the semantic name on the row's own accessibility
+    /// surface and the read consults THE REAL ELEMENT, so an arm that
+    /// stopped drawing moves the answer.
     ///
-    /// The observation is the SEMANTIC NAME (`"home"`), for
-    /// expect_menu_symbol's reason: a scene shared verbatim by five
-    /// lanes cannot compare `house` against `go-home-symbolic` against
-    /// `Home`. Each backend reads what its row actually draws and
-    /// inverts it back to kaya's vocabulary; where a platform hands out
-    /// no glyph object at all, the rendering arm publishes the semantic
-    /// name on the row's own accessibility surface and the read consults
-    /// THE REAL ELEMENT, so an arm that stopped drawing moves the
-    /// answer. Each backend's channel and its limit are stated at its
-    /// arm.
+    /// ADDRESSED BY TITLE, ACROSS EVERY WINDOW: the answer comes from
+    /// the first real row whose title matches, in window order.
     ///
-    /// ADDRESSED BY TITLE, ACROSS EVERY WINDOW, because a section row is
-    /// what the user sees and the sections scene puts its sidebar rows
-    /// in an aux window. The answer comes from the first real row whose
-    /// title matches, in window order; two windows with a same-titled
-    /// section would be ambiguous, and the day a scene wants that the
-    /// verb grows a `window#n` target the way expect_title has one.
-    ///
-    /// TOTAL, like `menu_symbol`: a title that no row carries, or a row
+    /// TOTAL, like `menu_symbol`: a title no row carries, or a row
     /// carrying no glyph, reads as a short description — a retryable
     /// non-match rather than a panic, so this doubles as the wait for a
     /// switcher rebuild.
@@ -495,34 +405,25 @@ pub enum Step {
     /// following menu_activate resolves against the OPEN menu. An
     /// action, silent like click.
     ContextOpen(Target),
-    /// Expect the menu item at the path to read the given state along
-    /// that state's axis (enablement, checkedness, or the radio
-    /// group's value), from the platform's REAL menu chrome — never
-    /// the scene model's copy, so a backend that ignored the write
-    /// must fail.
+    /// The menu item's state along one axis (enablement, checkedness,
+    /// or the radio group's value), from the platform's REAL menu
+    /// chrome — never the scene model's copy.
     ExpectMenu(String, MenuState),
     /// Expect the menu item at the path to carry the SEMANTIC ICON of
     /// that name, read from the platform's REAL menu chrome
     /// (docs/styling-plan.md D6).
     ///
     /// THE OBSERVATION IS THE ACCESSIBILITY DESCRIPTION, not the
-    /// platform's glyph string, and that is the whole design: kaya has
-    /// never asserted an icon anywhere, and a scene shared verbatim by
-    /// five lanes cannot compare `doc.on.doc` against `content_copy`
-    /// against `edit-copy-symbolic`. What every platform DOES agree on
-    /// is that an icon carrying meaning must say what it means to an
-    /// assistive client — so each backend sets that description to the
+    /// platform's glyph string: a scene shared verbatim by five lanes
+    /// cannot compare `doc.on.doc` against `content_copy` against
+    /// `edit-copy-symbolic`. Each backend sets that description to the
     /// SEMANTIC NAME kaya was given, and the harness reads it back out
-    /// of the real item. One byte-comparable answer on every lane, and
-    /// the accessibility every icon should have had anyway.
+    /// of the real item.
     ///
     /// TOTAL, like menu_state: a missing item or a missing image reads
     /// as a short description, a retryable non-match rather than a
     /// panic, so this doubles as the wait for a catalog rebuild.
     ExpectMenuSymbol(String, String),
-    /// The window's top-level catalog count, from the REAL
-    /// materialized bar (or the phone overflow's group list) — the
-    /// observation menubar_append's topology is verified by.
     /// The target's accessibility ROLE and spoken LABEL, read from the
     /// platform's OWN accessibility peer — NSAccessibility /
     /// UIAccessibility protocol methods, AccessibilityNodeInfo,
@@ -530,15 +431,9 @@ pub enum Step {
     /// model, and not kaya's copy of what it set: the data an assistive
     /// client actually receives.
     ///
-    /// This is the gate DESIGN's accessibility claim never had. kaya
-    /// asserts that native widgets ARE the accessibility tree, which is
-    /// the load-bearing consequence of the wrap-native bet, and until
-    /// now nothing anywhere proved it on any platform.
-    ///
     /// Spelled `<role>/<label>`. Role comes from each platform's own
     /// vocabulary normalized to a small closed set, because the point is
-    /// that the PLATFORM classified the control, not that kaya
-    /// remembered what it built.
+    /// that the PLATFORM classified the control.
     ExpectAx(Target, String),
     /// The control's HINT — what activating it does. Its own verb
     /// because expect_ax's `<role>/<label>` spelling is byte-frozen in
@@ -549,52 +444,35 @@ pub enum Step {
     /// `<size class>/<presentation>`: `regular/bar`,
     /// `compact/overflow`, or `<class>/none` when the catalog is empty.
     ///
-    /// The PAIR is the assertion on purpose. The iPadOS 26 defect was a
-    /// regular-width window wearing the compact lowering, and neither
-    /// half alone catches that — the size class was right and the
-    /// presentation was right, only for different windows (DESIGN.md,
+    /// THE PAIR is the assertion on purpose: neither half alone catches
+    /// a regular-width window wearing the compact lowering (DESIGN.md,
     /// "Form factor and adaptivity"). Size class comes from the
     /// platform's own reading where it has one (SwiftUI's horizontal
     /// size class, Compose's WindowSizeClass) and from the 600dp width
-    /// boundary those APIs themselves use where it does not (GTK4,
-    /// WinUI — whose adaptive triggers are width thresholds anyway).
-    /// `Some(spelling)` asserts an exact `<class>/<presentation>`.
-    /// `None` — the BARE form — asserts only the invariant: a regular
-    /// window must not hide its catalog behind the compact overflow.
-    /// The bare form is what a SHARED scene can carry, because the
-    /// exact literal differs per lane (`regular/bar` on desktops,
-    /// `compact/overflow` on phones) while the invariant holds
-    /// everywhere. Deliberately ASYMMETRIC: a compact window showing a
-    /// bar is legitimate — a narrow GTK or WinUI window keeps its menu
-    /// bar — so only the one direction is a defect.
+    /// boundary those APIs use where it does not (GTK4, WinUI).
+    ///
+    /// `Some(spelling)` asserts an exact `<class>/<presentation>`;
+    /// `None` — the BARE form, and the one a SHARED scene can carry —
+    /// asserts only the invariant, because the exact literal differs
+    /// per lane. Deliberately ASYMMETRIC: a compact window showing a
+    /// bar is legitimate, so only the one direction is a defect.
     ExpectMenuPresentation(Option<String>),
     /// The window's toolbar, BARE INVARIANT form (the
     /// expect_menu_presentation shape): the promoted set is really in
     /// this window's chrome, and the remainder is reachable.
     ///
-    /// A COUNT CANNOT RIDE A SHARED SCENE. Capacity *k* is the
-    /// platform's own number — "never computed by kaya", in both mobile
-    /// arms' words — and a scene is compared byte-for-byte on every
-    /// lane, so the step asserts the invariant and reports one
-    /// lane-independent verdict: "toolbar".
+    /// A COUNT CANNOT RIDE A SHARED SCENE: capacity *k* is the
+    /// platform's own number, so the step asserts the invariant and
+    /// reports one lane-independent verdict, "toolbar".
     ///
     /// The backend answers `<promoted actions found in the real
     /// chrome>/<promoted in the catalog>/<items the chrome holds>/<where
     /// the remainder lives>`. The first and third numbers are READ OFF
-    /// THE PLATFORM'S OWN BAR (macOS: the NSToolbar's items), the second
-    /// is computed from the catalog, and the fourth names the
-    /// remainder's home from a closed set: `menubar` (macOS — the whole
-    /// catalog sits in the kaya-owned NSApp.mainMenu segment, so the
-    /// remainder is reachable by construction), `more` (a synthesized
-    /// More menu), `overflow` (a bar that overflows in place), `none`
-    /// (the backend found no home — a failure, since every catalog this
-    /// step runs against has a remainder).
-    ///
-    /// The chrome number and the catalog number cannot be wrong
-    /// together, which is the whole point of asking for both: one is the
-    /// real chrome and the other is the model, so a lowering that never
-    /// attached a toolbar reads `0/2/0/…` and the failure names both
-    /// sides instead of echoing the promotion list back.
+    /// THE PLATFORM'S OWN BAR, the second is computed from the catalog,
+    /// and the fourth names the remainder's home from a closed set:
+    /// `menubar`, `more`, `overflow`, or `none` (a failure — every
+    /// catalog this step runs against has a remainder). One is the real
+    /// chrome and the other the model, so they cannot be wrong together.
     ///
     /// THE THIRD NUMBER IS THERE SO THE FAILURE CAN DISCRIMINATE, and it
     /// was added because a watched negative caught the sentence lying:
@@ -624,22 +502,18 @@ pub enum Step {
     /// silent like click.
     Shortcut(String),
     /// Drive the window's REAL resize — the path a user's drag takes,
-    /// not a model write — so the SIZE CLASS actually changes and the
-    /// adaptive arms re-run. `None` targets the implicit primary.
-    /// Capability-rejected on the phone hosts, the create_window
-    /// precedent: a phone window has no size to command. An action,
-    /// silent like click and close_window.
+    /// not a model write — so the SIZE CLASS changes and the adaptive
+    /// arms re-run. `None` targets the implicit primary.
+    /// Capability-rejected on the phone hosts: a phone window has no
+    /// size to command.
     ResizeWindow(Option<u64>, f64, f64),
     /// The window's live list-detail presentation,
     /// `<size class>/<presentation>` with presentations `split` and
     /// `stacked`. `Some(spelling)` asserts an exact reading; `None` —
-    /// the BARE form — asserts only the invariant a SHARED scene can
-    /// carry, because the exact literal differs per lane while the
-    /// invariant holds everywhere. Deliberately ASYMMETRIC, the
-    /// expect_menu_presentation precedent: a regular window must not be
-    /// showing one pane while its stack holds two, but what counts as
-    /// wide enough is the platform's call and a compact window is never
-    /// asked to show two.
+    /// the BARE form a SHARED scene can carry — asserts only the
+    /// invariant. ASYMMETRIC, the expect_menu_presentation precedent: a
+    /// regular window must not show one pane while its stack holds two,
+    /// but a compact window is never asked to show two.
     ExpectSplit(Option<String>),
     /// The textarea's DECORATED RANGES, read from the platform's own
     /// text layer, spelled `<start>:<end>=<covered text>` per range and
@@ -665,20 +539,16 @@ pub enum Step {
     /// Whether a range is inside the textarea's VIEWPORT: `visible` or
     /// `offscreen`.
     ///
-    /// CONTAINMENT AND NOT THE VIEWPORT ITSELF, because the visible
-    /// range is a geometry fact that differs per lane (a 240x96 macOS
-    /// text view showed `{1378,224}`) while "is my range on screen" is
-    /// the same question everywhere — the expect_split precedent. The
-    /// `offscreen` spelling is what keeps the assertion from being
-    /// vacuous: a scene asserts it BEFORE the reveal, so a document
-    /// short enough to be entirely visible fails the leg instead of
-    /// passing it.
+    /// CONTAINMENT AND NOT THE VIEWPORT ITSELF: the visible range is a
+    /// geometry fact that differs per lane while "is my range on
+    /// screen" is the same question everywhere. The `offscreen`
+    /// spelling keeps the assertion from being vacuous — a scene
+    /// asserts it BEFORE the reveal, so a document short enough to be
+    /// entirely visible fails the leg instead of passing it.
     ExpectRevealed(Target, TextRange, String),
     /// Start an input-method COMPOSITION in the target with this marked
-    /// text — the state a user is in mid-word with a Japanese or Chinese
-    /// IME, which no other verb can reach (`type` is printable ASCII by
-    /// contract, precisely because a composed character is an IME
-    /// question and not a verb argument).
+    /// text — the mid-word IME state no other verb can reach (`type` is
+    /// printable ASCII by contract).
     ///
     /// The text is MARKED, not committed: it is displayed, it is not in
     /// the widget's value, and the app has been told nothing. It exists
@@ -781,107 +651,80 @@ impl Step {
 /// What a backend supplies: its native calls, each hopping to its UI
 /// thread internally and blocking until applied (reads return the
 /// value). The harness thread stays dumb.
+///
+/// NO METHOD HERE GETS A DEFAULT BODY. A backend that forgets one must
+/// fail to COMPILE; a default would let it pass that scene's legs
+/// vacuously, which is how the GTK reorder gap reached the Linux suite.
 pub trait Stage: Send + 'static {
     fn click(&self, target: Target);
     fn toggle(&self, target: Target, on: bool);
     fn set_value(&self, target: Target, value: f64);
     fn set_text(&self, target: Target, text: &str);
     /// Deliver `text` to the FOCUSED widget as real platform
-    /// keystrokes. No default: a backend that forgets it must fail to
-    /// compile rather than pass a native-undo leg vacuously.
+    /// keystrokes. THE CONTRACT, since every backend implements it
+    /// separately and they must agree:
     ///
-    /// THE CONTRACT, spelled out because every backend implements it
-    /// separately and the whole point of the verb is that they agree
-    /// (CLAUDE.md invariant 1):
-    ///
-    /// 1. THE PLATFORM'S OWN INPUT PATH, never a text write. Each
-    ///    character goes in as a key event the toolkit did not
-    ///    manufacture for us — CGEvent/NSEvent on macOS, SendInput on
-    ///    Windows, gdk_event_put/key controller on GTK, the instrumented
-    ///    injection on Android — so the widget's NATIVE undo stack fills
-    ///    exactly as a user's typing fills it, and the field emits its
-    ///    ordinary `text_changed` per character. Setting the text and
-    ///    calling that "typing" is the one implementation that cannot
-    ///    be accepted: it wipes the native history (docs/undo-plan.md
-    ///    D7), which is the state a native-tier scene exists to observe.
+    /// 1. THE PLATFORM'S OWN INPUT PATH, never a text write —
+    ///    CGEvent/NSEvent, SendInput, gdk_event_put/key controller, the
+    ///    instrumented injection on Android — so the NATIVE undo stack
+    ///    fills as a user's typing fills it and the field emits its
+    ///    ordinary `text_changed` per character. Setting the text
+    ///    instead wipes the native history (docs/undo-plan.md D7),
+    ///    which is the state a native-tier scene exists to observe.
     /// 2. WHATEVER HOLDS FOCUS RECEIVES IT, resolved by the platform,
-    ///    not by kaya looking up a widget: a keystroke's destination is
-    ///    the routing question D6 asks, and answering it here in kaya
-    ///    would make the verb agree with itself. Nothing focused means
-    ///    the keys go where the platform sends them, which a following
-    ///    assertion will report as a mismatch.
+    ///    not by kaya looking up a widget. Nothing focused means the
+    ///    keys go where the platform sends them, which a following
+    ///    assertion reports as a mismatch.
     /// 3. IT APPENDS. Before the first keystroke the insertion point
-    ///    goes to the END of the widget's current text with nothing
-    ///    selected — a caret move, which is not an edit and spends no
-    ///    native undo step — and the characters follow. macOS is what
-    ///    makes this a contract rather than tidiness: making a text
-    ///    field first responder SELECTS ITS WHOLE CONTENTS, so a verb
-    ///    that typed "wherever the caret happens to be" would append on
-    ///    one platform and replace on another, and one script is
-    ///    compared byte-for-byte on all five (invariant 6). Two `type`
-    ///    steps in a row are therefore one run of typing, and the scene
-    ///    controls the state by what it types.
+    ///    goes to the END of the current text with nothing selected —
+    ///    a caret move, not an edit, spending no native undo step.
+    ///    macOS forces this: making a text field first responder
+    ///    SELECTS ITS WHOLE CONTENTS, so "wherever the caret happens to
+    ///    be" would append on one platform and replace on another.
     /// 4. IT BLOCKS UNTIL THE TEXT HAS LANDED — every character
-    ///    delivered AND processed by the widget (the platform's input
-    ///    queue drained past the last key event) before it returns.
-    ///    This is an ACTION, and actions are not retried: the
-    ///    POLL_DEADLINE contract makes a following `expect` a bounded
-    ///    retry that would paper over a late delivery, but a following
-    ///    ACTION — `menu_activate "Edit>Undo"`, which is the whole
-    ///    reason this verb exists — has no such cover, and a race there
-    ///    reads as a broken undo rather than a missed keystroke.
-    /// 5. NO SYNTHETIC COALESCING. The characters arrive as separate key
-    ///    events in order, and whether the platform merges them into one
-    ///    native undo step is the platform's business — the scene asserts
-    ///    kaya's ledger, never the platform's granularity.
+    ///    delivered AND processed (the input queue drained past the
+    ///    last key event) before it returns. Actions are not retried,
+    ///    and a following ACTION has no POLL_DEADLINE cover, so a race
+    ///    there reads as a broken undo rather than a missed keystroke.
+    /// 5. NO SYNTHETIC COALESCING. The characters arrive as separate
+    ///    key events in order; whether the platform merges them into
+    ///    one native undo step is the platform's business.
     /// 6. PRINTABLE ASCII ONLY. `parse` refuses anything else, so a
-    ///    backend needs no key mapping beyond the set every platform
-    ///    types the same way; a control character or a composed
-    ///    character is an IME question, not a verb argument.
+    ///    backend needs no key mapping; a control or composed character
+    ///    is an IME question, not a verb argument.
     fn type_text(&self, text: &str);
     fn read_label(&self, target: Target) -> String;
-    /// The displayed text of an entry — what the user sees in the
-    /// field, read from the toolkit (the observation the clear command
-    /// is pinned by: the occurrence fold alone cannot prove the screen
-    /// emptied). No default, like child_texts: a backend that forgets
-    /// it fails to compile.
+    /// The displayed text of an entry — what the user sees in the field,
+    /// read from the toolkit (the observation the clear command is pinned
+    /// by: the occurrence fold alone cannot prove the screen emptied).
     fn read_text(&self, target: Target) -> String;
-    /// Whether the widget holds keyboard focus, read from the toolkit
-    /// (per-window focus, never global key status — parallel tiled
-    /// legs must not steal each other's assertion). No default.
+    /// Whether the widget holds keyboard focus, read from the toolkit (per-
+    /// window focus, never global key status — parallel tiled legs must not
+    /// steal each other's assertion).
     fn is_focused(&self, target: Target) -> bool;
-    /// The decoded size of an image, as "WxH" — the observation that
-    /// pins "the bytes actually decoded and display" (a failed decode
-    /// reads "0x0", the placeholder class). No default, like
-    /// child_texts: a backend that forgets it fails to compile.
+    /// The decoded size of an image, as "WxH" — the observation that pins
+    /// "the bytes actually decoded and display" (a failed decode reads
+    /// "0x0", the placeholder class).
     fn image_size(&self, target: Target) -> String;
-    /// The texts of the container's label children, in child order,
-    /// joined with `|` — the observation expect_order verifies. No
-    /// default: a backend that forgets it must fail to compile, not
-    /// panic on the first reorder leg (which is how the GTK gap
-    /// reached the Linux suite).
+    /// The texts of the container's label children, in child order, joined
+    /// with `|` — the observation expect_order verifies.
     fn child_texts(&self, target: Target) -> String;
-    /// Whether the mounted root fills the window's content area, read
-    /// from the toolkit after forcing pending layout: the empty string
-    /// when it does (within one device unit — rounding is not a hug),
-    /// otherwise a short platform-flavored description of the two
-    /// rects, which only ever appears in failure text and is never
-    /// compared across platforms. "Content area" is the platform's own
-    /// notion — the safe area on iOS, the contentView on macOS, the
-    /// window's child area on GTK and WinUI, the content parent on
-    /// Android. No default, like child_shares: a backend that forgets
-    /// it must fail to compile rather than pass the fill leg vacuously.
+    /// Whether the mounted root fills the window's content area, read from
+    /// the toolkit after forcing pending layout: the empty string when it
+    /// does (within one device unit — rounding is not a hug), otherwise a
+    /// short platform-flavored description of the two rects, which only
+    /// ever appears in failure text and is never compared across platforms.
+    /// "Content area" is the platform's own notion — the safe area on iOS,
+    /// the contentView on macOS, the window's child area on GTK and WinUI,
+    /// the content parent on Android.
     fn root_fills(&self) -> String;
     /// The window content inset, MEASURED from real layout — the gap
     /// between the padding container's outer extent and its children's
-    /// offer, halved — as whole layout units ("16"), or the backend's
-    /// own words when the two axes disagree. No default, like
-    /// root_fills: a backend that forgets it fails to compile rather
-    /// than passing the inset leg vacuously.
+    /// offer, halved — as whole layout units ("16"), or the backend's own
+    /// words when the two axes disagree.
     fn inset(&self) -> String;
-    /// A CONTAINER's own content inset, the same halved-gap measurement
-    /// one level down (its outer extent against its children's offer).
-    /// No default, for inset's exact reason.
+    /// A CONTAINER's own content inset, the same halved-gap measurement one
+    /// level down (its outer extent against its children's offer).
     fn container_inset(&self, target: Target) -> String;
 
     /// The RESOLVED typeface family, read off the real text views —
@@ -890,29 +733,18 @@ pub trait Stage: Send + 'static {
     /// family this platform does not have, that is the platform's own
     /// default family, and the honest answer is to say so.
     ///
-    /// NO DEFAULT, and this one earns it more than most: every font API
-    /// on every platform renders SOMETHING for a family it cannot
-    /// match, so a Stage that answered "" or echoed the request would
-    /// pass the typeface leg while the swap never happened — the exact
-    /// failure the slice exists to catch, dressed as a green lane. A
-    /// backend without the read must fail to COMPILE.
+    /// Every font API renders SOMETHING for a family it cannot match,
+    /// so a Stage that answered "" or echoed the request would pass the
+    /// typeface leg while the swap never happened.
     fn typeface(&self) -> String;
     /// The app icon's four quadrant samples, read off the picture the
     /// PLATFORM is holding — `RRGGBB/RRGGBB/RRGGBB/RRGGBB`, uppercase,
     /// clockwise from the top left (docs/app-identity-plan.md I8).
     ///
-    /// NO DEFAULT, and it earns it the way `typeface` does: an icon that
-    /// never applied leaves the platform's own in place, so a Stage that
-    /// answered "" or echoed the declaration would pass the identity leg
-    /// while nothing was ever drawn — the silent fallback, one tier up
-    /// from the font's. A backend without the read must fail to COMPILE.
-    ///
     /// WHEN THERE IS NO ICON the answer says what it MEASURED and what
     /// it could not tell apart, never a bare "none": the platforms
     /// document a fallback chain (a Windows window with no icon of its
-    /// own falls through to the window CLASS's, then to the process's),
-    /// so a read that stopped at the first step would blame kaya for a
-    /// picture the shell is drawing from somewhere else.
+    /// own falls through to the window CLASS's, then the process's).
     fn app_icon(&self) -> String;
     /// The main-axis extents of the container's children, in child
     /// order, each as a whole percentage of their sum, joined with `,`
@@ -925,19 +757,14 @@ pub trait Stage: Send + 'static {
     /// alignment/layout rect where the toolkit distinguishes it from
     /// the drawing frame (AppKit inflates a slider's frame past its
     /// alignment rect, which would read 1:3 as 2.90:1).
-    ///
-    /// No default, like child_texts: a backend that forgets it must
-    /// fail to compile rather than pass a layout leg vacuously.
     fn child_shares(&self, target: Target) -> String;
-    /// Whether the container's children (plumbing like leftover
-    /// fillers excluded) span its content box along the main axis,
-    /// read from the toolkit after forcing pending layout: the empty
-    /// string when they do (within two device units), otherwise a
-    /// short platform-flavored description of the span and the box,
-    /// which only ever appears in failure text and is never compared
-    /// across platforms. The observation expect_fills verifies. No
-    /// default, like child_shares: a backend that forgets it must
-    /// fail to compile rather than pass the consumption leg vacuously.
+    /// Whether the container's children (plumbing like leftover fillers
+    /// excluded) span its content box along the main axis, read from the
+    /// toolkit after forcing pending layout: the empty string when they do
+    /// (within two device units), otherwise a short platform-flavored
+    /// description of the span and the box, which only ever appears in
+    /// failure text and is never compared across platforms. The observation
+    /// expect_fills verifies.
     fn container_fills(&self, target: Target) -> String;
     /// Whether a WIDGET spans the track its flex container assigned it,
     /// along that container's main axis: the empty string when it does
@@ -948,53 +775,36 @@ pub trait Stage: Send + 'static {
     /// appears in failure text and is never compared across platforms.
     /// The observation expect_fills verifies on a widget target.
     ///
-    /// THE HALF OF THE GROW CONTRACT SHARES CANNOT SEE, and the reason
-    /// this is a separate observation rather than a case of
-    /// `child_shares`: three of the four backends read the TRACK there
-    /// (SwiftUI's KayaFlex frame, WinUI's RowDefinition, Compose's
-    /// weighted cell), deliberately — the layout rect is what the grow
-    /// arithmetic decides, and a control that hugs inside it is
-    /// platform flavor a byte-compared assertion could never carry. So
-    /// a widget that draws at a HARD SIZE inside a correct track splits
-    /// its container exactly right and renders wrong, silently. It has
-    /// happened twice: the slider capped at 200pt rendered a 1:3 row as
-    /// 38/62 with expect_shares passing, and the textarea's
-    /// `.frame(width: 240, height: 96)` gave an editor asking for a
-    /// full-window buffer a small box on two backends at once.
-    ///
-    /// No default, like child_shares: a backend that forgets it must
-    /// fail to compile rather than pass the grow leg vacuously.
+    /// THE HALF OF THE GROW CONTRACT SHARES CANNOT SEE, which is why it
+    /// is not a case of `child_shares`: three of the four backends read
+    /// the TRACK there (SwiftUI's KayaFlex frame, WinUI's
+    /// RowDefinition, Compose's weighted cell), deliberately. So a
+    /// widget that draws at a HARD SIZE inside a correct track splits
+    /// its container exactly right and renders wrong, silently.
     fn widget_fills(&self, target: Target) -> String;
-    /// The container's cross-axis placement, CLASSIFIED from geometry
-    /// after forcing pending layout: one of "start", "center", "end",
-    /// "stretch", or "baseline" when the corresponding coincidence
-    /// holds for every child (within two device units), otherwise a
-    /// short platform-flavored description of what was seen (failure
-    /// text only, never compared across platforms). Baseline is
-    /// meaningful on rows alone and classifies via each toolkit's own
-    /// baseline query. The observation expect_aligned verifies. No
-    /// default: a backend that forgets it must fail to compile.
+    /// The container's cross-axis placement, CLASSIFIED from geometry after
+    /// forcing pending layout: one of "start", "center", "end", "stretch",
+    /// or "baseline" when the corresponding coincidence holds for every
+    /// child (within two device units), otherwise a short platform-flavored
+    /// description of what was seen (failure text only, never compared
+    /// across platforms). Baseline is meaningful on rows alone and
+    /// classifies via each toolkit's own baseline query. The observation
+    /// expect_aligned verifies.
     fn cross_mode(&self, target: Target) -> String;
-    /// A surface's REAL materialized title (the title bar on the
-    /// desktops, the task label on Android) — never the scene
-    /// model's copy, so a backend that ignored the write fails. No
-    /// default: a backend that forgets it must fail to compile.
+    /// A surface's REAL materialized title (the title bar on the desktops,
+    /// the task label on Android) — never the scene model's copy, so a
+    /// backend that ignored the write fails.
     fn window_title(&self, window: u64) -> String;
-    /// A surface's REAL content extent in device-independent units —
-    /// what expect_window_size compares against the advisory
-    /// request. No default, like window_title.
+    /// A surface's REAL content extent in device-independent units — what
+    /// expect_window_size compares against the advisory request.
     fn window_content_size(&self, window: u64) -> (f64, f64);
     /// Whether the surface is REALLY showing the platform's
     /// unsaved-work affordance — the observation `expect_dirty`
     /// verifies (docs/dirty-plan.md D5).
     ///
-    /// THE READ IS PER-BACKEND AND THE SCRIPT IS NOT. `dirty` is one
-    /// declaration with five different chromes (D2), so there is no
-    /// single string to compare and an expect_title per platform could
-    /// not be written at all — the .steps files are shared verbatim and
-    /// compared byte-for-byte (CLAUDE.md invariant 6). This verb is
-    /// where that divergence is absorbed: every backend answers the
-    /// same question from its own surface.
+    /// THE READ IS PER-BACKEND AND THE SCRIPT IS NOT: `dirty` is one
+    /// declaration with five different chromes (D2), so this verb is
+    /// where that divergence is absorbed.
     ///
     /// | backend | what to read |
     /// |---|---|
@@ -1003,14 +813,10 @@ pub trait Stage: Send + 'static {
     /// | GTK | the header-bar marker through the existing AT-SPI read |
     /// | SwiftUI (iOS), Compose | the applied window prop, read back through the interpreter — state, not chrome, because these platforms have none (D4). NOT vacuous: it fails if the prop never applied |
     ///
-    /// FROM THE PLATFORM WHEREVER THE PLATFORM HAS ONE. Reading kaya's
-    /// own model on a backend that draws chrome would make the verb
-    /// agree with itself and prove nothing: the failure under test is a
-    /// lowering that never reached the window. The model read is the
-    /// honest answer only where there is no chrome to read.
-    ///
-    /// No default: a backend that forgets it must fail to compile
-    /// rather than pass a dirty leg vacuously.
+    /// FROM THE PLATFORM WHEREVER THE PLATFORM HAS ONE: the failure
+    /// under test is a lowering that never reached the window, so a
+    /// model read would agree with itself. It is the honest answer only
+    /// where there is no chrome to read.
     fn window_dirty(&self, window: u64) -> bool;
     /// Drive the surface's REAL chrome close (performClose, WM_CLOSE,
     /// gtk close) — a veto_close window emits close_requested and
@@ -1018,54 +824,45 @@ pub trait Stage: Send + 'static {
     fn close_window(&self, window: u64);
     /// The number of live surfaces, primary included.
     fn window_count(&self) -> usize;
-    /// The REAL presented title of the live alert over the window, or
-    /// None when no alert is live there — read from the platform
-    /// dialog (NSAlert's messageText, ContentDialog's Title, ...),
-    /// never the request's copy. No default: a backend that forgets
-    /// it must fail to compile.
+    /// The REAL presented title of the live alert over the window, or None
+    /// when no alert is live there — read from the platform dialog
+    /// (NSAlert's messageText, ContentDialog's Title, ...), never the
+    /// request's copy.
     fn alert_title(&self, window: u64) -> Option<String>;
-    /// Drive the live alert's REAL answer path: activate the action
-    /// button (choice 0 or 1) or the cancel slot (the sentinel) the
-    /// way the platform's own dismissal would. No default.
+    /// Drive the live alert's REAL answer path: activate the action button
+    /// (choice 0 or 1) or the cancel slot (the sentinel) the way the
+    /// platform's own dismissal would.
     fn choose_alert(&self, choice: u32);
-    /// The number of live alerts (0 or 1). No default.
+    /// The number of live alerts (0 or 1).
     fn alert_count(&self) -> usize;
     /// What the live file picker is REALLY showing: the directory it is
     /// pointed at, and the file names its list actually contains — read
-    /// from the platform panel, never from the request. None when no
-    /// picker is live.
+    /// from the platform panel, never from the request. None when no picker
+    /// is live.
     ///
     /// Both halves matter and neither is stamped. A panel aimed at the
     /// wrong place, or with a filter that excludes everything, presents
-    /// perfectly and is useless; only reading the real "where" and the
-    /// real rows catches that. No default: a backend that forgets it
-    /// must fail to compile.
+    /// perfectly and is useless; only reading the real "where" and the real
+    /// rows catches that.
     fn file_dialog_state(&self) -> Option<(String, Vec<String>)>;
-    /// Drive the live picker's REAL answer path: select the named row
-    /// and press Open, or press Cancel when `name` is None — the same
-    /// controls a user works, not a synthesized completion. No default.
+    /// Drive the live picker's REAL answer path: select the named row and
+    /// press Open, or press Cancel when `name` is None — the same controls
+    /// a user works, not a synthesized completion.
     fn choose_file(&self, name: Option<&str>);
     /// Point the live picker at a directory, the way a user navigating
     /// there would leave it.
     ///
-    /// HARNESS MACHINERY, NOT VOCABULARY — the same tier as set_text,
-    /// which sets a field's text rather than simulating keystrokes. It
-    /// deliberately is NOT a request field: every platform has a start
-    /// location, but WinUI's is a PickerLocationId ENUM of well-known
-    /// folders, so a `directory` on the wire would be honorable on four
-    /// platforms and not the fifth — the "looks usable and isn't" shape
-    /// `local_path` already exists to avoid. Whether it took effect is
-    /// not assumed either: expect_file_dialog reads the panel back.
-    /// No default.
+    /// HARNESS MACHINERY, NOT VOCABULARY — set_text's tier. NOT a
+    /// request field: WinUI's start location is a PickerLocationId ENUM
+    /// of well-known folders, so a `directory` on the wire would be
+    /// honorable on four platforms and not the fifth.
     fn goto_directory(&self, path: &str);
     /// What the live SAVE dialog is really showing: the directory, and
     /// the name in its name field. None when no save dialog is live.
     ///
-    /// THE NAME HALF IS THE WHOLE POINT of reading a save dialog back. A
-    /// backend that ignored the name it was told saves under the
-    /// SUGGESTED name, and every assertion downstream — the bytes, the
-    /// reopen, the round trip — passes on the wrong file. Nothing else in
-    /// the scene can see that.
+    /// THE NAME HALF IS THE WHOLE POINT: a backend that ignored the name
+    /// it was told saves under the SUGGESTED name, and every downstream
+    /// assertion passes on the wrong file.
     ///
     /// NEVER REQUIRE ROWS HERE. A save dialog may have no file browser at
     /// all: NSSavePanel's collapsed form is the default and publishes
@@ -1075,255 +872,205 @@ pub trait Stage: Send + 'static {
     /// reader written on a box where someone once expanded a save panel
     /// would hang forever on a fresh one.
     ///
-    /// NO DEFAULT, like every other observation here — a backend that
-    /// forgets one of these three fails to COMPILE, and
-    /// tools/lib/stage-coverage.py holds them for GTK, which
+    /// tools/lib/stage-coverage.py holds these three for GTK, which
     /// check-targets structurally cannot compile.
-    ///
-    /// They carried a panicking default body from the save milestone,
-    /// which landed depth-first while gtk.rs and winui/mod.rs were still
-    /// the breadth arms' files. That body was a wall of the weaker kind:
-    /// it fired at the first save leg on a backend that had skipped
-    /// them, which is a whole lane run after the fact, and only on a
-    /// lane that runs a save leg at all. Both real impls implement all
-    /// three (gtk.rs, winui/mod.rs), so the bodies are gone and the
-    /// signatures end in `;` — the next backend to arrive is told by
-    /// rustc, at the moment it is written.
     fn save_dialog_state(&self) -> Option<(String, String)>;
     /// Type a name into the live save dialog's name field, the way a user
     /// would leave it. set_text's tier; whether it took is not assumed —
-    /// expect_save_dialog reads it back. No default, see above.
+    /// expect_save_dialog reads it back.
     fn set_save_name(&self, name: &str);
-    /// Press the live save dialog's REAL Save (`save`) or Cancel — the
-    /// same controls a user works, so the dialog's own completion runs.
-    /// No default, see above.
+    /// Press the live save dialog's REAL Save (`save`) or Cancel — the same
+    /// controls a user works, so the dialog's own completion runs.
     fn confirm_save(&self, save: bool);
-    /// Put content on the system clipboard FROM OUTSIDE THIS APP, and
-    /// read it back the same way: a child process using whatever the
-    /// platform's own clipboard tool is (pbcopy/pbpaste and osascript,
-    /// wl-copy/wl-paste, the Android helper).
+    /// Put content on the system clipboard FROM OUTSIDE THIS APP, and read
+    /// it back the same way: a child process using whatever the platform's
+    /// own clipboard tool is (pbcopy/pbpaste and osascript, wl-copy/wl-
+    /// paste, the Android helper).
     ///
-    /// FOREIGN ON PURPOSE, and it is the whole value of these two. The
-    /// representation set is closed because the LOWERINGS are tricky —
-    /// CF_HTML's offset header, Android's content:// URI for an image,
-    /// CF_HDROP's struct — and a check where kaya reads what kaya wrote
-    /// parses its own bad header perfectly happily. That is not less
-    /// coverage; it is a check that cannot fail for the reason the
-    /// design exists, which is worse than none because it looks like
-    /// coverage.
+    /// FOREIGN ON PURPOSE: the lowerings are tricky (CF_HTML's offset
+    /// header, Android's content:// URI for an image, CF_HDROP's
+    /// struct) and a check where kaya reads what kaya wrote parses its
+    /// own bad header happily — a check that cannot fail for the reason
+    /// the design exists.
     ///
     /// `kind` is a closed name (text, html, image, files) or a custom
-    /// format id. The read's answer is the content for text, html and
-    /// custom, the basenames for files, and the decoded size for an
-    /// image; an empty string when the clipboard holds nothing of that
-    /// kind. No default: a backend that forgets it must fail to compile
-    /// rather than pass a clipboard leg vacuously.
+    /// format id. The read answers the content for text, html and
+    /// custom, the basenames for files, the decoded size for an image,
+    /// and an empty string when the clipboard holds nothing of it.
     fn clipboard_seed(&self, kind: &str, argument: &str);
     fn clipboard_read(&self, kind: &str) -> String;
-    /// The window's navigation-stack depth — the observation
-    /// expect_entries verifies. No default: a backend that forgets it
-    /// must fail to compile rather than pass a navigation leg
-    /// vacuously.
+    /// The window's navigation-stack depth — the observation expect_entries
+    /// verifies.
     fn entry_count(&self, window: u64) -> usize;
-    /// Drive the window's REAL back affordance. No default.
+    /// Drive the window's REAL back affordance.
     fn back(&self, window: u64);
-    /// The progress bar's state, read from the toolkit: the
-    /// determinate fraction as an integer percent ("42%" — the slider
-    /// verdict's spelling, identical in every language by
-    /// construction) or "indeterminate" while activity mode is on.
-    /// No default: a backend that forgets it must fail to compile.
+    /// The progress bar's state, read from the toolkit: the determinate
+    /// fraction as an integer percent ("42%" — the slider verdict's
+    /// spelling, identical in every language by construction) or
+    /// "indeterminate" while activity mode is on.
     fn progress_state(&self, target: Target) -> String;
-    /// Drive the select's REAL selection path to the given option
-    /// index — the toolkit's own change route, so the native handler
-    /// emits value_changed (never a synthetic occurrence). No
-    /// default: a backend that forgets it must fail to compile.
+    /// Drive the select's REAL selection path to the given option index —
+    /// the toolkit's own change route, so the native handler emits
+    /// value_changed (never a synthetic occurrence).
     fn choose(&self, target: Target, index: usize);
-    /// The selected option's LABEL, read from the toolkit's own
-    /// selection state — what the collapsed control shows, never a
-    /// model copy. Labels, not indices: byte-compared across every
-    /// language like all expects. No default.
+    /// The selected option's LABEL, read from the toolkit's own selection
+    /// state — what the collapsed control shows, never a model copy.
+    /// Labels, not indices: byte-compared across every language like all
+    /// expects.
     fn selected_label(&self, target: Target) -> String;
-    /// The grid observation: empty when the grid lays out in exactly
-    /// `want` columns whose cells share their leading edges (within
-    /// two device units); otherwise the toolkit's own description of
-    /// the mismatch, for the failure text. Geometry, never a model
-    /// copy. No default.
+    /// The grid observation: empty when the grid lays out in exactly `want`
+    /// columns whose cells share their leading edges (within two device
+    /// units); otherwise the toolkit's own description of the mismatch, for
+    /// the failure text. Geometry, never a model copy.
     fn grid_columns(&self, target: Target, want: usize) -> String;
-    /// The scroll viewport's overflow, read from the toolkit after
-    /// forcing pending layout: the empty string when the content
-    /// exceeds the viewport, otherwise a short platform-flavored
-    /// description of the two extents (failure text only). No
-    /// default: a backend that forgets it must fail to compile.
+    /// The scroll viewport's overflow, read from the toolkit after forcing
+    /// pending layout: the empty string when the content exceeds the
+    /// viewport, otherwise a short platform-flavored description of the two
+    /// extents (failure text only).
     fn scroll_overflow(&self, target: Target) -> String;
-    /// Drive the viewport to its end through the toolkit's REAL
-    /// scrolling API. No default.
+    /// Drive the viewport to its end through the toolkit's REAL scrolling
+    /// API.
     fn scroll_end(&self, target: Target);
-    /// Whether the content's end edge coincides with the viewport's
-    /// (within two device units): the empty string when it does,
-    /// otherwise a description (failure text only). No default.
+    /// Whether the content's end edge coincides with the viewport's (within
+    /// two device units): the empty string when it does, otherwise a
+    /// description (failure text only).
     fn scroll_at_end(&self, target: Target) -> String;
-    /// The primary window's section count, read from the REAL
-    /// switcher control (tab bar items, stack pages), never the scene
-    /// model. No default: a backend that forgets it must fail to
-    /// compile.
+    /// The primary window's section count, read from the REAL switcher
+    /// control (tab bar items, stack pages), never the scene model.
     fn section_count(&self) -> usize;
-    /// The ACTIVE section's title, from the platform's own selection
-    /// state. No default.
+    /// The ACTIVE section's title, from the platform's own selection state.
     fn active_section_title(&self) -> String;
-    /// The SEMANTIC ICON NAME the REAL switcher row titled `title`
-    /// draws, searched across every window (the sections scene's
-    /// sidebar rows live in an aux window) — never the section
-    /// record's `symbol` field beside it, which is the copy the
-    /// +20/+24 decode wrote garbage into while every lane stayed
-    /// green.
+    /// The SEMANTIC ICON NAME the REAL switcher row titled `title` draws,
+    /// searched across every window (the sections scene's sidebar rows
+    /// live in an aux window) — never the section record's `symbol`
+    /// field beside it, which is a decoded copy.
     ///
     /// It answers with the semantic name (`"home"`) and nothing else on
     /// success. On failure it says WHAT IT MEASURED and no more: no
-    /// switcher for that title, a row that draws no glyph, or a glyph
-    /// this backend's table cannot invert — each a distinguishable
-    /// sentence, because "wrong concept", "nothing drawn" and "not
-    /// built yet" are three different bugs and a reader chases the
-    /// sentence (invariant 3).
+    /// switcher for that title, a row that draws no glyph, or a glyph this
+    /// backend's table cannot invert — each a distinguishable sentence,
+    /// because "wrong concept", "nothing drawn" and "not built yet" are
+    /// three different bugs and a reader chases the sentence (invariant 3).
     ///
-    /// TOTAL, like `menu_symbol`: a miss is a retryable non-match, so
-    /// this doubles as the wait for a switcher rebuild.
-    ///
-    /// No default: a backend that forgets this must fail to compile
-    /// rather than pass a sections icon leg vacuously.
+    /// TOTAL, like `menu_symbol`: a miss is a retryable non-match, so this
+    /// doubles as the wait for a switcher rebuild.
     fn section_symbol(&self, title: &str) -> String;
-    /// The ARM the sections render actually took, "bar" or "sidebar",
-    /// for the given window — stamped by the render body, never
-    /// derived from the declared prop (the expect_split rule). No
-    /// default: a backend that forgets it fails to compile rather
-    /// than passing the leg vacuously.
+    /// The ARM the sections render actually took, "bar" or "sidebar", for
+    /// the given window — stamped by the render body, never derived from
+    /// the declared prop (the expect_split rule).
     fn sections_presentation(&self, window: u64) -> String;
-    /// Drive the switcher to the section at `index` (add order)
-    /// through the platform's real switching path — the user's route,
-    /// so it emits section_selected (choose/toggle precedent). No
-    /// default.
+    /// Drive the switcher to the section at `index` (add order) through the
+    /// platform's real switching path — the user's route, so it emits
+    /// section_selected (choose/toggle precedent).
     fn select_section(&self, index: usize);
-    /// Drive the REAL activation path of the menu item at the
-    /// `>`-joined label path — through the bar (or its phone
-    /// overflow), or the OPEN context menu when a context_open
-    /// preceded — so the platform's own action route emits
-    /// menu_activated / menu_toggled / menu_value_changed, never a
-    /// synthetic occurrence. No default: a backend that forgets it
-    /// must fail to compile rather than pass a menu leg vacuously.
+    /// Drive the REAL activation path of the menu item at the `>`-joined
+    /// label path — through the bar (or its phone overflow), or the OPEN
+    /// context menu when a context_open preceded — so the platform's own
+    /// action route emits menu_activated / menu_toggled /
+    /// menu_value_changed, never a synthetic occurrence.
     fn menu_activate(&self, path: &str);
     /// Open the context menu attached to the live widget through the
     /// platform's own gesture route (right-click, long-press), so a
-    /// following menu_activate resolves against the OPEN menu. No
-    /// default.
+    /// following menu_activate resolves against the OPEN menu.
     fn context_open(&self, target: Target);
-    /// The top-level catalog count, read from the REAL materialized
-    /// bar (or the phone overflow's group list) — never the scene
-    /// model's copy. No default.
+    /// The top-level catalog count, read from the REAL materialized bar (or
+    /// the phone overflow's group list) — never the scene model's copy.
     fn menu_count(&self) -> usize;
     /// The target's accessibility ROLE and spoken LABEL as
-    /// `<role>/<label>`, read from the PLATFORM'S OWN accessibility
-    /// peer — never from the scene model and never from kaya's memory
-    /// of what it set. Reading the model would make this verb agree
-    /// with itself and prove nothing; the whole claim under test is
-    /// that the native control publishes a correct accessibility
-    /// surface without kaya doing anything.
+    /// `<role>/<label>`, read from the PLATFORM'S OWN accessibility peer —
+    /// never from the scene model and never from kaya's memory of what it
+    /// set. Reading the model would make this verb agree with itself and
+    /// prove nothing; the whole claim under test is that the native control
+    /// publishes a correct accessibility surface without kaya doing
+    /// anything.
     ///
-    /// Role is each platform's classification normalized to the closed
-    /// set in `check_ax`. `unknown` is legal and honest — a platform
-    /// that classifies something kaya has no name for must say so
-    /// rather than guess. No default.
+    /// Role is each platform's classification normalized to the closed set
+    /// in `check_ax`. `unknown` is legal and honest — a platform that
+    /// classifies something kaya has no name for must say so rather than
+    /// guess.
     fn ax(&self, target: Target) -> String;
 
     /// The control's HINT as the platform publishes it — what
     /// activating it does. Read from the same tree as `ax`, never from
     /// kaya's model, for the same reason.
     fn ax_hint(&self, target: Target) -> String;
-    /// The window catalog's live presentation, `<size class>/<presentation>`
-    /// — see Step::ExpectMenuPresentation for the vocabulary.
+    /// The window catalog's live presentation, `<size
+    /// class>/<presentation>` — see Step::ExpectMenuPresentation for the
+    /// vocabulary.
     ///
-    /// Both halves must come FROM THE PLATFORM, not from the scene
-    /// model. Reading the model would make this verb agree with itself:
-    /// the whole failure being gated is a lowering that disagrees with
-    /// the window it is in, and a model-sourced answer cannot see that.
-    /// No default.
+    /// Both halves must come FROM THE PLATFORM, not from the scene model.
+    /// Reading the model would make this verb agree with itself: the whole
+    /// failure being gated is a lowering that disagrees with the window it
+    /// is in, and a model-sourced answer cannot see that.
     fn menu_presentation(&self) -> String;
-    /// Resize `window` to WxH in DIP through the platform's real
-    /// window-resize path, blocking until the new size is applied so
-    /// the size-class-driven arms have re-run by the time this
-    /// returns. Hosts without commandable window size reject the
-    /// scene loudly rather than silently no-op.
-    /// No default.
+    /// Resize `window` to WxH in DIP through the platform's real window-
+    /// resize path, blocking until the new size is applied so the size-
+    /// class-driven arms have re-run by the time this returns. Hosts
+    /// without commandable window size reject the scene loudly rather than
+    /// silently no-op.
     fn resize_window(&self, window: u64, width: f64, height: f64);
-    /// The window's live list-detail presentation,
-    /// `<size class>/<presentation>` — see Step::ExpectSplit.
+    /// The window's live list-detail presentation, `<size
+    /// class>/<presentation>` — see Step::ExpectSplit.
     ///
-    /// The presentation half must name THE ARM THAT RENDERED, read
-    /// from the view layer's own stamp, never derived from the prop or
-    /// the size class. A derived answer agrees with the lowering by
-    /// construction and cannot see the defect being gated.
-    /// No default.
+    /// The presentation half must name THE ARM THAT RENDERED, read from the
+    /// view layer's own stamp, never derived from the prop or the size
+    /// class. A derived answer agrees with the lowering by construction and
+    /// cannot see the defect being gated.
     fn split_presentation(&self) -> String;
-    /// The menu item's state along one axis, read from the platform's
-    /// real menu chrome and spelled in the steps grammar's own words
-    /// ("enabled"/"disabled", "checked"/"unchecked", "value N") —
-    /// never a model copy, so a backend that ignored the write must
-    /// fail. TOTAL: a missing item reads as a short description ("no
-    /// such item"), a retryable non-match rather than a panic —
-    /// expect_menu doubles as the wait for a catalog rebuild to land.
-    /// No default.
+    /// The menu item's state along one axis, read from the platform's real
+    /// menu chrome and spelled in the steps grammar's own words
+    /// ("enabled"/"disabled", "checked"/"unchecked", "value N") — never a
+    /// model copy, so a backend that ignored the write must fail. TOTAL: a
+    /// missing item reads as a short description ("no such item"), a
+    /// retryable non-match rather than a panic — expect_menu doubles as the
+    /// wait for a catalog rebuild to land.
     fn menu_state(&self, path: &str, aspect: MenuAspect) -> String;
-    /// The SEMANTIC ICON NAME the platform's real menu item carries —
-    /// read from the materialized item's image accessibility
-    /// description (macOS: `NSMenuItem.image?.accessibilityDescription`),
-    /// never from the scene model, so a backend that decoded the prop
-    /// and drew nothing must fail.
+    /// The SEMANTIC ICON NAME the platform's real menu item carries — read
+    /// from the materialized item's image accessibility description (macOS:
+    /// `NSMenuItem.image?.accessibilityDescription`), never from the scene
+    /// model, so a backend that decoded the prop and drew nothing must
+    /// fail.
     ///
     /// It answers with the semantic name (`"copy"`) and nothing else on
-    /// success. On failure it says WHAT IT MEASURED and no more: `"no
-    /// such item"` when the path does not resolve, `"no symbol"` when
-    /// the item resolved and carries no icon, and — where the platform
-    /// can tell — a sentence naming the platform glyph string that
-    /// failed to resolve. A diagnostic may only print what it measured
-    /// (CLAUDE.md invariant 3): if a backend cannot tell "never
-    /// lowered" from "lowered and rejected", it must say the one thing
-    /// it does know rather than pick.
-    /// No default: a backend that forgets this must fail to compile
-    /// rather than pass an icon leg vacuously.
+    /// success. On failure it says WHAT IT MEASURED and no more: `"no such
+    /// item"` when the path does not resolve, `"no symbol"` when the item
+    /// resolved and carries no icon, and — where the platform can tell — a
+    /// sentence naming the platform glyph string that failed to resolve. A
+    /// diagnostic may only print what it measured (CLAUDE.md invariant 3):
+    /// if a backend cannot tell "never lowered" from "lowered and
+    /// rejected", it must say the one thing it does know rather than pick.
     fn menu_symbol(&self, path: &str) -> String;
     /// What this window's chrome DID with the promotion list, spelled
     /// `<promoted found in the real chrome>/<promoted in the
     /// catalog>/<items the chrome holds>/<remainder's home>` — see
-    /// Step::ExpectToolbar for the vocabulary and for why the item count
-    /// is in there.
+    /// Step::ExpectToolbar for the vocabulary and for why the item count is
+    /// in there.
     ///
-    /// The chrome numbers come FROM THE PLATFORM'S OWN BAR and the
-    /// catalog number from the model, deliberately from the two
-    /// different sides: an answer computed once and reported twice would
-    /// agree with itself, and the failure being gated is precisely a
-    /// promotion list that reached no chrome. No default: a backend that
-    /// forgets this must fail to compile rather than pass a toolbar leg
-    /// vacuously.
+    /// The chrome numbers come FROM THE PLATFORM'S OWN BAR and the catalog
+    /// number from the model, deliberately from the two different sides: an
+    /// answer computed once and reported twice would agree with itself, and
+    /// the failure being gated is precisely a promotion list that reached
+    /// no chrome.
     fn toolbar_chrome(&self) -> String;
-    /// One toolbar item's aspect, read off the REAL chrome: the
-    /// semantic symbol name it draws, or `"enabled"`/`"disabled"`.
+    /// One toolbar item's aspect, read off the REAL chrome: the semantic
+    /// symbol name it draws, or `"enabled"`/`"disabled"`.
     ///
-    /// TOTAL, like `menu_state`: an item the chrome does not carry reads
-    /// as a short description ("no such toolbar item"), a retryable
-    /// non-match rather than a panic. A diagnostic may only print what
-    /// it measured, and the enablement half is where that bites — on
-    /// macOS `NSToolbarItem.isEnabled` stays `true` for a visibly
-    /// disabled button, so each backend reads the property its own
-    /// disable moves and names it at the arm. No default.
+    /// TOTAL, like `menu_state`: an item the chrome does not carry reads as
+    /// a short description ("no such toolbar item"), a retryable non-match
+    /// rather than a panic. A diagnostic may only print what it measured,
+    /// and the enablement half is where that bites — on macOS
+    /// `NSToolbarItem.isEnabled` stays `true` for a visibly disabled
+    /// button, so each backend reads the property its own disable moves and
+    /// names it at the arm.
     fn toolbar_item(&self, label: &str, aspect: &str) -> String;
     /// Drive the platform's key-equivalent dispatch for a canonical
-    /// shortcut spelling — at minimum the same table the platform's
-    /// own key event would traverse, emitting the SAME menu_activated
-    /// the item's direct activation would (one dispatch path). No
-    /// default.
+    /// shortcut spelling — at minimum the same table the platform's own key
+    /// event would traverse, emitting the SAME menu_activated the item's
+    /// direct activation would (one dispatch path).
     fn shortcut(&self, spelling: &str);
-    /// THE TEXT-RANGE READS — three of them, one per primitive, and the
-    /// contract every backend implements against. Read the table before
-    /// writing an arm: what each one must come FROM is the whole point,
-    /// and the wrong source passes with the lowering deleted.
+    /// THE TEXT-RANGE READS, one per primitive. Read the table before
+    /// writing an arm: the wrong SOURCE passes with the lowering
+    /// deleted.
     ///
     /// | | source it MUST come from | mac (built) | windows | linux | ios/android |
     /// |---|---|---|---|---|---|
@@ -1334,17 +1081,14 @@ pub trait Stage: Send + 'static {
     /// SPELLING, both range verbs: `<start>:<end>=<covered text>` per
     /// range, `|`-joined, ascending; `""` when there is nothing. The
     /// offsets are UTF-8 BYTE offsets — the protocol's unit, not the
-    /// backend's — so one frozen scene compares byte-for-byte on five
-    /// lanes (invariant 6). This is the one place a backend converts an
-    /// offset in the READING direction, and it is deliberate: the
-    /// covered text beside it is what stops the read from being the
-    /// lowering's own inverse (see Step::ExpectHighlights).
+    /// backend's. This is the one place a backend converts an offset in
+    /// the READING direction; the covered text beside it is what stops
+    /// the read from being the lowering's own inverse (see
+    /// Step::ExpectHighlights).
     ///
     /// TOTAL, like `menu_state`: a target that is not a textarea, or a
-    /// widget that has vanished, answers with a short description rather
-    /// than panicking, so these double as the wait for a render to land.
-    /// No defaults on any of them — a backend that forgets one must fail
-    /// to compile rather than pass a range leg vacuously.
+    /// widget that has vanished, answers with a short description
+    /// rather than panicking, so these double as the wait for a render.
     fn highlights(&self, target: Target) -> String;
     fn selection(&self, target: Target) -> String;
     /// `visible` when the byte range is inside the widget's viewport,
@@ -1366,28 +1110,22 @@ pub trait Stage: Send + 'static {
     fn finish(&self, code: i32, verdict: &str);
 }
 
-/// Cut one script LINE into statements at `;` — the newline stand-in for
-/// transports that cannot carry a newline, which is why it exists at all
-/// (an Android intent extra is the case that forced it).
+/// Cut one script LINE into statements at `;` — the newline stand-in
+/// for transports that cannot carry a newline (an Android intent
+/// extra).
 ///
-/// QUOTE-AWARE, AND THAT IS NOT A NICETY. An expected string is whatever
-/// the app puts on screen, and kaya's own asset miss sentence contains a
-/// semicolon: `no asset named "x"; the package carries ...`. Before this
-/// function no expected string could contain one at all — the statement
-/// split ate it, the tail parsed as an unknown verb, and the grammar's
-/// restriction was written down nowhere.
+/// QUOTE-AWARE: an expected string is whatever the app puts on screen,
+/// and kaya's own asset miss sentence contains a semicolon — `no asset
+/// named "x"; the package carries ...`.
 ///
-/// A `"` TOGGLES, so a statement must have balanced quotes. Every
-/// statement in the corpus does, and `tools/check-steps.sh` refuses one
-/// that does not, because an odd quote would silently move every
-/// following `;` from one side of the rule to the other.
+/// A `"` TOGGLES, so a statement must have balanced quotes;
+/// `tools/check-steps.sh` refuses one that does not, because an odd
+/// quote would move every following `;` across the rule.
 ///
-/// ALL THREE INTERPRETERS SPLIT IDENTICALLY (this, KayaSwiftUI.swift's
-/// `kayaSplitStatements`, KayaCompose.kt's). The wall on that is
-/// `tools/scenes/assets.steps`, which freezes a sentence with a quoted
-/// `;` and runs on every lane through all three: a parser that regresses
-/// reddens a scene that already exists, rather than waiting for one
-/// nobody has written.
+/// ALL THREE INTERPRETERS SPLIT IDENTICALLY (this,
+/// KayaSwiftUI.swift's `kayaSplitStatements`, KayaCompose.kt's), and
+/// `tools/scenes/assets.steps` freezes a sentence with a quoted `;` on
+/// every lane through all three.
 fn split_statements(line: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -2055,23 +1793,15 @@ fn parse_quoted_prefix(spec: &str) -> Result<(String, &str), String> {
 
 /// What `type` may carry: a non-empty run of PRINTABLE ASCII.
 ///
-/// The floor is set by what a real keystroke costs. Every backend has
-/// to turn each character into a key event with a keycode and
-/// modifiers, and the printable ASCII set is the one range where all
-/// five platforms agree on that mapping with no keyboard-layout or
-/// input-method machinery. Above it sits composition — dead keys, IME
-/// candidate windows, the Japanese-IME undo bug Flutter still carries
-/// (docs/undo-plan.md A5) — which is a research topic, not a verb
-/// argument, and one whose result would differ per lane anyway while
-/// scripts are compared byte-for-byte.
+/// Printable ASCII is the one range where all five platforms agree on
+/// the character-to-keycode mapping with no keyboard-layout or
+/// input-method machinery. Above it sits composition, which is a
+/// research topic rather than a verb argument (docs/undo-plan.md A5).
 ///
-/// A LINE BREAK IS REFUSED FOR A SECOND REASON: Return is not a
-/// character but a command, and what it does depends on the widget it
-/// lands in — a newline in a textarea, activation in an entry, a
-/// dialog's default button beyond that. check-steps already refuses
-/// `set_text` of a `\n` into an entry for the same reason; this refuses
-/// it for every target, because the target here is whatever holds
-/// focus and the script cannot see which that is.
+/// A LINE BREAK IS REFUSED FOR A SECOND REASON: Return is a command,
+/// not a character, and what it does depends on the widget it lands in
+/// — a newline in a textarea, activation in an entry. The target here
+/// is whatever holds focus and the script cannot see which that is.
 fn check_typing(text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Err("type wants some text to type".to_owned());
@@ -2134,12 +1864,9 @@ fn parse_range(spec: &str) -> Result<TextRange, String> {
 /// set and is meaningful — it is what a scene asserts after an edit
 /// drops a declared set (docs/ranges-plan.md D2).
 ///
-/// The COVERED TEXT is checked here for the one thing that would make
-/// the spelling ambiguous rather than merely wrong: a `|` inside it. A
-/// scene whose document contains a pipe inside a decorated range would
-/// read back as two ranges and the failure would name the wrong
-/// offsets, which is the shape of bug that costs an afternoon. Scenes
-/// are frozen text; this makes the constraint on them explicit.
+/// The COVERED TEXT is checked for a `|` inside it: a document with a
+/// pipe inside a decorated range would read back as two ranges and the
+/// failure would name the wrong offsets.
 fn check_range_list(spec: &str) -> Result<(), String> {
     if spec.is_empty() {
         return Ok(());
@@ -2162,22 +1889,12 @@ fn check_range_list(spec: &str) -> Result<(), String> {
 /// from its own content). An empty label is legal and meaningful: it
 /// asserts the platform speaks nothing for this element.
 fn check_ax(spec: &str) -> Result<(), String> {
-    // NORMALIZED, not exhaustive: a platform role that no other
-    // platform can match is normalized DOWN to the coarsest one they
-    // all publish (macOS's AXRadioGroup and AXScrollArea are both
-    // `group`), because a name only one backend can produce is a name
-    // no shared scene can assert. `combobox` earns its place the other
-    // way: every platform has a chooser role, and only the spelling
-    // differs (AXPopUpButton, Compose's dropdown, AT-SPI/UIA ComboBox).
-    // `heading` joined with the styling pass (docs/styling-plan.md D4):
-    // it is the one ROLE-tier value with a real-tree observable on
-    // every platform (AXHeading, AT-SPI heading, UIA HeadingLevel,
-    // Compose heading()), and the styling scene freezes it on every
-    // lane — a vocabulary without it refuses to PARSE styling.steps,
-    // which is exactly how the gap surfaced: the two interpreter
-    // backends parse the steps themselves and never validate the role
-    // half, so mac went green while this list blocked linux and
-    // windows.
+    // NORMALIZED, not exhaustive: a platform role no other platform
+    // can match is normalized DOWN to the coarsest one they all publish
+    // (macOS's AXRadioGroup and AXScrollArea are both `group`), because
+    // a name only one backend can produce is a name no shared scene can
+    // assert. `combobox` and `heading` earn their places the other way
+    // — every platform has an observable for them.
     const ROLES: [&str; 11] = [
         "button", "label", "field", "checkbox", "slider", "image", "progress",
         "combobox", "group", "heading", "unknown",
@@ -2420,23 +2137,12 @@ pub fn spawn(scene: &str, stage: impl Stage, log: fn(&str)) {
             let _ = std::io::stdout().flush();
             std::process::exit(1);
         }
-        // AND THE VERDICT IS FINAL EVEN IF NOTHING CAN SHUT DOWN.
-        //
-        // `finish` printed the verdict and asked the main thread for an
-        // orderly exit, which is what normally ends the process a
-        // moment later. But an app thread that never returns cannot
-        // participate in shutdown — cleanup would have to run on the
-        // very thread that is gone — and five of the eight bindings
-        // then hang at exit waiting for it (python, go, csharp, ocaml
-        // and haskell; measured 2026-08-01 on the stall scene's
-        // permanent wedge, where every assertion passed and the leg
-        // still burned its whole 180-second timeout).
-        //
-        // No framework can fix that: there is nowhere left to run the
-        // cleanup. What it can do is stop pretending an orderly exit is
-        // coming. The grace period lets the normal path win whenever it
-        // works — which is every scene but this one — and the process
-        // leaves under its own verdict when it does not.
+        // AND THE VERDICT IS FINAL EVEN IF NOTHING CAN SHUT DOWN. An
+        // app thread that never returns cannot participate in shutdown,
+        // and five of the eight bindings then hang at exit waiting for
+        // it (docs/deferred.md). The grace period lets the orderly path
+        // win where it works and the process leaves under its own
+        // verdict where it does not.
         let code = outcome.unwrap_or(1);
         std::thread::sleep(Duration::from_secs(3));
         use std::io::Write;
@@ -2471,18 +2177,12 @@ fn gate_wait() {
     }
 }
 
-/// A recorded leg must outlive its last sample time. The extractor
-/// takes the final expect's still at that step's own transcript moment,
-/// and the window closes within ONE capture-frame period of that moment
-/// — the verdict and exit follow the last step by milliseconds. Any
-/// anchor drift then hands the covering-frame rule a teardown frame:
-/// the GTK stills were the bare Xvfb root, because the arithmetic
-/// anchor (kill-time minus duration) drifts ~150ms and at 15fps that is
-/// two black frames. Holding the window briefly after the steps makes
-/// every sampled moment a live one whatever the anchor error, on every
-/// backend alike. Without a recorder this is a no-op; the pre-flight
-/// failures (bad script, no expects) skip it — they ran no steps worth
-/// sampling.
+/// A recorded leg must outlive its last sample time: the verdict and
+/// exit follow the last step by milliseconds, so any anchor drift hands
+/// the covering-frame rule a teardown frame (docs/traps.md). Holding
+/// the window briefly makes every sampled moment a live one whatever
+/// the anchor error. A no-op without a recorder, and the pre-flight
+/// failures skip it — they ran no steps worth sampling.
 fn record_linger() {
     if std::env::var_os("KAYA_RECORD").is_some()
         || std::env::var_os("KAYA_HARNESS_GATE").is_some()
@@ -2541,16 +2241,9 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 stage.click(*t);
                 None
             }
-            // WRAPPED IN `poll`, LIKE EVERY OTHER OBSERVATION, and it
-            // has to be: the watchdog needs its threshold to elapse
-            // before it will say anything, so a single evaluation
-            // reads "keeping up" every time. Without this the step
-            // returned in under a millisecond while the watchdog went
-            // on to report the stall correctly a second later — the
-            // assertion failing on a scene that was working.
-            //
-            // The verdict names the duration, so a leg that passes
-            // still shows how long the app was gone.
+            // WRAPPED IN `poll` because the watchdog needs its
+            // threshold to elapse before it will say anything: a single
+            // evaluation reads "keeping up" every time.
             Step::ExpectStall => Some(poll(|| match crate::stall::stalled_for() {
                 Some(waited) => Ok(format!("stalled {}ms", waited.as_millis())),
                 None => Err(
@@ -2671,14 +2364,10 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     && !std::path::Path::new(&resolved).exists()
                 {
                     // A FILE THAT IS NOT THERE IS NOT A CLIPBOARD
-                    // PROBLEM, and the tools do not say so: macOS's
-                    // `set the clipboard to POSIX file "<missing>"`
-                    // exits 0, prints nothing and leaves the board
-                    // untouched (measured 2026-08-04), so the seed's
-                    // wait runs out and blames the pasteboard. Same
-                    // sentence on every backend, at the one place all
-                    // of them pass through — the file_dialog_goto arm
-                    // above says it for the same reason.
+                    // PROBLEM, and the tools do not say so
+                    // (docs/traps.md, "`set the clipboard to` reports
+                    // success and writes NOTHING"). Said here, at the
+                    // one place every backend passes through.
                     Some(Err(format!(
                         "clipboard_seed {kind} {arg}: there is no file at {resolved}"
                     )))
@@ -2704,19 +2393,13 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 // An action, silent like click: the observable is the
                 // guest's reaction to the result.
                 //
-                // EXCEPT that the row must be THERE. A backend selects
-                // the named row and then presses the dialog's own Open,
-                // and if the name matched nothing the selection is
-                // simply skipped while the press goes ahead — the
-                // chooser then completes with whatever was already
-                // selected, or with the only row it has. A silent wrong
-                // file, indistinguishable from a right one downstream.
-                // Measured on GTK, where pressing Open with nothing
-                // selected returns a file quite happily.
-                //
-                // Uniform and backend-independent on purpose: every
-                // backend reads its list back the same way, so no
-                // backend has to be trusted to check its own work.
+                // EXCEPT that the row must be THERE: a name that
+                // matched nothing skips the selection while the press
+                // goes ahead, and the chooser completes with whatever
+                // was already selected — a silent wrong file
+                // (docs/traps.md, "Pressing Open with nothing selected
+                // still returns a file"). Checked here rather than per
+                // backend, so no backend checks its own work.
                 match name {
                     Some(want) => match stage.file_dialog_state() {
                         Some((_, rows)) if rows.iter().any(|r| r == want) => {
@@ -2725,14 +2408,9 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                             // lands before the dialog is interactive is
                             // swallowed with no error anywhere, so the
                             // leg fails three steps later on an
-                            // assertion about the GUEST — which is where
-                            // nobody looks for a harness problem.
-                            // Measured on Windows, where it passed once
-                            // and flaked on the next run.
-                            //
-                            // Silent on success, like every other
-                            // action; this only ever speaks up when the
-                            // press did not take.
+                            // assertion about the GUEST. Measured on
+                            // Windows, where it passed once and flaked
+                            // on the next run.
                             match poll(|| match stage.file_dialog_state() {
                                 None => Ok(String::new()),
                                 Some((_, rows)) => Err(format!(
@@ -2862,10 +2540,7 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                     // of this bug: the picker is aimed correctly, shows
                     // the right directory, and the comparison fails
                     // against a literal "$PID" — which reads as a broken
-                    // picker. The goto arm has carried this guard since
-                    // the scene was written; the expect side went
-                    // without, and an interpreter that expanded only the
-                    // goto cost a round.
+                    // picker.
                     if dir.contains('$') {
                         return Err(format!(
                             "expect_file_dialog {dir}: unexpanded substitution — \
@@ -3207,18 +2882,11 @@ fn run_with_log(steps: Vec<Step>, stage: impl Stage, log: Option<fn(&str)>) -> i
                 }
             }
             Step::ExpectFills(t) => {
-                // ONE VERB, TWO SUBJECTS, one idea: nothing the layout
-                // handed out is left unconsumed. A CONTAINER's children
-                // must span its content box; a WIDGET must span the
-                // track its container gave it. The two are separate
-                // observations because they are separate blind spots —
-                // a container that pools leftover beside its children
-                // and a widget that draws at a hard size inside a
-                // correct track both keep every share exactly right.
-                //
-                // The pass observation is the byte-identical
-                // "column#0 fills" / "textarea#0 fills" every backend
-                // and interpreter emits.
+                // ONE VERB, TWO SUBJECTS: a CONTAINER's children must
+                // span its content box, a WIDGET must span the track
+                // its container gave it. Separate observations because
+                // they are separate blind spots — both keep every share
+                // exactly right while leaving leftover unconsumed.
                 let container = matches!(t.kind, TargetKind::Column | TargetKind::Row);
                 Some(poll(|| {
                     let slack = if container {
@@ -3536,12 +3204,10 @@ fn target_spec(t: &Target) -> String {
 /// sum, joined with `,` — the one implementation every backend's
 /// `child_shares` formats through.
 ///
-/// Shared because the *rounding* has to be identical everywhere, not
-/// just the arithmetic: expect_shares compares byte-for-byte, so a
-/// backend that rounded 24.6 to 24 while another rounded to 25 would
-/// fail a leg over a formatting difference and read as a layout bug.
-/// An empty container, or one whose children are all zero-extent,
-/// reports the empty string rather than dividing by zero.
+/// Shared because the ROUNDING has to be identical everywhere, not
+/// just the arithmetic: expect_shares compares byte-for-byte. An empty
+/// container, or one whose children are all zero-extent, reports the
+/// empty string rather than dividing by zero.
 pub fn shares(extents: &[f64]) -> String {
     let total: f64 = extents.iter().sum();
     if total <= 0.0 {
@@ -3554,20 +3220,12 @@ pub fn shares(extents: &[f64]) -> String {
         .join(",")
 }
 
-/// Resolve `#last` against a registry length; panics on out-of-range,
-/// which is a script bug worth dying loudly for.
-/// The observation contract: every expect is a BOUNDED RETRY — the
-/// predicate is polled until it holds or the deadline passes
-/// (ratified 2026-07-22, replacing scripted settles: fixed sleeps
-/// became actual latency, and the pacing race class died at the
-/// root). One uniform mechanism, no per-platform event plumbing: the
-/// poll interval is noise next to the settles it replaced, and the
-/// deadline keeps a wrong scene loudly failing with its last read.
-/// The FIRST expect of a script doubles as the scene-ready wait —
-/// scripts open with an expect of initial state (check-steps holds
-/// the line) — so reads must be TOTAL: a missing target is a
-/// retryable non-match ("no such target"), never a panic
-/// (try_resolve; the interpreters were already total).
+/// The observation contract: every expect is a BOUNDED RETRY, polled
+/// until it holds or the deadline passes. The FIRST expect of a script
+/// doubles as the scene-ready wait — scripts open with an expect of
+/// initial state (check-steps holds the line) — so reads must be
+/// TOTAL: a missing target is a retryable non-match ("no such
+/// target"), never a panic (try_resolve).
 pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 // 15, NOT 5, and the number is measured: under the five-lane matrix a
 // loaded VM answered a first click in more than five seconds and a leg
@@ -3578,23 +3236,15 @@ pub const POLL_DEADLINE: Duration = Duration::from_secs(15);
 
 /// `$TMP` and `$PID` in a scene path.
 ///
-/// THE THIRD SITE. KayaSwiftUI.swift and KayaCompose.kt each carry their
-/// own copy for the platforms they interpret, and this is the one the
-/// Rust backends (GTK, WinUI) use — so the substitution vocabulary lives
-/// in three places, not the two that check-verbs used to police. An
-/// interpreter that leaves a token alone uses it as a LITERAL path
-/// segment, which is a directory that cannot exist, and a picker aimed
-/// at one silently shows somewhere else (docs/traps.md).
+/// THE THIRD SITE, with KayaSwiftUI.swift's and KayaCompose.kt's copies
+/// — check-verbs polices all three. An interpreter that leaves a token
+/// alone uses it as a LITERAL path segment, and a picker aimed at a
+/// directory that cannot exist silently shows somewhere else.
 ///
-/// `$TMP` is `std::env::temp_dir`, which is what a Rust guest's own file
-/// API returns — both sides of one process must compute it the way their
-/// own language does, or they disagree about where the file is. That
-/// exact divergence cost a session on macOS, where Foundation ignores
-/// `$TMPDIR` and `std::env::temp_dir` honors it.
-///
-/// WHOLE NAMES, not prefixes: replacing `$TMP` by text also eats the
-/// front of `$TMPDIR` and leaves `<tmp>DIR`, a path wrong in a way that
-/// reads as the scene author's typo rather than the expander's.
+/// `$TMP` is `std::env::temp_dir`, which is what a Rust guest's own
+/// file API returns: both sides of one process must compute it the way
+/// their own language does. WHOLE NAMES, not prefixes, or `$TMP` eats
+/// the front of `$TMPDIR` (docs/traps.md).
 fn expand_path(path: &str) -> String {
     let tmp = std::env::temp_dir();
     let tmp = tmp.to_string_lossy();
@@ -4270,13 +3920,10 @@ mod tests {
     /// — the clause with the teeth — puts the RESOLVED family in its
     /// failure text rather than the requested one.
     ///
-    /// That is not cosmetic. Every font API on every platform renders
-    /// something for a family it does not have, so the resolved name IS
-    /// the diagnosis: the platform's own default means the presence gate
-    /// refused the request, `Helvetica` on Apple means a CoreText
-    /// fallback swallowed it, and the request echoed back would mean the
-    /// read is wired to the model instead of the views. A verdict that
-    /// only said "wanted Georgia" could not tell those apart.
+    /// The resolved name IS the diagnosis: the platform's own default
+    /// means the presence gate refused the request, `Helvetica` on
+    /// Apple means a CoreText fallback swallowed it, and the request
+    /// echoed back means the read is wired to the model, not the views.
     #[test]
     fn expect_typeface_reports_the_resolved_family() {
         let steps = parse(r#"expect_typeface "Georgia""#).unwrap();
@@ -4705,14 +4352,11 @@ mod tests {
     /// half of the grow contract, and the one shares cannot see.
     ///
     /// THE ROUTING IS THE TEST. Both observations answer "is anything
-    /// left unconsumed" and both spell their pass the same way, so a
-    /// widget arm wired to `container_fills` would look right in the
-    /// verdict and read the wrong geometry: the mock's containers all
-    /// fill, so the textarea's hard 96pt inside a 126pt track would
-    /// come back as "textarea#0 fills" forever. The mock answers by
-    /// INDEX (0 fills, anything else is short), which is what makes the
-    /// two halves below fail for different reasons rather than for the
-    /// same one.
+    /// left unconsumed" and spell their pass the same way, so a widget
+    /// arm wired to `container_fills` would look right in the verdict
+    /// and read the wrong geometry. The mock answers by INDEX (0 fills,
+    /// anything else is short), so the two halves below fail for
+    /// different reasons rather than the same one.
     #[test]
     fn expect_fills_reads_a_widget_against_its_track() {
         let steps = parse("expect_fills textarea#0").unwrap();

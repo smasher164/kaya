@@ -1,13 +1,11 @@
 // Sum-typed collections: the enum is the sum, its cases the
-// constructors. KayaSumElement reflects one prototype per case with
-// Mirror — the case's associated values, in declaration order, become
-// that constructor's schema — and, as with records, Mirror cannot
-// construct, so the one hand-written member is init(variant:values:).
-// Elimination is Swift-shaped where the guest holds the value (if
-// case / switch); the template takes a product of arms checked
-// complete at declaration, with the scene as the second check.
-// Mutation is witnessed: a field write names the constructor the
-// caller matched, and the model refuses a drifted entry.
+// constructors. Mirror walks one prototype per case, and
+// init(variant:values:) is the one hand-written member. Elimination is
+// Swift-shaped where the guest holds the value; the template takes a
+// product of arms checked complete at declaration, with the scene as the
+// second check. Mutation is WITNESSED: a field write names the
+// constructor the caller matched, and the model refuses a drifted
+// entry.
 
 import Foundation
 
@@ -92,11 +90,7 @@ struct KayaSumCollection<T: KayaSumElement> {
         tx.insertRecordRaw(collection, key, value, value.kayaVariant, value.kayaSumValues)
     }
 
-    /// Insert under a key the binding authors, and hand the key back —
-    /// the form for data that has no identity of its own. The contract
-    /// (one monotonic counter per collection INSTANCE, absorption of
-    /// explicit I64 keys, no decrement) lives on `KayaAppTx.insertFresh`;
-    /// this is the sum-typed spelling of it.
+    /// Insert under a key the binding authors, and hand the key back.
     @discardableResult
     func insertFresh(_ tx: KayaAppTx, _ value: T) -> Int64 {
         tx.insertRecordFresh(collection, value, value.kayaVariant, value.kayaSumValues)
@@ -126,11 +120,8 @@ struct KayaSumCollection<T: KayaSumElement> {
         tx.recordEntries(collection).first(where: { $0.key == key })?.value as? T
     }
 
-    /// The witnessed field write: `of` is a prototype of the
-    /// constructor the caller just matched (`if case .todo = ...` is
-    /// the refinement), the field named by its associated-value label.
-    /// The model refuses a drifted entry — the guard is checked, not
-    /// trusted.
+    /// The witnessed field write: `of` is a prototype of the constructor the
+    /// caller just matched, the field named by its associated-value label.
     func updateField(
         _ tx: KayaAppTx, _ key: KayaValue, of prototype: T, _ fieldName: String,
         _ value: KayaValue
@@ -234,9 +225,8 @@ struct KayaSumCase<T: KayaSumElement> {
 }
 
 extension KayaAppTx {
-    /// Declare a sum collection: T's prototypes are its constructors,
-    /// in order. A one-constructor sum is what collection(of:) already
-    /// declares; the prototypes list must have at least two.
+    /// Declare a sum collection: T's prototypes are its constructors, in
+    /// order.
     func sumCollection<T: KayaSumElement>(of type: T.Type) -> KayaSumCollection<T> {
         let schemas = T.kayaVariantSchemas
         precondition(
@@ -250,11 +240,8 @@ extension KayaAppTx {
         return KayaSumCollection(collection: c)
     }
 
-    /// The template eliminator: a product of arms, one per
-    /// constructor, handed over whole. Completeness is checked here at
-    /// declaration (one arm per constructor, any order) and again by
-    /// the scene — an omitted constructor never waits for its first
-    /// insert to fail.
+    /// The template eliminator: a product of arms, one per constructor,
+    /// handed over whole.
     func eachSum<T: KayaSumElement>(
         _ c: KayaSumCollection<T>, arms: [KayaSumArm<T>]
     ) -> KayaWidget {

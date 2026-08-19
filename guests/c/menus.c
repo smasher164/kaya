@@ -1,9 +1,7 @@
-/* The menus scene from C, at the explicit wire floor. The shortcut is in
- * the CANONICAL wire spelling ("primary+s": lowercase, '+'-joined,
- * primary/shift/alt order) — the core REJECTS non-canonical spellings,
- * so no canonicalizer runs here. Annotated semantics in
- * guests/rust/menus.rs; the byte-frozen contract in
- * tools/scenes/menus.steps. */
+/* The menus scene from C, at the explicit wire floor. The shortcut is
+ * in the CANONICAL wire spelling ("primary+s": lowercase, '+'-joined,
+ * primary/shift/alt order) — the core REJECTS non-canonical spellings.
+ * Semantics: guests/rust/menus.rs. Contract: tools/scenes/menus.steps. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -57,9 +55,6 @@ static void build_scene(void) {
     kaya_tx_create_signal(&tx, SIG_DETAILS, kaya_bool(0));
     kaya_tx_create_signal(&tx, SIG_SORT, kaya_f64(0.0));
 
-    /* File: enabled bound to the export signal (Save inherits, Export
-     * rides its own binding of the SAME signal); menubar_append is the
-     * window anchor. */
     {
         /* Packed by hand: the generated kaya_tx_set_window_prop closes
          * the record BEFORE the value. */

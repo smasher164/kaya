@@ -8,14 +8,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Records: the record type is the schema. {@link #collectionOf}
- * reflects over T's record components once at declaration — components
- * of wire types (String, boolean, long, double) in declaration order
- * become the schema; anything else is guest-only, living in the model
- * and never reaching the wire. One declaration drives the schema, the
- * conversions, and the field tokens, so none can drift. Java records
- * are immutable, so a field update reconstructs the model's copy
- * through the canonical constructor.
+ * Records: the record type is the schema. Record components of wire
+ * types (String, boolean, long, double, byte[]) in declaration order
+ * are the schema; anything else is guest-only and never reaches the
+ * wire.
  */
 public final class KayaRecords {
     /**
@@ -32,17 +28,9 @@ public final class KayaRecords {
         }
 
         /**
-         * THE WHOLE ELEMENT OF A SCALAR COLLECTION, as a field token.
-         *
-         * A field token names one field of a RECORD, and a scalar collection has
-         * no record: its element IS the value. Binding it was spelled with the
-         * bare element bind at the floor, which is why a template label over a
-         * scalar collection was built with the widget-kind floor rather than with
-         * the sugar. Nothing was missing but a NAME for field 0 — the wire record
-         * is the same either way.
-         *
-         * String only, and that is a fact rather than a restriction: a scalar
-         * collection is always a collection of strings, one field, one type.
+         * The whole element of a scalar collection, as a field token: a
+         * scalar collection has no record, so its element is field 0.
+         * String only — a scalar collection is always strings.
          */
         public static Field<String> element() {
             return new Field<>(0);
@@ -71,9 +59,8 @@ public final class KayaRecords {
             return null;
         }
 
-        // One reflection walk per record type, ever — selectors
-        // resolve per event in handlers, so the walk must not re-run
-        // there.
+        // One reflection walk per record type, ever: selectors resolve
+        // per event in handlers, so the walk must not re-run there.
         static final java.util.concurrent.ConcurrentHashMap<Class<?>, Info> CACHE =
                 new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -82,13 +69,10 @@ public final class KayaRecords {
         }
 
         /** Component (name, type) pairs in declaration order, plus the
-         * canonical constructor. Real record metadata when the runtime
-         * has it; on Android, D8 desugars records — ART never sees
-         * record components — so the fallback reads the one declared
-         * constructor instead: parameter names (kept by -parameters)
-         * name the components, and each accessor is the zero-argument
-         * method with the component's name. Both roads describe the
-         * same canonical shape. */
+         * canonical constructor. The second road — the single
+         * constructor's parameter names, kept by {@code -parameters} —
+         * is Android's: D8 desugars records, so {@code isRecord()} is
+         * false there (docs/traps.md). */
         static Info build(Class<?> type) {
             String[] names;
             Class<?>[] types;
@@ -168,14 +152,9 @@ public final class KayaRecords {
         }
 
         /**
-         * One field's wire value. Blob fields (byte[] components)
-         * register their bytes with the core here, at encode time —
-         * handles are single-submit, so insert, update, and
-         * update_field all re-register (one copy into core memory per
-         * write; the model keeps the guest's own byte[]). The guards
-         * turn the otherwise-obscure failure — a mistyped value
-         * encoding under the wrong tag and dying in the core — into an
-         * error at the call site.
+         * One field's wire value. A blob field registers its bytes here,
+         * at encode time: handles are single-submit, so every mutation
+         * carrying a blob field re-registers.
          */
         Object encodeField(int wireIndex, Object value) {
             if (schema[wireIndex] == KayaWire.VALUE_BLOB) {
@@ -196,14 +175,9 @@ public final class KayaRecords {
         }
 
         /**
-         * Rebuild a record from the wire fields an undo hands back.
-         *
-         * <p>The model keeps the guest's own object while an undo delta
-         * is core-authoritative WIRE VALUES, so the restored entry has
-         * to be reconstructed through the canonical constructor. Only
-         * the wire-typed components can be: a guest-only component was
-         * never on the wire, so it comes back at its default — the same
-         * bargain that makes it guest-only in the first place.
+         * Rebuild a record from the wire fields an undo hands back. A
+         * guest-only component was never on the wire, so it comes back
+         * at its default.
          */
         Object fromWire(List<Object> fields) {
             Parameter[] parameters = ctor.getParameters();
@@ -250,8 +224,7 @@ public final class KayaRecords {
     /**
      * A collection whose entries are T records keyed by K — String or
      * Long, the protocol's identity types (Java has no union bound to
-     * say so; the wire validates). The plain handle rides along for
-     * forEach and at.
+     * say so; the wire validates).
      */
     public static final class Collection<K, T> {
         public final KayaApp.Collection handle;
@@ -281,8 +254,7 @@ public final class KayaRecords {
 
         /**
          * One field's delta by selector: the rest of the record never
-         * travels. The accessor reference is the field — no token to
-         * declare ({@code todos.updateField(tx, key, Todo::done, true)}).
+         * travels ({@code todos.updateField(tx, key, Todo::done, true)}).
          */
         public <V> void updateField(KayaApp.Tx tx, K key,
                 java.util.function.Function<T, V> selector, V value) {
@@ -305,11 +277,9 @@ public final class KayaRecords {
         }
 
         /**
-         * Repositions an entry before another's: order is collection
-         * data, so the model reorders and the wire carries the same
-         * keys-only delta. Keys, never indices. A missing key or
-         * anchor throws at the call site — the same check the scene
-         * makes; moving an entry before itself is a no-op.
+         * Repositions an entry before another's. Keys, never indices. A
+         * missing key or anchor throws at the call site; moving an entry
+         * before itself is a no-op.
          */
         public void moveBefore(KayaApp.Tx tx, K key, K anchor) {
             tx.moveBefore(handle, key, anchor);
@@ -320,19 +290,12 @@ public final class KayaRecords {
             tx.moveToEnd(handle, key);
         }
 
-        /**
-         * Repositions an entry at the front: sugar for moveBefore the
-         * current first key, lowering to the same wire op.
-         */
+        /** Repositions an entry at the front of its collection. */
         public void moveToFront(KayaApp.Tx tx, K key) {
             tx.moveToFront(handle, key);
         }
 
-        /**
-         * Repositions an entry directly after another's: sugar for
-         * moveBefore the anchor's successor (moveToEnd when the anchor
-         * is last), lowering to the same wire op.
-         */
+        /** Repositions an entry directly after another's. */
         public void moveAfter(KayaApp.Tx tx, K key, K anchor) {
             tx.moveAfter(handle, key, anchor);
         }
@@ -354,10 +317,9 @@ public final class KayaRecords {
         }
 
         /**
-         * A checkbox bound to the field the selector reads, with its
-         * toggle handler co-located — the receiver's K types the
-         * handler's key (the depth-1 case; deeper nestings keep the
-         * List path via app.onToggle on the node).
+         * A checkbox bound to the field the selector reads. The
+         * receiver's K types the handler's key, which is the depth-1
+         * case; deeper nestings keep the List path via app.onToggle.
          */
         @SuppressWarnings("unchecked")
         public KayaApp.Node checkbox(KayaApp.Tpl t,
@@ -411,9 +373,7 @@ public final class KayaRecords {
         /**
          * A signal the binding recomputes from this collection's
          * entries after every mutation, written into the same
-         * transaction — the items-left label with no handler
-         * remembering to update it. The function is pure presentation:
-         * entries in, one value out; the core sees an ordinary signal.
+         * transaction.
          */
         public <V> KayaApp.Signal<V> derive(KayaApp.Tx tx,
                 java.util.function.Function<List<Entry<K, T>>, V> compute) {
@@ -425,8 +385,8 @@ public final class KayaRecords {
         /**
          * Typed field writes with the key spelled once:
          * {@code todos.patch(tx, key).set(Todo::done, true)}. Each set
-         * records one update_field — a patch is recorded writes, never
-         * a diff.
+         * records one update_field; a patch is recorded writes, never a
+         * diff.
          */
         public Patch<K, T> patch(KayaApp.Tx tx, K key) {
             return new Patch<>(this, tx, key);
@@ -461,10 +421,8 @@ public final class KayaRecords {
     /**
      * The generic machinery behind the generated {@code rows()}
      * Iterables: a one-element iterator that opens the For template on
-     * the first next(), closes it — parenting the For into the
-     * enclosing container scope — when the loop asks again, and makes
-     * the row from the template handle. A break leaves the trace open;
-     * the transaction refuses to submit.
+     * the first next() and closes it when the loop asks again. A break
+     * leaves the trace open; the transaction then refuses to submit.
      */
     public static <K, T, R> Iterable<R> rowTrace(
             Collection<K, T> c, java.util.function.Function<KayaApp.Tpl, R> makeRow) {
@@ -503,23 +461,13 @@ public final class KayaRecords {
 
     /**
      * Insert a record under a key the binding authors, and hand the key
-     * back — {@code long key = KayaRecords.insertFresh(tx, todos, new
-     * Todo(draft))}. The contract, the counter and the never-rewind
-     * argument are on {@link KayaApp.Tx#insertFresh}, in full; this is
-     * the typed spelling, encoding the record the way
-     * {@link Collection#insert} does.
+     * back. The contract, in full, is on {@link KayaApp.Tx#insertFresh}.
      *
-     * <p>A STATIC BECAUSE THE KEY TYPE IS THE POINT. The minted key is
-     * I64, so the collection has to be one whose keys ARE that:
-     * {@code Collection<Long, T>}. Java cannot constrain an instance
-     * method to one instantiation of its own class's type parameters,
-     * so as a method this would accept a {@code Collection<String, T>}
-     * and quietly put a number in a table of names — the second kind of
-     * name for one datum that the minter exists to prevent. Written as
-     * a function, the parameter type is the wall, and a String-keyed
-     * collection fails to compile AT THE CALL naming both types. (The
-     * Go binding, the other key-typed one, is a free function for the
-     * same reason.)
+     * <p>KEEP IT A STATIC. The minted key is I64, so the collection must
+     * be {@code Collection<Long, T>}; Java cannot constrain an instance
+     * method to one instantiation of its own class's type parameters, so
+     * as a method this would silently accept a String-keyed collection.
+     * As a function the parameter type is the wall.
      */
     public static <T> long insertFresh(KayaApp.Tx tx, Collection<Long, T> c, T value) {
         return c.insertMinted(tx, value);
@@ -532,18 +480,15 @@ public final class KayaRecords {
     public static <K, T> Collection<K, T> collectionOf(KayaApp.Tx tx, Class<T> type) {
         Info info = Info.of(type);
         KayaApp.Collection handle = tx.collectionWithSchema(info.schema);
-        // How an undo's wire fields become this collection's model
-        // value. Registered HERE because this is the one place T is
-        // known — the model holds records, the delta holds wire values.
+        // Registered here because this is the one place T is known.
         tx.registerRebuild(handle.id, (variant, fields) -> info.fromWire(fields));
         return new Collection<>(handle, info);
     }
 
     /**
-     * The field token at a known wire index, for generated code only
-     * (the kaya annotation processor computes indices from the record
-     * declaration; hand-written code should use the checked
-     * {@link #fieldOf} instead — a hand-minted index is unchecked).
+     * The field token at a known wire index, for generated code only: a
+     * hand-minted index is unchecked, so hand-written code uses
+     * {@link #fieldOf}.
      */
     public static <V> Field<V> fieldAt(int index) {
         return new Field<>(index);
@@ -551,14 +496,12 @@ public final class KayaRecords {
 
     /**
      * The field token for the component a selector reads:
-     * {@code fieldOf(Todo.class, Todo::done)}. The name and type are
-     * the record's own, compiler-checked and rename-safe — no strings
-     * restating the declaration. Resolution probes: it builds a
-     * default-valued prototype, then one variant per wire field with a
-     * sentinel in that field, and the probe whose selector result
-     * changes names the field. (SerializedLambda would read the method
-     * name directly, but D8-desugared lambdas carry no writeReplace on
-     * Android, where this code actually runs.)
+     * {@code fieldOf(Todo.class, Todo::done)}. Resolution probes: it
+     * builds a default-valued prototype, then one variant per wire field
+     * with a sentinel in that field, and the probe whose selector result
+     * changes names the field. Probes rather than SerializedLambda
+     * because D8-desugared lambdas carry no writeReplace on Android
+     * (docs/traps.md).
      */
     @SuppressWarnings("unchecked")
     public static <T, V> Field<V> fieldOf(Class<T> type, java.util.function.Function<T, V> selector) {
@@ -576,8 +519,7 @@ public final class KayaRecords {
             if (!java.util.Objects.equals(selector.apply(probe), base)) {
                 Field<V> f = new Field<>(wire);
                 // A capturing selector is a fresh object per event and
-                // would grow the map without bound; resetting keeps
-                // the cache a cache.
+                // would grow the map without bound.
                 if (SELECTORS.size() > 1024) {
                     SELECTORS.clear();
                 }
@@ -589,8 +531,8 @@ public final class KayaRecords {
                 "kaya: selector does not read a wire field of " + type.getName());
     }
 
-    /** Selector instance -> resolved token, by identity (a selector's
-     * probe run is the expensive path; handlers resolve per event). */
+    /** Selector instance -> resolved token, by identity: the probe run
+     * is the expensive path and handlers resolve per event. */
     private static final java.util.Map<Object, Field<?>> SELECTORS =
             java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
 

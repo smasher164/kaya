@@ -67,8 +67,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let mut settings_count = 0usize;
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
-            // The native control owns user state, so the bound signals
-            // deliberately stay where they were.
             Msg::Details(on) => ctx.apply(|tx| {
                 tx.write(status, if on { "details on" } else { "details off" });
             }),

@@ -23,7 +23,7 @@
 # in the guest's own source, where every language's compiler guarantees
 # UTF-8; a .steps file travels through three step interpreters, a shell
 # and an environment variable, and none of that decoding is proven yet
-# (scratchpad/ranges-units.md §8.7 asked for it). The CJK prefix buys
+# (docs/ranges-units.md §8.7 asked for it). The CJK prefix buys
 # the unit assertion without needing any of it.
 expect label#0 "0 matches"
 # NOTHING IS DECORATED YET, and asserting it is what stops the next

@@ -7,15 +7,6 @@ THE MARK IS THE VENDORED ONE (four flat quadrants) because no platform's
 own default icon can land on four declared colours, so a lowering that
 never applied can never read as a pass.
 
-THE MARK IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
-This scene used to read `KAYA_ICON_FILE` with a repo-relative default
-and raise in its own words, as its seven siblings each did in their own
-language. `kaya.asset(name)` is the whole thing now: WHERE the file
-lives is the core's knowledge — a repo checkout, a bundle's Resources,
-an APK's packaged assets/ with no path at all — and the failure sentence
-has one author. The four quadrants stay the four quadrants wherever the
-core found them.
-
 THE SECOND WINDOW HAS NO TITLE OF ITS OWN, deliberately: that is the
 blank an app's NAME fills on every platform.
 """
@@ -42,10 +33,9 @@ def on_go():
 
 with app.window(title="identity", width=480.0, height=360.0):
     # BEFORE THE FIRST MOUNT, per the declared-once wall. The scope
-    # mounts on exit, so anywhere in this body is before it.
-    # The asset's bytes go from the core's read straight to the
-    # platform's icon sink: this scene never holds them, and the `with`
-    # releases the core's handle on the way out.
+    # mounts on exit, so anywhere in this body is before it. The asset's
+    # bytes go straight to the platform's icon sink; the `with` releases
+    # the core's handle on the way out.
     with kaya.asset("icons/kaya-mark.png") as icon:
         kaya.app_identity("Aurora Notes", icon=icon)
 
@@ -69,9 +59,14 @@ with app.window(title="identity", width=480.0, height=360.0):
 # THE UNTITLED WINDOW. It declares no title at all rather than an empty
 # one: an empty string is a title an app WROTE, and the rule under test
 # is what a window with nothing written shows.
-with app.create_window(UNTITLED, width=360.0, height=240.0):
-    caption = kaya.signal("no title of its own")
-    with kaya.column():
-        kaya.label(bind=caption)  # label#2
+#
+# THE HOST IS ASKED, in all eight ports of this scene, even where the
+# answer is never no: the eight ports are one scene, and a binding
+# surface no guest calls is one no lane exercises.
+if kaya.capabilities().aux_windows:
+    with app.create_window(UNTITLED, width=360.0, height=240.0):
+        caption = kaya.signal("no title of its own")
+        with kaya.column():
+            kaya.label(bind=caption)  # label#2
 
 sys.exit(app.run())

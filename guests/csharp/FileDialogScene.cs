@@ -1,12 +1,6 @@
 // The filedialog conformance scene, C# port — the picker's
 // request/result grammar and the capability it hands back (DESIGN.md,
-// File dialogs).
-//
-// The assertion goes all the way to the bytes: the guest opens the
-// handle it was given and reports what it read, so nothing passes
-// unless a real descriptor came back carrying the real file. The file
-// is the guest's own — guest and interpreter are one process and agree
-// on the path with no runner involvement.
+// File dialogs). The assertion goes all the way to the bytes.
 //
 // Open BLOCKS, so the read runs on a thread of the guest's own, and it
 // PARKS between reading and posting: a guest that read inline is caught
@@ -48,7 +42,6 @@ static class FileDialogScene
             {
                 if (files.Count == 0)
                 {
-                    // The empty list IS cancel.
                     tx.Write(status, "cancelled");
                     return;
                 }
@@ -66,8 +59,6 @@ static class FileDialogScene
                     {
                         text = "open failed: " + e.Message;
                     }
-                    // Parks holding the result, standing in for the tail
-                    // of a slow transfer.
                     released.Wait();
                     int count = files.Count;
                     app.Post(inner => inner.Write(status, $"{count} {text}"));

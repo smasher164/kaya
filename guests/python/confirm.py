@@ -22,8 +22,6 @@ def delete_answered(choice):
 
 
 def eject_answered(choice):
-    # A different dialog, a different handler: this function can never
-    # see a delete answer.
     status.set("held" if choice == kaya.CANCEL else "ejected")
 
 

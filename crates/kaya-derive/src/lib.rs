@@ -1,14 +1,8 @@
-//! `#[derive(KayaGen)]`: the type's own shape is the schema — the one
-//! KayaGen marker every language spells. On a struct
-//! it derives the one-variant sum (KayaSum + KayaRecord), field tokens,
-//! and the typed patch builder — what the old `record!` macro emitted,
-//! minus the wrapping. On an enum it derives the real sum: KayaSum with
-//! one schema per constructor, case tokens for template elimination
-//! (`Task::NOTE`), per-variant field tokens (`Task::note_text()`), and
-//! per-variant patch handles reachable only through a match on the
-//! model's current entry (`Task::note(tx, &items, key)` returns Option)
-//! — so a field write on the wrong constructor is unrepresentable, and
-//! a stale occurrence's arm simply doesn't run.
+//! `#[derive(KayaGen)]`: the type's own shape is the schema. A struct
+//! derives the one-variant sum (KayaSum + KayaRecord), field tokens and
+//! the typed patch builder; an enum derives the real sum, plus case
+//! tokens, per-variant field tokens and per-variant patch handles
+//! reachable only through a match on the model's current entry.
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
@@ -90,8 +84,7 @@ fn derive_struct(input: &DeriveInput, fields: &Fields) -> TokenStream {
         }
 
         /// Typed field writes with the key spelled once; each setter
-        /// records one update_field. A patch is recorded writes, never
-        /// a diff — no clone, no comparison.
+        /// records one update_field. Recorded writes, never a diff.
         #[allow(dead_code)]
         #vis struct #patch<'t, 'c> {
             tx: &'t mut ::kaya::Tx<'c>,
@@ -168,9 +161,7 @@ fn derive_enum(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
         quote! { #i => #name::#vname { #(#inits),* }, }
     });
 
-    // Per-variant field tokens (Task::note_text()) and the
-    // match-refined accessors (Task::note(tx, &items, key) ->
-    // Option<TaskNotePatch>).
+    // Per-variant field tokens and the match-refined accessors.
     let mut tokens = Vec::new();
     let mut patches = Vec::new();
     for (i, (vname, fields)) in variants.iter().enumerate() {
@@ -194,8 +185,7 @@ fn derive_enum(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
 
             /// The match arm as an accessor: `Some` exactly when the
             /// entry currently holds this constructor, handing back a
-            /// patch refined to its fields. A stale occurrence's arm
-            /// simply doesn't run.
+            /// patch refined to its fields.
             pub fn #accessor<'t, 'c>(
                 tx: &'t mut ::kaya::Tx<'c>,
                 instance: &::kaya::Collection<#name>,
@@ -226,9 +216,9 @@ fn derive_enum(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
         });
 
         patches.push(quote! {
-            /// Field writes refined to one constructor, reachable only
-            /// through the accessor's match; each setter records one
-            /// update_field carrying the witnessed discriminant.
+            /// Field writes refined to one constructor; each setter
+            /// records one update_field carrying the witnessed
+            /// discriminant.
             #[allow(dead_code)]
             #vis struct #patch<'t, 'c> {
                 tx: &'t mut ::kaya::Tx<'c>,
@@ -244,8 +234,7 @@ fn derive_enum(input: &DeriveInput, data: &syn::DataEnum) -> TokenStream {
     }
 
     // The template eliminator: a record of arms, one field per
-    // constructor, so the struct literal is the totality check. Arm
-    // returns ride out in the matching field of the Out record.
+    // constructor, so the struct literal is the totality check.
     let cases = format_ident!("{name}Cases");
     let cases_out = format_ident!("{name}CasesOut");
     let arm_names: Vec<_> = variants

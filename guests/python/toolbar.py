@@ -14,7 +14,6 @@ import kaya
 
 app = kaya.App()
 
-# The guest's own copy of the enablement, flipped by the button.
 save_enabled = True
 
 
@@ -57,7 +56,6 @@ with app.window(title="toolbar"):
     with app.menu("Edit"):
         kaya.item("Find", symbol=kaya.Symbol.SEARCH, primary=True,
                   on_activate=on_find)
-        # Everything below is catalog, not chrome, on every platform.
         kaya.item("Replace", symbol=kaya.Symbol.EDIT)
 
     with app.menu("View"):

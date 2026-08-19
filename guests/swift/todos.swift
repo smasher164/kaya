@@ -37,13 +37,12 @@ app.build { tx in
             tx.item("Undo", role: KayaAppTx.roleUndo),
             tx.item("Redo", role: KayaAppTx.roleRedo),
         ])
-    // The menubar rides the window construct because the LEDGER is per
-    // window. NO onUndone AND NO onRedone: this scene's whole state is
-    // the collection and the signal derived from it, both of which the
-    // core restores on its own.
+        // The menubar rides the window construct because the LEDGER is per
+        // window. NO onUndone AND NO onRedone: this scene's whole state is
+        // the collection and the signal derived from it, both of which the
+        // core restores on its own.
     tx.window(title: "todos", menus: [edit])
     let todos = todoCollection(tx)
-    // A derived signal: the binding recomputes it after every mutation.
     let itemsLeft = todos.derive(tx) { items in
         let n = items.filter { !$0.value.done }.count
         return .str(n == 1 ? "1 item left" : "\(n) items left")
@@ -70,8 +69,6 @@ app.build { tx in
             }
         }
         tx.label(bind: itemsLeft)
-        // The tracing tier: the for statement IS the For — the body runs
-        // once, and stamping is the core's replay.
         for row in todos.rows {
             row.row {
                 row.checkbox(row.done) { tx, keys, checked in

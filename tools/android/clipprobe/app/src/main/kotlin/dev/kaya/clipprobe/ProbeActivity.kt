@@ -12,29 +12,16 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 // ClipProbe — what does Android charge for a clipboard read, and what
-// does it PUT ON SCREEN when one happens?
+// does it PUT ON SCREEN when one happens? The host cannot ask: there is
+// no `cmd clipboard`, and Android 10+ gives an unfocused reader
+// nothing, which the shell always is. Findings:
+// docs/clipboard-plan.md §7.
 //
-// The host cannot help here. There is no `cmd clipboard`, the service
-// is only reachable through `service call clipboard <n>` with a
-// transaction number that shifts per API level, and Android 10+ gives
-// an unfocused reader nothing — which the shell always is. So the
-// questions have to be asked from inside an app, exactly as the
-// DocumentsUI ones were.
-//
-//  Q1 Does a FOCUSED app read what it wrote? The plan's fallback for
-//     this lane is an in-process read through ClipboardManager, which
-//     is still the real system service rather than kaya's own record.
-//  Q2 Does the app still read after it LOSES focus? Android documents
-//     null for an unfocused reader, and the clipboard legs' whole
-//     parallel-vs-serial question turns on it.
-//  Q3 WHAT APPEARS ON SCREEN. Android 13 shows a floating clipboard
-//     preview when an app copies, and 12+ can toast when one reads.
-//     Either would sit on top of the guest while the harness is
-//     asserting against it, or reading its accessibility tree — and
-//     that is a lane problem nobody would connect to the clipboard.
-//  Q4 Does a read see content the app did NOT write? Cross-app
-//     acceptance is the property a copy-then-paste scene inside one app
-//     cannot prove.
+//  Q1 Does a FOCUSED app read what it wrote?
+//  Q2 Does it still read after it LOSES focus?
+//  Q3 WHAT APPEARS ON SCREEN — an overlay would sit on top of the
+//     guest while the harness asserts against it.
+//  Q4 Does a read see content the app did NOT write?
 //
 // Answers go to logcat under the "kayaprobe" tag.
 class ProbeActivity : Activity() {
@@ -50,11 +37,8 @@ class ProbeActivity : Activity() {
         val seeded = intent.getStringExtra("seed")
         say("==== begin, sdk ${android.os.Build.VERSION.SDK_INT}, seed=${seeded ?: "none"}")
 
-        // AT onCreate THE WINDOW DOES NOT HAVE FOCUS YET, and the
-        // clipboard's whole gate is focus. Reading here returns null
-        // even though this is the app the user just launched, which is
-        // a trap worth its own line: an app that reads the clipboard
-        // during startup gets nothing and no error.
+        // AT onCreate THE WINDOW DOES NOT HAVE FOCUS YET, and focus is
+        // the clipboard's whole gate (docs/traps.md).
         say("Q0 read at onCreate (focus=${hasWindowFocus()}) -> " +
             "${cm.primaryClip?.getItemAt(0)?.text?.toString() ?: "null"}")
 
@@ -62,8 +46,8 @@ class ProbeActivity : Activity() {
             say("Q3 window has focus: ${hasWindowFocus()}")
 
             // Q4: whatever is there BEFORE we touch it, read now that
-            // focus has landed. When run.sh seeded from an earlier
-            // process, this is the cross-app read.
+            // focus has landed — the cross-app read when run.sh seeded
+            // from an earlier process.
             val before = cm.primaryClip
             say("Q4 pre-existing clip: items=${before?.itemCount ?: -1} " +
                 "text=${before?.getItemAt(0)?.text?.toString() ?: "null"} " +
@@ -87,12 +71,9 @@ class ProbeActivity : Activity() {
             say("Q2 focus=${hasWindowFocus()} read -> " +
                 "${unfocused?.getItemAt(0)?.text?.toString() ?: "null"}")
 
-            // Q5: can an app WRITE while unfocused? Reads are gated on
-            // focus; writes may not be. It decides whether a helper
-            // that seeds the clipboard for a paste test has to come to
-            // the foreground (stealing focus from the guest mid-scene)
-            // or can do it from the background. The next run reports
-            // what actually landed.
+            // Q5: can an app WRITE while unfocused? It decides whether
+            // a seeding helper must come to the foreground and steal
+            // focus from the guest mid-scene.
             cm.setPrimaryClip(ClipData.newPlainText("kaya", "written-while-unfocused"))
             say("Q5 wrote while focus=${hasWindowFocus()}; run 2 says if it landed")
             say("==== end")

@@ -13,13 +13,7 @@ android {
         // THE NDK API LEVEL FOLLOWS THIS NUMBER, not the other way
         // round: tools/android/run-emulator.sh reads minSdk out of this
         // file and picks aarch64-linux-android<minSdk>-clang to
-        // cross-build the Go guest, so the guest cannot be built against
-        // a platform the manifest does not claim.
-        //
-        // 26 for the same reason milestone2kt is 26 — the pump natives
-        // this app registers through KayaRing come from the same tier —
-        // and the Go side needs nothing newer (its .so NEEDs only
-        // libkaya.so, liblog, libdl, libc).
+        // cross-build the Go guest.
         minSdk = 26
         targetSdk = 35
         versionCode = 1

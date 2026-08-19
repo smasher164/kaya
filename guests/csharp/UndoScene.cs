@@ -117,8 +117,7 @@ static class UndoScene
                     t.Focus(field);
                     // Clearing the field is not part of the step, and Clear
                     // inside an undoable group is refused at apply
-                    // (docs/undo-plan.md D4) — so it gets its own
-                    // transaction.
+                    // (docs/undo-plan.md D4).
                     app.Post(after => after.Clear(field));
                 });
                 tx.Button("star", onClick: t =>                    // button#1
@@ -149,8 +148,6 @@ static class UndoScene
                     {
                         row.Label(row.Title);
                         var note = row.Entry();
-                        // Folded exactly as the undo payload's restore of
-                        // the same field is: one rule, two arrival paths.
                         app.OnChange(note, (t2, path, text) =>
                         {
                             long key = RowKey(path);

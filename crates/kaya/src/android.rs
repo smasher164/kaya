@@ -1,23 +1,10 @@
 //! Android's kaya plumbing: the attach entries, the KayaRing natives
-//! (the JVM guest tier's transport), and the KayaPresent natives the
-//! Compose interpreter pumps through.
+//! (the JVM guest tier's transport, whose bodies live in jvm.rs), and
+//! the KayaPresent natives the Compose interpreter pumps through.
 //!
-//! One backend per platform: presentation is the Compose interpreter
-//! in android/kaya/'s Kotlin, an interpreter of resolved apply-ops
-//! consumed through the C API — the same pump shape as the SwiftUI
-//! backend on Apple. The hosting is inverted here: Android has no
-//! native process entry (Zygote forks the process, ActivityThread owns
-//! main), so the Activity calls the attach entry on the UI thread
-//! during onCreate; kaya spawns the app thread and returns the thread
-//! to Android's Looper.
-//!
-//! The KayaRing natives themselves live in jvm.rs — the ring surface
-//! is the JVM tier's transport on EVERY platform with a JVM, and the
-//! desktops register the same methods from their own attach.
-//!
-//! The Kotlin side's native methods are registered here rather than
-//! resolved by name, so a guest cdylib's only name-based export is its
-//! entry.
+//! Android has no native process entry, so the Activity calls the attach
+//! entry on the UI thread during onCreate; kaya spawns the app thread and
+//! returns that thread to Android's Looper.
 
 use std::sync::mpsc;
 
@@ -36,39 +23,23 @@ pub use jni::objects::{JClass, JObject};
 #[doc(hidden)]
 pub use jni::sys::jint as jint_export;
 
-/// attach's return value: the Kotlin side always mounts the Compose
-/// interpreter (one backend per platform).
+/// attach's return value: Kotlin always mounts the Compose interpreter.
 const PRESENT_GUEST: i32 = 1;
 
 /// The JVM this process's kaya was attached from, and dev.kaya.KayaPresent
-/// as a GLOBAL REFERENCE — both remembered at attach because a picked
-/// file is opened LATER, from a thread the guest made.
-///
-/// THE GLOBAL REF IS NOT AN OPTIMIZATION. A thread attached with
+/// as a GLOBAL REFERENCE, both taken at attach: a picked file is opened
+/// LATER, from a guest thread, and a thread attached with
 /// AttachCurrentThread resolves classes through the SYSTEM class loader,
-/// which knows the framework and nothing of this app: `FindClass` for
-/// dev/kaya/KayaPresent succeeds on the Activity's thread and fails on
-/// the guest's. That is precisely the thread hop filedialog.steps exists
-/// to exercise, so the by-name spelling would have passed every read
-/// done inline and failed the one the scene actually makes.
+/// where `FindClass("dev/kaya/KayaPresent")` fails (docs/traps.md).
 static JVM: std::sync::OnceLock<jni::JavaVM> = std::sync::OnceLock::new();
 static PRESENT_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 
-/// dev.kaya.KayaAssets and the Activity, remembered at attach for the
-/// same reason and with the same urgency as PRESENT_CLASS above: an
-/// asset is read from the APP THREAD, which was attached with
-/// AttachCurrentThread and resolves classes through the system class
-/// loader. `FindClass("dev/kaya/KayaAssets")` there fails, and a
-/// Context is not something a thread can go and find at all.
-///
-/// THE CONTEXT IS THE ACTIVITY, held as a global ref for the process's
-/// life. That is a strong reference to an Activity, which on Android is
-/// normally a leak — it is deliberate here and it is not one in
-/// practice: kaya's Activity IS the process (one Activity, one surface,
-/// finished by the harness's own exit), and the alternative,
-/// `getApplicationContext`, would need a JNI round trip on every asset
-/// read to fetch a context that outlives nothing more.
+/// dev.kaya.KayaAssets and the Activity, taken at attach for the same
+/// reason: an asset is read from the APP THREAD, which resolves classes
+/// through the system class loader. The Activity is held for the
+/// process's life — kaya's Activity IS the process, and
+/// getApplicationContext would cost a JNI round trip per asset read.
 static ASSETS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 static ACTIVITY: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::OnceLock::new();
@@ -83,17 +54,9 @@ fn init_logging() {
     log_panics::init();
 }
 
-/// Android's attach, with the platform anchor explicit: the shell
-/// Activity calls Kaya.attach(this) from onCreate on the UI thread, kaya
-/// spawns the app thread, sets up the interpreter, and returns the
-/// thread to the Looper — the host-owns-the-loop shape every Android app
-/// has by construction.
-///
-/// One backend per platform: the return value is always PRESENT_GUEST
-/// and the Kotlin side mounts the Compose interpreter. Same shape as
-/// kaya::run's SwiftUI branch — the Compose pump consumes resolved
-/// apply-ops through the C API, and its emissions route into this
-/// AppCtx's inbox.
+/// Android's attach: the shell Activity calls Kaya.attach(this) from
+/// onCreate on the UI thread, kaya spawns the app thread and returns that
+/// thread to the Looper.
 pub fn attach(
     mut env: JNIEnv,
     activity: JObject,
@@ -115,13 +78,10 @@ pub fn attach(
 }
 
 /// Attach when the JVM app itself is the guest: the app's own thread
-/// consumes the ring through KayaRing (direct tier) and answers with
-/// KayaRing.submit — the same core ends kaya_run hands a C guest on
-/// the desktop, plus the Activity anchor Android requires. The core
-/// ends STAY in place: the Compose pump takes them through
-/// KayaPresent.nextCommands, exactly as the SwiftUI host takes them
-/// for a desktop C guest — the Activity mounts KayaCompose after this
-/// returns. Exported by name; this lives in kaya's own cdylib.
+/// consumes the ring through KayaRing and answers with KayaRing.submit.
+/// The core ends stay in place — the Compose pump takes them through
+/// KayaPresent.nextCommands once the Activity mounts KayaCompose.
+/// Exported by name; this lives in kaya's own cdylib.
 #[unsafe(no_mangle)]
 extern "system" fn Java_dev_kaya_KayaRing_attach(
     mut env: JNIEnv,
@@ -129,10 +89,8 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
     activity: JObject,
 ) {
     init_logging();
-    // BOTH attach paths remember it, and that is the whole reason this
-    // parameter stopped being `_activity`: the JVM and Go tiers come
-    // through here and never through `attach` above, so an asset read
-    // on those tiers would have had no Context at all.
+    // The JVM and Go tiers attach HERE and never through `attach` above,
+    // so an asset read on those tiers has no Context unless this runs.
     remember_context(&mut env, &activity);
     crate::jvm::register_ring_natives(&mut env)
         .expect("kaya: registering KayaRing natives failed");
@@ -141,17 +99,12 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
 }
 
 /// Remember what an asset read will need and cannot go and find: the
-/// Activity (the Context whose AssetManager holds this APK's assets)
-/// and dev.kaya.KayaAssets, both as global refs, both resolved HERE on
-/// the Activity's own thread.
+/// Activity (the Context whose AssetManager holds this APK's assets) and
+/// dev.kaya.KayaAssets, both resolved HERE on the Activity's own thread.
 ///
-/// FAILURE IS SILENT AND THAT IS DELIBERATE. Nothing about mounting a
-/// window needs an asset, so a process whose class resolution failed
-/// must still start; what must not happen is a wrong sentence later.
-/// `apk_assets_reachable` answers false when either ref is missing, the
-/// resolver then falls through to its remaining routes, and the miss
-/// sentence names the place it DID resolve — which is a fact, where
-/// "the APK does not carry it" would have been a guess.
+/// Failure is silent on purpose — mounting a window needs no asset — and
+/// `apk_assets_reachable` then answers false, so the miss sentence names
+/// only where it did look.
 fn remember_context(env: &mut JNIEnv, activity: &JObject) {
     if let Ok(vm) = env.get_java_vm() {
         let _ = JVM.set(vm);
@@ -166,9 +119,8 @@ fn remember_context(env: &mut JNIEnv, activity: &JObject) {
             }
         }
         Err(e) => {
-            // The exception FindClass left pending would detonate at the
-            // next unrelated JNI call, so it is read and cleared here
-            // exactly as `open_through_resolver` does.
+            // A pending FindClass exception detonates at the next
+            // unrelated JNI call, so it is read and cleared here.
             if env.exception_check().unwrap_or(false) {
                 let _ = env.exception_describe();
                 let _ = env.exception_clear();
@@ -179,17 +131,14 @@ fn remember_context(env: &mut JNIEnv, activity: &JObject) {
 }
 
 /// Whether an asset read can reach this APK at all — the guard on
-/// `Place::Apk` (crates/kaya/src/assets.rs). All three refs or none:
-/// a route that half-works would produce a sentence about a place this
-/// process never looked in.
+/// `Place::Apk` (crates/kaya/src/assets.rs). All three refs or none.
 pub(crate) fn apk_assets_reachable() -> bool {
     JVM.get().is_some() && ACTIVITY.get().is_some() && ASSETS_CLASS.get().is_some()
 }
 
-/// The three refs plus an attached env, or `None`. Every call below
-/// wants the same four things and none of them may panic: an asset read
-/// happens on the app thread inside a guest's build closure, and a
-/// panic there is an abort with no diagnostic at all.
+/// The three refs plus an attached env, or `None`. None of this may
+/// panic: an asset read runs on the app thread inside a guest's build
+/// closure, where a panic is an abort with no diagnostic at all.
 fn assets_env() -> Option<(
     jni::AttachGuard<'static>,
     &'static jni::objects::GlobalRef,
@@ -202,10 +151,8 @@ fn assets_env() -> Option<(
     Some((env, class, activity))
 }
 
-/// Read one asset out of this APK. `None` is "the platform would not
-/// open it", which on this route covers both absent and unreadable —
-/// an entry inside an APK has no `ENOENT` to distinguish them, and
-/// assets.rs's sentence says only what it measured.
+/// Read one asset out of this APK. `None` covers absent AND unreadable:
+/// an entry inside an APK has no `ENOENT` to tell them apart.
 pub(crate) fn apk_asset_read(name: &str) -> Option<Vec<u8>> {
     let (mut env, class, activity) = assets_env()?;
     let name_arg = env.new_string(name).ok()?;
@@ -228,15 +175,12 @@ pub(crate) fn apk_asset_read(name: &str) -> Option<Vec<u8>> {
     env.convert_byte_array(&array).ok()
 }
 
-/// Every asset this APK carries, as asset names. THE DIRECTORY LISTING
-/// IS THE MANIFEST (docs/assets-plan.md A2) and here the platform does
-/// the walking, because `AssetManager.list` answers one directory at a
-/// time and says nothing about which entries are files.
-///
-/// An empty list is what a process that could not ask answers with, and
-/// the sentence upstream prints "nothing this process could list"
-/// rather than "carries nothing" — the difference between a measurement
-/// and a claim.
+/// Every asset this APK carries, as asset names (docs/assets-plan.md A2).
+/// The platform does the walking, because `AssetManager.list` answers one
+/// directory at a time and says nothing about which entries are files.
+/// An empty list is also what a process that could not ask answers with,
+/// which is why the sentence upstream says "nothing this process could
+/// list" and not "carries nothing".
 pub(crate) fn apk_asset_list() -> Vec<String> {
     let Some((mut env, class, activity)) = assets_env() else {
         return Vec::new();
@@ -275,11 +219,9 @@ pub(crate) fn apk_asset_list() -> Vec<String> {
     out
 }
 
-/// What to print for `Place::Apk` in the miss sentence's second line:
-/// the installed package this process is running out of, asked of the
-/// platform. A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED — when the
-/// platform will not answer, this says so rather than naming a path it
-/// does not have.
+/// What to print for `Place::Apk` in the miss sentence's second line,
+/// asked of the platform. When the platform will not answer, this says so
+/// rather than naming a path it does not have.
 pub(crate) fn apk_assets_shown() -> String {
     let Some((mut env, class, activity)) = assets_env() else {
         return "this APK's assets/ (the platform was not reachable to name the package)"
@@ -312,13 +254,11 @@ pub(crate) fn apk_assets_shown() -> String {
     }
 }
 
-// The presentation-side C API over JNI, for guest-language backends
-// (Compose): emissions in, resolved apply-op records out, mirroring
-// KayaHostApi on the Apple side.
+// The presentation-side C API over JNI for the Compose interpreter:
+// emissions in, resolved apply-op records out.
 fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
     let class = env.find_class("dev/kaya/KayaPresent")?;
-    // Remembered HERE, on the thread that can still resolve an app class
-    // (see JVM/PRESENT_CLASS above).
+    // Remembered HERE, on the thread that can still resolve an app class.
     let _ = JVM.set(env.get_java_vm()?);
     let _ = PRESENT_CLASS.set(env.new_global_ref(&class)?);
     env.register_native_methods(
@@ -416,18 +356,12 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(J)[B".into(),
                 fn_ptr: present_blob_data as *mut _,
             },
-            // The same fingerprint the ring exposes: the Compose
-            // interpreter asserts it at mount, closing the
-            // stale-artifact class on the presentation side (a stale
-            // APK against a new libkaya would otherwise decode wire
-            // records with old constants).
             NativeMethod {
                 name: "specHash".into(),
                 sig: "()J".into(),
                 fn_ptr: crate::jvm::ring_spec_hash as *mut _,
             },
-            // The undo tier (docs/undo-plan.md D6/§3), the JNI mirror of
-            // KayaHostApi's five vtable rows on the Apple side.
+            // The undo tier (docs/undo-plan.md D6/§3).
             NativeMethod {
                 name: "undoRoute".into(),
                 sig: "(JJZ)I".into(),
@@ -458,16 +392,10 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
 }
 
 /// A picked file on Android: the `content://` URI DocumentsUI answered
-/// with, opened through the ContentResolver on EVERY redemption.
-///
-/// The other four platforms hold a path and `PathSource` opens it. There
-/// is no path here at all — DocumentsUI answers with a URI into a
-/// provider, and the provider may not be a filesystem — so the source
-/// holds the URI and pays a JNI call per open. That is the price of the
-/// property the vocabulary promises: a handle is redeemable more than
-/// once, which an already-open descriptor cannot be. Measured on the
-/// emulator: three redemptions, one of them from a thread that did not
-/// do the picking, each a fresh descriptor carrying the whole file.
+/// with, opened through the ContentResolver on EVERY redemption. There is
+/// no path to hold — a provider need not be a filesystem — so the source
+/// pays a JNI call per open to keep a handle redeemable more than once
+/// (docs/file-dialogs-plan.md §6d).
 pub(crate) struct UriSource {
     pub name: String,
     pub uri: String,
@@ -476,9 +404,9 @@ pub(crate) struct UriSource {
 impl crate::protocol::PickedSource for UriSource {
     fn open(&self, mode: crate::protocol::FileMode) -> std::io::Result<(i64, bool)> {
         let fd = open_through_resolver(&self.uri, crate::protocol::android_open_mode(mode))?;
-        // Seekability RIDES THE OPEN because only the descriptor knows:
-        // a document provider may hand back a pipe (a cloud file being
-        // streamed) where the same URI gave a regular file yesterday.
+        // Seekability rides the open because only the descriptor knows: a
+        // document provider may hand back a pipe where the same URI gave a
+        // regular file yesterday.
         let file = unsafe { crate::protocol::file_from_raw(fd) };
         let seekable = file.metadata().map(|m| m.is_file()).unwrap_or(false);
         Ok((crate::protocol::raw_handle(file), seekable))
@@ -488,17 +416,13 @@ impl crate::protocol::PickedSource for UriSource {
         &self.name
     }
 
-    /// EMPTY, and the doc-comment's condition is why: `local_path` is a
-    /// name re-opening actually works through, and a content URI is not
-    /// a path any file API on any language accepts. The guest gets the
-    /// handle, which is the capability, and nothing that looks like a
-    /// path but is not one.
+    /// EMPTY: `local_path` is a name re-opening actually works through,
+    /// and a content URI is not a path any file API accepts.
     fn local_path(&self) -> &str {
         ""
     }
 
-    /// The `content://` URI, which IS what Android calls this file —
-    /// what ClipData.newUri carries and what a receiving app resolves.
+    /// The `content://` URI — what ClipData.newUri carries.
     fn locator(&self) -> &str {
         &self.uri
     }
@@ -507,11 +431,9 @@ impl crate::protocol::PickedSource for UriSource {
 /// KayaPresent.openPickedUri: `openFileDescriptor(uri, mode)` then
 /// `detachFd()`, on whatever thread the guest called `open` from.
 ///
-/// The JVM exception is READ AND CLEARED rather than left pending: it
-/// carries the only description of what went wrong (a revoked grant, a
-/// provider that is gone, a mode the document does not allow), and the
-/// guest sees it as the io::Error's message. A pending exception left
-/// on the thread would instead detonate at the next unrelated JNI call.
+/// The JVM exception is read and cleared rather than left pending: it
+/// carries the only description of what went wrong, and a pending one
+/// detonates at the next unrelated JNI call.
 fn open_through_resolver(uri: &str, mode: &str) -> std::io::Result<i64> {
     let vm = JVM
         .get()
@@ -551,9 +473,7 @@ fn open_through_resolver(uri: &str, mode: &str) -> std::io::Result<i64> {
 }
 
 /// The stall watchdog's reading, for the Compose interpreter's
-/// `expect_stall`. A read rather than an emit, and it comes through the
-/// same registered-natives table for the same reason everything else
-/// does: the interpreter must ask the one live core.
+/// `expect_stall`.
 extern "system" fn present_stalled_ms(_env: JNIEnv, _class: JClass) -> i64 {
     crate::stall::stalled_for()
         .map(|d| d.as_millis() as i64)
@@ -567,14 +487,11 @@ extern "system" fn present_emit(env: JNIEnv, _class: JClass, tag: JByteArray) {
     unsafe { crate::capi::kaya_emit_clicked(bytes.as_ptr(), bytes.len()) };
 }
 
-/// KayaPresent.emitTextChanged: the entry edit, plus the undo ledger's
-/// three facts (the window whose ledger the run belongs to, whether the
-/// field is focused, and whether the edit is ledger-quiet because the
-/// backend routed a native undo and reports it separately).
-///
-/// Android is single-window by construction — one Activity, one surface
-/// — so the window is the primary and Compose does not carry it across
-/// the boundary; the other two are the interpreter's to answer.
+/// KayaPresent.emitTextChanged: the entry edit plus the undo ledger's
+/// facts (whether the field is focused, and whether the edit is
+/// ledger-quiet because the backend routed a native undo). Android is
+/// single-window by construction, so the window is always the primary and
+/// Compose does not carry it across the boundary.
 extern "system" fn present_emit_text(
     mut env: JNIEnv,
     _class: JClass,
@@ -605,14 +522,8 @@ extern "system" fn present_emit_text(
 
 /// KayaPresent.undoRoute / redoRoute: kaya_undo_route's and
 /// kaya_redo_route's JNI spelling — 0 nowhere, 1 the focused field's own
-/// stack, 2 the core's ledger.
-///
-/// The pair the backend contributes (what is focused, whether that
-/// field's own stack has anything) goes down; the ledger decides. Asked
-/// once and used twice on the Kotlin side — enablement and activation
-/// are the same question (A4) — so this crossing happens on every menu
-/// render that carries an Edit>Undo row, which is why it is a plain
-/// forward with no allocation.
+/// stack, 2 the core's ledger. Crossed on every menu render carrying an
+/// Edit>Undo row, so it allocates nothing.
 extern "system" fn present_undo_route(
     _env: JNIEnv,
     _class: JClass,
@@ -633,9 +544,8 @@ extern "system" fn present_redo_route(
     crate::capi::kaya_redo_route(window as u64, focused as u64, u8::from(can_redo != 0)) as jint
 }
 
-/// KayaPresent.undo / redo: the core tier's two entries. Nothing comes
-/// back — the inverse's ops reach this backend through the pump like any
-/// other apply, and the app hears one `undone` / `redone`.
+/// KayaPresent.undo / redo. Nothing comes back — the inverse's ops reach
+/// this backend through the pump like any other apply.
 extern "system" fn present_undo(_env: JNIEnv, _class: JClass, window: jlong) {
     crate::capi::kaya_undo(window as u64);
 }
@@ -645,12 +555,8 @@ extern "system" fn present_redo(_env: JNIEnv, _class: JClass, window: jlong) {
 }
 
 /// KayaPresent.noteNativeUndo: the one report of a native undo THIS
-/// backend routed (docs/undo-plan.md §3) — the field, the text the walk
-/// landed on, and whether the field can still undo.
-///
-/// The string crosses as UTF-8 bytes, the same shape `emitTextChanged`
-/// hands `kaya_emit_text_changed`: the C entry takes a byte range and
-/// the local `String` outlives the call.
+/// backend routed (docs/undo-plan.md §3). The text crosses as UTF-8
+/// bytes; the local `String` outlives the call.
 extern "system" fn present_note_native_undo(
     mut env: JNIEnv,
     _class: JClass,
@@ -686,9 +592,8 @@ extern "system" fn present_emit_value_changed(
     unsafe { crate::capi::kaya_emit_value_changed(bytes.as_ptr(), bytes.len(), value) };
 }
 
-/// KayaPresent.emitAlertResult: kaya_emit_alert_result's JNI
-/// spelling — the jint choice reinterprets as the wire u32 (the
-/// cancel sentinel is -1 in java-int terms).
+/// KayaPresent.emitAlertResult: the jint choice reinterprets as the wire
+/// u32 (the cancel sentinel is -1 in java-int terms).
 extern "system" fn present_emit_alert_result(
     _env: JNIEnv,
     _class: JClass,
@@ -698,14 +603,9 @@ extern "system" fn present_emit_alert_result(
     crate::capi::kaya_emit_alert_result(alert as u64, choice as u32);
 }
 
-/// KayaPresent.emitFileDialogResult: the picker's one answer.
-/// `uris` and `names` are parallel String[]s; EMPTY is cancel, which is
-/// how every platform reports it (none can confirm an empty selection).
-///
-/// The core mints the handles, so this hands over the locators and lets
-/// it — the arrays go over as UTF-8 the same way the desktop backends'
-/// `char*` do, and `kaya_emit_file_dialog_result` wraps each in the
-/// platform's source.
+/// KayaPresent.emitFileDialogResult: `uris` and `names` are parallel
+/// String[]s, and EMPTY is cancel — no platform can confirm an empty
+/// selection. The core mints the handles from the locators.
 extern "system" fn present_emit_file_dialog_result(
     mut env: JNIEnv,
     _class: JClass,
@@ -731,9 +631,8 @@ extern "system" fn present_emit_file_dialog_result(
     for i in 0..count {
         owned.push((read(&mut env, &uris, i), read(&mut env, &names, i)));
     }
-    // The C entry reads borrowed pointers for the length of the call, so
-    // the CStrings have to outlive the pointer vectors — hence two
-    // passes rather than one clever iterator.
+    // The C entry borrows the pointers for the length of the call, so the
+    // CStrings must outlive the pointer vectors — hence two passes.
     let cstrings: Vec<(std::ffi::CString, std::ffi::CString)> = owned
         .iter()
         .map(|(u, n)| {
@@ -757,16 +656,11 @@ extern "system" fn present_emit_file_dialog_result(
     };
 }
 
-/// KayaPresent.emitSaveDialogResult: the save dialog's one answer.
-///
-/// ONE LOCATOR, NOT AN ARRAY, and a NULL one is cancel — the C entry's
-/// shape, kept all the way out to Kotlin so no layer here can hand back
-/// two destinations. `kaya_emit_save_dialog_result` is what makes the
-/// result a SAVE destination rather than a picked file
-/// (docs/save-plan.md D1), so the Compose backend answers on it even
-/// though this platform's two sources coincide: a created document
-/// exists, so the picker's entry would behave identically today and
-/// would be wrong the first time it stopped.
+/// KayaPresent.emitSaveDialogResult: ONE locator, not an array, and a
+/// NULL one is cancel. It answers on kaya_emit_save_dialog_result, which
+/// is what makes the result a SAVE destination rather than a picked file
+/// (docs/save-plan.md D1), even though this platform's two sources
+/// coincide today.
 extern "system" fn present_emit_save_dialog_result(
     mut env: JNIEnv,
     _class: JClass,
@@ -774,9 +668,8 @@ extern "system" fn present_emit_save_dialog_result(
     uri: JString,
     name: JString,
 ) {
-    // A JNI null object is the cancel, and it reaches the C entry as a
-    // null pointer rather than as an empty string: "" is a locator the
-    // core would try to open.
+    // A JNI null object is the cancel and reaches the C entry as a null
+    // pointer, never as "": that is a locator the core would try to open.
     let read = |env: &mut JNIEnv, s: &JString| -> Option<std::ffi::CString> {
         if s.is_null() {
             return None;
@@ -786,8 +679,6 @@ extern "system" fn present_emit_save_dialog_result(
     };
     let locator = read(&mut env, &uri);
     let display = read(&mut env, &name);
-    // The C entry borrows both pointers for the length of the call, so
-    // the CStrings outlive it here by construction.
     unsafe {
         crate::capi::kaya_emit_save_dialog_result(
             dialog as u64,
@@ -799,24 +690,16 @@ extern "system" fn present_emit_save_dialog_result(
     };
 }
 
-/// One representation, unpacked from the six scalars Kotlin sent and
-/// LENT to the C struct for the length of one call — the JNI spelling
-/// of the SwiftUI backend's kayaWithRepresentation.
+/// One representation, unpacked from the six scalars Kotlin sent and LENT
+/// to the C struct for the length of one call.
 ///
-/// FLATTENED RATHER THAN BUILT IN KOTLIN, the shape
-/// emitFileDialogResult already set: a KayaRepresentation assembled on
-/// the JVM side would be a second copy of the layout to keep in step
-/// with capi.rs, so the scalars cross and the struct is built here,
-/// once, for both entries.
-///
-/// `clip` 0 crosses as a NULL representation — the universal no, which
-/// the read may answer and a paste may not.
+/// The scalars cross flattened rather than assembled on the JVM side, so
+/// there is no second copy of capi.rs's layout to keep in step. `clip` 0
+/// crosses as a NULL representation — the universal no.
 ///
 /// ONE STRING ARGUMENT carries text, html AND a custom format's id, so
 /// the struct's `text` and `id` name the same buffer and `clip` decides
-/// which of them the core reads. That is the flattening's premise
-/// stated in pointers: a kind reads exactly the fields it names, and
-/// the other fields are not merely unused but never looked at.
+/// which of them the core reads.
 fn with_representation<'local, T>(
     env: &mut JNIEnv<'local>,
     clip: jint,
@@ -851,9 +734,8 @@ fn with_representation<'local, T>(
         "kaya: a clipboard answer carries {count} locators and {named} names"
     );
     // A files answer WITH NO FILES is a caller bug and not the empty
-    // answer: the empty answer is clip 0, and the other backends drop
-    // to it rather than reporting a files representation nobody can
-    // open (gtk.rs's materialize_clipboard, and Swift's walk).
+    // A files answer with no files is a caller bug, not the empty answer:
+    // the empty answer is clip 0.
     assert!(
         clip as u32 != crate::wire::CLIP_FILES || count > 0,
         "kaya: a clipboard answer names files and carries none — the empty \
@@ -863,9 +745,6 @@ fn with_representation<'local, T>(
     for i in 0..count {
         owned.push((read(env, &locators, i), read(env, &names, i)));
     }
-    // The C entry reads borrowed pointers for the length of the call,
-    // so every CString has to outlive the pointer vectors — the same
-    // two-pass shape emitFileDialogResult's thunk documents.
     let text = std::ffi::CString::new(text).unwrap_or_default();
     let cstrings: Vec<(std::ffi::CString, std::ffi::CString)> = owned
         .iter()
@@ -895,9 +774,8 @@ fn with_representation<'local, T>(
 
 /// KayaPresent.emitClipboardResult: the privileged read's one answer.
 /// `clip` 0 is the universal no — denied, unfocused, empty, or nothing
-/// the request accepted, which no platform tells apart — and the
-/// request retires either way. kaya_emit_clipboard_result's JNI
-/// spelling.
+/// the request accepted, which no platform tells apart — and the request
+/// retires either way.
 extern "system" fn present_emit_clipboard_result<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -913,14 +791,9 @@ extern "system" fn present_emit_clipboard_result<'local>(
     });
 }
 
-/// KayaPresent.emitPasted: content arriving at a widget because the
-/// USER pasted. The tag rides verbatim, exactly as emitMenuActivated's
-/// noun does — one identity for a live widget and a stamped copy.
-///
-/// A PASTE THAT DELIVERED NOTHING IS NOT AN OCCURRENCE, so a 0 `clip`
-/// is refused HERE, naming the Kotlin entry, rather than in the C one
-/// naming a struct the interpreter never built.
-/// kaya_emit_pasted's JNI spelling.
+/// KayaPresent.emitPasted: content arriving at a widget because the USER
+/// pasted; the tag rides verbatim. A 0 `clip` is refused HERE, naming the
+/// Kotlin entry, rather than in the C one.
 extern "system" fn present_emit_pasted<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
@@ -944,15 +817,13 @@ extern "system" fn present_emit_pasted<'local>(
     });
 }
 
-/// KayaPresent.emitEntryPopped: the user's back gesture popped an
-/// entry natively — the core's stack reconciles inside this call.
+/// KayaPresent.emitEntryPopped: a native back gesture popped an entry.
 extern "system" fn present_emit_entry_popped(_env: JNIEnv, _class: JClass, entry: jlong) {
     crate::capi::kaya_emit_entry_popped(entry as u64);
 }
 
 /// KayaPresent.emitSectionSelected: the user switched sections through
-/// the platform switcher (post-fact; the core's selection mirror
-/// reconciles inside). Programmatic selection never comes here.
+/// the platform switcher. Programmatic selection never comes here.
 extern "system" fn present_emit_section_selected(
     _env: JNIEnv,
     _class: JClass,
@@ -968,11 +839,9 @@ extern "system" fn present_emit_back_requested(_env: JNIEnv, _class: JClass, ent
     crate::capi::kaya_emit_back_requested(entry as u64);
 }
 
-/// KayaPresent.emitMenuActivated: a menu action fired — a bar/overflow
-/// row, a context-menu row, OR its shortcut; ONE occurrence, one
-/// dispatch path. `noun` is the raw wire key path CONTEXT_ATTACH_NODE
-/// handed the backend, empty for a bar or live-widget activation —
-/// kaya_emit_menu_activated's JNI spelling.
+/// KayaPresent.emitMenuActivated: a bar/overflow row, a context-menu row
+/// OR its shortcut — one occurrence, one dispatch path. `noun` is the raw
+/// wire key path, empty for a bar or live-widget activation.
 extern "system" fn present_emit_menu_activated(
     env: JNIEnv,
     _class: JClass,
@@ -985,9 +854,8 @@ extern "system" fn present_emit_menu_activated(
     unsafe { crate::capi::kaya_emit_menu_activated(item as u64, bytes.as_ptr(), bytes.len()) };
 }
 
-/// KayaPresent.emitMenuToggled: a toggle item flipped by the user
-/// (programmatic checked writes never come here — the echo doctrine).
-/// kaya_emit_menu_toggled's JNI spelling.
+/// KayaPresent.emitMenuToggled: a toggle flipped by the user
+/// (programmatic checked writes never come here).
 extern "system" fn present_emit_menu_toggled(
     env: JNIEnv,
     _class: JClass,
@@ -1003,10 +871,8 @@ extern "system" fn present_emit_menu_toggled(
     };
 }
 
-/// KayaPresent.emitMenuValueChanged: a radio group's selection changed
-/// by the user, keyed by the GROUP's id (programmatic value writes
-/// never come here — the echo doctrine). kaya_emit_menu_value_changed's
-/// JNI spelling.
+/// KayaPresent.emitMenuValueChanged: a radio group's selection changed by
+/// the user, keyed by the GROUP's id (programmatic writes never come here).
 extern "system" fn present_emit_menu_value_changed(
     env: JNIEnv,
     _class: JClass,
@@ -1034,10 +900,9 @@ extern "system" fn present_emit_toggled(
     unsafe { crate::capi::kaya_emit_toggled(bytes.as_ptr(), bytes.len(), checked) };
 }
 
-/// KayaPresent.blobData: fetch a blob's bytes by the handle an apply
-/// record carried — kaya_blob_data's JNI spelling, copied into a fresh
-/// byte[] (the JVM cannot borrow core memory safely). Null for a dead
-/// handle (a batch already superseded); fetch within the batch.
+/// KayaPresent.blobData: a blob's bytes by the handle an apply record
+/// carried, copied into a fresh byte[] (the JVM cannot borrow core
+/// memory). Null for a dead handle; fetch within the batch.
 extern "system" fn present_blob_data(
     env: JNIEnv,
     _class: JClass,
@@ -1059,8 +924,7 @@ extern "system" fn present_blob_data(
 }
 
 /// KayaPresent.nextCommands: block until the next transaction resolves,
-/// fill the byte array with apply-op records, and return the length
-/// (0 on shutdown).
+/// fill the array with apply-op records, return the length (0 on shutdown).
 extern "system" fn present_next_commands(
     env: JNIEnv,
     _class: JClass,
@@ -1081,11 +945,8 @@ extern "system" fn present_next_commands(
     n as jint
 }
 
-/// Export the JNI entry that `dev.kaya.Kaya.attach` resolves, wiring
-/// `$app` as the app-thread logic. The Android spelling of attach: the
-/// shell Activity calls Kaya.attach(this) and this expansion answers it.
-/// Returns who presents (Kaya.PRESENT_CORE or PRESENT_GUEST), decided by
-/// runtime backend selection.
+/// Export the JNI entry `dev.kaya.Kaya.attach` resolves, wiring `$app` as
+/// the app-thread logic. Returns who presents.
 #[macro_export]
 macro_rules! android_main {
     ($app:path) => {

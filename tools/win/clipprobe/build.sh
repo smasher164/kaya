@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,16 +9,12 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# Build clipprobe and run it on the Windows VM. See src/main.rs for
-# what it measures.
+# Build clipprobe and run it on the Windows VM (see src/main.rs).
 #
-# ONE INTERACTIVE-SESSION TASK RUNS EVERYTHING. Each ssh connection
-# gets its own window station and therefore its OWN CLIPBOARD
-# (measured 2026-08-03: write in one connection, read null in the
-# next), so neither the seeds nor the reads may run over ssh directly.
-# The ps1 orchestrates both halves inside the one schtasks /it task —
-# the same shape dialogprobe uses, kept here rather than shared
-# because a probe must not be able to change the lane's runner.
+# ONE INTERACTIVE-SESSION TASK RUNS EVERYTHING: each ssh connection has
+# its own window station and therefore its own clipboard (docs/traps.md),
+# so neither the seeds nor the reads may run over ssh directly. The ps1
+# orchestrates both halves inside the one schtasks /it task.
 #
 # Usage: build.sh <user@host>
 set -euo pipefail

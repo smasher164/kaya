@@ -3,11 +3,9 @@
 //
 // The odd shape is the point: a wrong implementation must DEADLOCK
 // rather than disagree. The worker parks until a CLICK releases it, and
-// only a live app thread can process a click.
-//
-// The accumulators are the guest's own state — signals are write-only —
-// and need no lock: everything that touches them runs on the app thread
-// inside a posted transaction.
+// only a live app thread can process a click. The accumulators need no
+// lock: everything that touches them runs on the app thread inside a
+// posted transaction.
 
 using System;
 using System.Threading;
@@ -45,7 +43,6 @@ static class BackgroundScene
                 {
                     var worker = new Thread(() =>
                     {
-                        // Parks until the scene clicks release.
                         released.Wait();
                         // Three posts: the accumulator makes this a test
                         // of ORDER, not of which one ran last.
@@ -64,8 +61,6 @@ static class BackgroundScene
                     worker.Start();
                     inner.Write(status, "working");
                 });
-                // Proof the app thread still serves input while the
-                // worker is parked.
                 tx.Button("ping", inner => inner.Write(alive, "alive"));  // button#1
                 tx.Button("release", _ => released.Set());                // button#2
                 // A post from inside a handler QUEUES for after; it never

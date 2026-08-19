@@ -17,7 +17,6 @@ detailId = 7
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    -- The one adaptive declaration in the whole guest.
     window 0 [WTitle "split", WListDetail True]
     s <- signal (VStr "list pane")
     root <-
@@ -32,8 +31,6 @@ main = kayaMain $ \app -> do
                 pushEntry
                   detailId
                   [ ETitle "detail",
-                    -- Retention: the base root takes this write while
-                    -- the detail is up.
                     EOnPopped (buildTx app (writeSignal s (VStr "popped detail")))
                   ]
                 caption <- signal (VStr "detail pane")

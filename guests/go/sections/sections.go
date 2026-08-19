@@ -19,8 +19,7 @@ const (
 	// The SIDEBAR half of the presentation enum, in an AUX WINDOW so one
 	// shared scene covers BOTH arms. It opens from a handler only the
 	// desktop tail's click reaches, so CreateWindow never runs where the
-	// capability is absent: reachability is the gate, and no capability
-	// read is needed.
+	// capability is absent.
 	library = 1
 	shelves = 2
 	loans   = 3
@@ -32,16 +31,12 @@ func App() *kaya.App {
 	visitCount := 0
 	var visits kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		// The hint is ADVISORY: bar is each desktop's horizontal
-		// spelling and the phones' physics regardless — no observable
-		// rides on it.
 		tx.Window(0).Title("sections").SectionsPresentation(kaya.SectionsPresentationBar)
 		visits = tx.Signal("archive: 0 visits")
 
 		// THE SEMANTIC ICON (docs/styling-plan.md D6): the glyph that
 		// means home differs per platform, and no shared asset would be
-		// legal anyway (SF Symbols are licensed to Apple platforms
-		// only).
+		// legal anyway (SF Symbols are licensed to Apple platforms only).
 		feedSection := tx.AddSection(feed).Title("Feed").Symbol(kaya.SymbolHome).Id()
 		archiveSection := tx.AddSection(archive).
 			Title("Archive").
@@ -57,8 +52,7 @@ func App() *kaya.App {
 			tx.Label(ready) // label#0
 			tx.Button("to archive", func(tx *kaya.Tx) { // button#0
 				// Programmatic selection: configuration, no echo —
-				// OnSelected must NOT fire, and the scene asserts the
-				// count holds.
+				// OnSelected must NOT fire.
 				tx.SelectSection(archive)
 			})
 			tx.Button("open library", func(tx *kaya.Tx) { // button#1

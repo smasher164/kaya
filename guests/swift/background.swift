@@ -50,7 +50,6 @@ app.build { tx in
                 }
                 try inner.write(status, .str("working"))
             })
-        // Proof the app thread still serves input while the worker parks.
         tx.button(
             "ping",
             onClick: { inner in  // button#1

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -28,11 +23,8 @@ fi
 # floor on purpose.
 #
 # AND THE GUARD RUNS IN BOTH DIRECTIONS. Everything until the last
-# clause is about what a BINDING OFFERS. The SCENE-TIER clause at the
-# end is about what the EXAMPLES USE (invariant 5), because a binding
-# can spell every constructor in all eight languages while the example
-# scenes go on teaching the floor — which is precisely how the entry
-# and milestone2 scenes stayed at the floor for five milestones.
+# clause is about what a BINDING OFFERS; the SCENE-TIER clause at the
+# end is about what the EXAMPLES USE (invariant 5).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -69,19 +61,12 @@ check_kind() {
 
 # --- THE TEXT-RANGE SURFACE, in all eight -------------------------
 #
-# The three primitives (docs/ranges-plan.md D1) plus `set_text`, which
-# is how an app puts a document in front of the user in the first place.
-# WHY THEY NEED A CLAUSE AT ALL: this file's other two sweeps cover
-# widget CONSTRUCTORS and WINDOW props, and a widget-level verb is
-# neither, so nothing structural would have demanded these of the seven
-# non-Rust bindings. check-verbs holds the COMPOSE INTERPRETER open and
-# stops the day that arm lands; without this, the bindings' half of the
-# sweep would then be held by a line in docs/deferred.md and nothing
-# else. That is the shape invariant 2 exists to prevent — a change
-# scoped silently to the languages a request named.
+# The three primitives (docs/ranges-plan.md D1) plus `set_text`. This
+# file's other sweeps cover widget CONSTRUCTORS and WINDOW props, and a
+# widget-level verb is neither, so nothing else would demand these of
+# the seven non-Rust bindings.
 #
-# RED BY DESIGN until the sweep lands, which is the depth-slice pattern
-# (CLAUDE.md, sequencing).
+# RED BY DESIGN until the sweep lands (CLAUDE.md, sequencing).
 # want_verb <language> <file> <verb> <regex> — `check`'s twin, with a
 # message that says what is actually missing.
 want_verb() {
@@ -97,17 +82,11 @@ check_range_verb() {
     local snake="$1" pascal="$2" camel="$3"
     want_verb rust    crates/kaya/src/app.rs              "$snake" "pub fn ${snake}\\("
     # PYTHON PUTS WIDGET-ADDRESSED VERBS ON THE HANDLE, which is why
-    # this one pattern is indented where the other seven are not. Every
-    # pattern in this clause is that binding's spelling of `clear` and
-    # `focus` — the widget-addressed one-shots these four join — and in
-    # seven bindings that is a transaction method taking a widget
-    # (`func (tx *Tx) Clear(w Widget)`, `let clear (Widget id)`), while
-    # Python's is `Widget.clear(self)` because Python's transaction is
-    # ambient and has no handle to hang it on. A module-level `def
-    # highlight_ranges(widget, ranges)` would sit beside
-    # `editor.focus()` in the same guest and read as two conventions;
-    # the file's other handle-verb clauses (a11y_id, accepts, on_paste)
-    # are all keyed on `(self` for the same reason.
+    # this one pattern is indented where the other seven are not: in
+    # seven bindings a widget-addressed one-shot is a transaction method
+    # taking a widget, while Python's transaction is ambient and has no
+    # handle to hang it on. The file's other handle-verb clauses
+    # (a11y_id, accepts, on_paste) are keyed on `(self` for that reason.
     want_verb python  bindings/python/kaya/__init__.py    "$snake" "def ${snake}\\(self"
     want_verb go      bindings/go/app.go                  "$snake" "func \\(tx \\*Tx\\) ${pascal}\\("
     want_verb csharp  bindings/csharp/KayaApp.cs          "$snake" "public void ${pascal}\\("
@@ -134,6 +113,157 @@ if [ "$range_fake" -ne 8 ]; then
 fi
 unset range_fake
 
+# --- THE CAPABILITIES SURFACE, in all eight ------------------------
+#
+# `kaya_capabilities()` is a C export every binding must wrap, or a
+# guest derives the answer from its OWN platform predicate instead —
+# copies of a rule the core already holds, keyed on the platform rather
+# than on the capability.
+#
+# TWO CLAUSES, because either alone passes for the wrong reason: a
+# binding can offer the QUERY and hand back the raw u64, and it can name
+# a FLAG that nothing computes.
+cap_want() {
+    if ! grep -qE "$4" "$2"; then
+        echo "check-sugar-surface: $1 has no capabilities $3" \
+            "(wanted /$4/ in $2)"
+        status=1
+    fi
+}
+
+# check_cap_query <snake_case> <PascalCase> <camelCase> — the query
+# itself: one call, no arguments, answerable any time.
+check_cap_query() {
+    local snake="$1" pascal="$2" camel="$3"
+    cap_want rust    crates/kaya/src/app.rs              query "^pub fn ${snake}\\(\\)"
+    cap_want python  bindings/python/kaya/__init__.py    query "^def ${snake}\\("
+    cap_want go      bindings/go/app.go                  query "^func ${pascal}\\(\\)"
+    cap_want csharp  bindings/csharp/KayaApp.cs          query "public static [A-Za-z]+ ${pascal}\\("
+    cap_want java    bindings/java/dev/kaya/KayaApp.java query "public static [A-Za-z]+ ${camel}\\("
+    cap_want swift   bindings/swift/KayaApp.swift        query "static func ${camel}\\("
+    cap_want haskell bindings/haskell/KayaApp.hs         query "^${camel} :: IO"
+    cap_want ocaml   bindings/ocaml/kaya_app.ml          query "^let ${snake} "
+}
+check_cap_query capabilities Capabilities capabilities
+
+# check_cap_flag <snake_case> <PascalCase> <camelCase> — ONE named
+# boolean, in every binding's own record/struct/dataclass. This is the
+# line that grows when the core grows a bit: one call here, and eight
+# bindings are held to it.
+check_cap_flag() {
+    local snake="$1" pascal="$2" camel="$3"
+    cap_want rust    crates/kaya/src/app.rs              "flag '$snake'" "pub ${snake}: bool"
+    cap_want python  bindings/python/kaya/__init__.py    "flag '$snake'" "^    ${snake}: bool"
+    cap_want go      bindings/go/app.go                  "flag '$snake'" "^	${pascal} bool"
+    cap_want csharp  bindings/csharp/KayaApp.cs          "flag '$snake'" "bool ${pascal}[,)]"
+    cap_want java    bindings/java/dev/kaya/KayaApp.java "flag '$snake'" "boolean ${camel}[,)]"
+    cap_want swift   bindings/swift/KayaApp.swift        "flag '$snake'" "let ${camel}: Bool"
+    cap_want haskell bindings/haskell/KayaApp.hs         "flag '$snake'" "${camel} :: Bool"
+    cap_want ocaml   bindings/ocaml/kaya_app.ml          "flag '$snake'" "${snake} : bool"
+}
+check_cap_flag aux_windows AuxWindows auxWindows
+
+# THEIR BUILT-IN NEGATIVE TESTS, one per clause and for the same reason
+# the range verbs have one: sixteen patterns that can only pass are
+# sixteen patterns nobody will notice have rotted. Each runs in a
+# subshell so its status=1 dies with it.
+cap_fake=$(check_cap_query kaya_fake_query KayaFakeQuery kayaFakeQuery 2>&1 \
+    | grep -c "has no capabilities")
+if [ "$cap_fake" -ne 8 ]; then
+    echo "check-sugar-surface: self-test failed ($cap_fake/8 capability-query patterns" \
+        "fired for a query that exists nowhere)"
+    exit 1
+fi
+cap_fake=$(check_cap_flag kaya_fake_cap KayaFakeCap kayaFakeCap 2>&1 \
+    | grep -c "has no capabilities")
+if [ "$cap_fake" -ne 8 ]; then
+    echo "check-sugar-surface: self-test failed ($cap_fake/8 capability-flag patterns" \
+        "fired for a bit that exists nowhere)"
+    exit 1
+fi
+unset cap_fake
+
+# AND THE BIT NUMBERS AGREE WITH THE CORE'S (the check-file-modes
+# lesson). Five bindings have no header to read `KAYA_CAP_AUX_WINDOWS`
+# out of and write the number themselves; renumber the bit in the core
+# and each goes on testing the old one, which reads as a host that lost
+# a capability. Three DO read the core's own name and cannot drift, so
+# for them the check is that they still name it rather than quietly
+# becoming copiers. Two tables, and the second table's claim is itself
+# checked.
+cap_out=$(python3 - <<'PY'
+import pathlib
+import re
+import sys
+
+# The authority: the scene core owns the bit (capi.rs's exported
+# constant is static-asserted equal to it, and the header's #define is
+# cbindgen's copy of capi.rs's).
+scene = pathlib.Path("crates/kaya/src/scene.rs").read_text()
+found = re.search(r"const CAP_AUX_WINDOWS: u64 = (\d+);", scene)
+if not found:
+    print("check-sugar-surface: crates/kaya/src/scene.rs declares no CAP_AUX_WINDOWS "
+          "— the capability bit has no authority to check the bindings against")
+    sys.exit(1)
+truth = int(found.group(1))
+
+COPIERS = {
+    "python":  ("bindings/python/kaya/runtime.py",      r"^CAP_AUX_WINDOWS = (\d+)$"),
+    "csharp":  ("bindings/csharp/Kaya.cs",              r"CAP_AUX_WINDOWS = (\d+);"),
+    "java":    ("bindings/java/dev/kaya/KayaApp.java",  r"CAP_AUX_WINDOWS = (\d+);"),
+    "haskell": ("bindings/haskell/KayaRuntime.hs",      r"^capAuxWindows = (\d+)$"),
+    "ocaml":   ("bindings/ocaml/kaya_runtime.ml",       r"^let cap_aux_windows = (\d+)L$"),
+}
+READERS = {
+    "rust":  ("crates/kaya/src/app.rs",          "KAYA_CAP_AUX_WINDOWS"),
+    "go":    ("bindings/go/runtime.go",          "C.KAYA_CAP_AUX_WINDOWS"),
+    "swift": ("bindings/swift/KayaApp.swift",    "KAYA_CAP_AUX_WINDOWS"),
+}
+
+
+def audit(number):
+    """Every copier's written bit, against `number`."""
+    bad = []
+    for lang, (path, pattern) in COPIERS.items():
+        text = pathlib.Path(path).read_text()
+        wrote = [int(g) for g in re.findall(pattern, text, re.M)]
+        if not wrote:
+            bad.append(f"{lang} writes no capability bit at all "
+                       f"({path} wanted /{pattern}/)")
+        elif any(v != number for v in wrote):
+            bad.append(f"{lang} writes CAP_AUX_WINDOWS={wrote} where the core says "
+                       f"{number} ({path}) — the guest would test a bit the core "
+                       f"no longer sets")
+    return bad
+
+
+fails = audit(truth)
+for lang, (path, name) in READERS.items():
+    if name not in pathlib.Path(path).read_text():
+        fails.append(f"{lang} no longer names {name} ({path}) — it read the core's "
+                     f"own constant, and anything else here is a number that drifts")
+
+# THE WATCHED NEGATIVE: move the authority under them and EVERY copier
+# must notice. A reader that silently found nothing agrees with any
+# number at all, which is the census defect one file over
+# (tools/tpl-surfaces.py refuses a verdict for the same reason).
+missed = len(COPIERS) - len(audit(truth + 41))
+if missed:
+    print(f"check-sugar-surface: self-test failed ({missed} of {len(COPIERS)} "
+          f"capability-number readers did not notice a renumbered bit)")
+    sys.exit(1)
+
+for line in fails:
+    print("check-sugar-surface: " + line)
+sys.exit(1 if fails else 0)
+PY
+)
+cap_rc=$?
+if [ "$cap_rc" -ne 0 ]; then
+    echo "$cap_out"
+    status=1
+fi
+
 # The built-in negative test: a kind that exists nowhere must fail in
 # every binding, or the patterns themselves have rotted. The fake runs
 # inside $( ), so its `status=1` dies with that subshell and the real
@@ -153,37 +283,24 @@ done
 
 # --- THE TEMPLATE ZONE, the same sweep one zone over ----------------
 #
-# kaya has TWO construction zones and this file only ever checked one.
-# The live zone is what an app builds in its build closure; the TEMPLATE
-# zone is the prototype inside a collection, stamped once per row. They
-# are different surfaces handing out different handles (Rust's zone
-# yields TemplateNodeId where the live one yields Widget), so a
-# constructor in one is not a constructor in the other — and until
-# 2026-08-10 the template zone had three kinds where the live zone had
-# fourteen.
+# kaya has TWO construction zones (CLAUDE.md's gate list). The LIVE zone
+# is what an app builds in its build closure; the TEMPLATE zone is the
+# prototype inside a collection, stamped once per row. They are
+# different surfaces handing out different handles, so a constructor in
+# one is not a constructor in the other.
 #
-# WHAT THAT COST, and why this is not tidiness: kaya's own text editor
-# spells its find bar's text field `row.Widget(kaya.KindEntry)`, passing
-# a wire constant as a runtime value, because there was no `entry` to
-# call. The undo scene does the same in seven languages. The floor is
-# the C guests' tier (invariant 5), not an app's.
-#
-# THE SWEEP IS PYTHON, NOT SEVEN MORE `check` LINES, and that is forced
-# rather than chosen: three bindings namespace the template zone by
-# SCOPE rather than by name. Rust's `Tpl` methods are `pub fn entry`
-# exactly like `Tx`'s and OCaml's live in `module Tpl = struct`, so a
-# line-oriented pattern cannot tell which block a line sits in — it
+# THE SWEEP IS PYTHON, NOT SEVEN MORE `check` LINES, and that is forced:
+# three bindings namespace the template zone by SCOPE rather than by
+# name (Rust's `Tpl` methods are `pub fn entry` exactly like `Tx`'s,
+# OCaml's live in `module Tpl = struct`), so a line-oriented pattern
 # would be satisfied by the LIVE constructor and report a zone it never
-# read. tools/tpl-surfaces.py locates each zone by its real structure,
-# reads the constructors from inside it, and REFUSES A VERDICT from a
-# reader that found implausibly few (a census that reads nothing agrees
-# with everything). It also holds Rust's two surfaces level with each
-# other: `Tpl` is the zone, `Row` is the for-statement façade that
-# forwards by hand, and it forwarded six methods while ten kinds were
-# missing.
+# read. tools/tpl-surfaces.py locates each zone by its structure and
+# REFUSES A VERDICT from a reader that found implausibly few. It also
+# holds Rust's two surfaces level: `Tpl` is the zone, `Row` is the
+# for-statement façade that forwards by hand.
 #
-# Kinds come from the generated wire file, same as the live sweep, so
-# the list tracks the spec by construction.
+# Kinds come from the generated wire file, so the list tracks the spec
+# by construction.
 tpl_kinds=$(echo "$kinds" | tr '\n' ',')
 tpl_out=$(python3 tools/tpl-surfaces.py --kinds "${tpl_kinds%,}" 2>&1)
 tpl_rc=$?
@@ -263,25 +380,18 @@ case "$tpl_row_probe" in
 esac
 unset tpl_row_probe
 
-# (d) THE PROP CENSUS IS WATCHED THE SAME WAY, in three perturbations —
-#     the census grew prop awareness on 2026-08-17 and a prop sweep
-#     nobody has seen fail is exactly the guard invariant 3 calls worse
-#     than none. Each probe stages a temp repo root in which ONE file
-#     differs and everything else is a symlink to the real tree, so the
-#     census reads the real bindings and the real generated façades and
-#     the only variable is the perturbation. Each prints its substitution
-#     count: a probe that did not apply is a FAILED test.
+# (d) THE PROP CENSUS IS WATCHED THE SAME WAY, in three perturbations.
+#     Each stages a temp repo root in which ONE file differs and
+#     everything else symlinks the real tree, and prints its
+#     substitution count: a probe that did not apply is a FAILED test.
 #
-#     d1 IS THE HISTORICAL SHAPE ITSELF — a prop the LIVE zone has and
-#        the TEMPLATE zone does not — and OCaml is the subject because
-#        its two zones spell the prop in the same eleven characters
-#        (`set_role (Widget id)` against `set_role (Node id)`). The live
-#        setter stays in the file throughout, so a census satisfied by
-#        the live twin passes this probe and a zone-scoped one cannot.
-#     d2 is a forward deleted from a GENERATED C# façade, the clause the
-#        ledger asked for (docs/deferred.md, three follow-ups).
+#     d1 is a prop the LIVE zone has and the TEMPLATE zone does not,
+#        in OCaml because its two zones spell the prop in the same
+#        eleven characters. The live setter stays, so a census satisfied
+#        by the live twin passes and a zone-scoped one cannot.
+#     d2 is a forward deleted from a GENERATED C# façade.
 #     d3 renames the zone's own header: a reader that can no longer find
-#        the zone must REFUSE, never report an empty zone as a clean one.
+#        the zone must REFUSE, never report an empty zone as clean.
 tpl_prop_probe=$(python3 - <<'PROBE'
 import os, re, shutil, subprocess, sys, tempfile
 
@@ -346,30 +456,21 @@ if [ "$tpl_prop_probe" != "$want_prop_probe" ]; then
 fi
 unset tpl_prop_probe want_prop_probe
 
-# (e) AND THE TAKES-A-SOURCE CENSUS, which grew on 2026-08-18 and asks
-#     the question the two above structurally cannot: not whether the
-#     kind has a constructor, but whether that constructor can be handed
-#     the ROW. `Tpl.Button(string)` satisfies the kind census exactly as
-#     `Tpl.button(Signal<String>)` does, which is how a per-row button
-#     caption came to be sugar in five bindings, floor-only in C# and
-#     Swift and inexpressible in Python with every gate green
-#     (docs/deferred.md, closed 2026-08-18).
+# (e) AND THE TAKES-A-SOURCE CENSUS asks what the two above
+#     structurally cannot: not whether the kind has a constructor, but
+#     whether that constructor can be handed the ROW.
+#     `Tpl.Button(string)` satisfies the kind census exactly as
+#     `Tpl.button(Signal<String>)` does (docs/deferred.md).
 #
-#     e1 IS THAT HISTORICAL SHAPE ITSELF, spliced back in from git: the
-#        three bindings' files as they stood at c9bb989, everything else
-#        the real tree. The census must come back red naming exactly
-#        csharp, swift and python — five quiet, three named — which is
-#        the drift the ledger recorded, and is the proof that this clause
-#        would have caught it. The splice is REFUSED if a file comes back
-#        byte-identical to the working tree: a perturbation that applied
-#        nothing is a failed test, not a passed one (invariant 3).
-#     e2 deletes JAVA's field overload — a binding this slice never
-#        touched — because a census keyed to the three that were fixed
-#        would pass e1 and see nothing anywhere else.
+#     e1 splices the three bindings' files back in from git at c9bb989,
+#        everything else the real tree; the census must come back red
+#        naming exactly csharp, swift and python. The splice is REFUSED
+#        if a file comes back byte-identical to the working tree.
+#     e2 deletes JAVA's field overload — a binding that slice never
+#        touched — so a census keyed to the three that were fixed cannot
+#        pass.
 #     e3 renames Haskell's constructor: a reader that can no longer find
 #        the point must REFUSE, never report a binding with no sources.
-#        The two outcomes are one empty set apart and could not differ
-#        more.
 tpl_src_probe=$(python3 - <<'PROBE'
 import os, shutil, subprocess, sys, tempfile
 
@@ -470,22 +571,15 @@ unset tpl_src_probe want_src_probe
 
 # THE SCALAR ELEMENT HAS A NAME, in all eight.
 #
-# A template constructor's element source is a FIELD, addressed by index
+# A template constructor's element source is a FIELD addressed by index
 # off a record. A SCALAR collection has no record — its element IS the
-# value — so binding it had no sugar spelling and three example scenes
-# built a template label at the widget-kind floor instead
-# (guests/{haskell/menus.hs, ocaml/menus.ml, swift/menus.swift}). Only
-# Go had a name for it, and Go's is the reason the gap was visible at
-# all: `Row.Value()` returns literally `FieldAt[string](0)`.
+# value — so it needs a NAME for field 0; the wire record is identical
+# either way, which is why the floor spelling worked and still taught
+# the floor (invariant 5).
 #
-# Nothing was missing but a NAME for field 0. The wire record is
-# identical either way, which is exactly why nobody noticed: the floor
-# spelling WORKED, it just taught the floor (invariant 5).
-#
-# Go keeps `Row.Value()` — it is scoped to a row surface no other
-# binding has, and its doc already says "the element itself"; the idiom
-# decides the spelling, never the semantics. Python's ambient `for_each`
-# yields the element as `el`, so its "token" is the loop variable.
+# Go keeps `Row.Value()`, scoped to a row surface no other binding has.
+# Python's ambient `for_each` yields the element as `el`, so its "token"
+# is the loop variable.
 check rust    crates/kaya/src/app.rs \
     "scalar element" "pub const fn element\(\)"
 check python  bindings/python/kaya/__init__.py \
@@ -504,16 +598,11 @@ check haskell bindings/haskell/KayaApp.hs \
     "scalar element" "^element :: KField String"
 
 # THE TEMPLATE-NODE PROPS, in all eight (docs/tpl-props-plan.md P1/P2):
-# the a11y pair + hint (source-taking), accepts (const — a prototype
-# fact), and the node paste registrar. Every pattern is RECEIVER-KEYED
-# on the template handle type, and that is the lesson this block was
-# born holding: the first draft of the grow clause below matched OCaml's
-# LIVE set_grow and went vacuous, proven by perturbation — a
-# bare-method-name pattern is satisfied by the live twin every time.
-# Swift's fan-out agent hit the same shape independently (its N2
-# negative). Python's clause is a separate AST reader
-# (tools/checks/py-node-props.py) because its zones share one surface
-# and a file-scoped grep stayed green through the whole defect.
+# the a11y pair + hint, accepts, and the node paste registrar. Every
+# pattern is RECEIVER-KEYED on the template handle type — a
+# bare-method-name pattern is satisfied by the LIVE twin every time.
+# Python's clause is a separate AST reader
+# (tools/checks/py-node-props.py) because its zones share one surface.
 check rust    crates/kaya/src/app.rs \
     "template a11y id"    "pub fn a11y_id\(&mut self, node: TemplateNodeId"
 check rust    crates/kaya/src/app.rs \
@@ -593,17 +682,15 @@ check haskell bindings/haskell/KayaApp.hs \
 # base -> exit 1 naming the prop; unhook the base -> exit 1 naming all
 # of them).
 #
-# IT READS TWO STRUCTURES NOW, not one, because Python spells the zone's
-# seven props in two ways. Six ride `_Handle`, the base `class Node`
-# inherits — that is the whole of why Python needed no template setter
-# when role landed. The SEVENTH, inset, is a CONSTRUCTOR KEYWORD
-# (`kaya.row(inset=8)`), so the reader holds the chain instead: the
-# kwarg reaches `_set_inset`, which writes onto `_widget`, which is
-# `_alloc_widget_or_node` and branches on `_tpl_depth`. Nothing on that
-# path may ask which zone it is in — a `_tpl_depth` read inside
-# `_set_inset` or `_Handle.role` is the shape that would make one zone
-# quietly different from the other, and the reader refuses it. It also
-# refuses a verdict when it cannot find the allocator at all.
+# IT READS TWO STRUCTURES, because Python spells the zone's props in two
+# ways. Most ride `_Handle`, the base `class Node` inherits. `inset` is
+# a CONSTRUCTOR KEYWORD (`kaya.row(inset=8)`), so the reader holds the
+# chain instead: the kwarg reaches `_set_inset`, which writes onto
+# `_widget`, which is `_alloc_widget_or_node` and branches on
+# `_tpl_depth`. NOTHING ON THAT PATH MAY ASK WHICH ZONE IT IS IN — a
+# `_tpl_depth` read inside `_set_inset` or `_Handle.role` would make one
+# zone quietly different from the other. It also refuses a verdict when
+# it cannot find the allocator at all.
 tpl_props_py=$(python3 tools/checks/py-node-props.py bindings/python/kaya/__init__.py 2>&1)
 tpl_props_py_rc=$?
 if [ "$tpl_props_py_rc" -ne 0 ]; then
@@ -613,36 +700,17 @@ fi
 
 # A TEMPLATE NODE'S GROW WEIGHT, in all eight.
 #
-# The template zone carried exactly ONE prop when this clause was
-# written, and the clause is why it carried one rather than none.
-# `scroll` needs it — an unconstrained viewport hugs its content and
-# nothing ever overflows, so a template scroll without a grow weight is
-# a scroll that cannot scroll — and Rust's `Tpl` could always spell it
-# through the generic `set(node, prop, value)`, so a binding shipping
-# the scroll constructor WITHOUT grow is a divergence opened by the same
-# pass that closed one. (The zone carries seven props today: the a11y
-# trio and accepts arrived with the props slice, role and inset with the
-# styling one. The census in tools/tpl-surfaces.py is what sweeps them.)
+# `scroll` needs a grow weight — an unconstrained viewport hugs its
+# content and nothing ever overflows — so a binding shipping the scroll
+# constructor WITHOUT grow is a divergence. Spacing and align remain
+# floor-only on template containers, in every binding alike.
 #
-# It is written down because the fan-out drifted on it in real time:
-# five bindings shipped a template grow and two did not, each side with
-# a defensible reading of a plan that ledgered template-node props as
-# out of scope. One rule, eight spellings, checked (invariant 1).
-#
-# The rest of the template-node props landed exactly as this comment
-# once demanded — as a sweep, not one binding at a time: the a11y trio,
-# accepts and the paste registrar are the clause block ABOVE this one
-# (docs/tpl-props-plan.md P1/P2). Spacing and align remain floor-only on
-# template containers, in every binding alike.
-#
-# AND NEW TEMPLATE PROPS DO NOT GO HERE ANY MORE. Since 2026-08-17 the
-# prop sweep lives in tools/tpl-surfaces.py's PROP_MEMBERS table, which
-# reads each spelling out of the template zone's OWN BLOCK — the thing a
-# line pattern cannot do, and the reason `role` and `inset` were added
-# there and not as sixteen more `check` lines. The clauses above and
-# below stay because they are already written and already pass; they are
-# not the pattern to copy. Python is the census's one exemption (its two
-# zones share a surface) and is covered by tools/checks/py-node-props.py.
+# NEW TEMPLATE PROPS DO NOT GO HERE. The prop sweep lives in
+# tools/tpl-surfaces.py's PROP_MEMBERS table, which reads each spelling
+# out of the template zone's OWN BLOCK — the thing a line pattern cannot
+# do. The clauses above and below stay because they already pass; they
+# are not the pattern to copy. Python is the census's one exemption (its
+# two zones share a surface), covered by tools/checks/py-node-props.py.
 check rust    crates/kaya/src/app.rs \
     "template grow" "pub fn set\(&mut self, node: TemplateNodeId"
 check python  bindings/python/kaya/__init__.py \
@@ -669,28 +737,16 @@ check haskell bindings/haskell/KayaApp.hs \
 #
 # Everything above is about what a BINDING OFFERS. This is invariant 5:
 # all example scenes use each language's sugar tier, and only the C
-# guests keep the explicit floor, deliberately, as the floor's
-# documentation.
+# guests keep the explicit floor.
 #
-# The scene tier at the end of this file already fails a guest for using
-# the floor, and it is good at it — per-language spellings, each watched
-# firing against a doctored copy of the real guest. It reads only the
-# scenes in its `scene_guests` table, which is `entry` and `milestone2`,
-# the two carve-out scenes. So a guest outside that table could teach
-# the floor indefinitely, and several did: the undo scene built its
-# per-row text field with `widget(KIND_ENTRY)` in seven languages for
-# five milestones, the text editor shipped its find bar the same way,
-# and guests/haskell/textarea.hs built its ENTIRE scene at the floor
-# while every constructor it needed sat unused in the binding.
-#
-# The first two had an excuse and it is now gone — the template zone had
-# no constructor for those kinds. So the rule is one sentence with no
-# per-scene table to forget to add to: a sugar guest does not name a
-# widget kind. tools/guest-floor.py sweeps every guest outside guests/c,
-# strips comments FIRST (the converted guests all explain the old floor
-# spelling in a comment above the new call, so a sweep that reads
-# comments reports every file it just fixed — measured while writing
-# it), and carries its exemptions with reasons the way gates.sh does.
+# The scene-tier clause at the end of this file reads only the scenes in
+# its `scene_guests` table, so a guest outside it could teach the floor
+# indefinitely. The rule here has no per-scene table to forget: A SUGAR
+# GUEST DOES NOT NAME A WIDGET KIND. tools/guest-floor.py sweeps every
+# guest outside guests/c, STRIPS COMMENTS FIRST (the converted guests
+# explain the old floor spelling in a comment above the new call, so a
+# sweep that reads comments reports every file it just fixed), and
+# carries its exemptions with reasons the way gates.sh does.
 floor_out=$(python3 tools/guest-floor.py 2>&1)
 floor_rc=$?
 if [ "$floor_rc" -ne 0 ]; then
@@ -804,19 +860,15 @@ check swift   bindings/swift/KayaApp.swift        a11y_hint "func setA11yHint\("
 check haskell bindings/haskell/KayaApp.hs         a11y_hint "A11yHint :: String -> Attr"
 check ocaml   bindings/ocaml/kaya_app.ml          a11y_hint "let set_a11y_hint \(Widget id\)"
 
-# THE CLIPBOARD SURFACE (DESIGN.md, Clipboard). Four points, and none
-# of them is a widget kind or a window prop, so nothing above can see
-# them: the copy record, the privileged read, the per-widget accept
-# list, and the paste hook. A binding shipping the clipboard wire-only
-# would leave apps in that language unable to copy anything at all,
-# and every other gate would pass.
+# THE CLIPBOARD SURFACE (DESIGN.md, Clipboard). Four points, none of
+# them a widget kind or a window prop: the copy record, the privileged
+# read, the per-widget accept list, and the paste hook.
 #
-# THE SPELLINGS DIFFER AND THE SEMANTICS DO NOT, which is the binding
-# convention (DESIGN.md): copy is a CHAIN where the language builds by
-# chaining, keyword arguments where it has them, and a record where
-# that is the idiom — but at-most-one-per-kind is structural in all
-# eight, never a duplicate check. `accepts` takes the kinds as VALUES
-# and joins them to the space-separated list the wire carries.
+# THE SPELLINGS DIFFER AND THE SEMANTICS DO NOT: copy is a CHAIN where
+# the language builds by chaining, keyword arguments where it has them,
+# a record where that is the idiom — but at-most-one-per-kind is
+# STRUCTURAL in all eight, never a duplicate check. `accepts` takes the
+# kinds as VALUES and joins them to the wire's space-separated list.
 check rust    crates/kaya/src/app.rs              copy "pub fn copy\(&mut self"
 check python  bindings/python/kaya/__init__.py    copy "^def copy\("
 check go      bindings/go/app.go                  copy "func \(tx \*Tx\) Copy\("
@@ -935,16 +987,11 @@ check_menus ocaml bindings/ocaml/kaya_app.ml \
     "separator=^let separator " "context_menu=^let context_menu " \
     "context_catalog=^let context_catalog "
 
-# EVERY WINDOW PROP NEEDS A SUGAR SPELLING TOO. The kinds sweep above
-# has held since the sugar tier landed; window props had no equivalent,
-# so an 8-way sweep of a new one was a matter of remembering. list_detail
-# was swept by hand and nothing would have caught a missed language.
-#
-# Props come from the GENERATED wire file, so this tracks the spec by
-# construction — a new WINDOW_PROPS entry lands here the moment the
-# generators run. C is exempt for the same reason it is above: the
-# floor spells every window prop with one generic
-# kaya_tx_set_window_prop call plus the constant, on purpose.
+# EVERY WINDOW PROP NEEDS A SUGAR SPELLING TOO. Props come from the
+# GENERATED wire file, so this tracks the spec by construction — a new
+# WINDOW_PROPS entry lands here the moment the generators run. C is
+# exempt for the reason it is above: the floor spells every window prop
+# with one generic kaya_tx_set_window_prop call, on purpose.
 wprops=$(grep -oE "^WPROP_[A-Z_]+" bindings/python/kaya/wire.py \
     | cut -c7- | tr "[:upper:]" "[:lower:]")
 [ -n "$wprops" ] || { echo "check-sugar-surface: no window props in the generated wire file"; exit 1; }
@@ -991,29 +1038,17 @@ print(''.join(p.capitalize() for p in sys.argv[1].split('_')))" "$wprop")
 done
 
 # ─────────────────────────────────────────────────────────────────────
-# THE STYLING SURFACE (docs/styling-plan.md, slice 1). Three points,
-# and the sweeps above already hold one of them: `inset` is a
-# WINDOW_PROPS entry, so the spec-derived window-prop loop demands its
-# spelling in all eight by construction — its rows appeared the moment
-# the generators ran. The other two are neither widget kinds nor window
-# props, so nothing else in this file can see them, and each would
-# otherwise be held by a ledger line and memory:
+# THE STYLING SURFACE (docs/styling-plan.md, slice 1). `inset` is a
+# WINDOW_PROPS entry and the spec-derived loop above already demands it.
+# The other two are neither widget kinds nor window props, so nothing
+# else in this file can see them:
 #
-#   - `brand_accent` is a TRANSACTION verb, copy's shape: the set-once
-#     identity write carrying the one seed hex. The per-appearance
-#     override form rides the same base name (a sibling `_with`, keyword
-#     arguments, optional labels — the idiom's call), so the patterns
-#     key on the base name and the override form's uniformity is the
-#     sweep verdict's business, not a ninth pattern's.
+#   - `brand_accent` is a TRANSACTION verb, copy's shape. The
+#     per-appearance override form rides the same base name, so the
+#     patterns key on the base name.
 #   - `role` rides the WIDGET chain the way grow does, with the closed
-#     vocabulary (destructive/prominent/heading) as a real enum type
-#     wherever the language has one. The root's declare-time wall is
-#     what refuses a misfit kind; the binding's job is only to spell
-#     the request.
-#
-# A binding shipping either wire-only leaves apps in that language
-# unable to brand or to say what a widget MEANS, and every other gate
-# would pass — invariant 2's exact failure shape, one pass later.
+#     vocabulary as a real enum type wherever the language has one. The
+#     root's declare-time wall refuses a misfit kind.
 
 # check_styling_point <point> <rust-re> <python-re> <go-re> <csharp-re>
 #                     <java-re> <swift-re> <haskell-re> <ocaml-re>
@@ -1056,15 +1091,10 @@ check_styling_point brand_accent \
     '^brandAccent ::' \
     '^let brand_accent '
 
-# THE BRAND TYPEFACE (Slice 2b), the accent's sibling and the same
-# failure shape: a transaction verb no other sweep can see — not a
-# widget kind, not a window prop — so a binding shipping it wire-only
-# strands apps in that language unable to brand a family while every
-# other gate passes. Same base-name rule as the accent: the
-# per-platform/font-bytes form rides the base name (Rust's `_with`
-# sibling, keyword arguments elsewhere), so one pattern per language
-# and the override form's uniformity stays the sweep verdict's
-# business.
+# THE BRAND TYPEFACE (Slice 2b), the accent's sibling: a transaction
+# verb no other sweep can see. Same base-name rule as the accent — the
+# per-platform/font-bytes form rides the base name, so one pattern per
+# language.
 check_styling_point brand_typeface \
     'pub fn brand_typeface\(&mut self' \
     '^def brand_typeface\(' \
@@ -1075,22 +1105,10 @@ check_styling_point brand_typeface \
     '^brandTypeface ::' \
     '^let brand_typeface '
 
-# THE APP IDENTITY (docs/app-identity-plan.md), the typeface's sibling
-# and the same failure shape: a transaction verb no other sweep can see
-# — not a widget kind, not a window prop — so a binding shipping it
-# wire-only strands apps in that language unable to say who they are
-# while every other gate passes.
-#
-# RED BY DESIGN, TODAY, and that is what this row is FOR. The plan
-# sequences the whole identity depth on Windows first (spec + the WinUI
-# arm + the Rust binding + the scene), with the seven other bindings'
-# sugar in the fan-out; a gate that went green on one binding would let
-# that fan-out be forgotten, which is precisely how a depth slice rots.
-# It goes green when the eighth binding lands and not before. Same
-# base-name rule as the brand rows: the icon-carrying form rides the
-# base name and the name-only form is its sibling, so one pattern per
-# language and the two forms' uniformity stays the sweep verdict's
-# business.
+# THE APP IDENTITY (docs/app-identity-plan.md): a transaction verb no
+# other sweep can see, so a binding shipping it wire-only strands apps
+# in that language while every other gate passes. RED BY DESIGN until
+# the eighth binding lands. Same base-name rule as the brand rows.
 check_styling_point app_identity \
     'pub fn app_identity\(&mut self' \
     '^def app_identity\(' \
@@ -1101,67 +1119,49 @@ check_styling_point app_identity \
     '^appIdentity ::' \
     '^let app_identity '
 
-# `asset(name)`, the ninth tier's newest verb (docs/assets-plan.md,
-# ratified 2026-08-18) and the same failure shape as the two rows above:
-# a transaction-tier call no other sweep can see — not a widget kind, not
-# a window prop, not a template prop — so a binding shipping the core
-# entry point without sugar strands apps in that language unable to read
-# the files their own build shipped, while every other gate passes.
+# `asset(name)` (docs/assets-plan.md): a transaction-tier call no other
+# sweep can see, so a binding shipping the core entry point without
+# sugar strands apps in that language while every other gate passes.
 #
-# THIS ROW IS WHY THE SWEEP EXISTS, more literally than most. The rule it
-# spreads is a rule that USED to be hand-written eight times: every
-# typeface guest carried its own environment read, its own repo-relative
-# default and its own prose for a missing file, and one of the eight had
-# a language trap severe enough to have earned a gate of its own
-# (tools/check-go-env.sh). `asset(name)` replaced all eight with one Rust
-# module — and the only thing keeping that true in eight languages is
-# this line.
+# EIGHT PATTERNS, FOUR SHAPES, idiom rather than semantics (invariant
+# 1). Rust, Go and C# hang it off the transaction; Python, OCaml and
+# Haskell are ambient and it is a plain function; Java is static on the
+# app surface; Swift spells it as a CLASS whose initializer opens the
+# asset, that language's idiom for a handle with a lifetime.
 #
-# EIGHT PATTERNS, FOUR SHAPES, and the differences are idiom rather than
-# semantics (invariant 1). Rust, Go and C# hang it off the transaction
-# (`tx.asset`, `tx.Asset`, `tx.Asset`); Python, OCaml and Haskell are
-# ambient and it is a plain function; Java is static on the app surface;
-# Swift spells it as a CLASS whose initializer opens the asset
-# (`KayaAsset("fonts/sora-wght.ttf")`), which is that language's idiom
-# for a handle with a lifetime and is why its pattern names a type.
+# SWIFT'S PATTERN IS THE THROWING INITIALIZER AND NOT THE CLASS NAME:
+# the class is already held by a compiler (three guests name it, so
+# swift-typecheck reds if it goes), while the `throws` has no such wall
+# — Swift answers a `try` with nothing to throw with a WARNING, and the
+# guest pass is not -warnings-as-errors.
 #
-# KEYED PAST THE BARE NAME, per this file's own scar tissue: `asset` is
-# a short common word, and a pattern matching it alone would be
-# satisfied by a doc comment. Every pattern below carries its receiver,
-# its keyword or its type signature.
+# KEYED PAST THE BARE NAME: `asset` is a short common word and a pattern
+# matching it alone would be satisfied by a doc comment. Every pattern
+# below carries its receiver, its keyword or its type signature.
 check_styling_point asset \
     'pub fn asset\(&self' \
     '^def asset\(' \
     'func \(tx \*Tx\) Asset\(' \
     'public Asset Asset\(' \
     'public static Asset asset\(' \
-    'final class KayaAsset' \
+    'init\(_ name: String\) throws' \
     '^asset :: String -> IO Asset' \
     '^let asset = '
 
 # The row above's other half: the sentence a miss WOULD raise, answered
-# TOTALLY, without unwinding.
+# TOTALLY, without unwinding. A scene has to OBSERVE that sentence on
+# five platforms in NINE languages — the eight bindings and the C floor
+# — and "catch it" is not one semantics in nine, because C has no catch
+# at all. A query is. The query also answers what no raise can: for a
+# name that RESOLVES it says so, having opened nothing, which is the
+# second half of what tools/scenes/assets.steps freezes.
 #
-# IT IS NOT A CONVENIENCE. `asset(name)` raises on a miss in every
-# binding, and seven of the eight raise something a guest could catch —
-# but Swift's is `fatalError`, which traps rather than unwinding, so a
-# Swift guest cannot recover from one at all (docs/deferred.md carries
-# that as a maintainer question about invariant 1). A scene has to
-# OBSERVE that sentence on five platforms in nine languages, and "catch
-# it" is not one semantics in nine languages. A query is.
+# The bindings write no prose — every one returns
+# crates/kaya/src/assets.rs's bytes unchanged.
 #
-# So this is the row that keeps the conformance scene writable: without
-# it in some language, tools/scenes/assets.steps simply has no guest in
-# that language, and the census nothing else observes goes unchecked
-# there. The bindings write no prose — every one of these returns
-# crates/kaya/src/assets.rs's bytes unchanged — so what the scene freezes
-# is what an app's author would have been shown.
-#
-# NAMED FOR CARRYING, NOT FOR DIAGNOSING, in all eight: a `…WhyNot` here
-# would opt into tools/check-diagnostics.sh by its name alone, and that
-# gate reads a function so named as the AUTHOR of a sentence these only
-# carry. Swift hangs it off the handle type as a static, which is that
-# language's idiom for a namespaced free function.
+# NAMED FOR CARRYING, NOT FOR DIAGNOSING: a `…WhyNot` here would opt
+# into tools/check-diagnostics.sh by its name alone, and that gate reads
+# a function so named as the AUTHOR of a sentence these only carry.
 check_styling_point asset_miss_sentence \
     'pub fn asset_miss_sentence\(&self' \
     '^def asset_miss_sentence\(' \
@@ -1172,16 +1172,12 @@ check_styling_point asset_miss_sentence \
     '^assetMissSentence :: String -> IO String' \
     '^let asset_miss_sentence = '
 
-# THREE ROWS ARE KEYED PAST THE MENU ITEM'S ROLE, which shares the
-# bare name: Rust's `role(self, role: MenuRole)`, Python's
-# `def role(self, name)` on the item class and OCaml's `let item …
-# ?role …` all predate this clause, and a bare-name pattern was
-# satisfied by each before any widget sugar existed (caught by running
-# the clause the day it was written — the OCaml template-grow lesson,
-# one surface over). Rust is keyed on the widget enum's type, Python on
-# the parameter name the way grow/a11y_hint are, OCaml on the
-# constructor or the setter receiver — none of which the menu item's
-# line can supply.
+# THREE ROWS ARE KEYED PAST THE MENU ITEM'S ROLE, which shares the bare
+# name: a bare-name pattern is satisfied by Rust's
+# `role(self, role: MenuRole)`, Python's `def role(self, name)` on the
+# item class and OCaml's `let item … ?role …`. Rust keys on the widget
+# enum's type, Python on the parameter name, OCaml on the constructor or
+# setter receiver — none of which the menu item's line can supply.
 check_styling_point role \
     'pub fn role\(self, role: crate::Role\)' \
     'def role\(self, role\)' \
@@ -1192,21 +1188,14 @@ check_styling_point role \
     'Role :: Role -> Attr' \
     'let (label|button) [^=]*\?role|let set_role \(Widget id\)'
 
-# A SECTION INTO A NAMED WINDOW, in all eight. add_section grew up
-# primary-only, and six bindings gained a window target while two kept
-# the hardcoded 0 — which no gate swept, so the divergence surfaced
-# only when the sidebar-coverage scene put sections in an aux window
-# and Python and Haskell could not say so (2026-08-15, both proven
-# through the apply stream: the records went silently to window 0).
-# Idiom decides the spelling — a second name where there are no
-# optional arguments, a window argument where there are — and each
-# pattern is keyed on the window-carrying form, so the primary-only
-# spelling cannot satisfy it — except Swift's and (since the symbol
-# sugar wrapped it, 2026-08-16) Python's, whose signatures put the
-# window parameter past a line break where a line-based grep cannot
-# key on it; those rows pin the wrapped signature's own first line and
-# the GUESTS hold the parameter (both sections guests call with
-# window=/window:).
+# A SECTION INTO A NAMED WINDOW, in all eight. Idiom decides the
+# spelling — a second name where there are no optional arguments, a
+# window argument where there are — and each pattern keys on the
+# window-carrying form so the primary-only spelling cannot satisfy it.
+# EXCEPT Swift's and Python's, whose signatures put the window parameter
+# past a line break where a line-based grep cannot key on it: those rows
+# pin the wrapped signature's own first line, and the GUESTS hold the
+# parameter (both sections guests call with window=/window:).
 check_styling_point 'sectioned aux window' \
     'pub fn add_section_in\(' \
     'def add_section\(self, section_id, title=None, symbol=None,' \
@@ -1235,37 +1224,19 @@ check_styling_point 'container inset' \
     'let set_inset \(Widget id\)|let (row|column|grid) [^=]*\?inset'
 
 # EVERY WINDOW HANDLER NEEDS A CONSTRUCT SPELLING TOO — AND NO LOOSE
-# ONE. The props above are half of the window construct; its HANDLERS
-# are the other half, and nothing swept them. That is how the undo
-# fan-out shipped an app-global `OnUndone(window, fn)` in three
-# bindings (Go, Java, Haskell) by transcribing Rust's Messages shape,
-# while the other five already carried the pair on the window
-# construct: a violation of the ratified rule that NO WINDOW ATTRIBUTE
-# LIVES AS A LOOSE FUNCTION OUTSIDE THE CONSTRUCT (DESIGN.md, Binding
-# conventions), found by eye on 2026-08-04 and by no gate. `window_title`
-# was the first arrival of that pattern; this was the second.
+# ONE: NO WINDOW ATTRIBUTE LIVES AS A LOOSE FUNCTION OUTSIDE THE
+# CONSTRUCT (DESIGN.md, Binding conventions). The sweep runs BOTH
+# directions, because only the pair states the rule.
 #
-# So the sweep runs BOTH directions, because only the pair states the
-# rule: the construct must spell the handler in every binding, and
-# nothing outside the construct may.
+# WHERE THE LIST COMES FROM: two bindings declare the construct's
+# attribute set as a CLOSED SYNTACTIC OBJECT — Haskell's
+# `data WindowAttr` and OCaml's `let window` — so "what the construct
+# carries" is a fact about a file rather than a judgement made here.
+# The list is the UNION of the two.
 #
-# WHERE THE LIST COMES FROM. Two bindings declare the window construct's
-# attribute set as a CLOSED SYNTACTIC OBJECT, so "what the construct
-# carries" is a fact about a file rather than a judgement made here:
-# Haskell's `data WindowAttr` (a sum whose WOn* constructors ARE its
-# handlers) and OCaml's `let window` (a labelled-argument list whose
-# ?on_* arguments are the same set). The list is the UNION of the two —
-# a handler EITHER of them claims is one every binding owes a spelling
-# for, and the two sources disagreeing needs no special report because
-# the sweep itself then names the one that is behind, in the same words
-# it uses for the other six. Today the union is four: close_requested,
-# closed, undone, redone.
-#
-# ADDING A NEW WINDOW HANDLER therefore means spelling it in Haskell's
-# WindowAttr or OCaml's window, at which point this sweep demands the
-# other seven spellings and refuses the loose one. The gate is red for
-# the rest of the fan-out — that is the hold-open pattern, not a
-# regression. Nobody edits a list here.
+# ADDING A NEW WINDOW HANDLER means spelling it in Haskell's WindowAttr
+# or OCaml's window, at which point this sweep demands the other seven
+# and refuses the loose one. Nobody edits a list here.
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
@@ -1312,13 +1283,9 @@ from_ml = re.findall(r"\?on_([a-z_]+)", m.group(0))
 
 union = sorted(set(from_hs) | set(from_ml))
 # THE ANTI-VACUITY FLOOR. A derived list that goes empty sweeps nothing
-# and passes everything, and the union only empties if BOTH declarations
-# drop a handler — a deliberate two-language retirement, which is the
-# one case where a shrinking list is right. The close pair is the floor
-# because it predates every other window handler and is the construct's
-# oldest content: if it ever leaves BOTH, this gate is reading the wrong
-# thing and has to be re-derived rather than quietly agree with what is
-# left.
+# and passes everything. The close pair is the floor: if it ever leaves
+# BOTH declarations, this gate is reading the wrong thing and has to be
+# re-derived rather than agree with what is left.
 missing = [h for h in ("close_requested", "closed") if h not in union]
 if missing:
     sys.exit(f"the window construct no longer carries {missing} in either {hs} "
@@ -1334,17 +1301,14 @@ if [ "$wh_rc" -ne 0 ]; then
 fi
 
 # RUST'S CARVE-OUT IS PINNED POSITIVELY rather than left as a hole:
-# `Messages::on_*(WindowId, …)` is the sanctioned Rust form, because a
-# Rust handler is a MESSAGE VALUE in a table the transaction cannot
-# reach — there is nowhere else for it to live. Pinning it means a
-# future "fix" that moves the four onto WindowRef goes red here and gets
-# decided on purpose instead of drifting.
+# `Messages::on_*(WindowId, …)` is the sanctioned Rust form, a MESSAGE
+# VALUE in a table the transaction cannot reach. Pinning it means a
+# future "fix" onto WindowRef goes red here and gets decided.
 #
 # The pin reads the `impl<M> Messages<M>` block with its signatures
 # collapsed onto one line (rustfmt wraps them and grep is line-based)
 # and its comments dropped, so a doc comment cannot satisfy it. A
-# missing anchor FAILS rather than going quiet: a gate that stops
-# finding what it reads reports a clean bill about nothing.
+# missing anchor FAILS rather than going quiet.
 python3 - crates/kaya/src/app.rs "$T/rust-messages.txt" <<'PY'
 import sys
 
@@ -1366,19 +1330,15 @@ if [ "$rust_rc" -ne 0 ]; then
 fi
 
 # AND THE FOUR ARGUMENT-LIST BINDINGS ARE READ BY REGION, NOT BY FILE.
-# Python, C#, Swift and OCaml spell a window's attributes as arguments,
-# and they spell them TWICE — once on the primary window's construct and
-# once on the auxiliary's — where DESIGN.md says the two take EXACTLY
-# the same set. A whole-file grep cannot tell those apart: a handler
-# dropped from `window` while `create_window` keeps it still matches
-# somewhere in the file, and the first cut of this sweep passed a tree
-# doctored exactly that way (measured while writing it, 2026-08-04). So
-# each construct's header is extracted and swept on its own.
+# Python, C#, Swift and OCaml spell a window's attributes as arguments
+# TWICE — the primary window's construct and the auxiliary's — where
+# DESIGN.md says the two take EXACTLY the same set. A whole-file grep
+# cannot tell those apart: a handler dropped from `window` while
+# `create_window` keeps it still matches somewhere in the file. So each
+# construct's header is extracted and swept on its own.
 #
-# The other four bindings need no extraction because their construct is
-# a TYPE rather than an argument list — Go's and Java's WindowRef chain,
-# Haskell's WindowAttr, Rust's Messages — so one spelling serves both
-# windows and the receiver is what names the construct.
+# The other four need no extraction: their construct is a TYPE rather
+# than an argument list, so one spelling serves both windows.
 python3 - "$T" "$WH_PY" "$WH_CS" "$WH_SW" "$WH_ML" <<'PY'
 import re
 import sys
@@ -1458,14 +1418,11 @@ deny() {
 # swift_one_door <construct argument> <KayaApp registrar> <file>
 #
 # SWIFT IS THE ONE BINDING WHERE "no such function exists" CANNOT BE THE
-# RULE, and the carve-out is stated rather than implied. KayaApp's
-# handler tables are `private`, so KayaAppTx — a different type in the
-# same file — cannot write them, and the construct reaches them through
-# a KayaApp method that DOES take a window id. Six bindings need no such
-# method (their construct writes the table itself) and Rust's IS the
-# sanctioned form, so Swift's is pinned as ONE DOOR instead: called
-# exactly once, from the construct, with the construct's own argument.
-# A second callsite is a second door, and a guest holds the KayaApp.
+# RULE. KayaApp handler tables are `private`, so KayaAppTx cannot write
+# them and the construct reaches them through a KayaApp method that DOES
+# take a window id. So Swift is pinned as ONE DOOR: called exactly once,
+# from the construct, with the construct own argument. A second callsite
+# is a second door, and a guest holds the KayaApp.
 swift_one_door() {
     local doors construct
     doors=$(grep -cE "app\.$2\(" "$3")
@@ -1540,20 +1497,15 @@ deny_loose() {
 import sys
 print(''.join(p.capitalize() for p in sys.argv[1].split('_')))" "$h")
     # Each pattern is that language's shape of a registration THE APP
-    # REACHES WITH A WINDOW ID IN HAND — the thing a construct-scoped
-    # handler makes unnecessary, and the exact shape Go, Java and
-    # Haskell shipped. Python, OCaml and Haskell have the simplest rule
-    # (the top-level definition itself: a construct spelling is a
-    # keyword argument, a labelled argument and a constructor there, so
-    # a function of that name can only be the loose one). Go's is a
-    # method on the app or the transaction, or a package-level function
-    # — the three places a Go registrar can live, the binding having no
-    # fourth. C# and Java are keyed on the DECLARATION rather than on
-    # the window parameter alone, because a wrapped signature puts the
-    # parameters on the next line while the name and its paren stay
-    # together: any `OnUndone(` declaration is loose in C# (the
-    # construct is a named argument, spelled lowercase), and in Java the
-    # construct returns WindowRef to chain, so a `void onUndone(` is
+    # REACHES WITH A WINDOW ID IN HAND — what a construct-scoped handler
+    # makes unnecessary. Python, OCaml and Haskell have the simplest
+    # rule (the top-level definition itself, since a construct spelling
+    # is a keyword/labelled argument or a constructor there). Go's is a
+    # method on the app or the transaction, or a package-level function.
+    # C# and Java key on the DECLARATION rather than the window
+    # parameter, because a wrapped signature puts the parameters on the
+    # next line: any `OnUndone(` declaration is loose in C#, and in Java
+    # the construct returns WindowRef to chain, so a `void onUndone(` is
     # the loose one by its return type.
     deny python "$pyf" "$h" "^ *def on_$h\("
     deny go "$gof" "$h" "^func (\([a-z]+ \*(App|Tx)\) )?On$pascal\("
@@ -1581,13 +1533,10 @@ if [ "$fake_wh_wants" -ne 12 ] || [ "$fake_wh_doors" -ne 1 ]; then
 fi
 
 # AND THE LOOSE-SPELLING CLAUSE IS WATCHED FAILING, on DOCTORED COPIES
-# OF THE REAL FILES rather than synthetic samples: a fixture only ever
-# proves the pattern matches the fixture, which is how the wayland seat
-# guard passed VACUOUSLY TWICE (docs/traps.md). Every perturbation
-# prints its substitution count and is refused if it did not apply — an
-# unchanged copy is a FAILED self-test, not a passed one — and every
-# refusal is checked for its REASON, since a non-empty complaint is
-# satisfied by any unrelated finding.
+# OF THE REAL FILES (docs/traps.md: the wayland seat guard passed
+# VACUOUSLY TWICE against a fixture). Every perturbation prints its
+# substitution count and is refused if it did not apply, and every
+# refusal is checked for its REASON.
 
 # <source> <regex> <replacement> <destination> -> substitution count
 perturb() {
@@ -1704,64 +1653,46 @@ for whandler in $whandlers; do
 done
 
 # THE C FLOOR IS EXEMPT, AND THE EXEMPTION IS CHECKED — an exemption is
-# not an implementation (check-roles' rule, from the other side). C
-# registers nothing at all: a guest reads the occurrence record's head
-# and matches on it, which is the floor's documentation of what every
-# other binding's handler table is doing. What makes that honest rather
-# than convenient is that the header declares NO handler registrar of
-# any kind, so a `kaya_app_on_undone` arriving one day fails here
-# instead of quietly making C the ninth binding with a loose spelling.
+# not an implementation. C registers nothing: a guest reads the
+# occurrence record head and matches on it. What makes that honest is
+# that the header declares NO handler registrar of any kind, so a
+# `kaya_app_on_undone` arriving one day fails here instead of quietly
+# making C the ninth binding with a loose spelling.
 deny c bindings/c/kaya_wire.h "any window handler" "kaya_[a-z_]*_on_[a-z_]+\("
 
 # ─────────────────────────────────────────────────────────────────────
 # THE SCENE TIER: THE SAME RULE, READ FROM THE OTHER SIDE.
 #
-# Everything above asks whether a BINDING OFFERS the sugar. Nothing
-# asked whether the EXAMPLES USE IT, which is invariant 5 (CLAUDE.md:
-# all example scenes use each language's sugar tier; only the C guests
-# keep the explicit floor, deliberately, as the floor's documentation).
-# That invariant was a matter of memory, and the two carve-out scenes
-# are what the memory cost: entry and milestone2 sat at the whole-file
-# explicit floor in eight languages for five milestones — widget-kind
-# constructors, add_child chains, bind_element by index — because their
-# EVENT mechanism is deliberately the raw tier and nobody separated the
-# two halves. Every reader who noticed reasoned "that is the explicit
-# scene" and moved on. The maintainer ratified the split on 2026-08-05
-# (DESIGN.md, "SCOPE, ratified 2026-08-05"): the carve-out covers the
-# EVENT-RECEIVING mechanism ONLY, and construction follows the same
-# sugar rule as every other example.
+# Everything above asks whether a BINDING OFFERS the sugar; this asks
+# whether the EXAMPLES USE IT (invariant 5). The carve-out for entry and
+# milestone2 covers the EVENT-RECEIVING mechanism ONLY (DESIGN.md,
+# "SCOPE, ratified 2026-08-05"); construction follows the same sugar
+# rule as every other example.
 #
-# So this clause reads both halves of that ratification, for BOTH
-# scenes the carve-out names:
+# So this clause reads both halves, for BOTH carve-out scenes:
 #   (a) no entry and no milestone2 guest spells CONSTRUCTION at the
 #       floor, in any of the eight bindings; and
 #   (b) both rust guests still spell their EVENTS as the raw
 #       `ctx.next()` loop. THE CARVE-OUT IS CHECKED, NOT ASSUMED — a
 #       later session "finishing the job" by folding them onto
 #       kaya::Messages would delete the only guests that document the
-#       tier Messages is built on, and this says so out loud instead of
-#       leaving it to a reviewer's eye.
+#       tier Messages is built on.
 #
-# THE PATTERNS ARE DERIVED FROM WHAT EACH FILE ACTUALLY SAID, not from
-# what a floor might look like: every regex below matched
-# guests/<lang>/<scene>.* at that scene's pre-graduation revision and
-# matches nothing in the graduated one.
+# THE PATTERNS ARE DERIVED FROM WHAT EACH FILE ACTUALLY SAID: every
+# regex below matched guests/<lang>/<scene>.* at that scene's
+# pre-graduation revision and matches nothing in the graduated one.
 #
 # A THIRD SCENE JOINS BY ADDING ROWS AND NOTHING ELSE: one to
-# scene_facts (its expected string, its script, the line the self-test
-# plants after) and one per language to scene_guests. Every loop below
-# — the clause itself, the planted-snippet self-test, the raw-loop pin,
-# the anti-vacuity negative — sweeps those two tables, so a scene that
-# joins arrives checked AND self-tested without surgery here.
+# scene_facts and one per language to scene_guests. Every loop below
+# sweeps those two tables.
 
 # <scene> <the expected string every guest carries> <its script> <the
 # line the self-test plants its floor snippets after>
 #
-# THE EXPECTED STRING IS THE ANTI-VACUITY ANCHOR. Frozen by invariant 6
-# and byte-identical in all eight languages by invariant 6's whole
-# point, so a guest that was renamed, moved or emptied fails loudly
-# here instead of satisfying every denial below by having nothing in
-# it.
+# THE EXPECTED STRING IS THE ANTI-VACUITY ANCHOR: frozen and
+# byte-identical in all eight languages (invariant 6), so a guest that
+# was renamed, moved or emptied fails loudly here instead of satisfying
+# every denial below by having nothing in it.
 scene_facts=(
     entry 'nothing to add, ' tools/scenes/entry.steps '^(.*no todos.*)$'
     milestone2 '"step 0"' tools/scenes/milestone2.steps '^(.*"step 0".*)$'
@@ -1771,12 +1702,9 @@ scene_facts=(
 #
 # THE GO ROWS NAME <scene>/<scene>.go, which is the scene ITSELF: one
 # directory per scene, package named for it, App() handing back a built
-# app. They briefly named guests/go/scenes/<scene>/ instead, and before
-# that guests/go/<scene>/main.go — which for a while was a six-line
-# desktop tail with no construction in it at all, so a row left pointing
-# there would have read a file that cannot spell the floor and passed
-# for the emptiest possible reason. The tails all live in
-# guests/go/cmd now and no scene row may name that directory.
+# app. The desktop TAILS live in guests/go/cmd and no scene row may name
+# that directory — a row pointing at a tail reads a file that cannot
+# spell the floor and passes for the emptiest possible reason.
 scene_guests=(
     entry rust guests/rust/entry.rs
     entry python guests/python/entry.py
@@ -1801,10 +1729,9 @@ scene_guests=(
 # fact_steps and fact_plant.
 #
 # GLOBALS RATHER THAN A `$( )`: a command substitution runs in a
-# subshell, where the `exit 1` for a scene missing from the table would
-# kill only that subshell and hand the caller an EMPTY anchor — and an
-# empty anchor is matched by every file, which is the exact vacuity
-# this clause exists to refuse.
+# subshell, where the `exit 1` for a scene missing from the table kills
+# only that subshell and hands the caller an EMPTY anchor — matched by
+# every file, which is the exact vacuity this clause refuses.
 fact_anchor=""
 fact_steps=""
 fact_plant=""
@@ -1826,15 +1753,8 @@ scene_fact() {
 
 # HASKELL'S GENERIC CONSTRUCTOR IS DENIED PER KIND, and the kind list
 # is the GENERATED one this file already reads at the top, so a kind
-# added to the spec is denied here without anyone editing a list.
-# HISTORY: this clause shipped with `kindEntry` and `kindButton`
-# exempted, because the sugar then had no handler-free leaf
-# constructors and entry.hs (which registers centrally) had no other
-# way to build those two widgets. The binding grew `entry` and
-# `button` the same day (2026-08-05, the one hole of its kind among
-# the eight bindings) and the exemption was dropped as the original
-# comment here instructed — the guest now builds every leaf in the
-# sugar and the denial is total.
+# added to the spec is denied here without anyone editing a list. The
+# denial is total: no kind is exempt.
 hs_kinds=$(python3 -c "
 import sys
 
@@ -1854,18 +1774,14 @@ hs_first="${hs_kinds##* }"
 
 # THE FLOOR VOCABULARY, FIVE FIELDS PER ROW: the SCENES the row guards,
 # the language, what the spelling IS, the regex that finds it, and A
-# LINE OF THAT LANGUAGE'S FLOOR THAT MUST TRIP IT. The last field is
-# not decoration. The self-test below plants every one of a language's
-# snippets in a copy of its real guest — ONCE PER SCENE THE ROW GUARDS
-# — and requires the clause to name every row, naming the scene it
-# found it in. So each regex here is watched finding something in every
-# file it speaks about, and a pattern cannot be added without a line
-# proving it fires. A guard nobody has seen fail is worse than none: it
-# stops you looking (docs/traps.md).
+# LINE OF THAT LANGUAGE'S FLOOR THAT MUST TRIP IT. The last field is not
+# decoration: the self-test plants every snippet in a copy of its real
+# guest, once per scene the row guards, and requires the clause to name
+# every row. A pattern cannot be added without a line proving it fires.
 #
 # THE FIRST FIELD IS "*" FOR ALL SCENES, which is what a floor spelling
-# normally is: `add_child` is the floor wherever it appears. One pair of
-# rows is scene-specific, for a reason written where it stands.
+# normally is. One pair of rows is scene-specific, for a reason written
+# where it stands.
 scene_rules=(
     "*" rust "widget-kind construction" '\.widget\(WidgetKind::' \
         '        let column = tx.widget(WidgetKind::Column);'
@@ -1878,16 +1794,12 @@ scene_rules=(
     "*" rust "bind_element by index" '\.bind_element\(' \
         '        t.bind_element(label, Prop::Text, 0);'
 
-    # PYTHON HAS NO WIDGET-KIND FLOOR TO LEAVE: its public surface has
-    # only ever been the sugar (the kind constructors call a private
-    # _widget), which is why its entry guest's graduation was the key
-    # counter alone. The clause is written anyway, and written the way
-    # the C exemption above is — as a rule about what must NOT ARRIVE.
-    # `kaya.for_each` is real today (feed.py needs the target for a
-    # variant collection) and is the tier below the `for` statement
-    # this scene traces with; the other two name spellings the binding
-    # does not export, so a floor arriving one day fails here instead
-    # of landing in an example first.
+    # PYTHON HAS NO WIDGET-KIND FLOOR TO LEAVE: its public surface is
+    # the sugar (the kind constructors call a private _widget). The
+    # clause is written anyway, as a rule about what must NOT ARRIVE.
+    # `kaya.for_each` is real today and is the tier below the `for`
+    # statement this scene traces with; the other two name spellings the
+    # binding does not export.
     "*" python "the for_each combinator" 'kaya\.for_each\(' \
         '    with kaya.for_each(todos) as todo:'
     "*" python "the add_child chain" '\.add_child\(' \
@@ -1897,19 +1809,15 @@ scene_rules=(
 
     "*" go "widget-kind construction" '\.Widget\(' \
         '        column := tx.Widget(kaya.KindColumn)'
-    # THE SetText/setText/set_text ROWS ARE GONE, RETIRED BY RENAME, and
-    # the mechanism is worth the note: in six languages the template
-    # PROP WRITE and the set_text WIDGET VERB (which check_range_verb
-    # REQUIRES as sugar) shared one name, so no pattern could fail the
-    # floor use without failing the verb — the receiver's TYPE decides
-    # and no regex sees a type. The props pass gave those six Rust's
-    # split instead: the template write is hidden (Go/C#/Java/Swift:
-    # unexported/private — the wall is now the compiler) or renamed
+    # NO SetText/setText/set_text ROW, and the reason is not an
+    # oversight: in six languages the template PROP WRITE and the
+    # set_text WIDGET VERB shared one name, so no pattern could fail the
+    # floor use without failing the verb — the receiver TYPE decides and
+    # no regex sees a type. Those six now hide the template write
+    # (unexported/private, so the wall is the compiler) or rename it
     # (Haskell setTextProp, OCaml Tpl.Floor.*), and the renamed
-    # spellings are swept repo-wide by tools/guest-floor.py. A row here
-    # would either never fire (the hidden ones) or fire on the verb
-    # (the one thing it must not), so the rows are gone rather than
-    # weakened (docs/tpl-props-plan.md F3).
+    # spellings are swept repo-wide by tools/guest-floor.py
+    # (docs/tpl-props-plan.md F3).
     "*" go "the generic BindText" '\.BindText\(' \
         '        tx.BindText(statusLabel, status)'
     "*" go "the ForEach combinator" '\.ForEach\(' \
@@ -1967,26 +1875,16 @@ scene_rules=(
         '       add_child column field;'
 
     # THE FOR COMBINATOR IS THE FLOOR IN ENTRY AND THE SUGAR IN
-    # MILESTONE2, in these two languages only, and the reason is one
-    # line of each binding: Haskell's `each c body = fst <$> forEach c
-    # body` and OCaml's `let each c body () = fst (for_each c body ())`.
-    # `each` IS the combinator with the body's RESULT THROWN AWAY.
+    # MILESTONE2, in these two languages only: `each` IS the combinator
+    # with the body's RESULT THROWN AWAY. entry's template body returns
+    # () so `each` is its spelling; milestone2's body returns the two
+    # handles its CENTRAL registration names, and a closure in these two
+    # languages cannot assign an outer variable the way swift's and
+    # java's do, so the result is the only way out.
     #
-    # entry's template body returns () — one bound label, nothing
-    # escapes — so `each` is its spelling and the combinator was the
-    # floor it left (that is the literal pre-graduation line in the
-    # fifth field). milestone2's body returns the two handles its
-    # CENTRAL registration names, the per-group collection and the
-    # stamped remove button, and a closure in these two languages
-    # cannot assign an outer variable the way swift's and java's do
-    # (`items = todos`, `items[0] = group.collection()`); the result is
-    # the only way out. Idiom decides the spelling, never the semantics
-    # (DESIGN.md, Binding conventions), and menus.hs/menus.ml spell it
-    # the same way outside the carve-out entirely.
-    #
-    # So milestone2 keeps the combinator and is denied the sin that is
-    # still available to it: a For whose result is (), which is a For
-    # `each` should have made. Both halves are watched firing.
+    # So milestone2 keeps the combinator and is denied the sin still
+    # available to it: a For whose result is (), which is a For `each`
+    # should have made. Both halves are watched firing.
     entry haskell "the forEach combinator" '(^|[^A-Za-z])forEach[[:space:]]' \
         '    forEach todos body'
     milestone2 haskell "a For whose result it drops" \
@@ -2062,12 +1960,9 @@ scene_one() {
 
     # RUST IS READ WITH ITS COMMENT LINES DROPPED, and only rust: both
     # its headers NAME `ctx.next()` in prose, so the positive pin below
-    # would be satisfied by the sentence describing the loop rather
-    # than by the loop (measured while writing this — entry.rs carries
-    # two occurrences, one of them prose, and milestone2.rs the same).
-    # The other seven are read whole: a comment that spells a floor
-    # call in a graduated scene teaches the floor, and is worth the
-    # reader's second.
+    # would be satisfied by the sentence describing the loop rather than
+    # by the loop. The other seven are read whole — a comment spelling a
+    # floor call in a graduated scene teaches the floor.
     if [ "$lang" = rust ]; then
         read_from="$T/rust-$scene-code.txt"
         python3 -c '
@@ -2169,16 +2064,13 @@ shout() {
 }
 
 # THE PERTURBATIONS, ON DOCTORED COPIES OF THE REAL GUESTS. One per
-# SCENE PER LANGUAGE: every snippet that language owes that scene is
-# planted after the scene's own plant line — a line each of its eight
-# guests carries — and the clause must then name EVERY rule the pair
-# has, IN THAT SCENE'S NAME. A snippet the pattern misses is a pattern
-# that would never have fired; a complaint naming the other scene is a
-# rule that fired about the wrong file.
+# SCENE PER LANGUAGE: every snippet a language owes a scene is planted
+# after that scene plant line, and the clause must then name EVERY rule
+# the pair has, IN THAT SCENE NAME. A snippet the pattern misses is a
+# pattern that would never have fired.
 #
-# `check_scene_sugar` runs inside `$( )` here, so the `status=1` it
-# sets dies with that subshell and the real run's verdict is untouched
-# (the fake-kind self-test's reason, from the scene side).
+# `check_scene_sugar` runs inside `$( )` here, so the `status=1` it sets
+# dies with that subshell and the real verdict is untouched.
 scene_selftest() { # <scene> <language> <guest>
     local scene="$1" lang="$2" src="$3" doctored hits out i what missing=""
     scene_fact "$scene"
@@ -2235,13 +2127,10 @@ for ((sg = 0; sg < ${#scene_guests[@]}; sg += 3)); do
 done
 
 # AND SO IS THE ANTI-VACUITY FLOOR, ONCE PER SCENE — the anchor is a
-# per-scene fact, so each scene's has to be watched refusing. A file
-# this clause cannot recognise as the scene it is filed under has to
-# fail LOUDLY rather than satisfy every denial by having nothing in it;
-# the wayland seat guard passed vacuously twice for want of exactly
-# this (docs/traps.md). The ocaml row carries it for no reason but
-# that every scene has one — what is under test is the anchor, not the
-# language.
+# per-scene fact, so each has to be watched refusing. A file this clause
+# cannot recognise as the scene it is filed under has to fail LOUDLY
+# rather than satisfy every denial by having nothing in it
+# (docs/traps.md). What is under test is the anchor, not the language.
 for ((sg = 0; sg < ${#scene_guests[@]}; sg += 3)); do
     [ "${scene_guests[sg + 1]}" = ocaml ] || continue
     scene_vac="${scene_guests[sg]}"

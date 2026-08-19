@@ -3,11 +3,9 @@
 #
 # GTK publishes an accessibility tree only when GTK_A11Y=atspi, which
 # needs a session bus for the a11y bus launcher to sit on. Both are
-# per-leg on purpose: exported lane-wide they changed the GTK backend
-# for EVERY leg and timed out eleven of them at 180s (measured
-# 2026-07-25 — python/go/csharp/ocaml died, rust and c survived). One
-# scene's requirement must not alter the environment of three hundred
-# legs that never asked for it.
+# PER-LEG: exported lane-wide they timed out eleven legs at 180s that
+# never asked for accessibility (measured 2026-07-25 —
+# python/go/csharp/ocaml died, rust and c survived; docs/HACKING.md).
 #
 # Runs INSIDE the runner's xvfb-run wrapper, like any other leg command.
 set -uo pipefail
@@ -35,8 +33,8 @@ eval "$(dbus-launch --sh-syntax)"
 export GTK_A11Y=atspi
 /usr/libexec/at-spi-bus-launcher --launch-immediately &
 launcher=$!
-# The registry must be up before the guest asks for it; the guest's own
-# first read would otherwise race the launcher's name acquisition.
+# The registry must be up before the guest's first read races the
+# launcher's name acquisition.
 sleep 1
 
 "$@"

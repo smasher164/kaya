@@ -2,34 +2,12 @@
 // field's native undo stack, and which NSUndoManager answers for a
 // focused kaya TextField?
 //
-// THE QUESTIONS THAT DECIDE D7's AND D6's MAC SPELLING
-// (docs/undo-plan.md §0). This file mirrors kaya's ACTUAL lowering —
-// swift/KayaSwiftUI.swift:7213 KayaEntry is a SwiftUI TextField over an
-// @Observable node, and the SetProp path (line 2492) writes
-// `node.text = …` and nothing else. Measuring `NSTextField.stringValue`
-// instead would answer a question kaya never asks.
-//
-//  Q1 WHICH RESPONDER, WHICH MANAGER. What class is first responder
-//     when a SwiftUI TextField is focused on macOS 26, is it the
-//     window's shared field editor, and which NSUndoManager does its
-//     `undoManager` resolve to — the window's, or one of its own?
-//  Q2 IS THE WINDOW'S HOOK ON THE PATH? Does AppKit consult
-//     NSWindowDelegate.windowWillReturnUndoManager(_:) for that
-//     responder — i.e. can kaya supply the manager per window (D6)?
-//  Q3 DOES TYPING REGISTER? Synthetic key events through
-//     NSApp.sendEvent must move the node's text (proof the real path
-//     ran) and must leave canUndo true.
-//  Q4 DOES A PROGRAMMATIC WRITE REGISTER? Set node.text, let SwiftUI
-//     render, then ask canUndo / count the registrations.
-//  Q5 WHAT DOES Cmd+Z DO AFTER A PROGRAMMATIC WRITE? The D7 hazard is
-//     not only "the write is undoable" — it is a STALE typing action
-//     replayed against content the app replaced.
-//  Q6 DOES removeAllActions BUY D7? Clear on write, then undo: does
-//     nothing revert?
-//  Q7 WHICH ROUTE IS Edit>Undo? NSApp.sendAction(undo:) down the
-//     responder chain vs a real NSMenu key-equivalent walk (what
-//     kayaMacShortcut does) — do they reach the same manager?
-//  Q8 TEXTAREA. Same questions for TextEditor (KayaTextarea).
+// The questions that decide D7's and D6's mac spelling, and what they
+// answered, are docs/undo-plan.md §0. This file mirrors kaya's ACTUAL
+// lowering — KayaEntry is a SwiftUI TextField over an @Observable node,
+// and the SetProp path writes `node.text = …` and nothing else.
+// Measuring `NSTextField.stringValue` instead would answer a question
+// kaya never asks.
 //
 // Answers land on stdout under "PROBE". Not a lane; nothing builds it
 // but build.sh beside it. THROWAWAY.

@@ -169,12 +169,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    // The set_property arms, one trio per property: spec-driven so new
-    // props reach every binding without emitter edits.
+    // The set_property arms, one trio per property, spec-driven.
     for (prop, _, kind) in prop_variants(spec) {
         let pc = camel(prop);
-        // Blob setters take the u64 kaya_blob_register handle (see
-        // BlobHandle), so the parameter says so.
+        // Blob setters take the u64 kaya_blob_register handle (BlobHandle).
         let (p, ty, expr) = match kind {
             crate::PropKind::Str => (param(prop), "string", format!("encodeValue(b, {})", param(prop))),
             crate::PropKind::Bool => (param(prop), "bool", format!("encodeValue(b, {})", param(prop))),
@@ -224,9 +222,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The window-prop duos (const + signal — element sources are
-    // rejected by the wire). Window 0, the primary surface, until aux
-    // windows land.
+    // The window-prop duos: const + signal, element sources being
+    // rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let pc = camel(prop);
         let (ty, expr) = match kind {
@@ -327,9 +324,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The one binding-tier shortcut parser (DESIGN.md, Menus): spelling
-    // only — policy (escape, shift-only/bare alphanumerics, the
-    // reserved floor) is the core's, validated on the canonical form.
+    // The one binding-tier shortcut parser (DESIGN.md, Menus): SPELLING
+    // only, policy being the core's and validated on the canonical form.
     // TxSetMenuShortcut routes through it, so no call site can bypass
     // canonicalization.
     let named_keys = crate::SHORTCUT_NAMED_KEYS
@@ -398,9 +394,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\treturn out + key");
     c.line("}");
 
-    // The menu-prop setters (const for every prop; signal binders only
-    // for the bindable ones — icon/primary/shortcut are const-only and
-    // SOURCE_SIGNAL on them dies at the root).
+    // The menu-prop setters: a const setter for every prop, signal
+    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
+    // dies at the root).
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let pc = camel(prop);
         let (p, ty, expr) = match kind {
@@ -448,11 +444,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         }
     }
     c.line("");
-    // The occurrence blob table, the third direction. A blob in an
-    // OCCURRENCE is a table handle, not the apply channel's batch-local
-    // index: this channel has no boundary that retires one, so it is
-    // released explicitly. Redeeming inside the decoder is what keeps a
-    // handle from ever reaching an app.
+    // The occurrence blob table. A blob in an OCCURRENCE is a table
+    // handle, not the apply channel's batch-local index, and nothing
+    // retires one here — so the decoder redeems and releases it, which
+    // is what keeps a handle from ever reaching an app.
     c.line("// ClipValues is one representation as the decoder hands it over:");
     c.line("// the clip kind, and its values with blobs already redeemed to");
     c.line("// bytes. The sum itself is the hand-written tier's — this is the");
@@ -570,9 +565,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t\treturn kind, id, nil, files, true");
     c.line("\t}");
-    // The privileged read's one answer. Its own arm for the
-    // file_dialog_result reason and then some: the generic tail would
-    // take the CLIP KIND for a path length, so a text answer (kind 1)
+    // The privileged read's one answer, in its own arm: the generic
+    // tail would take the CLIP KIND for a path length, so a text answer
     // would read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!("\tif kind == occ{} {{", camel(name)));
@@ -754,9 +748,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("\t\t}");
     c.line("\t}");
     // A paste rides a click tag VERBATIM, so the key path above is
-    // already read and the clip sits after it — the way text_changed's
-    // payload does. One record kind, path_len deciding, exactly as a
-    // click on a stamped row is one record with a click on a live one.
+    // already read and the clip sits after it. One record kind, path_len
+    // deciding.
     for name in crate::pasted_occurrence_names(spec) {
         c.line(&format!("\tif kind == occ{} {{", camel(name)));
         c.line("\t\tclip, _ := parseClip(rec, at)");

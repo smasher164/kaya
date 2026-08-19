@@ -5,23 +5,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
 }
 
-// THE APK IS ANDROID'S READER OF THE DECLARED IDENTITY
-// (docs/app-identity-plan.md, rulings 3 and 4). The launcher icon is not
-// something a running app sets here — it is compiled into the installed
-// package — so this build is where the declaration lands: the icon
-// becomes a mipmap resource and `android:icon` names it, and the name
-// becomes `android:label` through a manifest placeholder.
-//
-// HERE AND NOT IN THE THREE APP MODULES, because three copies of a
-// declaration is the failure the declaration exists to prevent: the
-// labels below were three hand-written literals, and a fourth was about
-// to be written. One reader, three manifests naming what it produced.
-//
-// AT CONFIGURATION TIME, deliberately. A task would have to be ordered
-// ahead of AGP's resource merge by hand, and an ordering nobody can see
-// is how a stale icon ships; doing it here means `gradle assembleDebug`
-// itself refuses when the declaration is missing or unreadable, which is
-// the wall invariant 3 asks for — on the path nobody can avoid.
+// The APK is Android's reader of the declared identity
+// (docs/app-identity-plan.md, rulings 3 and 4). Read AT CONFIGURATION
+// TIME, not in a task: a task would have to be ordered ahead of AGP's
+// resource merge by hand.
 
 /** The declaration: `name` and `icon` out of kaya's packaging manifest. */
 data class KayaIdentity(val name: String, val icon: File)
@@ -36,10 +23,7 @@ fun kayaReadIdentity(repoRoot: File): KayaIdentity {
                 "or a picture."
         )
     }
-    // A two-key file with no sections, so a two-line parser reads it
-    // exactly rather than pulling a TOML library into the build. A key
-    // this cannot find is a failure, never a default: a default is how
-    // one reader ends up showing a different name from the others.
+    // A missing key is a failure, never a default.
     fun value(key: String): String {
         val re = Regex("""^\s*$key\s*=\s*"([^"]*)"\s*$""", RegexOption.MULTILINE)
         val m = re.find(manifest.readText())
@@ -72,25 +56,9 @@ val kayaIdentity = kayaReadIdentity(rootDir.parentFile)
 
 /**
  * The asset root the APK carries, and the subdirectory of `assets/` it
- * carries it in.
- *
- * ANDROID IS THE ONE PLATFORM WHOSE PACKAGED ASSETS ARE NOT FILES, so
- * this is the only build in the tree that has to put them somewhere:
- * everywhere else the running app either sees the repo or is handed a
- * staged directory by name. Here the bytes go INTO the artifact and
- * `AssetManager` reads them back (dev.kaya.KayaAssets).
- *
- * `kaya/` RATHER THAN THE TOP OF `assets/`: an app's AssetManager root
- * listing is not exclusively the app's (the framework's own asset
- * directories are visible there on several API levels) and every AAR on
- * the classpath merges its `assets/` into the same namespace — so a
- * census taken at the root would name entries kaya never shipped, and
- * tools/scenes/assets.steps freezes that census. The same string is in
- * KayaAssets.kt's `ROOT` and in tools/check-assets.sh's APK clause,
- * which holds the three equal.
- *
- * AT CONFIGURATION TIME for the icon's reason one block up: an ordering
- * nobody can see is how a stale asset ships.
+ * carries it in (docs/assets-plan.md; docs/deferred.md on the `kaya/`
+ * prefix). The prefix string is also in KayaAssets.kt's `ROOT` and in
+ * tools/check-assets.sh's APK clause; that gate holds the three equal.
  */
 val kayaAssetRoot = File(rootDir.parentFile, "guests/assets")
 val kayaAssetPrefix = "kaya"
@@ -105,26 +73,19 @@ if (!kayaAssetRoot.isDirectory) {
 
 subprojects {
     plugins.withId("com.android.application") {
-        // The generated assets root: the whole tree, under one
-        // subdirectory, copied VERBATIM so the lane's byte-equality
-        // check after assembleDebug is a real comparison.
+        // Copied VERBATIM: the lane's byte-equality check after
+        // assembleDebug (tools/android/run-emulator.sh) compares hashes.
         val generatedAssets = layout.buildDirectory.dir("generated/kaya-assets").get().asFile
         val packagedAssets = File(generatedAssets, kayaAssetPrefix)
-        // Deleted first: a copy over a stale tree leaves an asset the
-        // repo no longer has inside the APK, and the census would then
-        // report it forever.
+        // Deleted first, or a stale asset stays in the APK and the
+        // census reports it forever.
         packagedAssets.deleteRecursively()
         kayaAssetRoot.copyRecursively(packagedAssets, overwrite = true)
 
-        // The generated res root: one `mipmap/` holding the declared
-        // picture under the name `android:icon` will spell.
         val generatedRes = layout.buildDirectory.dir("generated/kaya-identity/res").get().asFile
         val mipmap = File(generatedRes, "mipmap")
         mipmap.mkdirs()
         val packaged = File(mipmap, "kaya_mark.png")
-        // Copied VERBATIM, which is what makes the byte-equality check
-        // downstream (tools/android/run-emulator.sh, after assembleDebug)
-        // a real comparison rather than a comparison of two renderings.
         kayaIdentity.icon.copyTo(packaged, overwrite = true)
 
         extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
@@ -134,11 +95,9 @@ subprojects {
             sourceSets.getByName("main").res.srcDir(generatedRes)
             sourceSets.getByName("main").assets.srcDir(generatedAssets)
             buildTypes.getByName("debug") {
-                // AAPT2's PNG crunch would re-encode the picture, and the
-                // lane's check would then be comparing kaya's file against
-                // aapt's idea of it — a comparison that fails for a reason
-                // that is not a drift. Off is already the debug default;
-                // it is written down because the check depends on it.
+                // AAPT2's PNG crunch would re-encode the mark and break
+                // the byte-equality check. Already the debug default;
+                // written down because the check depends on it.
                 isCrunchPngs = false
             }
         }

@@ -7,30 +7,22 @@ import java.io.FileDescriptor
 import java.io.FileInputStream
 
 /**
- * Third campaign: what ART charges for BUILDING a java.io.FileDescriptor
- * around a raw integer fd — the thing KayaRing.openPicked must do when
- * the JVM guest redeems a pasted file.
- *
- * ART's FileDescriptor is libcore's, not OpenJDK's: the int field is
- * `descriptor` (not `fd`), and libcore adds public-but-non-SDK
- * accessors `setInt$`/`getInt$`. All three are NON-SDK MEMBERS, so
- * access from an app goes through hidden-API enforcement — the same
- * gate for reflection and for JNI GetFieldID/GetMethodID, which is why
- * a reflection probe measures the JNI arm's charge faithfully.
+ * What ART charges for BUILDING a java.io.FileDescriptor around a raw
+ * integer fd — what KayaRing.openPicked must do (findings:
+ * docs/clipboard-plan.md).
  *
  * F1  getDeclaredField("descriptor") — visible? settable?
  * F2  getMethod("setInt$")/getInt$ — visible? callable?
  * F3  the arm-shaped roundtrip: Os.open a real file, wrap the raw int
  *     in a hand-built FileDescriptor, read the bytes back through a
- *     FileInputStream over it. This is the whole openPicked contract
- *     in one cell.
+ *     FileInputStream over it.
  */
 class FdReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val out = StringBuilder()
 
-        // F1: the field, as libnativehelper's own jniCreateFileDescriptor
-        // touches it (SetIntField on `descriptor`).
+        // F1: the field, as libnativehelper's own
+        // jniCreateFileDescriptor touches it.
         out.append("F1=")
         try {
             val f = FileDescriptor::class.java.getDeclaredField("descriptor")

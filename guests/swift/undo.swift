@@ -151,7 +151,6 @@ app.build { tx in
                 tx.write(status, .str("nothing to add, \(total) total"))
                 return
             }
-            // ONE CALL, AND IT IS THE WHOLE UNDO SURFACE.
             tx.undoable("add \(draft)")
             // NO KEY, AND NO COUNTER TO GET WRONG: the binding mints the
             // name and hands it back; @discardableResult lets this read
@@ -169,7 +168,6 @@ app.build { tx in
             // through the fold.
             app.post { tx in tx.clear(field) }
         }
-        // A group at its smallest: one signal write.
         tx.button("star") { tx in  // button#1
             tx.write(status, .str("starred"))
             // NAMED AFTER THE FACT, which is the ordinary way a handler
@@ -213,7 +211,6 @@ app.build { tx in
                     } else {
                         rowNotes[key] = text
                     }
-                    // The app's mirror of a field's text is not a step.
                     tx.write(notes, .str(noteList()))
                 }
             }

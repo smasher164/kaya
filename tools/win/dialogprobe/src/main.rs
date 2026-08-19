@@ -1,56 +1,15 @@
 // DialogProbe — what the Shell's file dialog is MADE OF, measured on
-// the VM the windows lane actually runs on.
+// the VM the windows lane actually runs on: whether the file list and
+// the address bar are classic controls or DirectUI, whether the classic
+// control ids answer, and which of those reads survive a PROCESS
+// BOUNDARY (the guest must stop loading uiautomationcore — see
+// docs/deferred.md and docs/traps.md).
 //
-// THE QUESTION, and it decides whether the windows harness can drop UI
-// Automation entirely:
-//
-//   Q1 Is the dialog's file list a classic control? docs/deferred.md
-//      asserted the rows are a SysListView32 readable with
-//      LVM_GETITEMTEXT. THAT WAS NEVER MEASURED — it is true of the old
-//      GetOpenFileName dialog, and the Vista-era common item dialog is
-//      widely described as DirectUI-hosted, whose items are not windows
-//      at all. If they are not, no amount of SendMessage reads them and
-//      the only route left is driving the dialog from outside the guest
-//      process.
-//   Q2 Is the address bar a window with text, or is that DirectUI too?
-//      The harness reads the current directory from it.
-//   Q3 Do the classic control ids still answer? IDOK=1 and IDCANCEL=2
-//      are what file_dialog_press already uses and they work — this
-//      records the whole id map, so a future read knows what is there.
-//
-// AND THEN THE SAME QUESTIONS FROM OUTSIDE, which is the arrangement
-// that matters: the guest process must stop loading uiautomationcore at
-// all (docs/deferred.md), so a helper would read the dialog across a
-// process boundary. Everything below was measured in-process, and
-// in-process is exactly the assumption that put a wrong sentence in
-// deferred.md. `hold` keeps a dialog up; `attach` answers, from a
-// DIFFERENT process:
-//
-//   Q4 Does GetWindowTextW on the address toolbar (id 1001) cross a
-//      process boundary? WM_GETTEXT is marshaled by the window manager,
-//      so it should — "should" being the word that already misfired
-//      once.
-//   Q5 Does a UIA walk from outside read the DirectUI rows? This is
-//      UIA's designed case and the only route to the row names, so it
-//      is the load-bearing answer of the two.
-//   Q6 Does WM_SETTEXT into the file-name Edit (id 1148) cross the
-//      boundary? That is how a helper would choose a file without
-//      hit-testing a DirectUI row.
-//   Q7 Does BM_CLICK on IDCANCEL still dismiss it from outside?
-//
-// WHY IT MAY USE A LOCAL BUFFER AT ALL: the dialog is created with
-// CLSCTX_INPROC_SERVER, in the app's own process, on its own STA
-// thread. A cross-process listview read needs VirtualAllocEx and
-// ReadProcessMemory, because LVITEM carries a pointer the other process
-// must be able to dereference; in-process it is just a pointer. So this
-// probe opens the dialog the way crates/kaya/src/winui/mod.rs does
-// rather than attaching to a running app — it must measure the
-// arrangement the harness would actually have, not a similar one.
-//
-// The window calls are hand-declared with plain types, the way
-// file_dialog_is_up declares them, so the probe exercises the same
-// calls the backend would make rather than a differently-typed
-// wrapper.
+// It opens the dialog the way crates/kaya/src/winui/mod.rs does, on its
+// own STA thread with CLSCTX_INPROC_SERVER, rather than attaching to a
+// running app: it must measure the arrangement the harness would
+// actually have, not a similar one. The window calls are hand-declared
+// with plain types for the same reason.
 //
 // Not a lane; nothing builds it but build.sh beside it. Output goes to
 // stdout under "PROBE", and the last line is PROBEDONE so the runner

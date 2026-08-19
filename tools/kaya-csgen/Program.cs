@@ -1,16 +1,8 @@
-// The C# arm of the generator family. Reads guest sources for
-// [KayaGen] declarations — the declaration is the schema, nothing
-// restated — and writes <Type>Kaya.cs beside them. The declaration's
-// shape decides what is generated, the one KayaGen story every
-// language tells: an abstract record is a sum (the derived records,
-// in declaration order, are the constructors) and gets the collection
-// factory plus the compile-total EachSum eliminator — each
-// constructor a required delegate parameter, named at the call site,
-// so a missing arm is a missing argument, a compile error, with the
-// scene checking totality again. A plain record gets the collection
-// factory, exact-index field tokens, and a named-setter patch (each
-// Set records one update_field — a patch is recorded writes, never a
-// diff). Generated files are checked in; tools/gen-guests.sh
+// The C# arm of the generator family. Reads guest sources for [KayaGen]
+// declarations and writes <Type>Kaya.cs beside them; the DECLARATION'S
+// SHAPE decides what comes out — an abstract record is a sum (derived
+// records, in declaration order, are the constructors), a plain record
+// is a record. Generated files are checked in; tools/gen-guests.sh
 // regenerates and diffs.
 //
 //     dotnet run --project tools/kaya-csgen -- <guest source dir>
@@ -102,13 +94,10 @@ static class Program
         return 0;
     }
 
-    // The wire vocabulary a parameter type maps into; byte[] is the
-    // blob channel (encoded image bytes; VALUE_BLOB in the schema —
-    // KayaRecords.Info maps byte[] parameters in, so a skipped one
-    // here would shift every later exact-index token off the runtime
-    // schema). Sum-side setters stay blob-safe too: the witnessed
-    // update routes through Info.EncodeField, which re-registers the
-    // bytes.
+    // The wire vocabulary a parameter type maps into. byte[] is the blob
+    // channel, and KayaRecords.Info maps byte[] parameters in, so a
+    // skipped one HERE shifts every later exact-index token off the
+    // runtime schema.
     static readonly System.Collections.Generic.HashSet<string> Wire =
         new() { "string", "bool", "long", "double", "byte[]" };
 
@@ -265,9 +254,9 @@ static class Program
         b.AppendLine($"    internal {rec}Row(Tpl t) => this.t = t;");
         b.AppendLine();
         // The handler delegates, spelled once. A TEMPLATE handler carries
-        // the stamped copy's key path; that is the whole difference from
-        // the live zone's shape, and forwarding the live one here would
-        // hand a guest a handler that cannot say which copy fired.
+        // the stamped copy's key path; forwarding the LIVE zone's shape
+        // here would hand a guest a handler that cannot say which copy
+        // fired.
         const string keys = "System.Collections.Generic.List<object>";
         var onText = $"System.Action<Tx, {keys}, string>";
         var onToggle = $"System.Action<Tx, {keys}, bool>";
@@ -364,10 +353,8 @@ static class Program
         Fwd("Spacer", [], "");
         // THE PROP SETTERS, for the reason the constructors are here: a
         // prop reachable through tx.Each and not through `foreach (var
-        // row in c.Rows())` is the same difference no guest should have
-        // to know about. Grow shipped without a forwarder for a
-        // milestone, which is how a "the forwarders are the ZONE" list
-        // becomes a selection again (docs/tpl-props-plan.md P1).
+        // row in c.Rows())` is a difference no guest should have to know
+        // about (docs/tpl-props-plan.md P1).
         Set("SetGrow", ["Node n", "double weight"], "n, weight");
         Set("SetA11yId", ["Node n", "string id"], "n, id");
         Set("SetA11yId", ["Node n", "Signal s"], "n, s");

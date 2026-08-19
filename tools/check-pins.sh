@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -17,18 +11,11 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
 fi
 
 # Every dependency this repo resolves over the network names an exact
-# version. Cargo has Cargo.lock and --locked; nix has flake.lock; the
-# ecosystems checked here have neither, and are pinned only by the
-# discipline of writing a version every time — which is precisely the
-# kind of thing that holds until the day it doesn't.
-#
-# This gate is deliberately NOT a lockfile mechanism. Gradle and NuGet
-# already name exact versions and resolve them from immutable
-# repositories, so a lockfile would add regeneration ceremony without
-# adding determinism. What is actually missing is the guard that keeps
-# it that way: one dynamic version (`1.9.+`, `latest.release`, `*`, a
-# range) and the lane silently starts depending on what a server chose
-# today.
+# version. Gradle, NuGet, SwiftPM and the container's opam index have no
+# lockfile the way cargo and nix do, so one dynamic version (`1.9.+`,
+# `latest.release`, `*`, a range) and the lane depends on what a server
+# chose today. NOT a lockfile mechanism — the guard that keeps the
+# existing exact versions exact.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -79,9 +66,8 @@ COORD = re.compile(r'"([A-Za-z0-9_.\-]+:[A-Za-z0-9_.\-]+(?::[^"]*)?)"')
 
 for f in sorted(root.glob("android/**/*.gradle.kts")):
     text = f.read_text()
-    # A BOM (platform(...)) supplies versions for the coordinates that
-    # omit one, so version-less coordinates are only allowed alongside
-    # one — and the BOM itself must be pinned.
+    # A platform(...) BOM supplies versions for coordinates that omit
+    # one, so a version-less coordinate is legal only alongside a BOM.
     has_bom = "platform(" in text
     for n, line in enumerate(text.splitlines(), 1):
         if line.lstrip().startswith("//"):
@@ -108,11 +94,9 @@ for f in sorted(root.rglob("*.csproj")):
                 out.append(f"{f}:{n}: nuget {name} version {version!r} is not a fixed version")
 
 # --- opam: the container's OCaml packages ------------------------------
-# opam-repository is a ROLLING index, so a bare package name resolves to
-# whatever is newest the day the image is rebuilt. Every name must carry
-# its version (pkg.version), and the index itself must be pinned to a
-# commit — the version pins alone do not constrain what gets pulled in
-# transitively.
+# opam-repository is a ROLLING index: every name must carry its version
+# (pkg.version), and the index itself must be pinned to a commit — the
+# version pins alone do not constrain transitive resolution.
 dockerfile = root / "tools/linux/Dockerfile"
 text = dockerfile.read_text()
 # Join continuations so a wrapped install line reads as one.
@@ -130,10 +114,9 @@ if not re.search(r"opam-repository/archive/[0-9a-f]{40}\.tar\.gz", text):
     out.append(f"{dockerfile}: the opam index is not pinned to a commit")
 
 # --- SwiftPM: Package.resolved is the pin, so it must be honoured -----
-# Package.swift declares RANGES (`from: "601.0.0"`), which makes
-# Package.resolved the only thing standing between a build and whatever
-# was published this morning. Two halves: the lockfile is checked in,
-# and every invocation refuses to resolve around it.
+# Package.swift declares RANGES, so Package.resolved is the pin. Two
+# halves: it is checked in, and every invocation refuses to resolve
+# around it.
 for f in sorted(root.rglob("Package.swift")):
     if ".build" in f.parts:
         continue
@@ -160,8 +143,7 @@ if [ -n "$findings" ]; then
     status=1
 fi
 
-# Self-test: the scan has to see each defect shape, or its silence above
-# is not evidence of anything.
+# Self-test: the scan has to see each defect shape.
 probe=$(python3 - <<'PY'
 import re
 DYNAMIC = re.compile(r"[+*]|latest\.|^[\[(]|,")
@@ -169,8 +151,7 @@ cases = ["1.9.+", "latest.release", "*", "[1.0,2.0)", "2024.10.01", "8.7.3"]
 bad = [c for c in cases if DYNAMIC.search(c)]
 good = [c for c in cases if not DYNAMIC.search(c)]
 
-# A continued invocation must read as ONE command, or a clause looking
-# for a missing flag concludes the command was never there at all.
+# A continued invocation must read as ONE command.
 split = "swift " "run \\\n    --package-path tools/x kaya-gen"
 joined = split.replace("\\\n", " ")
 seen = 1 if re.search(r"swift\s+run\b", joined) and "--package-path" in joined else 0

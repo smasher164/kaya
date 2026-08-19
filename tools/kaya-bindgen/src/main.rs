@@ -1,15 +1,11 @@
 //! kaya-bindgen: emit each language's vocabulary file from the protocol
-//! spec (kaya::spec::SPEC — Rust is the root; this tool just walks it).
-//!
-//! The output is the mechanical layer of a binding: constants, record
-//! packers, and the occurrence parser. The runtime layer (ring consumer,
-//! loading, threading) is hand-written per language next to the
-//! generated file, and any idiomatic surface builds on top — neither is
-//! this tool's business.
+//! spec (kaya::spec::SPEC). Constants, record packers and the occurrence
+//! parser only — the runtime layer and the idiomatic surface are
+//! hand-written per language beside the generated file.
 //!
 //! Usage: kaya-bindgen <repo-root> [--check]
 //! --check regenerates into memory and fails if the checked-in files
-//! are out of date, touching nothing (the gen-header.sh pattern).
+//! are out of date, touching nothing.
 
 use std::fmt::Write as _;
 
@@ -29,13 +25,9 @@ fn main() {
     let root = args.next().expect("usage: kaya-bindgen <repo-root> [--check]");
     let check = args.next().as_deref() == Some("--check");
 
-    // Spec-derived identifiers must not collide with anything an emitter
-    // authors (its helper functions) or a target language reserves (its
-    // keywords). Checked here, at the root, so a collision is a loud
-    // generation failure instead of a runtime surprise in one guest.
-    // csharp is absent: its emitter escapes keywords with @ instead
-    // (the prop "checked" is a C# keyword), so a collision there is
-    // handled, not fatal.
+    // Spec-derived identifiers must not collide with an emitter's own
+    // helpers or a target language's keywords. csharp is absent: its
+    // emitter escapes keywords with @, so a collision there is handled.
     validate_identifiers(&SPEC, "python", python::RESERVED);
     validate_identifiers(&SPEC, "c", c::RESERVED);
     validate_identifiers(&SPEC, "go", go::RESERVED);
@@ -75,8 +67,7 @@ fn main() {
     }
 }
 
-/// Shared emitter helpers: the spec walk is the same in every language;
-/// only the syntax differs.
+/// Shared emitter helpers.
 pub(crate) struct Ctx {
     pub out: String,
 }
@@ -96,8 +87,7 @@ fn validate_identifiers(spec: &ProtocolSpec, lang: &str, reserved: &[&str]) {
         }
     }
     names.extend(spec.enums.iter().map(|e| e.name));
-    // Prop names become setter parameter names in every binding
-    // ("checked" broke C# before props were validated here).
+    // Prop names become setter parameter names in every binding.
     names.extend(kaya::spec::PROPS.iter().map(|(name, _, _)| *name));
     for name in names {
         assert!(
@@ -113,67 +103,56 @@ fn validate_identifiers(spec: &ProtocolSpec, lang: &str, reserved: &[&str]) {
 pub(crate) use kaya::spec::PropKind;
 
 /// The protocol fingerprint, baked into every generated file; runtimes
-/// assert the loaded core's kaya_spec_hash() agrees before any bytes
-/// flow (the stale-artifact guard).
+/// assert the loaded core's kaya_spec_hash() agrees before any bytes flow.
 pub(crate) fn spec_hash() -> u64 {
     kaya::spec::hash()
 }
 
 /// Properties with their value kinds, driving typed setter generation:
 /// set_text takes a string, set_checked a bool, in every language.
-/// (The spec pins PROPS to the "prop" enum, so constants and setters
-/// cannot drift.)
 pub(crate) fn prop_variants(_spec: &ProtocolSpec) -> &'static [(&'static str, u32, PropKind)] {
     kaya::spec::PROPS
 }
 
-/// Window properties, driving the typed window setters (title/width/
-/// height; window 0 = the primary surface until aux windows land).
-/// Element sources are rejected by the wire, so the emitters write
-/// const + signal duos, never trios.
+/// Window properties, driving the typed window setters. Element sources
+/// are rejected by the wire, so the emitters write const + signal duos,
+/// never trios.
 pub(crate) fn window_prop_variants(
     _spec: &ProtocolSpec,
 ) -> &'static [(&'static str, u32, PropKind)] {
     kaya::spec::WINDOW_PROPS
 }
 
-/// Navigation-entry properties, driving the typed entry setters
-/// (title, intercept_back) — their own table, not WINDOW_PROPS with
-/// applicability checks (DESIGN.md, Navigation). Const + signal duos
-/// like windows: element sources are rejected by the wire.
+/// Navigation-entry properties, their own table rather than WINDOW_PROPS
+/// with applicability checks (DESIGN.md, Navigation). Const + signal
+/// duos like windows.
 pub(crate) fn entry_prop_variants(
     _spec: &ProtocolSpec,
 ) -> &'static [(&'static str, u32, PropKind)] {
     kaya::spec::ENTRY_PROPS
 }
 
-/// Section properties (title, icon) — the third typed surface table,
-/// the entry-prop stance (DESIGN.md, Sections). Const + signal duos;
-/// icon rides the blob channel like the image source.
+/// Section properties (DESIGN.md, Sections). Const + signal duos; icon
+/// rides the blob channel like the image source.
 pub(crate) fn section_prop_variants(
     _spec: &ProtocolSpec,
 ) -> &'static [(&'static str, u32, PropKind)] {
     kaya::spec::SECTION_PROPS
 }
 
-/// Menu-item properties — the fifth typed surface table (DESIGN.md,
-/// Menus). NOT plain duos: every prop gets a const setter, but only
-/// the menu_prop_bindable ones get a signal binder — icon, primary,
-/// and shortcut are const-only and the wire rejects SOURCE_SIGNAL on
-/// them at the root. The shortcut const setter is the one place the
-/// generated canonicalizer is invoked, so no call site can bypass it.
+/// Menu-item properties (DESIGN.md, Menus). NOT plain duos: only the
+/// menu_prop_bindable ones get a signal binder, and the wire rejects
+/// SOURCE_SIGNAL on the rest at the root. The shortcut const setter is
+/// the one place the generated canonicalizer is invoked.
 pub(crate) fn menu_prop_variants(
     _spec: &ProtocolSpec,
 ) -> &'static [(&'static str, u32, PropKind)] {
     kaya::spec::MENU_PROPS
 }
 
-/// Which menu props accept SOURCE_SIGNAL: label, enabled, checked,
-/// value. Mirrors scene.rs's is_bindable_menu_prop (the root guard —
-/// a drifted emitter dies at the root, never silently). The match is
-/// exhaustive over today's table, so a NEW menu prop fails generation
-/// loudly until its bindability is declared here in lockstep with the
-/// scene.
+/// Which menu props accept SOURCE_SIGNAL. Mirrors scene.rs's
+/// is_bindable_menu_prop; the match is exhaustive over today's table, so
+/// a NEW menu prop fails generation until it is declared here.
 pub(crate) fn menu_prop_bindable(prop: &str) -> bool {
     match prop {
         "label" | "enabled" | "checked" | "value" => true,
@@ -185,43 +164,33 @@ pub(crate) fn menu_prop_bindable(prop: &str) -> bool {
     }
 }
 
-/// The shortcut spelling floor shared by every generated canonicalizer
-/// (DESIGN.md, Menus): the portable modifiers in canonical order, and
-/// the closed named-key set beyond a-z/0-9. f1..f12 are expanded so
-/// every binding does flat membership — no per-language function-key
-/// parsing to drift. `escape` is deliberately IN the set: the binding
-/// tier recognizes and canonicalizes it, and the CORE rejects it with
-/// the root error (recognized-but-rejected). Policy in general —
-/// escape, shift-only and bare alphanumerics, the reserved floor —
-/// lives at the core, which validates the canonical form and never
-/// rewrites; the canonicalizer owns SPELLING only.
-// (The modifier list is consumed by the reference below and, baked
-// into control flow, by every emitter's transcription — test-only from
-// rustc's point of view, hence the cfg_attr.)
+/// The shortcut spelling floor every generated canonicalizer transcribes
+/// (DESIGN.md, Menus). f1..f12 are expanded so every binding does flat
+/// membership. `escape` is deliberately IN the set: the binding tier
+/// canonicalizes it and the CORE rejects it. This tier owns SPELLING
+/// only; policy lives at the core.
+// The modifier list is baked into every emitter's control flow, so it is
+// test-only from rustc's point of view — hence the cfg_attr.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const SHORTCUT_MODIFIERS: &[&str] = &["primary", "shift", "alt"];
 pub(crate) const SHORTCUT_NAMED_KEYS: &[&str] = &[
     "enter", "escape", "delete", "left", "right", "up", "down", "f1", "f2", "f3", "f4", "f5",
     "f6", "f7", "f8", "f9", "f10", "f11", "f12",
-    // The punctuation set, named rather than spelled with the
-    // character: `enter`/`delete` are the precedent, and a name keeps
-    // the wire spelling clear of characters the step grammar and menu
-    // paths already use. Each names the UNSHIFTED US position — the
-    // host binds its own key code — so Command-plus is asked for as
+    // Named rather than spelled with the character, to keep the wire
+    // spelling clear of what the step grammar and menu paths use. Each
+    // names the UNSHIFTED US position, so Command-plus is asked for as
     // primary+shift+equal and no `plus` key exists.
     "comma", "period", "slash", "backslash", "minus", "equal", "leftbracket", "rightbracket",
 ];
 
-/// The normative canonicalizer every emitter transcribes into its
-/// language, kept here so the algorithm has ONE statement and the test
-/// table below is the shared vector set. Accepts ASCII case variants
-/// and any modifier order before the final key; emits lowercase
-/// canonical `primary`,`shift`,`alt`,key. Rejects whitespace, empty
-/// tokens, repeated modifiers, aliases (ctrl/cmd/option are just
-/// unknown modifiers), and unknown or multiple or missing keys (a
-/// missing key surfaces as a non-key final token). It does NOT reject
-/// escape, shift-only or bare alphanumerics, or the reserved floor:
-/// that is root policy, validated by the core on the canonical form.
+/// The normative canonicalizer every emitter transcribes, kept here so
+/// the algorithm has ONE statement and the test table below is the
+/// shared vector set. Accepts ASCII case variants and any modifier order
+/// before the final key; emits lowercase `primary`,`shift`,`alt`,key.
+/// Rejects whitespace, empty tokens, repeated modifiers, aliases, and
+/// unknown or multiple or missing keys. It does NOT reject escape,
+/// shift-only or bare alphanumerics, or the reserved floor: that is root
+/// policy, validated by the core on the canonical form.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn canonicalize_shortcut_reference(spelling: &str) -> Result<String, String> {
     if spelling.is_empty() {
@@ -275,19 +244,15 @@ pub(crate) fn canonicalize_shortcut_reference(spelling: &str) -> Result<String, 
 }
 
 /// Occurrence records, split by whether they carry a trailing payload
-/// value after the key path — a spec fact (Record::payload), so the
-/// generated parsers' kind lists derive rather than drift.
+/// value after the key path — a spec fact (Record::payload).
 pub(crate) fn occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence.iter().map(|r| r.name).collect()
 }
 
 /// Surface-lifecycle occurrences: records whose whole body is one u64
-/// surface id (close_requested, window_closed, entry_popped,
-/// back_requested). DERIVED from the record shapes, because this list
-/// was once hand-copied per emitter and a click-shaped read misparsed
-/// the records it missed (the slice-3 window-shape trap) — a new
-/// id-only occurrence now reaches all 8 parsers with zero emitter
-/// edits.
+/// surface id. DERIVED from the record shapes, so a new id-only
+/// occurrence reaches all 8 parsers with zero emitter edits; a
+/// hand-copied list left them parsing it as click-shaped.
 pub(crate) fn id_only_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -300,12 +265,9 @@ pub(crate) fn id_only_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
         .collect()
 }
 
-/// Surface-pair occurrences: records whose whole body is two u64
-/// surface ids (section_selected's window+section). Same derivation
-/// stance as id_only — a new pair-shaped occurrence reaches all 8
-/// parsers with zero emitter edits. Parsers yield the SECOND id as
-/// the handler key (handlers scope to the section) and the first as
-/// the payload.
+/// Surface-pair occurrences: records whose whole body is two u64 surface
+/// ids. Derived like id_only. Parsers yield the SECOND id as the handler
+/// key (handlers scope to the section) and the first as the payload.
 pub(crate) fn id_pair_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -322,15 +284,9 @@ pub(crate) fn id_pair_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
 
 /// Occurrences carrying ONE REPRESENTATION: records whose last three
 /// fields are `clip` (u32), a reserved u32, and a `value` Values block.
-/// That is `clipboard_result` and `pasted` today, and drag-and-drop
-/// when it lands — Android built onReceiveContent as one API for paste,
-/// drop and autofill, so the third trigger is the same payload.
-///
-/// DERIVED, on the id_only stance, because these two are the ONLY
-/// occurrences that ever carried bytes and every decoder meets the
-/// occurrence blob table here for the first time. A third one added by
-/// hand-copied lists would meet seven decoders that silently take its
-/// clip kind for a key-path length.
+/// DERIVED, on the id_only stance: a third one added by hand-copied
+/// lists would meet seven decoders that silently take its clip kind for
+/// a key-path length.
 fn representation_shaped(rec: &Record) -> bool {
     let n = rec.fields.len();
     n >= 3
@@ -343,8 +299,7 @@ fn representation_shaped(rec: &Record) -> bool {
 
 /// The representation-carrying occurrences that are CLICK-SHAPED: an
 /// identity tag (id + path_len + reserved, then the key path) with the
-/// clip after it. `pasted` — a paste onto a stamped row is the same
-/// event as a paste onto a live one, so the tag rides verbatim.
+/// clip after it.
 pub(crate) fn pasted_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -353,9 +308,8 @@ pub(crate) fn pasted_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> 
         .collect()
 }
 
-/// The representation-carrying occurrences that answer a REQUEST:
-/// `clipboard_result`, on the alert's grammar, with no key path and an
-/// empty answer meaning denied, absent, unfocused and
+/// The representation-carrying occurrences that answer a REQUEST: no key
+/// path, and an empty answer meaning denied, absent, unfocused and
 /// nothing-we-accept alike.
 pub(crate) fn clip_answer_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
@@ -377,15 +331,11 @@ pub(crate) fn payload_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str>
 
 /// Occurrences carrying an UNDO DELTA: a window, four u32 run lengths,
 /// the group's `label`, and one flat `delta` Values tail the runs cut up
-/// (`undone` and `redone` — docs/undo-plan.md D5, and
-/// `wire::undo_body`'s counts-in-the-head encoding).
+/// (docs/undo-plan.md D5, and `wire::undo_body`).
 ///
-/// DERIVED on the id_only stance, and it has to be: the generic tail
-/// every parser falls through to reads {u64 id, u32 path_len} and would
-/// take `window` for a widget and the SIGNAL COUNT for a key-path
-/// length, then read the label's bytes as keys. A third delta-shaped
-/// occurrence added by hand-copied lists would meet that silently in
-/// whichever of the 8 parsers nobody remembered.
+/// DERIVED, and it has to be: the generic tail every parser falls
+/// through to reads {u64 id, u32 path_len} and would take `window` for a
+/// widget and the SIGNAL COUNT for a key-path length.
 pub(crate) fn undo_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -401,13 +351,10 @@ pub(crate) fn undo_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
         .collect()
 }
 
-/// Click-shaped occurrences without a payload (button_clicked,
-/// menu_activated): {u64 id, u32 path_len, u32 reserved}, then the
-/// key path. The 7 generic parsers fall through to the click path via
-/// occurrence_names, but the C floor emits one named parser per
-/// record, so this list is DERIVED from the record shapes (the
-/// id_only stance) — a new click-shaped occurrence reaches the C
-/// parser with zero emitter edits.
+/// Click-shaped occurrences without a payload: {u64 id, u32 path_len,
+/// u32 reserved}, then the key path. The 7 generic parsers fall through
+/// to the click path via occurrence_names, but the C floor emits one
+/// named parser per record, so this list is DERIVED too.
 pub(crate) fn click_shaped_occurrence_names(spec: &ProtocolSpec) -> Vec<&'static str> {
     spec.occurrence
         .iter()
@@ -433,12 +380,9 @@ mod tests {
     use super::*;
 
     /// The shared vector table for the shortcut canonicalizer: every
-    /// emitter transcribes the SAME algorithm, and any per-language
-    /// negative check (kaya_app_checks.py, bindings/go's test) draws
-    /// its cases from here. Acceptance rows pin the canonical output;
-    /// note that `escape`, shift-only/bare alphanumerics, and the
-    /// reserved floor are ACCEPTED here on purpose — they canonicalize
-    /// fine and die at the core, which owns policy.
+    /// per-language negative check draws its cases from here. `escape`,
+    /// shift-only/bare alphanumerics and the reserved floor are ACCEPTED
+    /// on purpose — they canonicalize fine and die at the core.
     #[test]
     fn shortcut_canonicalizer_accepts_and_canonicalizes() {
         let accept: &[(&str, &str)] = &[
@@ -511,10 +455,9 @@ mod tests {
         }
     }
 
-    /// The bindability split covers exactly the spec's menu-prop table
-    /// (a new prop panics inside menu_prop_bindable until declared,
-    /// and this test walks the whole table to trigger that panic in
-    /// CI rather than at someone's regeneration).
+    /// The bindability split covers exactly the spec's menu-prop table.
+    /// Walking the whole table triggers menu_prop_bindable's panic for an
+    /// undeclared prop in CI rather than at someone's regeneration.
     #[test]
     fn every_menu_prop_declares_bindability() {
         let bindable: Vec<&str> = kaya::spec::MENU_PROPS

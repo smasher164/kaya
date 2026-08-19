@@ -12,7 +12,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // Map KAYA_* intent extras to environment variables, so the
-        // library's env-based switches keep one spelling everywhere:
+        // library's env switches keep one spelling everywhere:
         //   am start ... --ez KAYA_SELFTEST true
         // is this platform's KAYA_SELFTEST=1 ./app.
         intent.extras?.let { extras ->
@@ -25,17 +25,14 @@ class MainActivity : ComponentActivity() {
         }
 
         System.loadLibrary("milestone2_android")
-        // One backend per platform: attach wires the pump and the
-        // Activity mounts the Compose interpreter.
         Kaya.attach(this)
         KayaCompose.mount(this)
     }
 
-    // The hardware-keyboard route for menu shortcuts (ChromeOS/DeX):
-    // the shell Activity is where Android delivers a modified chord,
-    // and the interpreter owns the spelling, the catalog table, and
-    // the emit — so this forwards and never decides. A chord no
-    // catalog action claims falls through to the platform unchanged.
+    // The hardware-keyboard route for menu shortcuts (ChromeOS/DeX).
+    // The shell Activity is where Android delivers a modified chord;
+    // this forwards and never decides, so a chord no catalog action
+    // claims falls through to the platform unchanged.
     override fun dispatchKeyShortcutEvent(event: KeyEvent): Boolean =
         KayaCompose.dispatchKeyShortcutEvent(event) || super.dispatchKeyShortcutEvent(event)
 }

@@ -5,11 +5,9 @@ import dev.kaya.KayaApp;
 /**
  * The accessibility conformance scene from the JVM: the two universal
  * props (a11yId, a11yLabel), read back out of the platform's own
- * accessibility tree. Full note in guests/rust/a11y.rs; the byte-frozen
- * contract is tools/scenes/a11y.steps.
- *
- * <p>Every widget kind appears, and exactly ONE container of each
- * container kind: container targets are stable only while that holds.
+ * accessibility tree. Exactly ONE container of each container kind:
+ * container targets are ordinal. See guests/rust/a11y.rs;
+ * tools/scenes/a11y.steps.
  */
 final class A11y {
     static void app() {
@@ -50,8 +48,7 @@ final class A11y {
         app.dispatchLoop();
     }
 
-    /** A 2x2 RGB PNG: scenes carry their inputs as source, never as
-     * runtime file I/O. */
+        /** A 2x2 RGB PNG, embedded as source. */
     private static final byte[] TEST_PNG = {
         (byte) 137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
         0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, (byte) 253, (byte) 212,

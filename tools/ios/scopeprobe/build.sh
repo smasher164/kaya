@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -19,21 +14,17 @@ fi
 # Build, sign, install and launch ScopeProbe on a PAIRED IPHONE.
 # Usage: tools/ios/scopeprobe/build.sh
 #
-# THIS IS NOT A LANE and must never become one. It needs hardware, a
-# developer account, and a human to tap through a document picker. It
-# exists because the simulator does not enforce the app sandbox
-# (docs/traps.md), which makes an entire class of iOS behaviour
-# unobservable in CI: anything whose answer depends on the sandbox
-# DENYING something. See main.swift for what it currently measures and
-# DESIGN.md's file-dialog section for what those measurements decided.
+# NOT A LANE: it needs hardware and a human. It exists because the
+# simulator does not enforce the app sandbox (docs/traps.md). See
+# main.swift for what it measures.
 #
-# WHAT IT NEEDS, none of which this repo otherwise wants:
+# WHAT IT NEEDS:
 #   - full Xcode (devicectl, the iphoneos SDK)
 #   - an Apple ID added to Xcode, so `security find-identity -p
 #     codesigning` is non-empty. It is EMPTY on a fresh machine.
-#   - one provisioning profile that Xcode has already downloaded. A free
-#     account will not mint one until you have built SOME app for the
-#     device from Xcode once; there is no way around that from here.
+#   - one provisioning profile Xcode has already downloaded. A free
+#     account mints one only after you build SOME app for the device
+#     from Xcode once.
 #   - the phone plugged in, unlocked, with developer mode enabled.
 set -euo pipefail
 
@@ -41,9 +32,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# The active developer dir may still be the Command Line Tools; devicectl
-# and the iOS SDK live only in Xcode. Point at it without needing sudo,
-# handling versioned installs (Xcode-26.6.0.app, the xcodes convention).
+# The active developer dir may still be the Command Line Tools;
+# devicectl and the iOS SDK live only in Xcode. Versioned installs
+# (Xcode-26.6.0.app) are the xcodes convention.
 if ! xcrun devicectl list devices >/dev/null 2>&1; then
     for app in /Applications/Xcode.app /Applications/Xcode-*.app; do
         if [ -d "$app/Contents/Developer" ]; then
@@ -66,10 +57,8 @@ if [ -z "$IDENTITY" ]; then
     exit 1
 fi
 
-# Xcode has moved this directory once already, so search both homes —
-# and only the ones that EXIST, because `find` on a missing path fails
-# the whole pipeline under pipefail with nothing printed. That is how
-# this script's first run died silently.
+# Both homes, and only the ones that EXIST: `find` on a missing path
+# fails the whole pipeline under pipefail with nothing printed.
 PROFILE=""
 for dir in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
     "$HOME/Library/MobileDevice/Provisioning Profiles"; do
@@ -86,10 +75,9 @@ if [ -z "$PROFILE" ]; then
     exit 1
 fi
 
-# The profile decides the bundle id, not the other way round — a free
-# account's profile is usually pinned to ONE explicit app id, and signing
-# against a mismatched id fails at install time with a message that does
-# not say so. Read the id out and use it.
+# The profile decides the bundle id, not the other way round: a free
+# account's profile is pinned to ONE explicit app id, and signing
+# against a mismatched id fails at install time without saying so.
 security cms -D -i "$PROFILE" >"$WORK/profile.plist"
 BUNDLE_ID="$(python3 -c '
 import plistlib
@@ -162,9 +150,8 @@ fi
 
 xcrun devicectl device install app --device "$DEVICE" "$BUNDLE"
 
-# A LOCKED PHONE INSTALLS FINE AND REFUSES TO LAUNCH, and devicectl says
-# so ten lines into a nested error dump. Say it in one line instead: the
-# build was good, the phone just needs unlocking.
+# A LOCKED PHONE INSTALLS FINE AND REFUSES TO LAUNCH, ten lines into a
+# nested devicectl dump. Say it in one line instead.
 if ! xcrun devicectl device process launch --device "$DEVICE" "$BUNDLE_ID"; then
     echo "scopeprobe: installed OK but could not launch. If the dump above" \
         "says Locked, unlock the phone and re-run — nothing needs rebuilding." >&2

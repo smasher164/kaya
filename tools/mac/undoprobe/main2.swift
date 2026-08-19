@@ -2,31 +2,13 @@
 // programmatic write registers anything at all, and how the entry's
 // private NSCellUndoManager behaves across fields and focus.
 //
-// Round 1 (main.swift) established the shape: a kaya entry is an
-// NSTextField edited through the window's field editor with a PRIVATE
-// NSCellUndoManager, a kaya textarea is an NSTextView on the WINDOW's
-// manager, and both carry the D7 defect. Round 2 asks the questions
-// round 1 could only guess at.
+// The shape round 1 established, and what these questions answered, are
+// docs/undo-plan.md §0. The R-labels below mark which reading is which.
 //
-//  R1 WHICH OBJECT ANSWERS `undo:`? NSApp.target(forAction:) and each
-//     responder's supplementalTarget(forAction:), in every hook mode.
-//     Decides whether D6 can route on mac by supplying a manager.
-//  R2 THREE MODES, not two. `nohook` = a delegate that does NOT
-//     implement windowWillReturnUndoManager (what kaya ships TODAY —
-//     round 1's "plain" implemented it and returned nil, which is a
-//     different thing). `plainhook` = a stock UndoManager, isolating
-//     the subclass. `hook` = the logging subclass.
-//  R3 DOES THE WRITE REGISTER? A programmatic write on an EMPTY stack:
-//     canUndo afterwards. Round 1 always typed first.
-//  R4 THE STACK VS THE ROUTE. Call `manager.undo()` DIRECTLY, so a
-//     hijacked route cannot be mistaken for an empty stack.
-//  R5 IS NSCellUndoManager PER FIELD? Two entries, focused in turn:
-//     same object or different? Decides whether D7's clear can splash
-//     onto another widget's history.
-//  R6 AN UNFOCUSED WRITE. kaya's SetProp can target a field nobody is
-//     editing. Write while unfocused, then focus: is there history?
-//  R7 DOES HISTORY SURVIVE A FOCUS ROUND TRIP? entry -> textarea ->
-//     entry: does the entry's typing come back undoable?
+// THREE MODES, not two: `nohook` = a delegate that does NOT implement
+// windowWillReturnUndoManager (what kaya ships), `plainhook` = a stock
+// UndoManager, `hook` = the logging subclass. Implementing the method
+// and returning nil is a DIFFERENT thing, which round 1 conflated.
 //
 // THROWAWAY. Nothing builds it but build.sh beside it.
 import AppKit

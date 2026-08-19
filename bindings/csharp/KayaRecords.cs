@@ -1,11 +1,7 @@
-// Records: the record type is the schema. CollectionOf reflects over
-// T's primary constructor once at declaration — parameters of wire
-// types (string, bool, long, double) in declaration order become the
-// schema; anything else is guest-only, living in the model and never
-// reaching the wire. One declaration drives the schema, the
-// conversions, and the field tokens, so none can drift. C# records are
-// immutable, so a field update reconstructs the model's copy through
-// the same constructor.
+// Records: the record type is the schema. Primary-constructor
+// parameters of wire types (string, bool, long, double, byte[]) in
+// declaration order are the schema; anything else is guest-only and
+// never reaches the wire.
 
 using System;
 using System.Collections.Generic;
@@ -21,17 +17,9 @@ sealed class Field<V>
 
     internal Field(uint index) => Index = index;
 
-    /// THE WHOLE ELEMENT OF A SCALAR COLLECTION, as a field token.
-    ///
-    /// A field token names one field of a RECORD, and a scalar collection has
-    /// no record: its element IS the value. Binding it was spelled with the
-    /// bare element bind at the floor, which is why a template label over a
-    /// scalar collection was built with the widget-kind floor rather than with
-    /// the sugar. Nothing was missing but a NAME for field 0 — the wire record
-    /// is the same either way.
-    ///
-    /// String only, and that is a fact rather than a restriction: a scalar
-    /// collection is always a collection of strings, one field, one type.
+    /// The whole element of a scalar collection, as a field token: a
+    /// scalar collection has no record, so its element is field 0.
+    /// String only — a scalar collection is always strings.
     internal static Field<string> Element => new Field<string>(0);
 }
 
@@ -39,8 +27,7 @@ sealed class RecordInfo
 {
     internal uint[] Schema;
     // Wire field -> primary-constructor parameter position, and one
-    // getter per constructor parameter (reconstruction needs them all,
-    // guest-only included).
+    // getter per parameter (reconstruction needs the guest-only ones too).
     internal int[] WireToCtor;
     internal Func<object, object>[] Getters;
     internal ConstructorInfo Ctor;
@@ -53,8 +40,8 @@ sealed class RecordInfo
         : t == typeof(byte[]) ? KayaWire.ValueBlob
         : (uint?)null;
 
-    // One reflection walk per record type, ever — FieldOf runs per
-    // event in handlers, so the walk must not re-run there.
+    // One reflection walk per record type, ever: FieldOf runs per event
+    // in handlers, so the walk must not re-run there.
     static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, RecordInfo> Cache =
         new System.Collections.Concurrent.ConcurrentDictionary<Type, RecordInfo>();
 
@@ -103,14 +90,9 @@ sealed class RecordInfo
         return fields;
     }
 
-    /// One field's wire value. A blob field registers its bytes now,
-    /// at encode time — handles are single-submit, so every mutation
-    /// that carries a blob field re-registers (Insert, Update, and
-    /// UpdateField alike: one copy into core memory per write; the
-    /// model keeps the guest's own byte[]). The type checks turn what
-    /// would be an obscure wire-encoder failure — a hand-minted
-    /// FieldAt token pointing at the wrong index, say — into an error
-    /// naming the field.
+    /// One field's wire value. A blob field registers its bytes here,
+    /// at encode time: handles are single-submit, so every mutation
+    /// carrying a blob field re-registers.
     internal object EncodeField(uint wireIndex, object value)
     {
         string name = Ctor.GetParameters()[WireToCtor[wireIndex]].Name;
@@ -130,15 +112,11 @@ sealed class RecordInfo
     }
 
     /// The wire direction an undo travels: one entry's fields as the
-    /// core states them, back into the object the model keeps. Only an
-    /// undo needs it — every other write hands the model the guest's own
-    /// object and encodes a copy for the wire.
+    /// core states them, back into the object the model keeps.
     ///
-    /// GUEST-ONLY CONSTRUCTOR PARAMETERS NEVER TRAVELLED, so they come
-    /// from the entry the mirror still holds (an undone update), and
-    /// from the type's default when there is none (an undone remove,
-    /// putting an entry back that the mirror had dropped). Undo restores
-    /// state, and the state the core holds is the wire fields.
+    /// Guest-only constructor parameters never travelled, so they come
+    /// from the entry the mirror still holds, and from the type's
+    /// default when there is none (an undone remove).
     internal object FromWire(IReadOnlyList<object> fields, object current)
     {
         var parameters = Ctor.GetParameters();
@@ -181,12 +159,8 @@ sealed class RecordCollection<T>
     public void Insert(Tx tx, object key, T value) =>
         tx.InsertRecordRaw(Collection, key, value, 0, Info.WireFields(value));
 
-    /// Insert under a key the BINDING authors, and hand the key back —
-    /// for a record with no identity of its own (a todo is a title, and
-    /// a title is not a name). One monotonic counter per collection
-    /// instance, minting I64 keys from 1; mixing with explicit keys is
-    /// safe by absorption, and no history walk ever rewinds it. The
-    /// contract, in full, is on Tx.InsertFresh.
+    /// Insert under a key the binding authors, and hand the key back.
+    /// The contract, in full, is on Tx.InsertFresh.
     public long InsertFresh(Tx tx, T value)
     {
         long key = tx.MintKey(Collection);
@@ -198,8 +172,7 @@ sealed class RecordCollection<T>
         tx.UpdateRecordRaw(Collection, key, value, 0, Info.WireFields(value));
 
     /// One field's delta by selector: the rest of the record never
-    /// travels; the model's copy is reconstructed with the new value.
-    /// The expression is the field reference — no token to declare.
+    /// travels.
     public void UpdateField<V>(Tx tx, object key, Expression<Func<T, V>> selector, V value) =>
         UpdateField(tx, key, KayaRecords.FieldOf(selector), value);
 
@@ -212,39 +185,28 @@ sealed class RecordCollection<T>
                 current = entry.Value;
         if (current == null)
             throw new InvalidOperationException($"kaya: update of missing key {key}");
-        // The model keeps the guest's own value; the wire value is
-        // encoded (a blob field re-registers its bytes — handles are
-        // single-submit).
         tx.UpdateFieldRaw(Collection, key, Info.WithField(current, f.Index, value), 0,
             f.Index, Info.EncodeField(f.Index, value));
     }
 
-    /// MoveBefore repositions an entry before another's: order is
-    /// collection data, so the model reorders and the wire carries the
-    /// same keys-only delta. Keys, never indices. A missing key or
-    /// anchor throws at the call site — the same check the scene
-    /// makes; moving an entry before itself is a no-op.
+    /// MoveBefore repositions an entry before another's. Keys, never
+    /// indices. A missing key or anchor throws at the call site; moving
+    /// an entry before itself is a no-op.
     public void MoveBefore(Tx tx, object key, object anchor) =>
         tx.MoveBefore(Collection, key, anchor);
 
     /// MoveToEnd repositions an entry at the end of its collection.
     public void MoveToEnd(Tx tx, object key) => tx.MoveToEnd(Collection, key);
 
-    /// MoveToFront repositions an entry at the front: sugar for
-    /// MoveBefore the current first key, lowering to the same wire op.
+    /// MoveToFront repositions an entry at the front of its collection.
     public void MoveToFront(Tx tx, object key) => tx.MoveToFront(Collection, key);
 
-    /// MoveAfter repositions an entry directly after another's: sugar
-    /// for MoveBefore the anchor's successor (MoveToEnd when the
-    /// anchor is last), lowering to the same wire op.
+    /// MoveAfter repositions an entry directly after another's.
     public void MoveAfter(Tx tx, object key, object anchor) =>
         tx.MoveAfter(Collection, key, anchor);
 
     /// A signal the binding recomputes from this collection's entries
-    /// after every mutation, written into the same transaction — the
-    /// items-left label with no handler remembering to update it. The
-    /// compute is pure presentation: entries in, one value out; the
-    /// core sees an ordinary signal.
+    /// after every mutation, written into the same transaction.
     public Signal Derive(Tx tx, Func<List<KeyValuePair<object, T>>, object> compute)
     {
         var s = tx.Signal(compute(Items(tx)));
@@ -254,18 +216,15 @@ sealed class RecordCollection<T>
 
     /// Typed field writes with the key spelled once:
     /// todos.Patch(tx, key).Set(x => x.Done, true).Set(x => x.Title, "x").
-    /// Each Set records one update_field — a patch is recorded writes,
+    /// Each Set records one update_field; a patch is recorded writes,
     /// never a diff.
     public RecordPatch<T> Patch(Tx tx, object key) => new RecordPatch<T>(this, tx, key);
 
-    /// A label bound to the field the selector names (the argument's
-    /// type picks the source; constants and signals go through the
-    /// Tpl overloads).
+    /// A label bound to the field the selector names.
     public Node Label(Tpl t, Expression<Func<T, string>> selector) =>
         t.Label(KayaRecords.FieldOf(selector));
 
-    /// A checkbox bound to the field the selector names, with its
-    /// toggle handler co-located.
+    /// A checkbox bound to the field the selector names.
     public Node Checkbox(Tpl t, Expression<Func<T, bool>> selector,
         Action<Tx, List<object>, bool> onToggle = null) =>
         t.Checkbox(KayaRecords.FieldOf(selector), onToggle);
@@ -321,20 +280,13 @@ static class KayaRecords
     {
         var info = RecordInfo.Of(typeof(T));
         var c = tx.CollectionWithSchema(info.Schema);
-        // How an undo puts one of this collection's entries back: the
-        // record type is the schema in this direction too.
         tx.App.Rehydrate[c.Id] = (_, fields, current) => info.FromWire(fields, current);
         return new RecordCollection<T>(c, info);
     }
 
-    /// The field token for the property a selector expression names:
-    /// FieldOf((Todo t) => t.Done). The name and type are the record's
-    /// own, compiler-checked — no strings restating the declaration
-    /// (the EF Core shape).
-    /// The field token at a known wire index, for generated code only
-    /// (kaya-csgen computes indices from the record declaration;
-    /// hand-written code should use the checked FieldOf instead — a
-    /// hand-minted index is unchecked).
+    /// The field token at a known wire index, for generated code only:
+    /// a hand-minted index is unchecked, so hand-written code uses
+    /// FieldOf.
     public static Field<V> FieldAt<V>(uint index) => new Field<V>(index);
 
     public static Field<V> FieldOf<T, V>(Expression<Func<T, V>> selector)

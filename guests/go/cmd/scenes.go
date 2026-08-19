@@ -3,11 +3,10 @@
 //
 // ONE ARTIFACT CARRIES EVERY SCENE, ON EVERY PLATFORM, and the leg names
 // the one it wants in KAYA_SELFTEST. Android forces the shape:
-// `-buildmode=c-shared` produces one .so per main package and the shell
-// picks its library at load time (docs/go-mobile-plan.md D3). So the
-// scenes are LIBRARIES — one directory each, package named for the
-// scene, `App()` handing back a built app — and this is the only `main`
-// in the tree beside guests/go/encodebench.
+// `-buildmode=c-shared` produces one .so per main package
+// (docs/go-mobile-plan.md D3). So the scenes are LIBRARIES — one
+// directory each, package named for the scene, `App()` handing back a
+// built app.
 package main
 
 import (
@@ -56,15 +55,13 @@ import (
 
 // defaultScene is what an EMPTY KAYA_SELFTEST means on a desktop and
 // nowhere else; main_android.go refuses an empty name instead. "1" is
-// milestone2's name — the selftest flag's original spelling, which the
-// Rust and JVM guests and the legs all still pass.
+// milestone2's name, which the legs all still pass.
 const defaultScene = "1"
 
-// scenes is what this artifact carries, keyed by the name the leg passes
-// in KAYA_SELFTEST. EVERY SCENE THE GO TREE HAS IS IN IT, including the
-// ones a given host cannot run: an unsupported scene should die on the
-// capability gate that rejects it, naming what it could not do, rather
-// than in pick() claiming the artifact does not carry it.
+// scenes is keyed by the name the leg passes in KAYA_SELFTEST. EVERY
+// SCENE THE GO TREE HAS IS IN IT, including the ones a given host cannot
+// run: an unsupported scene should die on the capability gate that
+// rejects it, naming what it could not do, rather than in pick().
 var scenes = map[string]func() *kaya.App{
 	"1":          milestone2.App,
 	"a11y":       a11y.App,
@@ -85,9 +82,6 @@ var scenes = map[string]func() *kaya.App{
 	"grow":       grow.App,
 	"identity":   identity.App,
 	"layout":     layout.App,
-	// One app behind both list-detail scripts: `split` drives
-	// resize_window and is desktop-only, `listdetail` is the bare
-	// invariant at whatever width the device picked.
 	"listdetail": split.App,
 	"menus":      menus.App,
 	"nav":        nav.App,

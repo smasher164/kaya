@@ -1,52 +1,23 @@
 #!/usr/bin/env python3
 """THE CLASS AN INSTALLED kaya APP WOULD BE MATCHED BY, READ OFF THE REAL SERVER.
 
-WHY THIS EXISTS. A Linux desktop matches a running window to its
-installed `.desktop` entry by the window's CLASS — `WM_CLASS` on X11,
-`app_id` on Wayland — and that match is what decides the launcher icon,
-the dock grouping and the alt-tab entry. kaya's GTK backend builds and
-presents its PRIMARY window in `run_core`'s activate handler, before the
-app thread's first transaction is drained, so the class of the one window
-that matters is sent before any identity can arrive. `g_set_prgname`
-cannot move it; `crates/kaya/src/gtk.rs`'s `reclass_toplevels` does, with
-`XSetClassHint` on X11 and `xdg_toplevel.set_app_id` on Wayland.
+A LEG-level assertion, not a scene's: no harness verb reads a window
+class, and tools/scenes/*.steps are shared verbatim by five platforms.
+It runs OUTSIDE the leg, because the app has to be alive to be asked.
+Why the class needs moving at all, and by which route on each protocol,
+is in docs/deferred.md ("The primary window keeps its launcher binary's
+`app_id`/`WM_CLASS`").
 
-WHAT THIS SCRIPT ASSERTS, and why it is not the scene's job. The class is
-not a widget: no harness verb reads it, `tools/scenes/*.steps` are shared
-verbatim by five platforms, and this is a Linux-and-display-protocol fact
-that no guest language can change. So it is a LEG-level assertion, the
-shape `identity-wayland-witness.sh` already set on this lane, and it runs
-OUTSIDE the leg — the app has to be alive to be asked.
+Five clauses: the SERVER is asked and never kaya's model; EVERY mapped
+toplevel of this app carries the declared class; at least TWO of them,
+since the auxiliary window is born with the right class for free and a
+read satisfied by one may have found that one; the class is the name
+declared in guests/assets/identity.toml (docs/app-identity-plan.md
+ruling 4); and kaya's own `KAYA_DIAG app identity: class` record names a
+route, which is the half the server cannot answer.
 
-Each clause is a claim, and each names what it measured:
-
-  1. THE SERVER IS ASKED, not kaya. On X11 that is `xprop WM_CLASS` on the
-     xid, the property every other client on that display sees; on Wayland
-     it is sway's own tree, which IS the compositor's grouping view and so
-     is the thing a shell would match a `.desktop` against. Reading kaya's
-     model back would pass with no lowering at all.
-  2. EVERY MAPPED TOPLEVEL OF THIS APP CARRIES THE DECLARED CLASS. Not
-     "some window does": the auxiliary window is created AFTER the
-     declaration and is born with the right class for free, so a read
-     satisfied by one window is a read that agrees with the bug. It is the
-     PRIMARY this is about, and requiring every mapped toplevel to agree
-     is what covers it without this script having to know which is which.
-  3. AT LEAST TWO OF THEM, for the same reason from the other side: the
-     identity scene holds a primary and an auxiliary, and a sample that
-     found one window found the wrong one or found the app mid-startup.
-  4. THE CLASS IS THE DECLARED NAME, read out of guests/assets/identity.toml
-     rather than typed here (docs/app-identity-plan.md ruling 4: one
-     declaration, and every reader gets it from that file).
-  5. kaya SAYS IT DID IT. The backend's own `KAYA_DIAG app identity: class`
-     record must be present and must name a route. That is the half the
-     server cannot tell you: a class that is already right for some other
-     reason — a launcher that happened to be named the same thing — would
-     satisfy every clause above, and this one fails.
-
-IT REFUSES A VERDICT RATHER THAN AGREEING WITH NOTHING. A reader that saw
-no window at all, or could not read the declaration, fails HERE saying so.
-A census that reads nothing agrees with everything, and this lane has been
-bitten by exactly that twice (docs/traps.md, the wayland seat guard).
+A reader that saw no window, or could not read the declaration, fails
+HERE rather than agreeing with anything.
 
 Usage: identity-class-leg.py <the leg's command line>
 The child's output is passed through unchanged and its exit status is the
@@ -115,9 +86,6 @@ def run(argv):
 
 
 # ---------------------------------------------------------------- X11 ----
-# The read is `xprop -id <xid> WM_CLASS` — the server's own copy of the
-# property, which is what every other client on the display sees.
-#
 # THE XIDS COME FROM A SEARCH of the root's children rather than from
 # `_NET_CLIENT_LIST`, because that is a window manager's property and this
 # lane runs no window manager on X11 (one would resize windows and break
@@ -146,9 +114,8 @@ def read_x11_window(xid):
     pair = WM_CLASS.match(text)
     if pair:
         return (pair.group(1), pair.group(2))
-    # Printed verbatim, never normalised into the "no class" case: "WM_CLASS:
-    # not found" and a class of an unexpected type are different states of
-    # the world and the reader chases whichever one is named.
+    # Verbatim, never normalised into the "no class" case: "WM_CLASS: not
+    # found" and a class of an unexpected type are different states.
     return ("<" + text + ">",)
 
 
@@ -185,22 +152,17 @@ def describe_x11(found):
 
 def matches_x11(words, name):
     # WM_CLASS is a PAIR — instance and class — and GDK writes the program
-    # name into both, so the primary is only indistinguishable from a window
-    # created after the declaration if both fields moved.
+    # name into both, so both fields must have moved.
     return len(words) == 2 and words[0] == name and words[1] == name
 
 
 # ------------------------------------------------------------ WAYLAND ----
-# No Wayland client can read another client's app_id: the compositor is the
-# only holder of it. So the read goes through sway's IPC, which is not a
-# workaround but the closest thing to the real question — that tree IS what
-# a wlroots shell groups and matches by.
+# No Wayland client can read another client's app_id, so the read goes
+# through sway's IPC — the compositor's own grouping view.
 #
 # THE PID FILTER IS NOT OPTIONAL. The wayland ring shares ONE headless sway
 # across a pool of concurrent legs (KAYA_JOBS wide), so the tree holds other
-# legs' windows too. Nodes are kept only if their pid is this script's own
-# descendant, which is exact where a class-name filter would be circular —
-# selecting windows by the very class under test.
+# legs' windows too. Filtering by class instead would be circular.
 def descendants(root):
     """Every live pid below `root`, inclusive, from /proc."""
     parents = {}
@@ -278,10 +240,8 @@ def main():
             "than reading nothing and passing.",
         )
 
-    # The leg's own output is passed through LINE BY LINE as it arrives,
-    # never held back to the end: a wrapper that buffered it would make
-    # every failure underneath it unreadable, and this one runs outermost.
-    # It is also kept, because clause 5 is a question about what kaya said.
+    # LINE BY LINE as it arrives, never buffered to the end: this wrapper
+    # runs outermost. Kept as well, for the clause about what kaya said.
     child = subprocess.Popen(
         sys.argv[1:], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
@@ -294,15 +254,10 @@ def main():
             sys.stdout.flush()
 
     history = []
-    # THE VERDICT IS ANCHORED ON THE LAST SAMPLE THAT SAW BOTH WINDOWS,
-    # and the choice is between two races rather than a preference. The
-    # last sample FULL STOP catches the app tearing its windows down — a
-    # sample taken while the process is alive can still find one window or
-    # none, and this reader would then fail a leg for shutting down. The
-    # last sample that saw the app's two toplevels has neither problem,
-    # and it is not the assertion selecting the answer it wants: the
-    # selector is a COUNT, the count it demands is stated below and
-    # REFUSED if it never happens, and the class is never looked at.
+    # THE VERDICT IS ANCHORED ON THE LAST SAMPLE THAT SAW BOTH WINDOWS.
+    # The last sample full stop catches the app tearing its windows down
+    # and would fail a leg for shutting down. The selector is a COUNT and
+    # never the class, and it is REFUSED below if it never happens.
     samples = {"last": None, "polls": 0, "count": 0, "peak": 0}
 
     def poll():
@@ -310,10 +265,8 @@ def main():
             if backend == "x11":
                 found = sample_x11()
             else:
-                # Re-derived every sample rather than accumulated: the guest
-                # is a grandchild behind two wrappers and is not running yet
-                # at the first sample, and a pid that has exited must leave
-                # the set with it.
+                # Re-derived every sample: the guest is a grandchild behind
+                # two wrappers and is not running yet at the first one.
                 found = sample_wayland(descendants(child.pid))
             samples["polls"] += 1
             if found:
@@ -334,15 +287,10 @@ def main():
     relaying.join(timeout=INTERVAL_SETTLED * 5)
     watcher.join(timeout=INTERVAL_SETTLED * 3)
 
-    # The observation history, always, passing or failing: it is the record
-    # of what this display held while the leg ran, and on a failure it is
-    # the first thing a reader wants.
-    # THE THREE NUMBERS ARE THREE DIFFERENT FACTS and are printed as
-    # three, because one of them read alone is misleading: a leg that
-    # polled twenty times, saw a window in one of them and both windows in
-    # that one is a HEALTHY read on a three-second leg — the reader polls
-    # fast until it has the pair and then backs off, so a low "with a
-    # window" count is the backoff and not a near miss.
+    # The observation history, passing or failing. THE THREE NUMBERS ARE
+    # THREE DIFFERENT FACTS: the reader polls fast until it has the pair
+    # and then backs off, so a low "saw a window" count is the backoff and
+    # not a near miss.
     print(
         f"identity-class-leg: {backend}: {samples['polls']} polls, "
         f"{samples['count']} saw a window, most seen at once {samples['peak']}, "
@@ -380,12 +328,9 @@ def main():
             "was sent before the identity arrived (crates/kaya/src/gtk.rs,",
             "reclass_toplevels), and no .desktop entry can match it.",
         )
-    # CLAUSE 5, and it is the one the server cannot answer. Every clause
-    # above is satisfied by a class that is right for some OTHER reason — a
-    # launcher binary that happened to be named the same thing would pass
-    # them all with the lowering deleted. This one asks kaya what it did,
-    # and it names a route, so "the class moved" and "the class never had
-    # to move" stay two different verdicts.
+    # THE CLAUSE THE SERVER CANNOT ANSWER: every clause above is satisfied
+    # by a class that is right for some other reason, so this one asks kaya
+    # what it did and requires it to name a route.
     record = [line for line in said if "KAYA_DIAG app identity: class -> " in line]
     if not record:
         fail(

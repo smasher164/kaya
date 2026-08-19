@@ -19,21 +19,18 @@ import java.nio.file.Paths;
  *
  * <p>EVERY ASSERTION CROSSES A PROCESS BOUNDARY: a check where kaya
  * reads what kaya wrote parses its own malformed header happily. The
- * custom format is the one exception, since no stock tool writes an
- * app-defined type.
+ * custom format is the one exception.
  *
  * <p>THE IMAGE IS ASSERTED AS A DECODED SIZE, never as bytes: every
- * host re-encodes freely, so a byte count differs per lane for one
- * picture.
+ * host re-encodes freely.
  */
 final class Clipboard {
     private Clipboard() {}
 
-    /**
-     * A 4x4 PNG, spelled out rather than generated: the scene asserts
-     * "4x4" through a foreign decoder, so the picture has to be a real
-     * encoded image whose size is knowable from the script.
-     */
+        /**
+         * A 4x4 PNG, spelled out rather than generated: a foreign decoder
+         * asserts its size, so it has to be a real encoded image.
+         */
     private static final byte[] PIXEL_PNG = {
         (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
         0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
@@ -47,18 +44,16 @@ final class Clipboard {
         0x44, (byte) 0xAE, 0x42, 0x60, (byte) 0x82, // IEND + crc
 };
 
-    /**
-     * The app-defined format's id: reverse-DNS and SPACE-FREE, because
-     * it reaches every platform's own registry verbatim (a UTI, a
-     * RegisterClipboardFormat name, a target atom, a MIME type).
-     */
+        /**
+         * The app-defined format's id: reverse-DNS and SPACE-FREE, because
+         * it reaches every platform's own registry verbatim.
+         */
     private static final String NOTE_ID = "dev.kaya/note";
 
-    /**
-     * NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r
-     * and \\ in all three interpreters, with no \", so a quoted byte
-     * could not be spelled in the expectation.
-     */
+        /**
+         * NO QUOTES IN THE PAYLOAD: the step grammar's escapes are \n, \r
+         * and \\ in all three interpreters, with no \".
+         */
     private static final byte[] NOTE_BYTES = "note=1".getBytes(StandardCharsets.UTF_8);
 
     static void app() {
@@ -94,17 +89,12 @@ final class Clipboard {
         app.build(tx -> {
             KayaApp.WindowRef win = tx.window(0).title("clipboard");
 
-            // kaya has no selection API, which is why copy of a
-            // selection has to be a command at all.
             KayaApp.MenuItem edit = win.menu("Edit");
             edit.item("Cut").role(KayaApp.ROLE_CUT);
             edit.item("Copy").role(KayaApp.ROLE_COPY);
             edit.item("Paste").role(KayaApp.ROLE_PASTE);
 
             KayaApp.Signal<String> status = tx.signal("ready");
-            // Declared out here rather than in the column body because
-            // the seeding insert below runs AFTER the mount, and a
-            // local inside the lambda could not be reached from there.
             KayaApp.Signal<String> rowStatus = tx.signal("");
             KayaApp.Collection notes = tx.collection();
 
@@ -143,7 +133,6 @@ final class Clipboard {
                 tx.button("focus rich", inner -> inner.focus(fields[0])); // button#5
                 tx.button("focus plain", inner -> inner.focus(fields[1])); // button#6
 
-                // Declares what it takes, so a paste lands in the hook.
                 fields[0] = tx.entry().accepts(KayaApp.ACCEPT_TEXT).a11yId("rich"); // entry#0
                 app.onPaste(fields[0], (t, clip) -> {
                     if (clip instanceof KayaApp.Representation.Text text) {
@@ -153,8 +142,6 @@ final class Clipboard {
                     t.write(status, "pasted " + clip);
                 });
 
-                // Declares nothing, so the platform's own insertion
-                // happens and the ordinary change path reports it.
                 fields[1] = tx.entry().a11yId("plain"); // entry#1
 
                 // The same two doors on a STAMPED copy. The accept list

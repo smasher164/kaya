@@ -32,8 +32,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             tx.slider(0.0, 1.0, 0.5).a11y_id("volume").a11y_label("Volume");
             tx.progress(0.25).a11y_id("loading").a11y_label("Loading");
             tx.image(&TEST_PNG[..]).a11y_id("logo").a11y_label("Logo");
-            // The two CHOICE kinds: their options carry captions, but
-            // the choice itself is unnamed without a label.
             tx.select(&["Red", "Green"], 0).a11y_id("color").a11y_label("Color");
             tx.radio(&["Small", "Large"], 0).a11y_id("size").a11y_label("Size");
             // NAMING a container declares it a group, and its children

@@ -3,9 +3,7 @@
 // The simulator does not enforce the app sandbox (docs/traps.md), so
 // every scope-related assertion passes there for free. Anything whose
 // answer depends on the sandbox DENYING something has to be measured on
-// hardware, by hand, which is what this app is for. It answered the
-// file-dialog questions on 2026-07-27 (DESIGN.md, File dialogs) and is
-// kept because the next such question will not be the last.
+// hardware, by hand, which is what this app is for.
 //
 // It is NOT part of any lane and never will be: it needs a paired
 // device, a developer account, and a human to tap a picker. Run it with

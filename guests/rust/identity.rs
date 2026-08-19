@@ -27,20 +27,8 @@
 use kaya::Occurrence;
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
-    // THE UNTITLED WINDOW IS DESKTOP-ONLY, on the SAME predicate the core
-    // itself keys on (crates/kaya/src/scene.rs's CreateWindow arm), so the
-    // two cannot drift: the phones' systems own surface geometry, so
-    // KAYA_CAP_AUX_WINDOWS is unset there and `create_window` is a
-    // deterministic scene error. Measured before this cfg existed: the
-    // guest aborted with "this host has no auxiliary windows" after one
-    // harness step, on an emulator, with the icon already declared. The
-    // phone lanes drop the one step that reads it
-    // (tools/android/run-emulator.sh's scene_script_drop); the NAME's
-    // reader there is the package's own label.
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     use kaya::WindowId;
 
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     const UNTITLED: WindowId = WindowId(1);
 
     let (status, field, go) = ctx.apply(|tx| {
@@ -82,8 +70,26 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         // THE UNTITLED WINDOW. It declares no title at all rather than
         // an empty one: an empty string is a title an app WROTE, and the
         // rule under test is what a window with nothing written shows.
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        {
+        //
+        // THE HOST IS ASKED, not the platform. This was a
+        // `#[cfg(not(any(target_os = "ios", target_os = "android")))]`
+        // until the bindings wrapped `kaya_capabilities()`: a second
+        // copy of a rule the core already held, keyed on the target
+        // rather than on the capability, and free to drift from it in
+        // silence. `kaya::capabilities()` reads the core's own word
+        // (crates/kaya/src/scene.rs's CAPABILITIES), which is the same
+        // const the wall inside `create_window` tests — so what this
+        // guest is told and what it would walk into are one bit.
+        //
+        // THE ANSWER IS FALSE ON THE PHONES, and the core would refuse
+        // this call there AT THE ROOT: measured on an emulator before
+        // the guard existed, the guest aborted with "this host has no
+        // auxiliary windows" after one harness step, with the icon
+        // already declared. That wall has not moved. The phone lanes
+        // drop the one step that reads this window
+        // (tools/android/run-emulator.sh's scene_script_drop); the
+        // NAME's reader there is the package's own label.
+        if kaya::capabilities().aux_windows {
             let untitled = tx.create_window(UNTITLED).size(360.0, 240.0).id();
             let aux_root = tx
                 .column(|tx| {

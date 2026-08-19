@@ -10,8 +10,7 @@
    are registered on the APP after the build, not at the constructor.
    Every leaf constructor for a widget that produces events takes its
    handler as a REQUIRED argument, so this binding has no empty slot to
-   pass (no `tx.Entry(nil)` spelling); the two widgets registered below
-   therefore use the generic constructor.
+   pass; the two widgets registered below use the generic constructor.
 
    Build like milestone2.hs, then run with KAYA_SELFTEST=entry. -}
 

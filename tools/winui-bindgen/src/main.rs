@@ -386,7 +386,7 @@ fn main() {
         // `Symbol` enum covers 17 of kaya's 20 concepts and the other
         // three — info, warning, lock — have no enum member at all, so
         // they can only be spelled as Segoe Fluent Icons codepoints
-        // through FontIcon (styling/symbols-fluent.md).
+        // through FontIcon (docs/styling/symbols-fluent.md).
         //   IconElement — the base BOTH routes return and the type every
         //     Icon setter takes; without it nothing else here helps.
         //   Symbol      — the enum. An unfiltered enum takes its setter

@@ -1,18 +1,11 @@
 (* The entry scene from OCaml: the uncontrolled contract end to end. The
    field owns its text and reports each edit through on_change; the app
-   folds those into a plain ref. The clear's own text_changed "" re-enters
-   through that fold, so a second add finds nothing to add.
+   folds those into a plain ref.
 
-   THIS SCENE CARRIES THE EXPLICIT REGISTRATION TIER (DESIGN.md, scope
-   ratified 2026-08-05): the handlers are registered CENTRALLY, after the
-   build, against the handles the build returned ([on_change app field],
-   [on_click app add]) rather than through the [~on_change]/[~on_click]
-   arguments todos.ml and undo.ml pass. Both spellings land in the same
-   table, and the central tier is why these two widgets realize inside
-   the build and slot in with [w].
-
-   A draft identifies nothing, so its key comes from [insert_fresh]
-   (docs/fresh-key-plan.md).
+   THIS SCENE CARRIES THE EXPLICIT REGISTRATION TIER: the handlers are
+   registered CENTRALLY, after the build, against the handles the build
+   returned, rather than through the [~on_change]/[~on_click] arguments
+   todos.ml and undo.ml pass. Both spellings land in the same table.
 
    Build like milestone2.ml, then run with KAYA_SELFTEST=entry. *)
 
@@ -27,8 +20,6 @@ let () =
        let status = signal (Str "no todos") in
        let todos = collection () in
 
-       (* Realized here because the central registrations below need
-          their handles. *)
        let field = entry () in
        let add = button ~text:"add" () in
 

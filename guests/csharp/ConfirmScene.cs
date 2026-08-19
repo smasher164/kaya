@@ -20,8 +20,6 @@ static class ConfirmScene
                 tx.Label(bind: status); // label#0
                 tx.Button("delete", onClick: inner =>
                 {
-                    // The result handler rides the request and retires
-                    // with its one answer; ids are binding-allocated.
                     inner.ShowAlert(
                         title: "delete item?",
                         message: "this cannot be undone",

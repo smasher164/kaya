@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,8 +9,8 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# Build the Linux validation image and run all four milestone-0 suites in
-# it (GTK backend under Xvfb). Requires docker.
+# Build the Linux validation image and run the suites in it (GTK under
+# Xvfb). Requires docker.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,10 +18,8 @@ T0=$SECONDS
 docker build -q -t kaya-linux "$ROOT/tools/linux" >/dev/null
 echo "TIMING image-build $((SECONDS - T0))s"
 T0=$SECONDS
-# The hard ceiling: a suite that never returns (a drain deadlock, a
-# hung guest holding the container open) gets cut here instead of
-# hanging the caller forever. Generous — a cold container compiles
-# everything from scratch.
+# Hard ceiling on a suite that never returns. Generous: a cold container
+# compiles everything from scratch.
 rc=0
 timeout 1800 docker run --rm -v "$ROOT:/work" \
     -e KAYA_RECORD="${KAYA_RECORD:-}" -e KAYA_JOBS="${KAYA_JOBS:-}" \

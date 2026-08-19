@@ -21,7 +21,6 @@ app = kaya.App()
 
 
 def delete():
-    # A ROLE NEVER CHANGES WHAT A BUTTON DOES.
     status.set("deleted")
 
 

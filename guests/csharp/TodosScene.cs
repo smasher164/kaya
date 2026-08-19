@@ -7,9 +7,6 @@
 
 using System.Collections.Generic;
 
-// The record is the schema; kaya-csgen reads this declaration and
-// generates TodoKaya: the collection factory, exact-index field
-// tokens, and the named-setter patch.
 [KayaGen]
 record Todo(string Title, bool Done);
 
@@ -56,8 +53,7 @@ static class TodosScene
                     todos.InsertFresh(t, new Todo(draft, false));
                     // Finishing the form is not part of the step, and
                     // Clear inside an undoable group is refused at apply
-                    // (docs/undo-plan.md D4) — so it gets its own
-                    // transaction.
+                    // (docs/undo-plan.md D4).
                     app.Post(after =>
                     {
                         after.Clear(field);

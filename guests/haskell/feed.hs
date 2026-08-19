@@ -37,8 +37,6 @@ main = kayaMain $ \app -> do
          in VStr (show n ++ " done")
 
     let onPromote = submitTx app $ do
-          -- The update's new constructor restamps that key's copy in
-          -- place.
           entries <- sumItems feed
           case [(k, note) | (k, PNote note) <- entries] of
             (key, Note t) : _ -> sumUpdate feed key (PTodo (Todo t True))

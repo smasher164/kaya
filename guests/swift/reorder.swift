@@ -7,7 +7,6 @@
 
 import Foundation
 
-// The struct is the schema; kaya-swift-gen generates reorder+Kaya.swift.
 struct Item: KayaGen {
     var title: String
 }
@@ -18,7 +17,6 @@ app.build { tx in
     let items = itemCollection(tx)
     let root = tx.row {
         tx.button("rotate") { tx in
-            // First entry to the end. The model owns the order.
             let entries = items.items(tx)
             items.moveToEnd(tx, entries[0].key)
         }

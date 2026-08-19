@@ -1,49 +1,11 @@
-(* [@@deriving kaya_gen]: the record declaration is the schema.
-
-   For
-
-     type todo = { title : string; done_ : bool } [@@deriving kaya_gen]
-
-   this emits the descriptor, one typed field token per field, and the
-   patch function — typed field writes with the key spelled once, one
-   optional labelled argument per field (Python's kwargs patch, but
-   static):
-
-     val todo_record : todo Kaya_app.record_type
-     val todo_title : (todo, string) Kaya_app.field
-     val todo_done_ : (todo, bool) Kaya_app.field
-     val todo_patch :
-       ?title:string -> ?done_:bool ->
-       todo Kaya_app.record_collection -> Kaya_wire.value -> unit
-
-   Each supplied argument records one update_field — a patch is
-   recorded writes, never a diff. The schema, both conversions, the
-   indexes, and the patch all derive from the one declaration, so none
-   can drift (the same single-source move as #[derive(Kaya)] in Rust
-   and the dataclass reader in Python). Every field must be wire-typed
-   (string, bool, int64, float, or bytes — the blob kind: the model
-   keeps the guest's own bytes, and every insert/update/update_field
-   re-registers them with the core at encode time, because blob handles
-   are single-submit); OCaml keeps handlers out of records by idiom, so
-   there is no guest-only skipping.
-
-   On a variant whose constructors carry inline records —
-
-     type post = Note of { text : string }
-               | Todo of { title : string; done_ : bool }
-     [@@deriving kaya_gen]
-
-   it derives the sum: the descriptor (post_sum), one typed field token
-   per constructor field (post_note_text, post_todo_done_), one refined
-   patch per constructor (post_todo_patch — its witnessed writes refuse
-   an entry that no longer holds Todo), and the eliminator
-
-     val post_each : post Kaya_app.sum_collection ->
-       note:(unit -> 'a) -> todo:(unit -> 'a) ->
-       unit -> Kaya_app.widget
-
-   whose labelled arguments are required — template totality is a
-   compile error here, and the scene checks it again. *)
+(* [@@deriving kaya_gen]: the type declaration is the schema (DESIGN.md, the
+   generator tier). From a RECORD `todo`: `todo_record`, one typed field
+   token per field (`todo_title`), and `todo_patch` — one optional labelled
+   argument per field, each supplied one recording an update_field. From a
+   VARIANT of inline records: `post_sum`, per-constructor tokens
+   (`post_note_text`), one refined patch per constructor (`post_todo_patch`,
+   whose writes are witnessed), and the eliminator `post_each`, whose
+   labelled arms are REQUIRED so template totality is a compile error. *)
 
 open Ppxlib
 
@@ -67,10 +29,9 @@ let tag_expr ~loc = function
   | F64 -> [%expr Kaya_wire.value_f64]
   | Blob -> [%expr Kaya_wire.value_blob]
 
-(* A blob field's MODEL value carries the guest's own bytes as a
-   binary Str (the wire side re-registers them at encode time, in
-   Kaya_app.encode_field — handles are single-submit), so its value
-   constructor is Str, wrapped by the conversions below. *)
+(* A blob field's MODEL value carries the guest's bytes as a binary Str
+   (Kaya_app.encode_field re-registers them at encode time), so its
+   value constructor is Str. *)
 let value_ctor = function
   | Str -> "Str"
   | Bool -> "Bool"
@@ -182,9 +143,8 @@ let generate ~ctxt (_rec_flag, type_decls) =
                   [%e Ast_builder.Default.eint ~loc i]])
           fields
       in
-      (* <t>_patch ?f1 ?f2 rc key: each supplied argument is one
-         update_field. Internal names carry the __kaya_ prefix so a
-         field named rc/key/tx cannot capture them. *)
+      (* <t>_patch ?f1 ?f2 rc key. Internal names carry the __kaya_
+         prefix so a field named rc/key/tx cannot capture them. *)
       let patch =
         let write_one (name, _) =
           [%expr
@@ -373,9 +333,8 @@ let generate ~ctxt (_rec_flag, type_decls) =
               fields)
           variants
       in
-      (* Refined patches per constructor: post_todo_patch ?title
-         ?done_ sc key — each supplied argument is one witnessed
-         update_field, and the model refuses a drifted entry. *)
+      (* Refined patches per constructor: post_todo_patch ?title ?done_ sc
+         key. *)
       let patches =
         List.mapi
           (fun vi (ctor, fields) ->
@@ -412,8 +371,7 @@ let generate ~ctxt (_rec_flag, type_decls) =
                 [%e with_optionals]])
           variants
       in
-      (* The eliminator: required labelled arms, one per constructor —
-         totality is a compile error at every use site. *)
+      (* The eliminator: required labelled arms, one per constructor. *)
       let eliminator =
         let arms =
           Ast_builder.Default.elist ~loc

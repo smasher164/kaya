@@ -1,39 +1,25 @@
-# The python clause docs/tpl-props-plan.md P2 owes, ready to paste into
-# tools/check-sugar-surface.sh. Reads the CLASS STRUCTURE with `ast` —
-# a file-scoped grep cannot tell a method on `Widget` from one a node
-# can reach, which is exactly the defect this slice fixed, and an import
-# probe would need the built dylib (kaya/runtime.py loads it at import)
-# and could go green against a stale one.
+# The python clause of check-sugar-surface's template-prop sweep
+# (docs/tpl-props-plan.md P2). Reads the CLASS STRUCTURE with `ast`: a
+# file-scoped grep cannot tell a method on `Widget` from one a node can
+# reach, and an import probe would need the built dylib and could go
+# green against a stale one.
 #
 #   tpl_props_py=$(python3 tools/checks/py-node-props.py) || { ... }
 #
 # Argument: the binding path, so the gate keeps its one list of paths.
 #
-# TWO STRUCTURES, NOT ONE, and the split is the finding rather than an
-# accident of how this file grew:
-#
-#   A METHOD ON THE SHARED BASE — the a11y trio, `accepts`, `on_paste`
-#   and `role`. `class Node(_Handle)` is the whole of what puts them in
-#   the template zone, so a method that drifts up into `Widget` leaves
-#   this zone SILENTLY: the call still exists and still compiles, it
-#   just names a live widget and there is no stamped copy it can reach.
-#
-#   A CONSTRUCTOR KEYWORD — `inset`. Python has ONE constructor surface
-#   for both zones, and `_alloc_widget_or_node` is the only line in the
-#   binding that reads `_tpl_depth`, so `kaya.row(inset=8)` is ALREADY
-#   the template spelling. That costs nothing and is checked anyway,
-#   because "free" is a property of a three-link chain any one edit can
-#   cut: the container takes the kwarg, the container PASSES it (the
-#   `spacing=` failure — accepted and dropped changes nothing on screen
-#   and raises nothing), and the container allocates through the
-#   zone-agnostic `_widget`. Cut the last link and `inset=` still works
-#   perfectly in the live zone while every stamped row loses its
-#   padding, with nothing raised anywhere.
+# TWO STRUCTURES, NOT ONE. The a11y trio, `accepts`, `on_paste` and
+# `role` are METHODS ON THE SHARED BASE, so one drifting up into
+# `Widget` leaves the template zone silently. `inset` is a CONSTRUCTOR
+# KEYWORD, already the template spelling because Python has one
+# constructor surface for both zones — checked anyway, because that is a
+# three-link chain (the container takes the kwarg, PASSES it, and
+# allocates through the zone-agnostic `_widget`) and cutting any link
+# leaves the live zone working while every stamped row loses its padding.
 #
 # The dynamic setters (`Widget.inset`, `.grow`, `.align`, `.spacing`)
 # are deliberately NOT wanted on `Node` and this file must never ask for
-# them: a blueprint is declared once and never mutated, so a write meant
-# to happen after the build has no moment to happen in.
+# them: a blueprint is declared once and never mutated.
 import ast
 import sys
 
@@ -82,9 +68,8 @@ def takes(fn, arg):
 
 
 # THE ALLOCATOR CHAIN FIRST: a reader that cannot find it has read the
-# wrong file, and must refuse rather than report the props it did not
-# look for (tools/tpl-surfaces.py's rule — a census that reads nothing
-# agrees with everything).
+# wrong file and must refuse rather than report props it never looked
+# for (tools/tpl-surfaces.py's rule).
 broken = []
 for name in ("_widget", "_alloc_widget_or_node"):
     if name not in funcs:
@@ -123,13 +108,10 @@ if "_set_inset" not in funcs:
     print(f"{path}: no `_set_inset` — the container kwarg's write is gone")
     sys.exit(1)
 
-# AND THE WRITE ITSELF IS ZONE-BLIND. This is the cut the three links
-# above cannot see: every link can hold while `_set_inset` grows an
-# early return on `_tpl_depth`, and then `inset=` works in the live zone,
-# raises nothing in the template one, and every stamped row silently
-# loses its padding. Nothing that WRITES a prop may ask which zone it is
-# in — the wire record names an id, a prop and a source, and the root's
-# template declare arm runs the same `check_prop` the live one does.
+# AND THE WRITE ITSELF IS ZONE-BLIND — the cut the three links above
+# cannot see: every link can hold while `_set_inset` grows an early
+# return on `_tpl_depth`. Nothing that WRITES a prop may ask which zone
+# it is in.
 for who, fn in (("`_set_inset`", funcs["_set_inset"]),
                 ("`_Handle.role`", next(
                     (f for f in classes["_Handle"].body

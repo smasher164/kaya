@@ -1,10 +1,7 @@
 /* The entry scene from C, on the function floor: the uncontrolled
  * contract end to end. The field owns its text, the app folds
  * text_changed into `draft`, and the clear's own text_changed("")
- * re-enters through that fold — which is what makes a second add find
- * nothing to add.
- *
- * Built and run by the Linux container suite with KAYA_SELFTEST=entry. */
+ * re-enters through that fold. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -80,9 +77,6 @@ static void *app(void *arg) {
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0};
                 char status[192];
-                /* The empty-draft guard, and the scene's proof that
-                 * clear emptied the draft through the occurrence fold
-                 * rather than a side assignment. */
                 if (draft[0] == '\0') {
                     snprintf(status, sizeof status, "nothing to add, %u total",
                              total);
@@ -98,9 +92,6 @@ static void *app(void *arg) {
                 snprintf(status, sizeof status, "added %s, %u total", draft,
                          total);
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str(status));
-                /* Finish the form, atomically with the insert: the field
-                 * answers with text_changed("") and the fold above
-                 * empties draft. */
                 kaya_tx_widget_command(&tx, W_FIELD, KAYA_COMMAND_CLEAR);
                 kaya_tx_widget_command(&tx, W_FIELD, KAYA_COMMAND_FOCUS);
                 kaya_submit(tx.buf, tx.len);

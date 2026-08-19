@@ -1,8 +1,6 @@
 // The dirty-state conformance scene, C# port — unsaved work as window
-// chrome (docs/dirty-plan.md). dirty: is presentation only: kaya never
-// infers it, so the app declares it on both edges.
-//
-// See guests/rust/dirty.rs and tools/scenes/dirty.steps.
+// chrome (docs/dirty-plan.md). kaya never infers it, so the app declares
+// it on both edges. See guests/rust/dirty.rs and tools/scenes/dirty.steps.
 
 static class DirtyScene
 {
@@ -42,8 +40,6 @@ static class DirtyScene
                 tx.Label(bind: status); // label#1
                 tx.Button("edit", onClick: t =>
                 {
-                    // The model and the declaration in ONE transaction,
-                    // and neither implies the other.
                     t.Write(doc, "notes and a line");
                     t.Write(status, "unsaved");
                     t.Window(dirty: true);

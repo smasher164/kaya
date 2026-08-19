@@ -10,10 +10,10 @@ android {
 
     defaultConfig {
         applicationId = "dev.kaya.clipprobe"
-        // The same floor and ceiling the validation apps carry, because
-        // scoped storage and the picker's behaviour BOTH key on
-        // targetSdk — a probe that targeted less would measure a
-        // platform the lane never runs on.
+        // The validation apps' own floor and ceiling: scoped storage
+        // and the picker's behaviour both key on targetSdk, so a probe
+        // that targeted less would measure a platform the lane never
+        // runs on.
         minSdk = 26
         targetSdk = 35
         versionCode = 1

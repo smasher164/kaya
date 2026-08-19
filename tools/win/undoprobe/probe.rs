@@ -1,13 +1,10 @@
 //! THROWAWAY undo probe for the WinUI backend — docs/undo-plan.md §0,
 //! probe plan cells P3-win, P4, P5. Measures; builds nothing.
 //!
-//! It is a MODULE OF THE BACKEND rather than a standalone app on
-//! purpose: the questions are about the TextBox kaya itself creates,
-//! with kaya's minimal template, written through kaya's own SetProp
-//! path, under kaya's own thread-scoped chord hook. A standalone WinUI
-//! app would have to re-create the composed Application (KayaOuter),
-//! the MRT resources.pri and the minimal style, and would then be
-//! measuring a different widget.
+//! A MODULE OF THE BACKEND, not a standalone app: the questions are
+//! about the TextBox kaya itself creates, with kaya's minimal template,
+//! through kaya's own SetProp path and under its thread-scoped chord
+//! hook.
 //!
 //! Wiring (temporary, reverted after the run — see hook.patch):
 //!   crates/kaya/src/winui/mod.rs
@@ -18,8 +15,7 @@
 //! the guest's own observations print PROBEGUEST. The last line is
 //! PROBEDONE.
 
-// A probe keeps its unused instruments (right_click_area, call_redo):
-// the next question asked of this file is not the last one answered.
+// A probe keeps its unused instruments (right_click_area, call_redo).
 #![allow(dead_code)]
 
 use super::bindings::Microsoft::UI::Xaml::FocusState;
@@ -660,10 +656,8 @@ fn run() {
 
     // ---------------- P3 phase E: kaya's OWN clipboard commands ---------
     // Edit>Cut and Edit>Paste reach the field through the platform's own
-    // edit commands (perform_clipboard_role: CutSelectionToClipboard,
-    // PasteFromClipboard). Whether THOSE land in the native undo stack
-    // decides whether the two tiers stay coherent for a user who cuts
-    // and then presses Undo.
+    // edit commands (perform_clipboard_role). Whether THOSE land in the
+    // native undo stack decides whether the two tiers stay coherent.
     say("== P3 phase E: do kaya's clipboard commands enter the native stack ==");
     kaya_write("");
     call_clear_history();
@@ -745,11 +739,9 @@ fn run() {
     press(&[0x11], 0x5A, "ctrl+z with the button focused and the hook owning it");
     snap("P5e after ctrl+z with the button focused");
 
-    // P5f: the DISABLED item. The hook eats a chord its catalog owns
-    // whether or not the item is enabled ("a disabled item is INERT ...
-    // the chord is still this catalog's, so it is eaten"). If that
-    // holds, disabling Edit>Undo is NOT a way to hand Ctrl+Z back to
-    // the focused TextBox.
+    // P5f: the DISABLED item. The hook is expected to eat a chord its
+    // catalog owns whether or not the item is enabled; if it does,
+    // disabling Edit>Undo does NOT hand Ctrl+Z back to the TextBox.
     let disabled = on_ui(|core| {
         let id = *core.menu_shortcuts.get("primary+z").expect("the probe's chord");
         if let Some(m) = core.menu_models.get_mut(&id) {
@@ -770,9 +762,7 @@ fn run() {
     snap("P5f after ctrl+z (a disabled owner still eats the chord?)");
 
     // ------------- P4 again, with something to undo ---------------------
-    // The first pass caught the flyout in a CanUndo=false state. Ask the
-    // question the cell actually asks: with undoable content in the
-    // field, does the menu offer Undo?
+    // The first pass caught the flyout in a CanUndo=false state.
     say("== P4 (second pass): the flyout with undoable content ==");
     kaya_write("");
     call_clear_history();
@@ -784,10 +774,9 @@ fn run() {
     uia_dump("context menu with undoable content");
     dismiss_popup();
 
-    // (No third pass for an APP-declared context menu on a text
-    // widget: the root REFUSES the attachment outright —
-    // scene.rs:1435, measured here as a guest panic — so a kaya
-    // context menu can never displace the flyout above.)
+    // (No third pass for an APP-declared context menu on a text widget:
+    // the root REFUSES the attachment, so a kaya context menu can never
+    // displace the flyout above.)
     say("== P4: an app context menu on a text widget is refused at the root (scene.rs:1435) ==");
 
     say("probe complete");

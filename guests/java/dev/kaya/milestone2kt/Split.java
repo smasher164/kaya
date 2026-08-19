@@ -43,8 +43,6 @@ final class Split {
             return s;
         });
 
-        // status is captured by the handlers above; the check keeps the
-        // local alive.
         if (status == null) throw new IllegalStateException();
 
         app.dispatchLoop();

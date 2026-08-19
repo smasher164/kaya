@@ -72,7 +72,6 @@ let () =
            ]
        in
 
-       (* Remove's activation names BOTH keys (group, item). *)
        let group_list, items =
          for_each groups
            (fun () ->
@@ -104,10 +103,9 @@ let () =
                ~on_click:(fun () -> write can_export (Bool true)) (* button#0 *);
              button ~text:"reset menu state"
                ~on_click:(fun () ->
-                 (* The folds never echo the user's pick, so details and
-                    sort still hold false/0; these writes are real
-                    records, never coalesced away, and they reset the
-                    backend's own user-state mirror. *)
+                 (* The folds never echo the user's pick, so these writes
+                    are real records, never coalesced away, and they
+                    reset the backend's own user-state mirror. *)
                  write details (Bool false);
                  write sort (F64 0.0);
                  write status (Str "ready")) (* button#1 *);

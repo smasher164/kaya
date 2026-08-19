@@ -1,43 +1,12 @@
 //go:build android
 
-// WHAT A GO PANIC LOOKS LIKE ON ANDROID: nothing at all.
+// A Go panic on Android reaches nobody: the runtime writes to fd 2 and
+// exits, and an app process has no stderr (measured 2026-08-09;
+// docs/go-mobile-plan.md §D3).
 //
-// MEASURED 2026-08-09 on emulator-5554, with a deliberately broken
-// attach. The Go runtime prints a panic to file descriptor 2 and then
-// exits; an Android app process has no stderr anyone reads, so the
-// ENTIRE logcat of the crash was one line — "Process
-// dev.kaya.milestone2go (pid 25418) has died: fg TOP" — and 290 lines
-// of unrelated framework chatter. The panic's text, which named the
-// cause and the fix, went to /dev/null.
-//
-// That is not a cosmetic problem. Every wall kaya's Go binding has on
-// this platform is a panic, and until this file existed every one of
-// them was silent where it matters most:
-//
-//   - "KAYA_SELFTEST is empty" — the run-time half of the environment
-//     guard (docs/go-mobile-plan.md D2), the milestone's own defect;
-//   - "already attached" — a configuration change re-running onCreate;
-//   - "library speaks spec … this binding was generated from …" — the
-//     stale-artifact guard, which the file above calls worth MORE on
-//     Android than anywhere else;
-//   - "the app's own main returned without serving" — the guard the
-//     single-main entry point needs, added beside this file.
-//
-// A leg that hits one of those reads, on the lane, as "never printed a
-// verdict". CLAUDE.md's invariant 3 is about exactly this shape: a
-// guard nobody can see is barely a guard.
-//
-// THE FIX IS A RECOVER, NOT A PIPE, and the difference is a race.
-// golang.org/x/mobile redirects fd 1 and 2 into an os.Pipe and pumps
-// the reader into logcat on a goroutine
-// (internal/mobileinit/mobileinit_android.go). That works for ordinary
-// prints and NOT for the case that matters: a panic writes to fd 2 and
-// the runtime calls exit(2) immediately after, with no guarantee the
-// pump goroutine is ever scheduled in between. Recovering on the two
-// goroutines kaya owns — the UI thread inside attach, and the app
-// thread it starts — writes the message synchronously, before anything
-// can exit, and then re-raises so the process still dies the way it
-// should.
+// It must stay a recover and not x/mobile's fd-2-into-a-pipe pump: the
+// runtime calls exit(2) straight after writing the panic, with no
+// guarantee the pump goroutine is scheduled in between.
 package kaya
 
 /*
@@ -45,10 +14,6 @@ package kaya
 #include <android/log.h>
 #include <stdlib.h>
 
-// ANDROID_LOG_ERROR spelled through a wrapper rather than named from
-// Go: the enum's value is stable ABI, but a wrapper is what keeps the
-// constant's name in one place, and __android_log_write's own signature
-// out of cgo's variadic rules.
 static void kaya_logcat_error(const char *tag, const char *msg) {
 	__android_log_write(ANDROID_LOG_ERROR, tag, msg);
 }
@@ -61,9 +26,8 @@ import (
 	"unsafe"
 )
 
-// logcatError writes one message to the Android log under the tag the
-// lane already reads (tools/android/run-emulator.sh filters `kaya:*`
-// for verdicts and `Go:E` for crashes).
+// logcatError writes one message under the tag the lane already reads
+// (tools/android/run-emulator.sh filters `kaya:*` and `Go:E`).
 func logcatError(msg string) {
 	tag := C.CString("kaya")
 	text := C.CString(msg)
@@ -72,14 +36,9 @@ func logcatError(msg string) {
 	C.free(unsafe.Pointer(text))
 }
 
-// androidReport makes a panic on one of kaya's two Android goroutines
-// SAY SOMETHING before the process goes. Deferred directly, so its
-// recover is the panicking frame's own; it re-raises, because a panic
-// is fatal and this is about visibility, not about surviving.
-//
-// The stack is included because the two ends of an Android failure are
-// far apart: the message names the rule, the stack names the guest
-// function that broke it.
+// androidReport logs a panic on one of kaya's two Android goroutines
+// before the process goes. Must be deferred DIRECTLY, so its recover is
+// the panicking frame's own; it re-raises.
 func androidReport() {
 	r := recover()
 	if r == nil {

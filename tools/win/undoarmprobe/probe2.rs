@@ -1,18 +1,12 @@
 //! THROWAWAY probe #2 for the WinUI undo arm — the two claims the
 //! byte-frozen scene CANNOT reach:
 //!
-//! 1. THE CHORD. §1.1's decisive Windows finding is chord theft: kaya's
-//!    thread-scoped keyboard hook eats Ctrl+Z the moment the catalog
-//!    owns it, and a focused TextBox never sees the key. The undo guest
-//!    declares no shortcut (undo.steps drives the role through
-//!    `menu_activate`), so nothing in the suite presses a chord at all.
-//!    This installs `primary+z` into the live catalog table the hook
-//!    consults and presses the REAL key.
-//! 2. A1's CLEAR. The scene passes with or without it on this lane
-//!    (either the platform's coalescing stops at the focus change, or
-//!    the exhausted-episode fallback restores the same text), so the
-//!    clear needs a direct reading: type, commit a group with the field
-//!    focused, ask the field whether it can still undo.
+//! 1. THE CHORD (chord theft, §1.1). No scene presses one — the undo
+//!    guest declares no shortcut — so this installs `primary+z` into the
+//!    live catalog table the hook consults and presses the REAL key.
+//! 2. A1's CLEAR. The scene passes with or without it on this lane, so
+//!    the clear needs a direct reading: type, commit a group with the
+//!    field focused, ask the field whether it can still undo.
 //!
 //! Wiring (temporary, reverted after the run):
 //!   crates/kaya/src/winui/mod.rs

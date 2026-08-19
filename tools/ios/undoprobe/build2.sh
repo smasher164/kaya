@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -19,13 +13,11 @@ fi
 # Round 2 of the iOS undo probe: main2.swift (routing + gestures).
 # Usage: tools/ios/undoprobe/build2.sh [udid]
 #
-# NOT A LANE. It answers whether a kaya programmatic write enters the
-# native undo stack on iOS, and whether shake presents the system undo
-# UI, before D7's and P6's arms are written. See main2.swift's header and
-# docs/undo-plan.md §0. THROWAWAY.
+# NOT A LANE, THROWAWAY. Questions in main2.swift's header; what it
+# decides is docs/undo-plan.md §0.
 #
-# It UNINSTALLS itself at the end: the simulators here are shared with
-# the lane and a probe must leave no fixture behind.
+# It UNINSTALLS itself at the end: the simulators are shared with the
+# lane and a probe must leave no fixture behind.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -88,9 +80,8 @@ xcrun simctl install "$UDID" "$APP"
 echo "== running on $UDID =="
 xcrun simctl launch --console-pty "$UDID" dev.kaya.undoprobe2 2>&1 &
 launch_pid=$!
-# The probe holds for 12s at the shake so the screen can be captured:
-# an alert is a THING ON SCREEN and no in-process boolean is proof of it
-# on its own (the clipprobe rule).
+# The probe holds 12s at the shake so the screen can be captured: an
+# alert is a THING ON SCREEN, and no in-process boolean proves it.
 sleep 45
 xcrun simctl io "$UDID" screenshot "$OUT/shake2.png" >/dev/null 2>&1 \
     && echo "== screenshot at $OUT/shake.png =="

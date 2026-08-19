@@ -1,17 +1,13 @@
 //! Byte encoding of the protocol for the C boundary.
 //!
 //! One framing serves every channel — u32 size, u16 kind, u16 flags,
-//! 8-byte aligned, size includes the header, little-endian — but the
-//! transports differ: occurrences ride the shared ring (ring.rs),
-//! transactions arrive as a submitted buffer (one call commits one
-//! buffer), and the presentation pump hands resolved apply-ops out as a
-//! filled buffer. The Rust API skips this module entirely and constructs
-//! protocol values directly; decoding is for foreign guests, encoding for
-//! the pump and for tests.
+//! 8-byte aligned, size includes the header, little-endian. Values are
+//! { u32 type; u32 len; payload padded to 8 }.
 //!
-//! Values are encoded as { u32 type; u32 len; payload padded to 8 }.
-//! Malformed input fails loudly: a bad buffer is a broken binding, not a
-//! runtime condition.
+//! The Rust API skips this module and constructs protocol values
+//! directly; decoding is for foreign guests, encoding for the pump and
+//! for tests. Malformed input fails LOUDLY: a bad buffer is a broken
+//! binding, not a runtime condition.
 
 use std::sync::Arc;
 
@@ -67,25 +63,22 @@ pub const TX_READ_CLIPBOARD: u16 = 36;
 pub const TX_UNDO_GROUP: u16 = 37;
 /// The three text-range records (docs/ranges-plan.md D6). Byte offsets
 /// on this channel; the core converts to the backend's unit before it
-/// lowers (scratchpad/ranges-units.md §7).
+/// lowers (docs/ranges-units.md §7).
 pub const TX_HIGHLIGHT_RANGES: u16 = 38;
 pub const TX_SELECT_RANGE: u16 = 39;
 pub const TX_REVEAL_RANGE: u16 = 40;
 /// The save dialog's request (docs/save-plan.md D2). Its ANSWER is the
 /// picker's — a file_dialog_result carrying one file or none — because
 /// the two dialogs share one id space, one live slot and one result
-/// grammar; only the request differs, which is the only place they
-/// differ for a guest either.
+/// grammar.
 pub const TX_SHOW_SAVE_DIALOG: u16 = 41;
 pub const TX_SET_BRAND_ACCENT: u16 = 42;
 /// The brand typeface REQUEST (docs/styling-plan.md Slice 2b). Its
 /// per-platform pairs ride the wire where the accent's never do: a
 /// binding cannot resolve its platform (the JVM says "Linux" on
-/// Android) but a lowering IS its platform, so the rows travel and each
-/// backend picks its own.
+/// Android) but a lowering IS its platform.
 pub const TX_SET_BRAND_TYPEFACE: u16 = 43;
-/// The app's declared identity (docs/app-identity-plan.md): the name it
-/// goes by and the bytes of the picture that stands for it. The
+/// The app's declared identity (docs/app-identity-plan.md). Uses the
 /// typeface's mask-plus-always-written-slot convention, so the two
 /// records decode the same way.
 pub const TX_SET_APP_IDENTITY: u16 = 44;
@@ -278,9 +271,8 @@ pub const PLATFORM_WINDOWS: u32 = 4;
 pub const PLATFORM_ANDROID: u32 = 5;
 
 /// The platform vocabulary as one table, in wire order: `(id, name)`.
-/// SYMBOLS' shape and SYMBOLS' reason — the NAME is what the root's
-/// wall prints when a guest sends a tag nobody serves, so the sentence
-/// comes from the same place the values do.
+/// The NAME is what the root's wall prints, so the sentence comes from
+/// the same place the values do.
 pub const PLATFORMS: &[(u32, &str)] = &[
     (PLATFORM_MAC, "mac"),
     (PLATFORM_IOS, "ios"),
@@ -289,20 +281,11 @@ pub const PLATFORMS: &[(u32, &str)] = &[
     (PLATFORM_ANDROID, "android"),
 ];
 
-/// WHICH PLATFORM THIS CORE IS, as a tag.
-///
-/// The reason this exists rather than a constant copied into each
-/// backend: the two INTERPRETER backends are not Rust, so a per-platform
-/// row would have to be matched against a private copy of this
-/// vocabulary in Swift and in Kotlin — the CLIP_* mirror trap exactly,
-/// where a drifted value ships a wrong answer with nothing pinning
-/// either copy. The apply record carries this number instead, so a
-/// lowering asks "is this row mine?" without knowing any tag at all.
-///
-/// And the core may answer it where a BINDING may not: a guest binding
-/// genuinely cannot tell (the JVM says "Linux" on Android), while this
-/// crate is compiled once per target and cfg! is the compiler's own
-/// answer.
+/// WHICH PLATFORM THIS CORE IS, as a tag. The apply record carries this
+/// number so a lowering asks "is this row mine?" without keeping a
+/// private copy of the vocabulary (the CLIP_* mirror trap). The core
+/// may answer where a BINDING may not: a binding cannot tell (the JVM
+/// says "Linux" on Android), this crate is compiled once per target.
 pub fn this_platform() -> u32 {
     #[cfg(target_os = "macos")]
     {
@@ -377,9 +360,8 @@ pub const SYMBOL_PERSON: u32 = 19;
 pub const SYMBOL_HOME: u32 = 20;
 
 /// The vocabulary as one table, in wire order: `(id, semantic name)`.
-/// The NAME is what a diagnostic prints and what the harness compares
-/// — never a per-backend glyph string — so the sentence a bad value
-/// dies with, and the sentence a scene fails with, come from one place.
+/// The NAME is what a diagnostic prints and what the harness compares —
+/// never a per-backend glyph string.
 pub const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_ADD, "add"),
     (SYMBOL_REMOVE, "remove"),
@@ -403,9 +385,9 @@ pub const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_HOME, "home"),
 ];
 
-/// The semantic name of a wire symbol value, or None if the value is
-/// outside the vocabulary. The root's value wall and every diagnostic
-/// read it, so no site spells the vocabulary a second time.
+/// The semantic name of a wire symbol value, or None if it is outside
+/// the vocabulary. The root's wall and every diagnostic read it, so no
+/// site spells the vocabulary a second time.
 pub fn symbol_name(value: i64) -> Option<&'static str> {
     u32::try_from(value)
         .ok()
@@ -928,11 +910,8 @@ pub fn decode_transaction_with_blobs(
                 let count = r.u32() as usize;
                 let _reserved = r.u32();
                 // The offsets ride as one flat Values list read IN PAIRS
-                // — start then end — which is show_file_dialog's filter
-                // encoding one type over. The declared `count` and the
-                // list's own length must agree: a binding that writes one
-                // and means the other is a broken binding, and it fails
-                // here rather than painting half a set.
+                // — start then end. The declared `count` and the list's
+                // own length must agree, or half a set gets painted.
                 let flat = r.record();
                 assert!(
                     flat.len() == count * 2,
@@ -1023,14 +1002,8 @@ pub fn decode_transaction_with_blobs(
                         "kaya: set_brand_typeface says a font blob is present but \
                          carries {other:?}"
                     ),
-                    // THE OTHER DIRECTION IS LOUD TOO (the java arm's
-                    // finding, 2026-08-16): a clear mask bit with a real
-                    // blob in the slot was accepted silently — the font
-                    // dropped, the blob table stayed empty, and a brand
-                    // book's licensed face vanished with no error
-                    // anywhere. A disagreement between the mask and the
-                    // slot is an encoder bug in whichever binding wrote
-                    // it, and it dies here naming itself.
+                    // THE OTHER DIRECTION IS LOUD TOO: a clear mask bit
+                    // over a real blob would drop the font silently.
                     (false, Value::Blob(_)) => panic!(
                         "kaya: set_brand_typeface carries a font blob but its mask \
                          bit says none is present — the encoding disagrees with \
@@ -1053,14 +1026,10 @@ pub fn decode_transaction_with_blobs(
                         "kaya: set_app_identity name is {other:?}, wanted a string"
                     ),
                 };
-                // THE ICON SLOT IS ALWAYS WRITTEN and the mask is what
-                // says whether it means anything — the typeface's
-                // convention verbatim, including BOTH directions of the
-                // disagreement. A clear bit over a real blob would drop
-                // the app's MARK silently: every backend would leave the
-                // platform default in place and every observation would
-                // report that default, which is the silent fallback this
-                // whole slice's read is designed to expose.
+                // THE ICON SLOT IS ALWAYS WRITTEN and the mask says
+                // whether it means anything — the typeface's convention
+                // verbatim, including BOTH directions of the
+                // disagreement.
                 let icon = match (mask & 1 != 0, r.value()) {
                     (true, Value::Blob(b)) => Some(b),
                     (true, other) => panic!(
@@ -1290,9 +1259,7 @@ pub(crate) fn alert_result_body(alert: AlertId, choice: AlertChoice) -> [u8; 16]
 
 /// The picker's answer on the wire: dialog id, count, reserved, then
 /// `count` files as THREE consecutive values each — I64 handle, Str
-/// name, Str local_path. The grouping IS the encoding; Values already
-/// carries "an entry's record", so no repeated-record field type is
-/// needed. Cancel is count zero.
+/// name, Str local_path. Cancel is count zero.
 pub(crate) fn file_dialog_result_body(
     dialog: crate::protocol::FileDialogId,
     files: &[crate::protocol::PickedFile],
@@ -1301,10 +1268,9 @@ pub(crate) fn file_dialog_result_body(
     b.extend_from_slice(&dialog.0.to_le_bytes());
     b.extend_from_slice(&(files.len() as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
-    // The Values encoding, written the production way (click_tag's
-    // shape): count, reserved, then each value. write_values is the
-    // guest-side encoder and is cfg(test) here, because in production
-    // the guest encodes and the core only decodes.
+    // The Values encoding by hand: count, reserved, then each value.
+    // write_values is the guest-side encoder and is cfg(test) here,
+    // because in production the guest encodes and the core decodes.
     b.extend_from_slice(&((files.len() * 3) as u32).to_le_bytes());
     b.extend_from_slice(&0u32.to_le_bytes());
     for f in files {
@@ -1315,16 +1281,10 @@ pub(crate) fn file_dialog_result_body(
     b
 }
 
-/// An undo group's label, validated at the root the way every other
-/// authored grammar is (the check_custom_id stance: the rule lives once,
-/// where the wire is, so it fails identically in eight languages).
-///
-/// NON-EMPTY IS THE WHOLE RULE. The label is what a user-facing Undo
-/// item would say and what an `undone` occurrence carries, so an empty
-/// one is a typo rather than an anonymous group — and the empty label is
-/// already taken: it is how a TYPING EPISODE identifies itself on that
-/// same occurrence (docs/undo-plan.md §3), so an anonymous group would
-/// be indistinguishable from the native tier.
+/// An undo group's label, validated here so it fails identically in
+/// eight languages. NON-EMPTY IS THE WHOLE RULE: the empty label is
+/// already taken — it is how a TYPING EPISODE identifies itself on the
+/// `undone` occurrence (docs/undo-plan.md §3).
 pub(crate) fn check_undo_label(label: &str, what: &str) {
     assert!(
         !label.is_empty(),
@@ -1340,10 +1300,8 @@ pub(crate) fn check_undo_label(label: &str, what: &str) {
 /// counts, the label, then one flat Values list holding the runs in
 /// order — signal pairs, then three ARITY-FIRST group runs (texts,
 /// entries, orders), each opening with the size of the group including
-/// the size itself. See the `undone` spec record for the exact layouts
-/// and `spec::UNDO_DELTA_RUNS` for the fingerprinted one-line form; this
-/// is the ONE encoder, and `redone` is byte-identical so the two
-/// directions cannot drift.
+/// the size itself. Layouts: `spec::UNDO_DELTA_RUNS`. This is the ONE
+/// encoder; `redone` is byte-identical.
 pub(crate) fn undo_body(
     window: WindowId,
     label: &str,
@@ -1355,10 +1313,7 @@ pub(crate) fn undo_body(
         values.push(value.clone());
     }
     for text in &delta.texts {
-        // size counts ITSELF: 3 fixed ints + the path + the text. Same
-        // arity-first shape as the two runs below, for the same reason
-        // — the path is what names a stamped copy's field, and a fixed
-        // arity had nowhere to put it.
+        // size counts ITSELF: 3 fixed ints + the path + the text.
         let size = 4 + text.path.len();
         values.push(Value::I64(size as i64));
         values.push(Value::I64(text.id as i64));
@@ -1513,13 +1468,9 @@ pub(crate) fn clipboard_result_body(
 /// A paste landing on a widget: the widget's stored identity tag, then
 /// the clip kind and that representation's values.
 ///
-/// THE TAG GOES IN VERBATIM, exactly as text_changed_body takes it —
-/// which is why the clip kind rides AFTER the path rather than in the
-/// tag's reserved slot. A backend holds the tag bytes and appends; a
-/// binding reads a click tag and then reads a payload; both already
-/// have that code, and a paste onto a stamped row needs neither to
-/// change. NEVER the empty kind: a paste that delivered nothing is not
-/// an occurrence.
+/// THE TAG GOES IN VERBATIM, which is why the clip kind rides AFTER the
+/// path rather than in the tag's reserved slot. NEVER the empty kind: a
+/// paste that delivered nothing is not an occurrence.
 pub(crate) fn pasted_body(tag: &[u8], clip: &crate::protocol::Representation) -> Vec<u8> {
     let mut b = Vec::with_capacity(tag.len() + 32);
     b.extend_from_slice(tag);
@@ -1557,18 +1508,11 @@ pub fn parse_accept_list(list: &str) -> (u32, Vec<&str>) {
 
 /// An accept list names at least one representation and names none
 /// twice, and every custom id it names is held to the id grammar.
-/// `what` is the caller — the prop or the read — so the message says
-/// which declaration is wrong.
 ///
 /// WHICH TOKENS ARE CUSTOM IS ASKED OF [`parse_accept_list`] and not
-/// decided again here. The check used to re-run the CLIP_NAMES lookup
-/// itself, which is the second reading of the string that function's
-/// comment forbids — and it had a second cost: on macOS neither
-/// rust-native backend compiles, so the parser had no caller at all in
-/// a default build and rode as a dead-code warning. Routing the check
-/// through it makes the ONE PARSER claim true on every platform, and
-/// keeps the warning meaningful: if the parser ever really is orphaned,
-/// nothing will be holding it up.
+/// decided again here — a second reading of the string is a second
+/// contract. It also keeps the parser reachable on macOS, where neither
+/// rust-native backend compiles and it would otherwise be dead code.
 pub(crate) fn check_accept_list(list: &str, what: &str) {
     let (_, custom) = parse_accept_list(list);
     let tokens: Vec<&str> = list.split_whitespace().collect();
@@ -1590,15 +1534,9 @@ pub(crate) fn check_accept_list(list: &str, what: &str) {
 
 /// The custom-id grammar (DESIGN.md, Clipboard): MIME-SHAPED — a
 /// slash, lowercase, no whitespace. The slash and the case are GDK's
-/// measured charges, enforced at the root so they fail the same way on
-/// every platform: GDK's serving path interns the requested type as a
-/// mime type, so a slashless id is ADVERTISED AND NEVER SERVED on GTK
-/// — every reader can see it, none can get it, no error anywhere —
-/// and the same path lowercases, so a mixed-case id would surface
-/// lowercased there and verbatim on the other four platforms
-/// (docs/clipboard-plan.md §5b finding 4). Whitespace because accept
-/// lists are space-separated: an id with a space could never be
-/// accepted by name.
+/// charges (docs/clipboard-plan.md §5b finding 4), enforced here so
+/// they fail the same way on every platform. Whitespace because accept
+/// lists are space-separated.
 pub(crate) fn check_custom_id(id: &str, what: &str) {
     assert!(
         id.contains('/'),
@@ -1666,15 +1604,10 @@ fn write_representation(b: &mut Vec<u8>, clip: Option<&crate::protocol::Represen
 }
 
 /// A value on the OCCURRENCE channel, where a blob resolves through the
-/// occurrence blob table rather than a batch-local index.
-///
-/// The tx and apply channels both have a boundary that retires a blob
-/// handle — a submit, a batch — and the occurrence channel has neither:
-/// the guest takes one record at a time and the core cannot see it
-/// advance. So the handle is a table entry the binding redeems and
-/// releases while decoding, and `blobs` here stays empty by
-/// construction; a batch index would name a slot in whatever batch the
-/// pump happened to be serving.
+/// occurrence blob table rather than a batch-local index: tx and apply
+/// each have a boundary that retires a handle (a submit, a batch) and
+/// this channel has neither, so the handle is a table entry the binding
+/// redeems and releases while decoding.
 fn write_occurrence_value(b: &mut Vec<u8>, value: &Value) {
     match value {
         Value::Blob(blob) => {
@@ -1859,14 +1792,11 @@ pub fn decode_text_changed_tag(tag: &[u8], text: &str) -> Occurrence {
 
 // --- Menu occurrence tags --------------------------------------------------
 //
-// A menu occurrence's identity is the item id plus a NOUN: the empty
-// path for a bar action or a live-widget context item, or the anchor
-// copy's key path for a node-anchored context item (the on_click_node
-// encoding). One entry serves both routes: `noun` is either empty (the
-// direct route) or a wire path encoding { u32 count; u32 reserved;
-// count values } handed to the backend by CONTEXT_ATTACH_NODE. The
-// resulting tag is byte-identical to a click_tag, so the toggled/value
-// body builders and the click-tag decoders serve menus unchanged.
+// The item id plus a NOUN: empty for a bar action or a live-widget
+// context item, or the anchor copy's key path for a node-anchored one,
+// encoded { u32 count; u32 reserved; count values }. The resulting tag
+// is BYTE-IDENTICAL to a click_tag, so the toggled/value body builders
+// and the click-tag decoders serve menus unchanged.
 
 pub fn menu_tag(item: u64, noun: &[u8]) -> Vec<u8> {
     let mut b = Vec::with_capacity(16 + noun.len());
@@ -1917,13 +1847,11 @@ pub fn decode_menu_value_tag(tag: &[u8], index: f64) -> Occurrence {
 
 pub struct Writer {
     buf: Vec<u8>,
-    /// The batch's blob table: bytes referenced by the records just
-    /// written, in first-reference order. A blob VALUE on the wire is
-    /// a 1-based index into this table (0 is reserved as invalid) —
-    /// handles are batch-local, and the consumer's fetch window is
-    /// exactly one batch (kaya_blob_data serves the current table
-    /// until the next kaya_next_commands call replaces it). Payload
-    /// bytes never enter the record stream.
+    /// The batch's blob table, in first-reference order. A blob VALUE
+    /// on the wire is a 1-based index into it (0 is invalid). Handles
+    /// are BATCH-LOCAL: kaya_blob_data serves the current table until
+    /// the next kaya_next_commands call replaces it. Payload bytes
+    /// never enter the record stream.
     pub blobs: Vec<Arc<[u8]>>,
 }
 
@@ -2025,24 +1953,17 @@ impl Writer {
                 })
             }
             ApplyOp::SetTypeface(req) => self.record(APPLY_SET_TYPEFACE, |b, blobs| {
-                // THE REQUEST'S BODY, one writer for both channels: the
-                // core resolves the FAMILY nowhere (docs/styling-plan.md
-                // Slice 2b), so two writers would be two chances to
-                // disagree about a shape neither side transforms. The
-                // one word it does fill is which platform this core is,
-                // which is the fact an interpreter cannot get any other
-                // way without copying the vocabulary.
+                // ONE WRITER FOR BOTH CHANNELS: the core resolves the
+                // family nowhere (docs/styling-plan.md Slice 2b). The
+                // one word it fills is which platform this core is.
                 write_typeface(b, req, this_platform(), blobs);
             }),
             ApplyOp::SetAppIdentity(identity) => {
                 self.record(APPLY_SET_APP_IDENTITY, |b, blobs| {
-                    // THE DECLARATION'S BODY, one writer for both
-                    // channels, and for the typeface's reason: the core
-                    // resolves nothing here, so two writers would be two
-                    // chances to disagree about a shape neither side
-                    // transforms. There is no platform stamp to fill —
-                    // unlike a family name, a picture needs no row picked
-                    // for it: every platform gets the same bytes.
+                    // ONE WRITER FOR BOTH CHANNELS, the typeface's rule.
+                    // No platform stamp to fill: unlike a family name, a
+                    // picture needs no row picked — every platform gets
+                    // the same bytes.
                     write_app_identity(b, identity, blobs);
                 })
             }
@@ -2564,11 +2485,10 @@ fn write_path(b: &mut Vec<u8>, path: &Path, blobs: &mut Vec<Arc<[u8]>>) {
 }
 
 /// A typeface request's body: mask, the second word, family, the
-/// platform pairs, and the font slot. Both channels' arms call this;
-/// they differ in ONE word, and `second` is it — the tx record has
-/// nothing to say there (a guest cannot name its platform) while the
-/// apply record stamps WHICH platform this core is, so a lowering can
-/// pick its row without carrying a copy of the vocabulary.
+/// platform pairs, and the font slot. Both channels call this and
+/// differ in ONE word, `second`: the tx record has nothing to say there
+/// (a guest cannot name its platform) while the apply record stamps
+/// WHICH platform this core is.
 fn write_typeface(
     b: &mut Vec<u8>,
     req: &crate::protocol::TypefaceRequest,
@@ -2645,11 +2565,10 @@ fn kind_raw(kind: WidgetKind) -> u32 {
 
 /// The mirror of [`write_clip`]: the header says how many of each
 /// plural kind follow, and the canonical order (descending clip value)
-/// says which slot is which. ONE DECODER, for the same reason there is one encoder.
+/// says which slot is which. ONE DECODER, as there is one encoder.
 ///
-/// A COUNT THAT DOES NOT MATCH THE SLOTS IS A BROKEN BINDING, and it
-/// fails here rather than silently handing the app half a clip — the
-/// same rule the picker's read-in-threes already follows.
+/// A COUNT THAT DOES NOT MATCH THE SLOTS IS A BROKEN BINDING and fails
+/// here rather than handing the app half a clip.
 fn read_clip(r: &mut Reader<'_>) -> crate::protocol::Clip {
     let present = r.u32();
     let file_count = r.u32() as usize;
@@ -2716,22 +2635,14 @@ fn clip_blob(v: Option<Value>, what: &str) -> crate::protocol::Blob {
 ///
 /// THE ORDER IS PREFERENCE ORDER on every host that has one (macOS
 /// pasteboard types, X11 TARGETS), so a backend writes what it is
-/// handed, in the order it is handed, and is right. kaya fixes it once
-/// because richness is a property of the KIND and not of the app's
-/// intent, and eight bindings each deciding would be eight chances to
-/// invert it. An app's own custom format leads because it is the one
-/// representation that round-trips into the same app losslessly.
+/// handed, in the order it is handed, and is right. ONE ENCODER for
+/// both the tx and the apply record, because the order is the contract.
 ///
-/// ONE ENCODER for both the tx and the apply record, because the order
-/// is the contract and two copies of it would drift.
-///
-/// THE TX HALF IS TEST-ONLY, like [`decode_transaction`] and for the
-/// same reason: `Writer::tx_op` is `#[cfg(test)]` because a Rust guest
-/// never crosses the wire (it hands the root parsed `TxOp`s) and a
-/// foreign guest packs its own bytes. So this encoder exists to pin
-/// [`read_clip`] — the root's reading of what eight hand-written
-/// binding encoders produce — in `copy_records_round_trip`. The apply
-/// direction is live and goes through [`write_clip_out`].
+/// THE TX HALF IS TEST-ONLY, like [`decode_transaction`]: a Rust guest
+/// never crosses the wire and a foreign guest packs its own bytes, so
+/// this encoder exists to pin [`read_clip`] in
+/// `copy_records_round_trip`. The apply direction is live and goes
+/// through [`write_clip_out`].
 #[cfg_attr(not(test), allow(dead_code))]
 fn write_clip(
     b: &mut Vec<u8>,
@@ -3145,17 +3056,14 @@ mod tests {
         }
     }
 
-    /// BOTH DIALOG REQUESTS, out and back, in one test — because the
-    /// thing that can break is the difference between them. The picker
-    /// carries a flag then a list; the save request carries a STR AND
-    /// THEN A LIST, which is a shape no other tx record has, and a
-    /// decoder that read the name's padding as the list's count would
-    /// produce a filter list of garbage length rather than an error.
+    /// BOTH DIALOG REQUESTS, out and back, because what can break is the
+    /// difference between them: the picker carries a flag then a list,
+    /// the save request a STR AND THEN A LIST — a shape no other tx
+    /// record has, where a decoder reading the name's padding as the
+    /// list's count gets a garbage length rather than an error.
     ///
-    /// A SAVE REQUEST WITH NO FILTERS IS THE INTERESTING ONE and is
-    /// here deliberately: it is what the save scene sends, and it is the
-    /// case where the values list is empty, so a mis-sized name field
-    /// runs straight off the end of the record.
+    /// A SAVE REQUEST WITH NO FILTERS is here deliberately: the values
+    /// list is empty, so a mis-sized name field runs off the end.
     #[test]
     fn dialog_requests_round_trip() {
         use crate::protocol::{FileDialogId, FileDialogSpec, SaveDialogSpec};
@@ -3254,13 +3162,10 @@ mod tests {
     /// A header that disagrees with the slots it describes is a broken
     /// binding, and it says so rather than handing the app half a clip.
     ///
-    /// The disagreement is INTRODUCED BY HAND — one field of a
-    /// well-formed record — because no encoder in this file can produce
-    /// it, and an assertion nobody has watched fire is a guess about a
-    /// state nobody has reached. Record layout: 8-byte record header,
+    /// The disagreement is INTRODUCED BY HAND, because no encoder in
+    /// this file can produce it. Record layout: 8-byte record header,
     /// then present / file count / custom count / reserved, so bytes
-    /// 12..16 are the file count. Claiming one file over a text-only
-    /// clip leaves one value in a record that now describes two.
+    /// 12..16 are the file count.
     #[test]
     #[should_panic(expected = "copy carries 1 values but its header describes 2")]
     fn clip_header_disagreeing_with_its_slots_fails_loudly() {
@@ -3283,13 +3188,11 @@ mod tests {
     /// The two clipboard occurrences, out and back — including the
     /// blob that never enters the record stream.
     ///
-    /// THE BLOB HANDLE IS THE POINT. On the tx and apply channels a
-    /// blob rides as a batch-local index, and reusing that here would
-    /// name a slot in whatever batch the pump happened to be serving:
-    /// a pasted image would arrive as some window's icon, or as
-    /// nothing. So the decode below redeems through the occurrence
-    /// table exactly as a binding does, and RELEASES — a leak there is
-    /// a pasted megabyte per paste, forever.
+    /// THE BLOB HANDLE IS THE POINT: a batch-local index reused here
+    /// would name a slot in whatever batch the pump happened to be
+    /// serving. The decode below redeems through the occurrence table
+    /// exactly as a binding does, and RELEASES — a leak there is a
+    /// pasted megabyte per paste, forever.
     #[test]
     fn clipboard_occurrences_round_trip() {
         use crate::protocol::Representation as R;
@@ -3356,15 +3259,12 @@ mod tests {
     /// shapes a reader gets wrong: a record with more fields than the
     /// fixed head, an absent entry with no record at all, a non-empty
     /// instance path, and an order group whose length differs from the
-    /// entry count. Eight generated parsers will each write this walk
-    /// once; the encoder is pinned here so they have something to agree
-    /// with.
+    /// entry count.
     ///
     /// THE TEXTS RUN CARRIES BOTH IDENTITIES, and in that order: a live
     /// widget (empty path) followed by a stamped copy's field named by
-    /// template node plus key path. A reader that kept the old
-    /// fixed-arity pair reading takes the group's SIZE for the widget id
-    /// and the id for the text, so it fails here rather than in a scene.
+    /// template node plus key path. A reader that kept a fixed-arity
+    /// pair reading takes the group's SIZE for the widget id.
     #[test]
     fn undo_bodies_round_trip() {
         use crate::protocol::{UndoDelta, UndoEntry, UndoOrder, UndoText};

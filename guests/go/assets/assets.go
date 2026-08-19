@@ -10,10 +10,10 @@
 //
 // THE MISS IS A QUESTION, NOT A recover(). AssetMissSentence answers the
 // same sentence Tx.Asset would panic with, without panicking, and that
-// is the only shape nine languages share: Swift's raise is fatalError,
-// which traps rather than unwinding, so a Swift sibling cannot catch its
-// own miss. Go could recover here and deliberately does not — one shape
-// for the observation, in every language.
+// is the only shape all nine share — the C floor catches nothing at all
+// (docs/deferred.md, the assets entry). Go could recover here and
+// deliberately does not — one shape for the observation, in every
+// language.
 //
 // LINE 1 ONLY. Line 2 of that sentence names the place the core resolved
 // and the route that chose it, which a bundle, a device directory and a

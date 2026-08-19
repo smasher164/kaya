@@ -1,35 +1,15 @@
 // ClipProbe (macOS) — what does this host charge for a clipboard read,
 // and what does a foreign reader see of a multi-representation clip?
 //
-// THE QUESTION THAT DECIDES THE MAC ARM. macOS 15 grew the same
-// restriction iOS 16 has: an app that programmatically reads pasteboard
-// content written by ANOTHER app gets a permission alert, unless the
-// read is a user paste gesture. This host is macOS 26. If it prompts,
-// `read_clipboard`'s mac leg has to drive an alert exactly as the file
-// dialog leg drives a panel, and the scene's shape changes with it.
-//
-//  Q1 Do the cheap queries — changeCount, types, canReadObject — report
-//     FOREIGN content without a prompt? The offers signal depends on
-//     it, and so does every "is Paste enabled" answer.
-//  Q2 Does reading foreign content prompt, block, or answer? A prompt
-//     shows up as a read that takes human time, or as an alert on
-//     screen while the read returns immediately from a cache.
-//  Q3 Does reading our OWN content prompt? The plan assumes not.
-//  Q4 What survives a round trip through a FOREIGN READER? kaya writes
-//     custom, files, image, html, text in one declareTypes; `pbpaste
-//     -Prefer` reads back what a plain consumer would get. A test
-//     where kaya reads what kaya wrote cannot catch a malformed
-//     lowering, so this is the one that matters.
-//  Q5 Do the writes need the main thread? The apply pump is not on it.
-//  Q7 What does an IMAGE cost? kaya's image representation is encoded
-//     bytes, the same currency the image prop uses. Three ways to put
-//     them on: raw data under public.png, raw data under public.tiff,
-//     and writeObjects(NSImage). Which types does each declare, and
-//     what comes back — the same bytes, or a re-encode?
-//  Q6 Does an UNBUNDLED binary behave like a bundled app? The lane's
-//     foreign writer is `pbcopy`, and if the prompt keys off a bundle
-//     identity then a bare CLI probe would measure the wrong thing.
-//     build.sh runs this file both ways and diffs the answers.
+// THE QUESTION THAT DECIDES THE MAC ARM: macOS 15 grew the same
+// restriction iOS 16 has — an app that programmatically reads pasteboard
+// content written by ANOTHER app gets a permission alert unless the read
+// is a user paste gesture. If this host prompts, `read_clipboard`'s mac
+// leg has to drive an alert the way the file dialog leg drives a panel.
+// The questions and their answers are docs/clipboard-plan.md §5b; the
+// Q-labels below mark which reading is which. build.sh runs the file
+// both bundled and unbundled and diffs, because the prompt may key off
+// a bundle identity and the lane's foreign writer is bare `pbcopy`.
 //
 // Answers land on stdout under "PROBE". Not a lane; nothing builds it
 // but build.sh beside it.
@@ -179,11 +159,9 @@ say("Q7 writeObjects readback png=\(pb.data(forType: .png)?.count ?? -1) tiff=\(
 
 // ---- Q8: what foreign reader can the LANE use? ---------------------
 //
-// pbpaste is a TEXT tool: it answered nothing at all for public.png
-// above. The harness needs one foreign reader that can see every
-// representation, or the image leg cannot be verified from outside —
-// and "kaya reads what kaya wrote" is exactly the check that cannot
-// fail for the reason the design exists.
+// pbpaste is a TEXT tool and answered nothing for public.png above. The
+// lane needs one foreign reader that sees every representation, or the
+// image leg can only be checked by kaya reading what kaya wrote.
 _ = writeClip(on: "main (for Q8)")
 say("Q8 clipboard info -> \(shell(["osascript", "-e", "clipboard info"]).trimmingCharacters(in: .whitespacesAndNewlines))")
 pb.clearContents()
@@ -193,11 +171,9 @@ say("Q8 image-only clipboard info -> \(shell(["osascript", "-e", "clipboard info
 
 // ---- Q9: SEVERAL FILES, and the one-item model ---------------------
 //
-// kaya's clip is ONE item in several types, but macOS represents
-// several files as several ITEMS. So a clip with two files and a text
-// rendition has to be expressed somehow, and the choice decides the
-// arm: does Finder see two files, and does a text field still see the
-// text?
+// kaya's clip is ONE item in several types, but macOS represents several
+// files as several ITEMS: does Finder see two files, and does a text
+// field still see the text?
 let f2 = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("kaya-clipprobe-2.txt")
 try? "second file body".write(to: f2, atomically: true, encoding: .utf8)
 

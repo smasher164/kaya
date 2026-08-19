@@ -52,14 +52,10 @@ main = do
   buildTx app (insert todos (VStr "c") (VStr "three"))
   expectKeys app todos ["a", "b", "c"] "post-abort commit broken"
 
-  -- NOT PINNED: derived registrations roll back by the same purity, but
-  -- appDerived is internal to KayaApp so there is nothing to observe.
-
   -- The menu surface. The record stream is internal to the Build monad,
   -- so what the three clauses below pin is that the constructors run
-  -- through the emitter, that the binding's ONE shortcut parser rejects
-  -- aliases, and that an aborted append propagates and leaves the app
-  -- usable.
+  -- through the emitter, that the ONE shortcut parser rejects aliases,
+  -- and that an aborted append leaves the app usable.
   file <- buildTx app $ do
     f <- menu "File" [] [item "Save" [IShortcut "PRIMARY+S"]]
     window 0 [WMenus [pure f]]

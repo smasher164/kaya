@@ -1,20 +1,9 @@
 package kaya
 
-// The asset surface's guards (docs/assets-plan.md, ratified
-// 2026-08-18), pinned where a lane already walks: tools/check-abort.sh
-// runs `go test dev.kaya/bindings/go` on every desktop lane, so these
-// run with no GUI and no window.
-//
-// WHAT THIS FILE CAN ASK. The asset root these tests resolve is the
-// repo's own (crates/kaya/src/assets.rs's compile-time default), so the
-// vendored font is here and its byte count is a fact. What it cannot
-// ask is whether a bundled or packaged root resolves — that is a
-// question about a .app and an APK, and the lanes ask it.
-//
-// AND THE MISS SENTENCE IS NOT WRITTEN HERE, in either sense: this file
-// neither spells it nor asserts a spelling of its own. It asserts that
-// the panic carries the CORE's sentence byte for byte, which is the
-// property the nine bindings share — one author for the diagnostic.
+// The asset surface's guards (docs/assets-plan.md). These resolve the
+// REPO's asset root, so the vendored font is here and its byte count is
+// a fact; whether a bundled or packaged root resolves is a question
+// about a .app and an APK, and the lanes ask it.
 
 import (
 	"bytes"
@@ -24,10 +13,7 @@ import (
 	"testing"
 )
 
-// The vendored font's byte count, the same fact crates/kaya/src/assets.rs
-// pins on its own side. Asserted again here because a truncated read
-// would otherwise reach a scene as a font the platform silently declines
-// to register — the whole failure mode this surface exists inside.
+// The same fact crates/kaya/src/assets.rs pins on its own side.
 const vendoredFontBytes = 111400
 
 func openFont(t *testing.T) *Asset {
@@ -43,7 +29,6 @@ func openFont(t *testing.T) *Asset {
 	return asset
 }
 
-// THE THREE WAYS OF READING AGREE, and the count is the file's.
 func TestAssetReadsTheFileTheBuildShipped(t *testing.T) {
 	font := openFont(t)
 	defer font.Close()
@@ -65,23 +50,19 @@ func TestAssetReadsTheFileTheBuildShipped(t *testing.T) {
 	if !bytes.Equal(read, raw) {
 		t.Error("Reader is not the asset's bytes")
 	}
-	// The reader is a COPY, which is what makes it safe to hold past the
-	// Close: a guest that keeps the reader keeps its own memory.
+	// The reader is a COPY, so it stays valid past the Close.
 	if _, err := font.Reader().Seek(0, io.SeekStart); err != nil {
 		t.Errorf("the reader does not seek: %v", err)
 	}
 }
 
-// A MISS PANICS WITH THE CORE'S SENTENCE, byte for byte. The binding
-// writes no prose of its own, so a Go guest and a Haskell guest are
-// handed the same words and one scene can freeze them.
+// A miss panics with the CORE's sentence, byte for byte — the binding
+// writes no prose of its own, so one scene can freeze it everywhere.
 func TestAMissingAssetPanicsWithTheCoresSentence(t *testing.T) {
 	want := assetMissSentence("fonts/nope.ttf")
 	if want == "" {
 		t.Fatal("the core says fonts/nope.ttf resolves — this test cannot ask its question")
 	}
-	// The census is the half a truncating reader would lose, so it is
-	// asserted on the way in rather than assumed.
 	if !strings.Contains(want, "fonts/sora-wght.ttf") {
 		t.Errorf("the core's sentence carries no census of what IS there: %q", want)
 	}
@@ -102,8 +83,6 @@ func TestAMissingAssetPanicsWithTheCoresSentence(t *testing.T) {
 	})
 }
 
-// THE WALLS ARE THE CORE'S, reached through this surface: a name that
-// climbs out of the root is refused before any filesystem is touched.
 func TestAssetRefusesANameThatEscapesTheRoot(t *testing.T) {
 	defer func() {
 		r := recover()
@@ -120,14 +99,12 @@ func TestAssetRefusesANameThatEscapesTheRoot(t *testing.T) {
 	})
 }
 
-// CLOSING IS IDEMPOTENT and a closed asset says so rather than
-// answering nil — an empty answer would be indistinguishable from an
-// asset with no bytes, except that none can have any (the core refuses a
-// zero-byte asset at the open).
+// Closing is idempotent, and a closed asset raises rather than
+// answering nil.
 func TestAClosedAssetRefusesToRead(t *testing.T) {
 	font := openFont(t)
 	font.Close()
-	font.Close() // idempotent: the core's release is, so this is
+	font.Close()
 
 	defer func() {
 		r := recover()
@@ -141,10 +118,8 @@ func TestAClosedAssetRefusesToRead(t *testing.T) {
 	font.Bytes()
 }
 
-// FontAsset REACHES THE WIRE AS THE BLOB FORM, and it is the same
-// record FontBytes produces: mask bit 0 set, a live handle in the font
-// slot. The route differs (the core's own bytes, no copy through Go),
-// what a backend receives does not.
+// FontAsset reaches the wire as the same record FontBytes produces:
+// mask bit 0 set, a live handle in the font slot.
 func TestFontAssetShipsTheBlobForm(t *testing.T) {
 	font := openFont(t)
 	defer font.Close()
@@ -162,9 +137,8 @@ func TestFontAssetShipsTheBlobForm(t *testing.T) {
 		t.Errorf("font slot shipped as tag %d handle %d, want a live blob handle", body.font.tag, body.font.i64)
 	}
 
-	// TWO REDEMPTIONS ARE TWO REGISTRATIONS, which is the pending
-	// table's existing lifetime and not a quirk: a handle is consumed by
-	// one submit, so an asset used in two transactions must mint two.
+	// A handle is consumed by one submit, so an asset used in two
+	// transactions must mint two.
 	second := decodeTypeface(typefaceRecord(t, func(tx *Tx) {
 		tx.BrandTypeface("Sora", FontAsset(font))
 	}))
@@ -173,8 +147,6 @@ func TestFontAssetShipsTheBlobForm(t *testing.T) {
 	}
 }
 
-// AppIdentityAsset is the same declaration as AppIdentity by the asset
-// route: bit 0 set, a live handle where the picture would be.
 func TestAppIdentityAssetShipsTheBlobForm(t *testing.T) {
 	mark := openMark(t)
 	defer mark.Close()
@@ -218,8 +190,6 @@ func openMark(t *testing.T) *Asset {
 	return asset
 }
 
-// THE NIL CASE IS CAUGHT AT THE CONSTRUCTOR, where the caller's mistake
-// is, rather than as a nil dereference inside the redemption.
 func TestFontAssetRefusesNothing(t *testing.T) {
 	defer func() {
 		r := recover()

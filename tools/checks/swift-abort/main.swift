@@ -1,12 +1,7 @@
-// The uniform-abort guard: a handler abort rolls the model mirror
-// back, ships nothing, and the app continues — the same observable
-// semantics as every other binding (the negative test each language
-// carries). Runs headless: the library links and records submit, but
-// the core loop is never entered — the Python checks' arrangement.
-// Compiled as one module with bindings/swift/*.swift, so the internal
-// mirrors (signalMirrors, signalDeps) are in reach; the dispatch
-// wrapper is private, so the boundary test covers the rollback and
-// the dispatch wrapper stays compile-visible only.
+// The uniform-abort guard, Swift arm. Runs HEADLESS: the library links
+// and records submit, but the core loop is never entered. Compiled as
+// ONE MODULE with bindings/swift/*.swift, so the internal mirrors
+// (signalMirrors, signalDeps) are in reach.
 //
 // Build and run (from the repo root, inside `nix develop`):
 //   swiftc -o /tmp/swift-abort-check bindings/swift/*.swift \
@@ -18,11 +13,10 @@
 
 import Foundation
 
-// The record-time mirror-read guard, trap side: the guard is a
-// preconditionFailure — uncatchable in Swift — so each trapping arm
-// runs in a re-exec of this binary (KAYA_GUARD_TRAP=for|when) that
-// must die before reaching its exit(0). The parent asserts on the
-// child's death below; exit 0 here means the guard did NOT fire.
+// The record-time mirror-read guard, trap side: a preconditionFailure
+// is uncatchable in Swift, so each trapping arm runs in a re-exec of
+// this binary (KAYA_GUARD_TRAP=for|when) that must die before reaching
+// its exit(0). Exit 0 here means the guard did NOT fire.
 if let trap = ProcessInfo.processInfo.environment["KAYA_GUARD_TRAP"] {
     let app = KayaApp()
     app.build { tx in
@@ -119,12 +113,10 @@ app.build { tx in
         "post-scope read broken: \(tx.count(todos))")
 }
 
-// The menu construction surface must REACH the record stream — the
-// wire-dropped-write class: a constructor that emits nothing passes
-// every surface gate until a scene fails live (the dropped-spacing
-// lesson; Python's kaya_app_checks.py is the pattern). One module
-// with the bindings, so the transaction's byte buffer is in reach;
-// each frame is u32 length then u16 kind at offset 4, little-endian.
+// The menu construction surface must REACH the record stream: a
+// constructor that emits nothing passes every surface gate until a scene
+// fails live. Each frame is u32 length then u16 kind at offset 4,
+// little-endian.
 func recordKinds(_ data: Data, from start: Int) -> [UInt16] {
     var kinds: [UInt16] = []
     var at = start

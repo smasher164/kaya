@@ -1,11 +1,5 @@
 // Sum-typed collections: an abstract record is the sum, its derived
-// records the constructors. Elimination is C#-shaped on both sides —
-// pattern matching where the guest holds the value, a product of
-// typed arms where the core does. The arms are checked complete at
-// declaration (one per constructor, any order) with the scene as the
-// second check; mutation is witnessed — a field write names the
-// constructor the caller matched, and the model refuses a drifted
-// entry.
+// records the constructors. See DESIGN.md's variants section.
 
 using System;
 using System.Collections.Generic;
@@ -36,12 +30,8 @@ sealed class SumCollection<T>
     public void Insert(Tx tx, object key, T value) =>
         InsertOrUpdate(tx, key, value, insert: true);
 
-    /// Insert under a key the BINDING authors, and hand the key back —
-    /// the minter, on the sum surface too, because a sum's entries have
-    /// no more identity of their own than a record's (a feed item is
-    /// its content). The witness is unaffected: the value's own
-    /// constructor still rides the wire. The contract, in full, is on
-    /// Tx.InsertFresh.
+    /// Insert under a key the binding authors, and hand the key back.
+    /// The contract, in full, is on Tx.InsertFresh.
     public long InsertFresh(Tx tx, T value)
     {
         long key = tx.MintKey(Collection);
@@ -63,8 +53,7 @@ sealed class SumCollection<T>
             tx.UpdateRecordRaw(Collection, key, value, variant, info.WireFields(value));
     }
 
-    /// The typed model, in insertion order; a switch on the entry's
-    /// runtime type eliminates it.
+    /// The typed model, in insertion order.
     public List<KeyValuePair<object, T>> Items(Tx tx)
     {
         var items = new List<KeyValuePair<object, T>>();
@@ -84,9 +73,8 @@ sealed class SumCollection<T>
     }
 
     /// The witnessed field write: V names the constructor the caller
-    /// just matched (`if (feed.Get(tx, k) is Todo)` is the
-    /// refinement), and the model refuses if the entry holds a
-    /// different constructor — the guard is checked, not trusted.
+    /// just matched, and the write throws if the entry holds a
+    /// different one.
     public void UpdateField<V, F>(Tx tx, object key, Expression<Func<V, F>> selector, F value)
         where V : T
     {
@@ -98,9 +86,6 @@ sealed class SumCollection<T>
             throw new InvalidOperationException(
                 $"kaya: update_field witnessed {typeof(V).Name} but {key} holds {current.GetType().Name}");
         var f = KayaRecords.FieldOf(selector);
-        // The model keeps the guest's own value; the wire value is
-        // encoded (a blob field re-registers its bytes — handles are
-        // single-submit).
         tx.UpdateFieldRaw(Collection, key, info.WithField(current, f.Index, value), variant,
             f.Index, info.EncodeField(f.Index, value));
     }
@@ -148,8 +133,7 @@ sealed class SumCase<V>
     public Node Label(Tpl t, Expression<Func<V, string>> selector) =>
         t.Label(KayaRecords.FieldOf(selector));
 
-    /// A checkbox bound to the field the selector names, with its
-    /// toggle handler co-located (stamped key first).
+    /// A checkbox bound to the field the selector names.
     public Node Checkbox(Tpl t, Expression<Func<V, bool>> selector,
         Action<Tx, List<object>, bool> onToggle = null) =>
         t.Checkbox(KayaRecords.FieldOf(selector), onToggle);
@@ -158,8 +142,7 @@ sealed class SumCase<V>
 static class KayaSums
 {
     /// Declare a sum collection: one variant per constructor type, in
-    /// order — each derived record is that constructor's schema. A
-    /// one-constructor sum is what CollectionOf already declares.
+    /// order — each derived record is that constructor's schema.
     public static SumCollection<T> SumOf<T>(this Tx tx, params Type[] constructors)
     {
         if (constructors.Length < 2)
@@ -176,19 +159,13 @@ static class KayaSums
             schemas[i] = infos[i].Schema;
         }
         var c = tx.CollectionWithVariants(schemas);
-        // How an undo puts one of this collection's entries back: the
-        // variant names the constructor, exactly as it does on the way
-        // out.
         tx.App.Rehydrate[c.Id] =
             (variant, fields, current) => infos[variant].FromWire(fields, current);
         return new SumCollection<T>(c, constructors, infos);
     }
 
     /// The template eliminator: a product of arms, one per
-    /// constructor, handed over whole. Completeness is checked here at
-    /// declaration (one arm per constructor, any order), and the scene
-    /// checks it again — an omitted constructor never waits for its
-    /// first insert to fail.
+    /// constructor, checked complete here at declaration (any order).
     public static Widget EachSum<T>(this Tx tx, SumCollection<T> c, params SumArm<T>[] arms)
     {
         if (arms.Length != c.Variants.Length)

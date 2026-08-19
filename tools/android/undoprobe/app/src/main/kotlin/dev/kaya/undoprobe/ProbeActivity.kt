@@ -1,10 +1,6 @@
-// MEASURED, not guessed: at foundation 1.7.5 the ONLY experimental
-// surface in this file is `TextFieldState.undoState` and the five
-// members of UndoState (canUndo/canRedo/undo/redo/clearHistory) — 21
-// errors, all of them that one message, at lines 86/88/106/150/161/163/
-// 166 before this opt-in existed. BasicTextField(state=), TextFieldState,
-// edit{}, setTextAndPlaceCursorAtEnd and the `decorator` parameter are
-// all STABLE at that version.
+// At foundation 1.7.5 the ONLY experimental surface here is
+// `TextFieldState.undoState` and UndoState's five members
+// (docs/undo-plan.md).
 @file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 
 package dev.kaya.undoprobe
@@ -12,22 +8,20 @@ package dev.kaya.undoprobe
 // P3-compose (docs/undo-plan.md §0, D7): does a programmatic write enter
 // the Compose text widgets' native undo history, and can it be cleared?
 //
-// Two fields, side by side, on the SAME screen and the same pins kaya
-// ships (compose-bom 2024.10.01 => foundation 1.7.5, material3 1.3.1):
+// Two fields side by side on the same pins kaya ships (compose-bom
+// 2024.10.01 => foundation 1.7.5, material3 1.3.1):
 //
-//   LEGACY  M3 TextField(value:String, onValueChange:) — byte-for-byte
-//           the shape KayaCompose.kt's KIND_ENTRY/KIND_TEXTAREA use
-//           today, including the app-side mirror the app writes into.
+//   LEGACY  M3 TextField(value:String, onValueChange:) — the shape
+//           KayaCompose.kt's KIND_ENTRY/KIND_TEXTAREA used, mirror
+//           included.
 //   TFS     BasicTextField(state: TextFieldState) with M3 dressing via
 //           TextFieldDefaults.DecorationBox — the candidate shape, AND
-//           the compile-viability check for material3 1.3.1 (which has
-//           no TextField(state:) overload).
+//           the compile-viability check for material3 1.3.1, which has
+//           no TextField(state:) overload.
 //
-// Everything is driven and reported through ORDERED broadcasts, the way
-// tools/android/clipprobe does it: `am broadcast` prints the result data
-// directly, so there is no logcat race. The receiver is dynamic (it has
-// to reach the composition's state), goes async, waits two frames so a
-// write has actually recomposed, then answers.
+// Driven and reported through ORDERED broadcasts, so there is no logcat
+// race. The receiver is dynamic (it must reach the composition's
+// state), goes async, and waits two frames before answering.
 //
 // THROWAWAY. Nothing in the validation ladder calls this.
 
@@ -73,30 +67,27 @@ object P {
     // The LEGACY field's app-side mirror — kaya's `node.text`.
     var legacy by mutableStateOf("")
 
-    // The only lever the legacy path leaves: REMOUNT the field, so the
-    // CoreTextField (and the UndoManager it `remember`s) is thrown away
-    // and rebuilt. Bumping this composition key is the whole mechanism.
+    // The only lever the legacy path leaves: bumping this composition
+    // key REMOUNTS the field, throwing away the CoreTextField and the
+    // UndoManager it `remember`s.
     var legacyKey by mutableStateOf(0)
 
-    // Every onValueChange the legacy field delivers, counted. This is
-    // what kaya turns into a `text_changed` occurrence, so it answers
-    // "does an undo echo to the app?" for the legacy path.
+    // Every onValueChange the legacy field delivers — what kaya turns
+    // into `text_changed`, so it answers "does an undo echo?".
     var legacyEmits = 0
 
     // The candidate path's state. One instance for the process' life.
     val tfs = TextFieldState("")
 
     // The TFS path has no onValueChange; the idiomatic observation is a
-    // snapshotFlow over state.text. Counted here because kaya's echo
-    // doctrine turns on WHICH writes this channel reports: if it fires
-    // for the app's own writes too, the arm needs a suppression flag
-    // that the legacy onValueChange path never needed.
+    // snapshotFlow over state.text. Counted because the echo doctrine
+    // turns on WHICH writes this channel reports.
     var tfsObserved = 0
     var tfsLastObserved = ""
 
     // Key events seen by each field's onPreviewKeyEvent (pass-through:
-    // the handler always returns false). Answers "did the chord even
-    // reach the app?" separately from "did it do anything?".
+    // the handler always returns false). Answers "did the chord reach
+    // the app?" separately from "did it do anything?".
     val keys = ArrayList<String>()
 
     fun note(where: String, kind: String) {
@@ -144,8 +135,8 @@ class ProbeActivity : ComponentActivity() {
                 val text = intent.getStringExtra("text") ?: ""
                 val note = runCatching { apply(cmd, text) }
                     .getOrElse { "EXCEPTION ${it::class.java.simpleName}: ${it.message}" }
-                // Two frames, then answer: a programmatic write must have
-                // recomposed before the report claims what the field holds.
+                // Two frames, then answer: a programmatic write must
+                // have recomposed before the report claims anything.
                 Handler(Looper.getMainLooper()).postDelayed({
                     pending.setResultData("cmd=$cmd note=$note ${P.report()}")
                     pending.finish()
@@ -162,13 +153,11 @@ class ProbeActivity : ComponentActivity() {
         }
     }
 
-    // kaya's OWN accelerator route on Android (KayaCompose.kt:661,
-    // "the hardware-keyboard shortcut route (ChromeOS/DeX)"): the shell
-    // Activity overrides this and forwards to the catalog. The platform
-    // only calls it for a ctrl-modified key that NORMAL dispatch left
-    // unconsumed — so this log answers the Android form of P5's
-    // double-fire question: would a kaya Ctrl+Z chord fire BESIDE the
-    // focused field's own undo, or only when the field declined it?
+    // kaya's own accelerator route on Android. The platform calls this
+    // ONLY for a ctrl-modified key that normal dispatch left
+    // unconsumed, which is P5's double-fire question: would a kaya
+    // Ctrl+Z fire beside the field's own undo, or only when the field
+    // declined it?
     override fun dispatchKeyShortcutEvent(event: android.view.KeyEvent): Boolean {
         if (event.action == android.view.KeyEvent.ACTION_DOWN) {
             P.note("S", "${event.keyCode}${if (event.isCtrlPressed) "+C" else ""}")
@@ -208,8 +197,7 @@ class ProbeActivity : ComponentActivity() {
             P.tfs.edit { replace(0, length, text) }
             "ok"
         }
-        // The kaya-shaped no-op write: the app re-writes what is already
-        // there (an apply arm that does not diff).
+        // The kaya-shaped no-op write: an apply arm that does not diff.
         "tfs_edit_same" -> {
             val same = P.tfs.text.toString()
             P.tfs.edit { replace(0, length, same) }
@@ -222,11 +210,11 @@ class ProbeActivity : ComponentActivity() {
         "tfs_redo" -> {
             if (P.tfs.undoState.canRedo) { P.tfs.undoState.redo(); "redone" } else "canRedo=false"
         }
-        // THE HARNESS HOLE, asked from inside: no kaya verb can press a
-        // chord at a native widget. An app may not INJECT events, but it
-        // may DISPATCH one into its own window — if that reaches the
-        // focused field's key handler, an Android harness verb can drive
-        // the delegated tier with no adb and no permission.
+        // THE HARNESS HOLE: no kaya verb can press a chord at a native
+        // widget. An app may not INJECT events, but it may DISPATCH one
+        // into its own window — if that reaches the focused field's key
+        // handler, a harness verb can drive the delegated tier with no
+        // adb and no permission.
         "synth_ctrlz" -> {
             val t = android.os.SystemClock.uptimeMillis()
             val meta = android.view.KeyEvent.META_CTRL_ON or
@@ -287,9 +275,9 @@ class ProbeActivity : ComponentActivity() {
                     }
                     false
                 },
-            // The M3 dressing at material3 1.3.1 — no TextField(state:)
-            // overload exists there, so this is the shape a kaya arm
-            // would have to take without a pin bump.
+            // The M3 dressing at material3 1.3.1, which has no
+            // TextField(state:) overload — the shape a kaya arm has to
+            // take without a pin bump.
             decorator = { inner ->
                 TextFieldDefaults.DecorationBox(
                     value = P.tfs.text.toString(),

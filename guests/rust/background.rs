@@ -84,8 +84,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .expect("failed to spawn the background worker");
                 ctx.apply(|tx| tx.write(status, "working"));
             }
-            // Proof the app thread is still serving input while the
-            // worker is parked and has posted nothing.
             Msg::Ping => ctx.apply(|tx| tx.write(alive, "alive")),
             Msg::Release => {
                 if let Some(tx) = release_tx.take() {

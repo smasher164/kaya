@@ -1,27 +1,16 @@
 """A platform-gated core surface must be gated for BOTH platforms.
 
-The picked-file redemption path shipped `#[cfg(unix)]` end to end —
-PathSource, PickedOpen, PickedFile::open, and a PickedSource::open
-returning a POSIX fd — so on Windows there was no way to redeem a picked
-handle at all. The design's central claim, that kaya hands over a
-capability the guest opens with its own file API, simply had no Windows
-expression.
+A cfg'd-out surface whose only cfg'd-in consumer is also cfg'd out is
+invisible to a compiler, so check-targets is green on it: nothing is
+missing until something asks for it. That is how the picked-file
+redemption path shipped `#[cfg(unix)]` end to end, with no way to redeem
+a picked handle on Windows at all.
 
-It passed every gate. check-targets cross-compiles the WinUI backend and
-was perfectly happy, because the only thing that would have referenced
-PathSource on Windows was the file-dialog apply arm, and that arm was a
-depth stub. A cfg'd-out surface whose only cfg'd-in consumer is also
-cfg'd out is invisible to a compiler: nothing is missing until something
-asks for it.
-
-So the rule is structural instead. In the CORE — the platform-neutral
-layer every backend and binding sits on — an item gated to one platform
-must have a counterpart gated to the other. The counterpart may be a
-stub that returns an error; what it may not be is absent, because absent
-is what reads as fine right up until a backend needs it.
-
-The backends themselves are exempt: gtk.rs IS linux and winui/mod.rs IS
-windows, so a one-sided gate there says something true.
+So the rule is structural. In the CORE — the platform-neutral layer every
+backend sits on — an item gated to one platform must have a counterpart
+gated to the other; it may be a stub that returns an error, but it may
+not be absent. The backends themselves are exempt: gtk.rs IS linux and
+winui/mod.rs IS windows.
 """
 
 import pathlib

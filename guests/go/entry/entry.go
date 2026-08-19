@@ -5,9 +5,7 @@
 // WHAT THIS SCENE DOCUMENTS IS THE OTHER EVENT SURFACE: the two
 // handlers are registered on the APP after the build, against the
 // widgets the build handed back, rather than riding their constructors
-// the way every other Go guest spells it. Construction is the ordinary
-// sugar either way (DESIGN.md, entry's scope ratified 2026-08-05) — the
-// carve-out is the event mechanism, not the tree.
+// the way every other Go guest spells it.
 package entry
 
 import (
@@ -44,8 +42,6 @@ func App() *kaya.App {
 		draft = text
 	})
 	app.OnClick(add, func(tx *kaya.Tx) {
-		// The scene's proof that clear emptied the draft through the
-		// occurrence fold, not a side assignment.
 		if draft == "" {
 			total := tx.Len(todos)
 			tx.Write(status, fmt.Sprintf("nothing to add, %d total", total))
@@ -57,9 +53,6 @@ func App() *kaya.App {
 		tx.InsertFresh(todos, draft)
 		total := tx.Len(todos)
 		tx.Write(status, fmt.Sprintf("added %s, %d total", draft, total))
-		// Finish the form atomically with the insert; the field answers
-		// with text_changed("") through its normal edit path, and
-		// OnChange empties the draft.
 		tx.Clear(field)
 		tx.Focus(field)
 	})

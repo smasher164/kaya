@@ -93,7 +93,6 @@ def work(job):
 def picked(files):
     global source
     if not files:
-        # The empty list IS cancel.
         status.set("open cancelled")
         return
     file = files[0]
@@ -104,8 +103,6 @@ def picked(files):
 def saved(file):
     global destination
     if file is None:
-        # Cancel is None: nothing named, nothing written, no destination
-        # remembered.
         status.set("save cancelled")
         return
     destination = file
@@ -113,7 +110,6 @@ def saved(file):
 
 
 def open_file():
-    # No filter: the names in this scene carry no extension.
     kaya.pick_file(on_result=picked)
 
 

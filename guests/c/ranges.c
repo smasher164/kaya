@@ -1,8 +1,7 @@
 /* The text-ranges scene from C, on the function floor: HIGHLIGHT a set
  * of ranges, SELECT one, REVEAL one, spelled as the three wire records
- * they are (docs/ranges-plan.md D1-D4). Annotated semantics in
- * guests/rust/ranges.rs; the byte-frozen contract in
- * tools/scenes/ranges.steps.
+ * they are (docs/ranges-plan.md D1-D4). Semantics: guests/rust/ranges.rs.
+ * Contract: tools/scenes/ranges.steps.
  *
  * EVERY OFFSET HERE IS A UTF-8 BYTE OFFSET into the app's own buffer,
  * and it goes onto the wire unchanged: the CORE converts, once, against
@@ -10,15 +9,7 @@
  * units, GTK counts code points). The document opens in Japanese so the
  * frozen numbers catch a backend that forwards them unconverted —
  * `日本語` is three characters and NINE BYTES, so the script's 57 would
- * be 51 to a UTF-16 counter.
- *
- * NOTHING IN THIS FILE EVER CLEARS A HIGHLIGHT: D2's drop-on-edit is a
- * backend invariant, not a message. And nothing here knows about input
- * methods — the select is REFUSED mid-composition (D4), silently, by
- * the backend, and composition state is on no kaya channel.
- *
- * Built and run by the mac lane with SCENES=ranges and
- * KAYA_SELFTEST=ranges. */
+ * be 51 to a UTF-16 counter. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -98,9 +89,9 @@ static const char NEEDLE[] = "alpha";
 #define MAX_HITS 32
 #define TX_BUF 2048
 
-/* The whole search: literal, forward, non-overlapping, walked into the
- * flat start,stop array the wire wants. kaya ships no find engine — WHAT
- * to decorate is the app's question (docs/ranges-plan.md §3). */
+/* The whole search: literal, forward, non-overlapping. kaya ships no
+ * find engine — WHAT to decorate is the app's question
+ * (docs/ranges-plan.md §3). */
 static uint32_t find_all(const char *doc, const char *needle, uint64_t *flat,
                          uint32_t max) {
     size_t len = strlen(needle);
@@ -133,9 +124,6 @@ static void build_scene(void) {
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("0 matches"));
 
     kaya_tx_create_widget(&tx, W_COLUMN, KAYA_KIND_COLUMN);
-    /* The a11y id is not decoration: every range assertion reads the
-     * PLATFORM'S accessibility tree, and this is how a leg finds this
-     * control there. */
     kaya_tx_create_widget(&tx, W_EDITOR, KAYA_KIND_TEXTAREA);
     kaya_tx_set_a11y_id(&tx, W_EDITOR, "doc");
     kaya_tx_set_a11y_label(&tx, W_EDITOR, "Document");
@@ -172,8 +160,7 @@ static void *app(void *arg) {
     build_scene();
 
     /* THE APP'S OWN COPY, and the only authority on what an offset
-     * means: kaya never hands a widget's text back on request, so the
-     * app folds text_changed into this buffer. */
+     * means: kaya never hands a widget's text back on request. */
     char doc[DOC_CAP];
     memcpy(doc, DOC, sizeof DOC); /* the literal's NUL comes along */
 
@@ -192,17 +179,13 @@ static void *app(void *arg) {
         if (kaya_parse_text_changed(rec, &id, keys, 2, &n_keys, &text)) {
             if (id != W_EDITOR || n_keys != 0)
                 continue;
-            /* Truncating is safe for the offsets that survive: a prefix
-             * preserves byte offsets. An offset landing INSIDE a
-             * character is refused by the core, naming the character it
-             * splits — the five platforms answer a malformed range four
-             * different ways and one of them aborts. */
+            /* An offset landing INSIDE a character is refused by the
+             * core, naming the character it splits — the five platforms
+             * answer a malformed range four different ways and one of
+             * them aborts. */
             size_t len = text.s_len < DOC_CAP ? text.s_len : DOC_CAP - 1;
             memcpy(doc, text.s, len);
             doc[len] = '\0';
-            /* The backend has already dropped the decorations (D2),
-             * silently; this is the app agreeing rather than being
-             * told. */
             KayaTx tx = {buf, 0};
             kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("0 matches"));
             kaya_submit(tx.buf, tx.len);
@@ -219,8 +202,8 @@ static void *app(void *arg) {
                 for (uint32_t i = 0; i < 2 * n; i++)
                     ranges[i] = kaya_i64((int64_t)flat[i]);
                 kaya_tx_highlight_ranges(&tx, W_EDITOR, n, ranges, 2 * n);
-                /* The SECOND match, so a leg can tell the selection
-                 * apart from "the first thing the search found". */
+                /* The SECOND match, so a leg can tell the selection apart
+                 * from "the first thing the search found". */
                 if (n > 1)
                     kaya_tx_select_range(&tx, W_EDITOR, flat[2], flat[3]);
                 char status[32];
@@ -231,16 +214,14 @@ static void *app(void *arg) {
                 uint32_t n = find_all(doc, NEEDLE, flat, MAX_HITS);
                 if (n == 0)
                     continue;
-                /* A PURE EFFECT: the viewport moves, the declared set
-                 * and the selection do not, and undo does not put the
-                 * scroll back (docs/undo-plan.md A2). */
+                /* A PURE EFFECT: the viewport moves, the declared set and
+                 * the selection do not, and undo does not put the scroll
+                 * back (docs/undo-plan.md A2). */
                 KayaTx tx = {buf, 0};
                 kaya_tx_reveal_range(&tx, W_EDITOR, flat[2 * (n - 1)],
                                      flat[2 * (n - 1) + 1]);
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_FOCUS) {
-                /* The script types into the editor next, and a keystroke
-                 * has to land somewhere. */
                 KayaTx tx = {buf, 0};
                 kaya_tx_widget_command(&tx, W_EDITOR, KAYA_COMMAND_FOCUS);
                 kaya_submit(tx.buf, tx.len);
@@ -248,11 +229,9 @@ static void *app(void *arg) {
                 uint32_t n = find_all(doc, NEEDLE, flat, MAX_HITS);
                 if (n == 0)
                     continue;
-                /* The first match, asked for in the ordinary way and
-                 * refused mid-composition (D4). Nothing here could test
-                 * for that; an app that wants the selection asks again
-                 * after the next text_changed, which ends a
-                 * composition. */
+                /* The first match, refused mid-composition (D4). An app
+                 * that wants the selection asks again after the next
+                 * text_changed, which ends a composition. */
                 KayaTx tx = {buf, 0};
                 kaya_tx_select_range(&tx, W_EDITOR, flat[0], flat[1]);
                 kaya_submit(tx.buf, tx.len);

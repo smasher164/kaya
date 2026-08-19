@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -19,26 +13,16 @@ fi
 # Build, install and run PickerProbe on a booted SIMULATOR.
 # Usage: tools/ios/pickerprobe/build.sh [udid]
 #
-# NOT A LANE. It answers what the harness can see of the iOS document
-# picker before the arm is written — see main.swift's header for the
-# questions, and docs/traps.md for what it found.
-#
-# The SIMULATOR is the right host here, unlike tools/ios/scopeprobe:
-# these are UIKit questions, not sandbox ones, and the simulator runs
-# the same UIKit. Anything whose answer depends on the sandbox DENYING
-# something belongs in scopeprobe, on hardware.
+# NOT A LANE. Questions in main.swift's header, findings in
+# docs/traps.md. The SIMULATOR is the right host because these are UIKit
+# questions; anything whose answer depends on the sandbox DENYING
+# something belongs in tools/ios/scopeprobe, on hardware.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 cd "$ROOT"
 
-# Inside the dev shell DEVELOPER_DIR/SDKROOT point at a nix apple-sdk
-# where xcrun finds neither swiftc nor simctl. tools/lib/swift-toolchain.sh
-# is the single source of truth for steering back to a real Apple
-# toolchain — its own header records that this dance was copy-pasted with
-# drift across three scripts before it existed, so this sources it rather
-# than being the fourth.
 # shellcheck source=tools/lib/swift-toolchain.sh
 . "$ROOT/tools/lib/swift-toolchain.sh"
 kaya_resolve_swiftc || exit 1
@@ -63,8 +47,7 @@ APP="$OUT/PickerProbe.app"
 rm -rf "$APP"
 mkdir -p "$APP"
 
-# The iphonesimulator SDK, not the macOS one kaya_swiftc defaults to —
-# so this borrows the resolved toolchain's swiftc and overrides -sdk.
+# The iphonesimulator SDK, not the macOS one kaya_swiftc defaults to.
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 env -u SDKROOT "$SWIFTC" \
     -target arm64-apple-ios17.0-simulator \
@@ -72,10 +55,8 @@ env -u SDKROOT "$SWIFTC" \
     -o "$APP/PickerProbe" \
     "$HERE/main.swift"
 
-# UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace are the two
-# keys that decide whether the app's own container is BROWSABLE from the
-# picker at all — which is Q2, so the probe declares them and reports
-# what it sees rather than assuming either way.
+# UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace decide
+# whether the app's own container is BROWSABLE from the picker at all.
 cat >"$APP/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -100,8 +81,7 @@ xcrun simctl terminate "$UDID" dev.kaya.pickerprobe >/dev/null 2>&1 || true
 xcrun simctl uninstall "$UDID" dev.kaya.pickerprobe >/dev/null 2>&1 || true
 xcrun simctl install "$UDID" "$APP"
 
-# Console output, not a log stream: the probe prints to stdout and
-# simctl hands it back when launched with --console-pty.
+# --console-pty hands the probe's stdout back here.
 echo "== running on $UDID =="
 xcrun simctl launch --console-pty "$UDID" dev.kaya.pickerprobe 2>&1 &
 launch_pid=$!

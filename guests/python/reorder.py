@@ -7,10 +7,6 @@ column-kind widget: languages disagree on whether containers are created
 before or after their children, and column#0 must name the same widget
 everywhere.
 
-The backend selftest (KAYA_SELFTEST=reorder) checks "a|b|c", clicks
-rotate (first entry to the end), checks "b|c|a", clicks lift (last
-entry before the first), and checks "a|b|c" again.
-
 Build the library first (cargo build), then:
     KAYA_SELFTEST=reorder python3 guests/python/reorder.py
 """
@@ -37,7 +33,6 @@ def on_rotate():
 
 
 def on_lift():
-    # Keys, never indices.
     items.move_to_front(items.keys()[-1])
 
 

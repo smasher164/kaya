@@ -1,20 +1,10 @@
-// kaya's idiomatic surface for C#: the structural core.
+// kaya's idiomatic surface for C#: id allocation, template scoping and
+// occurrence dispatch, layered over the runtime (Kaya.cs) and the
+// generated wire vocabulary (KayaWire.cs). See DESIGN.md's binding
+// conventions.
 //
-// Three jobs, layered over the runtime (Kaya.cs) and the generated wire
-// vocabulary (KayaWire.cs):
-//
-//   - id allocation: signals, widgets, collections, and template nodes
-//     come from per-space counters behind distinct types, so no app
-//     hand-numbers the id spaces — and the compiler keeps blueprint
-//     nodes (Node) from being used where live widgets (Widget) belong;
-//   - template scoping: ForEach and When take an Action<Tpl> whose body
-//     declares the blueprint, bracketing the records;
-//   - occurrence dispatch: handlers register per button; the app loop
-//     routes each click, handing template-node handlers the stamped
-//     copy's key path. Handlers receive their transaction explicitly
-//     (Action<Tx>); it submits when the handler returns. The core never
-//     calls into the guest — dispatch runs on the app thread after it
-//     pulls from the ring.
+// Dispatch runs on the app thread after it pulls from the ring; the core
+// never calls into the guest.
 
 using System;
 using System.Collections.Generic;
@@ -24,9 +14,8 @@ using System.Threading;
 readonly struct Signal
 {
     /// Mint a derived signal: recomputed when the source is written,
-    /// the write batched into the same transaction; the core sees an
-    /// ordinary signal. Reaches the open transaction ambiently — the
-    /// operators below are static, and a Signal is only an id.
+    /// the write batched into the same transaction. Reaches the open
+    /// transaction ambiently, because the operators below are static.
     public Signal Derive(Func<object, object> compute)
     {
         var app = KayaApp.Ambient;
@@ -44,8 +33,8 @@ readonly struct Signal
     }
 
     /// The derive vocabulary (the cross-language canon: eq, ne, lt,
-    /// fmt, …); the comparison operators below are these methods in
-    /// operator clothes.
+    /// fmt, …); the operators below are these methods in operator
+    /// clothes.
     public Signal Eq(object other) => Derive(v => ValuesEqual(v, other));
 
     public Signal Ne(object other) => Derive(v => !ValuesEqual(v, other));
@@ -115,16 +104,10 @@ readonly struct Widget
 /// guest-visible text, which is kaya's unit on the wire and in every
 /// binding.
 ///
-/// IT IS A TYPE RATHER THAN TWO INTS BECAUSE C# COUNTS SOMETHING ELSE.
-/// A .NET string index counts UTF-16 code units, and the two units
-/// agree only on ASCII: over a document opening with three CJK
-/// characters, every later match sits SIX BYTES further along than
-/// IndexOf reports it. Six is not a crash — it is a valid offset on a
-/// character boundary inside the text, so the core's validation passes
-/// it and the highlight simply lands on the wrong six characters. `In`
-/// does the conversion once, here, so no app hand-rolls it and no app
-/// can hand kaya a number in the wrong unit by writing the obvious
-/// thing.
+/// A TYPE RATHER THAN TWO INTS BECAUSE C# COUNTS SOMETHING ELSE: a .NET
+/// string index counts UTF-16 code units, and the disagreement is
+/// silent (docs/traps.md, "A range offset is a UTF-8 BYTE offset").
+/// `In` does the conversion once, here.
 ///
 /// WHAT THE CORE REFUSES, wherever a range reaches it: endpoints out of
 /// order, an endpoint past the end of the text, or an endpoint inside a
@@ -145,15 +128,12 @@ readonly struct TextRange
     }
 
     /// The range covering `length` .NET chars from `index` — the
-    /// conversion from C#'s unit into kaya's, and the spelling an app
-    /// reaches for, because IndexOf and Length are what it has:
+    /// conversion from C#'s unit into kaya's:
     ///
     ///     hits.Add(TextRange.In(doc, at, needle.Length));
     ///
     /// The text is an argument rather than remembered state: a byte
-    /// offset means nothing without the string it indexes, and the
-    /// string the app searched is the only authority on what its own
-    /// numbers meant.
+    /// offset means nothing without the string it indexes.
     public static TextRange In(string text, int index, int length)
     {
         if (text == null)
@@ -169,10 +149,8 @@ readonly struct TextRange
     }
 
     /// Offsets that are ALREADY UTF-8 byte offsets — for an app whose
-    /// positions came out of something byte-oriented (a file it read, a
-    /// parser it ran) rather than out of a .NET string. Named for its
-    /// unit, because the only way to misuse it is to believe it takes
-    /// char indices.
+    /// positions came out of something byte-oriented rather than out of
+    /// a .NET string.
     public static TextRange Bytes(long start, long stop)
     {
         if (start < 0 || stop < 0)
@@ -202,13 +180,11 @@ readonly struct TextRange
 
     static void Boundary(string text, int at)
     {
-        // BOTH HALVES, not just the low one: a low surrogate whose
-        // neighbour is NOT a high surrogate is an orphan in the app's
-        // own string — ill-formed text, which the FFI boundary already
-        // owns (DESIGN.md, string observations) and a different problem
-        // from an index landing between two halves of a real character.
-        // Testing only the low half would also make this very message
-        // throw, since ConvertToUtf32 refuses the pair it was handed.
+        // BOTH HALVES, not just the low one: a lone low surrogate is
+        // ill-formed text, which the FFI boundary already owns
+        // (DESIGN.md, string observations), and testing only the low
+        // half would make this very message throw — ConvertToUtf32
+        // refuses the pair it was handed.
         if (at > 0 && at < text.Length
             && char.IsHighSurrogate(text[at - 1]) && char.IsLowSurrogate(text[at]))
             throw new ArgumentException(
@@ -231,8 +207,7 @@ readonly struct Node
 /// A collection instance handle: the collection plus the key path
 /// selecting one stamped copy's table. Tx.Collection() returns the
 /// root (empty-path, live-zone) handle; At steps into a copy, one key
-/// per enclosing For. Mutations and reads take the handle, so the
-/// target is spelled once.
+/// per enclosing For.
 readonly struct Collection
 {
     internal readonly ulong Id;
@@ -266,11 +241,9 @@ readonly struct Collection
     }
 }
 
-/// A live menu item: its OWN id space (the c_menu_item counter)
-/// behind its own type, so cross-use with Widget or Node ids is a
-/// compile error. One command identity: exactly one parent or anchor,
-/// forever (append-only; nothing is removed in v1). The id alone is
-/// the durable name — reopen a retained item with tx.Menu(item, ...).
+/// A live menu item. One command identity: exactly one parent or
+/// anchor, forever (append-only; nothing is removed in v1). Reopen a
+/// retained item with tx.Menu(item, ...).
 readonly struct MenuItem
 {
     internal readonly ulong Id;
@@ -279,11 +252,9 @@ readonly struct MenuItem
 }
 
 /// A context catalog built UNANCHORED (tx.ContextCatalog) for a
-/// template node: menu items are live and shared across stamped
-/// copies, so the catalog is built in the live zone and
-/// Tpl.ContextMenu attaches it inside the template, where each
-/// activation carries the copy's key path. An item takes exactly one
-/// anchor — a second attach throws.
+/// template node: the catalog is built in the live zone and
+/// Tpl.ContextMenu attaches it inside the template. An item takes
+/// exactly one anchor — a second attach throws.
 sealed class ContextCatalog
 {
     internal readonly MenuItem[] Roots;
@@ -294,9 +265,7 @@ sealed class ContextCatalog
 
 /// One of the TWO addressable sources a menu text property binds to —
 /// a constant or a signal (menu items are not collection elements, so
-/// there is no element arm). The implicit conversions keep one
-/// parameter name per property, compile-checked: a bool never
-/// converts here.
+/// there is no element arm).
 readonly struct TextSource
 {
     internal readonly string Text;
@@ -350,12 +319,8 @@ readonly struct IndexSource
     public static implicit operator IndexSource(Signal s) => new(0, s);
 }
 
-/// One instance of a collection: the table inside the stamped copy
-/// selected by Path (the empty path for a live-zone collection).
-/// Entries keep insertion order, matching the core's rendering.
-/// A container's cross-axis child placement (the align spec enum;
-/// wire values pinned by the generated KayaWire constants). Baseline
-/// is rows-only — the scene rejects it on columns at the root.
+/// A container's cross-axis child placement. Baseline is rows-only —
+/// the root rejects it on columns.
 enum Align : long
 {
     Start = 0,
@@ -366,46 +331,28 @@ enum Align : long
 }
 
 /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
-/// never how it looks. A closed set — the vocabulary grows by a spec
-/// change, never by an app naming a value — and each variant belongs to
-/// one kind: Destructive and Prominent are what pressing an action
-/// means, Heading is a text hierarchy fact. The root refuses the
-/// misfits at declare time, in one sentence naming both sides, which is
-/// why the `role:` argument appears on Button and Label alone and
-/// SetRole (the dynamic path, every kind) leans on that wall.
+/// never how it looks. Each variant belongs to one kind, and the root
+/// refuses the misfits at declare time — which is why `role:` appears
+/// on Button and Label alone and SetRole leans on that wall.
 enum Role : long
 {
-    /// An action whose press destroys something — the platform's own
-    /// destructive affordance (red text on Apple, the error-role
-    /// container on Material, `.destructive-action` on GTK).
+    /// An action whose press destroys something.
     Destructive = KayaWire.RoleDestructive,
-    /// THE primary action — one per dialog's worth of emphasis: the
-    /// default-button treatment on every platform.
+    /// THE primary action — the default-button treatment.
     Prominent = KayaWire.RoleProminent,
-    /// A text hierarchy heading — the platform's heading text style AND
-    /// the accessibility heading trait assistive users skim by.
+    /// A text hierarchy heading: the platform's heading text style AND
+    /// the accessibility heading trait.
     Heading = KayaWire.RoleHeading,
 }
 
 /// THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6, DESIGN.md
 /// "Icons want names, not bytes"). An app names a CONCEPT and each
-/// backend draws its own platform's glyph for it: Copy is `doc.on.doc`
-/// on Apple, `content_copy` on Material, `edit-copy-symbolic` on
-/// Adwaita, and no single asset is right on all three — SF Symbols are
-/// license-locked to Apple platforms, so a shared one is not even
-/// legal. The platform sets also metric-match the text beside them
-/// (weight, baseline) while a blob cannot. The `icon:` byte[] argument
-/// stays for genuinely app-specific art.
+/// backend draws its own platform's glyph. The `icon:` byte[] argument
+/// stays for app-specific art.
 ///
-/// Closed, and small on purpose — the Role trick one tier over. Apple
-/// keeps its own semantic set to fifteen entries. Growing it is a spec
-/// change with its gates, never a per-app escape hatch (D5), and the
-/// root refuses a value outside the set at declare time.
-///
-/// The members' values are the WIRE values (they come from the
-/// generated KayaWire constants, so this enum cannot drift from the
-/// spec) and they are APPEND-ONLY: a new concept takes 21, because
-/// renumbering silently redraws every shipped app's menus.
+/// Growing the set is a spec change (D5), never a per-app escape hatch,
+/// and the values are APPEND-ONLY: a new concept takes the next number,
+/// because renumbering silently redraws every shipped app's menus.
 enum Symbol : long
 {
     Add = KayaWire.SymbolAdd,
@@ -441,24 +388,11 @@ enum Symbol : long
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the spec's
-/// `platform` enum; docs/styling-plan.md Slice 2b): one entry per
-/// backend roster row, closed.
+/// `platform` enum; docs/styling-plan.md Slice 2b).
 ///
 /// AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
-/// Platform.Current() and there will not be: this binding cannot answer
-/// that question — the JVM says "Linux" on Android, and a .NET
-/// RuntimeInformation check would be just as wrong on the platforms
-/// kaya targets through a host — and it does not have to. Every row
-/// travels to every backend and each LOWERING picks its own, because a
-/// lowering IS its platform. A guest that branched on its platform
-/// would also be a guest that ships different code per platform, which
-/// is the thing kaya exists to not do.
-///
-/// The members' values are the WIRE values (they come from the
-/// generated KayaWire constants, so this enum cannot drift from the
-/// spec), and the root refuses a tag outside the set at declare time —
-/// a row no lowering serves reads exactly like a platform that chose
-/// the default, so it is refused rather than dropped.
+/// Platform.Current() and there will not be: every row travels to every
+/// backend and each lowering picks its own.
 enum Platform : long
 {
     Mac = KayaWire.PlatformMac,
@@ -479,8 +413,24 @@ sealed class KayaInstance
         new(Path) { Entries = new List<KeyValuePair<object, object>>(Entries) };
 }
 
+/// WHAT THIS HOST CAN DO — crates/kaya/src/app.rs carries the canonical
+/// note. Named booleans, never the bits.
+///
+/// CAPABILITIES INFORM; WALLS REFUSE: a false here is not what makes a
+/// call illegal, it lets a guest ask before it walks into the wall.
+///
+/// AuxWindows: the host can materialize a surface beside the primary
+/// one (Tx.CreateWindow, Tx.MountIn). False on iOS and Android, whose
+/// systems own surface geometry; there CreateWindow aborts at the root.
+readonly record struct Caps(bool AuxWindows);
+
 sealed class KayaApp
 {
+    /// This host's capabilities. Constant for the life of the process,
+    /// so asking once and remembering is fine.
+    public static Caps Capabilities() =>
+        new Caps((Kaya.CapabilityBits() & Kaya.CAP_AUX_WINDOWS) != 0);
+
     // Work handed over by other threads, waiting to run as transactions
     // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER
     // THREAD, and the only reason this class carries a lock at all —
@@ -494,10 +444,9 @@ sealed class KayaApp
 
     ulong signals, widgets, collections, nodes, menuItems;
     readonly Dictionary<ulong, Action<Tx>> widgetHandlers = new();
-    // Menu dispatch tables, keyed by MENU ITEM id — their own id
-    // space, separate from every widget/node table ("two tables,
-    // always" — now N tables, still always). The node flavors receive
-    // the stamped copy's key path (the keys ARE the noun).
+    // Menu dispatch tables, keyed by MENU ITEM id — their own id space,
+    // separate from every widget/node table. The node flavors receive
+    // the stamped copy's key path.
     internal readonly Dictionary<ulong, Action<Tx>> menuActivated = new();
     internal readonly Dictionary<ulong, Action<Tx, List<object>>> menuActivatedNode = new();
     internal readonly Dictionary<ulong, Action<Tx, bool>> menuToggled = new();
@@ -518,20 +467,17 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx>> sectionSelected = new();
     internal readonly Dictionary<ulong, Action<Tx>> windowClosed = new();
     // The ledger's two reports, keyed by WINDOW because the ledger is
-    // (docs/undo-plan.md §3). NOT one-shot, and that is the whole
-    // difference from the alert's table: a history is walked as often as
-    // the user likes, so the registration outlives every step.
+    // (docs/undo-plan.md §3). NOT one-shot, unlike the alert's table: a
+    // history is walked as often as the user likes.
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> undone = new();
     internal readonly Dictionary<ulong, Action<Tx, string, UndoDelta>> redone = new();
     internal readonly Dictionary<ulong, Action<Tx, uint>> alerts = new();
-    // BOTH DIALOG KINDS LIVE HERE. A save request answers on the picker's
-    // grammar out of the picker's id space (docs/save-plan.md D2), so it
-    // registers in this table with the narrowing to "one or none" already
-    // applied at Tx.SaveFile — one live slot, one retire, and no way for
-    // a result to reach the other kind's handler.
+    // BOTH DIALOG KINDS LIVE HERE: a save request answers on the
+    // picker's grammar out of the picker's id space (docs/save-plan.md
+    // D2), narrowed to "one or none" at Tx.SaveFile.
     internal readonly Dictionary<ulong, Action<Tx, List<PickedFile>>> fileDialogs = new();
-    // Clipboard reads share the alert's request/result grammar and so
-    // its table shape: one-shot, keyed by request id.
+    // Clipboard reads share the alert's request/result grammar: one-shot,
+    // keyed by request id.
     internal readonly Dictionary<ulong, Action<Tx, Representation?>> clipboardReads = new();
     internal readonly Dictionary<ulong, Action<Tx, Representation>> widgetPastes = new();
     internal readonly Dictionary<ulong, Action<Tx, List<object>, Representation>> nodePastes = new();
@@ -540,50 +486,39 @@ sealed class KayaApp
     internal ulong nextClipboardRead;
 
     // The collection is the model — the only copy: every mutation op
-    // edits it and queues the wire delta in the same call, so reads
-    // (Items, Count) are exactly the writes. Children records the
-    // declared-inside-a-For edges the model purges along when a parent
-    // entry's copy is torn down.
+    // edits it and queues the wire delta in the same call. Children
+    // records the declared-inside-a-For edges the model purges along
+    // when a parent entry's copy is torn down.
     internal readonly Dictionary<ulong, List<KayaInstance>> Model = new();
     // The fresh-key minter's counters, one per collection INSTANCE —
     // keyed by (collection, PATH), because an instance is a table and
-    // keys are unique within one. Path-compared exactly as Model is (a
-    // path is an object[] and two equal paths are not the same array,
-    // so there is no hashing it), and OUTSIDE the rollback journal on
-    // purpose: a minted key is spent, so an abandoned transaction puts
-    // the model back and leaves the counter where it is, and no key is
-    // ever handed out twice (docs/fresh-key-plan.md).
+    // keys are unique within one. OUTSIDE the rollback journal on
+    // purpose: a minted key is spent, so an abandoned transaction leaves
+    // the counter where it is and no key is handed out twice
+    // (docs/fresh-key-plan.md).
     readonly Dictionary<ulong, List<(List<object> Path, long Counter)>> fresh = new();
     // How to turn one collection's WIRE fields back into the object the
-    // model keeps, per collection id: (variant, fields, the entry the
-    // mirror still holds or null) -> the value. Registered where the
-    // type is known (KayaRecords.CollectionOf, KayaSums.SumOf, and the
-    // scalar Tx.Collection), because only an undo travels this
-    // direction — every other write hands the model the guest's own
-    // object and encodes a copy for the wire.
+    // model keeps, per collection id. Registered where the type is known
+    // (KayaRecords.CollectionOf, KayaSums.SumOf, the scalar
+    // Tx.Collection), because only an undo travels this direction.
     internal readonly Dictionary<ulong, Func<uint, List<object>, object, object>> Rehydrate = new();
-    // Signal mirrors and dependents, for binding-maintained derived
-    // signals; the ambient app/tx pair exists because the comparison
-    // operators are static and a Signal is only an id (one app per
-    // guest process, the Python binding's own assumption).
+    // The ambient app/tx pair exists because the comparison operators
+    // are static and a Signal is only an id (one app per guest process).
     internal static KayaApp Ambient;
     internal Tx CurrentTx;
     internal readonly Dictionary<ulong, object> SignalMirrors = new();
     internal readonly Dictionary<ulong, List<Action<Tx>>> SignalDeps = new();
     // The ambient parent stack: containers push their id around their
     // body, constructors parent to the top, and 0 is the template-root
-    // sentinel (template bodies root themselves; a cross-zone AddChild
-    // is structurally impossible).
+    // sentinel.
     internal readonly List<ulong> Parents = new();
     internal readonly Dictionary<ulong, List<ulong>> Children = new();
     internal readonly List<ulong> OpenFors = new();
     // >0 while a template body is being declared (a For body, a When
-    // body, or an open row trace). OpenFors tracks Fors only — When
-    // pushes nothing there — so template-scope detection needs its own
-    // counter. The template records once and replays: a model read
-    // inside its body would bake one snapshot into every stamp as
-    // silently dead data, so mirror reads throw while this is armed;
-    // live-zone, handler, and build reads stay legal.
+    // body, or an open row trace); OpenFors tracks Fors only. The
+    // template records once and replays, so a model read inside its body
+    // would bake one snapshot into every stamp — mirror reads throw
+    // while this is armed; live-zone, handler and build reads stay legal.
     internal int TplDepth;
 
     public KayaApp()
@@ -635,9 +570,8 @@ sealed class KayaApp
     }
 
     /// One instance's fresh-key counter, made if this is the first
-    /// anyone has asked. Split out because both the mint and the absorb
-    /// want the same lookup; a List entry is a value tuple, so the new
-    /// count is written back rather than mutated through the indexer.
+    /// anyone has asked. A List entry is a value tuple, so the new count
+    /// is written back rather than mutated through the indexer.
     long WithCounter(ulong coll, IReadOnlyList<object> path, Func<long, long> body)
     {
         if (!fresh.TryGetValue(coll, out var instances))
@@ -668,9 +602,7 @@ sealed class KayaApp
     /// BOTH C# INTEGER SPELLINGS COUNT. KayaWire.Encode widens an int
     /// to the wire's I64, so `Insert(c, 5, ...)` and `Insert(c, 5L, ...)`
     /// name the same entry to the core — while the mirror compares keys
-    /// with Equals, where 5 and 5L are different. A minted long that
-    /// collided with a hand-written int key would be one entry to the
-    /// core and two to the mirror, so the int is absorbed too.
+    /// with Equals, where 5 and 5L differ. So the int is absorbed too.
     internal void AbsorbKey(ulong coll, IReadOnlyList<object> path, object key)
     {
         long n;
@@ -685,18 +617,13 @@ sealed class KayaApp
 
     /// Fold an undo's payload into the mirrors.
     ///
-    /// THE ROLLBACK JOURNAL IN REVERSE: Tx.Rollback restores a snapshot
-    /// because nothing was shipped, while an undo restores a delta
-    /// because everything WAS — the core already moved, and the mirror
-    /// is what would otherwise be left behind. Same machinery, opposite
-    /// case, and the payload is core-authoritative, so nothing here
-    /// re-derives anything.
+    /// The payload is core-authoritative, so nothing here re-derives
+    /// anything.
     ///
     /// NO DERIVED RECOMPUTE, deliberately. A derived signal's write rode
-    /// the same transaction as the mutation that caused it, so it was
-    /// inside the group and the core restored it too — recomputing here
-    /// would write a value the ledger never banked, outside any
-    /// transaction, and drift the two apart on the next step.
+    /// the same transaction as the mutation that caused it, so the core
+    /// restored it too — recomputing here would write a value the ledger
+    /// never banked, outside any transaction.
     internal void AbsorbUndo(UndoDelta delta)
     {
         foreach (var signal in delta.Signals)
@@ -733,9 +660,7 @@ sealed class KayaApp
             if (instance == null)
                 continue;
             // Position by the payload's list, keeping anything it does
-            // not name at the end: the delta states one instance's whole
-            // order, and an entry it never mentions is one this step did
-            // not touch.
+            // not name at the end.
             var sorted = new List<KeyValuePair<object, object>>(instance.Entries.Count);
             foreach (var key in order.Keys)
             {
@@ -772,13 +697,9 @@ sealed class KayaApp
             CurrentTx = null;
         }
         tx.SubmitIfAny();
-        // AFTER the submit, and on the throwing path too (the catch
-        // above rethrows, so this line is not reached there — Close is
-        // called in the catch as well).
         tx.Close();
     }
 
-    /// Register a click handler for a live widget.
     public void OnClick(Widget w, Action<Tx> handler) => widgetHandlers[w.Id] = handler;
 
     /// Register a click handler for a template node; it also receives
@@ -786,8 +707,7 @@ sealed class KayaApp
     public void OnClick(Node n, Action<Tx, List<object>> handler) => nodeHandlers[n.Id] = handler;
 
     /// Register a change handler for a live entry: the widget owns its
-    /// text and reports each edit here; the app folds the text into its
-    /// own state — there is no read-back, by doctrine.
+    /// text and reports each edit here. There is no read-back.
     public void OnChange(Widget w, Action<Tx, string> handler) => widgetChanges[w.Id] = handler;
 
     /// Register a change handler for a template entry; it also receives
@@ -796,13 +716,11 @@ sealed class KayaApp
         nodeChanges[n.Id] = handler;
 
     /// Register a toggle handler for a live checkbox: the box owns its
-    /// checked bit and reports each flip here; the app folds it into
-    /// its own state.
+    /// checked bit and reports each flip here.
     public void OnToggle(Widget w, Action<Tx, bool> handler) => widgetToggles[w.Id] = handler;
 
     /// A live slider's change handler: the bar owns its position and
-    /// reports each move with the new value — the entry's uncontrolled
-    /// contract, with a double.
+    /// reports each move with the new value.
     public void OnValueChanged(Widget w, Action<Tx, double> handler) =>
         widgetValues[w.Id] = handler;
 
@@ -813,23 +731,13 @@ sealed class KayaApp
 
     /// A template slider's or choice widget's change handler; it also
     /// receives the stamped copy's keys, outermost first.
-    ///
-    /// The core has always emitted this one (InstanceValueChanged,
-    /// crates/kaya/src/protocol.rs) and until the template zone grew a
-    /// slider there was no way to reach it, so C# had the live
-    /// registrar, the live dispatch arm, and neither of the node
-    /// halves — a stamped copy's move matched no case in DispatchLoop
-    /// and was dropped with nothing said. Its three siblings (click,
-    /// text, toggle) each had both arms all along, which is what made
-    /// the hole invisible.
     public void OnValueChanged(Node n, Action<Tx, List<object>, double> handler) =>
         nodeValues[n.Id] = handler;
 
     /// One handler dispatch: an exception crosses the Build boundary
     /// (which rolled the mirrors back and dropped the records), is
-    /// logged, and the loop moves to the next occurrence — the uniform
-    /// dispatch discipline across every binding. Fatal runtime errors
-    /// (stack overflow, access violation) still die.
+    /// logged, and the loop moves to the next occurrence. Fatal runtime
+    /// errors (stack overflow, access violation) still die.
     void Dispatch(Action<Tx> fn)
     {
         try
@@ -844,37 +752,31 @@ sealed class KayaApp
     }
 
     /// Run body as a transaction on the app thread, soon. THE ONE method
-    /// safe to call from another thread, and the answer to "how does
-    /// background work reach the UI".
-    ///
-    /// Build is a transaction NOW on the calling thread; Post is the
-    /// same transaction SOON on the app thread — so a background thread
-    /// writes ordinary blocking C# and hands back only the result:
+    /// safe to call from another thread:
     ///
     ///     _ = Task.Run(() => {
     ///         var data = File.ReadAllText(path);   // blocks this thread
     ///         app.Post(tx => tx.Write(content, data));
     ///     });
     ///
-    /// The Tx is made where it is used and never crosses a
-    /// thread; ids are values and are meant to be captured. A posted
-    /// body runs in its OWN transaction, after whatever is running now,
-    /// so posting from inside a handler queues for after, never nests.
+    /// The Tx is made where it is used and never crosses a thread; ids
+    /// are values and are meant to be captured. A posted body runs in
+    /// its OWN transaction, after whatever is running now, so posting
+    /// from inside a handler queues for after, never nests.
     public void Post(Action<Tx> body)
     {
         lock (postLock) posted.Add(body);
         // The app thread may be parked in C waiting on the ring. Posted
-        // work is not an occurrence and never enters that ring, so this
-        // is the only way it hears about it.
+        // work never enters that ring, so this is the only way it hears
+        // about it.
         Kaya.Wake();
     }
 
-    /// Run everything posted, each as its own transaction, in order.
-    ///
-    /// The batch is taken and the lock released BEFORE any of it runs,
-    /// so a body that posts again lands in the NEXT batch. Holding the
-    /// lock across the calls would let a self-posting body drain forever
-    /// and starve the occurrence loop.
+    /// Run everything posted, each as its own transaction, in order. The
+    /// batch is taken and the lock released BEFORE any of it runs, so a
+    /// body that posts again lands in the NEXT batch — holding the lock
+    /// across the calls would let a self-posting body starve the
+    /// occurrence loop.
     void DrainPosted()
     {
         List<Action<Tx>> batch;
@@ -988,10 +890,8 @@ sealed class KayaApp
             else if (kind == KayaWire.OccKindFileDialogResult)
             {
                 // One-shot like the alert, and the id retires with it.
-                // EMPTY IS CANCEL — no platform can confirm an empty
-                // selection, so there is no sentinel to invent, and a
-                // save dialog's cancel is the same empty answer (it
-                // reaches the guest as null, narrowed at SaveFile).
+                // EMPTY IS CANCEL, for a save dialog too (it reaches the
+                // guest as null, narrowed at SaveFile).
                 if (fileDialogs.Remove(id, out var fn))
                 {
                     var files = payload as List<PickedFile> ?? new List<PickedFile>();
@@ -1002,24 +902,20 @@ sealed class KayaApp
             {
                 // One-shot like the alert, and the request retires with
                 // it. EMPTY IS THE UNIVERSAL NO and arrives as null —
-                // denied, unfocused, absent and nothing-we-accept
-                // alike, because no platform says which.
+                // denied, unfocused, absent and nothing-we-accept alike,
+                // because no platform says which.
                 if (clipboardReads.Remove(id, out var fn))
                 {
                     var clip = Representation.From(payload as KayaWire.ClipValues);
                     Dispatch(tx => fn(tx, clip));
                 }
             }
-            // kaya routed an undo (or a redo), and this is what the CORE
-            // put back. The id is the WINDOW: one ledger per window.
+            // An undo (or redo), as the CORE put it back. The id is the
+            // WINDOW: one ledger per window.
             //
-            // THE MIRROR FOLLOWS FIRST, and unconditionally. An undo
-            // moved core state without a transaction, so the model would
-            // otherwise be left behind — and a handler reads Count and
-            // Items expecting the RESTORED state, which is the whole
-            // reason the payload is fat. Absorbing before the lookup
-            // also keeps a window that registered no handler honest:
-            // the mirror is the binding's, not the app's.
+            // THE MIRROR FOLLOWS FIRST, and unconditionally — before the
+            // handler lookup, so a window that registered no handler
+            // still keeps its mirror in step.
             else if (kind == KayaWire.OccKindUndone || kind == KayaWire.OccKindRedone)
             {
                 var step = (UndoStep)payload;
@@ -1031,9 +927,8 @@ sealed class KayaApp
                     Dispatch(tx => fn(tx, step.Label, step.Delta));
             }
             // A paste rides a click tag verbatim, so it arrives on the
-            // ordinary widget/node split — one record kind, the key
-            // path deciding. Never empty: a paste that delivered
-            // nothing is not an occurrence.
+            // ordinary widget/node split. Never empty: a paste that
+            // delivered nothing is not an occurrence.
             else if (kind == KayaWire.OccKindPasted && keys.Count == 0)
             {
                 if (widgetPastes.TryGetValue(id, out var fn)
@@ -1046,12 +941,10 @@ sealed class KayaApp
                     && Representation.From(payload as KayaWire.ClipValues) is { } clip)
                     Dispatch(tx => fn(tx, keys, clip));
             }
-            // Menu occurrences key the menu-item tables — their own
-            // id space, so neither widget nor node ids can collide
-            // with them. Node-anchored context items carry the
-            // stamped copy's keys (the keys ARE the noun); toggles
-            // carry the new state, radio groups the new 0-based
-            // index.
+            // Menu occurrences key the menu-item tables — their own id
+            // space. Node-anchored context items carry the stamped
+            // copy's keys; toggles carry the new state, radio groups the
+            // new 0-based index.
             else if (kind == KayaWire.OccKindMenuActivated && keys.Count == 0)
             {
                 if (menuActivated.TryGetValue(id, out var fn))
@@ -1106,19 +999,11 @@ sealed class Tx
 {
     internal readonly KayaApp App;
 
-    // THE ONE CHOKEPOINT. Every one of the hundred-odd writes in this
-    // file is `Records.Add(...)`, so making Records a property that
-    // checks liveness first guards all of them without touching a
-    // single callsite — and guards the next one too, which is the part
-    // that matters. A check spread over the callsites is a check that
-    // gets forgotten: Go's lived on the Widget and MenuItem chains
-    // only, and a write through a Tx that had outlived its Build
-    // appended into a list already submitted and never submitted
-    // again. No exception, no error, the write simply vanished.
-    //
-    // Nothing invited that mistake until App.Post arrived. Posting is
-    // exactly the reason a guest now holds a Tx near a background
-    // thread, so the guard has to be total.
+    // THE ONE CHOKEPOINT. Every write in this file is `Records.Add(...)`,
+    // so the property checks liveness first and guards the next callsite
+    // too. A write through a Tx that outlived its Build vanishes with no
+    // error, which is why a check spread over callsites will not do
+    // (tools/check-tx-liveness.sh).
     readonly List<byte[]> records = new();
     internal List<byte[]> Records
     {
@@ -1261,9 +1146,7 @@ sealed class Tx
     {
         Touch(coll);
         var instance = App.InstanceOf(coll, path);
-        // The same checks the scene makes, made where the guest can
-        // see the stack: a missing key or anchor is a guest bug, never
-        // a fallback. Both validated before anything mutates.
+        // Both validated before anything mutates.
         int pos = instance == null ? -1 : instance.Entries.FindIndex(e => Equals(e.Key, key));
         if (pos < 0)
             throw new InvalidOperationException($"kaya: move of missing key {key}");
@@ -1300,37 +1183,24 @@ sealed class Tx
         }
     }
 
-    // Set by Undoable: one name per step, and the check needs a flag
-    // because the marker itself is opaque bytes by then.
+    // Set by Undoable: one name per step. A flag because the marker is
+    // opaque bytes by then.
     bool undoGroup;
 
-    /// Make this transaction ONE undoable step, under `label`.
-    ///
-    /// The unit of undo is a NAMED GROUP declared at the opener, not
-    /// every transaction: handlers fire per-gesture transactions
-    /// constantly and most of them are consequences rather than intents,
-    /// and a per-keystroke editor would earn one step per character —
-    /// the exact problem grouping exists to solve. So a group is opt-in,
-    /// which is also what keeps a collaborative app free to own its own
-    /// history (docs/undo-plan.md D2, D8).
+    /// Make this transaction ONE undoable step, under `label`. Opt-in
+    /// per transaction (docs/undo-plan.md D2, D8).
     ///
     /// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at the
-    /// head: a handler naturally builds first and names the step when it
-    /// knows what the step was, and the wire's head-of-batch rule should
-    /// not turn that into a footgun.
+    /// head of the batch.
     ///
     /// WHAT A GROUP MAY HOLD is the reactive half — signal writes and
-    /// collection deltas, whose inverse the core derives from state it
-    /// already keeps. Focus is permitted and not restored. Anything else
-    /// (a const property write, creating a widget, Clear, showing a
-    /// dialog) fails at apply, naming the op: undo restores state, and
-    /// state is signals plus collections. The app hears the result as
-    /// the window construct's onUndone.
+    /// collection deltas. Focus is permitted and not restored. Anything
+    /// else (a const property write, creating a widget, Clear, showing a
+    /// dialog) fails at apply, naming the op.
     public void Undoable(string label) => UndoableIn(0, label);
 
-    /// Undoable against an auxiliary window's ledger. Each window has
-    /// its own history, because Undo in one window has never meant
-    /// "revert what happened in another".
+    /// Undoable against an auxiliary window's ledger: each window has
+    /// its own history.
     public void UndoableIn(ulong window, string label)
     {
         if (undoGroup)
@@ -1354,9 +1224,7 @@ sealed class Tx
         TouchSignal(s.Id);
         Records.Add(KayaWire.TxWriteSignal(s.Id, value));
         App.SignalMirrors[s.Id] = value;
-        // The dependents recompute now, batched into this transaction
-        // (a derived write chains through here again for its own
-        // dependents).
+        // The dependents recompute now, batched into this transaction.
         if (App.SignalDeps.TryGetValue(s.Id, out var deps))
             foreach (var recompute in deps)
                 recompute(this);
@@ -1394,32 +1262,23 @@ sealed class Tx
 
     /// Set a widget's flex weight within its row/column: 0 is natural
     /// size, positive weights divide the container's leftover main-axis
-    /// space in proportion (see Prop::Grow in the core). The
-    /// declarative spelling is the `grow:` argument at construction;
-    /// this is the dynamic path.
+    /// space in proportion.
     public void SetGrow(Widget w, double weight) =>
         Records.Add(KayaWire.TxSetGrow(w.Id, weight));
 
     /// A container's inter-child gap (main axis, DIP; the normalized
-    /// default is 8). Containers only — the scene rejects it anywhere
-    /// else. The declarative spelling is the `spacing:` argument at
-    /// construction; this is the dynamic path.
+    /// default is 8). Containers only — the root rejects it elsewhere.
     public void SetSpacing(Widget w, double gap) =>
         Records.Add(KayaWire.TxSetSpacing(w.Id, gap));
 
     /// A container's own padding: DIP between its bounds and its
-    /// children, uniform on all four sides — the window inset one level
-    /// down. Containers only, spacing's kinds exactly; the scene rejects
-    /// it anywhere else. The declarative spelling is the `inset:`
-    /// argument at construction; this is the dynamic path.
+    /// children, uniform on all four sides. Containers only, spacing's
+    /// kinds exactly.
     public void SetInset(Widget w, double pad) =>
         Records.Add(KayaWire.TxSetInset(w.Id, pad));
 
-    /// A container's cross-axis child placement (the align spec enum;
-    /// the normalized default is Align.Start). Containers only;
-    /// baseline is rows-only — the scene rejects misuse at the root.
-    /// The declarative spelling is the `align:` argument at
-    /// construction; this is the dynamic path.
+    /// A container's cross-axis child placement (the normalized default
+    /// is Align.Start). Containers only; baseline is rows-only.
     public void SetAlign(Widget w, Align align) =>
         Records.Add(KayaWire.TxSetAlign(w.Id, (long)align));
 
@@ -1429,12 +1288,9 @@ sealed class Tx
     public void SetA11yId(Widget w, string id) =>
         Records.Add(KayaWire.TxSetA11yId(w.Id, id));
 
-    /// What an assistive client SPEAKS for a widget. Universal, and
-    /// deliberately separate from the identifier — an automation key is
-    /// not a spoken name. Leave it unset to keep whatever the platform
-    /// derives from the control's own content; setting it OVERRIDES
-    /// that, so a button whose caption already reads well needs nothing
-    /// here.
+    /// What an assistive client SPEAKS for a widget. Universal. Leave it
+    /// unset to keep whatever the platform derives from the control's
+    /// own content; setting it OVERRIDES that.
     public void SetA11yLabel(Widget w, string label) =>
         Records.Add(KayaWire.TxSetA11yLabel(w.Id, label));
 
@@ -1446,12 +1302,9 @@ sealed class Tx
         Records.Add(KayaWire.TxSetA11yHint(w.Id, hint));
 
     /// A widget's SEMANTIC EMPHASIS (Role): what it means, never how it
-    /// looks — the platform picks the chrome, and Heading is also the
-    /// accessibility heading trait. Destructive and Prominent are
-    /// button emphasis, Heading is label hierarchy, and the root
-    /// refuses a role on a kind it does not fit. The declarative
-    /// spelling is the `role:` argument at construction; this is the
-    /// dynamic path.
+    /// looks. Destructive and Prominent are button emphasis, Heading is
+    /// label hierarchy, and the root refuses a role on a kind it does
+    /// not fit.
     public void SetRole(Widget w, Role role) =>
         Records.Add(KayaWire.TxSetRole(w.Id, (long)role));
 
@@ -1459,9 +1312,8 @@ sealed class Tx
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 
     /// Point the widget at encoded image bytes: one registration copy
-    /// into core-owned memory — the handle is consumed by the next
-    /// submit from this guest, referenced or not, so the caller's
-    /// array is free to drop the moment this returns.
+    /// into core-owned memory, so the caller's array is free to drop the
+    /// moment this returns.
     public void SetSource(Widget w, byte[] source) =>
         Records.Add(KayaWire.TxSetSource(w.Id, Kaya.RegisterBlob(source)));
 
@@ -1471,44 +1323,27 @@ sealed class Tx
     public void AddChild(Widget parent, Widget child) =>
         Records.Add(KayaWire.TxAddChild(parent.Id, child.Id));
 
-    /// Drop the widget's owned content — a one-shot command: momentary
-    /// verbs into widget-owned state, riding this transaction like any
-    /// write, so the insert and the clear beside it commit together or
-    /// not at all. Fire-and-forget: no state at rest, nothing to
-    /// journal, and the widget answers through its normal occurrence
-    /// path (a clear arrives back as a text change with empty text, so
-    /// the app's draft fold empties itself — never a side assignment).
+    /// Drop the widget's owned content — a one-shot command riding this
+    /// transaction, so the insert and the clear beside it commit
+    /// together or not at all. The widget answers through its normal
+    /// occurrence path: a clear arrives back as a text change with empty
+    /// text.
     public void Clear(Widget w) =>
         Records.Add(KayaWire.TxWidgetCommand(w.Id, KayaWire.CommandClear));
 
-    /// Give the widget keyboard focus (the post-submit refocus every
-    /// real form wants) — a one-shot command riding the transaction
-    /// like Clear.
+    /// Give the widget keyboard focus — a one-shot command riding the
+    /// transaction like Clear.
     public void Focus(Widget w) =>
         Records.Add(KayaWire.TxWidgetCommand(w.Id, KayaWire.CommandFocus));
 
     /// DECLARE the decorated ranges of a textarea, replacing whatever
-    /// was declared before; an empty set is the clear.
+    /// was declared before; an empty set is the clear. kaya ships no
+    /// search — finding the hits is the app's (docs/ranges-plan.md §3).
     ///
-    /// kaya ships no search. What to highlight is the app's question —
-    /// case folding, word boundaries, a regex dialect and the find bar
-    /// itself belong to the text editor (docs/ranges-plan.md §3) — and
-    /// five lines of IndexOf is the honest amount of machinery for it:
-    ///
-    ///     for (int at = doc.IndexOf(needle, StringComparison.Ordinal); at >= 0;
-    ///          at = doc.IndexOf(needle, at + needle.Length, StringComparison.Ordinal))
-    ///         hits.Add(TextRange.In(doc, at, needle.Length));
-    ///     tx.HighlightRanges(editor, hits);
-    ///
-    /// What no app can write for itself is the other half — colouring a
-    /// run of the platform's own text view — and that is what this is.
-    ///
-    /// APP-OWNED AND NEVER TRACKED. A declared set is bound to the text
-    /// it was declared against: the first edit of any kind — a
-    /// keystroke, a SetText, a native undo — drops it with nothing said,
-    /// and the app re-declares from the fold its change handler already
-    /// drives. That is the same uncontrolled contract the text itself
-    /// has; nothing in kaya adjusts a range across an edit.
+    /// APP-OWNED AND NEVER TRACKED. The first edit of any kind — a
+    /// keystroke, a SetText, a native undo — drops the set with nothing
+    /// said, and the app re-declares from the fold its change handler
+    /// already drives. Nothing in kaya adjusts a range across an edit.
     public void HighlightRanges(Widget w, IEnumerable<TextRange> ranges)
     {
         if (ranges == null)
@@ -1516,8 +1351,8 @@ sealed class Tx
                 nameof(ranges),
                 "kaya: HighlightRanges takes the set to declare — an empty one is the clear");
         // The offsets ride as one flat Values list read in pairs, start
-        // then end, with the count beside it; the core asserts the two
-        // agree rather than painting half a set (wire.rs, TX_HIGHLIGHT_RANGES).
+        // then end, with the count beside it (wire.rs,
+        // TX_HIGHLIGHT_RANGES).
         var flat = new List<object>();
         foreach (TextRange r in ranges)
         {
@@ -1533,34 +1368,30 @@ sealed class Tx
     /// REFUSED WHILE THE USER IS COMPOSING through an input method, in
     /// every backend, because honouring it commits the composition
     /// mid-word — measured on macOS, where the half-typed kana land in
-    /// the document and in the app's own model. The refusal is a no-op
-    /// and not an exception: composition state is on no kaya channel, so
-    /// an app cannot avoid the race and is not blamed for it. The
-    /// selection is still worth asking for after the next change
+    /// the document and in the app's own model (docs/ranges-plan.md D4).
+    /// The refusal is a no-op and not an exception: composition state is
+    /// on no kaya channel. Ask again after the next change
     /// notification, which is what ends a composition.
     public void SelectRange(Widget w, TextRange range) =>
         Records.Add(KayaWire.TxSelectRange(w.Id, range.Start, range.Stop));
 
     /// Scroll the textarea so a range is inside the viewport. A pure
     /// effect: it moves no state, leaves the selection alone, and undo
-    /// does not put the scroll position back — undo restores state, not
-    /// where you were looking. How much context lands around the range
-    /// is the platform's own scroll-to-range behaviour; what kaya fixes
-    /// is containment.
+    /// does not put the scroll position back. How much context lands
+    /// around the range is the platform's own behaviour; kaya fixes
+    /// containment.
     public void RevealRange(Widget w, TextRange range) =>
         Records.Add(KayaWire.TxRevealRange(w.Id, range.Start, range.Stop));
 
-    // --- Construction sugar: the tree reads as a tree ----------------
+    // --- Construction sugar ------------------------------------------
     //
-    // Co-located constructors (props and handlers at the declaration
-    // site) and params-array containers. Everything lowers eagerly to
-    // the same records — children first, then the container, then the
-    // AddChilds; never a scene value interpreted later.
+    // Everything lowers eagerly to the same records — children first,
+    // then the container, then the AddChilds; never a scene value
+    // interpreted later.
 
     /// `role:` is this button's semantic emphasis (Role.Destructive,
-    /// Role.Prominent) — the ONE thing an app says about a widget's
-    /// appearance, and it says it in meaning rather than in colour. It
-    /// changes nothing about what pressing the button does.
+    /// Role.Prominent). It changes nothing about what pressing the
+    /// button does.
     public Widget Button(string text = null, Action<Tx> onClick = null, double? grow = null,
         Role? role = null)
     {
@@ -1592,8 +1423,8 @@ sealed class Tx
 
     /// `role:` is this label's place in the text hierarchy
     /// (Role.Heading) — the platform's heading text style AND the
-    /// heading trait assistive users skim by, which is why it is a role
-    /// and not a font size.
+    /// accessibility heading trait, which is why it is a role and not a
+    /// font size.
     public Widget Label(string text = null, Signal? bind = null, double? grow = null,
         Role? role = null)
     {
@@ -1618,11 +1449,9 @@ sealed class Tx
     }
 
     /// A slider over min..max at value, with its change handler
-    /// co-located.
-    /// `bind` takes a float Signal for the position instead of a
-    /// constant — the programmatic write path (Write fans out to the
-    /// control; property writes never echo an occurrence, so a
-    /// handler's own writes cannot loop back at it).
+    /// co-located. `bind` takes a float Signal for the position instead
+    /// of a constant; property writes never echo an occurrence, so a
+    /// handler's own writes cannot loop back at it.
     public Widget Slider(double min = 0.0, double max = 1.0, double value = 0.0,
         Action<Tx, double> onChange = null, double? grow = null, Signal? bind = null)
     {
@@ -1636,12 +1465,10 @@ sealed class Tx
         return w;
     }
 
-    /// A dropdown select over fixed options — each option becomes a
-    /// label child (labels only, scene-checked) — at selected, the
-    /// initial 0-based index (domain-checked at the root against the
-    /// option count), with its pick handler co-located: onSelect
-    /// receives each USER pick's new 0-based index (programmatic
-    /// writes never echo) — the slider's uncontrolled contract.
+    /// A dropdown select over fixed options — each becomes a label child
+    /// — at `selected`, the initial 0-based index (checked at the root
+    /// against the option count). onSelect receives each USER pick's new
+    /// index; programmatic writes never echo.
     public Widget Select(string[] options, int selected = 0,
         Action<Tx, int> onSelect = null, double? grow = null)
     {
@@ -1660,9 +1487,6 @@ sealed class Tx
         return w;
     }
 
-    /// A radio group over fixed options — the choice contract
-    /// (see Select) in its inline presentation: same option
-    /// children, same 0-based selected index, same pick handler.
     public Widget Radio(string[] options, int selected = 0,
         Action<Tx, int> onSelect = null, double? grow = null)
     {
@@ -1694,10 +1518,8 @@ sealed class Tx
 
     /// An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
     /// decodes natively, and decode failure renders the placeholder,
-    /// never a crash. `source` is the encoded bytes — one registration
-    /// copy into core memory, consumed by the next submit, so the
-    /// caller's array is free to drop the moment this returns; `bind`
-    /// a Signal carrying the image bytes.
+    /// never a crash. The caller's array is free to drop the moment this
+    /// returns.
     public Widget Image(byte[] source = null, Signal? bind = null, double? grow = null)
     {
         var w = Widget(KayaWire.KindImage);
@@ -1708,11 +1530,7 @@ sealed class Tx
     }
 
     /// A container parents everything declared inside its body (the
-    /// ambient stack). Statement position is the point: a foreach over
-    /// a generated row trace stands between siblings.
-    ///
-    /// `inset:` is this container's own padding — the window inset one
-    /// level down, so a full-bleed window can still hold an inset row.
+    /// ambient stack). `inset:` is this container's own padding.
     public Widget Column(
         Action body, double? grow = null, double? spacing = null, Align? align = null,
         double? inset = null) =>
@@ -1723,17 +1541,15 @@ sealed class Tx
         double? inset = null) =>
         ContainerOf(KayaWire.KindRow, body, grow, spacing, align, inset);
 
-    /// A vertical scroll viewport over EXACTLY ONE child (declare it
-    /// in the body; the scene rejects a second). Pass grow: so the
-    /// enclosing track CONSTRAINS it — an unconstrained viewport hugs
-    /// its content and nothing overflows.
+    /// A vertical scroll viewport over EXACTLY ONE child. Pass grow: so
+    /// the enclosing track CONSTRAINS it — an unconstrained viewport
+    /// hugs its content and nothing overflows.
     public Widget Scroll(Action body, double? grow = null) =>
         ContainerOf(KayaWire.KindScroll, body, grow, null, null, null);
 
-    /// A grid laying its children out row-major into `columns`
-    /// columns — each column takes its NATURAL width, aligned across
-    /// rows (the thing nested rows cannot express); `spacing` is the
-    /// inter-cell gap on both axes.
+    /// A grid laying its children out row-major into `columns` columns —
+    /// each column takes its NATURAL width, aligned across rows;
+    /// `spacing` is the inter-cell gap on both axes.
     public Widget Grid(int columns, Action body, double? spacing = null, double? grow = null,
         double? inset = null)
     {
@@ -1772,8 +1588,7 @@ sealed class Tx
         return parent;
     }
 
-    /// A For as a child: ForEach whose body keeps no handles — the
-    /// common case once handlers co-locate at their constructors.
+    /// A For as a child: ForEach whose body keeps no handles.
     public Widget Each(Collection c, Action<Tpl> body) => ForEach(c, body);
 
     public Collection Collection()
@@ -1819,12 +1634,9 @@ sealed class Tx
         return w;
     }
 
-    /// Open a For template for a generated row trace (`foreach (var
-    /// row in todos.Rows())`): the enumerator runs the loop body once
-    /// with the returned Tpl, then the close action ends the template
-    /// and parents the For into the enclosing scope. The enumerator's
-    /// Dispose calls close, so foreach makes the close structural —
-    /// even on break.
+    /// Open a For template for a generated row trace (`foreach (var row
+    /// in todos.Rows())`). The enumerator's Dispose calls the close
+    /// action, so foreach makes the close structural — even on break.
     public (Tpl, Action) BeginRowTrace(Collection c)
     {
         c.AssertRoot();
@@ -1873,42 +1685,28 @@ sealed class Tx
     /// Insert under a key the app already has: a scalar collection's
     /// entry is one value, which is the single-field record.
     ///
-    /// ROUTED THROUGH InsertRecordRaw and not spelled out again, so
-    /// there is ONE insert path in this binding rather than three. The
-    /// minter's absorption sits on it, and an explicit key that reached
-    /// the core without passing the counter is what would let a later
-    /// mint collide with it (docs/fresh-key-plan.md).
+    /// ROUTED THROUGH InsertRecordRaw so this binding has ONE insert
+    /// path: the minter's absorption sits on it, and an explicit key
+    /// that reached the core without passing the counter would let a
+    /// later mint collide with it (docs/fresh-key-plan.md).
     public void Insert(Collection c, object key, object value) =>
         InsertRecordRaw(c, key, value, 0, new[] { value });
 
-    /// Insert under a key the BINDING authors, and hand the key back.
-    ///
-    /// FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
-    /// identity and guest-chosen (DESIGN.md, the update algebra), so
-    /// anything that already HAS a name passes it to Insert — today and
-    /// always. This is the other case, and it is the common one in a
-    /// form: the app has a title and nothing else, and the alternative
-    /// is a hand-spelled counter beside the collection, whose safety
-    /// rests on a never-rewind rule nobody wrote down.
+    /// Insert under a key the BINDING authors, and hand the key back —
+    /// for data with no identity of its own (docs/fresh-key-plan.md).
     ///
     /// ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted
-    /// key is I64 (a C# long) and is counter+1. An instance is a table
-    /// — the live-zone collection, or one stamped copy selected by
-    /// At(...) — and keys are unique within one, so that is what the
-    /// counter is per.
+    /// key is I64 (a C# long) and is counter+1. An instance is a table —
+    /// the live-zone collection, or one stamped copy selected by At(...).
     ///
     /// MIXING IS SAFE BY ABSORPTION: an explicit Insert whose key is an
-    /// integer at or above the counter carries it up, so a later mint
-    /// clears every hand-chosen numeric key already in the table. A
-    /// non-numeric key cannot collide with an I64 at all and moves
-    /// nothing.
+    /// integer at or above the counter carries it up. A non-numeric key
+    /// cannot collide with an I64 and moves nothing.
     ///
-    /// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
-    /// argument. Undo and redo replay captured keys inside the core and
-    /// never re-enter this path, so a history walk never moves the
-    /// counter; an abandoned transaction does not move it back either
-    /// (Rollback restores the model, not the counter, so a key can
-    /// never be handed out twice). A fresh key is fresh forever.
+    /// NO DECREMENT IS EXPRESSIBLE: undo and redo replay captured keys
+    /// inside the core and never re-enter this path, and Rollback
+    /// restores the model but not the counter. A fresh key is fresh
+    /// forever.
     public long InsertFresh(Collection c, object value)
     {
         long key = MintKey(c);
@@ -1935,21 +1733,15 @@ sealed class Tx
         RecomputeDerived(c);
     }
 
-    /// MoveBefore repositions an entry before another's: order is
-    /// collection data, so the model reorders and the wire carries the
-    /// same keys-only delta. Keys, never indices. A missing key or
-    /// anchor throws here, at the call site — the same check the scene
-    /// makes; moving an entry before itself is a no-op, and nothing
-    /// travels.
+    /// MoveBefore repositions an entry before another's. Keys, never
+    /// indices. A missing key or anchor throws here, at the call site;
+    /// moving an entry before itself is a no-op and nothing travels.
     public void MoveBefore(Collection c, object key, object anchor) =>
         MoveEntry(c, key, new[] { anchor });
 
-    /// MoveToEnd repositions an entry at the end of its collection.
     public void MoveToEnd(Collection c, object key) =>
         MoveEntry(c, key, System.Array.Empty<object>());
 
-    /// MoveToFront repositions an entry at the front: sugar for
-    /// MoveBefore the current first key, lowering to the same wire op.
     public void MoveToFront(Collection c, object key)
     {
         var keys = KeysOf(c);
@@ -1958,9 +1750,6 @@ sealed class Tx
         MoveEntry(c, key, new[] { keys[0] });
     }
 
-    /// MoveAfter repositions an entry directly after another's: sugar
-    /// for MoveBefore the anchor's successor (MoveToEnd when the
-    /// anchor is last), lowering to the same wire op.
     public void MoveAfter(Collection c, object key, object anchor)
     {
         var keys = KeysOf(c);
@@ -1985,9 +1774,8 @@ sealed class Tx
     {
         if (before.Length > 0 && Equals(before[0], key))
         {
-            // Moving before itself: order unchanged and nothing
-            // travels — but the key must exist, the check the scene
-            // would make.
+            // Order unchanged and nothing travels — but the key must
+            // exist.
             if (!KeysOf(c).Exists(k => Equals(k, key)))
                 throw new InvalidOperationException($"kaya: move of missing key {key}");
             return;
@@ -2035,11 +1823,9 @@ sealed class Tx
 
     internal void InsertRecordRaw(Collection c, object key, object model, uint variant, object[] fields)
     {
-        // ABSORPTION, on the one path every explicit key travels — the
-        // scalar Insert, the record one and the sum one all arrive here:
-        // a numeric key at or above the minter's counter carries it up,
-        // so hand-chosen and minted keys share one space safely and in
-        // either order (InsertFresh's contract).
+        // ABSORPTION, on the one path every explicit key travels: a
+        // numeric key at or above the minter's counter carries it up
+        // (InsertFresh's contract).
         App.AbsorbKey(c.Id, c.Path, key);
         ModelSet(c.Id, c.Path, key, model);
         Records.Add(KayaWire.TxCollectionInsert(c.Id, c.Path, key, variant, fields));
@@ -2060,11 +1846,9 @@ sealed class Tx
         RecomputeDerived(c);
     }
 
-    // The record-time mirror-read guard: the template records once
-    // and replays, so a read inside a template body is one snapshot
-    // baked into every stamp — silently dead data. The typed surfaces
-    // (RecordCollection, SumCollection) route through Items, so this
-    // is the single choke point.
+    // The record-time mirror-read guard: a read inside a template body
+    // is one snapshot baked into every stamp. The typed surfaces route
+    // through Items, so this is the single choke point.
     void GuardMirrorRead()
     {
         if (App.TplDepth > 0)
@@ -2092,30 +1876,20 @@ sealed class Tx
     }
 
     /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2).
-    /// `seed` is one packed sRGB hex (0xRRGGBB) and is the whole call
-    /// for most apps; `light:`/`dark:` are the per-appearance overrides
-    /// a brand book that specifies a dark variant writes, and the seed
-    /// fills whichever is left unstated:
+    /// `seed` is one packed sRGB hex (0xRRGGBB); `light:`/`dark:` are
+    /// per-appearance overrides, and the seed fills whichever is left
+    /// unstated:
     /// tx.BrandAccent(0x3584E4) — tx.BrandAccent(0x3584E4, dark: 0x62A0EA).
     ///
     /// A REQUEST, uniformly: a platform may let its user override the
-    /// app's accent — macOS does today (an app accent applies only
-    /// while the system accent is multicolor) — and the semantics does
-    /// not change if another platform grows the preference.
+    /// app's accent (macOS does today).
     ///
-    /// SET ONCE, BEFORE THE FIRST MOUNT: brand is identity, not state,
-    /// and the root refuses a second write and a late one.
+    /// SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write
+    /// and a late one.
     ///
     /// The app NEVER writes a foreground and NEVER writes contrast
-    /// variants. The core derives fill, on-fill, standalone and a
-    /// hover/pressed ramp per appearance and hands every backend
-    /// values — an app-supplied foreground can be illegible with
-    /// nothing to catch it, and three of four platforms compute or
-    /// hard-code theirs anyway.
-    ///
-    /// There is no per-PLATFORM value map in this binding, as in every
-    /// other: D1 admits one, no binding spells it yet, and a C#-only
-    /// spelling would be a vocabulary that exists in one language.
+    /// variants — the core derives fill, on-fill, standalone and a
+    /// hover/pressed ramp per appearance.
     public void BrandAccent(uint seed, uint? light = null, uint? dark = null)
     {
         // The mask says which overrides are PRESENT, so a legitimate
@@ -2129,42 +1903,25 @@ sealed class Tx
     ///
     ///     using var font = tx.Asset("fonts/sora-wght.ttf");
     ///
-    /// Returns an Asset (see Kaya.cs for the type and its two
-    /// redemptions). Queues no record: opening one is a read, and the
-    /// transaction is here only because every kaya call a guest makes is.
+    /// Queues no record: opening one is a read.
     ///
-    /// A MISS THROWS, WITH THE CORE'S SENTENCE AND NOTHING ADDED. A
-    /// missing, unreadable, empty or malformed-name asset is a scene
-    /// error in every binding — the wall an app hits at startup, before
-    /// it can have drawn anything — and each raises in its own idiom: an
-    /// InvalidOperationException here, a panic in Rust and Go, a
-    /// RuntimeError in Python. Every one of them carries
-    /// kaya_asset_why_not's sentence VERBATIM. THIS BINDING WRITES NO
-    /// PROSE OF ITS OWN for that failure: one author for the diagnostic
-    /// means a C# guest and a Haskell guest are handed the same bytes,
-    /// and one scene can freeze them.
-    ///
-    /// That sentence names what the process measured — the name asked
-    /// for, the census of what the package does carry, the place it
-    /// resolved and the route that chose it — because a why-not may only
-    /// print what it went and got.
+    /// A MISS THROWS, WITH THE CORE'S SENTENCE AND NOTHING ADDED. This
+    /// binding writes no prose of its own for that failure, so every
+    /// language raises the same bytes and one scene can freeze them.
     ///
     /// EACH CALL READS. No cache, no watch, no reload.
     public Asset Asset(string name)
     {
         // The transaction's liveness, asked through the same chokepoint
-        // every write uses: Rust gets this from the borrow checker,
-        // which makes a dead Tx unnameable.
+        // every write uses.
         _ = Records;
         ulong handle = Kaya.AssetOpen(name);
         if (handle != 0) return new Asset(handle, name);
         string sentence = Kaya.AssetMissSentence(name);
         if (sentence.Length == 0)
-            // Reachable only if the two calls disagree, which they can
-            // do because they are two calls: the open answered a miss
-            // and the why-not answered that it resolves. Both facts were
-            // measured; this binding has no third one and invents no
-            // cause for them.
+            // Reachable only when the two calls disagree: the open
+            // answered a miss and the why-not answers that it resolves.
+            // Both were measured; this binding invents no third cause.
             sentence = $"kaya: asset(\"{name}\") did not open, and the core's own " +
                 "why-not answers that it resolves — those two facts were measured " +
                 "a moment apart, and this binding has nothing further to report";
@@ -2174,35 +1931,15 @@ sealed class Tx
     /// Why Asset(name) would throw — the sentence it would carry, handed
     /// over without throwing. "" means the name resolves.
     ///
-    /// WHY THIS EXISTS WHEN THE THROW ALREADY CARRIES IT. Unwinding is not
-    /// one semantics in nine languages, and a conformance scene has to
-    /// observe this sentence on five platforms. C# catches happily;
-    /// Swift's miss is a fatalError, which traps rather than unwinding, so
-    /// a Swift guest cannot catch a miss at all. A total query has no such
-    /// split — every binding answers the same string the same way, and the
-    /// scene can freeze it.
+    /// Line 1 (name, rule, census) is the same on every platform and is
+    /// the line a scene freezes; line 2 names the resolved place, which
+    /// three platforms spell three ways.
     ///
-    /// THE SAME SENTENCE, NOT A SECOND ONE: this and Asset's throw both
-    /// hand back the core's bytes, so what a scene freezes is what an
-    /// app's user would have been shown.
-    ///
-    /// NAMED FOR THE CARRYING and not for the diagnosing — the long form
-    /// of that reasoning is on Kaya.AssetMissSentence. There is one author
-    /// for the sentence and this only ferries it across the FFI.
-    ///
-    /// TWO LINES. Line 1 — the name, the rule it broke, and the census of
-    /// what the package carries — is the same on every platform and is the
-    /// line a scene freezes. Line 2 names the resolved place and the route
-    /// that chose it, which a bundle, a device directory and a repo
-    /// checkout spell three different ways.
-    ///
-    /// It measures rather than predicts: each call reads, so "" is a fact
-    /// about the moment it was asked.
+    /// Why a query and not just the throw: docs/deferred.md, the assets
+    /// entry.
     public string AssetMissSentence(string name)
     {
-        // The transaction's liveness, for the same reason Asset asks it:
-        // Rust's asset_miss_sentence takes &self, so a dead Tx cannot name
-        // it there, and C# reproduces that by asking rather than diverging.
+        // The transaction's liveness, for the same reason Asset asks it.
         _ = Records;
         return Kaya.AssetMissSentence(name);
     }
@@ -2212,42 +1949,26 @@ sealed class Tx
     /// and every platform that HAS that family installed uses it.
     ///
     /// THE FAMILY, NEVER THE SCALE: sizes, weights, metrics and the
-    /// whole type ramp stay the platform's. Substituting a family into
-    /// the platform's own ramp is what makes the swap safe, and it is
-    /// the role tier one surface over — not a font size — that carries
-    /// emphasis.
+    /// whole type ramp stay the platform's.
     ///
-    /// SET ONCE, BEFORE THE FIRST MOUNT: the accent's wall verbatim and
-    /// for its reason — brand is identity, not state, and a slot that
-    /// could flip at runtime would promise the theme-switching surface
-    /// the vocabulary deliberately does not have. The root refuses a
-    /// second write and a late one, in its own words, in every language
-    /// at once.
+    /// SET ONCE, BEFORE THE FIRST MOUNT: the accent's wall verbatim. The
+    /// root refuses a second write and a late one.
     ///
     /// A family a platform does not have leaves that platform's own
-    /// typeface in place, deliberately and silently: every font API
-    /// renders SOMETHING for a name it cannot match, so each lowering
-    /// gates on the family being INSTALLED rather than letting the
-    /// platform pick a stranger.
+    /// typeface in place, deliberately and silently: each lowering gates
+    /// on the family being INSTALLED, because every font API renders
+    /// SOMETHING for a name it cannot match.
     ///
     /// platforms: the per-platform overrides, as pairs —
     /// new[] { (Platform.Linux, "DejaVu Serif") } — with `family` the
-    /// default every platform that names no row of its own gets. THE
-    /// PAIRS TRAVEL UNRESOLVED, unlike the accent's per-appearance
-    /// values, and that asymmetry is the design: this binding cannot
-    /// know which platform it is running on (the JVM says "Linux" on
-    /// Android), but every LOWERING is its platform, so each backend
-    /// picks its own row and no platform id is ever needed here. A
-    /// colour resolves to one number a binding can compute anywhere; a
-    /// family name has to survive to the backend that will look it up.
+    /// default. THE PAIRS TRAVEL UNRESOLVED, because this binding cannot
+    /// know which platform it is running on while every LOWERING is its
+    /// platform.
     ///
     /// font: a font FILE, as bytes, on the same blob channel an image
-    /// rides. Register-then-resolve: the backend hands the bytes to its
-    /// platform's app-font API, reads back the family that registration
-    /// produced, and the NAME machinery above takes over unchanged — one
-    /// resolution, one observation, one fallback for both forms. A
-    /// registered blob's own family wins over `family` on the backend
-    /// that registered it.
+    /// rides. The backend registers them, reads back the family that
+    /// produced, and the NAME machinery above takes over; a registered
+    /// blob's own family wins over `family` on that backend.
     public void BrandTypeface(
         string family,
         (Platform Platform, string Family)[]? platforms = null,
@@ -2255,24 +1976,21 @@ sealed class Tx
     {
         // The mask says whether the font slot means anything; the slot
         // is written EITHER WAY (an empty Str when it does not), so the
-        // record's field count never varies with the payload — the
-        // accent's mask discipline verbatim.
+        // record's field count never varies with the payload.
         uint mask = font is null ? 0u : 1u;
         var pairs = new List<object>();
         foreach (var (platform, perPlatform) in
                  platforms ?? Array.Empty<(Platform, string)>())
         {
             // An I64 platform tag then that platform's family, read in
-            // twos by the core: the file dialog's filter encoding one
-            // surface over, and the same odd-count refusal.
+            // twos by the core, with the same odd-count refusal the file
+            // dialog's filters get.
             pairs.Add((long)platform);
             pairs.Add(perPlatform);
         }
         Records.Add(KayaWire.TxSetBrandTypeface(
             mask, family, pairs.ToArray(),
-            // The bytes go to the core ONCE, by handle, exactly as an
-            // image's do — the record carries the handle, never the
-            // font itself.
+            // The record carries the handle, never the font itself.
             font is null ? (object)"" : new KayaWire.BlobHandle(Kaya.RegisterBlob(font))));
     }
 
@@ -2282,20 +2000,13 @@ sealed class Tx
     ///     using var font = tx.Asset("fonts/sora-wght.ttf");
     ///     tx.BrandTypeface("Sora", font);
     ///
-    /// The bytes never enter .NET. The core read them, the redemption
-    /// clones one refcount into the blob table, and a hundred kilobytes
-    /// of font reaches the platform's font API without a byte[] ever
-    /// existing for it.
-    ///
-    /// AN OVERLOAD WHERE GO WRITES A NAMED SIBLING (kaya.FontAsset),
-    /// which is what invariant 1 asks for: every binding admits both
-    /// spellings, and the language decides how they are spelled.
+    /// The bytes never enter .NET: the core read them and the
+    /// redemption clones one refcount into the blob table.
     ///
     /// THE ASSET IS SECOND AND REQUIRED, rather than a third optional
     /// parameter beside `font`. Two overloads whose tails were both
-    /// optional would make tx.BrandTypeface("Georgia") ambiguous — a
-    /// compile error at every existing call site — so the parameter that
-    /// selects this overload is the one that cannot be left out.
+    /// optional would make tx.BrandTypeface("Georgia") ambiguous, so the
+    /// parameter that selects this overload cannot be left out.
     public void BrandTypeface(
         string family,
         Asset font,
@@ -2328,39 +2039,25 @@ sealed class Tx
     /// Send a PNG: each lowering converts, and no platform-specific
     /// artwork rides the wire.
     ///
-    /// SET ONCE, BEFORE THE FIRST MOUNT: the brand's wall verbatim and
-    /// for its reason — identity is not state, and a slot that could
-    /// flip at runtime would promise the identity-switching surface the
-    /// vocabulary deliberately does not have. The root refuses a second
-    /// write and a late one, in its own words, in every language at
-    /// once, and it refuses an empty name the same way: an app that
-    /// wants the platform's own identity declares none at all.
+    /// SET ONCE, BEFORE THE FIRST MOUNT: the brand's wall verbatim. The
+    /// root refuses a second write, a late one, and an empty name — an
+    /// app that wants the platform's own identity declares none at all.
     ///
     /// THE BYTES ARE NEVER INSPECTED between here and the platform's own
-    /// decoder. Whether a blob is an image is a question only that
-    /// decoder can answer, so bytes that are not one leave every
-    /// platform's default in place — which is why the conformance scene
-    /// reads what the DECODER produced rather than echoing this request
-    /// back.
+    /// decoder, so bytes that are not an image leave every platform's
+    /// default in place.
     ///
     /// icon: the picture's bytes, on the same blob channel an image
-    /// rides. Leave it out for the NAME-ONLY form — the optional
-    /// parameter BrandTypeface already uses, and C#'s spelling of
-    /// Rust's second function: a named app with no mark yet still
-    /// reaches the Windows caption, the macOS menu bar, the Linux
-    /// app_id and both phones' packaging, and every icon surface keeps
-    /// the platform's own default.
+    /// rides. Leave it out for the NAME-ONLY form, which still reaches
+    /// every name surface and keeps each platform's default mark.
     public void AppIdentity(string name, byte[]? icon = null)
     {
         // The mask says whether the icon slot means anything; the slot
         // is written EITHER WAY (an empty Str when it does not), so the
-        // record's field count never varies with the payload — the
-        // brand mask's discipline verbatim.
+        // record's field count never varies with the payload.
         Records.Add(KayaWire.TxSetAppIdentity(
             icon is null ? 0u : 1u, name,
-            // The bytes go to the core ONCE, by handle, exactly as an
-            // image's do — the record carries the handle, never the
-            // picture itself.
+            // The record carries the handle, never the picture itself.
             icon is null ? (object)"" : new KayaWire.BlobHandle(Kaya.RegisterBlob(icon))));
     }
 
@@ -2370,10 +2067,8 @@ sealed class Tx
     ///     using var mark = tx.Asset("icons/kaya-mark.png");
     ///     tx.AppIdentity("Aurora Notes", mark);
     ///
-    /// The picture never enters .NET — the core read it and the
-    /// redemption clones one refcount into the blob table. The
-    /// name-only form stays the one-argument call above; this overload
-    /// requires the asset, so nothing here is ambiguous with it.
+    /// The picture never enters .NET. This overload REQUIRES the asset,
+    /// so it is not ambiguous with the name-only call above.
     public void AppIdentity(string name, Asset icon)
     {
         if (icon is null)
@@ -2384,35 +2079,20 @@ sealed class Tx
             1u, name, new KayaWire.BlobHandle(icon.Blob())));
     }
 
-    /// Mount into the default window; per-window targets arrive with
-    /// the window vocabulary.
-    /// Set the window's attributes in one construct — the attribute
-    /// set is EXACTLY CreateWindow's (a window's attributes ride its
-    /// window construct; the primary differs only in having no
-    /// creation moment — the process owns it). Named arguments are
-    /// the C# spelling: tx.Window(title: "sections",
+    /// Set the window's attributes in one construct — the attribute set
+    /// is EXACTLY CreateWindow's. tx.Window(title: "sections",
     /// sectionsPresentation: KayaWire.SectionsPresentationBar).
     ///
     /// dirty: says this surface holds UNSAVED WORK, and the backend
-    /// shows its platform's own affordance — the dot in the close
-    /// button on macOS, a leading `*` in the rendered caption on
-    /// Windows, a bullet beside the header-bar title on GTK, nothing
-    /// on the phones, which have none (docs/dirty-plan.md D2/D4).
-    /// STATE, NOT CHROME: the title you declared is left alone, with
-    /// no marker to compose into it and no placeholder to leave room
-    /// for (the rejected Qt design). It ARMS NOTHING either — "unsaved
-    /// changes, close anyway?" is vetoClose plus a dialog, yours to
-    /// compose, because apps legitimately differ on what it should do.
+    /// shows its platform's own affordance (docs/dirty-plan.md D2/D4).
+    /// STATE, NOT CHROME: the declared title is left alone. It ARMS
+    /// NOTHING either — "unsaved changes, close anyway?" is vetoClose
+    /// plus a dialog, yours to compose.
     ///
     /// inset: the window CONTENT INSET, in layout units — LAYOUT, not
-    /// appearance (docs/styling-plan.md D3): the space kaya's own
-    /// interpreters put around the mounted root. 16 unless you say
-    /// otherwise; 0 is full bleed (a Sublime-shaped editor, a canvas),
-    /// honored unconditionally because the inset is kaya's own padding.
-    /// A platform's safe area is a separate fact and is not removed by
-    /// it: content extends to the safe-area edge, not past it. Negative
-    /// has no reading — an inset is space, not an offset — and the root
-    /// refuses one.
+    /// appearance (docs/styling-plan.md D3). 16 unless you say
+    /// otherwise; 0 is full bleed. A platform's safe area is a separate
+    /// fact and is not removed by it. Negative is refused at the root.
     public void Window(
         string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, bool? listDetail = null, bool? dirty = null,
@@ -2433,37 +2113,30 @@ sealed class Tx
             Records.Add(KayaWire.TxSetWindowSectionsPresentation(id, sp));
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
         if (onClosed is { } c) App.windowClosed[id] = c;
-        // The ledger's reports ride the window construct like the
-        // lifecycle handlers, and for the same reason: the ledger is per
-        // window, so the window is what they scope to. Each fires every
-        // time kaya routes an undo (or a redo) there, with the group's
-        // label — EMPTY for a typing episode — and what the core put
-        // back. THE DELTA IS THE ONLY NOTIFICATION: applying an inverse
-        // is a programmatic write, so the echo doctrine silences every
-        // occurrence it would otherwise cause. The binding has already
-        // folded the payload into its own mirrors when the handler runs;
-        // this is where an app folds it into ITS model.
+        // Each fires every time kaya routes an undo (or a redo) there,
+        // with the group's label — EMPTY for a typing episode — and what
+        // the core put back. THE DELTA IS THE ONLY NOTIFICATION:
+        // applying an inverse is a programmatic write, so the echo
+        // doctrine silences every occurrence it would cause. The mirrors
+        // are already folded when the handler runs; this is where an app
+        // folds it into ITS model.
         if (onUndone is { } u) App.undone[id] = u;
         if (onRedone is { } re) App.redone[id] = re;
-        // The menubar rides the window construct (the window-attribute
-        // unification rule): menus: appends top-level grouping nodes
-        // (Menu or RadioGroup) to this window's command catalog, in
-        // order — append-only, at any time.
+        // menus: appends top-level grouping nodes (Menu or RadioGroup)
+        // to this window's command catalog, in order — append-only, at
+        // any time.
         if (menus != null)
             foreach (var m in menus)
                 Records.Add(KayaWire.TxMenubarAppend(id, m.Id));
     }
 
-    /// Create an auxiliary window (capability-gated: phone hosts
-    /// reject at the root). Materializes hidden; MountIn presents it.
-    /// Named arguments are the C# spelling:
-    /// tx.CreateWindow(1, title: "inspector", width: 480, height: 320, vetoClose: true).
-    /// The handlers ride the declaration (per-window — handlers
-    /// scope to the thing that creates them): onCloseRequested fires
-    /// per chrome close while vetoClose is armed — nothing has
-    /// closed; answer with tx.DestroyWindow to agree. onClosed fires
-    /// when the non-veto auxiliary is chrome-closed (informational;
-    /// DestroyWindow reconciles) and retires with it.
+    /// Create an auxiliary window (capability-gated: phone hosts reject
+    /// at the root). Materializes hidden; MountIn presents it.
+    ///
+    /// onCloseRequested fires per chrome close while vetoClose is armed
+    /// — nothing has closed; answer with tx.DestroyWindow to agree.
+    /// onClosed fires when the non-veto auxiliary is chrome-closed
+    /// (informational; DestroyWindow reconciles) and retires with it.
     public void CreateWindow(
         ulong id, string? title = null, double? width = null, double? height = null,
         bool? vetoClose = null, bool? listDetail = null, bool? dirty = null,
@@ -2478,19 +2151,16 @@ sealed class Tx
             onCloseRequested, onClosed, onUndone, onRedone, menus, id);
     }
 
-    /// Request a modal alert (the request/result grammar), named
-    /// arguments as the C# spelling:
+    /// Request a modal alert (the request/result grammar):
     /// tx.ShowAlert(title: "delete item?", message: "…",
     ///     action0: "Delete", action1: "Archive", cancel: "Keep",
     ///     onResult: (tx, choice) => { … }).
-    /// The result handler rides the REQUEST (the widget-handler
-    /// precedent) and retires with its one answer — choice is an
-    /// action index (0 or 1) or KayaWire.AlertChoiceCancel, every
-    /// platform-native dismissal. Ids are binding-allocated; the
-    /// call returns the id for the floor-minded. Up to two actions
-    /// (the platform floor); the cancel label is required (no
-    /// binding invents a default). One alert may be live per
-    /// process; show the next from the handler.
+    /// The result handler rides the REQUEST and retires with its one
+    /// answer — choice is an action index (0 or 1) or
+    /// KayaWire.AlertChoiceCancel, every platform-native dismissal. Up
+    /// to two actions (the platform floor); the cancel label is
+    /// required. One alert may be live per process; show the next from
+    /// the handler.
     public ulong ShowAlert(
         string title = "", string message = "",
         string? action0 = null, string? action1 = null,
@@ -2514,16 +2184,14 @@ sealed class Tx
     }
 
     /// Ask the platform for files. THE PICK, NOT THE OPEN — the result
-    /// carries handles you redeem later, so the name says Pick
-    /// (DESIGN.md, File dialogs).
+    /// carries handles you redeem later (DESIGN.md, File dialogs).
     ///
-    /// `filters` is advisory on every platform: a default view rather
-    /// than a guarantee, so the guest still validates what it got. Each
-    /// entry is (label, space-separated extensions).
+    /// `filters` is advisory on every platform, so the guest still
+    /// validates what it got. Each entry is (label, space-separated
+    /// extensions).
     ///
-    /// onResult fires exactly once and the registration retires with
-    /// it. CANCEL IS THE EMPTY LIST, faithfully: no platform can
-    /// confirm an empty selection. One dialog may be live per process;
+    /// onResult fires exactly once and the registration retires with it.
+    /// CANCEL IS THE EMPTY LIST. One dialog may be live per process;
     /// show the next from the handler.
     public ulong PickFiles(
         (string Label, string Extensions)[]? filters = null,
@@ -2564,9 +2232,7 @@ sealed class Tx
     /// extension matching the mime type. Read the name you GOT.
     ///
     /// CANCEL IS null AND A DESTINATION IS A VALUE — the list the picker
-    /// returns is narrowed HERE rather than in every guest, because "one
-    /// locator or none" is a fact of the request and not something an app
-    /// should re-derive from a length.
+    /// returns is narrowed HERE rather than in every guest.
     ///
     /// onResult fires exactly once and the registration retires with it.
     /// One dialog may be live per process WHICHEVER KIND IT IS, so a save
@@ -2574,9 +2240,7 @@ sealed class Tx
     ///
     /// WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist
     /// yet (macOS, GTK and Windows answer with a name for a file nobody
-    /// has made — measured), so the handle's Open CREATES: opening it for
-    /// KayaWire.FileModeWrite succeeds and yields an empty file on every
-    /// platform, which is the one behaviour a guest writes against
+    /// has made — measured), so the handle's Open CREATES
     /// (docs/save-plan.md D1).
     public ulong SaveFile(
         string suggestedName,
@@ -2584,17 +2248,14 @@ sealed class Tx
         Action<Tx, PickedFile?>? onResult = null,
         ulong window = 0)
     {
-        // ONE ID SPACE AND ONE TABLE, shared with the picker rather than
-        // parallel to it: the core keeps ONE live-dialog slot whichever
-        // kind is up, and the answer arrives as the same
-        // file_dialog_result. A second counter would mint an id the
-        // picker had already used and route a result to the wrong
-        // handler; a second table would need a second retire.
+        // ONE ID SPACE AND ONE TABLE, shared with the picker: the core
+        // keeps ONE live-dialog slot whichever kind is up, and the answer
+        // arrives as the same file_dialog_result. A second counter would
+        // mint an id the picker had already used.
         ulong id = ++App.nextFileDialog;
         if (onResult != null)
             // The narrowing lives at the REGISTRATION, so the dispatch
-            // loop's one-shot removal serves both kinds unchanged and
-            // there is no second place to forget to retire.
+            // loop's one-shot removal serves both kinds unchanged.
             App.fileDialogs[id] = (tx, files) =>
                 onResult(tx, files.Count == 0 ? (PickedFile?)null : files[0]);
         Records.Add(KayaWire.TxShowSaveDialog(
@@ -2604,9 +2265,7 @@ sealed class Tx
 
     /// The advisory filters' wire shape, shared by both dialog kinds:
     /// alternating Str values, a label then its space-separated
-    /// extensions. One encoder because the core validates one encoding —
-    /// a save request that spelled its filters differently would be
-    /// refused at apply for a reason the guest never wrote.
+    /// extensions. One encoder because the core validates one encoding.
     static object[] FilterValues((string Label, string Extensions)[]? filters)
     {
         var values = new List<object>();
@@ -2620,29 +2279,20 @@ sealed class Tx
 
     // --- The clipboard (DESIGN.md, Clipboard) ----------------------
     //
-    // A clip is not a string: every host models it as ONE item
-    // available in several types, with the consumer taking the richest
-    // it understands. So COPY TAKES A RECORD — spelled as a chain here,
-    // where a second Text() replaces the field rather than needing a
-    // duplicate check — and the two answers are a SUM.
-    //
-    // kaya DERIVES NOTHING between representations. Whether list
-    // bullets survive html-to-text is the app's decision.
+    // A clip is ONE item available in several types, so Copy takes a
+    // record (a chain here, where a second Text() replaces the field)
+    // and the two answers are a sum. kaya DERIVES NOTHING between
+    // representations.
 
     /// Begin a clip: fill in as many representations as the app wants
     /// to offer, and Send puts it on the system clipboard.
     public CopyRef Copy() => new CopyRef(this);
 
-    /// Begin the privileged read — THE ONE NAMED FOR WHAT IT IS rather
-    /// than for pasting.
-    ///
-    /// A user's paste arrives at the widget's hook and costs nothing;
-    /// this asks without a gesture, which the platforms have
-    /// deliberately made expensive: iOS 16 PROMPTS when the content
-    /// came from another app and blocks until the user answers, Android
-    /// returns nothing unless the app has focus, and Wayland delivers
-    /// no offer to an unfocused client. Reach for this to detect a URL
-    /// or import from the clipboard, never to implement Paste — that is
+    /// Begin the privileged read. Asking without a gesture is expensive
+    /// on every platform: iOS 16 PROMPTS when the content came from
+    /// another app and blocks until the user answers, Android returns
+    /// nothing unless the app has focus, and Wayland delivers no offer
+    /// to an unfocused client. Never implement Paste with this — that is
     /// the Paste command, and it is free.
     public ClipReadRef ReadClipboard() => new ClipReadRef(this, ++App.nextClipboardRead);
 
@@ -2654,14 +2304,10 @@ sealed class Tx
     /// is live while this widget is focused, it filters what can reach
     /// the paste hook, and on Android it IS the native registration
     /// (setOnReceiveContentListener takes the mime types on the view).
-    /// Per-widget because whether Paste should be enabled is the
-    /// INTERSECTION of what the clipboard offers and what the FOCUSED
-    /// target takes.
     ///
     /// DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
-    /// declares nothing gets the platform's own insertion and reports
-    /// it through the ordinary change path, which is why a plain text
-    /// editor writes none of this and has working cut, copy and paste.
+    /// declares nothing gets the platform's own insertion and reports it
+    /// through the ordinary change path.
     public void SetAccepts(Widget w, params string[] kinds) =>
         Records.Add(KayaWire.TxSetAccepts(w.Id, AcceptList(kinds)));
 
@@ -2674,23 +2320,17 @@ sealed class Tx
     public void OnPaste(Widget w, Action<Tx, Representation> handler) =>
         App.widgetPastes[w.Id] = handler;
 
-    /// A paste onto a stamped copy: the handler also receives the
-    /// copy's key path, outermost first. One record kind, the path
-    /// deciding — exactly as a click on a stamped row is one record
-    /// with a click on a live widget.
+    /// A paste onto a stamped copy: the handler also receives the copy's
+    /// key path, outermost first.
     public void OnPaste(Node n, Action<Tx, List<object>, Representation> handler) =>
         App.nodePastes[n.Id] = handler;
 
     /// Join an accept list: the closed kinds by name plus any custom
     /// ids, space separated.
     ///
-    /// A LIST AND NOT A MASK, because half the set is open-ended. A
-    /// custom format that could be written and never accepted would be
-    /// an escape hatch that only opens outward, and round-tripping an
-    /// app's own data is the whole reason to have one. Ids reach every
-    /// platform's registry verbatim, so they carry no spaces — which is
-    /// what makes the join unambiguous, and what this refuses to let
-    /// you break.
+    /// A LIST AND NOT A MASK, because half the set is open-ended. Ids
+    /// reach every platform's registry verbatim, so they carry no spaces
+    /// — which is what makes the join unambiguous.
     internal static string AcceptList(IEnumerable<string> kinds)
     {
         foreach (var kind in kinds)
@@ -2707,18 +2347,15 @@ sealed class Tx
     /// confirmation and the reconciliation after a chrome close.
     public void DestroyWindow(ulong id) => Records.Add(KayaWire.TxDestroyWindow(id));
 
-    /// Push a navigation entry onto the primary surface's stack
-    /// (entry ids are guest-allocated in the shared surface
-    /// namespace, the CreateWindow discipline). Materializes covered;
-    /// MountIn presents it. Named arguments are the C# spelling:
-    /// tx.PushEntry(7, title: "detail", interceptBack: true).
-    /// The handlers ride the push (per-entry, the ShowAlert onResult
-    /// precedent — no id inspection anywhere): onPopped fires when
-    /// the user's back affordance pops THIS entry natively
-    /// (post-fact; a programmatic PopEntry does not fire it — its
-    /// caller already knows) and retires with the one pop;
-    /// onBackRequested fires per back request while interceptBack is
-    /// armed — nothing has popped; answer with tx.PopEntry to agree.
+    /// Push a navigation entry onto the primary surface's stack (entry
+    /// ids are guest-allocated in the shared surface namespace).
+    /// Materializes covered; MountIn presents it.
+    ///
+    /// onPopped fires when the user's back affordance pops THIS entry
+    /// natively (post-fact; a programmatic PopEntry does not fire it)
+    /// and retires with the one pop. onBackRequested fires per back
+    /// request while interceptBack is armed — nothing has popped; answer
+    /// with tx.PopEntry to agree.
     public void PushEntry(
         ulong id, string? title = null, bool? interceptBack = null,
         Action<Tx>? onPopped = null, Action<Tx>? onBackRequested = null,
@@ -2738,19 +2375,12 @@ sealed class Tx
 
     /// Append a section to the window's section set (section ids are
     /// guest-allocated in the shared surface namespace); the set is
-    /// append-only — sections have no destruction grammar, and every
-    /// section's root is retained while covered (switching is
-    /// SELECTION, not lifecycle). MountIn fills its pane. Named
-    /// arguments are the C# spelling:
-    /// tx.AddSection(7, title: "Feed", onSelected: tx => …).
-    /// onSelected rides the add (per-section): fires each time the
-    /// USER switches to it — post-fact and NOT one-shot; a
-    /// programmatic SelectSection does not fire it (the echo
-    /// doctrine).
-    /// `symbol:` is the switcher item's SEMANTIC ICON (Symbol): a
-    /// concept each backend draws in its own platform's symbol set — a
-    /// tab bar without icons is not the platform's real thing, and a
-    /// sidebar source list is where a desktop app most wants them.
+    /// append-only, and every section's root is retained while covered —
+    /// switching is SELECTION, not lifecycle. MountIn fills its pane.
+    ///
+    /// onSelected fires each time the USER switches to it — post-fact
+    /// and NOT one-shot; a programmatic SelectSection does not fire it.
+    /// `symbol:` is the switcher item's SEMANTIC ICON (Symbol).
     public void AddSection(
         ulong id, string? title = null, Symbol? symbol = null,
         Action<Tx>? onSelected = null, ulong window = 0)
@@ -2769,11 +2399,10 @@ sealed class Tx
 
     // --- Menus: the command vocabulary (DESIGN.md, Menus) ------------
     //
-    // Named-args constructors nested by argument lists: children are
-    // arguments (evaluated first, unanchored), the grouping construct
-    // appends them, and the window construct's menus: parameter is the
-    // bar anchor. Items are live-zone only; a retained item reopens
-    // through tx.Menu(item, ...) — the append-at-any-time discipline.
+    // Children are arguments (evaluated first, unanchored), the grouping
+    // construct appends them, and the window construct's menus:
+    // parameter is the bar anchor. Items are live-zone only; a retained
+    // item reopens through tx.Menu(item, ...).
 
     MenuItem NewMenuItem(uint kind, TextSource? label)
     {
@@ -2821,10 +2450,9 @@ sealed class Tx
             Records.Add(KayaWire.TxSetMenuValue(m.Id, value.Value));
     }
 
-    // The tail every item kind shares. `symbol` rides here BESIDE
-    // `icon` because they are the two answers to the same question —
-    // the semantic name the platform draws, or the app's own art — and
-    // one place to spell them is one place for a kind to forget them.
+    // The tail every item kind shares. `symbol` rides here beside
+    // `icon`: they are the two answers to the same question, and one
+    // place to spell them is one place for a kind to forget them.
     void MenuTail(MenuItem m, BoolSource? enabled, byte[] icon, Symbol? symbol = null)
     {
         if (enabled is { } e) MenuEnabled(m, e);
@@ -2846,14 +2474,10 @@ sealed class Tx
     /// The closed standard-command vocabulary (DESIGN.md, Menus):
     /// macOS places this one in the application menu, and every other
     /// host leaves the item where the app declared it.
-    // A NAMED VOCABULARY FOR THE CLOSED HALF, exactly as the menu roles
-    // are. The accept list is open-ended — a custom format id is any
-    // app-chosen string — so the four closed kinds cannot be a mask; but
-    // they can be spelled once here instead of quoted at every call site.
+    // A NAMED VOCABULARY FOR THE CLOSED HALF of the accept list, because
     // A MISTYPED BARE STRING IS SILENT: it becomes a custom format id no
     // clipboard will ever offer, so Paste stays dead and the paste hook
-    // never fires, with nothing to see anywhere. A custom id has no
-    // constant by nature — the app that defines it names it.
+    // never fires, with nothing to see anywhere.
     public const string AcceptText = "text";
     public const string AcceptHtml = "html";
     public const string AcceptImage = "image";
@@ -2865,31 +2489,25 @@ sealed class Tx
     /// act on the FOCUSED widget, and work out their own enablement
     /// from what the clipboard offers and what that widget accepts.
     ///
-    /// GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only
-    /// the widget knows what is selected, so an app cannot assemble the
-    /// payload for "copy the selected text" out of the data layer. Copy
-    /// of a selection is therefore necessarily a command, and Paste is
-    /// its mirror. Copy() and ReadClipboard() are for overriding that
-    /// default and for targets with no native behaviour.
+    /// GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only the
+    /// widget knows what is selected. Copy() and ReadClipboard() are for
+    /// overriding that default and for targets with no native behaviour.
     public const string RoleCut = "cut";
     public const string RoleCopy = "copy";
     public const string RolePaste = "paste";
 
-    /// The same gesture layer one tier deeper. Undo and Redo act on the
-    /// FOCUSED widget first — a text field whose own stack has something
-    /// to give answers before the core's ledger does — and configure
-    /// their own enablement from that same question, which is why they
-    /// are roles and not app-authored actions (docs/undo-plan.md D6).
-    /// An app declares the two items and writes nothing else: the
-    /// routing is kaya's, not the app's.
+    /// Undo and Redo act on the FOCUSED widget first — a text field
+    /// whose own stack has something to give answers before the core's
+    /// ledger does — and configure their own enablement
+    /// (docs/undo-plan.md D6). An app declares the two items and writes
+    /// nothing else.
     public const string RoleUndo = "undo";
     public const string RoleRedo = "redo";
 
     /// An action — a leaf command firing exactly one menu_activated
-    /// occurrence (menu click OR its shortcut: ONE occurrence, one
-    /// dispatch path; the handler rides the declaration and covers
-    /// both). The shortcut is canonicalized by the binding's one
-    /// parser; the root judges its anchor (window catalogs only).
+    /// occurrence for a menu click OR its shortcut. The shortcut is
+    /// canonicalized by the binding's one parser; the root judges its
+    /// anchor (window catalogs only).
     public MenuItem Item(TextSource label, string shortcut = null,
         BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null,
         bool primary = false, string role = null, Action<Tx> onActivate = null)
@@ -2905,8 +2523,8 @@ sealed class Tx
 
     /// The template-node flavor: an item attached to a stamped copy
     /// (tx.ContextCatalog + Tpl.ContextMenu) reports the copy's key
-    /// path, outermost first — the keys ARE the noun the command acts
-    /// on. Context items take no shortcuts (root-checked).
+    /// path, outermost first. Context items take no shortcuts
+    /// (root-checked).
     public MenuItem Item(TextSource label, Action<Tx, List<object>> onActivate,
         BoolSource? enabled = null, byte[] icon = null, Symbol? symbol = null)
     {
@@ -3069,17 +2687,11 @@ sealed class Tpl
         return n;
     }
 
-    /// PRIVATE, and the visibility is the point: `SetText` is the LIVE
-    /// zone's verb (Tx.SetText, a dynamic write to a widget the app
-    /// already built, which every gate requires as sugar), while a
-    /// constant text on a template NODE is the floor under
-    /// Label/Button/Entry/Textarea. Both spellings read `.SetText(` and
-    /// only the receiver's TYPE tells them apart, which no sweep over a
-    /// guest can see — so the template one stops being spellable at all
-    /// and the compiler holds the line a regex could not (F3,
-    /// docs/tpl-props-plan.md). The zone's floor keeps Widget, the
-    /// Bind*Field binds and AddChild; a const text at the floor had no
-    /// caller outside this class and now has no name outside it either.
+    /// PRIVATE, and the visibility is the point: both zones' spellings
+    /// read `.SetText(` and only the receiver's TYPE tells them apart,
+    /// which no sweep over a guest can see — so the template one is not
+    /// spellable and the compiler holds the line a regex could not (F3,
+    /// docs/tpl-props-plan.md). KEEP IT PRIVATE.
     void SetText(Node n, string text) => tx.Records.Add(KayaWire.TxSetText(n.Id, text));
 
     /// Bind text to the element of the enclosing For, `level` Fors up
@@ -3092,8 +2704,6 @@ sealed class Tpl
     public void BindTextField(Node n, uint level, Field<string> f) =>
         tx.Records.Add(KayaWire.TxBindTextElement(n.Id, level, f.Index));
 
-    /// Bind a checkbox's state to one field of the element;
-    /// Field<bool> only.
     public void BindCheckedField(Node n, uint level, Field<bool> f) =>
         tx.Records.Add(KayaWire.TxBindCheckedElement(n.Id, level, f.Index));
 
@@ -3104,22 +2714,19 @@ sealed class Tpl
 
     /// Bind a slider's, progress bar's or choice widget's value to one
     /// field of the element; Field&lt;double&gt; only. A choice's 0-based
-    /// index is carried by a `double` record field for the same reason:
-    /// `value` is an F64 prop and the root compares a bound field's
-    /// declared type against the prop's exactly, so a Field&lt;long&gt;
-    /// there is rejected at declaration however integral the index is.
+    /// index rides a `double` record field too: `value` is an F64 prop
+    /// and the root compares a bound field's declared type against the
+    /// prop's exactly, so a Field&lt;long&gt; is rejected at declaration
+    /// however integral the index is.
     public void BindValueField(Node n, uint level, Field<double> f) =>
         tx.Records.Add(KayaWire.TxBindValueElement(n.Id, level, f.Index));
 
-    /// A template node's flex weight within its enclosing row or
-    /// column — kind-agnostic, as the live Tx.SetGrow is.
+    /// A template node's flex weight within its enclosing row or column
+    /// — kind-agnostic, as the live Tx.SetGrow is.
     ///
-    /// It is a floor setter and not a `grow:` argument on every
-    /// constructor because a TEMPLATE constructor's arguments are its
-    /// sources: the thing that differs per stamped copy. Grow describes
-    /// the prototype and is one value for every copy, so it is set on
-    /// the node like any other prop — which is also where Rust's
-    /// `Tpl::set(node, Prop::Grow, …)` keeps it.
+    /// A floor setter and not a `grow:` argument, because a TEMPLATE
+    /// constructor's arguments are its per-copy SOURCES and grow is one
+    /// value for every copy.
     public void SetGrow(Node n, double weight) =>
         tx.Records.Add(KayaWire.TxSetGrow(n.Id, weight));
 
@@ -3127,11 +2734,8 @@ sealed class Tpl
     /// key assistive tooling and UI automation address it by, and which
     /// is NEVER spoken. Universal, in both zones.
     ///
-    /// A CONST OR SIGNAL GIVES EVERY COPY THE SAME KEY, which is legal
-    /// — nothing in the core deduplicates ids, and kaya's own harness
-    /// addresses by kind#index rather than by id, so no gate here
-    /// catches a collision — and sometimes right, when the row is
-    /// addressed as one thing. Source it from a field the row carries
+    /// A CONST OR SIGNAL GIVES EVERY COPY THE SAME KEY, and nothing
+    /// catches the collision. Source it from a field the row carries
     /// when automation must tell the copies apart.
     public void SetA11yId(Node n, string id) =>
         tx.Records.Add(KayaWire.TxSetA11yId(n.Id, id));
@@ -3142,21 +2746,12 @@ sealed class Tpl
     public void SetA11yId(Node n, Field<string> f, uint level = 0) =>
         tx.Records.Add(KayaWire.TxBindA11yIdElement(n.Id, level, f.Index));
 
-    /// What an assistive client SPEAKS for a stamped copy. Universal,
-    /// and deliberately separate from the identifier — an automation key
-    /// is not a spoken name. Leave it unset to keep whatever the
-    /// platform derives from the control's own content.
+    /// What an assistive client SPEAKS for a stamped copy. Universal.
+    /// Leave it unset to keep whatever the platform derives from the
+    /// control's own content.
     ///
     /// THE FIELD ARM IS THE CASE THIS ZONE EXISTS FOR: one label per
-    /// copy, the row announcing its own name —
-    ///
-    ///     tx.Each(people.Collection, t => {
-    ///         var avatar = t.Image(PersonKaya.Portrait);
-    ///         t.SetA11yLabel(avatar, PersonKaya.Name);
-    ///     });
-    ///
-    /// An image draws nothing a screen reader can read, so without this
-    /// the whole list speaks as N unlabelled images.
+    /// copy, so a list of images does not speak as N unlabelled images.
     public void SetA11yLabel(Node n, string label) =>
         tx.Records.Add(KayaWire.TxSetA11yLabel(n.Id, label));
 
@@ -3170,13 +2765,9 @@ sealed class Tpl
     /// field arm is a row of Delete buttons each naming what it deletes.
     ///
     /// ACTIVATION KINDS ONLY (button, checkbox, select, radio), and the
-    /// wall is the root's, not a type here: the template declare arm
-    /// runs the same check_prop the live path does, so a hint on a
-    /// template label dies at SUBMIT of the transaction that wrote it,
-    /// naming the kind and the prop, before a single row stamps. The
-    /// live Tx.SetA11yHint takes any widget for the same reason, and one
-    /// binding stricter than its own live zone would be a divergence
-    /// inside one language.
+    /// wall is the root's, not a type here: a hint on a template label
+    /// dies at SUBMIT of the transaction that wrote it, naming the kind
+    /// and the prop, before a single row stamps.
     public void SetA11yHint(Node n, string hint) =>
         tx.Records.Add(KayaWire.TxSetA11yHint(n.Id, hint));
 
@@ -3191,48 +2782,28 @@ sealed class Tpl
     /// format ids. Entry and textarea only; the root rejects it
     /// elsewhere, at submit, like the hint above.
     ///
-    /// WITHOUT THIS THE NODE PASTE HOOK NEVER FIRES. Every backend falls
+    /// WITHOUT THIS THE NODE PASTE HOOK NEVER FIRES: every backend falls
     /// back to the platform's own insertion when the focused control's
-    /// accept list is empty and emits no occurrence at all, so
-    /// Tx.OnPaste(Node, …) has been a registrar with no reachable
-    /// producer for as long as it has existed.
+    /// accept list is empty, and emits no occurrence at all.
     ///
-    /// CONSTANT ONLY, unlike the three props above, and that is not an
-    /// oversight: an accept list describes the PROTOTYPE'S ROLE — this
-    /// is a paste target and here is what it takes — which is one fact
-    /// for every copy, like a slider's min/max or a select's options. A
-    /// field arm would also have to hand the app kaya's own joined-list
-    /// encoding to store in its record, which is the thing Tx.AcceptList
-    /// exists to keep inside the binding.
+    /// CONSTANT ONLY, unlike the three props above: an accept list
+    /// describes the PROTOTYPE'S ROLE, which is one fact for every copy.
     public void SetAccepts(Node n, params string[] kinds) =>
         tx.Records.Add(KayaWire.TxSetAccepts(n.Id, Tx.AcceptList(kinds)));
 
     /// What a stamped copy MEANS — semantic emphasis, never appearance.
-    /// The live Tx.SetRole has carried this since the styling pass and
-    /// the template zone could spell it nowhere, so a stamped "Delete"
-    /// button inside a For was declarable as destructive in no language.
     ///
-    /// CONST, like SetAccepts above and for its reason: what a copy
-    /// means is a fact about the PROTOTYPE, not about the row's data.
-    /// The root refuses a role on a kind it does not fit at DECLARE
-    /// time, naming both the role and the kind, before a single row
-    /// stamps — which is why there is no type-level wall here, exactly
-    /// as the live zone's `role:` argument leans on that wall rather
-    /// than on Role's own type.
+    /// CONST, like SetAccepts above and for its reason. The root refuses
+    /// a role on a kind it does not fit at DECLARE time, naming both,
+    /// before a single row stamps — which is why there is no type-level
+    /// wall here.
     public void SetRole(Node n, Role role) =>
         tx.Records.Add(KayaWire.TxSetRole(n.Id, (long)role));
 
-    /// A stamped CONTAINER's own padding: DIP between its bounds and
-    /// its children, uniform on all four sides — the window inset one
-    /// level down, the same number the live Tx.SetInset spells.
-    ///
-    /// THE FORCING CASE IS A STAMPED ROW. The editor's status row is
-    /// live and insets; its find bar is a copy stamped from a template,
-    /// and it sat flush against a full-bleed window's edge because this
-    /// zone carried exactly one layout prop (SetGrow) — no prop could
-    /// give a stamped row its margin back. Const for SetRole's reason: a
-    /// prototype's margin describes the prototype. Containers only, and
-    /// the root says so at declare time.
+    /// A stamped CONTAINER's own padding: DIP between its bounds and its
+    /// children, uniform on all four sides — the same number the live
+    /// Tx.SetInset spells. Const for SetRole's reason. Containers only,
+    /// and the root says so at declare time.
     public void SetInset(Node n, double pad) =>
         tx.Records.Add(KayaWire.TxSetInset(n.Id, pad));
 
@@ -3261,16 +2832,12 @@ sealed class Tpl
         return n;
     }
 
-    /// A button with its caption, in the blueprint: the template twin
-    /// of Tx.Button. The argument's type picks the caption's source, as
-    /// it does for Label — a constant, a signal, or the row's field.
+    /// A button with its caption, in the blueprint: the template twin of
+    /// Tx.Button. The argument's type picks the caption's source.
     ///
-    /// IT TAKES NO HANDLER, and the omission is the design. A stamped
-    /// copy's click names the copy, so the handler is registered
-    /// against the TEMPLATE NODE — app.OnClick(node, (tx, keys) => …)
-    /// — and receives that copy's key path. The live zone's
-    /// Action&lt;Tx&gt; has nowhere to put the keys, so an onClick
-    /// overload here could only be the wrong one.
+    /// IT TAKES NO HANDLER, and the omission is the design: a stamped
+    /// copy's click names the copy, so the handler goes on the TEMPLATE
+    /// NODE — app.OnClick(node, (tx, keys) => …).
     public Node Button(string text)
     {
         var n = Widget(KayaWire.KindButton);
@@ -3295,9 +2862,8 @@ sealed class Tpl
         return n;
     }
 
-    /// An image over constant encoded bytes: one registration copy
-    /// into core memory at record time — the handle is consumed by
-    /// the next submit, and every stamped copy shows the same asset.
+    /// An image over constant encoded bytes: every stamped copy shows
+    /// the same asset.
     public Node Image(byte[] source)
     {
         var n = Widget(KayaWire.KindImage);
@@ -3329,18 +2895,13 @@ sealed class Tpl
 
     /// A single-line text field in the blueprint, one copy per stamped
     /// row. UNCONTROLLED, which is why the default overload takes no
-    /// source: the copy owns its text, each edit arrives at onChange
-    /// with that copy's keys, outermost first, and the app folds it
-    /// into its own state — there is no read-back, by doctrine. This is
-    /// the overload a per-row note field wants (guests/csharp/UndoScene.cs).
+    /// source: the copy owns its text and each edit arrives at onChange
+    /// with that copy's keys, outermost first.
     ///
-    /// The three below SEED the copy instead, which is what an editable
-    /// list pre-filled from its rows wants: the Field arm shows the
-    /// row's own stored text on the first stamp and re-shows it when an
-    /// undo restores that field. Seeding does not make the entry
-    /// controlled — a later write to the source pushes into every copy
-    /// quietly, replacing what the user typed, so seed from a field the
-    /// app writes on commit and not on keystroke.
+    /// The three below SEED the copy instead. Seeding does not make the
+    /// entry controlled — a later write to the source pushes into every
+    /// copy quietly, replacing what the user typed, so seed from a field
+    /// the app writes on commit and not on keystroke.
     public Node Entry(Action<Tx, List<object>, string> onChange = null)
     {
         var n = Widget(KayaWire.KindEntry);
@@ -3400,11 +2961,9 @@ sealed class Tpl
         return n;
     }
 
-    /// A progress bar in the blueprint: display-only, like Label and
-    /// Image. The fraction (0..=1, domain-checked at the root) comes
-    /// from any addressable source — and the element arm is the case
-    /// this zone exists for, one bar per row showing that row's own
-    /// number.
+    /// A progress bar in the blueprint: display-only. The fraction
+    /// (0..=1, domain-checked at the root) comes from any addressable
+    /// source.
     public Node Progress(double value)
     {
         var n = Widget(KayaWire.KindProgress);
@@ -3437,15 +2996,10 @@ sealed class Tpl
     }
 
     /// A slider over min..max in the blueprint, its POSITION from any
-    /// addressable source and its change handler co-located: moves on a
-    /// stamped copy arrive at onChange with that copy's keys, outermost
-    /// first, and the new position — the entry's uncontrolled contract,
-    /// with a double.
+    /// addressable source and its change handler co-located.
     ///
-    /// THE RANGE IS CONSTANT AND THE POSITION IS THE SOURCE. min and
-    /// max describe the prototype, so every copy shares them; the
-    /// position is the part a row owns, which is what the Field arm
-    /// binds.
+    /// THE RANGE IS CONSTANT AND THE POSITION IS THE SOURCE: min and max
+    /// describe the prototype, so every copy shares them.
     public Node Slider(double min, double max, double value,
         Action<Tx, List<object>, double> onChange = null)
     {
@@ -3479,19 +3033,13 @@ sealed class Tpl
         return n;
     }
 
-    /// A dropdown select in the blueprint — each option becomes a label
-    /// child (labels only) — with the SELECTED INDEX from any
-    /// addressable source and the pick handler co-located: onSelect
-    /// receives the stamped copy's keys, outermost first, and each USER
-    /// pick's new 0-based index (programmatic writes never echo) — the
-    /// slider's uncontrolled contract.
+    /// A dropdown select in the blueprint, with the SELECTED INDEX from
+    /// any addressable source: onSelect receives the stamped copy's
+    /// keys, outermost first, and each USER pick's new 0-based index.
     ///
-    /// THE OPTIONS ARE PER-TEMPLATE, NOT PER-ROW. Each option is a
-    /// label child of the prototype and the prototype is stamped
-    /// verbatim, so a per-copy option LIST would be a per-copy
-    /// blueprint; what varies per copy is which option is selected,
-    /// which is exactly what the source binds
-    /// (docs/sugar-pass-plan.md §2).
+    /// THE OPTIONS ARE PER-TEMPLATE, NOT PER-ROW: the prototype is
+    /// stamped verbatim, so a per-copy option LIST would be a per-copy
+    /// blueprint (docs/sugar-pass-plan.md §2).
     public Node Select(string[] options, int selected,
         Action<Tx, List<object>, int> onSelect = null) =>
         Choice(KayaWire.KindSelect, options, selected, onSelect);
@@ -3504,9 +3052,6 @@ sealed class Tpl
         Action<Tx, List<object>, int> onSelect = null) =>
         Choice(KayaWire.KindSelect, options, selected, onSelect);
 
-    /// A radio group in the blueprint: the choice contract (see Select)
-    /// in its inline presentation — same option children, same 0-based
-    /// index semantics, same pick handler carrying the copy's keys.
     public Node Radio(string[] options, int selected,
         Action<Tx, List<object>, int> onSelect = null) =>
         Choice(KayaWire.KindRadio, options, selected, onSelect);
@@ -3544,8 +3089,7 @@ sealed class Tpl
     }
 
     /// The option children and the handler — everything a choice widget
-    /// has before its selected index, which is the one part the three
-    /// arms above differ in.
+    /// has before its selected index.
     Node ChoiceOf(uint kind, string[] options, Action<Tx, List<object>, int> onSelect)
     {
         var n = Widget(kind);
@@ -3565,21 +3109,15 @@ sealed class Tpl
 
     public Node Row(Action body) => ContainerOf(KayaWire.KindRow, body);
 
-    /// A vertical scroll viewport over EXACTLY ONE child (declare it in
-    /// the body), per stamped copy. SetGrow it so the enclosing track
-    /// CONSTRAINS it — an unconstrained viewport hugs its content and
-    /// nothing overflows. The live zone spells that as a `grow:`
-    /// argument; here it is a floor call, because a template
-    /// constructor's arguments are its per-row sources.
+    /// A vertical scroll viewport over EXACTLY ONE child, per stamped
+    /// copy. SetGrow it so the enclosing track CONSTRAINS it — an
+    /// unconstrained viewport hugs its content and nothing overflows.
     public Node Scroll(Action body) => ContainerOf(KayaWire.KindScroll, body);
 
     /// A grid laying each stamped copy's children out row-major into
     /// `columns` columns — each column takes its NATURAL width, aligned
-    /// across rows (the thing nested rows cannot express).
-    ///
-    /// The column count describes the PROTOTYPE, so it is a constant
-    /// and not a source: every copy has the same shape, and only the
-    /// values inside it vary.
+    /// across rows. The column count describes the PROTOTYPE, so it is a
+    /// constant and not a source.
     public Node Grid(int columns, Action body)
     {
         var n = ContainerOf(KayaWire.KindGrid, body);
@@ -3587,9 +3125,8 @@ sealed class Tpl
         return n;
     }
 
-    /// A spacer: PURE SUGAR for an empty grown column — it consumes the
-    /// leftover main-axis space between its siblings, in every stamped
-    /// copy. No new vocabulary reaches a backend.
+    /// A spacer: PURE SUGAR for an empty grown column, in every stamped
+    /// copy.
     public Node Spacer()
     {
         var n = Widget(KayaWire.KindColumn);
@@ -3611,10 +3148,8 @@ sealed class Tpl
 
     /// Attach a live-built context catalog (tx.ContextCatalog) to a
     /// template node: every stamped copy shows the same catalog, and
-    /// each activation carries that copy's key path — the keys ARE
-    /// the noun (received by the node-flavor handlers). An item takes
-    /// exactly one anchor, so a second attach of the same catalog
-    /// throws here.
+    /// each activation carries that copy's key path. An item takes
+    /// exactly one anchor, so a second attach throws here.
     public void ContextMenu(Node n, ContextCatalog catalog)
     {
         if (catalog.Attached)
@@ -3627,14 +3162,12 @@ sealed class Tpl
 
     public Collection Collection() => tx.Collection();
 
-    /// A nested For as a child: ForEach whose body keeps no handles —
-    /// the template twin of Tx.Each, and swift's KayaTpl.each.
+    /// A nested For as a child: ForEach whose body keeps no handles.
     ///
     /// A C# lambda captures its enclosing locals BY REFERENCE, so a
     /// handle the body owes the outside is assigned to the scene's own
-    /// local (guests/csharp/Milestone2Scene.cs) rather than threaded
-    /// back through a result. That is why this returns the For alone
-    /// and why nothing here needs ForEach's shape.
+    /// local rather than threaded back through a result — which is why
+    /// this returns the For alone.
     public Node Each(Collection c, Action<Tpl> body) => ForEach(c, body);
 
     public Node ForEach(Collection c, Action<Tpl> body)
@@ -3689,9 +3222,8 @@ sealed class Tpl
 /// The copy chain: a clip record under construction. Each method fills
 /// one representation, and Send puts it on the clipboard.
 ///
-/// A RECORD AND NOT A LIST is the whole shape — at most one per kind is
-/// structural, since a second Text() replaces the field rather than
-/// needing a duplicate check the root has to run.
+/// A RECORD AND NOT A LIST: at most one per kind is structural, since a
+/// second Text() replaces the field.
 sealed class CopyRef
 {
     readonly Tx tx;
@@ -3707,7 +3239,6 @@ sealed class CopyRef
 
     public CopyRef Html(string value) { html = value; return this; }
 
-    /// Encoded image bytes — the same currency the image property takes.
     public CopyRef Image(byte[] bytes) { image = bytes; return this; }
 
     /// Offer a picked file, the picker's own capability put straight on
@@ -3717,8 +3248,7 @@ sealed class CopyRef
     /// An app-defined format, round-tripped verbatim. The id reaches
     /// every platform's own registry unchanged — a UTI on Apple,
     /// RegisterClipboardFormat on Windows, a target atom on X11 and
-    /// Wayland, a MIME type on Android — so it carries no spaces, and
-    /// kaya does nothing clever with the bytes.
+    /// Wayland, a MIME type on Android — so it carries no spaces.
     public CopyRef Custom(string id, byte[] bytes)
     {
         Tx.AcceptList(new[] { id });
@@ -3781,8 +3311,7 @@ sealed class ClipReadRef
     public ClipReadRef Files() => Accept("files");
 
     /// Accept an app-defined format by id. Custom formats are tried
-    /// FIRST, in the order named: an app's own format round-trips its
-    /// data losslessly, which is the only reason to have one.
+    /// FIRST, in the order named.
     public ClipReadRef Custom(string formatId) => Accept(formatId);
 
     ClipReadRef Accept(string kind)
@@ -3801,7 +3330,6 @@ sealed class ClipReadRef
         return this;
     }
 
-    /// Send the request, returning its id.
     public ulong Send()
     {
         if (onResult != null)

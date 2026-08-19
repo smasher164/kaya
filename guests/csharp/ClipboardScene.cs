@@ -1,11 +1,8 @@
 // The clipboard conformance scene, C# port — one clip in several
 // representations, and the privileged read that takes one back
-// (DESIGN.md, Clipboard; docs/clipboard-plan.md, whose §"The image is a
-// decoded size, never bytes" and foreign-reader sections say why the
-// assertions are shaped the way they are).
-//
-// Canonical semantics in guests/rust/clipboard.rs; the byte-frozen
-// contract in tools/scenes/clipboard.steps.
+// (DESIGN.md, Clipboard; docs/clipboard-plan.md). Canonical semantics in
+// guests/rust/clipboard.rs; the byte-frozen contract in
+// tools/scenes/clipboard.steps.
 
 using System;
 using System.Collections.Generic;
@@ -46,8 +43,7 @@ static class ClipboardScene
         var app = new KayaApp();
 
         // Guest and interpreter are one process and compute this path
-        // identically, with no runner involvement; the pid keeps
-        // parallel legs from colliding.
+        // identically; the pid keeps parallel legs from colliding.
         string dir = Path.Combine(
             Path.GetTempPath(),
             "kaya-clip-" + Process.GetCurrentProcess().Id);
@@ -93,8 +89,6 @@ static class ClipboardScene
                             $"custom {c.Id} {Encoding.UTF8.GetString(c.Bytes)}");
                         break;
                     case Representation.Image img:
-                        // Straight back out, for a foreign decoder to
-                        // assert the size of.
                         tx.Copy().Image(img.Bytes).Send();
                         tx.Write(status, "image");
                         break;
@@ -157,7 +151,6 @@ static class ClipboardScene
                 tx.Button("focus rich", onClick: inner => inner.Focus(rich));
                 tx.Button("focus plain", onClick: inner => inner.Focus(plain));
 
-                // Declares what it takes, so a paste lands in the hook.
                 rich = tx.Entry(); // entry#0
                 tx.SetAccepts(rich, Tx.AcceptText);
                 tx.SetA11yId(rich, "rich");
@@ -171,8 +164,6 @@ static class ClipboardScene
                     inner.Write(status, "pasted " + clip);
                 });
 
-                // Declares NOTHING on purpose: the platform's own
-                // insertion happens and the ordinary change path reports it.
                 plain = tx.Entry(); // entry#1
                 tx.SetA11yId(plain, "plain");
 

@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,117 +10,59 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# THE LEDGER MAY NOT DISAGREE WITH ITSELF.
+# THE LEDGER MAY NOT DISAGREE WITH ITSELF. A ledger entry is read the
+# way a diagnostic is read: whoever reads it next acts on the sentence.
 #
 #   tools/check-ledger.sh              check docs/deferred.md
-#   tools/check-ledger.sh <path>       check some other copy of it —
-#                                      THE TEST SEAM. It is how the
-#                                      watched negatives run against a
-#                                      COPY instead of the real file,
-#                                      and how this gate was calibrated
-#                                      against `git show
-#                                      0375e3e:docs/deferred.md`.
-#
-# THE DEFECT THIS EXISTS FOR, measured 2026-08-17. Two top-level entries
-# carried headlines in the present tense — "GAP — the stall diagnostic
-# DESIGN promises is not implemented", "GAP — a kaya app cannot do
-# background work" — while their own bodies, twenty lines down, recorded
-# "COMPLETE 2026-07-28, matrix ALL PASS at 808 legs" and "BREADTH SWEEP
-# COMPLETE 2026-08-01". Both had been finished for three weeks. A survey
-# read the HEADLINES, believed them, and reported a solved problem as the
-# largest open item in the project. A ledger entry is read the way a
-# diagnostic is read: whoever reads it next acts on the sentence.
+#   tools/check-ledger.sh <path>       check some other copy — THE TEST
+#                                      SEAM, how the watched negatives
+#                                      run against a COPY
 #
 # TWO CLAUSES.
 #
 #   A. An UNSTRUCK headline whose entry carries an ENTRY-LEVEL TERMINAL
-#      RESOLUTION. That is the shape above.
-#   B. A STRUCK headline with no resolution note. Striking a line
-#      through and saying nothing about where the work went leaves the
-#      next reader with a closed entry and no record.
+#      RESOLUTION (the measured shape: a present-tense "GAP —" over a
+#      body recording COMPLETE three weeks earlier).
+#   B. A STRUCK headline with no resolution note — a closed entry and no
+#      record of where the work went.
 #
-# TWO SYNTAXES, ONE RULE. The ledger writes an entry two ways, and this
-# gate read only the first for its first day. A BULLET ENTRY is a `- `
-# at column 0. A SECTION ENTRY is a `## ` (or `### `) heading over a
-# prose body — "Comments are drowning the code", "The template button's
-# caption is not uniform", "SOLVED: the rust guests cost ~11s to START".
-# Nineteen of the current file's entries are written that way, and every
-# one of them sat outside both clauses: a section headline could go
-# stale forever and this gate would never once have looked at it. That
-# is the disease it exists for, one syntax over (found 2026-08-17).
+# TWO SYNTAXES, ONE RULE. A BULLET ENTRY is a `- ` at column 0; a
+# SECTION ENTRY is a `## `/`### ` heading over a prose body. A section is
+# closed in its heading two ways, both in the file: struck, and prefixed
+# `SOLVED:`. Both must read as closed to clause A and both owe clause B
+# a dated note.
 #
-# FOUR HEADINGS ARE NOT ENTRIES. `Next milestones`, `Protocol / core`,
-# `Bindings / ergonomics` and `Testing / infrastructure` are the file's
-# taxonomy: their bodies are lists of bullet entries, which are already
-# read as entries one at a time. They are named in ORGANIZING below and
-# their presence is ASSERTED, because a named exemption that can rot
-# silently is worse than no exemption at all. Everything else at `##` or
-# deeper is an entry BY DEFAULT, and that default points the safe way: a
-# taxonomy heading misread as an entry gets checked for a claim it is
-# never going to make, while an entry misread as taxonomy is invisible,
-# which is the bug being fixed.
+# FOUR HEADINGS ARE NOT ENTRIES — the file's taxonomy, whose bodies are
+# lists of bullet entries read one at a time. They are named in
+# ORGANIZING below and their presence is ASSERTED, because a named
+# exemption that can rot silently is worse than none. Everything else at
+# `##` or deeper is an entry BY DEFAULT, and that default points the
+# safe way.
 #
-# A SECTION IS CLOSED IN ITS HEADING TWO WAYS, both of them in the file:
-# struck (`## ~~DEFECT — Compose's title bar never recomposed…~~`) and
-# prefixed `SOLVED:` (three sections). Both read as closed to a human,
-# so both must read as closed to clause A — and both owe clause B a
-# dated resolution note, because a closed entry with no record is
-# unauditable however it was closed.
+# THE DISCRIMINATOR IS THE WHOLE PROBLEM. Entries legitimately mix a
+# finished slice with an open remainder, so LANDED, FIXED and CLOSED
+# cannot carry the rule — all three appear slice-scoped in unstruck
+# entries ("DEPTH SLICE LANDED", "FIXED FOR GO AND RUST", "CLOSED …
+# for the remaining five"). COMPLETE can: this ledger reserves it for a
+# whole-entry verdict. The second recognized shape is a scoped-sounding
+# word corroborated by a full five-lane result on the same line
+# (`CLOSED … matrix ALL PASS`).
 #
-# THE DISCRIMINATOR IS THE WHOLE PROBLEM, and it is calibrated against
-# this file's real shapes rather than guessed. Entries legitimately mix a
-# finished slice with an open remainder — "Saving a file" carries "DEPTH
-# LANDED: spec + the core's SaveDestination + …" above five open depth
-# stubs — so a rule that fired on the ledger's ordinary closing words
-# would fire on those and be turned off within a week. Measured over both
-# the current file and 0375e3e, at entry level, in unstruck entries:
+# THE DECLARED LIMITS. An entry that records itself with a bare
+# `CLOSED <date>` and is never struck goes unflagged; the exits are to
+# strike it or to write a whole-entry verdict, NOT to widen the
+# vocabulary while those slice-scoped spellings live in the file. And
+# SUB-BULLETS are a different grammar: ENTRY LEVEL for a section is its
+# heading plus the column-0 lines that are neither bullets nor a
+# bullet's continuation, which is what keeps the depth-stub sections
+# open (self-test N4b is that shape, watched NOT firing).
 #
-#   DEPTH SLICE LANDED 2026-07-31    a slice, with breadth still open
-#   FIXED FOR GO AND RUST 2026-07-28 two languages of nine
-#   CLOSED 2026-07-31 for the remaining five   scoped by its own clause
-#   CLOSED 2026-08-05 by the completion pass   with a ratification still
-#                                              owed to the maintainer
-#
-# So LANDED, FIXED and CLOSED cannot carry the rule. COMPLETE can: this
-# ledger reserves it for a whole-entry verdict, and spells it exactly
-# that way where the entry IS closed — `~~**Clipboard**~~ — COMPLETE
-# 2026-08-04`. The second recognized shape is a scoped-sounding word
-# corroborated by a full five-lane result on the same line (`CLOSED …
-# matrix ALL PASS`), which is the ledger's own phrase for "the whole
-# matrix went green on this".
-#
-# AND WHAT THAT MEANS THIS GATE CANNOT SEE, said out loud because a
-# guard nobody has bounded is believed past its evidence: an entry that
-# finishes and records itself with a bare `CLOSED <date>` and is never
-# struck goes unflagged. The exits are to strike the entry (the
-# convention in CLAUDE.md) or to write the verdict the way this ledger
-# writes a whole-entry verdict. Widening the vocabulary is NOT an exit
-# while those four slice-scoped spellings live in the file; a gate that
-# fires on half the ledger teaches people to ignore it.
-#
-# ENTRY LEVEL, FOR A SECTION, is its heading plus the column-0 lines of
-# its body that are neither bullets nor a bullet's continuation. That is
-# what keeps the depth-stub sections safe: "The typeface scene's depth
-# stubs" records a landed slice over six sub-items, one of them struck
-# and carrying a full matrix result on its own line, while the section
-# itself is open and must stay open. Self-test N4b is that exact shape
-# and it is watched NOT firing.
-#
-# SUB-BULLETS ARE STILL A DIFFERENT GRAMMAR — a depth stub struck by its
-# own backend arm, a finding kept for its lesson — and the failure class
-# measured was entry-level. That is a declared limit, not an oversight.
-#
-# THE CENSUS DISCIPLINE (check-gates, tpl-surfaces): a reader that found
-# implausibly few entries agrees with everything, so this refuses a
-# verdict rather than printing one. BOTH syntaxes have a floor now, and
-# a SECOND, deliberately different reader counts the same two things
-# straight off the lines; the two must agree. Today they agree by
-# construction and the refusal costs nothing — it is there so that they
-# cannot silently STOP agreeing the day one of them grows a rule the
-# other does not, which is precisely how the section syntax came to go
-# unread. Every clause is watched failing on every run, against the real
-# bytes doctored in memory, with the perturbation count printed — zero
-# substitutions is a FAILED self-test, never a passed one.
+# THE CENSUS DISCIPLINE (check-gates, tpl-surfaces): both syntaxes have
+# a floor, and a SECOND, deliberately different reader counts the same
+# two things off the lines. The two must agree — they do so by
+# construction today, and the refusal exists so they cannot silently
+# STOP agreeing. Every clause is watched failing on every run, against
+# the real bytes doctored in memory, with the count printed.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -156,10 +92,8 @@ def fail(msg):
 
 HEADING = re.compile(r"^(#{2,6}) +(\S.*)$")
 
-# The ledger's taxonomy, not its entries: each of these is a heading
-# over a LIST of bullet entries, and every one of those bullets is read
-# on its own. Naming them is the exemption; asserting they are all still
-# present is what stops the name list from rotting into a silent skip.
+# The ledger's taxonomy, not its entries. Naming them is the exemption;
+# asserting they are still present stops the list rotting into a skip.
 ORGANIZING = (
     "Next milestones",
     "Protocol / core",
@@ -258,17 +192,11 @@ def section_level(sec):
     return out
 
 
-# `- ~~X~~ — LANDED …` and `- **~~X~~ REVERSED …**` are both struck
-# headlines; the strike opens the headline in each. A strike further in
-# is a struck PHRASE inside a live headline and says nothing about the
-# entry.
+# The strike must OPEN the headline. A strike further in is a struck
+# PHRASE inside a live headline and says nothing about the entry.
 STRUCK = re.compile(r"^- (?:\*\*)?~~")
 
-# The same, one syntax over — plus the ledger's other spelling for a
-# closed section, which is a `SOLVED:` prefix on the heading (three
-# sections, none of them struck). A heading that already says the work
-# is done cannot mislead the next reader, so clause A must read it as
-# closed; and it owes clause B a note exactly as a struck one does.
+# The same, one syntax over, plus the `SOLVED:` heading prefix.
 SEC_STRUCK = re.compile(r"^#{2,6} +(?:\*\*)?~~")
 SEC_SOLVED = re.compile(r"^#{2,6} +(?:\*\*)?SOLVED\b")
 
@@ -277,10 +205,8 @@ TERMINAL_WORD = re.compile(r"\bCOMPLETE\b")
 SCOPED_WORD = re.compile(r"\b(?:CLOSED|FIXED|RESOLVED|SWEPT)\b[^.]{0,40}\d{4}-\d{2}-\d{2}")
 FULL_MATRIX = re.compile(r"ALL PASS")
 
-# A resolution note: one of the ledger's closing words with the date it
-# closed on. SWEPT is in the list because the file uses it
-# (`~~**`split` and `listdetail` are rust-only…**~~ — SWEPT 2026-07-27`)
-# and clause B is about whether a note EXISTS, not about how final it is.
+# A resolution note: one of the ledger's closing words with its date.
+# Clause B asks whether a note EXISTS, not how final it is.
 RESOLUTION = re.compile(
     r"\b(?:LANDED|CLOSED|FIXED|COMPLETE|COMPLETED|DONE|RESOLVED|REVERSED"
     r"|ANSWERED|SHIPPED|SWEPT|SUPERSEDED|WITHDRAWN)\b[^.]{0,60}?\d{4}-\d{2}-\d{2}"
@@ -353,12 +279,9 @@ def report(clause, at, head, n, line):
 
 # ---------------------------------------------------- 0. the self-tests
 #
-# Every clause is a pattern match, and a pattern that never matched
-# agrees with everything. So each is watched failing FIRST, against the
-# real bytes of the real ledger, doctored in memory, with the count
-# printed. This is the rule check-tx-liveness and the wayland seat guard
-# both learned the hard way (three clauses passed with the guard
-# deleted; a pattern that never matched passed vacuously, twice).
+# A pattern that never matched agrees with everything, so each clause is
+# watched failing FIRST against the real bytes of the real ledger,
+# doctored in memory, with the count printed (docs/traps.md).
 
 if not target.is_file():
     sys.exit(f"check-ledger: {target} does not exist")
@@ -370,9 +293,8 @@ open_ = [e for e in all_entries if not STRUCK.match(e["lines"][0][1])]
 sec_closed = [s for s in all_sections if closed_head(s["lines"][0][1])]
 sec_open = [s for s in all_sections if not closed_head(s["lines"][0][1])]
 
-# N1 — CLAUSE A. A synthetic entry in the measured shape: an unstruck
-# headline making a present-tense claim over a body that says the work
-# is done. Appended to a COPY of the real text, never to the file.
+# N1 — CLAUSE A: an unstruck present-tense headline over a body that
+# says the work is done. Appended to a COPY, never to the file.
 SYNTH_A = """
 - **GAP — the selftest widget cannot be constructed.** As found, nothing
   in crates/ builds one, so an app asking for it gets nothing.
@@ -391,10 +313,9 @@ else:
         fail("self-test N1: an unstruck headline over a COMPLETE body was not "
              "flagged — clause A is vacuous")
 
-# N1b — THE DISCRIMINATOR, from the other side. The shape clause A must
-# NOT fire on: a depth slice recorded as landed, with the entry's own
-# remainder still open. If this fires, the gate is about to flag half
-# the ledger and will be turned off rather than heeded.
+# N1b — THE DISCRIMINATOR from the other side: a landed depth slice
+# with the entry's own remainder open. If this fires the gate is about
+# to flag half the ledger and will be turned off rather than heeded.
 SYNTH_NOT_A = """
 - **Selftest breadth** — IN FLIGHT 2026-08-17. DEPTH SLICE LANDED
   2026-08-17: spec + the core + the Rust surface. Matrix ALL PASS at 841
@@ -437,10 +358,8 @@ else:
             fail(f"self-test N2: the struck entry at line {v_at} lost its "
                  f"resolution note and was not flagged — clause B is vacuous")
 
-# N4 — CLAUSE A, SECTION SYNTAX. The same measured shape written as a
-# section: a heading in the present tense over a body that records the
-# work finished. This is the shape that had no reader at all until
-# 2026-08-17.
+# N4 — CLAUSE A, SECTION SYNTAX: the same shape as a heading over a
+# body that records the work finished.
 SYNTH_SEC_A = """
 ## GAP — the selftest widget cannot be constructed (selftest)
 KEY: selftest widget, section census
@@ -461,11 +380,9 @@ else:
         fail("self-test N4: a section heading over a COMPLETE body was not "
              "flagged — clause A does not reach the section syntax")
 
-# N4b — THE SECTION DISCRIMINATOR, from the other side, and it is the
-# clause that decides whether this gate is usable: the depth-stub
-# sections are open sections whose SUB-BULLETS carry landed slices and
-# whole-matrix results. If section level leaked one sub-bullet, the
-# typeface, toolbar and styling sections would all go red at once.
+# N4b — THE SECTION DISCRIMINATOR: an open section whose SUB-BULLETS
+# carry landed slices and whole-matrix results. If section level leaked
+# one sub-bullet, three real sections would go red at once.
 SYNTH_SEC_NOT_A = """
 ## Selftest scene's depth stubs (mid-flight, closes with the fan-out)
 
@@ -584,12 +501,9 @@ if refusal is None:
     fail("self-test N3: the census accepted a 30-line fragment — the floor "
          "refusal is decorative")
 
-# N3b — the SECTION floor, which N3 above can never reach: a fragment
-# small enough to fail the bullet floor fails it first, and a branch of
-# a refusal that has never been made to print is a guess about a state
-# nobody has reached. So: the real file with every non-organizing
-# heading LINE deleted — the bullets are all still there, the section
-# syntax has vanished, and that is the shape this floor exists to catch.
+# N3b — the SECTION floor, which N3 can never reach: a fragment small
+# enough to fail the bullet floor fails it first. So: the real file with
+# every non-organizing heading LINE deleted.
 headless = "\n".join(l for l in text.split("\n")
                      if not (HEADING.match(l) and not organizing(l)))
 h_entries, h_secs = entries(headless), sections(headless)
@@ -627,8 +541,7 @@ else:
         fail("self-test N6: the census accepted two readers that disagree by a "
              "whole entry — the agreement refusal is decorative")
 
-# N6b — the same for the named exemption. ORGANIZING is a list of names,
-# and a list of names goes stale in silence; a rename must refuse rather
+# N6b — the same for the named exemption: a rename must refuse rather
 # than turn four headings into unread entries.
 renamed = text.replace("\n## Protocol / core\n", "\n## Protocol and core\n", 1)
 print(f"check-ledger: self-test N6b renamed one organizing heading, "

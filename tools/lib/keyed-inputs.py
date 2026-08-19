@@ -3,26 +3,15 @@
 tools/keyed.sh skips a gate whose declared input set has not moved since
 it last passed, so an input a gate READS but does not DECLARE is a
 false-PASS generator — and it fires exactly when the undeclared file is
-the thing that changed, which is the worst possible moment.
+the thing that changed. So: scan each gate's script for repo paths it
+names IN CODE, and require each to be covered by that gate's declared
+set.
 
-Not hypothetical. check-steps was declared `["guests"]` from the day it
-was written. It later grew a rule that reads the BACKENDS (it stops
-demanding a runner's legs where that runner's backend declares a depth
-stub), so under KAYA_FAST, removing a declaration — the edit that makes
-the missing legs a real failure — would have re-run nothing and handed
-back the stale PASS. It was caught by hand, which is not a mechanism.
-
-So: scan each gate's script for repo paths it names IN CODE, and require
-each to be covered by that gate's declared set.
-
-CODE, NOT PROSE. The first cut counted every mention and reported eleven
-findings, all of them comments citing CLAUDE.md or docs/traps.md for the
-reasoning behind a rule — no true positives at all. A gate that noisy on
-day one gets worked around rather than heeded, so comments and
-docstrings are stripped first. That gives up a path constructed at
-runtime, which is the honest limit of reading a script instead of
-running it; what remains is the class that actually escaped, a literal
-path assigned and then read.
+CODE, NOT PROSE. Counting every mention reports comments citing CLAUDE.md
+or docs/traps.md for the reasoning behind a rule, with no true positives
+at all, so comments and docstrings are stripped first. That gives up a
+path constructed at runtime, which is the honest limit of reading a
+script instead of running it.
 """
 
 import pathlib
@@ -53,10 +42,8 @@ def gates() -> dict[str, list[str]]:
 def code_only(source: pathlib.Path) -> str:
     """The script with comments and docstrings removed.
 
-    Shell and Python both comment with `#`, and the embedded heredoc
-    Python inside a .sh gate is no exception. A standalone .py helper
-    also carries docstrings, which are prose in a string literal — ast
-    is what tells those apart from a path a call actually uses.
+    A docstring is prose in a string literal, and `ast` is what tells one
+    apart from a path a call actually uses.
     """
     text = source.read_text()
     if source.suffix == ".py":
@@ -88,9 +75,7 @@ def code_only(source: pathlib.Path) -> str:
     text = "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     )
-    # A quoted string with a SPACE in it is a message, not a path — the
-    # second round of false positives was every `echo "... (docs/traps.md,
-    # the grapheme family) ..."` citing the reasoning for a rule. A path
+    # A quoted string with a SPACE in it is a message, not a path: a path
     # in a read position is a bare word or a quoted string of just the
     # path, and neither has a space.
     return re.sub(r"\"[^\"\n]* [^\"\n]*\"|'[^'\n]* [^'\n]*'", '""', text)

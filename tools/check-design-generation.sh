@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,73 +11,34 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# THE MAC LANE RUNS BOTH macOS DESIGN GENERATIONS, AND NOTHING SAID SO.
+# THE MAC LANE RUNS BOTH macOS DESIGN GENERATIONS, and both halves must
+# stay populated. SwiftUI picks the generation from the MAIN
+# EXECUTABLE's LC_BUILD_VERSION sdk field (docs/traps.md), so the legs
+# kaya links are MODERN and the vendor-built hosts (python3, the .NET
+# apphost, the zulu JVM) are COMPAT. docs/deferred.md carries the
+# standing constraint: do not bump the flake SDK without leaving a
+# compat leg. Either half could empty out with no diff in this repo.
 #
-# SwiftUI picks its design generation from the MAIN EXECUTABLE's
-# LC_BUILD_VERSION — the sdk field, not minos (kaya's own measurement,
-# docs/traps.md; a binary stamped minos 14 + sdk 26.5 takes the modern
-# path). So the generation a leg exercises is decided by whoever LINKED
-# its host process, and the mac lane's legs have two different linkers:
+# It measures COMPILES, not build outputs: the modern half is two probes
+# built here and now, through this shell's `cc` and through kaya_swiftc.
+# Reading target/'s guests would make this a stale-artifact reader, and
+# `vtool`/`otool` are xcrun shims here that cannot find their tool.
 #
-#   MODERN   the legs kaya links itself — rust, go, c, ocaml, haskell go
-#            through this shell's cc, and flake.nix's
-#            `buildInputs = [ pkgs.apple-sdk_26 ]` is what stamps them
-#            sdk 26.5 — plus swift, which builds through kaya_swiftc
-#            against the system toolchain and was modern already.
-#   COMPAT   the legs whose main executable is a VENDOR-BUILT host kaya
-#            never links: python3, the .NET host, the zulu JVM. They are
-#            compat by accident of someone else's build, not by choice.
-#
-# The ledger's standing constraint (docs/deferred.md, "do not bump the
-# flake SDK without preserving a compat-generation leg") requires BOTH
-# halves to stay populated: the compat generation is where the Button
-# measurement bug class lives (docs/traps.md — sizeThatFits answers with
-# borderless metrics while the bezeled control draws, so captions
-# ellipsize), and the native-kit button bridges are load-bearing
-# indefinitely. Before this gate that constraint was a comment in
-# flake.nix and a paragraph in the ledger. Either half could empty out
-# with no diff in this repo at all — a nixpkgs bump moves the stdenv SDK
-# under python3, Azul or Microsoft rebuild a host, someone writes the
-# `packages =` spelling of the SDK line — and nothing would have gone
-# red. That is precisely the guard-you-have-to-remember shape invariant 3
-# rejects, so: measured on every sweep, both halves, or no verdict.
-#
-# WHAT IT MEASURES, AND WHAT IT DELIBERATELY DOES NOT.
-#
-# It measures COMPILES, not build outputs. A stamp is a property of the
-# link that produced it, so the modern half is two probes built here and
-# now — a 3-line C file through the shell's own `cc` (the linker driver
-# every kaya-built mac leg's main executable goes through: rustc, cgo,
-# ocamlopt and ghc all shell out to it) and a one-line Swift file through
-# kaya_swiftc (tools/lib/swift-toolchain.sh, which is what
-# validate-mac.sh and swiftui/build-dylib.sh build with). Reading
-# target/'s guests instead would make the gate a stale-artifact reader
-# that passes on a tree nobody has built, and `vtool`/`otool` are not
-# reachable here anyway — inside the dev shell they are xcrun shims that
-# cannot find their tool. The reader below is 60 lines of struct.unpack
-# and was cross-checked field-for-field against `otool -l` on six files.
-#
-# ENV HYGIENE — AND THE MOVE THAT LOOKS RIGHT AND IS BACKWARDS.
+# ENV HYGIENE — THE MOVE THAT LOOKS RIGHT AND IS BACKWARDS.
 # `env -u DEVELOPER_DIR -u SDKROOT cc probe.c` does NOT neutralise a
 # caller's stray environment. Measured on this tree: it drops the flake's
 # SDK entirely and stamps 14.4, because DEVELOPER_DIR/SDKROOT are exactly
 # how the apple-sdk derivation's setup hook hands the SDK to clang. So
 # the probe compile is NORMALISED rather than cleared, from a witness a
-# caller does not set: mkShell exports its own `buildInputs` attribute,
-# which is flake.nix's declaration verbatim. No apple-sdk there is a
-# refusal, not a guess.
+# caller does not set: mkShell's own `buildInputs` attribute.
 #
-# MACOSX_DEPLOYMENT_TARGET has no second witness — it comes from
-# stdenv.hostPlatform.darwinMinVersion, not from any attribute in
-# flake.nix — so it is inherited, and printed inside the minos failure
-# sentence so a reader can tell a flake regression from a stray export.
+# MACOSX_DEPLOYMENT_TARGET has no second witness (it comes from
+# stdenv.hostPlatform.darwinMinVersion), so it is inherited and printed
+# inside the minos failure sentence.
 #
-# TEST-ONLY SEAM: KAYA_DESIGN_GEN_SUBST="leg=path,leg=path" replaces the
-# binary a named leg reads, so the watched negatives can drive a doctored
-# stamp through the real code path. It exists for those negatives and for
-# nothing else; a name it does not recognise is a hard failure, because a
-# typo'd substitution would make a watched red vacuous — the failure mode
-# the wayland seat guard shipped twice.
+# TEST-ONLY SEAM: KAYA_DESIGN_GEN_SUBST="leg=path,…" replaces the binary
+# a named leg reads, for the watched negatives. An unrecognised name is
+# a hard failure: a typo'd substitution would make a watched red vacuous.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -96,10 +52,8 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 # The swift toolchain is RESOLVED here, never inherited: swift-toolchain.sh
-# memoizes into SWIFTC/SWIFT_SDK_ARGS/SWIFT_DEVELOPER_DIR and returns early
-# if SWIFTC is already set, so a caller carrying one from another build
-# would decide which SDK this gate's swift half measured. Same rule as the
-# DEVELOPER_DIR normalisation above, one toolchain over.
+# returns early if SWIFTC is already set, so a caller carrying one from
+# another build would decide which SDK this gate's swift half measured.
 unset SWIFTC SWIFT_SDK_ARGS SWIFT_DEVELOPER_DIR
 # shellcheck source=tools/lib/swift-toolchain.sh
 source "$ROOT/tools/lib/swift-toolchain.sh"
@@ -136,7 +90,7 @@ PY
     exit 1
 fi
 
-# 1. THE FLAKE-LINKED PROBE. What rust, go, c, ocaml and haskell guests
+# 1. THE FLAKE-LINKED PROBE — what rust, go, c, ocaml and haskell guests
 #    get when the lane links their main executables.
 printf '%s\n' 'int main(void) { return 0; }' >"$T/probe.c"
 if ! env DEVELOPER_DIR="$flake_sdk" SDKROOT="$flake_sdk/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" \
@@ -172,13 +126,9 @@ flake_sdk, probe_flake_cc, probe_swift = sys.argv[1:4]
 
 # ------------------------------------------------------------ the table
 #
-# DECLARED_READS is the census. It is a literal, written here, and the
-# verdict at the bottom refuses unless exactly this many stamps were
-# actually read — the tools/check-gates.sh and tools/tpl-surfaces.py
-# precedent. A reader that resolves nothing agrees with everything: a
-# machine with no dotnet, a python3 that resolved to a wrapper script, a
-# loop that silently delivered four of five legs, all have to come back
-# red rather than "both halves non-empty, OK".
+# DECLARED_READS is the census: the verdict at the bottom refuses unless
+# exactly this many stamps were read. A reader that resolves nothing
+# agrees with everything.
 DECLARED_READS = 5
 
 MODERN_FLOOR = (26, 0)   # sdk >= this is macOS 26's modern generation
@@ -390,11 +340,8 @@ for name, side, how, what, rules, stands_for in LEGS:
              f"what it can see is that it inherited MACOSX_DEPLOYMENT_TARGET="
              f"{os.environ.get('MACOSX_DEPLOYMENT_TARGET', '<unset>')}.")
 
-    # The probe legs the gate compiled itself have a second witness: the
-    # store path the SDK came from names its version. If the compile did
-    # not honour the DEVELOPER_DIR this gate normalised, these disagree
-    # and the measurement is not of the thing it was aimed at. Skipped
-    # for a substituted leg, whose binary this gate did not build.
+    # Second witness for a probe this gate compiled: the SDK store path
+    # names its version. Skipped for a substituted leg.
     if name == "flake-cc" and name not in SUBST:
         declared_sdk = re.search(r"apple-sdk-([0-9]+(?:\.[0-9]+)*)", flake_sdk)
         if declared_sdk is None:

@@ -1,10 +1,9 @@
 /* The standard-commands scene from C, at the explicit wire floor. Each
  * chord is in the CANONICAL wire spelling ("primary+comma": lowercase,
- * '+'-joined, primary/shift/alt order, punctuation NAMED rather than
- * spelled with the character) and the role is the canonical wire string
- * — the core REJECTS non-canonical spellings, so no canonicalizer runs
- * here. Annotated semantics in guests/rust/commands.rs; the byte-frozen
- * contract in tools/scenes/commands.steps. */
+ * '+'-joined, primary/shift/alt order, punctuation NAMED) and the role
+ * is the canonical wire string — the core REJECTS non-canonical
+ * spellings, so no canonicalizer runs here. Semantics:
+ * guests/rust/commands.rs. Contract: tools/scenes/commands.steps. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -122,8 +121,7 @@ static void *app(void *arg) {
         if (kaya_parse_menu_activated(rec, &id, keys, 2, &n_keys)) {
             if (n_keys == 0 && id == M_SETTINGS) {
                 /* Fires TWICE on purpose: once by the chord, once by
-                 * activating the item at its declared path — which on
-                 * macOS lives in the application menu by then. */
+                 * activating the item at its declared path. */
                 char status[64];
                 settings_count++;
                 snprintf(status, sizeof status, "settings %d", settings_count);

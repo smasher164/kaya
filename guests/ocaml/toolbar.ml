@@ -1,9 +1,8 @@
 (* The toolbar conformance scene, OCaml port: the [primary] bit as real
    window chrome (docs/chrome-plan.md C2). The app declares ONE catalog
    and marks two actions primary; every host promotes the same first two
-   in catalog preorder — the desktop's toolbar, the phones' top bar — and
-   the rest of the catalog stays reachable where that host keeps it.
-   There is no toolbar vocabulary to spell, which is the point.
+   in catalog preorder. There is no toolbar vocabulary to spell, which
+   is the point.
 
    Canonical semantics in guests/rust/toolbar.rs; the byte-frozen
    contract in tools/scenes/toolbar.steps. *)
@@ -14,8 +13,6 @@ open Kaya_app
 let () =
   let app = Kaya_app.create () in
 
-  (* The guest's own copy of the enablement: the signal is the model, and
-     this ref is only what "the other one" means. *)
   let save_enabled = ref true in
 
   build app (fun () ->

@@ -3920,3 +3920,47 @@ write, and a probe with nobody to answer it simply hangs. Sample the
 prompt-free surface (`changeCount`, `types`, `numberOfItems`) and put
 any read of the bytes on a background queue behind a deadline, so a
 block is a measurement instead of a wedge.
+
+## Cutting comments is its own trap family
+
+Measured across the 2026-08-19 tree-wide sweep (13 lanes, ~21,000 lines
+cut, every one proven comment-only by a string-literal-aware skeleton
+diff). The next comments pass starts from these, not from scratch:
+
+- THE PROOF TOOL DEFINES "COMMENT", AND THREE THINGS ARE NOT ONE. A
+  python triple-quoted docstring is a STRING LITERAL — including inside
+  a shell heredoc — so rewriting one is a code change and fails the
+  skeleton proof (two lanes hit this live). Haskell `{-# … #-}` pragmas
+  look like block comments and are code. A line beginning `# shellcheck`
+  is a DIRECTIVE: prepend prose to it and shellcheck dies SC1072/SC1073.
+- REGEX STRIPPERS DIE ON STRINGS, VACUOUSLY. `.setType("*/*")` in
+  KayaCompose.kt terminates a naive block-comment regex (~87 live lines
+  eaten); a `///` doc line containing `"""` silently spared 2,302 lines
+  in one probe and LOOKED like a clean pass. A cutter is validated the
+  same way a negative test is: run it on a file where you know the
+  answer, and treat "nothing to cut" as a failure to explain. The
+  sibling shell trap: counting doctest fences with grep -c over a
+  backtick pattern returned 0 because the SHELL ate the backticks —
+  count fences from python.
+- RUST DOCTESTS LIVE IN `///`. Thirteen `compile_fail` walls in app.rs
+  are comments to a stripper and tests to cargo; compare doctest COUNTS
+  before/after, because their loss is silent.
+- SOME COMMENTS ARE LOAD-BEARING TO GATES. check-go-env demands a `//`
+  line naming `os.Getenv`; generated files are exempted by their
+  `DO NOT EDIT` banner (guest-floor.py); check-steps' `wired()` greps
+  bare scene names that in four (scene,runner) pairs exist only in
+  comments; and two docs DELEGATE line-numbered comment blocks as the
+  durable home of measurements (run-suites.sh's app_id table,
+  validate-all's duration ceilings). The gate-read survey's map is the
+  census route: cut, run the gate, watch the red, restore.
+- TWO GENERATORS PUNISH THE CUT ITSELF. tools/kaya-bindgen sources are
+  whole-file-hashed by crates/kaya/build.rs — any comment byte moved
+  there reddens every cargo run until tools/gen-bindings.sh restamps
+  (the panic names the fix). tools/gen-guests.sh --check REGENERATES
+  unconditionally, so a cut made in a generated guest silently reverts
+  and the gate exits 0 — cut generators, never their outputs.
+- CITATIONS SHRINK-BREAK AND MEANING-DRIFT. check-doc-refs holds
+  `path:NNN` anchors only to `NNN <= file length`, so a big cut breaks
+  anchors (13 files went red from shrinking alone) and a small one can
+  leave an anchor pointing at the WRONG line with the gate green —
+  re-anchor by TEXT, never by arithmetic.

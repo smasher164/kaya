@@ -1,23 +1,14 @@
 package kaya
 
-// The save request's two binding-tier facts, pinned where a lane already
-// walks: tools/check-abort.sh runs `go test dev.kaya/bindings/go` on
-// every desktop lane, so these run with no GUI, no panel and no mac.
-//
-// WHY A TEST RATHER THAN THE SCENE. The save scene proves both of these
-// on macOS through a real NSSavePanel — but only there, only when a
-// human's box has a logged-in GUI session, and at nine seconds a panel.
-// The narrowing below is the contract rule with the widest blast radius
-// ("cancel is the empty answer, and a guest must remember NOTHING for
-// it", docs/save-plan.md D2): a save dialog that answered cancel with a
-// destination would have an app write a file the user declined to name.
+// The save request's two binding-tier facts. The save scene proves both
+// on macOS through a real NSSavePanel, but only there and only with a
+// logged-in GUI session; the narrowing rule is docs/save-plan.md D2.
 
 import "testing"
 
-// CANCEL IS NIL, AND A DESTINATION IS THE FIRST LOCATOR. The wire says
-// "exactly one locator or none" and the picker's result record carries a
-// LIST, so somebody has to narrow it; SaveDialogRef.Show does, once, for
-// every app.
+// Cancel is nil and a destination is the first locator. The wire says
+// "exactly one locator or none" and the result record carries a LIST,
+// so SaveDialogRef.Show narrows it once for every app.
 func TestSaveDialogNarrowsToOneOrNone(t *testing.T) {
 	app := NewApp()
 	var dialog uint64
@@ -54,10 +45,9 @@ func TestSaveDialogNarrowsToOneOrNone(t *testing.T) {
 	}
 }
 
-// ONE ID SPACE AND ONE LIVE SLOT, whichever dialog asked. The core keeps
-// a single live-dialog slot and answers both kinds on file_dialog_result,
-// so a save request drawing from a counter of its own would collide with
-// a picker id and steer one dialog's answer into the other's handler.
+// One id space and one live slot, whichever dialog asked: the core
+// answers both kinds on file_dialog_result, so a save request drawing
+// from its own counter would steer one dialog's answer to the other.
 func TestSaveDialogSharesThePickerIdSpace(t *testing.T) {
 	app := NewApp()
 	var pick, save, next uint64

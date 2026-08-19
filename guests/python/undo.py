@@ -96,7 +96,6 @@ def on_note(key, text):
 
 def on_add():
     if not draft:
-        # NOT a step, so the forward history survives it.
         status.set(f"nothing to add, {len(todos)} total")
         return
     kaya.undoable(f"add {draft}")
@@ -105,7 +104,6 @@ def on_add():
     todos.insert_fresh(Todo(title=draft))
     status.set(f"added {draft}, {len(todos)} total")
     keys.set(key_list())
-    # A pure effect rides along and is not restored (A2).
     field.focus()
     # Finishing the form is a SECOND transaction: `clear` inside the group
     # would be refused, and undoing the add must not put the draft back.
@@ -161,7 +159,6 @@ def redone(label, delta):
     notes.set(note_list())
 
 
-# The two handlers ride the window declaration and outlive every step.
 with app.window(title="undo", on_undone=undone, on_redone=redone):
     with app.menu("Edit"):
         kaya.item("Undo", role=kaya.ROLE_UNDO)
@@ -188,8 +185,6 @@ with app.window(title="undo", on_undone=undone, on_redone=redone):
         for todo in todos:
             with kaya.row():
                 kaya.label(bind=todo.title)
-                # The template zone's `entry` is the same call the draft
-                # above makes; the binding allocates a node, not a widget.
                 kaya.entry(on_change=on_note)
 
     # The scene types with real keystrokes, so something must hold focus.

@@ -1,19 +1,17 @@
 {- The accessibility conformance scene from Haskell: the two universal
-   props (the 'A11yId' and 'A11yLabel' attrs) and the verb that reads
-   them back out of the PLATFORM'S OWN accessibility tree rather than
-   kaya's model.
+   props (the 'A11yId' and 'A11yLabel' attrs), read back out of the
+   PLATFORM'S OWN accessibility tree rather than kaya's model.
 
-   Every widget kind appears, and EXACTLY ONE container of each
-   container kind: container targets are stable only while a scene keeps
-   one of each. See guests/rust/a11y.rs for the full note; the
-   byte-frozen contract is tools/scenes/a11y.steps. -}
+   EXACTLY ONE container of each container kind: container targets are
+   ordinal. See guests/rust/a11y.rs; the byte-frozen contract is
+   tools/scenes/a11y.steps. -}
 
 import qualified Data.ByteString as BS
 
 import KayaApp
 
 {- A 2x2 RGB PNG (red/green over blue/white), 75 bytes, embedded as
-   source: scenes carry their inputs, with no runtime file I/O. -}
+   source. -}
 testPng :: BS.ByteString
 testPng =
   BS.pack
@@ -44,8 +42,6 @@ main = kayaMain $ \app -> do
           sliderOn 0 1 0.5 (const (return ())) [A11yId "volume", A11yLabel "Volume"],
           progress 0.25 [A11yId "loading", A11yLabel "Loading"],
           imageBytes testPng [A11yId "logo", A11yLabel "Logo"],
-          -- The two CHOICE kinds: their options carry captions, the
-          -- choice itself does not.
           selectOn ["Red", "Green"] 0 (const (return ()))
             [A11yId "color", A11yLabel "Color"],
           radioOn ["Small", "Large"] 0 (const (return ()))

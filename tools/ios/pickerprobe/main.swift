@@ -8,37 +8,23 @@
 // because it is the same UIKit.
 //
 // THE QUESTION THAT DECIDES THE WHOLE ARM, because iOS has no
-// accessibility-service escape hatch the way Android does:
-//
-//  Q1 Is UIDocumentPickerViewController's content REACHABLE IN-PROCESS?
-//     Every other backend reads the real picker — AX on mac, AT-SPI on
-//     GTK, UI Automation on Windows, an accessibility service on
-//     Android. On iOS the picker is widely believed to be a REMOTE view
-//     controller hosted by another process, in which case the app sees
-//     a placeholder with no rows and `expect_file_dialog` has nothing
-//     to read. If that is so, the iOS arm needs a different answer to
-//     "drive the real picker" and it is better to know now.
-//  Q2 Where can the guest write that the picker can BROWSE? The app's
-//     own container is only visible to the Files browser when the
-//     bundle says so (UIFileSharingEnabled +
-//     LSSupportsOpeningDocumentsInPlace), which is an Info.plist
-//     question, not a code one.
-//  Q3 Does `directoryURL` aim the picker, the way EXTRA_INITIAL_URI
-//     does on Android and `directoryURL` does on NSOpenPanel?
-//  Q4 Does the picker even come up in the simulator — is the
-//     DocumentManager service present there at all?
+// accessibility-service escape hatch the way Android does: is
+// UIDocumentPickerViewController's content REACHABLE IN-PROCESS? The
+// rest of the cells — where a guest can write that the picker will
+// browse, whether `directoryURL` aims it, whether the DocumentManager
+// service exists in the simulator — and every answer are in
+// docs/file-dialogs-plan.md §6e and docs/traps.md. The Q-labels below
+// mark which reading is which.
 //
 // Answers land in the log under "PROBE". Not a lane; nothing builds it
 // but build.sh beside it.
 import UIKit
 import UniformTypeIdentifiers
 
-/// Which shape of the question this run asks. The scene needs BOTH:
-/// `pick_files()` asks for many and `pick_file()` for one, and they are
-/// different interactions — with many, a tap SELECTS and a confirm
-/// button appears; with one, the tap IS the answer.
+/// Which shape of the question this run asks: single and multi selection
+/// are different interactions (docs/traps.md).
 ///
-/// From the environment because `simctl launch --args` reaches the app
+/// From the ENVIRONMENT, because `simctl launch --args` reaches the app
 /// as argv while SIMCTL_CHILD_* reaches it as the environment, and the
 /// lane already speaks the latter.
 let variant = ProcessInfo.processInfo.environment["KAYA_PROBE_VARIANT"] ?? "single"
@@ -130,11 +116,8 @@ final class VC: UIViewController, UIDocumentPickerDelegate {
         // this is the iOS spelling of the same idea, and whether it is
         // honoured at all is the question.
         p.directoryURL = dir
-        // MULTI-SELECT IS A DIFFERENT INTERACTION, and the scene uses
-        // both: pick_files() asks for many, pick_file() for one. With
-        // many, a tap SELECTS rather than answering, and a confirm
-        // button appears — which is why this is a variant rather than
-        // an assumption.
+        // A VARIANT rather than an assumption: with many, a tap SELECTS
+        // rather than answering and a confirm button appears.
         p.allowsMultipleSelection = (variant == "multi")
         picker = p
         say("Q3 presenting, aimed at \(dir.path)")
@@ -179,11 +162,9 @@ final class VC: UIViewController, UIDocumentPickerDelegate {
         for n in names { say("Q1   \(n)") }
 
         // Q5: the ONE part of the picker that IS in this process — the
-        // remote bar button's tracking view, which carries the label
-        // "Cancel". If it can be driven, an iOS leg can at least prove
-        // the request/result grammar (present, dismiss, empty list)
-        // even where it cannot choose a file. If it cannot, nothing
-        // about this picker is reachable from the lane.
+        // remote bar button's tracking view, labelled "Cancel". If it
+        // can be driven, an iOS leg can at least prove the
+        // request/result grammar without choosing a file.
         var cancels: [UIView] = []
         func findCancel(_ v: UIView) {
             if v.accessibilityLabel == "Cancel" { cancels.append(v) }

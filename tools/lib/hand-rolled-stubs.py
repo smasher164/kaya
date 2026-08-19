@@ -1,24 +1,15 @@
 """No backend may REFUSE a feature in its own words.
 
-check-stubs pairs a runner's wired legs against the backends that still
-stub the scene, and check-steps stops demanding legs where a stub
-stands. Both read the CALL `depth_stub("<scene>")` (Kotlin:
-`depthStub`), because the convention used to be a free-form sentence —
-"<scene> is not yet materialized" — and in four milestones not one
-backend ever wrote it. check-stubs could therefore only ever pass, and
-the filedialog depth slice went straight through it while three
-backends refused in three different sentences of their own.
-
-So the sentence itself is now the failure: a refusal that does not go
-through the helper is invisible to both gates, and being invisible is
-the whole defect.
+check-stubs and check-steps both read the CALL `depth_stub("<scene>")`
+(Kotlin: `depthStub`), not a sentence — docs/traps.md has why. A refusal
+that does not go through the helper is invisible to both gates, and being
+invisible is the whole defect.
 
 A REFUSAL IS NOT A SENTINEL. Returning "<the GTK accessibility read is
-not implemented yet>" as a value is a different and equally honest
+not implemented yet>" as a VALUE is a different and equally honest
 pattern: it cannot equal a valid `<role>/<label>`, so a scene asserting
-on it fails loudly with the string in hand. That is a value a comparison
-consumes, not a control-flow refusal, and no gate needs to model it. Only
-constructs that ABORT are checked here.
+on it fails loudly with the string in hand. Only constructs that ABORT
+are checked here.
 """
 
 import pathlib
@@ -50,8 +41,8 @@ SMELL = re.compile(
     re.I | re.X,
 )
 
-# A refusal's message can wrap; and the helper's own definition sits
-# just above its body. Both need a few lines of context either way.
+# A refusal's message can wrap, and the helper's own definition sits just
+# above its body. Both need a few lines of context either way.
 AFTER = 3
 BEFORE = 3
 

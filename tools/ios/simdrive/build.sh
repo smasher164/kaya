@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,12 +10,8 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# Build simdrive, the iOS lane's out-of-app driver. See main.swift for
-# what it is and why iOS needs one at all.
-#
-# Prints the built binary's path on stdout so a caller can use it
-# directly; the runner builds it once per run and passes the path to
-# every leg.
+# Build simdrive, the iOS lane's out-of-app driver (see main.swift).
+# Prints the built binary's path on stdout.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

@@ -1,8 +1,6 @@
 // The filedialog conformance scene, Go port — the picker's
 // request/result grammar and the capability it hands back (DESIGN.md,
-// File dialogs). The guest reads what it was given with an ORDINARY
-// *os.File, so the assertion fails unless a real descriptor came back
-// carrying the real file.
+// File dialogs).
 //
 // THE READ RUNS OFF THE APP THREAD, which is what Open tells every caller
 // to do: it blocks. The worker PARKS between reading and posting, so a
@@ -97,7 +95,6 @@ func App() *kaya.App {
 					}
 					f.Close()
 				}
-				// Parks holding the result, standing in for the tail of a slow transfer.
 				<-release
 				count := len(files)
 				app.Post(func(tx *kaya.Tx) {
@@ -111,7 +108,6 @@ func App() *kaya.App {
 		tx.Mount(tx.Column(func() {
 			tx.Label(status).A11yID("status") // label#0
 			tx.Button("open", func(tx *kaya.Tx) { // button#0
-				// ADVISORY on every platform: a default view, never a guarantee.
 				tx.PickFiles().Filter("Text", "txt").OnResult(picked).Show()
 			})
 			tx.Button("open one", func(tx *kaya.Tx) { // button#1

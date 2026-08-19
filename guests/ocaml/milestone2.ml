@@ -3,17 +3,13 @@
    template zone; handles declared inside a template escape as the
    body's result.
 
-   THIS SCENE CARRIES THE EXPLICIT REGISTRATION TIER (DESIGN.md, scope
-   ratified 2026-08-05): the remove handler is registered CENTRALLY,
-   after the build, against the handle the build returned
-   ([on_click_node app remove_button]) rather than through the
-   [~on_click] argument todos.ml and undo.ml pass. Both spellings land
-   in the same table. It is also why the group For keeps its result —
+   THIS SCENE CARRIES THE EXPLICIT REGISTRATION TIER: the remove handler
+   is registered CENTRALLY, after the build, against the handle the
+   build returned. It is also why the group For keeps its result —
    [each] discards what the template body returns.
 
-   The app authors "g1" and "a" itself because it looks them up again
-   (rename g1, remove g2/a); [insert_fresh] is for data that identifies
-   nothing.
+   The app authors [g1] and [a] itself because it looks them up again;
+   [insert_fresh] is for data that identifies nothing.
 
    Build the library first (cargo build), then, from a scratch dir
    holding this file plus the contents of bindings/ocaml:
@@ -48,8 +44,6 @@ let () =
                let item_list, (_cell, remove_button) =
                  for_each items (fun () ->
                      let text = label ~bind_field:element () in
-                     (* The stamped copies are what the script clicks
-                        (button#last, the most recent stamp). *)
                      let remove_button = button ~text:"remove" () in
                      let cell = column [ w text; w remove_button ] () in
                      (cell, remove_button)) ()

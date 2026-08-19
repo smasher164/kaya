@@ -1,68 +1,48 @@
-(* kaya's idiomatic surface for OCaml: the structural core.
-
-   Three jobs, layered over the runtime (kaya_runtime.ml) and the
-   generated wire vocabulary (kaya_wire.ml):
-
-   - id allocation: signals, widgets, collections, and template nodes
-     come from per-space counters behind distinct types, so no app
-     hand-numbers the id spaces — and the compiler keeps blueprint
-     nodes (node) from being used where live widgets (widget) belong;
-   - template scoping: for_each and when_ take a (unit -> 'a) whose
-     body declares the blueprint, bracketing the records. OCaml has no
-     overloading, so the template vocabulary lives in the Tpl submodule
-     — the module path spells the zone the way the type family does in
-     the Haskell binding;
-   - direct-style declarations over the AMBIENT transaction: [build]
-     (and each handler dispatch) sets the ambient tx for its extent,
-     every builder reads it, and plain [let] and [;] compose scenes —
-     ratified 2026-07-22, retiring the let*/decl reader. The price of
-     direct style is that "declared outside a transaction" moves from
-     a type error to a loud runtime error (see [the_tx]). The Tpl
-     submodule still spells the template zone by module path;
-   - the trailing-unit convention: every creator ends in [()]. Apply
-     it to realize a widget where you stand ([let field = entry
-     ~on_change:h ()]); omit it and the partial application is a pure
-     [unit -> widget] thunk — the child form containers take in
-     lists, realized left to right ([List.iter]'s specified order, so
-     document order never rides on OCaml's unspecified list-literal
-     evaluation order). [w] wraps an already-realized widget for a
-     child slot;
-   - occurrence dispatch: handlers register per button; the app loop
-     routes each click, handing template-node handlers the stamped
-     copy's key path. Handlers run inside their own transaction (the
-     ambient tx is set for their extent); it submits when the handler
-     returns. *)
+(* kaya's idiomatic surface for OCaml: the structural core, over the runtime
+   (kaya_runtime.ml) and the generated wire vocabulary (kaya_wire.ml). THE
+   TEMPLATE ZONE IS THE Tpl SUBMODULE. OCaml has no overloading, so the
+   module path spells the zone. THE TRANSACTION IS AMBIENT: [build] (and
+   each handler dispatch) sets it for its extent and every builder reads it,
+   so plain [let] and [;] compose scenes. The price is that "declared
+   outside a transaction" is a loud RUNTIME error rather than a type error
+   (see [the_tx]). THE TRAILING-UNIT CONVENTION: every creator ends in [()].
+   Apply it to realize a widget where you stand; OMIT it and the partial
+   application is a pure [unit -> widget] thunk, which is the child form
+   containers take in lists and realize left to right ([List.iter]'s
+   specified order, so document order never rides on OCaml's unspecified
+   list-literal evaluation order). *)
 
 type signal = Signal of int64
 type widget = Widget of int64
 type node = Node of int64
 
-(* A live menu item: its OWN id space (the c_menu_item counter) behind
-   its own constructor, so cross-use with widget or node handles is a
-   type error. One command identity: exactly one parent or anchor,
-   forever (append-only; nothing is removed in v1). The handle is
-   durable — the dynamic tier (set_menu_label, menu_append, ...)
-   reopens it in any later transaction. *)
+(* WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the canonical
+   note, which every binding's copy of this surface shortens. *)
+type capabilities = { aux_windows : bool }
+
+(* This host's capabilities. Constant for the life of the process, so
+   asking once and remembering is fine. *)
+let capabilities () =
+  let bits = Kaya_runtime.capability_bits () in
+  { aux_windows = Int64.logand bits Kaya_runtime.cap_aux_windows <> 0L }
+
+(* A live menu item: its OWN id space (the c_menu_item counter) behind its
+   own constructor, so cross-use with widget or node handles is a type
+   error. *)
 type menu_item = MenuItem of int64
 
-(* A context catalog built UNANCHORED ([context_catalog]) for a
-   template node: menu items are live and shared across stamped
-   copies, so the catalog is built in the live zone and
-   [Tpl.context_menu] attaches it inside the template, where each
-   activation carries the copy's key path. An item takes exactly one
-   anchor — a second attach raises. *)
+(* A context catalog built UNANCHORED ([context_catalog]) for a template
+   node: menu items are live and shared across stamped copies, so the
+   catalog is built in the live zone and [Tpl.context_menu] attaches it
+   inside the template, where each activation carries the copy's key path. *)
 type context_catalog = { cc_roots : int64 list; mutable cc_attached : bool }
 
-(* A collection instance handle: the collection plus the key path
-   selecting one stamped copy's table. [collection] returns the root
-   (empty-path, live-zone) handle; [at] steps into a copy, one key per
-   enclosing For. Mutations and reads take the handle, so the target is
-   spelled once. *)
+(* A collection instance handle: the collection plus the key path selecting
+   one stamped copy's table. *)
 type collection = { cid : int64; cpath : Kaya_wire.value list }
 
-(* One instance of a collection: the table inside the stamped copy
-   selected by [path] (the empty path for a live-zone collection).
-   Entries keep insertion order, matching the core's rendering. *)
+(* One instance of a collection: the table inside the stamped copy selected
+   by [path] (the empty path for a live-zone collection). *)
 type instance = {
   path : Kaya_wire.value list;
   (* (key, (variant, fields)): the discriminant rides with the
@@ -78,110 +58,38 @@ type instance = {
 type picked_file = { handle : int64; name : string; local_path : string }
 
 (* AN ASSET — a file this app's own BUILD put where the running program
-   can find it (docs/assets-plan.md, ratified 2026-08-18): the vendored
-   typeface, the app's mark, a licence text.
-
-   [asset "fonts/sora-wght.ttf"] opens one. The name is a relative path
-   under the asset root, spelled with [/], and THE ROOT IS KAYA'S
-   PROBLEM AND NOT AN APP'S: a directory beside the program on the
-   desktops, the packaged assets on the phones, and one environment
-   variable ([KAYA_ASSET_DIR]) overrides the whole root for a lane that
-   staged it elsewhere. No guest reads an environment variable and no
-   guest carries a repo-relative default; both used to be hand-written
-   once per language, and one of those eight copies had a
-   language-specific trap severe enough to have earned its own gate.
+   can find it (docs/assets-plan.md). [asset "fonts/sora-wght.ttf"]
+   opens one; the name is a relative path under a root the CORE
+   resolves, and no guest reads an asset environment variable or carries
+   a repo-relative default (tools/check-assets.sh).
 
    A MISS RAISES [Failure] carrying the core's sentence and nothing
-   added. There is one author for that sentence
-   (crates/kaya/src/assets.rs) so an OCaml guest and a Java guest name
-   the same fault in the same words, and a scene can freeze them once.
-   [Failure] rather than [Invalid_argument] for the runtime's reason:
-   this module raises [Failure] when the world is not as the process
-   needs it (no library, disagreeing spec hashes), and a name the build
-   did not ship is that.
+   added, so an OCaml guest and a Java guest name the fault in the same
+   words. EACH CALL READS: no cache, no watch, no reload. Release is
+   explicit ([asset_close]) and automatic (a [Gc.finalise] per handle).
 
-   TWO REDEMPTIONS, and the whole point of there being two.
-   [brand_typeface ~font_asset] and [app_identity ~icon_asset] take the
-   handle itself and the bytes never enter the OCaml heap — the core
-   hands its own buffer to the blob table. [asset_bytes] is for a guest
-   that is ITSELF the consumer, and copies once.
-
-   FILE-LIKE READING IS BINDING-SIDE SUGAR OVER THESE BYTES and never a
-   core surface. Six of the eight bindings wrap them in the language's
-   own standard in-memory reader — std::io::Cursor, io.BytesIO,
-   bytes.NewReader, MemoryStream, java.io.ByteArrayInputStream,
-   Foundation's InputStream(data:) — and OCaml and Haskell wrap them in
-   nothing, because neither language's dependency set carries one
-   (OCaml's In_channel only wraps a real channel; base has no in-memory
-   Handle) and kaya will not add a package to a guest's build to invent
-   one. In those two the byte value IS the reader — Bytes.t and
-   Data.ByteString.ByteString — and every reading idiom the language has
-   applies to it directly. That is the whole of the carve-out (DESIGN.md,
-   Binding conventions): the idiom decides the spelling, and here two
-   idioms have no second spelling to decide on.
-
-   READ-ONLY, STRUCTURALLY: no mode argument anywhere on this surface,
-   and no file descriptor either. A descriptor was [picked_file]'s
-   necessity — a provider-opened file with no path behind it — and it is
-   not ours: kaya resolved the name and produced the bytes itself.
-
-   EACH CALL READS. No cache, no watch, no reload.
-
-   RELEASE IS EXPLICIT ([asset_close]) AND AUTOMATIC: the runtime
-   attaches a [Gc.finalise] to every handle, so a guest that forgets
-   leaks nothing. *)
+   In OCaml the byte value IS the reader — there is no in-memory-channel
+   wrapper, which is the stated carve-out (DESIGN.md, Binding
+   conventions). *)
 type asset = Kaya_runtime.asset
 
 let asset = Kaya_runtime.open_asset
 
-(* Why [asset name] would raise — the sentence it would carry, handed over
-   without raising. [""] means the name resolves.
-
-   WHY THIS EXISTS WHEN THE RAISE ALREADY CARRIES IT. Unwinding is not one
-   semantics in nine languages, and a conformance scene has to observe this
-   sentence on five platforms. OCaml catches [Failure] happily; Swift's
-   miss is a [fatalError], which traps rather than unwinding, so a Swift
-   guest cannot catch a miss at all. A total query has no such split —
-   every binding answers the same string the same way.
-
-   THE SAME SENTENCE, NOT A SECOND ONE: [asset]'s [failwith] carries
-   exactly this string, so what a scene freezes is what an app's user would
-   have been shown.
-
-   NAMED FOR THE CARRYING and not for the diagnosing — the long form is on
-   [Kaya_runtime.asset_miss_sentence]. One author writes the sentence; this
-   only ferries it.
-
-   TWO LINES. Line 1 — the name, the rule it broke, and the census of what
-   the package carries — is the same on every platform and is the line a
-   scene freezes. Line 2 names the resolved place and the route that chose
-   it, which a bundle, a device directory and a repo checkout spell three
-   different ways.
-
-   It measures rather than predicts: each call reads, so [""] is a fact
-   about the moment it was asked. *)
+(* Why [asset name] would raise — the sentence it would carry, handed
+   over without raising. [""] means the name resolves. LINE 1 (name,
+   rule, census) is the same on every platform and is the line a scene
+   freezes; line 2 names the resolved place, which three platforms spell
+   three ways. Authored by [asset_why_not] in
+   crates/kaya/src/assets.rs. *)
 let asset_miss_sentence = Kaya_runtime.asset_miss_sentence
 let asset_bytes = Kaya_runtime.asset_bytes
 let asset_close = Kaya_runtime.asset_close
 
 (* One representation, arriving — the sum a copy is the record of.
-   OCaml has a real sum, so this is a variant and a match is the
-   elimination.
-
-   YOU OFFER MANY AND YOU RECEIVE ONE, and the two shapes say so: a
-   record here would invite a guest to check five fields where four are
-   structurally always empty.
-
    Bytes ride as [string], OCaml's own binary buffer. [Image] may be a
-   RE-ENCODE of what was copied — the hosts convert freely between image
-   types — so compare what the image IS, never the bytes it arrived in.
-   [Files] is plural INSIDE one representation, the same nesting
-   text/uri-list and CF_HDROP already have. *)
-(* One collection entry's restored state, as the core states it.
-   [ue_state] is None when the step this undoes had no such entry at
-   all — "gone" is a state like any other, and the alternative (a
-   present/absent flag beside a dummy record) makes every reader check
-   two things. *)
+   RE-ENCODE of what was copied, so compare what the image IS, never the
+   bytes it arrived in. *)
+(* One collection entry's restored state, as the core states it. *)
 type undo_entry = {
   ue_collection : int64;
   (* The instance path: one key per enclosing For, empty at top level. *)
@@ -200,39 +108,19 @@ type undo_order = {
 }
 
 (* One text field's restored contents, and the FIELD'S OWN NAME beside
-   it — the identity-tag vocabulary [Node]-flavored occurrences already
-   speak, one more time.
-
-   [ut_path] EMPTY means [ut_id] is a live widget's id, the one the app
-   holds. A non-empty path means it is a TEMPLATE NODE's id and the path
-   is the stamped copy's keys, outermost first: a row's field has no id
-   an app could hold, so (node, keys) is the only name it has. Same pair
-   a click or an edit on that copy already arrives under. *)
+   it. [ut_path] EMPTY means [ut_id] is a live widget's id; a non-empty
+   path means it is a TEMPLATE NODE's id and the path is the stamped
+   copy's keys, outermost first. *)
 type undo_text = {
   ut_id : int64;
   ut_path : Kaya_wire.value list;
   ut_text : string;
 }
 
-(* WHAT THE CORE PUT BACK, and a STATEMENT of it rather than a replay
-   of ops: every run says what a thing now IS, so applying it twice is
-   the same as applying it once.
-
-   APPLYING AN INVERSE EMITS NOTHING ELSE (the echo doctrine), which is
-   why this is fat: it is the ONLY thing an app hears about the step.
-   [ud_texts] is the one nothing else could ever carry — restoring a
-   typing episode is a programmatic write, so an app that folds
-   text_changed into its own model learns of it here or not at all. The
-   binding has already reconciled its collection mirror from
-   [ud_entries] and [ud_orders] before a handler runs; signals and text
-   are not mirrored by this binding (no read-back exists for either, by
-   doctrine), so those two runs are the app's own business.
-
-   THE TEXTS RUN IS CARRIED WHOLE and each of its entries NAMES its
-   field ([undo_text]), because one step can restore several: a group
-   that touched the draft and a row's note hands back both, and an app
-   with two rows can only put a note in the right one because the path
-   says which. *)
+(* WHAT THE CORE PUT BACK, and a STATEMENT of it rather than a replay of
+   ops: every run says what a thing now IS, so applying it twice is the same
+   as applying it once. APPLYING AN INVERSE EMITS NOTHING ELSE (the echo
+   doctrine), so this is the ONLY thing an app hears about the step. *)
 type undo_delta = {
   ud_signals : (int64 * Kaya_wire.value) list;
   ud_texts : undo_text list;
@@ -291,26 +179,18 @@ type app = {
   widget_pastes : (int64, representation -> unit) Hashtbl.t;
   node_pastes : (int64, Kaya_wire.value list -> representation -> unit) Hashtbl.t;
   window_closed : (int64, unit -> unit) Hashtbl.t;
-  (* The history, per window and NOT one-shot: a history is walked as
-     often as the user likes, so these outlive every step (the
-     section_selected stance, not the alert's). Each receives the
-     group's label — empty for a typing episode, which kaya does not
-     name — and the whole restored state. *)
+  (* The history, per window and NOT one-shot: a history is walked as often
+     as the user likes, so these outlive every step (the section_selected
+     stance, not the alert's). *)
   undone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
   redone_handlers : (int64, string -> undo_delta -> unit) Hashtbl.t;
   node_toggles : (int64, Kaya_wire.value list -> bool -> unit) Hashtbl.t;
-  (* A stamped slider's move and a stamped choice's pick, the node
-     flavor of [widget_values]. Its absence was not a design: the core
-     has always emitted the keyed occurrence, and without this table
-     [dispatch_loop] matched no arm for it and dropped it in silence —
-     which nothing could notice, because until this pass no template
-     could contain a slider, a select or a radio to drop one from. *)
+  (* A stamped slider's move and a stamped choice's pick, the node flavor of
+     [widget_values]. *)
   node_values : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
-  (* The collection is the model — the only copy: every mutation op
-     edits it and queues the wire delta in the same call, so reads
-     (items, count) are exactly the writes. [children] records the
-     declared-inside-a-For edges the model purges along when a parent
-     entry's copy is torn down. *)
+  (* The collection is the model — the only copy: every mutation op edits it
+     and queues the wire delta in the same call, so reads (items, count) are
+     exactly the writes. *)
   model : (int64, instance list) Hashtbl.t;
   (* The minter's counters: the highest I64 key each collection
      INSTANCE has minted or absorbed, keyed by path the way [model] is
@@ -323,19 +203,16 @@ type app = {
   children : (int64, int64 list) Hashtbl.t;
   mutable open_fors : int64 list;
   (* The record-time mirror-read guard's arming counter: >0 while any
-     template body (a For body, a When body, a sum eliminator's arms)
-     is being DECLARED. Distinct from open_fors (For-only, and keyed by
-     collection): every template scope bumps this, When included. *)
+     template body (a For body, a When body, a sum eliminator's arms) is
+     being DECLARED. *)
   mutable tpl_depth : int;
   (* Signals recomputed from a collection after each of its mutations,
      written into the same transaction. *)
   derived : (int64, (unit -> unit) list) Hashtbl.t;
 }
 
-(* One transaction: everything queued inside build (or a handler)
-   applies atomically when it returns. Records accumulate reversed.
-   The journal holds a snapshot per touched collection, taken on first
-   touch, so an abandoned transaction abandons its model edits too. *)
+(* One transaction: everything queued inside build (or a handler) applies
+   atomically when it returns. *)
 and tx = {
   app : app;
     mutable records : string list;
@@ -343,7 +220,7 @@ and tx = {
      rides at the HEAD of the batch wherever [undoable] was called: a
      handler builds first and names the step once it knows what the step
      was, and the wire's head-of-batch rule must not turn that into a
-     footgun. Some twice is a guest bug ("one name per step"). *)
+     footgun. *)
   mutable undo_group : (int64 * string) option;
   mutable journal : (int64 * instance list) list;
   (* Deriveds registered in this transaction: promoted to the app
@@ -352,13 +229,10 @@ and tx = {
   mutable pending_derived : (int64 * (unit -> unit)) list;
 }
 
-(* The ambient transaction: set for the extent of [build] (handler
-   dispatch runs through build, so handlers get it too). Builders
-   read it instead of threading a reader, so plain [let] and [;]
-   compose scenes — the let*/decl reader retired with this (ratified
-   2026-07-22). A builder outside build fails loudly: the price of
-   direct style is that this check moves from the type system to
-   runtime. Single-threaded by the dispatch discipline. *)
+(* The ambient transaction: set for the extent of [build] (handler dispatch
+   runs through build, so handlers get it too). Builders read it instead of
+   threading a reader, so plain [let] and [;] compose scenes — the let*/decl
+   reader retired with this (ratified 2026-07-22). *)
 let ambient_tx : tx option ref = ref None
 
 (* The app thread's id, learned when the dispatch loop starts. None
@@ -366,16 +240,9 @@ let ambient_tx : tx option ref = ref None
 let app_thread : int option ref = ref None
 
 (* The OCaml spelling of a rule the handle bindings get from a stale-tx
-   check. [ambient_tx] above is a GLOBAL ref, not thread-local, so a
-   transaction opened on a background thread would stamp its records
-   into the app thread's open transaction -- silently, and interleaved.
-   Rust makes that a compile error (its Tx is !Send), Go, Java, C# and
-   Swift raise on a transaction that has closed; OCaml has no handle to
-   check, so it checks the thread, exactly as Python does.
-
-   Reads and writes need no guard of their own: a signal write outside
-   a transaction already fails with "no ambient transaction", which is
-   what a background thread gets. *)
+   check. [ambient_tx] above is a GLOBAL ref, NOT thread-local, so a
+   transaction opened on a background thread would stamp its records into
+   the app thread's open transaction — silently, and interleaved. *)
 let require_app_thread () =
   match !app_thread with
   | Some owner when owner <> Thread.id (Thread.self ()) ->
@@ -445,10 +312,8 @@ let emit tx record = tx.records <- record :: tx.records
 
 let instances_of app cid = Option.value ~default:[] (Hashtbl.find_opt app.model cid)
 
-(* One instance's fresh-key counter, made if this is the first anyone
-   has asked. Split out because both the mint and the absorb want the
-   same lookup, and a [ref] in the slot means neither has to write the
-   table back. *)
+(* One instance's fresh-key counter, made if this is the first anyone has
+   asked. *)
 let counter_of app cid path =
   let instances = Option.value ~default:[] (Hashtbl.find_opt app.fresh cid) in
   match List.assoc_opt path instances with
@@ -458,18 +323,13 @@ let counter_of app cid path =
       Hashtbl.replace app.fresh cid (instances @ [ (path, counter) ]);
       counter
 
-(* The next fresh key for one instance: counter+1, and the counter keeps
-   it. Monotonic by construction — nothing else writes it downwards (see
-   [insert_fresh]). *)
+(* The next fresh key for one instance: counter+1, and the counter keeps it. *)
 let mint_key app cid path =
   let counter = counter_of app cid path in
   counter := Int64.add !counter 1L;
   !counter
 
-(* An explicit key, shown to the minter on its way into the table. A
-   numeric key at or above the counter carries it up so the next mint
-   clears it; anything else moves nothing, having no way to collide with
-   an I64. *)
+(* An explicit key, shown to the minter on its way into the table. *)
 let absorb_key app cid path key =
   match key with
   | Kaya_wire.I64 n ->
@@ -477,10 +337,9 @@ let absorb_key app cid path key =
       if Int64.compare n !counter > 0 then counter := n
   | _ -> ()
 
-(* The record-time mirror-read guard: a template body records once and
-   the core replays it — a model read inside one bakes this moment's
-   data into every future stamp, silently dead. Live-zone, handler-tx,
-   and build-tx reads stay legal. *)
+(* The record-time mirror-read guard: a template body records once and the
+   core replays it — a model read inside one bakes this moment's data into
+   every future stamp, silently dead. *)
 let guard_mirror_read () =
   let tx = the_tx () in
   if tx.app.tpl_depth > 0 then
@@ -566,9 +425,8 @@ let model_move tx cid path key before =
          end)
        (instances_of tx.app cid))
 
-(* Every derived signal rooted at this collection, recomputed and
-   written into this transaction. Deriveds hang off root handles, so
-   nested-instance mutations cannot change their input. *)
+(* Every derived signal rooted at this collection, recomputed and written
+   into this transaction. *)
 let recompute_derived tx cid path =
   if path = [] then begin
     (match Hashtbl.find_opt tx.app.derived cid with
@@ -577,9 +435,8 @@ let recompute_derived tx cid path =
     List.iter (fun (c, f) -> if c = cid then f ()) (List.rev tx.pending_derived)
   end
 
-(* Run a scene program with a fresh ambient transaction and submit
-   it atomically. A program that raises abandons its records, and the
-   model abandons the same writes before the exception continues. *)
+(* Run a scene program with a fresh ambient transaction and submit it
+   atomically. *)
 let build app (program : unit -> 'a) =
   require_app_thread ();
   let tx =
@@ -619,21 +476,9 @@ let build app (program : unit -> 'a) =
    the loop moves to the next occurrence -- the uniform dispatch
    discipline across every binding. *)
 (* Run [program] as a transaction on the app thread, soon. THE ONE
-   function safe to call from another thread, and the answer to "how
-   does background work reach the UI".
-
-   [build app] is a transaction NOW on the calling thread; [post app] is
-   the same transaction SOON on the app thread — so a background thread
-   writes ordinary blocking OCaml and hands back only the result:
-
-     ignore (Thread.create (fun () ->
-       let data = slow_read () in
-       Kaya_app.post app (fun () -> Kaya_app.set status data)) ())
-
-   Signals are ids and are meant to be captured; that is how the posted
-   thunk names what to write. A posted thunk runs in its OWN
-   transaction, after whatever is running now, so posting from inside a
-   handler queues for after and never nests. *)
+   function safe to call from another thread. A posted thunk runs in its
+   OWN transaction, after whatever is running now, so posting from inside
+   a handler queues for after and never nests. *)
 let post app (program : unit -> unit) =
   Mutex.lock app.post_lock;
   app.posted <- app.posted @ [ program ];
@@ -649,33 +494,11 @@ let dispatch app (program : unit -> unit) =
     Printf.eprintf "kaya: handler raised (transaction rolled back): %s\n%!"
       (Printexc.to_string e)
 
-(* Make this transaction ONE undoable step, under [label].
-
-   THE UNIT OF UNDO IS A NAMED GROUP, not every transaction: handlers
-   fire per-gesture transactions constantly and most of them are
-   consequences rather than intents, and a per-keystroke editor would
-   earn one step per character — the exact problem grouping exists to
-   solve. So a group is opt-in, which is also what keeps a
-   collaborative app free to own its own history (docs/undo-plan.md
-   D2, D8).
-
-   CALLABLE ANYWHERE IN THE TRANSACTION, and the marker still rides at
-   the head (see [build]): a handler naturally acts first and names the
-   step when it knows what the step was. The transaction is the unit —
-   this marks the ambient one and does not bracket a region of it, so
-   where the call sits changes nothing.
-
-   WHAT A GROUP MAY HOLD is the reactive half — signal writes and
-   collection deltas, whose inverse the core derives from state it
-   already keeps. Focus is permitted and simply not restored. Anything
-   else (a const property write, creating a widget, [clear], showing a
-   dialog) fails at apply, naming the op: undo restores state, and
-   state is signals plus collections. The app hears the result at
-   [~on_undone].
-
-   The window is a labelled optional because each window has its own
-   history — Undo in one window has never meant "revert what happened
-   in another" — and the primary is the default, as everywhere else. *)
+(* Make this transaction ONE undoable step, under [label] (docs/undo-plan.md
+   D2). CALLABLE ANYWHERE IN THE TRANSACTION and the marker still rides at
+   the HEAD of the batch: the transaction is the unit, so where the call
+   sits changes nothing. WHAT A GROUP MAY HOLD is the reactive half — signal
+   writes and collection deltas. *)
 let undoable ?(window = 0L) label =
   let tx = the_tx () in
   if tx.undo_group <> None then
@@ -700,45 +523,34 @@ let widget kind =
 
 (* A widget's text: a button's caption, a label's line — and, on the
    uncontrolled text widgets, the "open a document into the editor"
-   write. One write, after which the user owns the field again: it
-   answers with its ordinary [text_changed] and the app's fold takes it
-   from there, the same round trip a keystroke makes.
+   write. One write, after which the user owns the field again.
 
-   A write that CHANGES the text of a textarea drops whatever ranges
-   were declared over it (see [highlight_ranges]) and spends the field's
+   A write that CHANGES a textarea's text DROPS whatever ranges were
+   declared over it (see [highlight_ranges]) and spends the field's
    native undo history, which is why undo's D7 treats it as an episode
    boundary. *)
 let set_text (Widget id) text = emit (the_tx ()) (Kaya_wire.tx_set_text id text)
 
-(* Set a widget's flex weight within its row/column: 0 is natural
-   size, positive weights divide the container's leftover main-axis
-   space in proportion (see Prop::Grow in the core). [set_grow] is the
-   dynamic path; the declarative spelling is the [~grow] labeled
-   argument every constructor takes. *)
+(* Set a widget's flex weight within its row/column: 0 is natural size,
+   positive weights divide the container's leftover main-axis space in
+   proportion (see Prop::Grow in the core). *)
 let set_grow (Widget id) weight = emit (the_tx ()) (Kaya_wire.tx_set_grow id weight)
 
-(* A widget's accessibility IDENTIFIER: a stable authored key that
-   assistive tooling and UI automation address it by, and which is
-   NEVER spoken. Universal — every kind carries one. [set_a11y_id] is
-   the dynamic path; the declarative spelling is the [~a11y_id] labeled
-   argument every constructor takes, like [~grow]. *)
+(* A widget's accessibility IDENTIFIER: a stable authored key that assistive
+   tooling and UI automation address it by, and which is NEVER spoken. *)
 let set_a11y_id (Widget id) value = emit (the_tx ()) (Kaya_wire.tx_set_a11y_id id value)
 
-(* What an assistive client SPEAKS for a widget. Universal, and
-   deliberately separate from the identifier — an automation key is not
-   a spoken name. Leave it unset to keep whatever the platform derives
-   from the control's own content; setting it OVERRIDES that, so a
-   button whose caption already reads well needs nothing here.
-   [set_a11y_label] is the dynamic path; [~a11y_label] is the
-   declarative spelling. *)
+(* What an assistive client SPEAKS for a widget. Universal, and deliberately
+   separate from the identifier — an automation key is not a spoken name.
+   Leave it unset to keep whatever the platform derives from the control's
+   own content; setting it OVERRIDES that, so a button whose caption already
+   reads well needs nothing here. *)
 let set_a11y_label (Widget id) value =
   emit (the_tx ()) (Kaya_wire.tx_set_a11y_label id value)
 
-(* What ACTIVATING this widget does — the platforms' hint (Apple
-   defines it as the result of performing an action; Android carries it
-   as the click action's label). Write a VERB PHRASE. Activation kinds
-   only; the root rejects it elsewhere, which is why [~a11y_hint] rides
-   button, checkbox, select and radio and not [set_a11y] below. *)
+(* What ACTIVATING this widget does — the platforms' hint (Apple defines it
+   as the result of performing an action; Android carries it as the click
+   action's label). Write a VERB PHRASE. *)
 let set_a11y_hint (Widget id) value =
   emit (the_tx ()) (Kaya_wire.tx_set_a11y_hint id value)
 
@@ -749,26 +561,17 @@ let set_a11y ?a11y_id ?a11y_label w =
   Option.iter (fun v -> set_a11y_id w v) a11y_id;
   Option.iter (fun v -> set_a11y_label w v) a11y_label
 
-(* A container's inter-child gap (main axis, DIP; the normalized
-   default is 8). Containers only — the scene rejects it anywhere
-   else. [set_spacing] is the dynamic path; the declarative spelling
-   is the [~spacing] labeled argument on the container. *)
+(* A container's inter-child gap (main axis, DIP; the normalized default is
+   8). *)
 let set_spacing (Widget id) gap = emit (the_tx ()) (Kaya_wire.tx_set_spacing id gap)
 
 (* A container's OWN padding (DIP between its bounds and its children,
-   uniform on all four sides) — the window inset one level down, which
-   is why a full-bleed [window ~inset:0.0] can still hold an inset
-   status row. Containers only, spacing's kinds exactly; the scene
-   rejects it anywhere else. [set_inset] is the dynamic path; the
-   declarative spelling is the [~inset] labeled argument on the
-   container. *)
+   uniform on all four sides) — the window inset one level down, which is
+   why a full-bleed [window ~inset:0.0] can still hold an inset status row. *)
 let set_inset (Widget id) pad = emit (the_tx ()) (Kaya_wire.tx_set_inset id pad)
 
 (* A container's cross-axis child placement (the align spec enum; the
-   normalized default is [Start]). Containers only; [Baseline] is
-   rows-only — the scene rejects misuse at the root. [set_align] is
-   the dynamic path; the declarative spelling is the [~align] labeled
-   argument on the container. *)
+   normalized default is [Start]). *)
 type align = Start | Center | End | Stretch | Baseline
 
 let align_wire = function
@@ -786,18 +589,7 @@ let set_align (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_align id (align
    surface's actions is THE one — so they belong to a button and nothing
    else. [Heading] is a text hierarchy fact: the platform's own heading
    text style AND the trait assistive users skim a screen by, which is
-   why it is a role and not a font size.
-
-   The vocabulary is CLOSED — a variant, with no raw value behind it —
-   because a color or a weight per widget is what the styling ceiling
-   exists to refuse; kaya grows the set, an app never does.
-
-   THE KIND IS THE ROOT'S JUDGEMENT, exactly as [Baseline] is one
-   declaration up: a [Heading] on a button dies at declare time, in one
-   sentence naming both sides, before any backend improvises on a
-   combination that means nothing. [set_role] is the dynamic path; the
-   declarative spelling is the [~role] labeled argument, which rides the
-   two constructors a role fits (the [~a11y_hint] discipline). *)
+   why it is a role and not a font size. *)
 type role = Destructive | Prominent | Heading
 
 let role_wire = function
@@ -808,25 +600,7 @@ let role_wire = function
 let set_role (Widget id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
 
 (* THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
-   docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
-
-   An app names a CONCEPT and each backend draws its own platform's
-   glyph for it: [Copy] is [doc.on.doc] on Apple, [content_copy] on
-   Material, [edit-copy-symbolic] on Adwaita, and no single asset is
-   right on all three — SF Symbols are license-locked to Apple
-   platforms, so a shared one is not even legal. The platform sets also
-   metric-match the text beside them (weight, baseline) while a blob
-   cannot. The [~icon] blob slot stays for genuinely app-specific art:
-   this rides BESIDE it, never instead of it.
-
-   CLOSED, and small on purpose — the [role] trick one declaration up,
-   for the same reason: a variant with no raw value behind it, so an
-   app cannot name a concept kaya has not mapped on every platform.
-   Apple keeps its own semantic set to fifteen entries. Growing this
-   one is a spec change with its gates, never a per-app escape hatch.
-
-   The WIRE VALUES ARE APPEND-ONLY (a new concept takes 21); they live
-   in the generated [Kaya_wire] and are never spelled here. *)
+   docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes"). *)
 type symbol =
   | Add
   | Remove
@@ -886,16 +660,9 @@ let symbol_wire = function
    roster row, closed like [role] and [symbol] above.
 
    AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS, and there is no
-   [current] in this binding for the same reason there is none in any
-   other: OCaml cannot answer that question — [Sys.os_type] is ["Unix"]
-   for macOS, Linux, iOS and Android alike — and it does not have to.
-   Every row travels to every backend on the wire and each LOWERING
-   picks its own, because a lowering IS its platform. A guest that
-   branched on its platform would also be a guest that ships different
-   code per platform, which is the thing kaya exists to not do.
-
-   The WIRE VALUES live in the generated [Kaya_wire] and are never
-   spelled here. *)
+   [current]: OCaml cannot answer that question — [Sys.os_type] is "Unix"
+   for macOS, Linux, iOS and Android alike. Every row travels to every
+   backend and each LOWERING picks its own. *)
 type platform = Mac | Ios | Linux | Windows | Android
 
 let platform_wire = function
@@ -909,10 +676,8 @@ let bind_text (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_text 
 let set_checked (Widget id) checked = emit (the_tx ()) (Kaya_wire.tx_set_checked id checked)
 let bind_checked (Widget id) (Signal s) = emit (the_tx ()) (Kaya_wire.tx_bind_checked id s)
 
-(* An image's content: one registration copy of the encoded bytes into
-   core-owned memory. The handle is consumed by the next submit from
-   this guest, referenced or not — so every write re-registers — and
-   the caller's bytes are free to drop the moment this returns. *)
+(* An image's content: one registration copy of the encoded bytes into core-
+   owned memory. *)
 let set_source (Widget id) data =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_set_source id (Kaya_runtime.register_blob data))
@@ -921,14 +686,9 @@ let bind_source (Widget id) (Signal s) =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_bind_source id s)
 
-(* One-shot commands: momentary verbs into widget-owned state, riding
-   the open transaction like any record — the insert and the clear
-   beside it submit together or not at all. Fire-and-forget: no model
-   state, nothing to journal; the widget answers through its normal
-   occurrence path (a clear arrives back as text_changed "" and the
-   app's draft fold empties itself). Commands take a widget only — a
-   node is a blueprint, and a blueprint has nothing to clear (the
-   type-level arm of the scene's own template rejection). *)
+(* One-shot commands: momentary verbs into widget-owned state, riding the
+   open transaction like any record — the insert and the clear beside it
+   submit together or not at all. *)
 
 (* Drop an entry's content now (the field stays authoritative). *)
 let clear (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_clear)
@@ -939,55 +699,23 @@ let focus (Widget id) = emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wi
 (* --- Text ranges: the three primitives an editor cannot write itself -
 
    A RANGE IS A PAIR OF UTF-8 BYTE OFFSETS [(start, stop)] into the
-   widget's current text, half-open — Python's own [slice] pair, and the
-   spec's field names. OCaml's [string] IS a byte sequence, so the
-   offsets an app already has are the offsets kaya wants: [String.length],
-   [String.index_from] and any literal search over the document count
-   the same units the wire carries, and this binding converts nothing.
-   (Four of the nine guest languages are byte-native like this; the
-   other five convert once at their own edge — scratchpad/ranges-units.md
-   §5.)
+   widget's current text, half-open. OCaml's [string] IS a byte sequence,
+   so the offsets an app already has are the offsets kaya wants and this
+   binding converts nothing. The offsets are [int], not [int64], because
+   an offset is arithmetic the APP does with the stdlib.
 
-   THE OFFSETS ARE [int] AND NOT [int64] deliberately, unlike the ids
-   these functions take: an id is an opaque handle the binding mints,
-   while an offset is arithmetic the APP does with the stdlib, and the
-   stdlib counts in [int]. A range surface in [int64] would put an
-   [Int64.of_int] at every call site of a search loop.
-
-   ONE PAIR TYPE FOR ALL THREE VERBS, so the value flows: the list a
-   find handed [highlight_ranges] is the list [List.nth_opt] takes one
-   out of for [select_range]. Labelled [~start]/[~stop] arguments were
-   the alternative and would have needed the pair anyway (the set is a
-   LIST), leaving two spellings for one datum.
-
-   THE CORE VALIDATES AND REFUSES, at one chokepoint, before any of this
-   reaches a platform: [start <= stop], [stop <= String.length text], and
-   both endpoints on a code-point boundary. A malformed offset is an
-   app-programming error of the same class as ill-formed text on the
-   wire, and it gets the same loud treatment — the five platforms answer
-   one in four different ways and macOS ABORTS THE PROCESS (an out-of-range
-   NSTextStorage attribute is an NSRangeException, exit 134). An endpoint
-   inside a grapheme cluster is NOT refused: the platforms disagree about
-   what a grapheme is, so the range covers exactly the code points it
-   names and a platform may widen what it paints. *)
+   THE CORE VALIDATES AND REFUSES at one chokepoint before any of this
+   reaches a platform ([start <= stop], inside the text, both endpoints
+   on a code-point boundary). A malformed offset gets loud treatment
+   because macOS ABORTS THE PROCESS on one (crates/kaya/src/spec.rs;
+   docs/traps.md). An endpoint inside a grapheme cluster is NOT
+   refused. *)
 
 (* DECLARE the decorated ranges of a textarea, replacing whatever was
-   declared before; [[]] is the clear.
-
-   APP-OWNED AND NEVER TRACKED (docs/ranges-plan.md D2). A declared set
-   is bound to the text it was declared against: the first edit of any
-   kind — a keystroke, a programmatic write, a native undo — DROPS it,
-   with nothing said, and the app re-declares from the fold [~on_change]
-   already drives. That is the uncontrolled contract the text itself
-   has, and it is why kaya ships no range-adjustment machinery: tracking
-   ranges across edits is editor-component work.
-
-   kaya ships no search either. What to decorate is the app's question —
-   a find engine, a find bar and a regex dialect belong to the text
-   editor — and the five lines that answer it live in the guest:
-
-     let hits = find_all !doc needle in
-     highlight_ranges editor hits *)
+   declared before; [[]] is the clear. APP-OWNED AND NEVER TRACKED
+   (docs/ranges-plan.md D2): the first edit of any kind DROPS the set, with
+   nothing said, and the app re-declares from the fold [~on_change] already
+   drives. *)
 let highlight_ranges (Widget id) ranges =
   emit (the_tx ())
     (Kaya_wire.tx_highlight_ranges id (List.length ranges)
@@ -997,24 +725,17 @@ let highlight_ranges (Widget id) ranges =
           ranges))
 
 (* Put the textarea's selection at one range; [(at, at)] is a caret.
-
    REFUSED WHILE THE USER IS COMPOSING through an input method, in every
-   backend (D4). Honouring it commits the marked text into the document
-   and into the app's own model mid-word — measured on macOS — which is
-   data loss shaped like a feature. The refusal is a NO-OP and not an
-   exception: composition state is on no kaya channel and never will be,
-   so the same call is honoured one millisecond and refused the next,
-   and an app cannot avoid the race. Ask again after the next
-   [~on_change], which is what the end of a composition announces. *)
+   backend (D4), and the refusal is a NO-OP rather than an exception:
+   composition state is on no kaya channel, so an app cannot avoid the
+   race. Ask again after the next [~on_change]. *)
 let select_range (Widget id) (start, stop) =
   emit (the_tx ())
     (Kaya_wire.tx_select_range id (Int64.of_int start) (Int64.of_int stop))
 
-(* Scroll the textarea so a range is inside the viewport. A PURE
-   EFFECT: no state moves, the selection is untouched, and undo does not
-   put the scroll back — undo restores state, not where you were
-   looking. How much context lands around the range is the platform's
-   own scroll behaviour; the observable kaya fixes is containment. *)
+(* Scroll the textarea so a range is inside the viewport. A PURE EFFECT: no
+   state moves, the selection is untouched, and undo does not put the scroll
+   back — undo restores state, not where you were looking. *)
 let reveal_range (Widget id) (start, stop) =
   emit (the_tx ())
     (Kaya_wire.tx_reveal_range id (Int64.of_int start) (Int64.of_int stop))
@@ -1023,27 +744,7 @@ let add_child (Widget parent) (Widget child) =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_child parent child)
 
-(* --- Construction sugar: the tree reads as a tree -------------------
-
-   Co-located constructors (props and handlers at the declaration
-   site) and containers taking their children, so
-
-     let* check = widget kind_checkbox in
-     let* () = bind_checked_field check todo_done_ in
-     ...
-     let* row = widget kind_row in
-     let* () = add_child row check in
-     let* () = add_child row title in
-
-   reads instead as
-
-     let* r = row [ checkbox ~on_toggle (); label ~bind:status () ] in
-
-   Everything lowers eagerly to the same records in the same order —
-   children created first, then the container, then the add_childs.
-   Sugar is syntax over the record calls, never a scene value the
-   binding interprets later (the design's no-guest-AST rule); the
-   explicit floor above stays for whoever wants one call ≈ one record. *)
+(* --- Construction sugar: the tree reads as a tree ------------------- *)
 
 let button ?grow ?a11y_id ?a11y_label ?a11y_hint ?role ?text ?on_click () =
   let tx = the_tx () in
@@ -1110,12 +811,9 @@ let progress ?grow ?a11y_id ?a11y_label ?(value = 0.0) ?indeterminate () =
   Option.iter (fun i -> emit tx (Kaya_wire.tx_set_indeterminate id i)) indeterminate;
   w
 
-(* A slider over min..max at value. Uncontrolled, like the entry: the
-   bar owns its position and reports each change to [on_change] (the
-   new value as a float). [~bind] takes a float signal for the
-   position instead of a constant — the programmatic write path
-   ([write] fans out to the control; property writes never echo an
-   occurrence, so a handler's own writes cannot loop back at it). *)
+(* A slider over min..max at value. Uncontrolled, like the entry: the bar
+   owns its position and reports each change to [on_change] (the new value
+   as a float). *)
 let slider ?grow ?a11y_id ?a11y_label ?(min = 0.0) ?(max = 1.0) ?(value = 0.0) ?bind
     ?on_change () =
   let tx = the_tx () in
@@ -1199,12 +897,8 @@ let checkbox ?grow ?a11y_id ?a11y_label ?a11y_hint ?text ?checked ?on_toggle () 
   | None -> ());
   w
 
-(* An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
-   decodes natively, and decode failure renders the placeholder, never
-   a crash. [source] takes the encoded bytes — one registration copy
-   into core memory; the handle is consumed by the next submit, and
-   the guest's bytes are free to drop the moment the call returns.
-   [bind] takes a Blob signal instead. Display-only, like a label. *)
+(* An image displaying encoded bytes (PNG, JPEG, ...): the toolkit decodes
+   natively, and decode failure renders the placeholder, never a crash. *)
 let image ?grow ?a11y_id ?a11y_label ?source ?bind () =
   let w = widget Kaya_wire.kind_image in
   Option.iter (fun g -> set_grow w g) grow;
@@ -1316,38 +1010,15 @@ let insert c key value =
   emit tx (Kaya_wire.tx_collection_insert c.cid c.cpath key 0 [ value ]);
   recompute_derived tx c.cid c.cpath
 
-(* Insert a value under a key the binding authors, and hand the key
-   back — [let key = insert_fresh todos (Str draft)].
-
-   FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain identity
-   and guest-chosen (DESIGN.md, the update algebra), so anything that
-   already HAS a name passes it to [insert] — today and always. This is
-   the other case, and it is the common one in a form: the app has a
-   title and nothing else, and the alternative is a hand-spelled counter
-   beside the collection, which in OCaml is an [int ref] that outlives
-   every handler that adds, and whose safety rests on a never-rewind
-   rule nobody wrote down.
+(* Insert a value under a key the binding authors, and hand the key back
+   — [let key = insert_fresh todos (Str draft)].
 
    ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted key is
-   [I64] and is counter+1. An instance is a table — the live-zone
-   collection, or one stamped copy selected by [at] — and keys are
-   unique within one, so that is what the counter is per.
-
-   MIXING IS SAFE BY ABSORPTION: an explicit [insert] whose key is an
-   [I64] at or above the counter carries it up, so a later mint clears
-   every hand-chosen numeric key already in the table. A [Str] key
-   cannot collide with an [I64] at all and moves nothing.
-
-   NO DECREMENT IS EXPRESSIBLE, and that is the whole safety argument.
-   Undo and redo replay captured keys inside the core and never re-enter
-   this path ([absorb_undo] writes the mirror directly), so a history
-   walk never moves the counter; an abandoned transaction does not move
-   it back either — the rollback journal restores the model, not the
-   counter, so a key can never be handed out twice. A fresh key is fresh
-   forever.
-
-   The result is meaningful even where a scene discards it: [ignore] is
-   OCaml's spelling for "inserted for effect". *)
+   [I64] and is counter+1. MIXING IS SAFE BY ABSORPTION: an explicit
+   [insert] whose key is an [I64] at or above the counter carries it up.
+   NO DECREMENT IS EXPRESSIBLE — a history walk never moves the counter,
+   and an abandoned transaction does not move it back either (the
+   rollback journal restores the model, not the counter). *)
 let insert_fresh c value =
   let tx = the_tx () in
   let key = mint_key tx.app c.cid c.cpath in
@@ -1371,9 +1042,8 @@ let entry_keys tx cid path =
   | Some i -> List.map fst i.entries
   | None -> []
 
-(* The same checks the scene makes, made where the guest can see the
-   stack: a missing key or anchor is a guest bug, never a fallback.
-   Moving an entry before itself is a no-op, and nothing travels. *)
+(* The same checks the scene makes, made where the guest can see the stack:
+   a missing key or anchor is a guest bug, never a fallback. *)
 let move_entry c key before =
   let tx = the_tx () in
   let keys = entry_keys tx c.cid c.cpath in
@@ -1389,9 +1059,8 @@ let move_entry c key before =
     recompute_derived tx c.cid c.cpath
   end
 
-(* Reposition an entry before another's: order is collection data, so
-   the model reorders and the wire carries the same keys-only delta.
-   Keys, never indices. *)
+(* Reposition an entry before another's: order is collection data, so the
+   model reorders and the wire carries the same keys-only delta. *)
 let move_before c key anchor = move_entry c key (Some anchor)
 
 (* Reposition an entry at the end of its collection. *)
@@ -1438,20 +1107,15 @@ let items c =
 (* count reads through items, so the mirror-read guard fires there. *)
 let count c = List.length (items c)
 
-(* Records: a first-class descriptor is the schema — the honest floor
-   a future ppx deriver ([@@deriving kaya_gen]) will generate. One
-   descriptor drives the schema, the conversions, and the field tokens,
-   so keeping them adjacent is the discipline; the deriver will delete
-   even that. *)
+(* Records: a first-class descriptor is the schema — the honest floor a
+   future ppx deriver ([@@deriving kaya_gen]) will generate. *)
 type 'a record_type = {
   rt_schema : int list;
   rt_to_values : 'a -> Kaya_wire.value list;
   rt_of_values : Kaya_wire.value list -> 'a;
 }
 
-(* A typed projection: one field of a record type, by wire position.
-   The phantom pins the OCaml type, so bind_checked_field rejects a
-   (_, string) field at compile time. *)
+(* A typed projection: one field of a record type, by wire position. *)
 type ('a, 'v) field = {
   fd_index : int;
   fd_to_value : 'v -> Kaya_wire.value;
@@ -1460,17 +1124,7 @@ type ('a, 'v) field = {
 let str_field index : ('a, string) field =
   { fd_index = index; fd_to_value = (fun s -> Kaya_wire.Str s) }
 
-(* THE WHOLE ELEMENT OF A SCALAR COLLECTION, as a field token.
-
-   A field token names one field of a RECORD, and a scalar collection has
-   no record: its element IS the value. Binding it was spelled with the
-   bare element bind at the floor, which is why a template label over a
-   scalar collection was built with the widget-kind floor rather than with
-   the sugar. Nothing was missing but a NAME for field 0 — the wire record
-   is the same either way.
-   
-   String only, and that is a fact rather than a restriction: a scalar
-   collection is always a collection of strings, one field, one type. *)
+(* THE WHOLE ELEMENT OF A SCALAR COLLECTION, as a field token. *)
 let element : ('a, string) field = str_field 0
 
 let bool_field index : ('a, bool) field =
@@ -1538,9 +1192,8 @@ let insert_record rc key value =
        (encode_fields rc.rc_type.rt_schema fields));
   recompute_derived tx rc.rc_handle.cid rc.rc_handle.cpath
 
-(* [insert_fresh] for a record collection: the binding authors the key
-   and hands it back. Same contract, same counter — see [insert_fresh]
-   for the whole of it. *)
+(* [insert_fresh] for a record collection: the binding authors the key and
+   hands it back. *)
 let insert_record_fresh rc value =
   let tx = the_tx () in
   let key = mint_key tx.app rc.rc_handle.cid rc.rc_handle.cpath in
@@ -1591,11 +1244,9 @@ let record_items rc =
   | Some i -> List.map (fun (k, (_, vs)) -> (k, rc.rc_type.rt_of_values vs)) i.entries
   | None -> []
 
-(* A signal recomputed from this collection's entries after every
-   mutation, written into the same transaction — the items-left label
-   with no handler remembering to update it. The function is pure
-   presentation: entries in, one value out; the core sees an ordinary
-   signal. *)
+(* A signal recomputed from this collection's entries after every mutation,
+   written into the same transaction — the items-left label with no handler
+   remembering to update it. *)
 let derive rc compute =
   let tx = the_tx () in
   let s = signal (compute (record_items rc)) in
@@ -1606,33 +1257,12 @@ let derive rc compute =
 
 (* REQUEST this app's brand accent (docs/styling-plan.md D1/D2): one
    sRGB hex — [brand_accent 0x3584E4] — is the whole call, and the core
-   derives the rest.
-
-   A REQUEST, and the word is the semantics in every language: a
-   platform may let its user override what the app asks for. macOS does
-   today (an app accent applies only while the user's system accent is
-   multicolor), and this sentence does not change if another platform
-   grows the preference — the app states a brand, the platform stays the
-   judge of its own chrome.
-
-   THE APP NEVER WRITES A FOREGROUND, and never writes a contrast
-   variant: the core derives fill, on-fill, standalone and the
-   hover/pressed ramp per appearance and hands every backend VALUES. An
-   app-supplied pair can be illegible with nothing to catch it, and
-   three of the four platforms compute or hard-code the foreground
-   anyway — so an app value would be honored on some and ignored on
-   others, which is divergence by construction.
-
-   [~light] and [~dark] are the per-appearance form, for a brand book
-   that specifies its own dark variant; whatever they leave unstated
-   comes from the seed. The optional labels are the OCaml spelling of
-   what other languages spell as a second function — one call, one
-   meaning.
+   derives the rest. THE APP NEVER WRITES A FOREGROUND and never writes
+   a contrast variant. [~light] and [~dark] are the per-appearance form;
+   whatever they leave unstated comes from the seed.
 
    SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write and
-   a late one. Brand is identity, not state, and a slot that could flip
-   at runtime would promise a theme-switching surface the vocabulary
-   deliberately does not have. *)
+   a late one. *)
 let brand_accent ?light ?dark seed =
   let mask =
     (match light with Some _ -> 1 | None -> 0)
@@ -1644,49 +1274,16 @@ let brand_accent ?light ?dark seed =
        (Option.value dark ~default:0))
 
 (* REQUEST this app's brand typeface (docs/styling-plan.md Slice 2b):
-   one family name — [brand_typeface "Georgia"] — is the whole call, and
-   every platform that has that family installed uses it.
+   one family name — [brand_typeface "Georgia"] — is the whole call.
+   THE FAMILY, NEVER THE SCALE. [~platforms] rows TRAVEL UNRESOLVED, so
+   each backend picks its own; [~font] ships a font file's bytes and
+   [~font_asset] the same slot with the font NAMED (the bytes never enter
+   the OCaml heap). The two are EXCLUSIVE — naming both is refused.
 
-   THE FAMILY, NEVER THE SCALE (ratified DESIGN.md). Sizes, weights,
-   metrics and the whole type ramp stay the platform's; substituting a
-   family INTO the platform's own ramp is what makes the swap safe, and
-   it is the role tier ([~role:Heading]) that carries emphasis, never a
-   font size. There is deliberately no size argument here to leave out.
-
-   [~platforms] is the per-platform form — [brand_typeface
-   ~platforms:[ (Linux, "DejaVu Serif") ] "Georgia"] — and the pairs
-   TRAVEL UNRESOLVED, unlike the accent's per-appearance values. That
-   asymmetry is the design: a binding cannot know its platform, but
-   every lowering is one, so each backend picks its own row and no
-   platform id is ever needed on this side. A row for a platform nobody
-   is running is simply not read.
-
-   [~font] ships a FONT FILE's bytes, on the same blob channel [~source]
-   uses for an image: the backend hands them to its platform's app-font
-   API, reads back the family that registration named, and takes that
-   name in preference to any name above — register then resolve, so both
-   forms share one resolution, one observation and one fallback.
-
-   A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own typeface
-   in place, deliberately and silently. Every font API renders SOMETHING
-   for a name it cannot match, which would make a typo indistinguishable
-   from a working swap, so each lowering gates on the family being
-   PRESENT rather than letting the platform pick a stranger.
-
-   SET ONCE, BEFORE THE FIRST MOUNT: [brand_accent]'s wall verbatim, and
-   for its reason — a typeface that could flip at runtime would promise
-   the theme-switching surface the vocabulary deliberately does not
-   have. The root refuses a second write and a late one.
-
-   [~font_asset] is the same slot with the font NAMED rather than read —
-   [brand_typeface ~font_asset:(asset "fonts/sora-wght.ttf") "Sora"] —
-   and THE BYTES NEVER ENTER THE OCAML HEAP: the core already holds
-   them, and this hands the same buffer to the blob table. That is the
-   whole reason an asset is a handle rather than a bytes factory;
-   [~font:(asset_bytes a)] would work and would copy a megabyte through
-   OCaml for nothing. The two are exclusive — naming both is a
-   declaration that means two different fonts in one slot, and it is
-   refused rather than resolved by an order nobody wrote down. *)
+   SET ONCE, BEFORE THE FIRST MOUNT. A FAMILY A PLATFORM DOES NOT HAVE
+   leaves that platform's own typeface in place, deliberately and
+   silently: each lowering gates on the family being PRESENT rather than
+   letting the platform pick a stranger. *)
 let brand_typeface ?(platforms = []) ?font ?font_asset family =
   let pairs =
     (* The filters' encoding one tier over: a FLAT list read in twos,
@@ -1717,41 +1314,14 @@ let brand_typeface ?(platforms = []) ?font ?font_asset family =
 
 (* DECLARE this app's identity (docs/app-identity-plan.md): the name it
    goes by and the picture that stands for it, as the bytes of one image
-   file — [app_identity ~icon:mark "Aurora Notes"].
+   file — [app_identity ~icon:mark "Aurora Notes"]. Send a PNG; each
+   lowering converts. [~icon] LEFT OUT IS THE NAME-ONLY DECLARATION, and
+   [~icon_asset] is the same slot with the mark NAMED rather than read;
+   the two are exclusive.
 
-   ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
-   tile, the Windows taskbar/alt-tab icon and the caption's mark, and an
-   X11 window's icon; the same FILE, read at build time, becomes the
-   Android launcher icon and the iOS Home Screen icon. Send a PNG: each
-   lowering converts, and no platform-specific artwork rides the wire.
-
-   [~icon] LEFT OUT IS THE NAME-ONLY DECLARATION — the optional labelled
-   argument [brand_typeface]'s [~font] already uses, and OCaml's spelling
-   of Rust's second function. A named app with no mark still reaches the
-   surfaces a name reaches (the Windows caption and taskbar tooltip, the
-   macOS menu bar, the Linux app_id, and both phones' packaging), and
-   every icon surface keeps the platform's own default, honestly and
-   visibly.
-
-   SET ONCE, BEFORE THE FIRST MOUNT: [brand_typeface]'s wall verbatim,
-   and for its reason — identity is not state, and a slot that could flip
-   at runtime would promise the identity-switching surface the vocabulary
-   deliberately does not have. The root refuses a second write, a late
-   one and an empty name; an app that wants the platform's own identity
-   declares none at all.
-
-   THE BYTES ARE NEVER INSPECTED between here and the platform's own
-   decoder. Whether a blob is an image is a question only that decoder
-   can answer, so bytes that are not one leave every platform's default
-   in place, which is why the conformance scene reads what the DECODER
-   produced rather than echoing this request back.
-
-   [~icon_asset] is the same slot with the mark NAMED rather than read —
-   [app_identity ~icon_asset:(asset "icons/kaya-mark.png") "Aurora
-   Notes"] — and THE BYTES NEVER ENTER THE OCAML HEAP: the core hands
-   its own buffer to the blob table, so a picture costs one reference
-   here and no [Bytes.t]. The two are exclusive, for [~font]'s reason:
-   one icon slot on the wire. *)
+   SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write, a
+   late one and an empty name. THE BYTES ARE NEVER INSPECTED between here
+   and the platform's own decoder. *)
 let app_identity ?icon ?icon_asset name =
   let slot =
     match (icon, icon_asset) with
@@ -1788,18 +1358,10 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?list_detail
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
   Option.iter (fun h -> emit tx (Kaya_wire.tx_set_window_height id h)) height;
-  (* [~inset] is the space kaya's own interpreters put around the
-     mounted root, in layout units — LAYOUT, not appearance
-     (docs/styling-plan.md D3), which is why it rides here beside the
-     size and not in any styling vocabulary. 16 unless you say
-     otherwise; 0 is full bleed, for an editor or a canvas, and it is
-     honored unconditionally on every platform because the inset is
-     kaya's own padding and nothing platform-side defends it.
-
-     A PHONE'S SAFE AREA IS A SEPARATE FACT and is not removed by 0:
-     content extends to the safe-area edge, not under the notch or the
-     home indicator. Negative has no reading — an inset is space, not an
-     offset — and the root says so. *)
+  (* [~inset] is the space kaya's own interpreters put around the mounted
+     root, in layout units — LAYOUT, not appearance (docs/styling-plan.md
+     D3), which is why it rides here beside the size and not in any styling
+     vocabulary. *)
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_inset id v)) inset;
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_veto_close id v)) veto_close;
   (* [~dirty] declares that this surface holds unsaved work; the backend
@@ -1808,18 +1370,7 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?list_detail
      the GTK header bar, nothing on the phones, which have none —
      docs/dirty-plan.md D2/D4). THE TITLE STRING IS NEVER TOUCHED: a
      marker composed into the app's own title is Qt's [*] template, the
-     named rejection (D1).
-
-     It arms NOTHING (D3). The "unsaved changes, close anyway?" flow is
-     [~veto_close] plus [show_alert], composed by the app, and the two
-     props are orthogonal — either rides this construct without the
-     other.
-
-     Nothing infers it: writing the document's signal does not raise the
-     mark, and saving does not lower it. Say both, in the one
-     transaction the handler already is — [window ~dirty:true ()] is the
-     OCaml spelling of setting it later, since a window attribute never
-     lives as a loose function outside this construct. *)
+     named rejection (D1). *)
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_dirty id v)) dirty;
   Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_list_detail id v)) list_detail;
   Option.iter
@@ -1847,20 +1398,18 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?list_detail
   Option.iter (fun f -> Hashtbl.replace tx.app.undone_handlers id f) on_undone;
   Option.iter (fun f -> Hashtbl.replace tx.app.redone_handlers id f) on_redone;
   (* The menubar rides the window construct (the window-attribute
-     unification rule): [~menus] realizes its thunks left to right —
-     the curried-children convention, [w file] for a retained handle
-     — and appends each top-level grouping node (menu or radio_group)
-     to this window's command catalog. Append-only, at any time. *)
+     unification rule): [~menus] realizes its thunks left to right — the
+     curried-children convention, [w file] for a retained handle — and
+     appends each top-level grouping node (menu or radio_group) to this
+     window's command catalog. *)
   Option.iter
     (List.iter (fun th ->
          let (MenuItem m) = th () in
          emit tx (Kaya_wire.tx_menubar_append id m)))
     menus
 
-(* Create an auxiliary window (capability-gated: phone hosts reject
-   at the root); materializes hidden, [mount_in] presents. Labeled
-   optional arguments are the OCaml spelling — the same set [window]
-   takes. *)
+(* Create an auxiliary window (capability-gated: phone hosts reject at the
+   root); materializes hidden, [mount_in] presents. *)
 let create_window ?title ?width ?height ?inset ?veto_close ?dirty
     ?sections_presentation
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?menus id =
@@ -1879,20 +1428,9 @@ let destroy_window id = emit (the_tx ()) (Kaya_wire.tx_destroy_window id)
 (* Mount a root into a specific window; mounting presents. *)
 let mount_in window (Widget root) = emit (the_tx ()) (Kaya_wire.tx_mount window root)
 
-(* Push a navigation entry onto the primary surface's stack (entry
-   ids are guest-allocated in the shared surface namespace, the
-   [create_window] discipline); materializes covered, [mount_in]
-   presents it. Labeled optional arguments are the OCaml spelling:
-   [push_entry ~title:"detail" ~intercept_back:true 7L].
-
-   The handlers ride the push (per-entry, the [show_alert]
-   ~on_result precedent — no id inspection anywhere): [~on_popped]
-   fires when the user's back affordance pops THIS entry natively
-   (post-fact; a programmatic [pop_entry] does not fire it — its
-   caller already knows) and retires with the one pop;
-   [~on_back_requested] fires per back request while intercept_back
-   is armed — nothing has popped; answer with [pop_entry] to
-   agree. *)
+(* Push a navigation entry onto the primary surface's stack (entry ids are
+   guest-allocated in the shared surface namespace, the [create_window]
+   discipline); materializes covered, [mount_in] presents it. *)
 let push_entry ?(window = 0L) ?title ?intercept_back ?on_popped
     ?on_back_requested id =
   let tx = the_tx () in
@@ -1914,11 +1452,7 @@ let push_entry ?(window = 0L) ?title ?intercept_back ?on_popped
    [add_section ~title:"Feed" ~on_selected:(fun tx -> …) 7L].
    [~on_selected] rides the add (per-section): fires each time the
    USER switches to it — post-fact and NOT one-shot; a programmatic
-   [select_section] does not fire it (the echo doctrine).
-
-   [~symbol] is the switcher item's SEMANTIC ICON ([symbol], the closed
-   vocabulary): a tab bar without icons is not the platform's real
-   thing, and a blob is the wrong primitive for a STANDARD glyph. *)
+   [select_section] does not fire it (the echo doctrine). *)
 let add_section ?(window = 0L) ?title ?symbol ?on_selected id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_section window id);
@@ -1936,24 +1470,16 @@ let select_section ?(window = 0L) id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_select_section window id)
 
-(* Pop the window's top navigation entry and forget its tree — also
-   the back-veto grammar's confirmation after [on_back_requested].
-   Popping an empty stack is a scene error. *)
+(* Pop the window's top navigation entry and forget its tree — also the
+   back-veto grammar's confirmation after [on_back_requested]. *)
 let pop_entry ?(window = 0L) () = emit (the_tx ()) (Kaya_wire.tx_pop_entry window)
 
-(* Request a modal alert (the request/result grammar); labeled
-   arguments are the OCaml spelling:
-   [show_alert ~title ~message ~actions:["Delete"; "Archive"]
-      ~cancel:"Keep" ~on_result:(fun choice tx -> ...) tx]. The
-   result handler rides the REQUEST (the widget-handler precedent)
-   and retires with its one answer — choice is an action index (0 or
-   1) or [alert_cancel], every platform-native dismissal. Ids are
-   binding-allocated; the call returns the id for the floor-minded.
-   At most two actions (the platform floor); [~cancel] is required
-   by the signature — the slot every platform-native dismissal (Esc,
-   back, outside tap) resolves to, and no binding invents a default
-   label. One alert may be live per process; show the next from the
-   handler. *)
+(* Request a modal alert (the request/result grammar); labeled arguments are
+   the OCaml spelling: [show_alert ~title ~message ~actions:["Delete";
+   "Archive"] ~cancel:"Keep" ~on_result:(fun choice tx -> ...) tx]. The
+   result handler rides the REQUEST (the widget-handler precedent) and
+   retires with its one answer — choice is an action index (0 or 1) or
+   [alert_cancel], every platform-native dismissal. *)
 let show_alert ?(window = 0L) ?(title = "") ?(message = "")
     ?(actions = []) ~cancel ?on_result () =
   let tx = the_tx () in
@@ -1973,14 +1499,11 @@ let show_alert ?(window = 0L) ?(title = "") ?(message = "")
        (Kaya_wire.Str cancel));
   id
 
-(* The alert_choice cancel sentinel, for handlers: the wire u32
-   0xFFFFFFFF as an OCaml int32 (-1l). Deliberately not an index. *)
+(* The alert_choice cancel sentinel, for handlers: the wire u32 0xFFFFFFFF
+   as an OCaml int32 (-1l). *)
 
 (* The filters encoding, written ONCE because two requests carry it:
-   alternating label and space-separated extensions. The picker and the
-   save dialog share the wire's shape, so they share the code that
-   builds it — a second copy is how the two drift apart on the day one
-   of them starts validating. *)
+   alternating label and space-separated extensions. *)
 let filter_values filters =
   List.concat_map
     (fun (label, exts) -> [ Kaya_wire.Str label; Kaya_wire.Str exts ])
@@ -2005,18 +1528,11 @@ let pick ?(window = 0L) ?(filters = []) ~multiple ?on_result () =
        (filter_values filters));
   id
 
-(* Ask the platform for files. THE PICK, NOT THE OPEN — the result
-   carries handles you redeem later, so the name says [pick]
-   (DESIGN.md, File dialogs).
-
-   [filters] is a list of (label, space-separated extensions),
-   ADVISORY on every platform: a default view rather than a guarantee,
-   so the guest still validates what it got.
-
-   [on_result] fires exactly once and retires with its answer. CANCEL
-   IS THE EMPTY LIST, faithfully: no platform can confirm an empty
-   selection. One dialog may be live per process; show the next from
-   the handler. *)
+(* Ask the platform for files. THE PICK, NOT THE OPEN — the result carries
+   handles you redeem later (DESIGN.md, File dialogs). [filters] is a list
+   of (label, space-separated extensions), ADVISORY on every platform.
+   [on_result] fires exactly once and retires with its answer; CANCEL IS THE
+   EMPTY LIST. *)
 let pick_files ?(window = 0L) ?(filters = []) ?on_result () =
   pick ~window ~filters ~multiple:true ?on_result ()
 
@@ -2025,40 +1541,19 @@ let pick_files ?(window = 0L) ?(filters = []) ?on_result () =
 let pick_file ?(window = 0L) ?(filters = []) ?on_result () =
   pick ~window ~filters ~multiple:false ?on_result ()
 
-(* Ask the platform WHERE TO SAVE. The picker's twin, and deliberately
-   the same grammar (docs/save-plan.md D2): the id comes from the same
-   counter and so from the same one-live-dialog-per-process slot, the
-   answer arrives as the picker's own result, and the registration
-   retires with it.
+(* Ask the platform WHERE TO SAVE. The picker's twin on the same grammar
+   and out of the same one-live-dialog slot (docs/save-plan.md D2).
 
-   [suggested_name] is the name the dialog OPENS with, and it rides as a
-   plain argument rather than an optional one — a save dialog with an
-   empty name box is one the platform will not let the user complete.
-   Every platform TAKES it and none guarantees it: the user renames it,
-   and Android appends an extension matching the mime type at creation.
-   So read the name you GOT — or, better, do not read a name at all and
-   read the bytes.
+   [suggested_name] is the name the dialog OPENS with; every platform
+   TAKES it and none guarantees it, so read the name you GOT — or read
+   the bytes instead. On macOS, with allowed content types set,
+   NSSavePanel appends the first allowed extension to a name that has
+   none (docs/deferred.md).
 
-   [filters] is the picker's advisory list, unchanged in meaning. Beware
-   on macOS: with allowed content types set, NSSavePanel appends the
-   first allowed extension to a name that has none.
-
-   [on_result] fires exactly once with [Some destination] or [None].
-   CANCEL IS [None], and the narrowing from the wire's list happens
-   HERE, not in the guest: "exactly one locator or none" is a fact of
-   the request — no platform's save dialog names two destinations — and
-   a guest should not have to re-derive it from a list length.
-
-   WHAT YOU GET BACK OPENS EMPTY, on every platform (docs/save-plan.md
-   D1). A destination need not exist yet: macOS, GTK and Windows answer
-   with a name for a file nobody has made, and macOS does not truncate
-   even when the user picks Replace, while Android and iOS hand back a
-   document that already exists. The core absorbs that — the handle
-   opens with CREATE — so [file_mode_write] on a fresh destination
-   succeeds and yields an empty file everywhere, and the guest writes
-   against the one behaviour. It is NOT a fourth file mode: creation is
-   a property of the destination the dialog promised, never of the
-   caller's intent. *)
+   [on_result] fires exactly once; CANCEL IS [None]. WHAT YOU GET BACK
+   OPENS EMPTY on every platform (docs/save-plan.md D1): the handle opens
+   with CREATE, so [file_mode_write] on a fresh destination succeeds and
+   yields an empty file everywhere. *)
 let save_file ?(window = 0L) ?(filters = []) ?on_result suggested_name =
   let tx = the_tx () in
   let app = tx.app in
@@ -2074,27 +1569,12 @@ let save_file ?(window = 0L) ?(filters = []) ?on_result suggested_name =
        (filter_values filters));
   id
 
-(* --- The clipboard (DESIGN.md, Clipboard) ---------------------------
-
-   A clip is not a string: every host models it as ONE item available in
-   several types, with the consumer taking the richest it understands.
-   So COPY TAKES A RECORD — optional labelled arguments being how OCaml
-   spells one, and what makes at-most-one-per-kind structural rather
-   than a duplicate check — and the two answers are a SUM.
-
-   kaya DERIVES NOTHING between representations. Whether list bullets
-   survive html-to-text is the app's decision, and a bad
-   auto-derivation degrades every paste into a plain field silently. *)
+(* --- The clipboard (DESIGN.md, Clipboard) --------------------------- *)
 
 (* Join an accept list: the closed kinds by name plus any custom ids,
-   space separated.
-
-   A LIST AND NOT A MASK, because half the set is open-ended. A custom
-   format that could be written and never accepted would be an escape
-   hatch that only opens outward, and round-tripping an app's own data
-   is the whole reason to have one. Ids reach every platform's registry
-   verbatim, so they carry no spaces — which is what makes the join
-   unambiguous, and what this refuses to let you break. *)
+   space separated. Ids reach every platform's registry verbatim, so they
+   carry NO SPACES — which is what makes the join unambiguous, and what
+   this refuses to let you break. *)
 let accept_list kinds =
   List.iter
     (fun kind ->
@@ -2110,15 +1590,7 @@ let accept_list kinds =
   String.concat " " kinds
 
 (* Put ONE clip on the system clipboard, offered in as many
-   representations as the call fills in.
-
-   [files] takes picked-file handles: copying a file and picking one are
-   the same currency, so a picked file goes straight on and the bytes
-   never move through kaya. [custom] is the one plural field with names,
-   since several app-defined formats are legitimate.
-
-   The wire order is kaya's, not this call's — descending richness,
-   which is preference order on every host that has one. *)
+   representations as the call fills in. *)
 let copy ?text ?html ?image ?(files = []) ?(custom = []) () =
   let tx = the_tx () in
   let present = ref 0 in
@@ -2150,19 +1622,10 @@ let copy ?text ?html ?image ?(files = []) ?(custom = []) () =
     (Kaya_wire.tx_copy !present (List.length files) (List.length custom)
        (List.rev !values))
 
-(* Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE,
-   named for what it is rather than for pasting.
-
-   A user's paste arrives at the widget's hook and costs nothing; this
-   asks without a gesture, which the platforms have deliberately made
-   expensive: iOS 16 PROMPTS when the content came from another app and
-   blocks until the user answers, Android returns nothing unless the app
-   has focus, and Wayland delivers no offer to an unfocused client.
-   Reach for this to detect a URL or import from the clipboard, never to
-   implement Paste — that is the Paste command, and it is free.
-
-   [on_result] fires exactly once with [Some rep] or [None], and the
-   registration retires with it — the alert's grammar. *)
+(* Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE. The
+   platforms have deliberately made it expensive (DESIGN.md, and
+   docs/clipboard-plan.md): reach for it to detect a URL or import, never to
+   implement Paste — that is the Paste command, and it is free. *)
 let read_clipboard ?on_result accepting =
   let tx = the_tx () in
   let app = tx.app in
@@ -2173,20 +1636,12 @@ let read_clipboard ?on_result accepting =
   id
 
 (* Declare what a widget takes from a paste — the closed kinds by name
-   ("text", "html", "image", "files") plus any custom format ids.
-
-   ONE DECLARATION, THREE JOBS: it drives whether the Paste command is
-   live while this widget is focused, it filters what can reach the
-   paste hook, and on Android it IS the native registration
-   (setOnReceiveContentListener takes the mime types on the view).
-   Per-widget because whether Paste should be enabled is the
-   INTERSECTION of what the clipboard offers and what the FOCUSED target
-   takes.
-
-   DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that declares
-   nothing gets the platform's own insertion and reports it through the
-   ordinary change path, which is why a plain text editor writes none of
-   this and has working cut, copy and paste. *)
+   ("text", "html", "image", "files") plus any custom format ids. It
+   drives whether Paste is live while this widget is focused, filters
+   what reaches the paste hook, and on Android IS the native
+   registration. A widget that declares NOTHING gets the platform's own
+   insertion, which is why a plain text editor writes none of this and
+   has working cut, copy and paste. *)
 let set_accepts (Widget id) kinds =
   emit (the_tx ()) (Kaya_wire.tx_set_accepts id (accept_list kinds))
 
@@ -2200,13 +1655,9 @@ let mount (Widget root) = emit (the_tx ()) (Kaya_wire.tx_mount 0L root)
 
    The curried-children convention extends to items: creators end in
    [()], omitted unit is the child form, and a grouping creator's list
-   holds bare partial applications the parent realizes left to right —
-   [menu ~label:"File" [ item ~label:"Save" ~shortcut:"primary+s"
-   ~on_activate:h; ... ] ()]. The window construct's [~menus] is the
-   bar anchor; [context_menu]/[context_catalog] are the noun anchors;
-   the dynamic tier below ([set_menu_label], [menu_append], ...)
-   reopens a retained handle in any later transaction — the
-   append-at-any-time discipline. *)
+   holds bare partial applications the parent realizes left to right. The
+   window construct's [~menus] is the bar anchor;
+   [context_menu]/[context_catalog] are the noun anchors. *)
 
 (* Create one item in the menu-item id space. Menu records are
    live-zone only: a template body records a blueprint, and items are
@@ -2226,17 +1677,11 @@ let alloc_menu_item kind label =
   Option.iter (fun l -> emit tx (Kaya_wire.tx_set_menu_label id l)) label;
   id
 
-(* The shared optional-prop tail: [?enabled] a constant,
-   [?bind_enabled] a Bool signal (the labeled-optional family — one
-   label per (prop, source) pair), [?icon] the blob channel and
-   [?symbol] the SEMANTIC one — the closed [symbol] vocabulary each
-   backend draws in its own platform's set. The two ride together
-   because they are different channels, not alternatives: a standard
-   concept takes [~symbol], app-specific art takes [~icon].
-
-   Both live on the TAIL, so every leaf and every grouping node gets
-   them from one place: a per-kind spelling is how a surface goes
-   uneven between kinds without anyone noticing. *)
+(* The shared optional-prop tail: [?enabled] a constant, [?bind_enabled]
+   a Bool signal, [?icon] the blob channel and [?symbol] the SEMANTIC
+   one. The two icon slots are different channels, not alternatives.
+   Both live on the TAIL so every leaf and every grouping node gets them
+   from one place. *)
 let menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol () =
   let tx = the_tx () in
   Option.iter (fun e -> emit tx (Kaya_wire.tx_set_menu_enabled id e)) enabled;
@@ -2251,14 +1696,12 @@ let menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol () =
     (fun s -> emit tx (Kaya_wire.tx_set_menu_symbol id (symbol_wire s)))
     symbol
 
-(* An action — a leaf command firing exactly one menu_activated
-   occurrence (menu click OR its shortcut: ONE occurrence, one
-   dispatch path; [~on_activate] rides the declaration and covers
-   both). [~on_activate_node] is the template-node flavor: an item
-   attached to a stamped copy reports the copy's key path, outermost
-   first — the keys ARE the noun. The shortcut is canonicalized by the
-   binding's one parser; the root judges its anchor (window catalogs
-   only). *)
+(* An action — a leaf command firing exactly one menu_activated occurrence
+   (menu click OR its shortcut: ONE occurrence, one dispatch path;
+   [~on_activate] rides the declaration and covers both).
+   [~on_activate_node] is the template-node flavor: an item attached to a
+   stamped copy reports the copy's key path, outermost first — the keys ARE
+   the noun. *)
 let item ?shortcut ?enabled ?bind_enabled ?icon ?symbol ?primary ?role
     ?on_activate ?on_activate_node ~label () =
   let tx = the_tx () in
@@ -2316,10 +1759,8 @@ let realize_menu_children tx parent children =
     children
 
 (* A menu grouping node — a bar root through the window construct's
-   [~menus], or nested as a bare partial application in a parent's
-   child list (one nested grouping level is the cap, root-checked).
-   Disabling a menu disables its subtree (the inherited-disabled
-   contract). *)
+   [~menus], or nested as a bare partial application in a parent's child
+   list (one nested grouping level is the cap, root-checked). *)
 let menu ?enabled ?bind_enabled ?icon ?symbol ~label children () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_menu (Some label) in
@@ -2352,12 +1793,8 @@ let radio_group ?value ?bind_value ?enabled ?bind_enabled ?icon ?symbol
     on_select_node;
   MenuItem id
 
-(* A context menu on a LIVE widget: the same item vocabulary scoped to
-   a NOUN, with the platform's own gesture (right-click, long-press).
-   Calling it again appends more roots. The editable text controls
-   (entry, textarea) reject attachment at the root; context items take
-   no shortcuts (root-checked — the anchor is decided here, after the
-   items exist). *)
+(* A context menu on a LIVE widget: the same item vocabulary scoped to a
+   NOUN, with the platform's own gesture (right-click, long-press). *)
 let context_menu (Widget target) children =
   let tx = the_tx () in
   List.iter
@@ -2425,14 +1862,10 @@ let set_menu_primary (MenuItem id) on =
 (* The closed standard-command vocabulary (DESIGN.md, Menus): macOS
    places this one in the application menu, and every other host leaves
    the item where the app declared it. *)
-(* A NAMED VOCABULARY FOR THE CLOSED HALF, exactly as the menu roles
-   are. The accept list is open-ended — a custom format id is any
-   app-chosen string — so the four closed kinds cannot be a mask; but
-   they can be spelled once here instead of quoted at every call site.
-   A MISTYPED BARE STRING IS SILENT: it becomes a custom format id no
-   clipboard will ever offer, so Paste stays dead and the paste hook
-   never fires, with nothing to see anywhere. A custom id has no
-   constant by nature — the app that defines it names it. *)
+(* A named vocabulary for the accept list's closed half. A MISTYPED BARE
+   STRING IS SILENT: it becomes a custom format id no clipboard will ever
+   offer, so Paste stays dead and the paste hook never fires, with
+   nothing to see anywhere. *)
 let accept_text = "text"
 let accept_html = "html"
 let accept_image = "image"
@@ -2440,32 +1873,22 @@ let accept_files = "files"
 
 let role_settings = "settings"
 
-(* The three clipboard commands. They lower to the platform's own, act
-   on the FOCUSED widget, and work out their own enablement from what
-   the clipboard offers and what that widget accepts.
-
-   GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only the
-   widget knows what is selected, so an app cannot assemble the payload
-   for "copy the selected text" out of the data layer. Copy of a
-   selection is therefore necessarily a command, and Paste is its
-   mirror. [copy] and [read_clipboard] are for overriding that default
-   and for targets with no native behaviour. *)
+(* The three clipboard commands. They lower to the platform's own, act on
+   the FOCUSED widget, and work out their own enablement from what the
+   clipboard offers and what that widget accepts. *)
 let role_cut = "cut"
 let role_copy = "copy"
 let role_paste = "paste"
 
-(* The two history commands. ONE Edit>Undo covers both tiers: it asks
-   the focused text widget's own stack first and the window's ledger
-   otherwise, and works out its own enablement from the same question,
-   live at activation (docs/undo-plan.md D1, D6). An app declares the
-   items and writes nothing else — a scene that wants a step in the
-   ledger names it with [undoable]. *)
+(* The two history commands. ONE Edit>Undo covers both tiers: it asks the
+   focused text widget's own stack first and the window's ledger otherwise,
+   and works out its own enablement from the same question, live at
+   activation (docs/undo-plan.md D1, D6). *)
 let role_undo = "undo"
 let role_redo = "redo"
 
-(* Declare a retained action a standard command (actions only —
-   root-checked). Uniform declaration, per-host placement; a role never
-   invents a chord. Const-only. *)
+(* Declare a retained action a standard command (actions only — root-
+   checked). *)
 let set_menu_role (MenuItem id) name =
   emit (the_tx ()) (Kaya_wire.tx_set_menu_role id name)
 
@@ -2478,10 +1901,8 @@ let set_menu_shortcut (MenuItem id) spelling =
   emit (the_tx ()) (Kaya_wire.tx_set_menu_shortcut id spelling)
 
 (* Reopen a RETAINED grouping node and append more children — the
-   append-at-any-time discipline:
-   [menu_append file [ item ~label:"Publish" ~primary:true
-   ~on_activate:h ]]. The root re-validates each appended subtree in
-   the item's real anchor context (depth, shortcuts, duplicates). *)
+   append-at-any-time discipline: [menu_append file [ item ~label:"Publish"
+   ~primary:true ~on_activate:h ]]. *)
 let menu_append (MenuItem id) children =
   realize_menu_children (the_tx ()) id children
 
@@ -2511,12 +1932,7 @@ let for_each c body () =
    common case once handlers co-locate at their constructors. *)
 let each c body () = fst (for_each c body ())
 
-(* Sums: a variant type whose constructors carry inline records. The
-   descriptor is what [@@deriving kaya_gen] emits for such a type — one
-   record shape per constructor, the discriminant, both conversions —
-   and the generated per-sum eliminator (post_each ~note ~todo) calls
-   [each_sum] with its arms; the labelled arguments are required, so
-   totality is a compile error there, and the scene checks it again. *)
+(* Sums: a variant type whose constructors carry inline records. *)
 type 'a sum_type = {
   st_schemas : int list list;
   st_variant : 'a -> int;
@@ -2555,9 +1971,8 @@ let sum_insert sc key value =
        (encode_fields (List.nth sc.sc_type.st_schemas variant) fields));
   recompute_derived tx sc.sc_handle.cid sc.sc_handle.cpath
 
-(* [insert_fresh] for a sum collection: the value's own constructor is
-   still what is witnessed onto the wire; only the key comes from the
-   binding. Same contract, same counter — see [insert_fresh]. *)
+(* [insert_fresh] for a sum collection: the value's own constructor is still
+   what is witnessed onto the wire; only the key comes from the binding. *)
 let sum_insert_fresh sc value =
   let tx = the_tx () in
   let key = mint_key tx.app sc.sc_handle.cid sc.sc_handle.cpath in
@@ -2647,10 +2062,8 @@ let sum_derive sc compute =
     :: tx.pending_derived;
   s
 
-(* The eliminator's mechanism: (variant, arm) pairs in declaration
-   order, each arm a Tpl program. Only the generated per-sum wrappers
-   call this — their required labelled arguments are what makes
-   totality a compile error. *)
+(* The eliminator's mechanism: (variant, arm) pairs in declaration order,
+   each arm a Tpl program. *)
 let each_sum sc arms () =
   let tx = the_tx () in
   assert_root sc.sc_handle;
@@ -2691,19 +2104,14 @@ module Tpl = struct
 
   (* --- THE FLOOR, IN A MODULE THAT SAYS SO -------------------------
      Node allocation, the child link and one prop write per record: the
-     tier every constructor below is sugar over, and the tier no
-     example scene may spell (invariant 5).
+     tier every constructor below is sugar over, and the tier no example
+     scene may spell (invariant 5).
 
-     WHY A MODULE AND NOT A NAME. The template write and a live WIDGET
-     VERB were the same word. [set_text editor doc] is how an app puts
-     a document in front of the user — a verb the surface sweep
-     REQUIRES of every binding — while [set_text n "add"] on a node is
-     the floor spelling of [~text], which no example may contain. The
-     receiver's type is the whole difference and no pattern over a
-     guest file sees a type, so the two were guarded together by a
-     contextual rule that could only ever be scoped to the two carve-out
-     scenes. The qualifier is what a pattern CAN see: the floor now
-     says [Floor.] at every callsite, in one word, everywhere
+     A MODULE AND NOT A NAME because the receiver's type is the whole
+     difference between [set_text editor doc] (a live verb every binding
+     must have) and [set_text n "add"] (the floor spelling of [~text]),
+     and no pattern over a guest file sees a type. The qualifier is what
+     a pattern CAN see: the floor says [Floor.] at every callsite
      (docs/tpl-props-plan.md F3). *)
   module Floor = struct
     let widget kind =
@@ -2742,44 +2150,26 @@ module Tpl = struct
     (* --- What a stamped copy MEANS, and how far it holds its children
        off its own edge -------------------------------------------------
 
-       The two styling props the live zone has carried since the styling
-       pass and this zone could not spell at all: a stamped "Delete"
-       button was declarable as destructive in no language, and a
-       stamped row — the editor's find bar — sat flush against a
-       full-bleed window's edge while the live status row beside it
-       inset.
-
-       CONST ONLY, unlike text or the a11y pair and exactly like
-       [set_accepts]: what a copy means, and how far its prototype holds
-       its children off its edge, are facts about the PROTOTYPE rather
-       than about the row's data. There is no [bind_role_field] for the
-       same reason there is no [bind_accepts_field].
+       CONST ONLY, like [set_accepts]: what a copy means, and how far its
+       prototype holds its children off its edge, are facts about the
+       PROTOTYPE rather than about the row's data.
 
        NEITHER NEEDS A TYPE-LEVEL WALL HERE, because [node] is not typed
-       by kind (see [set_a11y_hint] above for why it cannot be) and the
-       root already judges the combination while the blueprint is being
-       recorded, before a single row stamps: a [Heading] on a template
-       button and an inset on a template label each die at declare time
-       naming both sides (crates/kaya/src/scene.rs:552, :596). The
-       constructors are still the wall a guest meets first — [~role]
-       rides button and label, [~inset] the container kinds. *)
+       by kind and the root judges the combination while the blueprint is
+       recorded, before a single row stamps
+       (crates/kaya/src/scene.rs). *)
 
     let set_role (Node id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
     let set_inset (Node id) pad = emit (the_tx ()) (Kaya_wire.tx_set_inset id pad)
 
     (* --- What a stamped copy carries for assistive tech --------------
-       Grouped by PROP rather than by source, unlike everything else
-       here, because that is how they arrive: the three sources of ONE
-       prop are the choice the constructor's caller makes
-       ([~a11y_label] a constant, [~a11y_label_bind] a signal,
-       [~a11y_label_field] the copy's own field). The core admits all
-       three on the template path through the same [check_prop] the
-       live path runs, so nothing below is a template special case.
+       Grouped by PROP rather than by source, because that is how they
+       arrive: the three sources of ONE prop are the choice the
+       constructor's caller makes.
 
-       A DUPLICATE ID ACROSS COPIES IS LEGAL and often right: nothing
-       in the core deduplicates a11y ids and the harness addresses by
-       kind#index, never by id — so a constant names the ROLE every
-       copy plays and the row's own key field names the copy. *)
+       A DUPLICATE ID ACROSS COPIES IS LEGAL and often right: nothing in
+       the core deduplicates a11y ids and the harness addresses by
+       kind#index, never by id. *)
 
     let set_a11y_id (Node id) value =
       emit (the_tx ()) (Kaya_wire.tx_set_a11y_id id value)
@@ -2800,21 +2190,16 @@ module Tpl = struct
     let bind_a11y_label (Node id) (Signal s) =
       emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label id s)
 
-    (* THE SOURCE THIS SLICE EXISTS FOR: each stamped copy speaks its
-       OWN row's name to assistive tech. A (_, string) field only. *)
+    (* THE SOURCE THIS SLICE EXISTS FOR: each stamped copy speaks its OWN
+       row's name to assistive tech. *)
     let bind_a11y_label_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_a11y_label_element ~level ~field:fd.fd_index id)
 
     (* ACTIVATION KINDS ONLY — button, checkbox, select, radio. The
-       restriction is not a type on this setter and cannot be: [node]
-       is not typed by kind, because a container's children are one
-       list and OCaml's lists are homogeneous (a phantom kind would
-       cost a wrapper at every child position). So the wall is the
-       constructors — [~a11y_hint] rides those four and no others —
-       and a hint reaching a template label dies at DECLARE time in the
-       root's own words, while the blueprint is being recorded and
-       before any row stamps. That is exactly the live zone's
-       arrangement, where [set_a11y_hint] is equally unrestricted. *)
+       restriction cannot be a type here: [node] is not typed by kind,
+       because a container's children are one list and OCaml's lists are
+       homogeneous. So the wall is the constructors, and a hint reaching
+       a template label dies at DECLARE time in the root's own words. *)
     let set_a11y_hint (Node id) value =
       emit (the_tx ()) (Kaya_wire.tx_set_a11y_hint id value)
 
@@ -2824,16 +2209,15 @@ module Tpl = struct
     let bind_a11y_hint_field ?(level = 0) (Node id) (fd : (_, string) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_a11y_hint_element ~level ~field:fd.fd_index id)
 
-    (* The two universal props as they ride every constructor here, the
-       live [set_a11y]'s device: applied together, in one place, so a
-       new constructor cannot pick up [~grow] and quietly miss them.
+    (* The two universal props as they ride every constructor here, applied
+       together in one place so a new constructor cannot pick up [~grow]
+       and quietly miss them.
 
-       [~a11y_level] is how many Fors up the FIELD source sits, and it
-       defaults to the constructor's own [~level] — so the ordinary
-       case says nothing and a nested one can still take its name from
-       an outer row. One shared [~level] would have been the trap: a
-       guest writing [~bind_field:x ~level:1 ~a11y_label_field:y] would
-       have moved the label's source out one For as well, silently. *)
+       [~a11y_level] is how many Fors up the FIELD source sits and
+       defaults to the constructor's own [~level]. ONE SHARED [~level]
+       WOULD HAVE BEEN THE TRAP: [~bind_field:x ~level:1
+       ~a11y_label_field:y] would have moved the label's source out one
+       For as well, silently. *)
     let set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
         ?a11y_label_bind ?a11y_label_field ?(a11y_level = 0) n =
       Option.iter (fun v -> set_a11y_id n v) a11y_id;
@@ -2843,24 +2227,13 @@ module Tpl = struct
       Option.iter (fun s -> bind_a11y_label n s) a11y_label_bind;
       Option.iter (fun fd -> bind_a11y_label_field ~level:a11y_level n fd) a11y_label_field
 
-    (* What a stamped copy takes from a paste — and the prop that lets
-       a copy's paste hook fire at all. Every backend gates the paste
+    (* What a stamped copy takes from a paste — and the prop that lets a
+       copy's paste hook fire at all. Every backend gates the paste
        occurrence on the focused widget's ACCEPT LIST and falls back to
-       the platform's own insertion when it is empty, so until this
-       existed [on_paste_node] registered a handler and waited forever
-       (docs/tpl-props-plan.md §1).
-
-       CONST ONLY, unlike the props above, for two reasons. An accept
-       list describes the PROTOTYPE — what a control can take is a fact
-       about the control, not about the row — and [accept_list] is a
-       guard the binding can only run on a value it can see: it refuses
-       an empty token and one containing a space, because a custom
-       format id reaches the platform registry verbatim and the space
-       is the separator. A row's field is ordinary record data that no
-       binding can recognise as an accept list, so a per-row source
-       would ship "text my format" as two entries with nothing
-       complaining. Entry and textarea only; the root rejects it
-       elsewhere. *)
+       the platform's own insertion when it is empty, so without this
+       [on_paste_node] would register a handler and wait forever
+       (docs/tpl-props-plan.md §1). CONST ONLY: an accept list describes
+       the PROTOTYPE. *)
     let set_accepts (Node id) kinds =
       emit (the_tx ()) (Kaya_wire.tx_set_accepts id (accept_list kinds))
 
@@ -2907,19 +2280,17 @@ module Tpl = struct
     let bind_checked_field ?(level = 0) (Node id) (fd : (_, bool) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_checked_element ~level ~field:fd.fd_index id)
 
-    (* Bind a fraction, a slider position or a choice's selected index
-       to one field of the element. A (_, float) field, and a choice's
-       index is no exception: Prop::Value is F64 in the spec, and the
-       scene refuses a field whose schema column type differs from the
-       prop's (crates/kaya/src/scene.rs:3629), so an i64 field would
-       typecheck here and abort at declaration. The phantom moves that
-       to compile time. *)
+    (* Bind a fraction, a slider position or a choice's selected index to
+       one field of the element. A (_, float) field, and a choice's index is
+       no exception: Prop::Value is F64 in the spec, and the scene refuses a
+       field whose schema column type differs from the prop's
+       (crates/kaya/src/scene.rs:3629), so an i64 field would typecheck here
+       and abort at declaration. *)
     let bind_value_field ?(level = 0) (Node id) (fd : (_, float) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_value_element ~level ~field:fd.fd_index id)
 
     (* Bind an image's source to one field of the element; a (_, bytes)
-       field only — the phantom pins it at compile time. Per-entry
-       content: the core stamps each copy with its entry's blob. *)
+       field only — the phantom pins it at compile time. *)
     let bind_source_field ?(level = 0) (Node id) (fd : (_, bytes) field) =
       emit (the_tx ()) (Kaya_wire.tx_bind_source_element ~level ~field:fd.fd_index id)
 
@@ -2959,53 +2330,7 @@ module Tpl = struct
     emit tx (Kaya_wire.tx_template_end ());
     (Node id, result)
 
-  (* --- The construction sugar, template flavor --------------------
-
-     Spelled in the same order as the outer zone's, so the two read side
-     by side: every constructor here has a live twin with the same name,
-     the same trailing [()] and the same handler.
-
-     WHAT THE TWO ZONES DIFFER BY, and the only thing they differ by:
-     wherever the live constructor takes a plain value, this one takes a
-     SOURCE — because a stamp makes N copies and each copy's value can
-     come from its own row. The source is spelled as the labeled
-     argument's NAME, the same device the outer zone already uses for
-     const-or-signal:
-
-       [~text] / [~value] / [~selected] / [~checked] / [~source]
-           a constant, the same in every copy;
-       [~bind]
-           a signal, which every copy follows together;
-       [~bind_field] (with [~level], how many Fors up, 0 = nearest)
-           the copy's OWN field of the element — the source that exists
-           only here.
-
-     A SECOND PROP NEEDS ITS OWN THREE NAMES, and takes them by prefix:
-     the constructor's primary prop owns the bare three above, so the
-     universal pair spells its sources [~a11y_label] (const),
-     [~a11y_label_bind] (a signal) and [~a11y_label_field] (the copy's
-     own field, at [~a11y_level], which defaults to [~level]). The
-     label from the row's own field is the point of the pair being here
-     at all: a list row that announces its own name to assistive tech.
-
-     [~a11y_hint] rides button, checkbox, select and radio, as it does
-     in the outer zone — the root admits it on the activation kinds
-     alone and rejects it elsewhere while the blueprint is being
-     recorded. [~accepts] rides entry and textarea, const only, and is
-     what makes a stamped copy a paste target at all
-     ([on_paste_node] below the module registers the handler).
-
-     Arguments that describe the PROTOTYPE rather than the row stay
-     plain constants: a slider's [~min]/[~max], a grid's [~columns], a
-     choice's option list, an [~accepts] list. The stamp copies one
-     shape and varies only what sits inside it, so a per-row option
-     COUNT is not expressible and deliberately so
-     (docs/sugar-pass-plan.md §S2, §2).
-
-     Handlers are co-located here as in the outer zone, and receive the
-     stamped copy's keys FIRST, outermost first — the keys ARE the noun.
-     The [_node] registrars below the module are the same handlers,
-     late-bound, for when the guest wants the node's handle first. *)
+  (* --- The construction sugar, template flavor -------------------- *)
 
   let button ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
@@ -3033,17 +2358,8 @@ module Tpl = struct
     | None -> ());
     n
 
-  (* A multi-line editor per stamped copy: the entry's uncontrolled
-     contract over the platform's real multi-line control. Same three
-     text sources as [entry] and the same caution about binding one —
-     read it there.
-
-     The range verbs ([highlight_ranges], [select_range],
-     [reveal_range]) and [focus] take a WIDGET, and a stamped copy has
-     no widget handle in the guest — the guest holds the blueprint, the
-     copies are the core's. So a template textarea renders and edits
-     like any other and has no decoration surface; that is a gap in the
-     protocol's addressing, not in this constructor. *)
+  (* A multi-line editor per stamped copy: the entry's uncontrolled contract
+     over the platform's real multi-line control. *)
   let textarea ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change () =
@@ -3069,10 +2385,9 @@ module Tpl = struct
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ~a11y_level n;
-    (* [Heading] is the label's role — the platform's own heading text
-       style AND the trait assistive users skim by, which is what makes
-       a stamped section title readable as one. The two button emphases
-       die at the root. *)
+    (* [Heading] is the label's role — the platform's own heading text style
+       AND the trait assistive users skim by, which is what makes a stamped
+       section title readable as one. *)
     Option.iter (fun r -> Floor.set_role n r) role;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
@@ -3082,33 +2397,7 @@ module Tpl = struct
   (* A single-line text field per stamped copy. UNCONTROLLED exactly as
      its live twin is: the copy owns its text, every edit arrives at
      [~on_change] with that copy's keys first, and the app folds it into
-     its own state — there is no read-back, by doctrine.
-
-     ITS TEXT IS GENUINELY OPTIONAL, which a label's is not — an entry
-     with nothing to say starts blank, and that is the common case (the
-     undo scene's per-row note, an editor's find bar). So the split
-     other bindings spell as two names ([entry] and [entry_bound]) is
-     one constructor here with an optional source: labeled optional
-     arguments ARE the union type in OCaml, and the outer zone already
-     resolves the same choice this way ([label ?text ?bind]).
-
-     WHAT BINDING ONE COSTS. [~bind_field] is a LIVE binding, not a
-     one-time seed: writing that field re-applies the prop to every
-     stamped copy that reads it (crates/kaya/src/scene.rs:4153). An app
-     that folds each keystroke back into the field it bound is therefore
-     pushing the text it just typed back at the field it came from,
-     which is a programmatic write into a focused entry — it spends the
-     platform's native undo history where it changes anything. Bind for
-     display, fold for state; that is what uncontrolled means.
-
-     [~accepts] IS WHAT MAKES A COPY A PASTE TARGET. Declare it and a
-     paste into a stamped copy arrives at the handler registered by
-     [on_paste_node] with that copy's keys first; leave it out and the
-     platform's own insertion happens and the copy's ordinary change
-     path reports it, exactly as live. The handler stays a registrar
-     rather than a [~on_paste] label here because the live twin has no
-     such label either, and the two constructors carry the same
-     handlers by rule. *)
+     its own state — there is no read-back, by doctrine. *)
   let entry ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?accepts ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) ?on_change () =
@@ -3127,18 +2416,7 @@ module Tpl = struct
     | None -> ());
     n
 
-  (* A progress bar per stamped copy: display-only, like label and
-     image. The determinate fraction (0..=1) comes from any of the three
-     sources — [~bind_field] is the per-row case this zone exists for.
-     [~indeterminate] switches to the platform's activity mode and is a
-     constant, because whether a copy has a fraction to show at all is
-     the prototype's shape rather than the row's value.
-
-     UNLIKE THE LIVE TWIN THERE IS NO DEFAULT [~value]. The live one
-     always emits 0.0, which here would land on top of whichever binding
-     was asked for and win, since the later record is the one the
-     backend applies. An unset fraction leaves the bar where the backend
-     starts it, exactly as an unset [~text] leaves a label blank. *)
+  (* A progress bar per stamped copy: display-only, like label and image. *)
   let progress ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?value ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) ?indeterminate () =
@@ -3152,19 +2430,8 @@ module Tpl = struct
     Option.iter (fun i -> Floor.set_indeterminate n i) indeterminate;
     n
 
-  (* A slider per stamped copy, over [~min]..[~max] at a position from
-     any of the three sources. Uncontrolled like its live twin: the copy
-     owns its position and reports each move to [~on_change] with that
-     copy's keys first and the new value as a float.
-
-     THE RANGE IS CONSTANT and keeps the live defaults (0..1) — it
-     describes the prototype, and a slider with no range has no reading.
-     A per-row range would need two more field arguments, and OCaml
-     would infer an INDEPENDENT record phantom for each: the compiler
-     could not even hold the three to one element type, so the type
-     would read safer than it is. [bind_min_field]/[bind_max_field] do
-     not exist for that reason; the position is what varies per row.
-     It does not default, for [progress]'s reason. *)
+  (* A slider per stamped copy, over [~min]..[~max] at a position from any
+     of the three sources. *)
   let slider ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?(min = 0.0) ?(max = 1.0) ?value ?bind
       ?bind_field ?(level = 0) ?(a11y_level = level) ?on_change () =
@@ -3188,18 +2455,7 @@ module Tpl = struct
      option becomes a label child, exactly as in the live zone (labels
      only). The SELECTED INDEX is what varies per row and takes any of
      the three sources; [~bind_field] wants a (_, float) field, because
-     Prop::Value is F64 (see [bind_value_field]).
-
-     THE OPTION LIST IS ONE SHAPE FOR EVERY COPY, by construction: the
-     options are children of the prototype, so a per-row list would need
-     a nested collection inside the choice widget, which the scene
-     rejects. Per-row option TEXT is still reachable at the floor —
-     [label ~bind_field] children under a [widget kind_select] — at a
-     fixed count. Deliberate, not a gap (docs/sugar-pass-plan.md §2).
-
-     Uncontrolled like the slider: [~on_select] receives the copy's keys
-     first and each USER pick's new 0-based index (programmatic writes
-     never echo). *)
+     Prop::Value is F64 (see [bind_value_field]). *)
   let select ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_hint ?a11y_hint_bind
       ?a11y_hint_field ?selected ?bind ?bind_field ?(level = 0)
@@ -3335,19 +2591,17 @@ module Tpl = struct
     n
 
   (* A spacer: PURE SUGAR for an empty grown column — it consumes the
-     leftover main-axis space between its siblings, in every stamped
-     copy. No new vocabulary reaches a backend. *)
+     leftover main-axis space between its siblings, in every stamped copy. *)
   let spacer ?(grow = 1.0) () =
     let n = Floor.widget Kaya_wire.kind_column in
     Floor.set_grow n grow;
     n
 
   (* The three named containers forward the props ONE BY ONE, which the
-     partial application they used to be could not: an optional
-     argument in front of a positional one is erased the moment the
-     positional one is supplied, so [container kind_column] would have
-     defaulted every prop and swallowed the caller's. The live zone
-     forwards the same way and for the same reason. *)
+     partial application they used to be could not: an optional argument in
+     front of a positional one is erased the moment the positional one is
+     supplied, so [container kind_column] would have defaulted every prop
+     and swallowed the caller's. *)
   let column ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset children =
     container ?grow ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
@@ -3378,12 +2632,10 @@ module Tpl = struct
       ?a11y_label_bind ?a11y_label_field ?a11y_level ?inset Kaya_wire.kind_row
       children
 
-  (* Attach a live-built context catalog ([context_catalog]) to a
-     template node: every stamped copy shows the same catalog, and
-     each activation carries that copy's key path — the keys ARE the
-     noun (received by the [_node] handler flavors). An item takes
-     exactly one anchor, so a second attach of the same catalog
-     raises here. *)
+  (* Attach a live-built context catalog ([context_catalog]) to a template
+     node: every stamped copy shows the same catalog, and each activation
+     carries that copy's key path — the keys ARE the noun (received by the
+     [_node] handler flavors). *)
   let context_menu (Node n) catalog =
     if catalog.cc_attached then
       invalid_arg "kaya: a context catalog takes exactly one anchor";
@@ -3410,30 +2662,12 @@ let on_click_node app (Node id) (handler : Kaya_wire.value list -> unit) =
 (* Register a change handler for a live entry: the widget owns its text
    and reports each edit here; the app folds the text into its own
    state — there is no read-back, by doctrine. *)
-(* Take pasted content at a live widget.
-
-   COSTS NOTHING ON ANY PLATFORM, unlike [read_clipboard]: a paste is a
-   user gesture, so it is its own authorisation — iOS raises no prompt
-   and the focus rules are satisfied by construction. Only fires for a
-   widget that declared what it accepts. *)
+(* Take pasted content at a live widget. *)
 let on_paste app (Widget id) (handler : representation -> unit) =
   Hashtbl.replace app.widget_pastes id handler
 
 (* A paste onto a stamped copy: the handler also receives the copy's key
-   path, outermost first. One record kind, the path deciding — exactly
-   as a click on a stamped row is one record with a click on a live
-   widget.
-
-   ONLY FIRES IF THE TEMPLATE DECLARED WHAT IT ACCEPTS
-   ([Tpl.entry ~accepts] / [Tpl.textarea ~accepts]), for the live rule's
-   reason one identity deeper: every backend gates the paste occurrence
-   on the focused widget's accept list and falls back to the platform's
-   own insertion when it is empty. This registrar and its dispatch arm
-   shipped a whole milestone before a node could carry that prop, so
-   the handler registered and waited — SILENTLY, since an undeclared
-   paste is not an error anywhere, it is the platform's own insertion
-   arriving through the copy's change handler instead
-   (docs/tpl-props-plan.md §1). *)
+   path, outermost first. *)
 let on_paste_node app (Node id)
     (handler : Kaya_wire.value list -> representation -> unit) =
   Hashtbl.replace app.node_pastes id handler
@@ -3463,26 +2697,13 @@ let on_value_changed app (Widget id) (handler : float -> unit) =
 let on_toggle_node app (Node id) (handler : Kaya_wire.value list -> bool -> unit) =
   Hashtbl.replace app.node_toggles id handler
 
-(* Register a change handler for a template slider or choice widget; it
-   also receives the stamped copy's keys, outermost first. One record
-   kind, the path deciding — a move on a stamped slider is the live
-   slider's occurrence one identity deeper, exactly as a click on a
-   stamped row is [on_click]'s.
-
-   A choice's pick rides the same table, the index carried as a float:
-   that is already the live zone's shape ([select ~on_select] wraps
-   [widget_values] the same way), so a guest that wants the raw float
-   from a template select can reach it here. *)
+(* Register a change handler for a template slider or choice widget; it also
+   receives the stamped copy's keys, outermost first. *)
 let on_value_changed_node app (Node id)
     (handler : Kaya_wire.value list -> float -> unit) =
   Hashtbl.replace app.node_values id handler
 
-(* Run everything posted, each as its own transaction, in order.
-
-   The batch is taken and the lock released BEFORE any of it runs, so a
-   thunk that posts again lands in the NEXT batch. Holding the lock
-   across the calls would let a self-posting thunk drain forever and
-   starve the occurrence loop. *)
+(* Run everything posted, each as its own transaction, in order. *)
 let drain_posted app =
   Mutex.lock app.post_lock;
   let batch = app.posted in
@@ -3490,12 +2711,7 @@ let drain_posted app =
   Mutex.unlock app.post_lock;
   List.iter (fun program -> dispatch app program) batch
 
-(* Turn the decoder's kind-and-values into the sum, or None.
-
-   EMPTY IS THE UNIVERSAL NO: None covers a denied prompt on iOS, an
-   unfocused reader on Android or Wayland, an empty clipboard, and
-   content in no representation this read accepted. The guest is not
-   told which, because the platforms deliberately do not say. *)
+(* Turn the decoder's kind-and-values into the sum, or None. *)
 let representation_of clip =
   match clip with
   | None -> None
@@ -3520,22 +2736,7 @@ let representation_of clip =
       end
       else None
 
-(* Cut one undone/redone body into the delta the app is handed.
-
-   THE LAYOUT IS COUNTS-IN-THE-HEAD (wire::undo_body): the window, four
-   u32 run lengths, the group's label, then ONE flat values tail those
-   runs cut up — signals, texts, entries, orders, in that order. Each
-   entry and order group is ARITY-FIRST, its own size leading it, so a
-   reader needs no schema and a record with more fields cannot shift
-   the group after it.
-
-   The window is NOT read here: it arrives in the record's id slot like
-   every other occurrence's identity, and reading the same fact twice is
-   how two readers come to disagree.
-
-   A body that does not add up is a broken ENCODER and not bad input,
-   so it raises rather than handing an app half a step — the picker's
-   read-in-threes rule. *)
+(* Cut one undone/redone body into the delta the app is handed. *)
 let decode_undo body =
   let byte i = Char.code body.[i] in
   let n_signals = Kaya_wire.u32_at byte 8 in
@@ -3553,9 +2754,7 @@ let decode_undo body =
     at := next
   done;
   (* Read position, not a fold: every run below takes what it needs and
-     leaves the cursor where the next one starts. Each step is its own
-     [let] because OCaml does not specify the order arguments of a pair
-     are evaluated in, and these all read the same cursor. *)
+     leaves the cursor where the next one starts. *)
   let pos = ref 0 in
   let take () =
     if !pos >= count then failwith "kaya: undo delta is truncated";
@@ -3600,8 +2799,8 @@ let decode_undo body =
     if n = 0 then List.rev acc
     else begin
       let start = !pos in
-      (* size, collection, flags, variant, path_len — then the path,
-         the key, and the record's fields. [size] counts itself. *)
+      (* size, collection, flags, variant, path_len — then the path, the
+         key, and the record's fields. *)
       let size = int () in
       let collection = i64 () in
       let flags = i64 () in
@@ -3638,38 +2837,7 @@ let decode_undo body =
   if !pos <> count then failwith "kaya: undo delta has trailing values";
   (label, { ud_signals; ud_texts; ud_entries; ud_orders })
 
-(* Fold an undo's payload into the collection mirror.
-
-   THE ROLLBACK JOURNAL IN REVERSE: an abandoned transaction restores a
-   snapshot because nothing was shipped, while an undo restores a delta
-   because everything WAS — the core has already moved, and the mirror
-   is what would otherwise be left behind. The payload is
-   core-authoritative, so nothing here re-derives anything. Signals and
-   text are not mirrored by this binding (no read-back exists for
-   either, by doctrine), so those two runs go straight to the app.
-
-   NO DERIVED RECOMPUTE HERE, AND THE ABSENCE IS THE DESIGN RATHER THAN
-   AN OMISSION. A derived signal's write rode the SAME transaction as
-   the mutation that caused it — [recompute_derived] runs the
-   collection's computes inside whichever transaction the insert,
-   update, remove or move was called in — so when that transaction
-   carried an [undoable] name, the group banked the derived value in
-   both of its directions and the core had already restored it before
-   this function ran. The types say it too: recomputing wants a [tx],
-   and this takes an [app].
-
-   That is not an accident of the signature. This runs from the dispatch
-   loop OUTSIDE any transaction, deliberately (the mirror is reconciled
-   before the handler and outside its rollback), so a recompute here
-   could not borrow the app's transaction — [the_tx ()] raises — and
-   would have to open one of its own. It would then write a value the
-   ledger never banked, in a transaction the app never asked for,
-   landing between the core's restore and the app's [~on_undone].
-   Agreeing with the banked value it is dead code hiding the mechanism;
-   disagreeing — a compute reading anything beyond the entries, or a
-   derive declared after that step was banked (docs/deferred.md's one
-   residual) — it drifts the screen away from the ledger's record of the
-   step, and the next walk through the history jumps back. *)
+(* Fold an undo's payload into the collection mirror. *)
 let absorb_undo app delta =
   List.iter
     (fun e ->
@@ -3795,10 +2963,9 @@ let dispatch_loop app =
            | Some handler -> dispatch app handler
            | None -> ())
          else if kind = Kaya_wire.occ_kind_section_selected then
-           (* NOT one-shot: sections never die, and the user can
-              return any number of times (id is the section; the
-              window rides as the payload). A programmatic
-              select_section never lands here (the echo doctrine). *)
+           (* NOT one-shot: sections never die, and the user can return any
+              number of times (id is the section; the window rides as the
+              payload). *)
            (match Hashtbl.find_opt app.section_selected id with
            | Some handler -> dispatch app handler
            | None -> ())
@@ -3840,8 +3007,7 @@ let dispatch_loop app =
          else if kind = Kaya_wire.occ_kind_pasted then
            (* A paste rides a click tag verbatim, so it arrives on the
               ordinary widget/node split — one record kind, the key path
-              deciding. Never empty: a paste that delivered nothing is
-              not an occurrence. *)
+              deciding. *)
            (match (representation_of clip, keys) with
            | None, _ -> ()
            | Some rep, [] ->
@@ -3860,13 +3026,7 @@ let dispatch_loop app =
               echo doctrine silences everything it did — no text_changed
               for the text it restored, no value_changed for the
               signals. NOT one-shot: a history is walked as often as the
-              user likes.
-
-              The mirror is reconciled BEFORE the handler and OUTSIDE
-              its transaction, and both halves matter. Before, so
-              [count] answers about the restored state. Outside, because
-              a handler that raises rolls back ITS edits and not the
-              core's — the core has already moved. *)
+              user likes. *)
            (match undo with
            | None -> ()
            | Some body ->

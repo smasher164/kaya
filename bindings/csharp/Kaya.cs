@@ -427,6 +427,22 @@ static class Kaya
     [DllImport("kaya")]
     static extern ulong kaya_spec_hash();
 
+    [DllImport("kaya")]
+    static extern ulong kaya_capabilities();
+
+    /// THE HOST CAPABILITY WORD. KayaApp.Capabilities() is the surface;
+    /// this is its floor, and no guest reads either number.
+    ///
+    /// CAP_AUX_WINDOWS IS THE CORE'S NUMBER WRITTEN AGAIN, which
+    /// P/Invoke leaves no way around — there is no header here to read
+    /// `KAYA_CAP_AUX_WINDOWS` out of, the way Go's cgo and Swift's
+    /// bridging header do. tools/check-sugar-surface.sh reads the
+    /// authoritative value out of crates/kaya/src/scene.rs and fails if
+    /// this line disagrees, so the copy cannot go stale in silence.
+    internal const ulong CAP_AUX_WINDOWS = 1;
+
+    internal static ulong CapabilityBits() => kaya_capabilities();
+
     public static int Run()
     {
         // The stale-artifact guard: this binding was generated from one

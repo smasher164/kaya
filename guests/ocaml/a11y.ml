@@ -9,8 +9,7 @@
 
 open Kaya_app
 
-(* A 2x2 RGB PNG, 75 bytes. Embedded as source per the include_str!
-   doctrine: scenes carry their inputs, no runtime file I/O. *)
+(* A 2x2 RGB PNG, 75 bytes, embedded as source. *)
 let test_png =
   Bytes.of_string
     "\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\
@@ -40,8 +39,6 @@ let () =
              ~value:0.5;
            progress ~a11y_id:"loading" ~a11y_label:"Loading" ~value:0.25;
            image ~a11y_id:"logo" ~a11y_label:"Logo" ~source:test_png;
-           (* The two CHOICE kinds: their options carry captions, the
-              choice itself does not. *)
            select ~a11y_id:"color" ~a11y_label:"Color" [ "Red"; "Green" ];
            radio ~a11y_id:"size" ~a11y_label:"Size" [ "Small"; "Large" ];
            grid ~columns:2 ~a11y_id:"cells" ~a11y_label:"Cells"

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,16 +11,11 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# Round 3 of the iOS undo probe: main3.swift (which stack the shake drives).
-# Usage: tools/ios/undoprobe/build2.sh [udid]
-#
-# NOT A LANE. It answers whether a kaya programmatic write enters the
-# native undo stack on iOS, and whether shake presents the system undo
-# UI, before D7's and P6's arms are written. See main3.swift's header and
-# docs/undo-plan.md §0. THROWAWAY.
-#
-# It UNINSTALLS itself at the end: the simulators here are shared with
-# the lane and a probe must leave no fixture behind.
+# iOS undo probe: main3.swift (which stack the shake drives).
+# Usage: tools/ios/undoprobe/build3.sh [udid]
+# A throwaway probe, not a lane: see main3.swift's header and
+# docs/undo-plan.md §0. It UNINSTALLS itself at the end — the simulators
+# are shared with the lane.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -89,15 +79,13 @@ echo "== running on $UDID =="
 xcrun simctl launch --console-pty "$UDID" dev.kaya.undoprobe3 2>&1 &
 launch_pid=$!
 # The probe holds for 12s at the shake so the screen can be captured:
-# an alert is a THING ON SCREEN and no in-process boolean is proof of it
-# on its own (the clipprobe rule).
+# an alert is a thing ON SCREEN, and no in-process boolean proves that.
 sleep 30
 xcrun simctl io "$UDID" screenshot "$OUT/shake3.png" >/dev/null 2>&1 \
     && echo "== screenshot at $OUT/shake.png =="
 sleep 12
 kill "$launch_pid" 2>/dev/null || true
 
-# NO FIXTURE LEFT BEHIND. The simulators are shared with the lane.
 xcrun simctl terminate "$UDID" dev.kaya.undoprobe3 >/dev/null 2>&1 || true
 xcrun simctl uninstall "$UDID" dev.kaya.undoprobe3 >/dev/null 2>&1 || true
 echo "== uninstalled dev.kaya.undoprobe3 from $UDID =="

@@ -28,7 +28,7 @@ func App() *kaya.App {
 	app.Build(func(tx *kaya.Tx) {
 		// Set BEFORE THE FIRST MOUNT, per the set-once wall. The
 		// asset's bytes go from the core's read straight to the
-		// platform's font API: this scene never holds them.
+		// platform's font API.
 		font := tx.Asset("fonts/sora-wght.ttf")
 		defer font.Close()
 		tx.BrandTypeface("Sora", kaya.FontAsset(font))

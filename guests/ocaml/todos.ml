@@ -1,15 +1,12 @@
 (* The todos scene from OCaml, on the let surface with the construction
    sugar: the record declaration is the schema ([@@deriving kaya_gen]).
 
-   The app names no todo — the key comes from [insert_record_fresh],
-   which mints one per collection instance (docs/fresh-key-plan.md).
+   The app names no todo — the key comes from [insert_record_fresh]
+   (docs/fresh-key-plan.md).
 
    THE ADD IS ONE STEP AND THIS FILE WRITES NO UNDO CODE FOR IT. The
-   derive's write rides the same transaction ([insert_record] recomputes
-   into the transaction it was called in), so the group banks both
-   halves and the core restores them together; nothing recomputes on the
-   way back (docs/deferred.md, the retracted "a derived signal goes
-   stale after an undo" defect).
+   derive's write rides the same transaction, so the group banks both
+   halves and the core restores them together.
 
    Build like milestone2.ml, then run with KAYA_SELFTEST=todos. *)
 
@@ -57,8 +54,6 @@ let () =
        todo_patch ~done_:checked todos (List.hd keys)
      in
 
-     (* The items ride the WINDOW because the ledger is per window, and
-        they need no handler: the step's inverse is core state. *)
      window ~title:"todos"
        ~menus:
          [

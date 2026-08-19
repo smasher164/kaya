@@ -7,14 +7,6 @@
 // platform's own default icon can land on four declared colours, so a
 // lowering that never applied can never read as a pass.
 //
-// THE MARK IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
-// This scene used to read KAYA_ICON_FILE with a repo-relative default
-// and throw in its own words, as its seven siblings each did in their
-// own language. tx.Asset(name) is the whole thing now: WHERE the file
-// lives is the core's knowledge — a repo checkout, a bundle's Resources,
-// an APK's packaged assets/ with no path at all — and the four quadrants
-// the scene reads back are the same four wherever it was found.
-//
 // THE SECOND WINDOW HAS NO TITLE OF ITS OWN, deliberately: that is the
 // blank an app's NAME fills on every platform.
 
@@ -33,17 +25,16 @@ static class IdentityScene
         {
             // BEFORE THE FIRST MOUNT, per the declared-once wall. The
             // asset's bytes go from the core's read straight to the
-            // platform's icon sink: this scene never holds them, and the
-            // `using` releases the core's handle on the way out.
+            // platform's icon sink; the `using` releases the core's
+            // handle on the way out.
             using var icon = tx.Asset("icons/kaya-mark.png");
             tx.AppIdentity("Aurora Notes", icon);
 
             // ONE PROMOTED COMMAND, AND IT IS NOT ABOUT COMMANDS. Windows
             // mints its custom caption from the first promotion and from
             // nothing else, and a custom caption REPLACES the system one
-            // — taking the system-drawn app icon with it. That is why the
-            // identity has a second Windows sink at all, and a scene with
-            // no promotion anywhere would leave that sink's arm unreached.
+            // — taking the system-drawn app icon with it. A scene with no
+            // promotion anywhere would leave that sink's arm unreached.
             var file = tx.Menu("File", items: new[]
             {
                 tx.Item("Save", symbol: Symbol.Done, primary: true),
@@ -67,13 +58,21 @@ static class IdentityScene
             // than an empty one: an empty string is a title an app
             // WROTE, and the rule under test is what a window with
             // nothing written shows.
-            tx.CreateWindow(1, width: 360, height: 240);
-            var aux = tx.Column(() =>
+            //
+            // THE HOST IS ASKED, in all eight ports of this scene, even
+            // where the answer is never no: the eight ports are one
+            // scene, and a binding surface no guest calls is one no lane
+            // exercises.
+            if (KayaApp.Capabilities().AuxWindows)
             {
-                var caption = tx.Signal("no title of its own");
-                tx.Label(bind: caption); // label#2
-            });
-            tx.MountIn(1, aux);
+                tx.CreateWindow(1, width: 360, height: 240);
+                var aux = tx.Column(() =>
+                {
+                    var caption = tx.Signal("no title of its own");
+                    tx.Label(bind: caption); // label#2
+                });
+                tx.MountIn(1, aux);
+            }
         });
 
         Environment.Exit(app.Run());

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,26 +10,11 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# EVERY TRACKED PATH MUST MATCH THE FILESYSTEM'S CASE EXACTLY.
-#
-# THE DEFECT THIS EXISTS FOR (2026-07-28, the background-work sweep).
-# A Haskell guest was created as `Background.hs` while its cabal stanza
-# said `main-is: background.hs`. macOS's filesystem is case-INSENSITIVE,
-# so the local build found it, the scene ran, and validate-mac went
-# green. Linux is case-SENSITIVE and would have failed — after a full
-# matrix run, on the lane furthest from the change.
-#
-# The class is general and nastier than one typo: every build manifest
-# in this repo names files as strings — cabal `main-is`, dune `modules`,
-# Cargo `path`, csproj globs, gradle sources, the Makefile's SCENES. Any
-# of them can disagree with the filesystem in case alone and no macOS
-# tool will say so. A case-only RENAME is worse still: git records the
-# old name and `mv` is a no-op, so the mismatch survives a fix that
-# looks like it worked (the rename must go through a temp path).
-#
-# Cheap to check because git already stores the exact bytes of every
-# tracked path: compare them against what the directory actually
-# contains, case-sensitively, in python rather than the shell.
+# EVERY TRACKED PATH MUST MATCH THE FILESYSTEM'S CASE EXACTLY
+# (CLAUDE.md's gate list for the defect it exists for). macOS is
+# case-insensitive and Linux is not, and every build manifest here names
+# files as strings — cabal `main-is`, dune `modules`, Cargo `path`,
+# csproj globs, gradle sources, the Makefile's SCENES.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -66,7 +46,7 @@ for path in paths:
     if name in entries:
         continue
     # Present only under a different case is THE defect; absent
-    # entirely is someone else`s problem (a deleted file mid-rebase).
+    # entirely is someone else`s problem.
     lower = {e.lower(): e for e in entries}
     actual = lower.get(name.lower())
     if actual is not None:
@@ -76,8 +56,8 @@ sys.exit(1 if bad else 0)
 ' "$1"
 }
 
-# The guard guards itself, both directions: a case-only mismatch must be
-# caught, and an exact match must NOT be.
+# Self-test, both directions: a case-only mismatch caught, an exact
+# match not.
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/case"

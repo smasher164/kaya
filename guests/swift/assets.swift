@@ -9,11 +9,18 @@
 // mark out with `bytes` and hands the Data to an image, and the
 // platform's own decoder answers 64x64 off the real view.
 //
-// THE MISS IS A QUESTION, AND SWIFT IS WHY IT HAS TO BE. A miss traps
-// here — `fatalError` does not unwind — so this guest could not catch
-// one however it was written. `KayaAsset.missSentence` hands back the
-// same string the trap would carry, without trapping, and that is the
-// one shape all nine languages can observe.
+// THE MISS IS READ BOTH WAYS HERE, one per surface, and Swift is the
+// language that has both to read. Since the throws ruling (2026-08-19) a
+// miss is a `KayaAssetMiss` this guest can CATCH, so the census below
+// comes out of the catch — which makes label#1's frozen bytes the wall
+// on the error's payload: the sentence the guest is handed is the core's
+// own, or the expectation reddens. The tail of label#2 stays on
+// `KayaAsset.missSentence`, because that is the half a throw cannot
+// answer: for a name that RESOLVES the query says so, having opened
+// nothing. The other eight guests read both halves through the query —
+// the C floor catches nothing at all, so the total answer is still the
+// one shape all nine share, and this guest produces the same bytes
+// either way.
 //
 // LINE 1 ONLY. Line 2 of that sentence names the place the core resolved
 // and the route that chose it, which a bundle, a device directory and a
@@ -41,19 +48,31 @@ func firstLine(_ sentence: String) -> String {
 
 let app = KayaApp()
 
-app.build { tx in
+try app.build { tx in
     tx.window(title: "assets", width: 480, height: 360)
 
-    let mark = KayaAsset(markName)
-    let font = KayaAsset(fontName)
-    // Read both while the handles are open; the close is explicit, as
-    // the typeface scene's is.
+    let mark = try KayaAsset(markName)
+    let font = try KayaAsset(fontName)
     let markBytes = mark.bytes
     let fontLength = font.bytes.count
     mark.close()
     font.close()
 
-    let census = firstLine(KayaAsset.missSentence(missingName))
+    // THE CATCH, which is what the throws ruling bought. The open
+    // SUCCEEDING is the thing that never happens on a healthy lane, so
+    // that is the arm holding a sentence saying what was measured: a
+    // name the package does not carry answering to something is the fact
+    // label#1 should print, and the frozen expectation reddens on it.
+    var census = "\(missingName) opened"
+    do {
+        let gone = try KayaAsset(missingName)
+        gone.close()
+    } catch let miss as KayaAssetMiss {
+        // The error's own sentence, unread by anything else — the same
+        // bytes `KayaAsset.missSentence` would have handed over, because
+        // the throw asks that very function for them.
+        census = firstLine(miss.sentence)
+    }
     let complaint = KayaAsset.missSentence(fontName)
     // The other arm is never taken on a healthy lane, and it shows the
     // sentence rather than a word about it: a failure here has to say
@@ -79,5 +98,4 @@ app.build { tx in
     tx.mount(root)
 }
 
-// Nothing to drive: every observation is a read of the first mount.
 app.run()

@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -26,51 +20,26 @@ fi
 #                               failing gate and a missing script must all
 #                               come back red
 #
-# WHY THIS FILE EXISTS, in two defects that both printed green.
+# TWO REFUSALS HOLD THIS UP.
 #
-# 1. THE SWEEP THAT UNDER-RAN. A hand-rolled sweep held its gate list in
-#    a variable and looped over it with `for g in $list`. Under zsh an
-#    unquoted expansion is NOT word-split, so the whole list arrived as
-#    ONE argument: 1 gate of 24 ran and the sweep reported a clean run
-#    (2026-08-07). The in-session twin is on the record too — the iOS
-#    arm's `for u in $(simctl list …)` shut down one "device" whose name
-#    was four concatenated UDIDs, and "the proof is the AFTER listing,
-#    not the absence of errors" (postmortem F5.6).
+# 1. The sweep KNOWS HOW MANY GATES IT DECLARED and will not report
+#    success unless that many ran and that many passed. A hand-rolled
+#    shell loop over a variable once ran 1 gate of 24 and printed a
+#    clean run. The loop is python3 over a literal list for the same
+#    reason. --selftest watches the refusal fire.
+# 2. The list and the build are the same file, in that order: a gate
+#    cannot verify an artifact the run has not built yet, and the
+#    build's exit status is load-bearing.
 #
-#    So: the loop is python3 over a literal list, never shell over a
-#    variable, and — the clause that actually kills the class — the
-#    sweep KNOWS HOW MANY GATES IT DECLARED and refuses to report
-#    success unless that many ran and that many passed. A sweep that
-#    silently ran zero gates cannot print OK, because 0 != 28. That
-#    refusal is watched failing on every run, by --selftest, which
-#    check-gates.sh calls.
+# THERE IS DELIBERATELY NO SUBSET FLAG — a flag that runs part of the
+# list and still prints a verdict is defect 1 with an interface. To run
+# one gate, run that gate; they are all standalone. (KAYA_FAST is the
+# honest version, through tools/keyed.sh.)
 #
-# 2. THE SWEEP THAT VERIFIED BEFORE IT BUILT. Running the gate list
-#    without building first red-flagged check-build-id twice in one day
-#    for no reason: it read the PREVIOUS run's artifacts and reported
-#    them stale, which was true and useless. tools/validate-mac.sh:63-67
-#    had already written the rule down — "a gate cannot verify something
-#    the lane has not built yet ... Build every artifact, then verify all
-#    of them" — and the rule stayed true while the list moved out from
-#    under it. Now the list and the build are the same file, in that
-#    order, and the build's exit status is load-bearing: unchecked, a
-#    swiftc failure once left the PREVIOUS dylib in place and 152 legs
-#    false-PASSed against stale code (2026-07-22).
-#
-# THERE IS DELIBERATELY NO SUBSET FLAG. No --only, no --skip, no --fast
-# (KAYA_FAST already does the honest version of that through
-# tools/keyed.sh, which skips a gate whose declared inputs have not
-# moved since it last PASSED, and says so with its key). A flag that
-# runs part of the list and still prints a verdict is the defect above
-# with a command-line interface. To run one gate, run that gate: they
-# are all standalone.
-#
-# THE SWEEP IS macOS-SHAPED — it builds libkaya.dylib and the SwiftUI
-# interpreter, and three of its gates load them. The other four lanes
-# run their own small per-lane subset (check-targets <platform>,
-# gen-header, gen-bindings, and on iOS swift-typecheck) rather than this
-# list; that asymmetry is deliberate and check-gates.sh does not police
-# it.
+# THE SWEEP IS macOS-SHAPED: it builds libkaya.dylib and the SwiftUI
+# interpreter and three gates load them. The other four lanes run their
+# own small per-lane subset instead, and check-gates.sh does not police
+# that asymmetry.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -87,25 +56,17 @@ import time
 root = pathlib.Path(sys.argv[1])
 args = sys.argv[2:]
 
-# THE LIST. Order is the order validate-mac.sh ran these in, which is
-# roughly cheapest-and-most-likely-to-fail first; check-gates joins the
-# doctrine-hygiene cluster right after check-mirror, because the two ask
-# the same question about the same file (check-mirror: does AGENTS.md
-# still say what CLAUDE.md says; check-gates: does CLAUDE.md still name
-# what this file runs).
+# THE LIST, roughly cheapest-and-most-likely-to-fail first.
 #
-# `keyed` says whether the gate goes through tools/keyed.sh, which under
-# KAYA_FAST=1 skips a gate whose declared inputs (build-id.sh's GATES)
-# have not moved since it last passed. An UNKEYED gate carries its
-# reason here rather than in a comment somewhere else, because "why is
-# this one not cached" is the question that gets a gate wrongly cached.
+# `keyed` says whether the gate goes through tools/keyed.sh. An UNKEYED
+# gate carries its reason HERE, beside itself — check-keyed enforces
+# that the reason is written.
 GATES = [
     ("gen-header", ["tools/gen-header.sh", "--check"], True, ""),
     ("gen-bindings", ["tools/gen-bindings.sh", "--check"], True, ""),
     ("gen-guests", ["tools/gen-guests.sh", "--check"], True, ""),
     ("check-steps", ["tools/check-steps.sh"], True, ""),
-    # The Python surface's guard and mirror semantics, checked headlessly
-    # (records queue; the core is never entered).
+    # The Python surface's guard and mirror semantics, headless.
     ("kaya-app-checks", ["python3", "bindings/python/kaya_app_checks.py"], False,
      "sub-second and pure python; hashing an input set would cost more than "
      "the run it would skip"),
@@ -113,15 +74,11 @@ GATES = [
     ("check-shell", ["tools/check-shell.sh"], True, ""),
     ("check-mirror", ["tools/check-mirror.sh"], True, ""),
     ("check-gates", ["tools/check-gates.sh"], True, ""),
-    # The ledger may not disagree with itself: an unstruck headline over
-    # a body that records the work COMPLETE is what sent a survey after
-    # a solved problem three weeks after it was solved. Pure prose scan
-    # over docs/; its four self-tests run first, inside it.
+    # The ledger may not disagree with itself — an unstruck headline
+    # over a body recording the work COMPLETE sends a survey after a
+    # solved problem.
     ("check-ledger", ["tools/check-ledger.sh"], True, ""),
-    # The other half of that failure: a doc citing a path the tree does
-    # not have. Same doctrine-hygiene cluster, one question over — the
-    # ledger's claims about itself, then every doc's claims about the
-    # tree.
+    # The other half: a doc citing a path the tree does not have.
     ("check-doc-refs", ["tools/check-doc-refs.sh"], False,
      "its input is the EXISTENCE of every path any doc names, so a rename or "
      "a delete anywhere in the tree is a real input — check-case's shape, and "
@@ -132,21 +89,24 @@ GATES = [
      "cheap to invalidate is a cache that never hits"),
     ("check-sugar-surface", ["tools/check-sugar-surface.sh"], True, ""),
     ("check-universal-props", ["tools/check-universal-props.sh"], True, ""),
-    # The role vocabulary's lowering-side sibling: MENU_ROLES is one line
-    # that no generator reads, so a role can ship with the root accepting
-    # it and every backend ignoring it. RED BY DESIGN across a fan-out —
-    # the role joins the vocabulary first and the four arms follow.
+    # MENU_ROLES is one line no generator reads, so a role can ship with
+    # the root accepting it and every backend ignoring it. RED BY DESIGN
+    # across a fan-out.
     ("check-roles", ["tools/check-roles.sh"], True, ""),
-    # The native undo tier's two guards, which NO shared scene can fail:
-    # the ledger-quiet bracket and A1's clear both live inside a SECOND
-    # consecutive native walk, and the routing makes that unreachable
-    # (compose-undo-arm §3.3/§3.4, watched green with each guard broken).
-    # Static pairing is the only wall available.
+    # The native undo tier's two guards, which NO shared scene can
+    # reach: static pairing is the only wall available.
     ("check-native-undo", ["tools/check-native-undo.sh"], True, ""),
     # A why-not that can print only one sentence prints it for every
-    # cause it cannot name, and the reader believes it. Pure source
-    # scan; its own two negative tests run first, inside it.
+    # cause it cannot name, and the reader believes it.
     ("check-diagnostics", ["tools/check-diagnostics.sh"], True, ""),
+    # ONE NODE IS ONE WIDGET, even when its content will not decode: in
+    # the declarative backends "render nothing" makes the node LEAVE THE
+    # TREE and every positional reader above it reads the wrong child
+    # (docs/deferred.md).
+    ("check-empty-child", ["tools/check-empty-child.sh"], False,
+     "its macOS clause compiles the interpreter's own source against the BUILT "
+     "libkaya and RUNS it, so an unchanged source tree is not an unchanged "
+     "answer — check-abort's shape, one toolkit over"),
     ("check-wheel", ["tools/check-wheel.sh"], False,
      "it builds and imports a wheel out of target/, so an unchanged source "
      "tree is not an unchanged answer"),
@@ -160,11 +120,9 @@ GATES = [
     ("check-ambient-tx", ["tools/check-ambient-tx.sh"], False,
      "no input set is declared for it in build-id.sh's GATES; same shape as "
      "check-tx-liveness above"),
-    # A Go guest reads the HOST's environment, never Go's copy of it: in
-    # a c-shared library (Android) os.Getenv is empty forever while C's
-    # getenv reads the live one, and an empty KAYA_SELFTEST is not an
-    # unknown scene name, it is the default arm. Pure source scan; its
-    # four self-tests run first, inside it.
+    # A Go guest reads the HOST's environment, never Go's copy: in a
+    # c-shared library os.Getenv is empty forever, and an empty
+    # KAYA_SELFTEST is the default arm, not an unknown scene.
     ("check-go-env", ["tools/check-go-env.sh"], True, ""),
     ("check-build-id", ["tools/check-build-id.sh"], False,
      "it inspects the built libkaya and the built interpreter; this is THE "
@@ -173,39 +131,29 @@ GATES = [
      "it is the cache's own gate — a cached verdict about the cache is "
      "worth nothing"),
     ("check-pins", ["tools/check-pins.sh"], True, ""),
-    # BOTH macOS design generations stay on the mac lane. SwiftUI reads
-    # the MAIN EXECUTABLE's sdk stamp, so flake.nix's apple-sdk_26 keeps
-    # the kaya-linked legs modern while the vendor-built hosts (python3,
-    # dotnet, the zulu JVM) hold the compat side — the side where the
-    # Button measurement bug class lives, and the side nobody chose.
+    # BOTH macOS design generations stay on the mac lane: SwiftUI reads
+    # the MAIN EXECUTABLE's sdk stamp, so the kaya-linked legs are
+    # modern and the vendor-built hosts hold the compat side.
     ("check-design-generation", ["tools/check-design-generation.sh"], False,
      "its inputs are the toolchain and the vendor hosts on the machine, not "
      "files in this tree — a source-keyed skip would go quiet exactly when a "
      "nixpkgs or vendor rebuild moved a stamp, which is the move it exists to "
      "catch"),
     ("check-verbs", ["tools/check-verbs.sh"], True, ""),
-    # The file-mode numbers against the spec that owns them. Five
-    # hand-written sites decode the integer kaya_open_picked takes and
-    # nothing held them to the spec's numbering — the same class as
-    # check-verbs' private wire constants, one ABI over.
+    # The file-mode numbers against the spec that owns them: five
+    # hand-written sites decode the integer kaya_open_picked takes.
     ("check-file-modes", ["tools/check-file-modes.sh"], True, ""),
-    # ONE DECLARED IDENTITY, READ BY A BUILD AND BY A RUNNING APP. Five
-    # routes reading five different files is how "one mark on five
-    # platforms" breaks quietly: the launcher shows last month's icon,
-    # the running window shows this month's, and every test still
-    # passes. This holds guests/assets/identity.toml level with every
-    # hand-written copy of it, and holds the byte-frozen scene
-    # expectation level with the mark's actual pixels.
+    # ONE DECLARED IDENTITY, READ BY A BUILD AND BY A RUNNING APP:
+    # guests/assets/identity.toml held level with every hand-written
+    # copy of it, and the byte-frozen scene expectation level with the
+    # mark's actual pixels.
     ("check-app-identity", ["tools/check-app-identity.sh"], False,
      "one of its clauses walks every path in the tree looking for app-icon "
      "resources, so any add, delete or rename is a real input — check-case's "
      "shape, and a key that cheap to invalidate is a cache that never hits"),
-    # THE ASSET ROOT'S DRIFT GATE, the identity gate's sibling one tier
-    # down (docs/assets-plan.md A6). `asset(name)` is only "one rule in
-    # one place" while nothing else resolves an asset for itself and
-    # every lane that has to carry the root carries all of it; neither is
-    # a thing the core can check, because both are statements about files
-    # the core never reads.
+    # THE ASSET ROOT'S DRIFT GATE (docs/assets-plan.md A6): nothing else
+    # resolves an asset for itself, and every lane that carries the root
+    # carries all of it. Neither is checkable from inside the core.
     ("check-assets", ["tools/check-assets.sh"], False,
      "one of its clauses walks every source root looking for a second "
      "resolver and another walks the asset root itself, so any add, delete "
@@ -219,9 +167,8 @@ GATES = [
     ("java-typecheck", ["tools/java-typecheck.sh"], True, ""),
 ]
 
-# Gate scripts that exist on disk and are deliberately NOT in the sweep.
-# The reason is required and check-gates.sh reads it: an exclusion with
-# no stated reason is how four gates went unnamed for two milestones.
+# Gate scripts on disk that are deliberately NOT in the sweep. The
+# reason is required and check-gates.sh reads it.
 EXCLUDED = {
     "tools/check-gtk.sh":
         "needs docker — it compile-checks the GTK backend, which "
@@ -229,10 +176,9 @@ EXCLUDED = {
         "pkg-config world). Run it by hand after any gtk.rs change",
 }
 
-# What the gates READ and must therefore be built from current sources
-# BEFORE any of them runs. Order matters inside this list too: the
-# interpreter build compiles against libkaya's header and loads the
-# library at run time.
+# What the gates READ, built from current sources BEFORE any of them
+# runs. Order matters: the interpreter compiles against libkaya's header
+# and loads the library at run time.
 BUILD = [
     ("libkaya", ["cargo", "build", "--locked", "--lib"]),
     ("libkaya id", ["tools/build-id.sh", "--verify", "target/debug/libkaya.dylib"]),
@@ -270,10 +216,8 @@ def preflight(gates):
     for name in sorted(set(n for n in names if names.count(n) > 1)):
         problems.append(f"{name} is listed more than once")
     for name, cmd, _keyed, _why in gates:
-        # Every PATH-SHAPED word in the command must be in the tree. That
-        # is one rule for both spellings a gate takes — `tools/x.sh` and
-        # `python3 bindings/…/y.py` — and it leaves an interpreter or a
-        # bare builtin to the PATH, where it belongs.
+        # Every PATH-SHAPED word must be in the tree; an interpreter
+        # or a bare builtin is left to the PATH.
         for word in cmd:
             if "/" in word and not (root / word).is_file():
                 problems.append(f"{name}: {word} does not exist")

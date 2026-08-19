@@ -18,17 +18,16 @@ import java.util.List;
  * offset").
  */
 final class Ranges {
-    /**
-     * The document, frozen: three occurrences of {@code alpha} and
-     * nothing else containing that substring, over forty short lines so
-     * the last match is below the viewport and REVEAL has work to do.
-     *
-     * <p>THE CJK WORD IS SPELLED IN {@code \}{@code u} ESCAPES: a Java
-     * literal's bytes depend on the encoding the compiler was told the
-     * file is in, and the Android build that also compiles this
-     * directory passes no {@code -encoding}. An escape is ASCII in the
-     * file and the same three characters out of every compiler.
-     */
+        /**
+         * The document, frozen: three occurrences of {@code alpha} and
+         * nothing else containing that substring, over forty short lines so
+         * the last match is below the viewport and REVEAL has work to do.
+         *
+         * <p>THE CJK WORD IS SPELLED IN {@code \}{@code u} ESCAPES: a Java
+         * literal's bytes depend on the encoding the compiler was told the
+         * file is in, and the Android build that also compiles this
+         * directory passes no {@code -encoding}.
+         */
     private static final String DOC =
             """
             line 00: \u65e5\u672c\u8a9e preface
@@ -74,16 +73,11 @@ final class Ranges {
 
     private static final String NEEDLE = "alpha";
 
-    /**
-     * The app's own copy of the document: the only authority on what
-     * the offsets mean, folded from the change occurrences.
-     */
+        /** The app's own copy: the only authority on what the offsets mean. */
     private static String doc = DOC;
 
-    /**
-     * The whole search: literal, forward, non-overlapping, converted
-     * once per hit into the unit kaya's ranges are made of.
-     */
+        /** The whole search: literal, forward, non-overlapping, converted
+         * once per hit into the unit kaya's ranges are made of. */
     private static List<KayaApp.TextRange> findAll(String text, String needle) {
         List<KayaApp.TextRange> hits = new ArrayList<>();
         for (int at = text.indexOf(needle); at >= 0;

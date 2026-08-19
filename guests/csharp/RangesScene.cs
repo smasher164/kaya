@@ -1,7 +1,7 @@
-// The text-ranges conformance scene, C# port — the three primitives an
-// editor cannot write for itself: HIGHLIGHT a set of ranges, SELECT
-// one, REVEAL one. Canonical semantics in guests/rust/ranges.rs; the
-// byte-frozen contract in tools/scenes/ranges.steps.
+// The text-ranges conformance scene, C# port — HIGHLIGHT a set of
+// ranges, SELECT one, REVEAL one. Canonical semantics in
+// guests/rust/ranges.rs; the byte-frozen contract in
+// tools/scenes/ranges.steps.
 //
 // .NET's IndexOf answers in UTF-16 code units and kaya's ranges are
 // UTF-8 byte offsets, six apart on this document and silently so —
@@ -103,9 +103,6 @@ static class RangesScene
                 editor = tx.Textarea(onChange: (t, text) =>
                 {
                     doc = text;
-                    // kaya has already dropped the decorations — a
-                    // declared set is bound to the text it was declared
-                    // against — so the app agrees.
                     t.Write(status, "0 matches");
                 });
                 // Every range assertion reads the accessibility tree, and

@@ -6,13 +6,7 @@ import java.util.function.Function;
 
 /**
  * Sum-typed collections: a sealed interface is the sum, its permitted
- * records the constructors. Elimination is Java-shaped on both sides —
- * pattern matching over the sealed hierarchy where the guest holds the
- * value, a product of typed arms where the core does. The arms are
- * checked complete at declaration (one per constructor, any order)
- * with the scene as the second check; mutation is witnessed — a field
- * write names the constructor the caller matched, and the model
- * refuses a drifted entry.
+ * records the constructors. See DESIGN.md's variants section.
  */
 public final class KayaSums {
     /** A collection whose entries are one of several record
@@ -64,8 +58,7 @@ public final class KayaSums {
                     infos[variant].wireFields(value));
         }
 
-        /** The typed model, in insertion order; a switch over the
-         * sealed hierarchy eliminates the values. */
+        /** The typed model, in insertion order. */
         @SuppressWarnings("unchecked")
         public List<KayaRecords.Entry<K, T>> items(KayaApp.Tx tx) {
             List<KayaRecords.Entry<K, T>> out = new java.util.ArrayList<>();
@@ -88,10 +81,9 @@ public final class KayaSums {
         }
 
         /**
-         * The witnessed field write: V names the constructor the
-         * caller just matched ({@code instanceof} is the refinement),
-         * and the model refuses if the entry holds a different
-         * constructor — the guard is checked, not trusted.
+         * The witnessed field write: V names the constructor the caller
+         * just matched, and the write throws if the entry holds a
+         * different one.
          */
         public <V extends T, F> void updateField(KayaApp.Tx tx, K key, Class<V> constructor,
                 Function<V, F> selector, F value) {
@@ -106,8 +98,6 @@ public final class KayaSums {
                         + current.getClass().getSimpleName());
             }
             KayaRecords.Field<F> f = KayaRecords.fieldOf(constructor, selector);
-            // encodeField: blob fields re-register their bytes at
-            // encode time — handles are single-submit.
             tx.updateFieldRaw(handle, key,
                     infos[variant].withField(current, f.index, value), variant, f.index,
                     infos[variant].encodeField(f.index, value));
@@ -165,8 +155,7 @@ public final class KayaSums {
             void accept(KayaApp.Tx tx, K key, boolean checked);
         }
 
-        /** A checkbox bound to the field the selector names, with its
-         * toggle handler co-located (the stamped key first). */
+        /** A checkbox bound to the field the selector names. */
         @SuppressWarnings("unchecked")
         public <K2> KayaApp.Node checkbox(KayaApp.Tpl t, Function<V, Boolean> selector,
                 ToggleHandler<K2> onToggle) {
@@ -181,15 +170,10 @@ public final class KayaSums {
 
     /**
      * Insert under a key the binding authors, and hand it back — the
-     * sum twin of {@link KayaRecords#insertFresh}, witnessing the
-     * constructor exactly as {@link SumCollection#insert} does. The
-     * contract is on {@link KayaApp.Tx#insertFresh}; a sum's entries
-     * have no more identity of their own than a record's, so the minter
-     * is not a record-only surface.
+     * sum twin of {@link KayaRecords#insertFresh}. The contract is on
+     * {@link KayaApp.Tx#insertFresh}.
      *
-     * <p>A STATIC FOR THE SAME REASON its record twin is: the minted
-     * key is I64, and {@code SumCollection<Long, T>} in the parameter
-     * is what refuses a collection keyed by names.
+     * <p>KEEP IT A STATIC, for the reason its record twin gives.
      */
     public static <T> long insertFresh(KayaApp.Tx tx, SumCollection<Long, T> c, T value) {
         return c.insertMinted(tx, value);
@@ -197,8 +181,7 @@ public final class KayaSums {
 
     /**
      * Declare a sum collection: one variant per constructor class, in
-     * order — each record is that constructor's schema. A
-     * one-constructor sum is what collectionOf already declares.
+     * order — each record is that constructor's schema.
      */
     @SafeVarargs
     public static <K, T> SumCollection<K, T> sumOf(KayaApp.Tx tx, Class<T> sum,
@@ -216,17 +199,13 @@ public final class KayaSums {
             schemas[i] = infos[i].schema;
         }
         KayaApp.Collection handle = tx.collectionWithVariants(schemas);
-        // The undo delta names the constructor it restored, so the sum's
-        // rebuild picks the arm rather than assuming one.
         tx.registerRebuild(handle.id, (variant, fields) -> infos[variant].fromWire(fields));
         return new SumCollection<>(handle, variants, infos);
     }
 
     /**
      * The template eliminator: a product of arms, one per constructor,
-     * handed over whole. Completeness is checked here at declaration
-     * (one arm per constructor, any order) and again by the scene — an
-     * omitted constructor never waits for its first insert to fail.
+     * checked complete here at declaration (any order).
      */
     @SafeVarargs
     public static <K, T> KayaApp.Widget eachSum(KayaApp.Tx tx, SumCollection<K, T> c,

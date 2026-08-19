@@ -1,19 +1,13 @@
 /* The styling conformance scene from C, on the function floor: the
- * brand accent, the role tier and the window inset — slice 1's whole
- * surface (docs/styling-plan.md).
+ * brand accent, the role tier and the window inset (docs/styling-plan.md).
  *
  * BRAND IS SET ONCE AND BEFORE THE FIRST MOUNT: the root refuses a
- * second write and a late one, so the accent leads the transaction and
- * mount closes it. The accent record is {seed, mask, light, dark} and no
- * tier sends a foreground or a contrast variant — the core derives fill,
- * on-fill, standalone and the hover/pressed ramp. It is a REQUEST (D2):
- * a platform may let its user override it.
+ * second write and a late one. The accent record is {seed, mask, light,
+ * dark} and no tier sends a foreground or a contrast variant — the core
+ * derives fill, on-fill, standalone and the hover/pressed ramp. It is a
+ * REQUEST (D2): a platform may let its user override it.
  *
- * The roles are constants from a closed enum and the root judges the
- * pairing, so a misfit dies at declare time.
- *
- * The byte-frozen contract is tools/scenes/styling.steps.
- * Run with KAYA_SELFTEST=styling. */
+ * Contract: tools/scenes/styling.steps. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -35,9 +29,7 @@
 #define W_SAVE 5   /* button#1 */
 
 /* A window prop with its value, packed by hand: the generated
- * kaya_tx_set_window_prop closes the record BEFORE the value. One helper
- * for all four — title, width, height and inset differ by a constant and
- * a value kind. */
+ * kaya_tx_set_window_prop closes the record BEFORE the value. */
 static void window_prop(KayaTx *tx, uint64_t window, uint32_t prop, KayaVal value) {
     size_t start = kaya_wire_begin(tx, KAYA_TX_SET_WINDOW_PROP);
     kaya_wire_u64(tx, window);
@@ -60,8 +52,7 @@ static void build_scene(void) {
     window_prop(&tx, 0, KAYA_WPROP_HEIGHT, kaya_f64(360.0));
     /* FULL BLEED, AND IT IS LAYOUT (D3): the inset is kaya's own padding
      * inside the mounted root, so 0 is honored unconditionally. A
-     * phone's safe area is a separate fact and this does not remove
-     * it. */
+     * phone's safe area is a separate fact and this does not remove it. */
     window_prop(&tx, 0, KAYA_WPROP_INSET, kaya_f64(0.0));
 
     kaya_tx_create_signal(&tx, SIG_HEADING, kaya_str("Sections"));
@@ -71,8 +62,7 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_TITLE, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_TITLE, SIG_HEADING);
     kaya_tx_set_role(&tx, W_TITLE, KAYA_ROLE_HEADING);
-    /* expect_ax resolves its target through the AUTHORED id, so
-     * everything the script reads back is identified. */
+    /* expect_ax resolves its target through the AUTHORED id. */
     kaya_tx_set_a11y_id(&tx, W_TITLE, "title");
     kaya_tx_create_widget(&tx, W_STATUS, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_STATUS, SIG_STATUS);
@@ -110,8 +100,7 @@ static void *app(void *arg) {
         if (!kaya_parse_click(rec, &id, keys, 2, &n_keys) || n_keys != 0)
             continue;
         /* A ROLE NEVER CHANGES WHAT A BUTTON DOES: destructive and
-         * prominent press like any other. Nothing here reads the role
-         * back — the emphasis is the platform's chrome. */
+         * prominent press like any other. */
         const char *status = NULL;
         if (id == W_DELETE)
             status = "deleted";

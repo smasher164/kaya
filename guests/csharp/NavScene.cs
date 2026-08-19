@@ -32,8 +32,6 @@ static class NavScene
                         inner.Label(bind: caption);
                     });
                     inner.MountIn(Detail, pane);
-                    // A write to the COVERED root: retention, observable
-                    // after the pop.
                     inner.Write(status, "pushed detail");
                 });
                 tx.Button("open settings", onClick: inner => // button#1

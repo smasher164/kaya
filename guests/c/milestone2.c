@@ -1,9 +1,8 @@
-/* The milestone-2 scene from C, on the kaya bindings. THE MAIN THREAD
- * ENTERS kaya_run() and becomes the core's UI thread; a pthread is the
- * app thread — the arrangement every C guest here uses.
+/* The milestone-2 scene from C. THE MAIN THREAD ENTERS kaya_run() and
+ * becomes the core's UI thread; a pthread is the app thread — the
+ * arrangement every C guest here uses.
  *
- * Built and run by the Linux container suite (tools/linux/run-suites.sh);
- * compiling by hand needs -I bindings/c alongside
+ * Compiling by hand needs -I bindings/c alongside
  * -I crates/kaya/include. */
 
 #include <kaya.h>
@@ -42,7 +41,6 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_STATUS, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_STATUS, SIG_STATUS);
 
-    /* When(extras): a banner label. The scope brackets the blueprint. */
     kaya_tx_create_when(&tx, W_WHEN, SIG_EXTRAS);
     kaya_tx_create_widget(&tx, N_BANNER, KAYA_KIND_LABEL);
     kaya_tx_set_text(&tx, N_BANNER, "extras on");

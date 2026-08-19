@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,15 +11,11 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # Build dialogprobe and run it on the Windows VM. See src/main.rs for
-# what it measures.
+# what it measures. Usage: build.sh <user@host>
 #
 # THE INTERACTIVE SESSION IS NOT OPTIONAL: the probe shows a real Shell
 # dialog, and a task without /it runs in session 0 where no window
-# manager will ever create one. This is the same schtasks shape
-# deploy-win.sh's run_oneshot uses, kept here rather than shared
-# because a probe must not be able to change the lane's runner.
-#
-# Usage: build.sh <user@host>
+# manager will ever create one.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -36,12 +27,9 @@ EXE="$HERE/target/aarch64-pc-windows-msvc/release/dialogprobe.exe"
 
 ssh -n -o BatchMode=yes "$HOST" 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 scp -q "$EXE" "$HOST:C:/kaya/dialogprobe.exe"
-# TWO PROCESSES, because the in-process answers were the easy half and
-# the arrangement that matters is a reader outside the owning process.
-# `hold` puts a dialog up and steps back; `attach` finds the first
-# #32770 that is not its own and interrogates it. Both must land in the
-# SAME interactive session — SendMessage does not cross one — which the
-# single /it task guarantees.
+# `hold` puts a dialog up; `attach` interrogates the first #32770 that
+# is not its own. Both must land in the SAME interactive session —
+# SendMessage does not cross one — which the single /it task guarantees.
 #
 # CRLF, because cmd.exe reads a lone LF as part of the command.
 printf '@echo off\r\nstart "" /b C:\\kaya\\dialogprobe.exe hold %%1 > C:\\kaya\\out_dialoghold.txt 2>&1\r\nping -n 6 127.0.0.1 >nul\r\nC:\\kaya\\dialogprobe.exe attach > C:\\kaya\\out_dialogprobe.txt 2>&1\r\n' \

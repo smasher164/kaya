@@ -7,7 +7,6 @@ import Foundation
 
 let app = KayaApp()
 
-// The guest's own copy of the enablement, flipped by the button.
 var saveEnabled = true
 
 app.build { tx in
@@ -40,7 +39,6 @@ app.build { tx in
             tx.item("Find", symbol: .search, primary: true) { t in
                 t.write(status, .str("found"))
             },
-            // The remainder: catalog, not chrome, on every platform.
             tx.item("Replace", symbol: .edit),
         ])
     let view = tx.menu(

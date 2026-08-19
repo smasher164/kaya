@@ -108,8 +108,6 @@ app.build { tx in
             tx.button("find") { t in  // button#0
                 let hits = findAll(doc, needle)
                 t.highlightRanges(editor, hits, in: doc)
-                // The second match, so a leg can tell the selection
-                // apart from "the first thing found".
                 if hits.count > 1 {
                     t.selectRange(editor, hits[1], in: doc)
                 }

@@ -1,6 +1,5 @@
 {- The text-ranges conformance scene, Haskell port: HIGHLIGHT a set of
-   ranges, SELECT one, REVEAL one, driven by a search this file writes
-   in five lines.
+   ranges, SELECT one, REVEAL one.
 
    THE OFFSETS ARE UTF-8 BYTE OFFSETS AND HASKELL'S OWN UNIT IS NOT: a
    'String' is a list of 'Char', so an 'isPrefixOf' walk answers in

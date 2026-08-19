@@ -1,21 +1,11 @@
 """Every backend Stage impl names every required trait method.
 
-THE COMPILER ALREADY DOES THIS — for the backends check-targets can
-compile. GTK is not one of them: gtk-sys needs the distro's pkg-config
-world, so check-targets is structurally blind there and CLAUDE.md says
-to run check-gtk (docker) after any gtk.rs change. That instruction is a
-thing to remember, and remembering failed the first time it mattered:
-the file-dialog slice added three Stage methods, mac and windows
-compiled, check-targets went green, and the linux lane died on `not all
-trait items implemented, missing: goto_directory` — a whole matrix run
-to learn a one-word fact.
-
-So this reads the trait and the impls as text. Weaker than compiling
-(it cannot see a wrong signature) and deliberately so: it costs no
-docker, runs with the fast gates, and catches the class that actually
-escaped — a method added to the trait and missed in one backend.
-check-gtk still compiles the real thing; this just stops the miss from
-surviving until the matrix.
+THE COMPILER ALREADY DOES THIS for the backends check-targets can
+compile; GTK is not one of them, because gtk-sys needs the distro's
+pkg-config world (CLAUDE.md). So this reads the trait and the impls as
+TEXT: weaker than compiling — it cannot see a wrong signature — but it
+costs no docker and catches a method added to the trait and missed in
+one backend. check-gtk still compiles the real thing.
 """
 
 import pathlib
@@ -104,7 +94,7 @@ def main() -> int:
                 status = 1
 
     # The gate guards itself: dropping a method from a synthetic impl
-    # must be caught, or this is a false green.
+    # must be caught.
     sample = "impl crate::harness::Stage for X {\n    fn a(&self) {}\n}"
     if "b" in impl_methods(sample, "impl crate::harness::Stage for X {"):
         print("stage-coverage: SELF-TEST FAIL (bad sample passed)", file=sys.stderr)

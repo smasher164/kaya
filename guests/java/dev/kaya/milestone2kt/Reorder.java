@@ -17,7 +17,6 @@ import java.util.List;
  * same widget everywhere.
  */
 final class Reorder {
-    /** The annotation processor reads this and generates ItemKaya. */
     @KayaGen(key = "String")
     record Item(String title) {}
 
@@ -29,9 +28,8 @@ final class Reorder {
 
             tx.mount(tx.row(() -> {
                 tx.button("rotate", t -> {
-                    // First entry to the end. The model owns the order,
-                    // so the handler asks it which key is first rather
-                    // than counting widgets.
+                                        // The model owns the order, so the handler asks it
+                                        // which key is first rather than counting widgets.
                     List<KayaRecords.Entry<String, Item>> entries = items.items(t);
                     items.moveToEnd(t, entries.get(0).key);
                 });

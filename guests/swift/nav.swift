@@ -29,7 +29,6 @@ app.build { tx in
                 inner.label(bind: caption)
             }
             inner.mountIn(DETAIL, pane)
-            // The covered root keeps taking writes — retention.
             inner.write(status, .str("pushed detail"))
             })
         tx.button(

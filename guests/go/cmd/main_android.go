@@ -1,13 +1,11 @@
 //go:build android
 
 // The Android tail: the OS owns main, so the guest registers here and
-// kaya starts it when the shell Activity attaches
-// (bindings/go/android.go).
+// kaya starts it when the shell Activity attaches (bindings/go/android.go).
 //
 // AN init() RATHER THAN main(): `go build -buildmode=c-shared` requires
-// exactly one main package and then NEVER CALLS its main — the only
-// callable symbols are the cgo exported ones — so a guest that registered
-// in main would register nothing.
+// exactly one main package and then NEVER CALLS its main, so a guest
+// that registered in main would register nothing.
 
 package main
 
@@ -17,8 +15,6 @@ import (
 
 func init() { kaya.AndroidMain(androidApp) }
 
-// Never called: -buildmode=c-shared has no process entry. It exists
-// because the toolchain demands a main package.
 func main() {}
 
 func androidApp() {

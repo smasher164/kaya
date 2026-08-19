@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,23 +10,12 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# The GTK compile check that check-targets.sh cannot do.
+# The GTK compile check that check-targets.sh cannot do: gtk-sys needs
+# the distro's pkg-config world, so the Linux backend builds nowhere but
+# the container. A `cargo check` in the cached image, seconds warm.
 #
-# check-targets cross-compiles every other cfg'd backend in seconds, but
-# not the Linux one: gtk-sys needs the distro's pkg-config world, so it
-# builds nowhere but the container. That left the GTK backend — which
-# carries the most hand-written layout code of any backend, an entire
-# GtkLayoutManager — reachable only through validate-linux, i.e. going
-# from "written" straight to a full suite run. Every bug in the first
-# cut of the flex layout manager needed docker to surface.
-#
-# This is the missing rung: a `cargo check` of the Linux target in the
-# cached image. With a warm target-linux it answers in seconds, which
-# makes it usable in the edit loop the way check-targets is.
-#
-# It never skips. A gate that quietly passes when docker is down would
-# be exactly the false green the repo's fourth invariant forbids — the
-# absence of a check must be loud, or it reads as "GTK is fine".
+# It never skips — a gate that quietly passes when docker is down reads
+# as "GTK is fine".
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -52,18 +36,15 @@ if [ -z "$(docker image ls -q kaya-linux 2>/dev/null)" ]; then
     exit 1
 fi
 
-# Same target dir the suite uses, so this shares its incremental state
-# rather than fighting it; never the mac target dir, which holds
+# Same target dir the suite uses; never the mac one, which holds
 # host-arch artifacts.
 if docker run --rm -v "$ROOT:/work" kaya-linux bash -c '
     cd /work || exit 1
     export CARGO_TARGET_DIR=/work/target-linux
-    # BOTH feature configurations, the check-targets rule. Without
-    # --features harness the Stage impl is configured out entirely, so
-    # this gate reported OK on a gtk.rs whose harness half did not
-    # compile, and the Linux LANE was what found it — exactly the trip
-    # this gate exists to save. (No apostrophes in here: the block is
-    # inside a single-quoted bash -c string and one would close it.)
+    # BOTH feature configurations, the check-targets rule: without
+    # --features harness the Stage impl is configured out entirely.
+    # (No apostrophes in here: the block is inside a single-quoted
+    # bash -c string and one would close it.)
     cargo check --locked --lib --quiet 2>&1 \
         && cargo check --locked --lib --quiet --features harness 2>&1
 '; then

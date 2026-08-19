@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,12 +10,9 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # Regenerate the per-language guest surfaces from the guests' own
-# KayaGen-marked declarations (the type is the schema; the generators
-# read it, never restate it; the declaration's shape decides record or
-# sum) — the Form-A tier of DESIGN.md's eliminator-convergence note.
-# Generated files are checked in; --check regenerates in place and
-# fails on any diff, so a drifted surface dies in the gates, not in a
-# guest build.
+# KayaGen-marked declarations (DESIGN.md's eliminator-convergence note).
+# Generated files are checked in; --check regenerates in place and fails
+# on any diff.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,9 +21,9 @@ cd "$ROOT" || exit 1
 # Go: every //go:generate directive under guests/go runs cmd/kaya-gen.
 go generate ./guests/go/... || exit 1
 
-# Java: the annotation processor over the APK guest sources
-# (-proc:only parses and generates without compiling; generated
-# *Kaya.java files are excluded from the run's inputs and rewritten).
+# Java: the annotation processor over the APK guest sources. -proc:only
+# parses and generates without compiling; the generated *Kaya.java are
+# excluded from the run's inputs and rewritten.
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 run_javac() {
@@ -65,12 +56,10 @@ run_javac -encoding UTF-8 -proc:only \
 dotnet run --project tools/kaya-csgen -- guests/csharp || exit 1
 
 # Swift: the swift-syntax CLI over each guest file that declares sums.
-# SPM runs outside the nix DEVELOPER_DIR — the swift-typecheck escape
-# hatch: nix's apple-sdk has no SPM on darwin.
-# --disable-automatic-resolution is SwiftPM's --locked: Package.swift
-# asks for swift-syntax `from: "601.0.0"`, a RANGE, and only the
-# checked-in Package.resolved makes that a version. Without the flag a
-# resolve can quietly move the pin and rewrite the lockfile mid-run.
+# SPM runs outside the nix DEVELOPER_DIR — nix's apple-sdk has no SPM on
+# darwin. --disable-automatic-resolution is SwiftPM's --locked: the
+# swift-syntax dependency is a RANGE and only the checked-in
+# Package.resolved makes it a version.
 env -u DEVELOPER_DIR -u SDKROOT swift run --disable-automatic-resolution \
     --package-path tools/kaya-swift-gen \
     kaya-swift-gen guests/swift/feed.swift guests/swift/todos.swift \
@@ -78,9 +67,8 @@ env -u DEVELOPER_DIR -u SDKROOT swift run --disable-automatic-resolution \
 
 GENERATED=('guests/*_kaya.go' 'guests/*Kaya.java' 'guests/*Kaya.cs' 'guests/*+Kaya.swift')
 if [ "${1:-}" = --check ]; then
-    # Both drift (tracked file no longer matches what the generator
-    # produces) and omission (generated file never checked in) fail —
-    # git diff alone is vacuous for untracked paths.
+    # Drift AND omission both fail: git diff is vacuous for untracked
+    # paths, so the ls-files clause below is not redundant.
     if ! git diff --exit-code -- "${GENERATED[@]}" >/dev/null; then
         echo "gen-guests: generated surfaces are stale — run tools/gen-guests.sh and commit" >&2
         git diff --stat -- "${GENERATED[@]}" >&2

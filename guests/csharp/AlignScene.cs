@@ -1,8 +1,7 @@
 // The align conformance scene, C# port — see guests/rust/align.rs and
-// tools/scenes/align.steps for the rationale. The tall no-baseline
-// image is load-bearing: its bottom sits ON the baseline (the CSS
-// replaced-element rule), which is what separates the modes on every
-// platform's control metrics.
+// tools/scenes/align.steps. The tall no-baseline image matters: its
+// bottom sits ON the baseline (the CSS replaced-element rule), which is
+// what separates the modes on every platform's control metrics.
 
 static class AlignScene
 {

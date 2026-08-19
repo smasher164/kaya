@@ -1,15 +1,11 @@
 (* The dirty-state conformance scene, OCaml port — unsaved work as
    window chrome (docs/dirty-plan.md). The app declares STATE and the
-   backend spells its platform's own affordance (the dot in the close
-   button on macOS, a leading [*] in the caption on Windows, a bullet in
-   the GTK header bar, nothing on the phones).
+   backend spells its platform's own affordance.
 
    TWO DECLARATIONS, ON PURPOSE: kaya does not watch your signals and
    guess. An edit writes the document AND says [~dirty:true].
 
-   SETTING IT LATER IS THE CONSTRUCT AGAIN — there is no loose setter,
-   and none is needed, since [window ~dirty:true ()] inside a handler
-   rides the transaction that handler already is.
+   SETTING IT LATER IS THE CONSTRUCT AGAIN — there is no loose setter.
 
    Canonical semantics in guests/rust/dirty.rs; the byte-frozen contract
    in tools/scenes/dirty.steps. *)
@@ -25,8 +21,6 @@ let () =
      let status = signal (Str "saved") in
 
      let on_edit () =
-       (* Three statements in one transaction: none of them implies
-          either of the others. *)
        write doc (Str "notes and a line");
        write status (Str "unsaved");
        window ~dirty:true ()

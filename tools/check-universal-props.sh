@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,35 +10,22 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# The universal-props guard: a11y_id and a11y_label are UNIVERSAL —
-# every widget kind carries both — so every backend must actually apply
-# them to every kind. check-sugar-surface.sh makes that structural on
-# the CONSTRUCTION side (each binding spells the props); this is the
-# same rule on the LOWERING side.
+# The universal-props guard on the LOWERING side: every backend applies
+# a11y_id and a11y_label to every widget kind. (check-sugar-surface is
+# the same rule on the construction side.) The failure it catches is a
+# value applied to thirteen kinds and forgotten on the fourteenth, which
+# no compiler and no linter can see.
 #
-# It exists because the lowering can be written, compile, and reach no
-# widget at all: the Compose props were once computed into a `val a11y`
-# that no render arm used, and check-compose (it compiles) plus
-# check-verbs (the verb is present) both stayed green. detekt now
-# catches the DEAD-value shape of that mistake; this catches the live
-# one — a value that is applied to thirteen kinds and forgotten on the
-# fourteenth, which no compiler and no linter can see.
+# Each backend is checked in the shape it uses:
 #
-# Each backend is checked in the shape it actually uses, because the
-# shapes differ for real reasons:
-#
-#   Compose  per-kind: KayaRenderCore's `when (node.kind)` builds each
-#            control itself, so every arm must thread the modifier.
-#   SwiftUI  central: KayaRender.body wraps the kind switch's product
-#            once, so the assertion is that NO path around the wrapper
-#            exists.
-#   GTK      kind-agnostic: the apply arm matches the PROP alone and
-#            reaches the widget generically, so the assertion is that
-#            nobody narrowed the binder to one NativeWidget variant.
+#   Compose  per-kind: every `when (node.kind)` arm threads the modifier.
+#   SwiftUI  central: NO path around KayaRender.body's one wrapper.
+#   GTK      kind-agnostic: the apply arm matches the PROP alone, so
+#            nobody may narrow the binder to one NativeWidget variant.
 #   WinUI    kind-agnostic, same as GTK.
 #
 # Kinds come from the GENERATED python wire file, so the list tracks the
-# spec by construction (check-sugar-surface's rule).
+# spec by construction.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -70,8 +52,7 @@ kinds = re.findall(r"^KIND_([A-Z_]+)", read(wire), re.M)
 if not kinds:
     bad.append(f"{wire}: no KIND_* constants — the spec list is empty")
 
-# COMPOSE. The `when (node.kind)` in KayaRenderCore, arm by arm: the
-# body of each must mention the modifier that carries the props.
+# COMPOSE. Each `when (node.kind)` arm must mention the modifier.
 text = read(compose)
 start = text.find("private fun KayaRenderCore(")
 if start < 0:
@@ -92,18 +73,15 @@ for kind in kinds:
     arm = arms[kind]
     # `a11y` carries BOTH props. An arm may take the identity half
     # alone (`a11yTag`) only if it hands the NAME to the composable's
-    # own parameter — Image is that case, and taking the tag half
-    # without naming the widget at all is the defect this gate exists
-    # for, not a spelling variant of applying it.
+    # own parameter — Image is that case.
     if not (re.search(r"\ba11y\b", arm)
             or (re.search(r"\ba11yTag\b", arm) and re.search(r"\ba11yLabel\b", arm))):
         bad.append(
             f"{compose}: the KIND_{kind} arm never applies `a11y` — "
             "the universal props reach every other kind and not this one")
 
-# SWIFTUI. One wrapper around the kind switch's product: every mention
-# of `widget` inside KayaRender.body must be inside a kayaA11y call, or
-# some path publishes a view with no props on it.
+# SWIFTUI. Every mention of `widget` inside KayaRender.body must be
+# inside a kayaA11y call, or some path publishes a view with no props.
 text = read(swiftui)
 start = text.find("struct KayaRender: View {")
 if start < 0:
@@ -121,8 +99,7 @@ else:
                     f"{swiftui}: KayaRender.body renders `widget` without "
                     f"kayaA11y on it: {line.strip()!r}")
 
-# GTK and WINUI. The apply arm keys on the PROP ALONE and reaches the
-# widget generically; a binder that names a NativeWidget variant would
+# GTK and WINUI. A binder that names a NativeWidget variant would
 # silently scope the props to one kind.
 for path in (gtk, winui):
     text = read(path)
@@ -141,11 +118,8 @@ sys.exit(1 if bad else 0)
 PY
 }
 
-# The built-in negative test (the check-sugar-surface fake-kind
-# pattern), run against DOCTORED COPIES OF THE REAL FILES rather than
-# synthetic samples: that proves the patterns still bite on the sources
-# as they are actually written today, which is the half a synthetic
-# sample cannot show.
+# Negative test against DOCTORED COPIES OF THE REAL FILES, not synthetic
+# samples: the patterns must still bite on the sources as written today.
 SELFTEST_DIR="$(mktemp -d)"
 trap 'rm -rf "$SELFTEST_DIR"' EXIT
 python3 - "$SELFTEST_DIR" "$COMPOSE" "$SWIFTUI" "$GTK" "$WINUI" <<'PY'

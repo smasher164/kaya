@@ -11,8 +11,8 @@ android {
 
     defaultConfig {
         applicationId = "dev.kaya.undoprobe"
-        // kaya's own floor and ceiling: a probe on a different platform
-        // level would measure a platform the lane never runs on.
+        // kaya's own floor and ceiling: a probe at a different level
+        // would measure a platform the lane never runs on.
         minSdk = 26
         targetSdk = 35
         versionCode = 1

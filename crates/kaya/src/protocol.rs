@@ -1,11 +1,7 @@
 //! Traffic types between the core (main thread) and app logic (its own
-//! thread).
-//!
-//! Transport policy: while the crate is in-process-only, transactions ride
-//! `std::sync::mpsc` as parsed values, and the Rust API constructs them
-//! directly — serialization is for the C boundary (wire.rs), where foreign
-//! guests submit the same records as bytes. Occurrences travel the
-//! byte-record ring (ring.rs) or mpsc, per consumer.
+//! thread). In-process transactions ride mpsc as parsed values;
+//! serialization is for the C boundary (wire.rs). Occurrences travel
+//! the byte-record ring (ring.rs) or mpsc, per consumer.
 
 use std::sync::Arc;
 
@@ -59,27 +55,20 @@ pub struct PickedFile {
 }
 
 /// An opened picked file: the descriptor as the language's own file
-/// type, plus whether it seeks.
-///
-/// `seekable` rides the OPEN and not the pick because that is the only
-/// place the answer exists — an Android provider may hand back a pipe,
-/// and nothing short of opening reveals it. FALSE means a stream: `mmap`
-/// and random access are unavailable, sequential reads are fine.
+/// type, plus whether it seeks. `seekable` rides the OPEN because only
+/// opening reveals it (an Android provider may hand back a pipe);
+/// FALSE means a stream — no mmap, no random access.
 pub struct PickedOpen {
     pub file: std::fs::File,
     pub seekable: bool,
 }
 
 impl PickedFile {
-    /// Redeem the handle for a real descriptor. BLOCKS, and may block
-    /// for a long time — a cloud provider can download the file first —
-    /// so call it from a thread you chose and post the result back
-    /// (DESIGN.md, File dialogs). Safe from any thread.
-    ///
-    /// Fallible in ways the pick is not: no picker on any platform lets
-    /// you REQUEST write, so a read-only document refuses here. That is
-    /// the correct place — kaya surfaces the platform's answer and does
-    /// not stand between the guest and the error.
+    /// Redeem the handle for a real descriptor. BLOCKS, possibly for a
+    /// long time — a cloud provider may download first — so call it from
+    /// a thread you chose (DESIGN.md, File dialogs). Safe from any
+    /// thread. Fallible where the pick is not: no picker on any platform
+    /// lets you REQUEST write.
     pub fn open(&self, mode: FileMode) -> std::io::Result<PickedOpen> {
         let raw = match mode {
             FileMode::Read => crate::wire::FILE_MODE_READ,
@@ -93,67 +82,40 @@ impl PickedFile {
             return Err(std::io::Error::from_raw_os_error(rc as i32));
         }
         Ok(PickedOpen {
-            // The handle is the guest's from here: File closes it on
-            // drop, with the guest's own file API in between.
+            // The handle is the guest's from here: File closes it on drop.
             file: unsafe { file_from_raw(handle) },
             seekable: seekable != 0,
         })
     }
 }
 
-/// What the backend registers for each picked file. The core stores
-/// these behind integer handles and never interprets them; only the
-/// backend that made one knows what it is.
+/// What the backend registers for each picked file; the core stores
+/// these behind integer handles and never interprets them.
 ///
-/// `open` runs ON THE CALLING THREAD by design — the guest called it
-/// from a thread it spawned, and dispatching to a shared worker would
-/// SERIALIZE opens, losing exactly the concurrency the guest created.
+/// `open` runs ON THE CALLING THREAD by design — dispatching to a
+/// shared worker would SERIALIZE opens the guest made concurrent.
 pub trait PickedSource: Send + Sync {
-    /// Open in `mode`, returning the descriptor and whether it seeks.
-    /// Seekability is only knowable by opening (Android may hand back a
-    /// pipe), which is why it rides the open and not the pick.
-    /// The open file as the OS's own handle: a DESCRIPTOR on POSIX, a
-    /// HANDLE on Windows. One integer, two spellings — the semantics
-    /// ("you are holding an open file the OS knows about") is uniform
-    /// and only the platform's name for it differs, which is the
-    /// carve-out shape the binding conventions allow.
+    /// Open in `mode`, returning the OS's own integer — a DESCRIPTOR on
+    /// POSIX, a HANDLE on Windows — and whether it seeks. Seekability is
+    /// only knowable by opening (Android may hand back a pipe).
     ///
-    /// NOT a CRT file descriptor on Windows, which would have kept the
-    /// ABI byte-identical and been a trap: `_open_osfhandle` mints an
-    /// fd that is only valid inside the CRT that minted it, and Python,
-    /// Go and the JVM each bring their own. It would have worked for the
-    /// Rust and C guests and quietly broken the rest.
+    /// NOT a CRT file descriptor on Windows: `_open_osfhandle` mints one
+    /// valid only inside the CRT that minted it, and Python, Go and the
+    /// JVM each bring their own (docs/traps.md).
     fn open(&self, mode: FileMode) -> std::io::Result<(i64, bool)>;
     fn name(&self) -> &str;
     /// Empty unless re-opening this name actually works.
     fn local_path(&self) -> &str;
     /// WHAT THE PLATFORM CALLS THIS FILE — a path on the desktops, a
-    /// `content://` URI on Android, a security-scoped URL string on
-    /// iOS. Never empty, unlike `local_path`, because every platform
-    /// has SOME name for a file it handed over; it is just not always
-    /// one anybody else can reopen.
-    ///
-    /// Exists because a copied file goes on the clipboard as the
-    /// platform's own reference (`public.file-url`, `text/uri-list`,
-    /// `CF_HDROP`, `ClipData.newUri`), and the backend holds a kaya
-    /// handle rather than a URL. The core resolves it once, at
-    /// lowering, so no backend needs a table lookup of its own.
+    /// `content://` URI on Android, a security-scoped URL string on iOS.
+    /// Never empty, unlike `local_path`. The core resolves handle to
+    /// locator once, at lowering, so no backend needs its own table.
     fn locator(&self) -> &str;
 }
 
-/// The three desktops' source: a path is the capability, so the open is
-/// ordinary `std::fs`. `into_raw_fd` transfers ownership — the guest
-/// owns the descriptor from here and closes it with its own file API,
-/// which is the whole point of handing over a capability rather than
-/// bytes.
-///
-/// The phones do NOT use this: Android has no path at all, and iOS has
-/// one that EPERMs once the security scope drops (measured). Their
-/// sources hold the platform object instead.
-/// The other half of the divergence: build a File back from the OS
-/// integer the C ABI carried. Unsafe for the usual reason — it takes
-/// ownership of a handle it did not open, and closing it twice is on
-/// the caller.
+/// Build a File back from the OS integer the C ABI carried. Unsafe: it
+/// takes ownership of a handle it did not open, and closing it twice is
+/// on the caller.
 #[cfg(unix)]
 pub(crate) unsafe fn file_from_raw(handle: i64) -> std::fs::File {
     use std::os::fd::FromRawFd;
@@ -167,9 +129,7 @@ pub(crate) unsafe fn file_from_raw(handle: i64) -> std::fs::File {
 }
 
 /// The open file as the OS's own integer, and the ONE place the
-/// platforms differ: `IntoRawFd` on POSIX, `IntoRawHandle` on Windows.
-/// Both give up ownership — the caller owns the handle now, which is
-/// what handing over a capability means.
+/// platforms differ. Both arms give up ownership: the caller owns it.
 #[cfg(unix)]
 pub(crate) fn raw_handle(file: std::fs::File) -> i64 {
     use std::os::fd::IntoRawFd;
@@ -182,25 +142,10 @@ pub(crate) fn raw_handle(file: std::fs::File) -> i64 {
     file.into_raw_handle() as i64
 }
 
-/// `FileMode` as ContentResolver.openFileDescriptor spells it.
-///
-/// `wt` AND NOT `w` FOR WRITE, which is the whole reason this is a named
-/// function with a test rather than a match inside the Android source:
-/// `PathSource` opens Write with `.truncate(true)`, and the provider maps
-/// a bare `w` to O_WRONLY WITHOUT O_TRUNC. Measured — a 12-byte file
-/// opened `w`, written short, and still 12 bytes. Same `FileMode`, two
-/// meanings, which is exactly the divergence the binding conventions
-/// forbid; the `t` is what makes them one.
-///
-/// Not cfg'd to Android: a rule this easy to get wrong is worth a test
-/// that runs on every platform's `cargo test`, not only the one that
-/// cannot run it.
 /// `FileMode` as the number that crosses the C ABI to a backend that
-/// redeems a picked file (iOS's `kaya_swiftui_open_picked`).
-///
-/// Spelled out here rather than cast from the enum's discriminant so the
-/// two sides of the ABI agree by a written rule instead of by a layout
-/// nobody stated. The Swift side names the same three values.
+/// redeems a picked file (iOS's `kaya_swiftui_open_picked`). Spelled out
+/// rather than cast from the discriminant, so the two sides of the ABI
+/// agree by a written rule; the Swift side names the same three values.
 #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
 pub(crate) fn picked_mode_code(mode: FileMode) -> u32 {
     match mode {
@@ -210,9 +155,13 @@ pub(crate) fn picked_mode_code(mode: FileMode) -> u32 {
     }
 }
 
-/// Dead everywhere but Android BY DESIGN — the test is the point, and it
-/// runs on the platform that cannot run the code. Narrowed to
-/// not-android so Android still fails if its own caller goes away.
+/// `FileMode` as ContentResolver.openFileDescriptor spells it.
+///
+/// `wt` AND NOT `w` FOR WRITE: the provider maps a bare `w` to O_WRONLY
+/// WITHOUT O_TRUNC while `PathSource` opens Write with `.truncate(true)`
+/// — one `FileMode`, two meanings (docs/file-dialogs-plan.md §6d,
+/// measurement 11). Not cfg'd to Android so the test runs everywhere;
+/// narrowed to not-android so Android still fails if its caller goes.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub(crate) fn android_open_mode(mode: FileMode) -> &'static str {
     match mode {
@@ -222,6 +171,11 @@ pub(crate) fn android_open_mode(mode: FileMode) -> &'static str {
     }
 }
 
+/// The three desktops' source: a path is the capability, so the open is
+/// ordinary `std::fs` and `into_raw_fd` transfers ownership to the
+/// guest. The phones do NOT use this — Android has no path at all, and
+/// iOS's EPERMs once the security scope drops
+/// (docs/file-dialogs-plan.md).
 pub struct PathSource {
     pub name: String,
     pub path: String,
@@ -236,9 +190,8 @@ impl PickedSource for PathSource {
             FileMode::ReadWrite => opts.read(true).write(true),
         };
         let file = opts.open(&self.path)?;
-        // A regular file seeks; anything else here (a fifo the user
-        // picked, a device) does not. The phones answer this from the
-        // descriptor they were handed, which is why it rides the OPEN.
+        // A regular file seeks; a fifo or a device does not. The phones
+        // answer this from the descriptor, which is why it rides the OPEN.
         let seekable = file.metadata().map(|m| m.is_file()).unwrap_or(false);
         Ok((raw_handle(file), seekable))
     }
@@ -259,34 +212,17 @@ impl PickedSource for PathSource {
 }
 
 /// WHERE A SAVE DIALOG SAID TO WRITE — the same path, opened by a
-/// different rule, and the rule IS docs/save-plan.md D1.
+/// different rule, and the rule IS docs/save-plan.md D1. Three platforms
+/// answer a save dialog with a name for a file NOBODY HAS MADE and two
+/// with a document that already exists, so the destination's open
+/// CREATES and the guest sees one behaviour everywhere.
 ///
-/// A save dialog on macOS, GTK and Windows answers with a name for a file
-/// NOBODY HAS MADE (measured on macOS: `exists=false` after a clean Save,
-/// and pressing Replace does not truncate either), while Android's
-/// `ACTION_CREATE_DOCUMENT` and iOS's export controller answer with a
-/// document that already exists. Same guest code, two behaviours — which
-/// is the divergence the binding conventions forbid, one layer under the
-/// bindings. So the destination's open CREATES, and the guest sees the
-/// one behaviour the plan states: after a save dialog, opening the result
-/// succeeds, and opening it for WRITE yields an empty file.
+/// A SEPARATE SOURCE RATHER THAN A FOURTH FILE MODE: creation is a
+/// property of the DESTINATION, not of the caller's intent.
 ///
-/// A SEPARATE SOURCE RATHER THAN A FOURTH FILE MODE, because creation is
-/// a property of the DESTINATION — the dialog promised the file — and not
-/// of the caller's intent. A `FILE_MODE_CREATE` would let a guest ask for
-/// creation on a file it merely opened, which is how "save" quietly
-/// becomes "clobber".
-///
-/// CREATE ON EVERY MODE, TRUNCATE ONLY ON `Write`, and the second half is
-/// exactly `PathSource`'s rule: a destination is never missing, so no
-/// mode may answer ENOENT for a file the dialog just named, but a reopen
-/// must still find the bytes the guest wrote (the save scene reads its
-/// own work back through the same handle). `Read` and `ReadWrite`
-/// therefore coincide here: creating a file costs write access on every
-/// OS kaya targets — POSIX `O_CREAT` needs `O_WRONLY`/`O_RDWR`, and Rust
-/// refuses `.create(true)` without `.write(true)` — so there is no
-/// read-only way to make one, and pretending otherwise would only mean
-/// opening twice.
+/// CREATE ON EVERY MODE, TRUNCATE ONLY ON `Write`. `Read` and
+/// `ReadWrite` coincide here — creating a file costs write access on
+/// every OS kaya targets, so there is no read-only way to make one.
 pub struct SaveDestination {
     pub name: String,
     pub path: String,
@@ -331,10 +267,8 @@ pub enum AlertChoice {
 }
 
 /// One modal alert request, atomic on the wire (SHOW_ALERT /
-/// PRESENT_ALERT carry the same shape): the request/result grammar's
-/// first client. `actions` holds 0..=2 labels — the platform floor
-/// (ContentDialog's three slots are two actions plus close); `cancel`
-/// is the always-present dismissal slot's label.
+/// PRESENT_ALERT carry the same shape). `actions` holds 0..=2 labels —
+/// the platform floor; `cancel` is the always-present dismissal slot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlertSpec {
     pub window: WindowId,
@@ -356,13 +290,9 @@ pub struct FileDialogSpec {
     pub filters: Vec<(String, String)>,
 }
 
-/// A save-dialog request. The picker's twin with two differences and no
-/// others: there is no `multiple` (no platform's save dialog names two
-/// destinations), and `suggested_name` is the name the dialog opens with.
-///
-/// ADVISORY LIKE THE FILTERS, and for the same reason: every platform
-/// takes it, none guarantees it. The user renames it; Android may append
-/// an extension matching the mime type. A guest reads the name it GOT.
+/// A save-dialog request. The picker's twin with two differences: there
+/// is no `multiple`, and `suggested_name` is the name the dialog opens
+/// with — ADVISORY like the filters. A guest reads the name it GOT.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaveDialogSpec {
     pub window: WindowId,
@@ -372,15 +302,12 @@ pub struct SaveDialogSpec {
 }
 
 /// A brand-typeface request, carried UNRESOLVED from the guest to every
-/// backend (docs/styling-plan.md Slice 2b).
-///
-/// `family` is the default; `platforms` are the per-platform overrides
-/// as `(tag, family)` pairs over the spec's `platform` enum; `font` is
-/// an optional font file's bytes. Nothing here is resolved by the core,
-/// and that is the design: a colour is one number every platform means
-/// the same way, while a family NAME is a lookup only the platform can
-/// do — and a binding cannot even name its own platform (the JVM says
-/// "Linux" on Android), where a lowering IS one.
+/// backend (docs/styling-plan.md Slice 2b). `family` is the default,
+/// `platforms` the per-platform overrides over the spec's `platform`
+/// enum, `font` an optional font file's bytes. The core resolves
+/// nothing: a family NAME is a lookup only the platform can do, and a
+/// binding cannot even name its own platform (the JVM says "Linux" on
+/// Android).
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypefaceRequest {
     pub family: String,
@@ -389,18 +316,10 @@ pub struct TypefaceRequest {
 }
 
 impl TypefaceRequest {
-    /// The family THIS platform asked for: its own row if it has one,
-    /// the default otherwise. Every backend calls this rather than
-    /// re-walking the pairs, so "which row is mine" is answered once —
-    /// paired with `wire::this_platform()`, which says which row that
-    /// is.
-    ///
-    /// The two Rust-native backends (gtk.rs, winui/mod.rs) call this;
-    /// the two interpreter backends are not Rust and answer the same
-    /// question against the apply record's platform stamp, so no copy of
-    /// the vocabulary lives in Swift or Kotlin. `allow(dead_code)`
-    /// because a host build compiling neither backend still compiles
-    /// this file — mac builds the SwiftUI interpreter, not gtk.
+    /// The family THIS platform asked for: its own row if it has one, the
+    /// default otherwise. Paired with `wire::this_platform()`.
+    /// `allow(dead_code)` because a host build compiling neither Rust
+    /// native backend still compiles this file.
     #[allow(dead_code)]
     pub fn family_for(&self, platform: u32) -> &str {
         self.platforms
@@ -411,23 +330,14 @@ impl TypefaceRequest {
 }
 
 /// The app's declared identity, carried UNINSPECTED from the guest to
-/// every backend (docs/app-identity-plan.md, ratified 2026-08-18).
+/// every backend (docs/app-identity-plan.md). The core validates only
+/// the four walls the root enforces — set once, before the first mount,
+/// non-empty, not undoable: whether a blob is an image is a question
+/// only the platform's own decoder can answer.
 ///
-/// `name` is what the app goes by; `icon` is the picture that stands for
-/// it, as the bytes of one image file. Nothing here is resolved or
-/// validated by the core beyond the four walls the root enforces (set
-/// once, before the first mount, non-empty, not undoable), and that is
-/// the typeface's rule for the typeface's reason: whether a blob is an
-/// image is a question only the platform's own decoder can answer, and a
-/// guess that disagreed with the decoder would be worse than no answer.
-///
-/// ONE PICTURE, NOT FIVE. The same bytes reach the macOS Dock, the
-/// Windows taskbar and caption, an X11 window's `_NET_WM_ICON`, and (as
-/// the same FILE, at build time) the Android launcher and the iOS Home
-/// Screen. Per-platform artwork is refused for now, deliberately: the
-/// divergences that genuinely matter — mac's margin grid, Android's
-/// adaptive layer pair, iOS's mask — are packaging-time transforms a
-/// runtime slot cannot serve anyway.
+/// ONE PICTURE, NOT FIVE, reaching every platform's identity sink.
+/// Per-platform artwork is refused for now: the divergences that matter
+/// are packaging-time transforms a runtime slot cannot serve.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppIdentity {
     pub name: String,
@@ -436,20 +346,14 @@ pub struct AppIdentity {
 
 /// One clip, offered in several representations at once.
 ///
-/// A RECORD AND NOT A LIST, which is the whole shape: every platform
-/// models the clipboard as one item available in several types, with
-/// the consumer taking the richest it understands, and a record makes
-/// at-most-one-per-kind structural rather than a duplicate check the
-/// root has to run. `custom` is the one plural field with names,
-/// because several app-defined formats are legitimate.
+/// A RECORD AND NOT A LIST: every platform models the clipboard as one
+/// item available in several types, so at-most-one-per-kind is
+/// structural rather than a duplicate check. `custom` is the one plural
+/// field with names.
 ///
 /// kaya DERIVES NOTHING. An app that wants plain text alongside html
-/// puts both in: whether list bullets survive and where line breaks go
-/// are rendering decisions the app owns, and a bad auto-derivation is
-/// worse than none because it degrades every paste into a plain field
-/// silently. The one exception is `files`, which also gets a text
-/// rendition of the paths — universal convention, and no judgment in
-/// it.
+/// puts both in. The one exception is `files`, which also gets a text
+/// rendition of the paths — universal convention, no judgment in it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Clip {
     pub text: Option<String>,
@@ -461,16 +365,11 @@ pub struct Clip {
     pub custom: Vec<(String, Blob)>,
 }
 
-/// The same clip, one step later: what a BACKEND receives.
-///
-/// Identical to [`Clip`] except in the files field, and the difference
-/// is the whole reason it exists. A guest names a file by CAPABILITY —
-/// the handle the picker minted, which it can open — while a backend
-/// needs the platform's own reference to put on a clipboard: a file
-/// URL, a `content://` URI, a path inside a `DROPFILES` struct. The
-/// core resolves handle to locator ONCE, at lowering, where the picked
-/// table lives; otherwise all four backends would carry a lookup and
-/// the two Rust-native ones would need a C entry to do it.
+/// The same clip, one step later: what a BACKEND receives. Identical to
+/// [`Clip`] except in `files`, and that is why it exists — a guest names
+/// a file by CAPABILITY, a backend needs the platform's own reference.
+/// The core resolves handle to locator ONCE, at lowering, where the
+/// picked table lives.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClipOut {
     pub text: Option<String>,
@@ -483,18 +382,10 @@ pub struct ClipOut {
 
 /// One representation, arriving — the sum [`Clip`] is the record of.
 ///
-/// YOU OFFER MANY AND YOU RECEIVE ONE, and the two shapes say so. A
-/// clipboard read and a paste both materialise exactly one of the kinds
-/// the reader accepted, because that is what every host does: macOS
-/// walks the pasteboard's types in preference order and hands back the
-/// first match, Android's `onReceiveContent` delivers one item, and a
-/// Wayland offer is read one mime type at a time. A record here would
-/// invite a guest to check five fields where four are structurally
-/// always empty.
-///
-/// `files` is plural INSIDE one representation, which is the same
-/// nesting `text/uri-list` and `CF_HDROP` already have and the same one
-/// a multi-select pick already returns.
+/// YOU OFFER MANY AND YOU RECEIVE ONE: a clipboard read and a paste both
+/// materialise exactly one of the kinds the reader accepted, because
+/// that is what every host does. `files` is plural INSIDE one
+/// representation, the nesting `text/uri-list` already has.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Representation {
     Text(String),
@@ -516,12 +407,10 @@ pub struct CollectionId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TemplateNodeId(pub u64);
 
-/// A menu item's id: its OWN guest-allocated id space (one `c_menu_item`
-/// counter per app), distinct from widget, node, surface, and every
-/// other space so cross-use with a widget or a window is a compile
-/// error where the language can express it (DESIGN.md, Menus). Dispatch
-/// tables key by item id — "N tables, always". Never carries the
-/// internal bit; 0 is not an item.
+/// A menu item's id: its OWN guest-allocated id space, distinct from
+/// widget, node and surface ids so cross-use is a compile error where
+/// the language can express it (DESIGN.md, Menus). Dispatch tables key
+/// by item id. Never carries the internal bit; 0 is not an item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MenuItemId(pub u64);
 
@@ -536,10 +425,8 @@ pub type Path = Vec<Value>;
 
 /// What the app thread's inbox carries. A guest only ever sees
 /// `Occurrence`; `Woken` is how a [`crate::Poster`] gets the app thread
-/// out of `recv()` for work that is NOT an event and never belongs in
-/// the public vocabulary. Keeping it out of `Occurrence` matters: guests
-/// match that enum exhaustively (guests/rust/milestone2.rs does), and a
-/// variant they can never receive would be a case they must write anyway.
+/// out of `recv()` for work that is NOT an event. Keeping it out of
+/// `Occurrence` matters: guests match that enum exhaustively.
 pub(crate) enum Inbox {
     Occ(Occurrence),
     Woken,
@@ -554,23 +441,19 @@ pub enum Occurrence {
     /// node, and the key path naming the copy.
     InstanceButtonClicked { node: TemplateNodeId, path: Path },
     /// The user edited an entry the guest created directly. The widget
-    /// owns its text; the app folds these into its own model — there is
-    /// no read-back, by doctrine.
+    /// owns its text; there is no read-back, by doctrine.
     TextChanged { id: WidgetId, text: String },
     /// The user edited a stamped copy of a template entry.
     InstanceTextChanged { node: TemplateNodeId, path: Path, text: String },
     /// The user toggled a checkbox the guest created directly; carries
     /// the new state. Same ownership stance as TextChanged.
     Toggled { id: WidgetId, checked: bool },
-    /// The user asked a veto_close window to close. Nothing has
-    /// closed; the app answers with destroy_window if it agrees (the
-    /// request/confirm veto class — no response required, no
-    /// correlation ids).
+    /// The user asked a veto_close window to close. Nothing has closed;
+    /// the app answers with destroy_window if it agrees.
     CloseRequested { window: WindowId },
     /// A non-veto auxiliary window was closed by its chrome —
-    /// informational and post-fact; destroy_window reconciles the
-    /// scene (idempotent: the backend tolerates the native window
-    /// already being gone).
+    /// informational and post-fact; destroy_window reconciles the scene
+    /// (idempotent: the native window may already be gone).
     WindowClosed { window: WindowId },
     /// The picker's one answer: the chosen files, or an EMPTY list for
     /// cancel — no platform can confirm an empty selection, so the
@@ -583,40 +466,33 @@ pub enum Occurrence {
     /// fires, and the alert id retired with it.
     AlertResult { alert: AlertId, choice: AlertChoice },
     /// The user's back affordance popped an entry natively —
-    /// informational and post-fact (the WindowClosed precedent); the
-    /// core's stack has already reconciled. A programmatic pop_entry
-    /// does not echo here: its caller already knows.
+    /// informational and post-fact. A programmatic pop_entry does not
+    /// echo here: its caller already knows.
     EntryPopped { entry: WindowId },
     /// The user drove the back affordance on an entry whose
     /// intercept_back is armed. Nothing has popped; the app answers
     /// with pop_entry if it agrees — the CloseRequested veto class.
     BackRequested { entry: WindowId },
-    /// The user switched sections through the platform's own switcher
-    /// — informational and post-fact: the selection has already
-    /// changed on screen. Only the user's act emits; a programmatic
-    /// SelectSection is configuration and stays silent (the echo
-    /// doctrine).
+    /// The user switched sections through the platform's own switcher —
+    /// informational and post-fact. A programmatic SelectSection is
+    /// configuration and stays silent (the echo doctrine).
     SectionSelected { window: WindowId, section: WindowId },
     /// The user toggled a stamped copy of a template checkbox.
     InstanceToggled { node: TemplateNodeId, path: Path, checked: bool },
-    /// The user moved a slider the guest created directly; carries the
-    /// new value, one occurrence per change (the entry's per-edit
-    /// granularity). Same ownership stance as TextChanged.
+    /// The user moved a slider the guest created directly; one
+    /// occurrence per change.
     ValueChanged { id: WidgetId, value: f64 },
     /// The user moved a stamped copy of a template slider.
     InstanceValueChanged { node: TemplateNodeId, path: Path, value: f64 },
-    /// A menu action fired — clicked in the bar/overflow/context menu OR
-    /// invoked through its shortcut: ONE occurrence, one dispatch path
-    /// (the shortcut is another affordance of the same item; DESIGN.md,
-    /// Menus). The action the guest created directly.
+    /// A menu action fired — clicked OR invoked through its shortcut:
+    /// ONE occurrence, one dispatch path (DESIGN.md, Menus).
     MenuActivated { item: MenuItemId },
     /// A menu action fired on a node-anchored context menu: the item id
     /// plus the anchor copy's key path (the on_click_node encoding — the
     /// keys ARE the noun).
     InstanceMenuActivated { item: MenuItemId, path: Path },
-    /// The user flipped a toggle item; carries the new state. Reuses the
-    /// checkbox contract — user activation emits, a programmatic
-    /// `checked` write is configuration and stays quiet.
+    /// The user flipped a toggle item; carries the new state. A
+    /// programmatic `checked` write is configuration and stays quiet.
     MenuToggled { item: MenuItemId, checked: bool },
     /// A toggle flipped on a node-anchored context menu.
     InstanceMenuToggled { item: MenuItemId, path: Path, checked: bool },
@@ -626,12 +502,10 @@ pub enum Occurrence {
     MenuValueChanged { group: MenuItemId, index: f64 },
     /// A radio option picked on a node-anchored context menu.
     InstanceMenuValueChanged { group: MenuItemId, path: Path, index: f64 },
-    /// The privileged read's one answer, or `None` for the universal
-    /// no. Empty covers a denied iOS prompt, an unfocused reader on
-    /// Android or Wayland, an empty clipboard, and content in no
-    /// representation the request accepted — the platforms decline to
-    /// say which, so kaya does not invent a distinction. The request id
-    /// retires here, exactly as the dialog id does.
+    /// The privileged read's one answer, or `None` for the universal no
+    /// — a denied prompt, an unfocused reader, an empty clipboard, or no
+    /// accepted representation; the platforms decline to say which, so
+    /// kaya does not invent a distinction. The request id retires here.
     ClipboardResult {
         request: u64,
         clip: Option<Representation>,
@@ -649,18 +523,14 @@ pub enum Occurrence {
     /// kaya routed an undo, and this is what the CORE put back
     /// (docs/undo-plan.md D5). `label` is the group's authored name, or
     /// EMPTY for a typing episode. Applying an inverse emits nothing
-    /// else — it is programmatic, so the echo doctrine covers it — which
-    /// is exactly why the payload is complete: this is the only thing
-    /// the app hears, and every binding updates its mirror from it.
+    /// else, which is why this payload has to be complete.
     Undone {
         window: WindowId,
         label: String,
         delta: UndoDelta,
     },
-    /// The Undone twin, same payload, opposite direction. Only a
-    /// FRONTIER typing episode redoes natively, and that one never
-    /// arrives here: it is the platform's own stack moving, reported by
-    /// its ordinary TextChanged.
+    /// The Undone twin, same payload, opposite direction. A FRONTIER
+    /// typing episode redoes natively and arrives as TextChanged.
     Redone {
         window: WindowId,
         label: String,
@@ -671,22 +541,17 @@ pub enum Occurrence {
     Shutdown,
 }
 
-/// Bulk payload bytes behind a cheap handle: the content-buffer arm of
-/// the value set. The bytes live once, in core-owned memory; every
-/// clone is an Arc clone (8 bytes of pointer, one refcount bump), so a
-/// blob bound to N widgets or stamped into M rows never re-copies —
-/// the scene's fan-out clones stay O(1) per reference. The last drop
-/// frees: reclamation is refcount, resolving DESIGN's open question #2.
-/// On the wire a blob travels as its u64 registration handle; the
-/// bytes never enter a record stream.
+/// Bulk payload bytes behind a cheap handle. The bytes live once, in
+/// core-owned memory; every clone is an Arc clone, so a blob bound to N
+/// widgets or stamped into M rows never re-copies. The last drop frees.
+/// On the wire a blob travels as its u64 registration handle; the bytes
+/// never enter a record stream.
 #[derive(Clone)]
 pub struct Blob(pub Arc<[u8]>);
 
 impl std::fmt::Debug for Blob {
-    /// Length plus a short FNV prefix, never the bytes: round-trip
-    /// tests compare Debug strings, and a payload dump would make a
-    /// megabyte diff out of a one-line mismatch (while a bare length
-    /// would false-match different bytes of equal size).
+    /// Length plus a short FNV prefix, never the bytes: round-trip tests
+    /// compare Debug strings, and a bare length would false-match.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         for b in self.0.iter() {
@@ -721,20 +586,17 @@ impl From<Arc<[u8]>> for Blob {
     }
 }
 
-/// A signal, property, element-field, or key value. The scalar set
-/// plus the blob handle; there is deliberately no record *value* — a
-/// collection entry is a Record (one Value per schema field), and
-/// Value::Record waits for the feature that needs a record as a value
-/// (nested fields, sum-typed payloads).
+/// A signal, property, element-field, or key value. The scalar set plus
+/// the blob handle; there is deliberately no record *value* — a
+/// collection entry is a Record (one Value per schema field).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Bool(bool),
     I64(i64),
     F64(f64),
     Str(String),
-    /// Bulk payload bytes (an encoded image, a row batch): Arc'd core
-    /// memory referenced by handle on the wire. Not a key type — a
-    /// blob names content, never identity.
+    /// Bulk payload bytes, Arc'd core memory referenced by handle on the
+    /// wire. Not a key type — a blob names content, never identity.
     Blob(Blob),
 }
 
@@ -771,16 +633,13 @@ pub type Record = Vec<Value>;
 ///
 /// A STATEMENT, NOT A REPLAY. Every member says what a thing now IS, so
 /// a mirror that applies one twice is still correct and a binding needs
-/// no diffing of its own. The core owns the truth; eight bindings fold
-/// the same payload the way they already fold a rollback journal, which
-/// is what keeps mirror drift to one implementation instead of eight.
+/// no diffing of its own.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UndoDelta {
     /// Signal id -> its restored value.
     pub signals: Vec<(SignalId, Value)>,
-    /// Each text field this step put back. A coarse episode restore is
-    /// a programmatic write, so nothing else would ever tell an app
-    /// that folds TextChanged into its model.
+    /// Each text field this step put back. A coarse episode restore is a
+    /// programmatic write, so nothing else would tell an app.
     pub texts: Vec<UndoText>,
     /// Collection entries, present or gone.
     pub entries: Vec<UndoEntry>,
@@ -789,18 +648,14 @@ pub struct UndoDelta {
     pub orders: Vec<UndoOrder>,
 }
 
-/// One text field's restored text, named the way the edit that filled
-/// it was named.
+/// One text field's restored text, named the way the edit that filled it
+/// was named.
 ///
-/// THE IDENTITY IS THE OCCURRENCE'S, not the core's bookkeeping. An
-/// empty `path` means `id` is a live [`WidgetId`]; a non-empty one
-/// means `id` is the [`TemplateNodeId`] of a stamped copy addressed by
-/// that key path — the split `decode_text_changed_tag` already makes
-/// between `TextChanged` and `InstanceTextChanged`. An app therefore
-/// folds this into the same model its own change handler fills, and the
-/// core's internal widget id for a copy never leaves the core (it could
-/// not be resolved by an app, and it changes when the row is stamped
-/// again).
+/// THE IDENTITY IS THE OCCURRENCE'S, not the core's bookkeeping: an
+/// empty `path` means `id` is a live [`WidgetId`], a non-empty one that
+/// `id` is the [`TemplateNodeId`] of a stamped copy addressed by that
+/// path. The core's internal widget id for a copy never leaves the core
+/// — an app could not resolve it, and it changes on every restamp.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UndoText {
     /// A widget id when `path` is empty, a template node id otherwise.
@@ -894,16 +749,14 @@ impl Key {
     }
 }
 
-/// The widget vocabulary, growing one conformance-gallery widget at a
-/// time.
+/// The widget vocabulary (the spec's `kind` enum).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WidgetKind {
     Column,
     Button,
     Label,
-    /// A single-line text field. Uncontrolled: the widget owns its
-    /// text and reports edits as TextChanged occurrences; Prop::Text
-    /// sets the initial (or programmatic) content.
+    /// A single-line text field. Uncontrolled: the widget owns its text
+    /// and reports edits as TextChanged; Prop::Text sets the content.
     Entry,
     /// A horizontal container: Column turned sideways.
     Row,
@@ -911,50 +764,37 @@ pub enum WidgetKind {
     /// the state; user toggles report as Toggled occurrences.
     Checkbox,
     /// A continuous control over a numeric range. Prop::Value is the
-    /// position, Prop::Min/Prop::Max the range (0..1 unless set); user
-    /// drags report as ValueChanged occurrences, one per change.
-    /// Uncontrolled, like the entry: the widget owns its position.
+    /// position, Prop::Min/Prop::Max the range (0..1 unless set); drags
+    /// report as ValueChanged. Uncontrolled, like the entry.
     Slider,
     /// A displayed picture. Prop::Source carries the encoded bytes
     /// (PNG/JPEG/...) as a blob; the toolkit decodes natively.
-    /// Display-only, like Label: no occurrence, no tag. The v1 vehicle
-    /// for the content-buffer path (DESIGN: "Image covers content
-    /// buffers").
+    /// Display-only, like Label: no occurrence, no tag.
     Image,
-    /// A horizontal progress bar. Display-only, like Label and
-    /// Image: no occurrence, no tag. Prop::Value carries the
-    /// determinate fraction (0..=1, domain-checked at the root, the
-    /// grow discipline); Prop::Indeterminate switches the bar to the
-    /// platform's activity mode (pulse/animation) and Value is
-    /// ignored while it is on.
+    /// A horizontal progress bar. Display-only. Prop::Value carries the
+    /// determinate fraction (0..=1, domain-checked at the root);
+    /// Prop::Indeterminate switches the bar to the platform's activity
+    /// mode and Value is ignored while it is on.
     Progress,
     Select,
     Radio,
     Grid,
-    /// The multi-line entry: same uncontrolled text contract, same
-    /// text_changed occurrence, same clear/focus commands — the
-    /// platform's real multi-line editor.
+    /// The multi-line entry: the platform's real multi-line editor, on
+    /// the Entry's uncontrolled text contract.
     Textarea,
-    /// A vertical scroll viewport over EXACTLY ONE child (usually a
-    /// column) — the ScrolledWindow/SingleChildScrollView shape; the
-    /// scene rejects a second child. Vertical-only in v1 (an axis
-    /// enum is a later relaxation, the slider-step precedent). No
-    /// occurrence: the position is widget-owned state, and no props
-    /// of its own — Spacing/Align are container-of-many concerns and
-    /// do not apply. Virtualization is explicitly out (ledgered; a
-    /// For inside a scroll renders unvirtualized).
+    /// A vertical scroll viewport over EXACTLY ONE child; the scene
+    /// rejects a second. Vertical-only in v1. No occurrence — the
+    /// position is widget-owned — and no props of its own, since
+    /// Spacing/Align are container-of-many concerns. Virtualization is
+    /// out (docs/deferred.md).
     Scroll,
 }
 
 impl WidgetKind {
     /// Every kind, for the sweeps that must not miss one — the tag
-    /// agreement between the live and stamped paths is checked by
-    /// walking this rather than by repeating a list, so a kind added
-    /// later joins the sweep instead of quietly sitting outside it.
-    /// Pinned to the spec's own `kind` enum by
-    /// `spec::tests::all_widget_kinds_are_the_spec_s_kinds`: the spec is
-    /// the root, so a variant added there must appear here or that test
-    /// fails (invariant 7).
+    /// agreement between the live and stamped paths walks this rather
+    /// than repeating a list. Pinned to the spec's own `kind` enum by
+    /// `spec::tests::all_widget_kinds_are_the_spec_s_kinds` (invariant 7).
     ///
     /// `pub(crate)`, not `pub`: a `pub` associated const makes cbindgen
     /// treat `WidgetKind` as a type the C ABI exports, and it emitted
@@ -964,10 +804,8 @@ impl WidgetKind {
     /// still name the enum's variants; nothing outside this crate needs
     /// to walk them.
     ///
-    /// `cfg(test)` because the sweeps that walk it ARE tests — the
-    /// live-vs-stamped tag agreement and the backend tag pairing. A
-    /// shipped app has no reason to enumerate the kinds, and carrying it
-    /// unconditionally is a dead_code warning that trains the next
+    /// `cfg(test)` because the sweeps that walk it ARE tests, and an
+    /// unconditional copy is a dead_code warning that trains the next
     /// reader to ignore dead_code warnings.
     #[cfg(test)]
     pub(crate) const ALL: [WidgetKind; 14] = [
@@ -992,16 +830,9 @@ impl WidgetKind {
     /// control reports. THE INTERACTIVE KINDS DO; the display and
     /// container kinds have nothing to report.
     ///
-    /// This predicate exists because it used to be a `match` written
-    /// twice, twelve hundred lines apart in scene.rs — once for a live
-    /// widget and once for a stamped copy — and the two had drifted:
-    /// Textarea, Select and Radio were tagged live and untagged when
-    /// stamped. GTK and WinUI unwrap the tag for exactly those three, so
-    /// a stamped select aborted the process there and reported to nobody
-    /// on the SwiftUI interpreter, which reads a zero-length tag without
-    /// complaint. Nothing caught it because no binding had a template
-    /// constructor for those kinds — only the raw floor could reach it
-    /// (docs/sugar-pass-plan.md D1). One predicate, both callsites.
+    /// ONE predicate, read by both the live and the stamped callsite: as
+    /// two matches they drifted, and only the raw floor could reach the
+    /// difference (docs/sugar-pass-plan.md D1).
     pub(crate) fn carries_tag(self) -> bool {
         match self {
             WidgetKind::Button
@@ -1013,8 +844,7 @@ impl WidgetKind {
             | WidgetKind::Radio => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
-            // decide whether it reports, rather than defaulting to
-            // "silent" and finding out on a backend.
+            // decide whether it reports.
             WidgetKind::Column
             | WidgetKind::Row
             | WidgetKind::Label
@@ -1027,10 +857,8 @@ impl WidgetKind {
 }
 
 /// The menu item vocabulary (spec enum "menu_kind"; DESIGN.md, Menus).
-/// `menu` and `radio_group` are the grouping nodes; the rest are
-/// leaves. One vocabulary, two anchors (the window bar and a
-/// widget/node context) — the anchor decides the spelling, never the
-/// item kinds.
+/// `menu` and `radio_group` are the grouping nodes, the rest are leaves.
+/// One vocabulary, two anchors — the anchor decides the spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuItemKind {
     /// A neutral grouping node, at bar level or nested as a submenu.
@@ -1054,10 +882,8 @@ impl MenuItemKind {
     /// Whether this kind may carry a `shortcut` — every LEAF command
     /// (DESIGN.md, Menus). ONE statement of the rule: the root's
     /// validation and every backend's dispatch table read it here, so a
-    /// backend cannot quietly disagree with the root about which chords
-    /// exist. It did once: a table built from actions alone gated the
-    /// harness verb, so a checkable command's chord was never pressed
-    /// and the silence read as a platform limitation (docs/traps.md).
+    /// backend cannot quietly disagree about which chords exist
+    /// (docs/traps.md).
     pub fn takes_shortcut(self) -> bool {
         matches!(
             self,
@@ -1067,14 +893,12 @@ impl MenuItemKind {
 }
 
 /// Value accessors for a prop apply. The ROOT validated every (prop,
-/// value) pairing, so a mismatch here is a core bug rather than a guest
-/// one — which is exactly why a backend should match EXHAUSTIVELY over
-/// the prop enum and read the value through these, instead of matching
-/// the pair and catching the rest. A new prop then fails to COMPILE in
-/// every backend; the previous shape let `role` reach a catch-all and
-/// panic on Windows at runtime (docs/traps.md).
-// (Their callers are the cfg'd NATIVE backends — gtk and winui — so a
-// mac-native build sees no use at all.)
+/// value) pairing, so a backend matches EXHAUSTIVELY over the prop enum
+/// and reads the value through these: a new prop then fails to COMPILE
+/// in every backend instead of reaching a catch-all and panicking at
+/// runtime (docs/traps.md).
+// Their callers are the cfg'd NATIVE backends, so a mac-native build
+// sees no use at all.
 #[allow(dead_code)]
 pub fn prop_str(value: &Value) -> &str {
     match value {
@@ -1099,13 +923,11 @@ pub fn prop_f64(value: &Value) -> f64 {
     }
 }
 
-/// Menu property keys — separate from widget, window, entry, and
-/// section props (spec::MENU_PROPS; DESIGN.md, Menus). `label` and
+/// Menu property keys (spec::MENU_PROPS; DESIGN.md, Menus). `label` and
 /// `enabled` apply to every kind but `separator`; `checked` is
 /// toggle-only, `value` radio-group-only; `primary` and `role` are
 /// action-only, `shortcut` rides any leaf command. `label`, `enabled`,
-/// `checked`, and `value` are signal-bindable; `icon`, `primary`,
-/// `shortcut`, and `role` are const-only.
+/// `checked` and `value` are signal-bindable; the rest are const-only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MenuProp {
     /// The item's label (Str). Required except on separators;
@@ -1138,26 +960,18 @@ pub enum MenuProp {
     Role,
     /// The item's SEMANTIC ICON NAME (I64-valued, the spec's "symbol"
     /// enum; docs/styling-plan.md D6). A concept, never bytes: each
-    /// backend maps it to its own platform's symbol set, because the
-    /// platforms draw the same concept differently and their symbol
-    /// sets metric-match the label beside them. Const-only, and it
-    /// sits BESIDE `Icon` rather than replacing it — a blob is still
+    /// backend maps it to its own platform's symbol set. Const-only, and
+    /// it sits BESIDE `Icon` rather than replacing it — a blob is still
     /// the right primitive for app-specific art.
     Symbol,
 }
 
 /// Which materialized attachment a backend's menu native belongs to:
-/// one window's bar, or one context anchor's flyout. A template
-/// context catalog attaches the SAME item ids to every stamped copy,
-/// so an item id alone never identifies a native — stamped node
-/// activations carry the copy's key path because those keys identify
-/// the noun (DESIGN.md, Menus), and only the attachment says whose
-/// copy (and therefore whose noun) an activation route fires for.
-/// A backend that keeps a flat native map keys it by
-/// `(MenuAttachment, item id)` (WinUI); GTK reaches the same
-/// invariant with per-attachment action instances. Compiled with the
-/// Rust-native backends and the unit tests (the harness cfg
-/// precedent).
+/// one window's bar, or one context anchor's flyout. A template context
+/// catalog attaches the SAME item ids to every stamped copy, so an item
+/// id alone never identifies a native. A backend with a flat native map
+/// keys it by `(MenuAttachment, item id)` (WinUI); GTK reaches the same
+/// invariant with per-attachment action instances.
 #[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MenuAttachment {
@@ -1168,13 +982,10 @@ pub enum MenuAttachment {
 }
 
 /// Destroying a context anchor takes its materialized natives with it
-/// (menu ITEMS are never destroyed; the attachment's instances are):
-/// a detached native still raises Click through its automation peer —
-/// the WinUI menu probe proves it — so a surviving entry would stay
-/// invoke-capable with the dead copy's noun. Every other attachment's
-/// natives — the shared item ids under OTHER anchors, and the window
-/// bars — survive untouched (GTK's Destroy arm is the precedent: it
-/// retains item actions against the removed attachment's instances).
+/// (menu ITEMS are never destroyed; the attachment's instances are): a
+/// detached native still raises Click through its automation peer
+/// (docs/traps.md), so a surviving entry would stay invoke-capable with
+/// the dead copy's noun. Every other attachment's natives survive.
 #[cfg(any(target_os = "windows", test))]
 pub fn purge_context_natives<V>(
     natives: &mut std::collections::HashMap<(MenuAttachment, u64), V>,
@@ -1197,32 +1008,25 @@ pub enum Prop {
     Max,
     /// An image's encoded source bytes (Blob-valued).
     Source,
-    /// A container's inter-child gap on its main axis (F64-valued,
-    /// device-independent units; finite, non-negative). The normalized
-    /// default is 8 — the prop overrides it per container. Spacing is
-    /// a property OF the container, unlike grow, which rides the child.
+    /// A container's inter-child gap on its main axis (F64-valued, DIP;
+    /// finite, non-negative; the normalized default is 8). A property OF
+    /// the container, unlike grow, which rides the child.
     Spacing,
     /// A container's cross-axis child placement (I64-valued on the
     /// wire: one of the `align` spec enum's values — start 0, center
     /// 1, end 2, stretch 3, baseline 4). Baseline is rows-only; the
     /// scene rejects it on columns.
     Align,
-    /// A child's flex-grow weight within its row/column (F64-valued;
-    /// 0 = natural size, the default). Kind-agnostic — any child may
-    /// grow.
+    /// A child's flex-grow weight within its row/column (F64-valued; 0 =
+    /// natural size, the default). Kind-agnostic.
     ///
-    /// The normalized semantics, uniform on every backend: children
-    /// with weight 0 are laid out at their natural main-axis size, and
-    /// the children with weight > 0 divide the space left over in
-    /// proportion to their weights. A grower's own natural size does
-    /// not enter the division — weights 1 and 3 split the leftover
-    /// 1:3 whatever the two children would have measured. This is the
-    /// contract shared by CSS `flex-basis: 0`, Compose's
-    /// `Modifier.weight`, XAML star sizing, and Android's
-    /// `layout_weight` at a 0 main-axis size; the backends that have no
-    /// native weight (AppKit, GTK) construct it explicitly rather than
-    /// approximating it with a priority, which would be merely ordinal
-    /// and would render differently per platform.
+    /// The normalized semantics, uniform on every backend: weight-0
+    /// children are laid out at their natural main-axis size, and the
+    /// growers divide the LEFTOVER in proportion to their weights — a
+    /// grower's own natural size does not enter the division. This is
+    /// CSS `flex-basis: 0`, Compose's `Modifier.weight` and XAML star
+    /// sizing; backends with no native weight construct it explicitly
+    /// rather than approximating it with an ordinal priority.
     Grow,
     /// Progress-only (Bool): the bar shows activity without a
     /// fraction — the platform's pulse/animation mode; Value is
@@ -1232,83 +1036,57 @@ pub enum Prop {
     /// fill row-major. Columns take their NATURAL width, aligned
     /// across rows — the thing nested rows cannot express.
     Columns,
-    /// The accessibility IDENTIFIER (Str): a stable authored key,
-    /// NEVER spoken. Every platform's automation identifier is the
-    /// same idea — accessibilityIdentifier, testTag,
-    /// AutomationProperties.AutomationId — which is why this is a
-    /// product surface rather than test plumbing: assistive tooling
-    /// and UI automation both key on it, and kaya's harness is simply
-    /// its first consumer.
+    /// The accessibility IDENTIFIER (Str): a stable authored key, NEVER
+    /// spoken — accessibilityIdentifier, testTag, AutomationId are the
+    /// same idea. A product surface rather than test plumbing; kaya's
+    /// harness is only its first consumer.
     A11yId,
-    /// The accessibility LABEL (Str): what an assistive client SPEAKS
-    /// for this widget. Separate from [`Prop::A11yId`] on purpose —
-    /// conflating them would read every automation key aloud to
-    /// screen-reader users. Maps to accessibilityLabel,
-    /// contentDescription, AutomationProperties.Name, and GTK's LABEL
-    /// accessible property.
+    /// The accessibility LABEL (Str): what an assistive client SPEAKS.
+    /// Separate from [`Prop::A11yId`] on purpose — conflating them would
+    /// read every automation key aloud to screen-reader users.
     A11yLabel,
     /// What activating this control does — the platforms' hint, which
     /// every one of them defines as the result of an ACTION.
     A11yHint,
     /// Which clip representations this widget accepts (Str carrying a
     /// space-separated ACCEPT LIST — the closed kinds by name plus any
-    /// custom ids; a mask was the first cut and could name nothing
-    /// open). PER-WIDGET, because whether Paste should be live is the
-    /// intersection of what the clipboard offers and what the focused
-    /// target takes: a search field wants plain text, a rich editor
-    /// also wants images. Every platform asks exactly this of the
-    /// focused target, and Android's `setOnReceiveContentListener`
-    /// takes the accepted MIME types as an argument on the view.
+    /// custom ids; a mask could name nothing open). PER-WIDGET, because
+    /// whether Paste should be live is the intersection of what the
+    /// clipboard offers and what the focused target takes, which is
+    /// exactly what every platform asks of the focused target.
     Accepts,
     /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what this widget
     /// MEANS — destructive, prominent, heading — never how it looks.
     /// U32-valued from the closed role enum; which variant fits which
-    /// KIND is the root's value-dependent check (a destructive label
-    /// dies at declare time in the root's own words). The tier exists
-    /// because color-without-semantics is how Qt and SWT broke their
-    /// styling ceilings; it ships WITH the brand tier, deliberately.
+    /// KIND is the root's value-dependent check.
     Role,
     /// A CONTAINER'S OWN PADDING (docs/styling-plan.md D3, one level
     /// down from the window inset): DIP between the container's bounds
-    /// and its children, uniform on all four sides like the window's.
-    /// LAYOUT beside grow/spacing/align, carried by the spacing kinds —
-    /// a leaf has no children to hold away from its edge. Born from the
-    /// first full-bleed app: the editor's Inset(0) window put the
-    /// buffer on the window edge as designed and took the status row
-    /// and find bar with it, and no prop could give the chrome rows
-    /// their margin back. It reached the FIND BAR only when the
-    /// template zone learned to spell it too (2026-08-17): that row is
-    /// stamped, not live, and one prop with two zones is one prop.
+    /// and its children, uniform on all four sides. LAYOUT beside
+    /// grow/spacing/align, carried by the spacing kinds — a leaf has no
+    /// children to hold away from its edge. Spelled in BOTH construction
+    /// zones: a stamped row needs it as much as a live one.
     Inset,
 }
 
-/// Window property keys — the presentation-context twin of [`Prop`],
-/// separate because windows are not widgets (the widget domain checks
 /// The leading pane's width for a list-detail split: a FRACTION of the
 /// window, clamped.
 ///
 /// Not half. No platform splits a list-detail in half — the list is a
-/// navigation affordance and the detail is the content, so the detail
-/// takes the remainder. libadwaita states the rule outright for
-/// AdwNavigationSplitView (25% of the total, min 180, max 280), Apple's
-/// NavigationSplitView behaves the same way, and Material gives the
-/// list a preferred width with the detail taking the rest. Those
-/// numbers are adopted here rather than invented so that swapping in
-/// each platform's own wrapper later is a change of DRESSING, not of
-/// behaviour.
+/// navigation affordance and the detail is the content. libadwaita
+/// states the rule outright for AdwNavigationSplitView (25% of the
+/// total, min 180, max 280), Apple's NavigationSplitView behaves the
+/// same way, and Material gives the list a preferred width with the
+/// detail taking the rest. Those numbers are adopted rather than
+/// invented, so swapping in each platform's own wrapper later is a
+/// change of DRESSING.
 ///
-/// This lives in one place because three backends have to pick, and
-/// three independent guesses is how a lowering starts disagreeing with
-/// itself across platforms.
-// Used by the GTK and WinUI backends, which are cfg'd per platform, so
-// a host that compiles neither sees it as dead. The tests exercise it
-// everywhere.
+/// One place, because three backends picking independently is how a
+/// lowering starts disagreeing with itself across platforms.
 #[cfg_attr(
-    // GTK dropped off this list when the backend adopted
-    // AdwNavigationSplitView: libadwaita sizes its own sidebar from the
-    // rule this function encodes, so asking it to is better than
-    // computing a copy. WinUI still needs the number, because
-    // TwoPaneView's own default is two EQUAL panes.
+    // WinUI only: libadwaita sizes its own sidebar from the rule this
+    // function encodes, while TwoPaneView's default is two EQUAL panes.
+    // The tests exercise it everywhere.
     not(any(target_os = "windows", test)),
     allow(dead_code)
 )]
@@ -1316,8 +1094,9 @@ pub(crate) fn leading_pane_width(total: f64) -> f64 {
     (total * 0.25).clamp(180.0, 280.0).min(total)
 }
 
-/// stay widget-pure; see DESIGN.md's Presentation contexts). Window 0
-/// is the primary surface and always exists.
+/// Window property keys — the presentation-context twin of [`Prop`],
+/// separate because windows are not widgets (DESIGN.md, Presentation
+/// contexts). Window 0 is the primary surface and always exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WindowProp {
     /// The surface's title (Str-valued). Uniform semantics with
@@ -1339,31 +1118,23 @@ pub enum WindowProp {
     /// on mobile: no chrome close, and back is not close.
     VetoClose,
     /// How this window presents its sections (Enum-valued:
-    /// [`SectionsPresentation`]; default Auto). ADVISORY, the
-    /// width/height precedent: honored where the platform has the
-    /// idiom, resolved to the nearest thing otherwise, ignored on the
-    /// phones where physics decides. Window-scoped because the GROUP
-    /// is the unit — no platform mixes per-section presentations
+    /// [`SectionsPresentation`]; default Auto). ADVISORY: honored where
+    /// the platform has the idiom, resolved to the nearest thing
+    /// otherwise. Window-scoped because the GROUP is the unit
     /// (DESIGN.md, Sections).
     SectionsPresentation,
     /// Whether this window presents its ENTRY STACK as list-detail
-    /// (Bool-valued; DESIGN.md, Adaptive list-detail). False (the
-    /// default) is the serial stack navigation has always had. True
-    /// asks for the adaptive presentation: on a REGULAR window the
-    /// base root takes the leading pane and the top of the stack the
-    /// trailing one; on a COMPACT window nothing changes, because the
-    /// compact case IS the default. There is deliberately no prop for
-    /// WHICH way it presents — that is the size class's answer.
+    /// (Bool-valued; DESIGN.md, Adaptive list-detail). False is the
+    /// serial stack navigation has always had. True asks for the
+    /// adaptive presentation on a REGULAR window — base root leading,
+    /// top of stack trailing; a COMPACT window is unchanged, the compact
+    /// case being the default. There is deliberately no prop for WHICH
+    /// way it presents: that is the size class's answer.
     ListDetail,
     /// Whether this surface holds UNSAVED WORK (Bool-valued; default
-    /// false; docs/dirty-plan.md D1). State, never chrome: the app says
-    /// the document is edited and each backend spells its platform's
-    /// own affordance — the close button's dot on macOS, a leading `*`
-    /// in the rendered caption on Windows, a bullet beside the
-    /// header-bar title on GTK, nothing on the phones, which have no
-    /// chrome to show it in (D4). The app's title string is untouched
-    /// everywhere; a marker composed into it is Qt's design and this
-    /// prop's named rejection.
+    /// false; docs/dirty-plan.md D1). State, never chrome: each backend
+    /// spells its platform's own affordance (D2) and the app's title
+    /// string is untouched everywhere.
     ///
     /// It arms nothing (D3). The "unsaved changes, close anyway?" flow
     /// is `veto_close` plus the dialog machinery, which apps compose
@@ -1373,11 +1144,9 @@ pub enum WindowProp {
     Dirty,
     /// The window CONTENT INSET in layout units (F64-valued) — LAYOUT,
     /// not appearance (docs/styling-plan.md D3): the space kaya's own
-    /// interpreters put around the mounted root. Defaults to 16 (the
-    /// value every backend hard-coded before this prop existed); 0 is
-    /// full bleed, honored unconditionally because the inset is kaya's
-    /// own padding. Platform safe areas are separate facts and are not
-    /// removed by it.
+    /// interpreters put around the mounted root. Defaults to 16; 0 is
+    /// full bleed, honored unconditionally. Platform safe areas are
+    /// separate facts and are not removed by it.
     Inset,
 }
 
@@ -1410,41 +1179,33 @@ pub enum SectionProp {
     /// switcher without icon slots ignores it.
     Icon,
     /// The switcher item's SEMANTIC ICON NAME (I64-valued, the spec's
-    /// "symbol" enum; docs/styling-plan.md D6) — the names-not-bytes
-    /// half of the same slot. A tab bar wants `home`, and the glyph
-    /// that means home differs per platform; the vocabulary is
-    /// uniform and only the drawing varies.
+    /// "symbol" enum; docs/styling-plan.md D6) — the names-not-bytes half
+    /// of the same slot.
     Symbol,
 }
 
-/// Navigation-entry property keys — their own typed table (see
-/// spec::ENTRY_PROPS and DESIGN.md's Navigation): a wrong-surface
-/// prop dies at compile time in every binding rather than at the
-/// scene. Entries share the surface-id namespace with windows (one
-/// guest-side allocator; mount's target addresses either), so
-/// [`WindowId`] carries entry ids too.
+/// Navigation-entry property keys (spec::ENTRY_PROPS; DESIGN.md,
+/// Navigation): a wrong-surface prop dies at compile time in every
+/// binding rather than at the scene. Entries share the surface-id
+/// namespace with windows, so [`WindowId`] carries entry ids too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EntryProp {
     /// The entry's title (Str-valued): the back affordance's label
     /// source — the iOS back button, the desktop headers.
     Title,
     /// The close-veto class transplanted to POP (Bool-valued; default
-    /// false). False: the platform pops natively with its full
-    /// predictive animation. True: the back affordance emits
-    /// back_requested and nothing pops until the app answers with
-    /// pop_entry — Android's own declared-ahead OnBackPressedCallback
-    /// model, not veto-at-gesture-time.
+    /// false). False: the platform pops natively with its predictive
+    /// animation. True: the back affordance emits back_requested and
+    /// nothing pops until the app answers with pop_entry — Android's own
+    /// declared-ahead model, not veto-at-gesture-time.
     InterceptBack,
 }
 
 /// The one-shot command vocabulary: momentary verbs aimed at
-/// widget-owned state, the third arm of the ownership rule (app-owned
-/// state travels as props and deltas, widget-owned state comes back as
-/// occurrences, and the app's momentary crossings into state it does
-/// not own are commands). Fire-and-forget: no state at rest, nothing
-/// replays on instance rebuild, and the widget reports the result
-/// through its normal occurrence path. A closed set; each verb is
-/// admitted by a real artifact, per the escalation policy.
+/// widget-owned state, the third arm of the ownership rule.
+/// Fire-and-forget — no state at rest, nothing replays on instance
+/// rebuild, and the widget reports the result through its normal
+/// occurrence path. A closed set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
     /// Drop an entry's content now (the widget stays authoritative and
@@ -1456,17 +1217,14 @@ pub enum CommandKind {
 
 /// A span of a text widget's content, in UTF-8 BYTE offsets into the
 /// widget's current guest-visible text — the unit the guest speaks and
-/// the only one with an O(1) validity predicate
-/// (scratchpad/ranges-units.md). `start <= end`; `start == end` is a
-/// caret.
+/// the only one with an O(1) validity predicate. `start <= end`;
+/// `start == end` is a caret.
 ///
-/// THE SIBLING TYPE [`NativeRange`] IS THE POINT OF BOTH OF THEM.
-/// Every backend counts something else — UTF-16 code units on mac, iOS,
+/// THE SIBLING TYPE [`NativeRange`] IS THE POINT OF BOTH OF THEM. Every
+/// backend counts something else — UTF-16 code units on mac, iOS,
 /// Windows and Android, code points on GTK — and the core converts
-/// before it lowers. Two types rather than one make that conversion
-/// impossible to skip: an [`ApplyOp`] cannot be built out of a
-/// `TextRange`, so a backend physically cannot be handed an unconverted
-/// offset. Types over generation over runtime checks.
+/// before it lowers. Two types make that conversion impossible to skip:
+/// an [`ApplyOp`] cannot be built out of a `TextRange`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextRange {
     pub start: u64,
@@ -1504,15 +1262,11 @@ pub enum PropValue {
 ///
 /// Zone rule: between CreateFor/CreateWhen and its matching TemplateEnd,
 /// creation records describe a blueprint — their ids are read in the
-/// template-node space (the WidgetId newtype in these ops carries a
-/// template node id there; one wire vocabulary, two zones). Outside a
-/// scope they create live things, as in milestone 1.
+/// template-node space. Outside a scope they create live things.
 #[derive(Debug)]
 pub enum TxOp {
     /// Mark this transaction as ONE undoable step in `window`'s ledger.
-    /// MUST BE THE FIRST OP OF THE BATCH and may appear once — a
-    /// transaction is a bare list with no header, so head-of-batch is
-    /// the only unambiguous home for per-transaction metadata
+    /// MUST BE THE FIRST OP OF THE BATCH and may appear once
     /// (docs/undo-plan.md D2). A marked batch holds signal writes and
     /// collection deltas; focus is permitted and not restored; anything
     /// else is refused at apply, naming the op.
@@ -1555,16 +1309,13 @@ pub enum TxOp {
         dark: Option<u32>,
     },
     /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
-    /// a default family, the per-platform overrides, and optionally a
-    /// font file's bytes. Set once, before the first mount — the
-    /// accent's wall verbatim. The core resolves NOTHING; every backend
-    /// picks its own row and looks the family up itself.
+    /// a default family, the per-platform overrides, optionally a font
+    /// file's bytes. Set once, before the first mount — the accent's wall
+    /// verbatim. The core resolves NOTHING.
     SetBrandTypeface(TypefaceRequest),
-    /// DECLARE the app's identity (docs/app-identity-plan.md): the name it
-    /// goes by and the picture that stands for it. Set once, before the
-    /// first mount — the brand's walls verbatim. The core inspects the
-    /// bytes no more than it inspects a font's: every backend hands them
-    /// to its own platform's decoder.
+    /// DECLARE the app's identity (docs/app-identity-plan.md). Set once,
+    /// before the first mount — the brand's walls verbatim. The core
+    /// inspects the bytes no more than it inspects a font's.
     SetAppIdentity(AppIdentity),
     /// Put one clip on the system clipboard.
     Copy(Clip),
@@ -1572,10 +1323,8 @@ pub enum TxOp {
     /// one; see the spec record for what the platforms charge.
     ReadClipboard { request: u64, accepting: String },
     /// Push a navigation entry onto `window`'s stack (no capability
-    /// gate — every host materializes a serial stack natively).
-    /// Materializes covered/incoming; mounting a root into it
-    /// presents it. The covered root below stays alive: retained
-    /// until popped.
+    /// gate). Materializes covered/incoming; mounting a root into it
+    /// presents it. The covered root below stays alive until popped.
     PushEntry { window: WindowId, entry: WindowId },
     /// Pop the window's top entry and forget its mounted tree, the
     /// destroy_window teardown discipline (ids never reused). Popping
@@ -1621,11 +1370,10 @@ pub enum TxOp {
     /// decode — menu items are not collection elements; `icon`,
     /// `primary`, and `shortcut` reject signal sources at the root.
     SetMenuProp { item: MenuItemId, prop: MenuProp, value: PropValue },
-    /// Declare a collection with its schema: one ordered field-type
-    /// list per variant of the element sum. Mandatory — a record
-    /// collection is the one-variant case and a scalar collection the
-    /// one-variant one-field case, not separate modes. Variants are
-    /// indices; variant names never travel, like field names.
+    /// Declare a collection with its schema: one ordered field-type list
+    /// per variant of the element sum. Mandatory — a record collection is
+    /// the one-variant case, not a separate mode. Variants are indices;
+    /// variant names never travel, like field names.
     CreateCollection { id: CollectionId, variants: Vec<Vec<ValueType>> },
     /// Delta ops. `path` addresses the collection instance (one key per
     /// enclosing For of the collection's declaration site; empty for a
@@ -1637,11 +1385,10 @@ pub enum TxOp {
     CollectionUpdate { id: CollectionId, path: Path, key: Value, variant: u32, record: Record },
     /// One field's delta: toggling a todo's `done` never resends its
     /// title, and only bindings on that field re-resolve. `variant` is
-    /// the discriminant the guest witnessed in the match that produced
+    /// the discriminant the guest WITNESSED in the match that produced
     /// this write — never a way to change it — and the scene asserts it
-    /// against the entry's stored variant, so a binding whose model
-    /// drifted from the core fails loudly instead of writing a
-    /// type-correct field of the wrong constructor.
+    /// against the entry's stored variant, so a drifted binding fails
+    /// loudly instead of writing the wrong constructor's field.
     CollectionUpdateField {
         id: CollectionId,
         path: Path,
@@ -1670,13 +1417,9 @@ pub enum TxOp {
     /// a constructor as nothing; omitting a case is a scene error.
     VariantCase { variant: u32 },
     TemplateEnd,
-    /// A one-shot command aimed at a live widget. Live-zone targets
-    /// only for now: a live id can only vanish by the guest's own hand,
-    /// so a missing target is misuse and fails loudly, like
-    /// SetProperty. Instance-addressed commands (a scrollTo naming a
-    /// stamped row) arrive with their artifact and bring the silent
-    /// vanished-target no-op with them — stamped copies legitimately
-    /// disappear under rebuild.
+    /// A one-shot command aimed at a live widget. Live-zone targets only
+    /// for now: a live id can only vanish by the guest's own hand, so a
+    /// missing target is misuse and fails loudly, like SetProperty.
     WidgetCommand { widget: WidgetId, command: CommandKind },
     /// DECLARE this textarea's decorated ranges, replacing the previous
     /// set; an empty list is the clear. Byte offsets, validated at
@@ -1722,17 +1465,16 @@ pub enum ApplyOp {
     /// Present the platform's real save dialog (already validated).
     PresentSaveDialog(SaveDialogSpec),
     /// Put this clip on the system clipboard. The backend owns the
-    /// lowering per representation — CF_HTML's offset header, Android's
-    /// content:// URI for an image, CF_HDROP's struct — which is the
-    /// whole reason the representation set is closed.
+    /// lowering per representation — CF_HTML's offset header, a
+    /// content:// URI, CF_HDROP's struct — which is the whole reason the
+    /// representation set is closed.
     Copy(ClipOut),
     /// Answer a privileged read with the first accepted representation.
     ReadClipboard { request: u64, accepting: String },
     /// Reset the NATIVE undo history of whatever editable holds the
     /// keyboard focus in this window; do nothing if that is nothing.
     /// Targetless because the core does not know what is focused and by
-    /// doctrine never will, while every backend already asks itself the
-    /// same question for role enablement (docs/undo-plan.md A1).
+    /// doctrine never will (docs/undo-plan.md A1).
     ClearUndo { window: WindowId },
     /// Push a navigation entry onto the window's stack, hidden until
     /// a mount presents it. The covered root stays alive.
@@ -1775,12 +1517,10 @@ pub enum ApplyOp {
     /// one Destroy per widget of a torn-down instance, children before
     /// parents, so backends never walk anything.
     Destroy { id: WidgetId },
-    /// Execute a one-shot command on the widget, then let it report
-    /// the result through its normal occurrence path — a clear arrives
-    /// back as TextChanged with empty text, through the same delegate
-    /// a keystroke uses (programmatic mutations fire the change path
-    /// explicitly on toolkits that don't, the Stage set_text
-    /// precedent).
+    /// Execute a one-shot command on the widget, then let it report the
+    /// result through its normal occurrence path — a clear arrives back
+    /// as TextChanged with empty text, through the same delegate a
+    /// keystroke uses.
     Command { id: WidgetId, command: CommandKind },
     /// REPLACE the widget's decorated set with these ranges — already in
     /// this build's native unit — and record the widget's text as it is
@@ -1795,11 +1535,10 @@ pub enum ApplyOp {
     SelectRange { id: WidgetId, range: NativeRange },
     /// Scroll the range into the widget's viewport, in native units.
     RevealRange { id: WidgetId, range: NativeRange },
-    /// The brand accent, DERIVED (docs/styling-plan.md D1): the seed
-    /// (for the one platform whose own derivation kaya defers to —
-    /// Material builds its role scheme from it) plus per-appearance
-    /// values no backend re-computes. Emitted once, before the first
-    /// mount's ops, by the root's set-once arm.
+    /// The brand accent, DERIVED (docs/styling-plan.md D1): the seed —
+    /// for Material, the one platform whose own derivation kaya defers
+    /// to — plus per-appearance values no backend re-computes. Emitted
+    /// once, before the first mount's ops.
     SetBrand {
         accent: crate::brand::BrandAccent,
     },
@@ -1811,9 +1550,8 @@ pub enum ApplyOp {
     SetTypeface(TypefaceRequest),
     /// The app's identity, as declared (docs/app-identity-plan.md): the
     /// backend hands the icon's bytes to its own platform's decoder and
-    /// routes the result to that platform's identity sinks — two of them
-    /// on Windows, one on each of the others. Emitted once, before the
-    /// first mount's ops.
+    /// routes the result to that platform's identity sinks. Emitted
+    /// once, before the first mount's ops.
     SetAppIdentity(AppIdentity),
 }
 
@@ -1826,9 +1564,8 @@ pub(crate) enum OccSink {
 }
 
 impl OccSink {
-    // The Rust-native backends (GTK, WinUI) push through this; on the
-    // interpreter platforms occurrences enter through the C API's
-    // typed emit entries instead, so the method is dead there.
+    // Dead on the interpreter platforms, where occurrences enter through
+    // the C API's typed emit entries instead.
     #[cfg_attr(
         any(target_os = "macos", target_os = "ios", target_os = "android"),
         allow(dead_code)
@@ -2032,8 +1769,8 @@ impl OccSink {
 
     /// A menu action fired: the item's menu tag (item id + noun path)
     /// goes out verbatim (ring) or is parsed back into an Occurrence
-    /// (mpsc). One route for the bar action and the node-anchored
-    /// context item; the noun path in the tag tells them apart.
+    /// (mpsc). One route for the bar action and the node-anchored context
+    /// item; the noun path in the tag tells them apart.
     #[cfg_attr(
         any(target_os = "macos", target_os = "ios", target_os = "android"),
         allow(dead_code)
@@ -2097,12 +1834,10 @@ impl OccSink {
 mod tests {
     use super::*;
 
-    /// The negative for the mode divergence: Android's Write must ask
-    /// for TRUNCATION EXPLICITLY, because the provider's bare `w` is
-    /// O_WRONLY without O_TRUNC and `PathSource` truncates. Measured on
-    /// the emulator (docs/file-dialogs-plan.md §6d, measurement 11) —
-    /// a file opened Write and written short kept its old tail, so the
-    /// same `FileMode` meant two things on two platforms.
+    /// The negative for the mode divergence: Android's Write must ask for
+    /// TRUNCATION EXPLICITLY, because the provider's bare `w` is
+    /// O_WRONLY without O_TRUNC while `PathSource` truncates
+    /// (docs/file-dialogs-plan.md §6d, measurement 11).
     #[test]
     fn android_write_truncates_like_every_other_platform() {
         assert_eq!(android_open_mode(FileMode::Read), "r");
@@ -2116,10 +1851,9 @@ mod tests {
     }
 
     /// The mode numbers that cross to a backend redeeming a picked file
-    /// are a WRITTEN rule, not the enum's layout: the Swift side names
-    /// the same three values, and nothing but this test holds the two
-    /// spellings together. Reordering `FileMode` would otherwise turn
-    /// every guest's Read into the backend's Write, silently.
+    /// are a WRITTEN rule, not the enum's layout, and nothing but this
+    /// test holds the two spellings together. Reordering `FileMode`
+    /// would otherwise turn every guest's Read into the backend's Write.
     #[test]
     fn picked_mode_codes_are_pinned() {
         assert_eq!(picked_mode_code(FileMode::Read), 0);
@@ -2136,13 +1870,11 @@ mod tests {
         Key::from_value(&Value::Blob(Blob::from(&b"\x89PNG"[..])));
     }
 
-    /// The multi-copy negative: a template context catalog attaches
-    /// the SAME item ids to every stamped row, so a native map must
-    /// hold one entry per (attachment, item). A flat per-item map
-    /// keeps only the last-built copy — whichever attachment an
-    /// arbitrary rebuild order visits last — with THAT row's noun
-    /// baked into its activation route (the WinUI wrong-noun bug,
-    /// docs/traps.md).
+    /// The multi-copy negative: a template context catalog attaches the
+    /// SAME item ids to every stamped row, so a native map must hold one
+    /// entry per (attachment, item). A flat per-item map keeps only the
+    /// last-built copy, with THAT row's noun baked into its activation
+    /// route (docs/traps.md).
     #[test]
     fn stamped_copies_keep_one_native_per_attachment() {
         let mut natives = std::collections::HashMap::new();
@@ -2156,11 +1888,10 @@ mod tests {
         assert_eq!(natives[&(MenuAttachment::Window(0), 7)], "bar copy");
     }
 
-    /// The destroy negative: removing one stamped row purges exactly
-    /// that attachment's instances — the other rows' copies and the
-    /// bar's stay — so Remove on row 1 followed by context_open +
-    /// menu_activate on row 2 can never invoke (and re-emit the keys
-    /// of) the dead copy.
+    /// The destroy negative: removing one stamped row purges exactly that
+    /// attachment's instances — the other rows' copies and the bar's stay
+    /// — so a later context_open + menu_activate on another row can never
+    /// invoke the dead copy.
     #[test]
     fn destroying_an_anchor_purges_only_its_natives() {
         let mut natives = std::collections::HashMap::new();

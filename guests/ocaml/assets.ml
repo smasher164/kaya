@@ -11,10 +11,10 @@
 
    THE MISS IS A QUESTION, NOT A [try ... with]. [asset_miss_sentence]
    answers the same sentence [asset] would raise with, without raising,
-   and that is the only shape nine languages share: Swift's raise is a
-   trap rather than an exception, so a Swift sibling cannot catch its own
-   miss at all. OCaml could catch [Failure] here and deliberately does
-   not — one shape for the observation, in every language.
+   and that is the only shape all nine share — the C floor catches
+   nothing at all (docs/deferred.md, the assets entry). OCaml could catch
+   [Failure] here and deliberately does not — one shape for the
+   observation, in every language.
 
    LINE 1 ONLY. Line 2 of that sentence names the place the core resolved
    and the route that chose it, which a bundle, a device directory and a
@@ -50,8 +50,6 @@ let () =
 
      let mark = asset mark_name in
      let font = asset font_name in
-     (* Read both while the handles are open; the close is explicit, as
-        the typeface scene's is. *)
      let mark_bytes = asset_bytes mark in
      let font_length = Bytes.length (asset_bytes font) in
      asset_close mark;
@@ -90,5 +88,4 @@ let () =
      in
      mount root);
 
-  (* Nothing to drive: every observation is a read of the first mount. *)
   exit (run app)

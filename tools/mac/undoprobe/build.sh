@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,24 +10,18 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# Build and run UndoProbe TWICE — once with the window delegate NOT
-# implementing windowWillReturnUndoManager (mode=plain, what kaya ships
-# today) and once with it supplying a logging manager (mode=hook, D6's
-# candidate plumbing). Print both transcripts.
+# Build and run UndoProbe twice: mode=plain (no
+# windowWillReturnUndoManager) and mode=hook (a logging manager). Prints
+# both transcripts.
 #
-# NOT A LANE. It answers whether a kaya programmatic write enters the
-# native undo stack on macOS before D7's mac arm is written; see
-# main.swift's header for the questions and docs/undo-plan.md §0 for
-# what it decides. THROWAWAY.
+# NOT A LANE, THROWAWAY. Questions in main.swift's header; what it
+# decides is docs/undo-plan.md §0.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 cd "$ROOT"
 
-# Inside the dev shell DEVELOPER_DIR/SDKROOT point at a nix apple-sdk
-# where xcrun finds no swiftc. tools/lib/swift-toolchain.sh is the
-# single source of truth for steering back to a real Apple toolchain.
 # shellcheck source=tools/lib/swift-toolchain.sh
 . "$ROOT/tools/lib/swift-toolchain.sh"
 kaya_resolve_swiftc || exit 1
@@ -60,13 +48,12 @@ cat >"$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# A BUNDLE, not the bare binary: the key window and the main menu are
-# what the responder-chain question is about, and an unbundled binary
-# cannot become the active app.
+# A BUNDLE, not the bare binary: an unbundled binary cannot become the
+# active app, and the key window is what the question is about.
 for mode in plain hook; do
     echo "=== mode=$mode ==="
-    # `if !` and not an rc capture: set -e is on, so the failing command
-    # would take the script down before anything could read $?.
+    # `if !` and not an rc capture: set -e would take the script down
+    # before anything could read $?.
     if ! KAYA_UNDOPROBE_MODE="$mode" "$APP/Contents/MacOS/UndoProbe"; then
         echo "UndoProbe: exited nonzero in mode=$mode"
     fi

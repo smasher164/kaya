@@ -29,8 +29,6 @@ def archive_shown():
 
 
 def go_archive():
-    # Programmatic selection: configuration, no echo — on_selected
-    # must NOT fire (the scene asserts the count holds).
     kaya.select_section(ARCHIVE)
 
 

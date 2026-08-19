@@ -17,22 +17,17 @@ import dev.kaya.KayaRecords;
  * clear that finishes the form goes in a transaction of its own.
  */
 final class Undo {
-    /**
-     * NAMED FOR ITS SCENE rather than {@code Todo}: the annotation
-     * processor writes {@code <Type>Kaya.java} into ONE package shared
-     * by every scene in this guest, so two records of the same simple
-     * name generate the same file, and {@code Todos.Todo} got there
-     * first. The name reaches no wire record or scene string.
-     *
-     * <p>KEYED BY Long because the minter's keys are I64 and the
-     * generated surface carries the key type.
-     */
+        /**
+         * NAMED FOR ITS SCENE rather than {@code Todo}: the annotation
+         * processor writes {@code <Type>Kaya.java} into ONE package shared
+         * by every scene in this guest, and {@code Todos.Todo} got there
+         * first. The name reaches no wire record or scene string.
+         *
+         * <p>KEYED BY Long because the minter's keys are I64.
+         */
     @KayaGen(key = "Long")
     record UndoTodo(String title) {}
 
-    // Two folds, because there are two kinds of text field on screen —
-    // the draft and one per row — and the payload's path tells them
-    // apart.
     private static String draft = "";
 
     /**
@@ -50,10 +45,8 @@ final class Undo {
         return label.isEmpty() ? "typing" : label;
     }
 
-    /**
-     * Every key the collection holds, in order — the part of an undo a
-     * COUNT cannot see.
-     */
+        /** Every key the collection holds, in order — the part of an undo a
+         * COUNT cannot see. */
     private static String keyList(KayaApp.Tx tx,
             KayaRecords.Collection<Long, UndoTodo> todos) {
         StringBuilder keys = new StringBuilder();
@@ -71,11 +64,11 @@ final class Undo {
         return (Long) path.get(0);
     }
 
-    /**
-     * Every note the app holds, by key. An undone note arrives naming
-     * (template node, key path), which is what puts it back in the row
-     * it came from.
-     */
+        /**
+         * Every note the app holds, by key. An undone note arrives naming
+         * (template node, key path), which is what puts it back in the row
+         * it came from.
+         */
     private static String noteList() {
         if (rowNotes.isEmpty()) {
             return "no notes";
@@ -103,8 +96,6 @@ final class Undo {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            // The two items are the whole undo surface an app declares;
-            // they work out their own enablement.
             KayaApp.WindowRef win = tx.window(0).title("undo");
             KayaApp.MenuItem edit = win.menu("Edit");
             edit.item("Undo").role(KayaApp.ROLE_UNDO);

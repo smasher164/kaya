@@ -74,8 +74,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         RowPasted(kaya::Path, kaya::Representation),
     }
 
-    // The files the outside process will seed from, written before
-    // anything is shown.
     let dir = scene_dir();
     std::fs::create_dir_all(&dir).expect("failed to make the scene's directory");
     std::fs::write(dir.join("pixel.png"), PIXEL_PNG).expect("failed to write the picture");
@@ -110,7 +108,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let focus_plain = tx.button("focus plain").id(); // button#6
                 msgs.on_click(focus_plain, Msg::FocusPlain);
 
-                // Declares what it takes, so a paste lands in the hook.
                 let field = tx
                     .entry()
                     .accepts(&[kaya::Accepts::Text])
@@ -119,8 +116,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_paste(field, Msg::Pasted);
                 rich_field = Some(field);
 
-                // Declares nothing, so the platform's own insertion
-                // happens and the ordinary change path reports it.
                 plain_field = Some(tx.entry().a11y_id("plain").id()); // entry#1
 
                 // A STAMPED paste target: the accept list comes from the
@@ -180,7 +175,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Pasted(other) => {
                 ctx.apply(|tx| tx.write(status, format!("pasted {other:?}")));
             }
-            // The copy's own key rides the payload — [Str("r1")] here.
             Msg::RowPasted(path, kaya::Representation::Text(text)) => {
                 let key = match path.first() {
                     Some(kaya::Value::Str(k)) => k.clone(),

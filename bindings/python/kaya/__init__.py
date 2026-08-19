@@ -1,51 +1,24 @@
 """kaya's idiomatic surface for Python: the structural core plus the
 tier-1 sugar from the design's appendix ("the shape of an app").
 
-On top of the three structural jobs (typed handles over the id spaces,
-scoped templates, occurrence dispatch), this layer adds:
+What this layer adds over the structural jobs: AMBIENT TRANSACTIONS
+(`with app.window():` and every handler body run inside one, submitting
+atomically on exit); container auto-parenting; co-located handlers, a
+template button's receiving the stamped copy's keys as arguments;
+element proxies (`with kaya.for_each(groups) as group:`); handles with
+methods; derived signals maintained by the binding and batched into the
+same transaction.
 
-- ambient transactions: `with app.window():` and every handler body run
-  inside a transaction implicitly — `status.set(...)`,
-  `groups.insert(...)` queue into it, and it submits atomically on
-  exit. Per the binding conventions, a handler *is* a transaction; the
-  surface just stops making Python spell it;
-- container auto-parenting: `with kaya.column():` parents everything
-  declared inside it, deleting the add_child bookkeeping. Template
-  bodies reset the parent stack — their top-level widgets are the
-  blueprint's roots, appended to the For's container per stamp by the
-  core;
-- co-located handlers: `kaya.button("step", on_click=fn)` registers at
-  the declaration site. A template button's handler receives the
-  stamped copy's keys as arguments (`def on_remove(group, item):`) —
-  the honest residue of templates running once rather than per element;
-- element proxies: `with kaya.for_each(groups) as group:` yields the
-  element, and `kaya.label(bind=group)` binds it (levels are computed,
-  never written by hand);
-- handles with methods: `signal.set`, `collection.insert/update/remove`
-  and `collection.at(*path)` for instances of template-declared
-  collections. Data with no identity of its own gets its key from the
-  binding: `collection.insert_fresh(value)` mints one and returns it,
-  so no app spells a `next_key` global;
-- the collection is the model — the only copy. Every mutation is a
-  patch: it edits the model and becomes the wire delta in one recorded
-  operation, in order, inside the transaction, and an abandoned
-  transaction rolls both back together — so reads (`for key, value in
-  groups.items():`) are exactly the committed model, never stale, and
-  no second bookkeeping copy exists anywhere. Bulk mutations read
-  naturally as draft scopes (`with items.at("g1").change() as d:`
-  `d[k] = v`, `del d[k]` — insert-or-update resolved from the model),
-  Immer-style; single ops keep the method spelling. Signals have no
-  read method, deliberately: they are a render pipe, not a state bus.
-  Model reads in template position are a frozen-branch bug and raise
-  at record time (values in handlers, signals in templates);
-- derived signals: `steps.eq(1)`, `steps.fmt("step {}")` — maintained
-  by the binding, recomputed at write time, batched into the same
-  transaction; the core never knows. Derived signals are signals:
-  bind them, hand them to `when`.
+THE COLLECTION IS THE MODEL, the only copy: every mutation edits it and
+becomes the wire delta in one recorded operation, and an abandoned
+transaction rolls both back together — so reads are exactly the
+committed model. Signals have NO read method, deliberately: they are a
+render pipe, not a state bus. Model reads in template position raise at
+record time.
 
-Dispatch still runs on the app thread after it pulls from the ring; the
-core never calls into the guest. The wire vocabulary underneath
-(kaya_wire) is generated from kaya::spec by kaya-bindgen.
+Dispatch runs on the app thread after it pulls from the ring; the core
+never calls into the guest. The wire vocabulary (kaya_wire) is
+generated from kaya::spec by kaya-bindgen.
 """
 
 import dataclasses
@@ -97,25 +70,18 @@ def _text_range(what, span):
     """One text range, normalized to the (start, stop) pair the wire
     carries.
 
-    THE SPELLING IS `range(start, stop)` — Python's own half-open
-    interval of ints, which is exactly what a kaya range is — and a
-    plain (start, stop) pair is taken too, since an app that has just
-    computed two offsets already holds the pair. A `slice` is refused
-    rather than quietly reinterpreted: its endpoints are optional, and a
-    None there means "the text's own end", which this call cannot
-    resolve because it does not have the text.
+    THE SPELLING IS `range(start, stop)`, and a plain (start, stop) pair
+    too. A `slice` is REFUSED rather than reinterpreted: its endpoints
+    are optional, and a None there means "the text's own end", which
+    this call cannot resolve because it does not have the text.
 
     NEGATIVE OFFSETS ARE REFUSED HERE, BY NAME, because Python hands
-    them out: `str.find` and `bytes.find` answer -1 for "not found", and
-    an unchecked -1 would reach the wire as a struct.error on one record
-    and as an enormous offset on another. kaya has no end-relative
-    offset.
+    them out: `str.find` answers -1 for "not found", and an unchecked -1
+    reaches the wire as a struct.error on one record and an enormous
+    offset on another. kaya has no end-relative offset.
 
-    EVERY OTHER MALFORMED RANGE IS THE CORE'S TO REFUSE — start after
-    stop, past the end of the text, or splitting a character — at its
-    one chokepoint, with the text in hand and the character it splits
-    nameable. Eight bindings re-deriving that check would be eight
-    approximations of one sentence (scratchpad/ranges-units.md §7).
+    EVERY OTHER MALFORMED RANGE IS THE CORE'S TO REFUSE, at its one
+    chokepoint with the text in hand.
     """
     if isinstance(span, range):
         if span.step != 1:
@@ -156,15 +122,11 @@ _app_thread = None
 def _require_app_thread():
     """The Python spelling of a rule the other bindings get from types.
 
-    `_tx` above is a module GLOBAL, not thread-local, so a transaction
-    opened on a background thread would stamp its records into the app
-    thread's open transaction — silently, and interleaved. Rust makes
-    that a compile error (`Tx` is `!Send`) and Go a panic; Python has
-    neither handle to check, so it checks the thread.
-
-    Reads and writes need no guard of their own: a signal write outside
-    a transaction already raises "no ambient transaction", which is
-    exactly what a background thread gets.
+    `_tx` is a module GLOBAL, not thread-local, so a transaction opened
+    on a background thread would stamp its records into the app thread's
+    open transaction — silently, and interleaved. Rust makes that a
+    compile error and Go a panic; Python has neither handle to check, so
+    it checks the thread.
     """
     if _app_thread is not None and threading.get_ident() != _app_thread:
         raise RuntimeError(
@@ -236,14 +198,12 @@ def _guard_mirror_read(what):
 def _no_truth_value(what):
     """The lax.cond wall, element edition: a tracer is a reference into
     the blueprint, not a value. A template body runs ONCE, so a branch
-    taken on the row's data freezes one row's answer into every stamped
-    copy.
+    taken on the row's data freezes one row's answer into every copy.
 
     ON THE ELEMENT AS WELL AS ITS FIELDS, because the constant arms
-    COERCE: `progress(indeterminate=el)` matched no source arm and fell
-    through to `bool(el)`, and an object with no `__bool__` is true — a
-    permanently spinning bar on every row, with nothing raised and
-    nothing on the wire to say the binding was meant to be per-row.
+    COERCE: an object with no `__bool__` is true, so
+    `progress(indeterminate=el)` wrote a permanently spinning bar on
+    every row with nothing raised.
     """
     raise RuntimeError(
         f"kaya: {what} has no truth value — bind it "
@@ -268,10 +228,8 @@ class Signal:
             derived._recompute()
 
     # No read method, deliberately: signals are a render pipe, not a
-    # state bus. The value you wrote lives in your own variables or in
-    # a collection mirror; computations belong in derived signals. (The
-    # internal mirror below exists to feed derivations and to skip
-    # no-op derived writes.)
+    # state bus. The internal mirror below exists to feed derivations
+    # and to skip no-op derived writes.
 
     def _derive(self, compute):
         derived = _Derived(_app._next("signal"), self, compute)
@@ -304,11 +262,9 @@ class Signal:
         return self._derive(lambda v: template.format(v))
 
     # The tracing tier: comparison operators are the method vocabulary
-    # in operator clothes — `count == 0` is `count.eq(0)`, a derived
-    # Bool signal. The documented sharp edge (the SQLAlchemy/pandas
-    # trade-off): == no longer answers identity, so signals keep
-    # identity hashing and membership tests will truth-test a derived —
-    # which raises, pointing here.
+    # in operator clothes — `count == 0` is `count.eq(0)`. The sharp
+    # edge (the SQLAlchemy/pandas trade-off): == no longer answers
+    # identity, so signals keep identity hashing.
     __hash__ = object.__hash__
 
     def __eq__(self, other):
@@ -391,16 +347,12 @@ class _CollectionDerived(Signal):
 def _prop_source(what, handle, value, const, signal, element):
     """One prop write from whichever of the zone's three sources the
     guest handed over: a constant, a Signal, or the enclosing For's
-    element — the element ITSELF for a scalar collection (its value is
-    the element: level, field 0), `row.field` for a record one.
+    element — the element ITSELF for a scalar collection, `row.field`
+    for a record one.
 
     THE SOURCE ARMS COME FIRST AND THE CONSTANT ARM LAST, because the
-    constant arm COERCES. `str(row.title)` succeeds and writes
-    "<kaya.FieldRef object at 0x109cd6a50>" onto every stamped copy,
-    with nothing raised, nothing on the wire to say a per-row binding
-    was meant, and a screen reader dutifully speaking it — the same
-    shape of failure `label(bind=...)` grew its floor arm for, and the
-    one `progress(value=el.pct)` shipped for months.
+    constant arm COERCES: `str(row.title)` succeeds, writes the repr
+    onto every stamped copy, and a screen reader speaks it.
     """
     if isinstance(value, Signal):
         return signal(handle.id, value.id)
@@ -424,28 +376,19 @@ class _Handle:
 
     Python's transaction is ambient, so ONE set of constructors serves
     both zones and `_alloc_widget_or_node` decides which handle comes
-    back. A PROP OBEYS THE SAME RULE, because a prop record names an id,
-    a prop and a source and nothing else: neither the wire nor the root
-    cares which zone the id came from, and the template declare arm runs
-    the very same `check_prop` the live one does
-    (crates/kaya/src/scene.rs). So these five live on the base both
-    handles share — a surface that cannot drift between the zones
-    because there is only one of it.
+    back. A PROP OBEYS THE SAME RULE: a prop record names an id, a prop
+    and a source and nothing else, and the template declare arm runs the
+    very same `check_prop` the live one does. So these five live on the
+    base both handles share and cannot drift between the zones.
 
-    WHAT DIFFERS BY ZONE IS WHICH SOURCES ARE REACHABLE, NOT THE CALL.
-    A constant works anywhere; a Signal works anywhere (the core rebinds
-    on every write, live and stamped alike); the enclosing For's element
-    exists only inside a template, and it is the point — a stamp makes N
-    copies of one node, and a row that cannot say its own name is a row
-    an assistive client cannot tell from the thirteen beside it.
+    WHAT DIFFERS BY ZONE IS WHICH SOURCES ARE REACHABLE, NOT THE CALL:
+    the enclosing For's element exists only inside a template, and it is
+    the point — a row that cannot say its own name is a row an assistive
+    client cannot tell from the thirteen beside it.
 
-    That leaves this surface WIDER LIVE than the other seven bindings,
-    whose live a11y setters take a string: `_prop_source` is total over
-    its argument, so the alternative is not a narrower surface but the
-    coercing one that shipped before it, writing a Signal's repr onto a
-    widget and saying nothing. The narrow live setters are the gap
-    (docs/tpl-props-plan.md F5's stance on Haskell's constant-only
-    slider), not this.
+    That leaves this surface WIDER LIVE than the other seven, whose live
+    a11y setters take a string. The alternative is not a narrower
+    surface but the coercing one that shipped before it.
     """
 
     def __init__(self, id):
@@ -453,34 +396,22 @@ class _Handle:
 
     def a11y_id(self, ident):
         """Set this widget's accessibility IDENTIFIER: a stable authored
-        key that assistive tooling and UI automation address it by, and
-        which is NEVER spoken. Universal — every kind carries one.
+        key automation addresses it by, and which is NEVER spoken.
 
         IN A TEMPLATE, TAKE IT FROM THE ROW (`row.slug`): the copies of
-        one node share a node id, so a constant names fourteen things at
-        once. That is legal — nothing in the core deduplicates ids, and
-        the harness addresses by kind#index — and it is the right answer
-        for a node with one copy; it is the wrong one when automation
-        has to tell the copies apart.
-
-        Returns the handle, so the props chain:
-        `kaya.entry().a11y_id("name").a11y_label("Full name")`."""
+        one node share a node id, so a constant names N things at once.
+        Legal, and right for a node with one copy; wrong when automation
+        has to tell the copies apart. Returns the handle, so it chains."""
         _records().append(_prop_source(
             "a11y_id", self, ident, wire.tx_set_a11y_id,
             wire.tx_bind_a11y_id, wire.tx_bind_a11y_id_element))
         return self
 
     def a11y_hint(self, hint):
-        """Set what ACTIVATING this widget does — the platforms' hint
-        (Apple defines it as the result of performing an action;
-        Android carries it as the click action's label). Write a VERB
-        PHRASE: VoiceOver speaks it as written, TalkBack prefixes
-        "double tap to". Activation kinds only (button, checkbox,
-        select, radio); the root rejects it elsewhere, in BOTH zones and
-        at the same moment — the template declare arm runs the same
-        check, so a hint on a template label dies when the blueprint is
-        declared, before a single row stamps. Returns the handle, so it
-        chains."""
+        """Set what ACTIVATING this widget does. Write a VERB PHRASE:
+        VoiceOver speaks it as written, TalkBack prefixes "double tap
+        to". Activation kinds only; the root rejects it elsewhere, in
+        BOTH zones and at declare time. Returns the handle."""
         _records().append(_prop_source(
             "a11y_hint", self, hint, wire.tx_set_a11y_hint,
             wire.tx_bind_a11y_hint, wire.tx_bind_a11y_hint_element))
@@ -488,55 +419,41 @@ class _Handle:
 
     def a11y_label(self, label):
         """Set this widget's accessibility LABEL: what an assistive
-        client speaks for it. Universal, and deliberately separate from
-        `a11y_id` — an automation key is not a spoken name. Leave it
-        unset to keep whatever the platform derives from the control's
-        own content; setting it OVERRIDES that, so a button whose
-        caption already reads well needs nothing here.
+        client speaks for it. Separate from `a11y_id` — an automation key
+        is not a spoken name. Unset keeps what the platform derives from
+        the control's own content; setting it OVERRIDES that.
 
         THE ROW'S OWN FIELD IS THE CASE THIS EXISTS FOR
-        (`kaya.checkbox(checked=todo.done).a11y_label(todo.title)`): a
-        list of identical checkboxes reads as "checkbox, checkbox,
-        checkbox" until each copy speaks its own row. Returns the
-        handle, so the two props chain."""
+        (`kaya.checkbox(checked=todo.done).a11y_label(todo.title)`).
+        Returns the handle, so the props chain."""
         _records().append(_prop_source(
             "a11y_label", self, label, wire.tx_set_a11y_label,
             wire.tx_bind_a11y_label, wire.tx_bind_a11y_label_element))
         return self
 
     def accepts(self, *kinds):
-        """Declare what this widget takes from a paste — the closed
-        kinds by name ("text", "html", "image", "files") plus any custom
-        format ids.
+        """Declare what this widget takes from a paste — the closed kinds
+        by name plus any custom format ids.
 
         ONE DECLARATION, THREE JOBS: it drives whether the Paste command
         is live while this widget is focused, it filters what can reach
-        the paste hook, and on Android it IS the native registration
-        (setOnReceiveContentListener takes the mime types on the view).
-        Per-widget because whether Paste should be enabled is the
-        INTERSECTION of what the clipboard offers and what the FOCUSED
-        target takes — a search field wants plain text, a rich editor
-        also wants images.
+        the paste hook, and on Android it IS the native registration.
+        Per-widget because Paste's enablement is the INTERSECTION of what
+        the clipboard offers and what the FOCUSED target takes.
 
-        DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
-        declares nothing gets the platform's own insertion and reports
-        it through the ordinary change path, which is why a plain text
-        editor writes none of this and has working cut, copy and paste.
+        DECLARING IS HOW AN APP OVERRIDES THE DEFAULT: a widget that
+        declares nothing gets the platform's own insertion and reports it
+        through the ordinary change path.
 
         CONSTANT IN A TEMPLATE, unlike the a11y props: an accept list
-        describes the PROTOTYPE — what this control can receive — and
-        not the row. Rows that genuinely take different things are
-        different VARIANTS, and each `cases.case(...)` arm declares its
-        own template body with its own constant list. Returns the
-        handle, so it chains with the a11y props.
+        describes the PROTOTYPE, not the row. Returns the handle.
         """
         for kind in kinds:
             if isinstance(kind, (Signal, Element, _CaseElement, FieldRef)):
-                # The const-only rule, said out loud. Without this the
-                # kind coerces: `str(row.formats)` is a repr, the repr
-                # has spaces in it, and the guest gets `_accept_list`
-                # complaining about a space in a format id — a true
-                # sentence about the wrong problem.
+                # The const-only rule, said out loud: without it the
+                # kind coerces to a repr and `_accept_list` complains
+                # about a space in a format id — a true sentence about
+                # the wrong problem.
                 raise TypeError(
                     f"kaya: accepts takes constant kinds, not "
                     f"{type(kind).__name__} — an accept list describes "
@@ -549,61 +466,35 @@ class _Handle:
 
     def role(self, role):
         """Declare what this widget MEANS — never how it looks
-        (docs/styling-plan.md D4). `kaya.Role.DESTRUCTIVE` and
-        `kaya.Role.PROMINENT` are button emphasis, `kaya.Role.HEADING` is
-        label hierarchy, and the names are accepted as plain strings too
-        (`role("heading")`, the `align=` spelling).
+        (docs/styling-plan.md D4). The names are accepted as plain
+        strings too (`role("heading")`, the `align=` spelling).
 
-        A ROLE NEVER CHANGES WHAT A WIDGET DOES. A destructive button
-        presses like any other and the app's handler is what acts; a
-        heading label is still a label. What it changes is the platform's
-        own emphasis chrome AND — for `heading` — the accessibility tree,
-        which is the point: a heading is how an assistive user skims, so
-        it is a role and not a font size.
+        A ROLE NEVER CHANGES WHAT A WIDGET DOES. What it changes is the
+        platform's emphasis chrome AND — for `heading` — the
+        accessibility tree, which is the point: a heading is how an
+        assistive user skims, so it is a role and not a font size.
 
-        THE VOCABULARY IS CLOSED, and closed to APPS specifically (D5):
-        kaya grows it through its own work on the widgets and lowerings,
-        a spec change at a time, but there is no per-widget escape into
-        raw appearance. An unknown name raises here rather than travelling
-        as an integer nobody lowers.
+        THE VOCABULARY IS CLOSED, and closed to APPS specifically (D5).
+        An unknown name raises here rather than travelling as an integer
+        nobody lowers. WHICH KINDS FIT IS THE ROOT'S ANSWER: a handle
+        carries an id and the kind lives in the scene.
 
-        WHICH KINDS FIT IS THE ROOT'S ANSWER, not this binding's: a
-        handle carries an id, and the kind lives in the scene, so
-        `role("destructive")` on a label dies at declare time in the
-        root's own words naming both sides. CONSTANT ONLY, like
-        `accepts`: a role describes the control, not the state, and no
-        binding offers a Signal here.
-
-        ON THE BASE, so a STAMPED copy can say what it means: a "Delete"
-        button inside a For is the case the prop exists for, and the
-        `_Handle` docstring above is the whole reason this needed no
-        second surface. Const-only reads the same way in the template
-        zone — what a copy MEANS is a fact about the prototype and not
-        about the row, so a field or an element raises here rather than
-        travelling as one row's number. Moving this method up to
-        `Widget` would leave every stamped copy unable to be declared
-        destructive, with nothing raised anywhere; the wall that notices
-        is tools/checks/py-node-props.py.
-
-        Returns the handle, so it chains:
-        `kaya.button("Delete").role(kaya.Role.DESTRUCTIVE).a11y_id("delete")`."""
+        CONSTANT ONLY, like `accepts`. ON THE BASE, so a STAMPED copy can
+        say what it means; moving this up to `Widget` would leave every
+        stamped copy undeclarable with nothing raised, and the wall that
+        notices is tools/checks/py-node-props.py. Returns the handle."""
         _records().append(wire.tx_set_role(self.id, _role_value(role)))
         return self
 
     def on_paste(self, fn):
-        """Take pasted content here: fn(clip) with the Representation
-        sum, or fn(*keys, clip) for a stamped copy — the copy's key path
-        first, exactly as on_change and on_click deliver it.
+        """Take pasted content here: fn(clip), or fn(*keys, clip) for a
+        stamped copy — the copy's key path first, as on_change delivers.
 
         COSTS NOTHING ON ANY PLATFORM, unlike read_clipboard: a paste is
-        a user gesture, so it is its own authorisation — iOS raises no
-        prompt and the focus rules are satisfied by construction. ONLY
-        FIRES FOR A WIDGET THAT DECLARED WHAT IT `accepts`, in both
-        zones: every backend gates the occurrence on the focused
-        widget's accept list and falls back to the platform's own
-        insertion when it is empty, so a template node that registers
-        this and declares nothing waits forever. Returns the handle, so
-        it chains."""
+        a user gesture and so is its own authorisation. ONLY FIRES FOR A
+        WIDGET THAT DECLARED WHAT IT `accepts`, in both zones, so a
+        template node that registers this and declares nothing waits
+        forever. Returns the handle."""
         _app._register(self, wire.OCC_PASTED, fn)
         return self
 
@@ -611,20 +502,17 @@ class _Handle:
 class Widget(_Handle):
     """A live widget: exactly one thing on screen."""
 
-    # One-shot commands: momentary verbs into widget-owned state,
-    # riding the open transaction like any write — the insert and the
-    # clear beside it commit together or not at all. Fire-and-forget:
-    # no mirror state, nothing to journal; the widget answers through
-    # its normal occurrence path (a clear arrives back as
-    # text_changed("") and the app's draft fold empties itself).
-    # Commands live on Widget only — a Node is a blueprint, and a
-    # blueprint has nothing to clear (the type-level arm of the scene's
-    # own template rejection). That is the whole of what this class adds
-    # over the base: the momentary verbs, and the three DYNAMIC prop
-    # setters below, whose documented job is changing a prop AFTER the
-    # build. A template is declared, never mutated, and its declarative
-    # spelling is the constructor kwarg — which already works in both
-    # zones.
+    # One-shot commands: momentary verbs into widget-owned state, riding
+    # the open transaction like any write, so the insert and the clear
+    # beside it commit together or not at all. The widget answers through
+    # its normal occurrence path — a clear arrives back as
+    # text_changed("") — never a side assignment.
+    #
+    # ON Widget ONLY, and that is the whole of what this class adds over
+    # the base: the momentary verbs plus the DYNAMIC prop setters, whose
+    # job is changing a prop AFTER the build. A template is declared,
+    # never mutated, and its declarative spelling is the constructor
+    # kwarg, which already works in both zones.
 
     def clear(self):
         """Drop an entry's content now (the field stays authoritative)."""
@@ -637,33 +525,18 @@ class Widget(_Handle):
     # THE TEXT-RANGE SURFACE (docs/ranges-plan.md D1): the three
     # primitives an editor cannot write for itself — DECORATE a set of
     # ranges, put the SELECTION at one, SCROLL one into view — plus the
-    # write that opens a document into the control in the first place.
-    # On the HANDLE, beside clear and focus, because that is where this
-    # binding keeps every widget-addressed verb; the languages that hand
-    # a guest a transaction spell the same four on it.
-    #
-    # kaya ships no search. What to decorate is the app's question, and
-    # a find engine, a find bar and a regex dialect belong to the text
-    # editor (docs/ranges-plan.md §3); what no app can write for itself
-    # is colouring a run of a native text view, moving its selection and
-    # scrolling it into view, which is exactly what these are.
+    # write that opens a document into the control. kaya ships no search:
+    # what to decorate is the app's question (docs/ranges-plan.md §3).
 
     def set_text(self, text):
         """Put text into a text widget programmatically — the "open a
-        document into the editor" write, and the dynamic spelling of
-        `kaya.textarea(text=...)`.
+        document into the editor" write.
 
-        SUGAR OVER THE GENERIC PROP SETTER, and it earns its own name
-        because the widget is UNCONTROLLED: this is ONE write, after
-        which the user owns the text. The field answers with its
-        ordinary `text_changed` and the app's fold takes it from there —
-        the same round trip a keystroke makes.
-
-        A write that CHANGES the text also drops whatever ranges the app
-        had declared over it (a set is bound to the text it was declared
-        against — see `highlight_ranges`) and spends the field's native
-        undo history. Returns the widget, so it chains with the a11y
-        props."""
+        THE WIDGET IS UNCONTROLLED: this is ONE write, after which the
+        user owns the text and the field answers with its ordinary
+        `text_changed`. A write that CHANGES the text also drops whatever
+        ranges the app declared over it (`highlight_ranges`) and spends
+        the field's native undo history. Returns the widget."""
         _records().append(wire.tx_set_text(self.id, _text_value("set_text", text)))
         return self
 
@@ -671,14 +544,11 @@ class Widget(_Handle):
         """DECLARE this textarea's decorated ranges, replacing whatever
         was declared before; an empty set is the clear.
 
-        THE OFFSETS ARE UTF-8 BYTE OFFSETS into the widget's current
-        text — kaya's unit on the wire and in all eight bindings — and
-        PYTHON IS ONE OF THE FOUR LANGUAGES WHERE THAT IS NOT WHAT THE
-        LANGUAGE'S OWN SEARCH RETURNS. `str.find` counts scalars:
-        `"日本語 x".find("x")` is 4 where kaya's offset is 10. Search the
-        UTF-8 bytes and the offsets are kaya's by construction (UTF-8 is
-        self-synchronizing, so a byte-level match is always a character
-        boundary — the two searches find the same occurrences):
+        THE OFFSETS ARE UTF-8 BYTE OFFSETS, and PYTHON IS ONE OF THE FOUR
+        LANGUAGES WHERE THAT IS NOT WHAT ITS OWN SEARCH RETURNS.
+        `str.find` counts scalars: `"日本語 x".find("x")` is 4 where kaya's
+        offset is 10. Search the UTF-8 BYTES and the offsets are kaya's
+        by construction:
 
             data, hit = doc.encode(), needle.encode()
             at = data.find(hit)
@@ -687,16 +557,10 @@ class Widget(_Handle):
                 at = data.find(hit, at + len(hit))
             editor.highlight_ranges(hits)
 
-        APP-OWNED AND NEVER TRACKED. A declared set is bound to the text
-        it was declared against: the first edit of any kind — a
-        keystroke, a `set_text`, a native undo — drops it, and the app
-        re-declares from the fold `text_changed` already drives. Nothing
-        in kaya adjusts a range across an edit.
-
-        An offset past the end of the text, or one that splits a
-        character, fails loudly in the core rather than in a backend:
-        the five platforms answer a malformed offset five different ways
-        and one of them aborts the process."""
+        APP-OWNED AND NEVER TRACKED: the first edit of any kind drops the
+        set, and the app re-declares from the fold `text_changed` already
+        drives. A malformed offset fails loudly in the CORE rather than
+        in a backend, where one of the five aborts the process."""
         flat = []
         for span in ranges:
             start, stop = _text_range("highlight_ranges", span)
@@ -707,34 +571,28 @@ class Widget(_Handle):
 
     def select_range(self, span):
         """Put this textarea's selection at one range (an empty range is
-        a caret). Same offsets, same validation as `highlight_ranges`.
+        a caret). Same offsets and validation as `highlight_ranges`.
 
         REFUSED WHILE THE USER IS COMPOSING through an input method, in
-        every backend, because honouring it commits the composition
-        mid-word — measured on macOS, where the half-typed kana land in
-        the document and in the app's own model. The refusal is a no-op
-        and not an error: composition state is on no kaya channel, so an
-        app cannot avoid the race and is not blamed for it. The
-        selection is still worth asking for after the next
-        `text_changed`, which is what ends a composition."""
+        every backend: honouring it commits the composition mid-word —
+        measured on macOS, where the half-typed kana land in the document
+        and in the app's own model. The refusal is a no-op, not an error:
+        composition state is on no kaya channel."""
         start, stop = _text_range("select_range", span)
         _records().append(wire.tx_select_range(self.id, start, stop))
 
     def reveal_range(self, span):
-        """Scroll this textarea so a range is inside the viewport. A
-        pure effect: it moves no state, leaves the selection alone, and
-        undo does not put the scroll position back (undo restores state,
-        not where you were looking). How much context lands around the
-        range is the platform's own scroll-to-range behaviour."""
+        """Scroll this textarea so a range is inside the viewport. A pure
+        effect: no state moves, the selection is untouched, and undo does
+        not put the scroll position back."""
         start, stop = _text_range("reveal_range", span)
         _records().append(wire.tx_reveal_range(self.id, start, stop))
 
     def grow(self, weight):
         """Set this widget's flex weight within its row/column: 0 is
-        natural size, positive weights divide the container's leftover
-        main-axis space in proportion. The declarative spelling is the
-        `grow=` argument at construction; this is the dynamic path —
-        collapsing a pane is `grow(0)` and back."""
+        natural size, positive weights divide the leftover main-axis
+        space. The declarative spelling is the `grow=` argument; this is
+        the dynamic path."""
         _records().append(wire.tx_set_grow(self.id, float(weight)))
 
     def align(self, mode):
@@ -752,31 +610,24 @@ class Widget(_Handle):
 
     def inset(self, pad):
         """Set this container's own padding: DIP between its bounds and
-        its children, uniform on all four sides — the window inset one
-        level down, so a full-bleed window can still hold an inset
-        status row (the app that forced it: the editor). Containers only
-        — the scene rejects it anywhere else, and refuses a negative
-        one. The declarative spelling is the `inset=` argument at
-        construction; this is the dynamic path.
+        its children, uniform on all four sides. Containers only, and a
+        negative one is refused. The declarative spelling is the `inset=`
+        argument at construction; this is the dynamic path.
 
-        AND THE DECLARATIVE SPELLING IS THE TEMPLATE ZONE'S. `kaya.row`
+        AND THE DECLARATIVE SPELLING IS THE TEMPLATE ZONE'S: `kaya.row`
         allocates through `_alloc_widget_or_node`, so inside a For the
-        kwarg writes a NODE's inset and the editor's find bar — a
-        stamped row — insets exactly as the live status row beside it
-        does. This dynamic setter stays live-only for the reason the
-        class comment gives: a blueprint is declared once and never
-        mutated, so a write meant to land after the build has no moment
-        to land in. The chain that keeps the kwarg working in both zones
+        kwarg writes a NODE's inset. This dynamic setter stays live-only
+        — a blueprint is declared once and never mutated, so a write
+        meant to land after the build has no moment to land in. The chain
         is held by tools/checks/py-node-props.py."""
         _records().append(wire.tx_set_inset(self.id, float(pad)))
 
     def context_menu(self):
-        """The live-widget context anchor: `with target.context_menu():`
-        declares the catalog — the same command vocabulary scoped to a
-        NOUN, with the platform's own gesture (right-click, long-press).
-        No shortcuts here (a shortcut needs a window catalog as its
-        native dispatch home — record-time checked); the editable text
-        controls (entry, textarea) reject attachment at the root."""
+        """The live-widget context anchor: the same command vocabulary
+        scoped to a NOUN, with the platform's own gesture. No shortcuts
+        here (a shortcut needs a window catalog as its native dispatch
+        home); the editable text controls reject attachment at the
+        root."""
         return _MenuScope(("widget", self.id), shortcut_ok=False)
 
 
@@ -785,18 +636,14 @@ class Node(_Handle):
     Never on screen by itself; clicks and pastes on its copies arrive
     with the copy's key path.
 
-    Its own class, not an alias, because `App._register` reads the
-    handle's type to decide which handler table a callback lands in —
-    the node table, keyed the same way and dispatched with the key path
-    in front."""
+    ITS OWN CLASS, NOT AN ALIAS: `App._register` reads the handle's type
+    to decide which handler table a callback lands in."""
 
     def context_menu(self, catalog):
-        """Attach a live-zone-built context catalog
-        (kaya.context_catalog) to this template node: every stamped
-        copy shows the same catalog, and each activation carries that
-        copy's key path — the keys ARE the noun (the on_click_node
-        encoding). An item takes exactly one anchor, so a second
-        attach of the same catalog raises here."""
+        """Attach a live-zone-built context catalog to this template
+        node: every stamped copy shows the same catalog, and each
+        activation carries that copy's key path. An item takes exactly
+        ONE anchor, so a second attach raises here."""
         if catalog._attached:
             raise RuntimeError(
                 "kaya: a context catalog takes exactly one anchor"
@@ -833,11 +680,10 @@ class Element:
 
 
 class _Cases:
-    """The eliminator over a sum collection, yielded by its for_each:
-    one `with cases.case(Cls) as el:` block per constructor of the
-    union, in any order. The scene holds the arms to totality at
-    declaration — a missing constructor is a startup error naming it,
-    and an empty block is the explicit way to render one as nothing."""
+    """The eliminator over a sum collection: one `with cases.case(Cls) as
+    el:` block per constructor, in any order. The scene holds the arms to
+    TOTALITY at declaration; an empty block is the explicit way to render
+    one as nothing."""
 
     def __init__(self, for_index, coll):
         self._for_index = for_index
@@ -937,11 +783,9 @@ class _BoundCollection:
         return variant, [e(g(value)) for g, e in zip(spec.getters, spec.encoders)]
 
     def derive(self, compute):
-        """A signal the binding recomputes from this collection's
-        entries after every mutation, batched into the same transaction
-        — `todos.derive(lambda items: ...)`; chain .eq/.fmt for further
-        derivation. The callable is pure presentation: the entries dict
-        in, one value out."""
+        """A signal the binding recomputes from this collection's entries
+        after every mutation, batched into the same transaction. The
+        callable is pure presentation: entries in, one value out."""
         if self._path:
             raise RuntimeError(
                 "kaya: derive on the collection itself, not an instance — drop the at()"
@@ -964,15 +808,11 @@ class _BoundCollection:
 
     def _absorb_key(self, key):
         """An explicit key, shown to the minter on its way into the
-        table: a numeric key at or above the counter carries it up so
-        the next mint clears it.
+        table: a numeric key at or above the counter carries it up.
 
         BOOLS ARE NOT NUMBERS HERE, because they are not numbers on the
-        wire either — `wire._enc.value` dispatches `bool` before `int`
-        and a True key rides as VALUE_BOOL. Python's `bool` subclasses
-        `int`, so the isinstance order below is the encoder's order,
-        written out; anything else has no way to collide with an I64 and
-        moves nothing.
+        wire either — `wire._enc.value` dispatches `bool` before `int`,
+        so the isinstance order below is the encoder's order written out.
         """
         if isinstance(key, bool) or not isinstance(key, int):
             return
@@ -982,11 +822,9 @@ class _BoundCollection:
 
     def insert(self, key, value):
         variant, fields = self._encode(value)
-        # ABSORPTION, on the one path every explicit key travels (the
-        # draft scope's `d[k] = v` lands here too): a numeric key at or
-        # above the minter's counter carries it up, so hand-chosen and
-        # minted keys share one space safely and in either order
-        # (insert_fresh's contract).
+        # ABSORPTION, on the one path every explicit key travels: a
+        # numeric key at or above the minter's counter carries it up, so
+        # hand-chosen and minted keys share one space in either order.
         self._absorb_key(key)
         _records().append(
             wire.tx_collection_insert(self._owner._id, self._path, key,
@@ -999,36 +837,21 @@ class _BoundCollection:
         """Insert a record under a key the binding authors, and hand the
         key back — `key = todos.insert_fresh(Todo(title=draft))`.
 
-        FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
-        identity and guest-chosen (DESIGN.md, the update algebra), so
-        anything that already HAS a name passes it to `insert` — today
-        and always. This is the other case, and it is the common one in
-        a form: the app has a title and nothing else, and the
-        alternative is a hand-spelled counter beside the collection,
-        which in Python is a module global reached through `global` in
-        every handler that adds, and whose safety rests on a
-        never-rewind rule nobody wrote down.
+        FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Anything that already
+        HAS a name passes it to `insert`.
 
         ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted
-        key is an I64 and is counter+1. An instance is a table — the
-        live-zone collection, or one stamped copy selected by `at(...)`
-        — and keys are unique within one, so that is what the counter is
-        per.
+        key is an I64 and is counter+1. An instance is a table and keys
+        are unique within one, so that is what the counter is per.
 
         MIXING IS SAFE BY ABSORPTION: an explicit `insert` whose key is
-        an int at or above the counter carries it up, so a later mint
-        clears every hand-chosen numeric key already in the table. A
-        string key cannot collide with an I64 at all and moves nothing.
+        an int at or above the counter carries it up.
 
         NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
         argument. Undo and redo replay captured keys inside the core and
-        never re-enter this path (`App._absorb_undo` writes the mirror
-        directly), so a history walk never moves the counter; an
-        abandoned transaction does not move it back either (the counter
-        is deliberately outside `_journal_once` — the rollback journal
-        restores the mirror, never the counter, so a key spent by an
-        abandoned transaction stays spent and cannot be handed out
-        twice). A fresh key is fresh forever.
+        never re-enter this path; the counter sits deliberately outside
+        `_journal_once`, so a key spent by an abandoned transaction stays
+        spent. A fresh key is fresh forever.
         """
         path = tuple(self._path)
         key = self._owner._fresh.get(path, 0) + 1
@@ -1047,12 +870,10 @@ class _BoundCollection:
 
     def patch(self, key, **fields):
         """Field-level deltas: `todos.patch(k, done=True)` sends one
-        update_field per kwarg and mutates the model instance in place —
-        toggling `done` never resends `title`. On a sum, the entry's
-        current constructor is the witness: names resolve against it,
-        the wire carries its discriminant, and a kwarg the constructor
-        lacks raises here — so the isinstance (or match) that guards
-        the patch is the refinement, checked, not trusted."""
+        update_field per kwarg and mutates the model instance in place.
+        On a sum the entry's CURRENT CONSTRUCTOR is the witness — a kwarg
+        it lacks raises here, so the match that guards the patch is
+        checked, not trusted."""
         entry = self._mirror()[key]
         variant, spec = self._owner._variant_for(entry)
         if spec.fields is None:
@@ -1073,11 +894,9 @@ class _BoundCollection:
         self._recompute_derived()
 
     def move_before(self, key, anchor):
-        """Reposition an entry before another's key: order is collection
-        data, so the model reorders and the wire carries the same
-        keys-only delta. Keys, never indices. A missing key or anchor
-        raises here, at the call site — the same check the scene makes;
-        moving an entry before itself is a no-op, and nothing travels."""
+        """Reposition an entry before another's key. Keys, never indices;
+        a missing key or anchor raises at the call site, and moving an
+        entry before itself is a no-op."""
         self._move(key, [anchor])
 
     def move_to_end(self, key):
@@ -1112,8 +931,7 @@ class _BoundCollection:
     def _move(self, key, before):
         mirror = self._mirror()
         # The same checks the scene makes, made where the guest can see
-        # the stack: a missing key or anchor is a guest bug, never a
-        # fallback.
+        # the stack.
         if key not in mirror:
             raise KeyError(f"kaya: move of missing key {key!r}")
         if before and before[0] not in mirror:
@@ -1150,11 +968,10 @@ class _BoundCollection:
             child._purge(prefix)
 
     def change(self):
-        """A draft scope for bulk mutation: `with c.change() as d:` —
-        `d[key] = value` inserts or updates (resolved from the model),
-        `del d[key]` removes, reads see the draft's own writes. Each
-        operation records its patch immediately, in order, into the
-        ambient transaction; the scope is syntax, not a barrier."""
+        """A draft scope for bulk mutation: `d[key] = value` inserts or
+        updates (resolved from the model), `del d[key]` removes, reads
+        see the draft's own writes. Each operation records its patch
+        immediately; THE SCOPE IS SYNTAX, NOT A BARRIER."""
         return _Draft(self)
 
     def get(self, key, default=None):
@@ -1295,22 +1112,18 @@ class Collection(_BoundCollection):
     def _decode(self, variant, fields, current):
         """Rebuild a model value from an undo delta's wire record.
 
-        THE MIRROR HOLDS THE APP'S OWN OBJECT — that is what makes
-        `items()` the model rather than a second copy — so a restored
-        entry has to be reassembled from the wire fields the core kept.
-        An entry the mirror still holds is UPDATED IN PLACE, the patch()
-        stance: a dataclass field the wire never carried (a handler, a
-        cached thing) survives the undo instead of being dropped.
+        THE MIRROR HOLDS THE APP'S OWN OBJECT, so a restored entry is
+        reassembled from the wire fields the core kept. An entry the
+        mirror still holds is UPDATED IN PLACE, so a dataclass field the
+        wire never carried survives the undo.
         """
         spec = self._variants[variant]
         for value in fields:
             if isinstance(value, wire.BlobHandle):
-                # NOT REDEEMABLE, and loudly so: undo_body writes delta
-                # values through the batch-local encoder, so a blob
-                # field arrives as an index into a table that was
-                # thrown away (crates/kaya/src/wire.rs). Silently
-                # storing the handle would put a stranger in the app's
-                # model.
+                # NOT REDEEMABLE, and loudly so: a blob field arrives as
+                # an index into a batch-local table that was thrown away,
+                # so storing the handle would put a stranger in the
+                # app's model.
                 raise NotImplementedError(
                     "kaya: this undo step restores a collection entry with "
                     "a bytes field, and the core's undo payload cannot "
@@ -1397,8 +1210,8 @@ class _Template(_Scope):
         global _tpl_depth
         self.handle = _alloc_widget_or_node()
         # The container parents into the enclosing scope, but the record
-        # must land after template_end — the opener starts the blueprint
-        # scope, and an add_child inside it would cross zones.
+        # must land after template_end: an add_child inside the blueprint
+        # would cross zones.
         self._parent = _parents[-1] if _parents else None
         _records().append(self._opener(self.handle.id, self._target_id))
         _tpl_depth += 1
@@ -1424,11 +1237,10 @@ class _Template(_Scope):
 
 
 class _ForTrace:
-    """The for-statement tracer (DESIGN's JAX-style tier): `for t in
-    todos:` opens the For template, hands the loop body one element
-    tracer, and closes the template when the loop asks for a second
-    element. The body runs once — it authors the blueprint; stamping is
-    the core's replay, never Python iteration."""
+    """The for-statement tracer: `for t in todos:` opens the For
+    template, hands the body one element tracer, and closes the template
+    when the loop asks for a second element. THE BODY RUNS ONCE —
+    stamping is the core's replay, never Python iteration."""
 
     def __init__(self, coll):
         self._template = _Template(
@@ -1511,16 +1323,12 @@ CANCEL = wire.ALERT_CHOICE_CANCEL
 
 def show_alert(title="", message="", actions=(), cancel=None,
                on_result=None, window=0):
-    """Request a modal alert (the request/result grammar): up to two
-    action labels (the platform floor) plus the REQUIRED cancel label
-    — the slot every platform-native dismissal (Esc, back, outside
-    tap) resolves to; no binding invents a default label. The result
-    handler rides the REQUEST (the widget-handler precedent):
-    on_result(choice) fires exactly once — choice is 0 or 1 for
-    actions, kaya.CANCEL for every native dismissal — and the
-    registration retires with it. Ids are binding-allocated; the call
-    returns the id for the floor-minded. One alert may be live per
-    process — show the next from the handler."""
+    """Request a modal alert: up to two action labels (the platform
+    floor) plus the REQUIRED cancel label, the slot every
+    platform-native dismissal resolves to. on_result(choice) fires
+    exactly once — 0 or 1 for actions, kaya.CANCEL for every native
+    dismissal — and the registration retires with it. One alert may be
+    live per process; show the next from the handler."""
     actions = list(actions)
     if len(actions) > 2:
         raise ValueError(
@@ -1557,15 +1365,11 @@ class PickedFile:
         """Redeem the handle: returns `(file, seekable)` — an ordinary
         Python file object, and whether it supports random access.
 
-        BLOCKS, and may block for a long time (a cloud provider can
-        download the file first), so call it from a thread you chose
-        and post the result back. kaya is not in the data path: the
-        object returned is a real file and `read`, `mmap` and the rest
-        are the ones you already know.
-
-        `seekable` RIDES THE OPEN rather than the pick because that is
-        the only place the answer exists — an Android provider may hand
-        back a pipe, and nothing short of opening reveals it.
+        BLOCKS, possibly for a long time (a cloud provider can download
+        the file first), so call it from a thread you chose and post the
+        result back. `seekable` RIDES THE OPEN because that is the only
+        place the answer exists — an Android provider may hand back a
+        pipe, and nothing short of opening reveals it.
         """
         return runtime.open_picked(self.handle, mode)
 
@@ -1575,20 +1379,15 @@ class PickedFile:
 
 def pick_files(filters=(), on_result=None, window=0):
     """Ask the platform for files. THE PICK, NOT THE OPEN — the result
-    carries handles you redeem later, so the name says `pick`.
+    carries handles you redeem later.
 
-    `filters` is a sequence of `(label, extensions)` pairs, advisory on
-    every platform: they set a default view rather than a guarantee, so
-    the guest still validates what it got. `extensions` may be a string
-    or a sequence.
+    `filters` is a sequence of `(label, extensions)` pairs, ADVISORY on
+    every platform, so the guest still validates what it got.
 
-    on_result(files) fires exactly once with a list of PickedFile, and
-    the registration retires with it — the same request/result grammar
-    show_alert uses. CANCEL IS THE EMPTY LIST, faithfully: no platform
-    can confirm an empty selection, so there is no sentinel to invent.
-
-    One dialog may be live per process; show the next from the first's
-    handler."""
+    on_result(files) fires exactly once and the registration retires with
+    it. CANCEL IS THE EMPTY LIST: no platform can confirm an empty
+    selection, so there is no sentinel to invent. One dialog may be live
+    per process; show the next from the first's handler."""
     return _pick(True, filters, on_result, window)
 
 
@@ -1600,38 +1399,23 @@ def pick_file(filters=(), on_result=None, window=0):
 
 
 def save_file(suggested_name, filters=(), on_result=None, window=0):
-    """Ask the platform WHERE TO SAVE. The picker's twin: a request that
-    answers once with a capability, on the same grammar, out of the same
-    one-live-dialog slot — so a save dialog and an open dialog cannot be
-    up at the same time, and the next one is shown from this one's
-    handler.
+    """Ask the platform WHERE TO SAVE. The picker's twin, out of the same
+    one-live-dialog slot, so a save and an open dialog cannot be up at
+    the same time.
 
     `suggested_name` is the name the dialog OPENS with, and it is not
     optional: a save dialog with an empty name box is one the platform
-    will not let the user complete. Every platform treats it the way it
-    treats a filter — it takes it, and guarantees nothing. The user
-    renames it, and Android may append an extension matching the mime
-    type, so READ THE NAME YOU GOT (`file.name`) rather than the one you
-    asked for.
+    will not let the user complete. Every platform takes it and
+    guarantees nothing — the user renames it, and Android may append an
+    extension matching the mime type, so READ THE NAME YOU GOT.
 
-    on_result(file) fires exactly once and the registration retires with
-    it. CANCEL IS `None`, and a destination is a single PickedFile — the
-    narrowing from the floor's list happens here rather than in your
-    handler, because "one locator or none" is a fact of the request (no
-    platform's save dialog names two destinations) and not something
-    every app should re-derive from a length.
+    on_result(file) fires exactly once. CANCEL IS `None`, and a
+    destination is a single PickedFile: "one locator or none" is a fact
+    of the request, not something every app should re-derive.
 
-    WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist yet
-    — macOS, GTK and Windows answer with a name for a file nobody has
-    made, and macOS does not even truncate when the user presses Replace
-    — so the handle's open CREATES: opening it for FILE_MODE_WRITE
-    succeeds and yields an empty file on every platform, which is the
-    one behaviour to write against (docs/save-plan.md D1). Android and
-    iOS hand back a document that already exists; the core absorbs the
-    difference, and there is deliberately no fourth file mode asking for
-    it.
-
-    `filters` is the picker's advisory encoding, unchanged."""
+    WHAT YOU GET BACK OPENS EMPTY: the handle's open CREATES, so
+    FILE_MODE_WRITE yields an empty file on every platform
+    (docs/save-plan.md D1). `filters` is the picker's encoding."""
     app = _app
     dialog_id = app._next("file_dialog")
     if on_result is not None:
@@ -1670,24 +1454,19 @@ def _pick(multiple, filters, on_result, window):
 # --- The clipboard (DESIGN.md, Clipboard) --------------------------
 #
 # A clip is not a string: every host models it as ONE item available in
-# several types, with the consumer taking the richest it understands.
-# So COPY TAKES A RECORD — `copy(text=..., html=...)`, where at most one
-# per kind is structural rather than a duplicate check — and the two
-# answers are a SUM, because you offer many and receive one.
+# several types, with the consumer taking the richest it understands. So
+# COPY TAKES A RECORD and the two answers are a SUM.
 #
-# kaya DERIVES NOTHING between representations. Whether list bullets
-# survive html-to-text is the app's decision, and a bad auto-derivation
+# kaya DERIVES NOTHING between representations: a bad auto-derivation
 # degrades every paste into a plain field silently. Files are the one
-# exception, and the platforms make it: a file list also gets their own
-# text rendition of the paths.
+# exception, and the platforms make it.
 
 
 class Representation:
     """One representation, arriving — the sum `copy` is the record of.
 
-    Nested constructors rather than five module-level names, so a match
-    reads the way the wire does and `Image` cannot be mistaken for the
-    `image()` widget:
+    Nested constructors rather than five module-level names, so `Image`
+    cannot be mistaken for the `image()` widget:
 
         match clip:
             case None: ...                        # the universal empty
@@ -1763,10 +1542,9 @@ class Representation:
 def _representation(payload):
     """Turn the decoder's (clip kind, values) into the sum, or None.
 
-    EMPTY IS THE UNIVERSAL NO, with kind 0: it covers a denied prompt on
-    iOS, an unfocused reader on Android or Wayland, an empty clipboard,
-    and content in no representation this read accepted. The guest is
-    not told which, because the platforms deliberately do not say.
+    EMPTY IS THE UNIVERSAL NO: a denied prompt on iOS, an unfocused
+    reader on Android or Wayland, an empty clipboard, and content in no
+    representation this read accepted. The platforms do not say which.
     """
     clip, values = payload
     if clip == wire.CLIP_TEXT:
@@ -1794,38 +1572,23 @@ class UndoDelta:
 
     - `signals` — (signal id, restored value) pairs.
     - `texts` — (widget or node id, instance path, restored text)
-      triples. THE ONLY NOTIFICATION THERE IS for that text: restoring
-      a typing episode is a programmatic write, and a programmatic
-      write never echoes, so an app that folds `text_changed` into its
-      own model — which is every app, the field being uncontrolled —
-      would go stale on exactly this step if the payload did not carry
-      it.
+      triples, and THE ONLY NOTIFICATION THERE IS for that text: a
+      restore is a programmatic write and never echoes, so an app that
+      folds `text_changed` into its own model would go stale.
 
-      THE PATH IS WHICH FIELD, and it is the same identity tag every
-      other occurrence already carries. EMPTY means a live widget:
-      the id is the one the app holds, and there is nothing else to
-      say. NON-EMPTY means a stamped copy of a template, whose identity
-      is (template node, key path) because a copy has no id an app
-      could hold — the very pair its own edits arrive under, since a
-      template `entry`'s `on_change` is handed those keys before the
-      text. A top-level `for` over a collection makes that one key, so
-      `path[0]` is the row, already an int for the minter's I64 keys.
-
-      THE RUN IS A LIST AND EVERY MEMBER COUNTS: one step can restore
-      the draft and a row's note at once, so an app that reads only the
-      last entry drops the other field on the floor.
-    - `entries` — (collection id, instance path, key, state), with state
-      None where the restored state does not have that entry at all and
-      (variant, wire fields) where it does.
-    - `orders` — (collection id, instance path, that instance's keys in
-      order); position is the one thing per-entry statements cannot
-      carry.
+      THE PATH IS WHICH FIELD. EMPTY means a live widget. NON-EMPTY
+      means a stamped copy, whose identity is (template node, key path)
+      because a copy has no id an app could hold — the very pair its own
+      edits arrive under. EVERY MEMBER COUNTS: one step can restore the
+      draft and a row's note at once.
+    - `entries` — (collection id, instance path, key, state), state None
+      where the restored state does not have that entry.
+    - `orders` — (collection id, instance path, keys in order); position
+      is the one thing per-entry statements cannot carry.
 
     THE COLLECTION MIRRORS ARE ALREADY RECONCILED from this payload
-    before your handler runs, so `len(todos)` and `todos.items()` answer
-    about the restored state. Signals and text are not mirrored by this
-    binding (there is no read-back for either, by doctrine), which is
-    why those two runs are handed to the app instead.
+    before your handler runs. Signals and text are not mirrored by this
+    binding, which is why those two runs are handed to the app instead.
     """
 
     __slots__ = ("signals", "texts", "entries", "orders")
@@ -1842,15 +1605,13 @@ class UndoDelta:
 
 
 def _accept_list(kinds):
-    """Join an accept list: the closed kinds by name plus any custom
-    ids, space separated.
+    """Join an accept list: the closed kinds by name plus any custom ids,
+    space separated.
 
-    A LIST AND NOT A MASK, because half the set is open-ended. A custom
-    format that could be written and never accepted would be an escape
-    hatch that only opens outward, and round-tripping an app's own data
-    is the whole reason to have one. Ids reach every platform's registry
-    verbatim, so they carry no spaces — which is what makes the join
-    unambiguous, and what this refuses to let you break.
+    A LIST AND NOT A MASK, because half the set is open-ended. Ids reach
+    every platform's registry verbatim, so they carry NO SPACES — which
+    is what makes the join unambiguous, and what this refuses to let you
+    break.
     """
     out = []
     for kind in kinds:
@@ -1869,16 +1630,11 @@ def copy(text=None, html=None, image=None, files=(), custom=None):
     """Put ONE clip on the system clipboard, offered in as many
     representations as you fill in.
 
-    A RECORD AND NOT A LIST: at most one per kind is structural here,
-    since naming `text` twice is not something the call can express.
-    `custom` is the one plural field with names — several app-defined
-    formats are legitimate — and takes a mapping of id to bytes.
-
-    `files` takes PickedFile handles: copying a file and picking one are
-    the same currency, so a picked file goes straight on and the bytes
-    never move through kaya. The wire order is kaya's, not this call's —
-    descending richness, which is preference order on every host that
-    has one.
+    A RECORD AND NOT A LIST: at most one per kind is structural, since
+    naming `text` twice is not something the call can express. `custom`
+    takes a mapping of id to bytes. `files` takes PickedFile handles, so
+    the bytes never move through kaya. The wire order is kaya's, not this
+    call's — descending richness.
     """
     reps = []
     present = 0
@@ -1903,22 +1659,18 @@ def copy(text=None, html=None, image=None, files=(), custom=None):
 
 
 def read_clipboard(accepting, on_result=None):
-    """Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED
-    ONE, named for what it is rather than for pasting.
+    """Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE.
 
     A user's paste arrives at the widget's hook and costs nothing; this
-    asks without a gesture, which the platforms have deliberately made
-    expensive: iOS 16 PROMPTS when the content came from another app and
-    blocks until the user answers, Android returns nothing unless the
-    app has focus, and Wayland delivers no offer to an unfocused client.
-    Reach for this to detect a URL or import from the clipboard, never
-    to implement Paste — that is the Paste command, and it is free.
+    asks without a gesture, which the platforms have made expensive: iOS
+    16 PROMPTS when the content came from another app and blocks until
+    the user answers, Android returns nothing unless the app has focus,
+    and Wayland delivers no offer to an unfocused client. Reach for this
+    to detect a URL, never to implement Paste — that is the Paste
+    command, and it is free.
 
-    `accepting` is the accept list; the answer carries the first match
-    by descending richness, so exactly one representation is ever
-    materialised. on_result(clip) fires exactly once, with the sum or
-    None, and the registration retires with it — the alert's grammar.
-    Returns the request id.
+    on_result(clip) fires exactly once with the sum or None, and the
+    registration retires with it. Returns the request id.
     """
     app = _app
     request = app._next("clipboard")
@@ -1930,23 +1682,17 @@ def read_clipboard(accepting, on_result=None):
 
 # --- Menus: the command vocabulary (DESIGN.md, Menus) --------------
 #
-# One item vocabulary, two anchors. The window bar rides the window
-# construct (`with app.menu("File") as file:`); a context menu scopes
-# the same verbs to a noun (`with target.context_menu():` on a live
-# widget, kaya.context_catalog() + node.context_menu(catalog) for a
-# template node). Creators declare into the open with-scope; handlers
-# ride the declarations (on_activate=, on_toggle=, on_select=) — no
-# app-global menu dispatcher exists. Node-anchored handlers receive
-# the stamped copy's keys first (the keys ARE the noun).
+# One item vocabulary, two anchors: the window bar rides the window
+# construct, a context menu scopes the same verbs to a noun. Creators
+# declare into the open with-scope; handlers ride the declarations, and
+# node-anchored ones receive the stamped copy's keys FIRST.
 
 
 class MenuItem:
-    """A live menu item — its OWN id space (the c_menu_item counter),
-    never a widget or node id. One command identity: exactly one
-    parent or anchor, forever (append-only; nothing is removed in v1).
-    The methods are the dynamic tier — every mutable prop, each judged
-    by the root against the item's kind and anchor — plus append(),
-    the reopening scope for a retained grouping node."""
+    """A live menu item in its OWN id space, never a widget or node id.
+    One command identity: exactly one parent or anchor, forever
+    (append-only). The methods are the dynamic tier, each judged by the
+    root against the item's kind and anchor, plus append()."""
 
     def __init__(self, id):
         self.id = id
@@ -1994,12 +1740,9 @@ class MenuItem:
 
     def symbol(self, symbol):
         """The item's SEMANTIC ICON (`kaya.Symbol`, or its name): the
-        closed concept vocabulary each backend maps to its own
-        platform's symbol set. BESIDE `icon`, not instead of it — app
-        art still rides the blob; a STANDARD concept rides this, because
-        no one asset is right on all three platforms and the platform
-        sets metric-match the text beside them. No symbol on a
-        separator (root-checked). Const-only."""
+        closed concept vocabulary each backend maps to its own platform's
+        symbol set. BESIDE `icon`, not instead of it — app art still
+        rides the blob. No symbol on a separator. Const-only."""
         _records().append(
             wire.tx_set_menu_symbol(self.id, _symbol_value(symbol)))
 
@@ -2010,40 +1753,30 @@ class MenuItem:
         _records().append(wire.tx_set_menu_primary(self.id, bool(on)))
 
     def role(self, name):
-        """Declare this action a standard command (actions only —
-        root-checked). The declaration is uniform; PLACEMENT is each
-        host's business: macOS shows `kaya.ROLE_SETTINGS` in the
-        application menu, everyone else leaves the item where it was
-        declared. One item per role, and the role never invents a
-        chord — spell the shortcut too if the app wants one.
-        Const-only."""
+        """Declare this action a standard command (actions only). The
+        declaration is uniform; PLACEMENT is each host's business. One
+        item per role, and a role NEVER invents a chord — spell the
+        shortcut too if the app wants one. Const-only."""
         _records().append(wire.tx_set_menu_role(self.id, name))
 
     def shortcut(self, spelling):
-        """The shortcut of any LEAF command — action, toggle, or one
-        option of a group (window-anchored only — the
-        root knows the retained item's anchor and judges). Canonicalized
-        by the binding's one parser (wire.canonicalize_shortcut); the
-        shortcut is another affordance of the same item — it fires the
-        SAME menu_activated occurrence as a click. Const-only."""
+        """The shortcut of any LEAF command (window-anchored only),
+        canonicalized by wire.canonicalize_shortcut. It fires the SAME
+        menu_activated occurrence as a click. Const-only."""
         _records().append(wire.tx_set_menu_shortcut(self.id, spelling))
 
     def append(self):
         """Reopen this RETAINED grouping node — the append-at-any-time
-        discipline: `with file.append():` declares more children
-        (kaya.item/kaya.toggle/...; kaya.option for a radio group).
-        The root re-validates each appended subtree in the item's real
-        anchor context (depth, shortcuts, duplicates)."""
+        discipline. The root re-validates each appended subtree in the
+        item's real anchor context."""
         return _MenuScope(("item", self.id), shortcut_ok=True, value=self)
 
 
 class ContextCatalog:
-    """A context catalog built free of any anchor
-    (kaya.context_catalog) for a template node: menu items are live
-    and shared across stamped copies, so the catalog is built HERE, in
-    the live zone, and node.context_menu(catalog) attaches it inside
-    the template. An item takes exactly one anchor — a second attach
-    raises."""
+    """A context catalog built free of any anchor, for a template node:
+    menu items are live and shared across stamped copies, so it is built
+    HERE, in the live zone, and node.context_menu(catalog) attaches it
+    inside the template. An item takes exactly ONE anchor."""
 
     def __init__(self):
         self._roots = []
@@ -2051,15 +1784,11 @@ class ContextCatalog:
 
 
 class _MenuScope(_Scope):
-    """A with-block whose creators seat under one menu anchor: a
-    grouping item (bar menus, submenus, radio groups, reopened
-    chains), a live widget's context anchor, or a free context
-    catalog. shortcut_ok carries the one anchor-dependent rule to
-    record time — a shortcut needs a window catalog as its native
-    dispatch home — with the root as the floor beneath. on_exit runs
-    after the block's children recorded — the radio value's seat: the
-    selected index must land AFTER the options it addresses (the root
-    judges the index against the option count at the record)."""
+    """A with-block whose creators seat under one menu anchor.
+    shortcut_ok carries the one anchor-dependent rule to record time — a
+    shortcut needs a window catalog as its native dispatch home. on_exit
+    runs after the block's children recorded, which is THE RADIO VALUE'S
+    SEAT: the selected index must land AFTER the options it addresses."""
 
     def __init__(self, seat, shortcut_ok, value=None, on_exit=None):
         self._seat = seat  # ("item", id) | ("widget", id) | ("free", catalog)
@@ -2122,14 +1851,9 @@ def _menu_seat(item):
 #: The closed standard-command vocabulary (DESIGN.md, Menus). macOS
 #: places this one in the application menu; every other host leaves the
 #: item where the app declared it.
-#: A NAMED VOCABULARY FOR THE CLOSED HALF, exactly as the menu roles
-#: are. The accept list is open-ended — a custom format id is any
-#: app-chosen string — so the four closed kinds cannot be a mask; but
-#: they can be spelled once here instead of quoted at every call site.
-#: A MISTYPED BARE STRING IS SILENT: it becomes a custom format id no
-#: clipboard will ever offer, so Paste stays dead and the paste hook
-#: never fires, with nothing to see anywhere. A custom id has no
-#: constant by nature — the app that defines it names it.
+#: A NAMED VOCABULARY FOR THE CLOSED HALF. A MISTYPED BARE STRING IS
+#: SILENT: it becomes a custom format id no clipboard will ever offer,
+#: so Paste stays dead and the paste hook never fires.
 ACCEPT_TEXT = "text"
 ACCEPT_HTML = "html"
 ACCEPT_IMAGE = "image"
@@ -2139,26 +1863,19 @@ ACCEPT_FILES = "files"
 ROLE_SETTINGS = "settings"
 
 #: The three clipboard commands. They lower to the platform's own, act
-#: on the FOCUSED widget, and work out their own enablement from what
-#: the clipboard offers and what that widget accepts.
+#: on the FOCUSED widget, and work out their own enablement.
 #:
 #: GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only the
-#: widget knows what is selected, so an app cannot assemble the payload
-#: for "copy the selected text" out of the data layer. Copy of a
-#: selection is therefore necessarily a command, and Paste is its
-#: mirror. `kaya.copy` and `kaya.read_clipboard` are for overriding
-#: that default and for targets with no native behaviour.
+#: widget knows what is selected. `kaya.copy` and `kaya.read_clipboard`
+#: are for overriding that default.
 ROLE_CUT = "cut"
 ROLE_COPY = "copy"
 ROLE_PASTE = "paste"
 
-#: The two history commands, on the same terms. They ask the FOCUSED
-#: widget first — a text field answers with its own typing history where
-#: it has one — and otherwise the window's ledger answers, which is what
-#: an editor user expects: mid-typing, Undo means the typing; after a
-#: structural action, Undo means the action (docs/undo-plan.md D6). An
-#: app that names no group still gets working text undo from these two,
-#: because the first tier is the platform's.
+#: The two history commands: they ask the FOCUSED widget FIRST and
+#: otherwise the window's ledger answers, so mid-typing Undo means the
+#: typing and after a structural action it means the action
+#: (docs/undo-plan.md D6).
 ROLE_UNDO = "undo"
 ROLE_REDO = "redo"
 
@@ -2177,10 +1894,8 @@ def _menu_require_catalog(scope):
 def item(label, shortcut=None, enabled=None, icon=None, symbol=None,
          primary=None, role=None, on_activate=None):
     """An action — a leaf command firing exactly one menu_activated
-    occurrence (menu click OR its shortcut: ONE occurrence, one
-    dispatch path). The handler rides the declaration; on a
-    template-node catalog it receives the stamped copy's keys as
-    arguments (`def on_remove(group, item):`)."""
+    occurrence, whether from a click or its shortcut. On a template-node
+    catalog the handler receives the stamped copy's keys as arguments."""
     it = _menu_create(wire.MENU_KIND_ACTION, label)
     scope = _menu_seat(it)
     if shortcut is not None:
@@ -2273,12 +1988,10 @@ def menu(label, enabled=None, icon=None, symbol=None):
 
 def radio_group(label, value=None, enabled=None, icon=None, symbol=None,
                 on_select=None):
-    """A NESTED radio group — the Choice contract inline, with the
-    platform's checkmark idiom: `with kaya.radio_group("Sort"):`
-    declares only kaya.option children. `value` is the selected
-    0-based option index (an int or a bound signal; programmatic
-    writes are quiet); on_select receives each USER pick's new index.
-    Bar-level groups are `app.radio_group`."""
+    """A NESTED radio group, declaring only kaya.option children.
+    `value` is the selected 0-based index; programmatic writes are quiet,
+    and on_select receives each USER pick's new index. Bar-level groups
+    are `app.radio_group`."""
     it = _menu_create(wire.MENU_KIND_RADIO_GROUP, label)
     scope = _menu_seat(it)
     if enabled is not None:
@@ -2298,11 +2011,9 @@ def radio_group(label, value=None, enabled=None, icon=None, symbol=None,
 
 def context_catalog():
     """Build a context catalog UNANCHORED — free root items for a
-    template-node anchor: `with kaya.context_catalog() as catalog:`.
-    Menu items are live and shared across stamped copies, so the
-    catalog is built here, in the live zone; node.context_menu(catalog)
-    attaches it inside the template, and each activation carries the
-    copy's key path. Context items take no shortcuts."""
+    template-node anchor. Menu items are live and shared across stamped
+    copies, so the catalog is built here, in the LIVE zone. Context items
+    take no shortcuts."""
     catalog = ContextCatalog()
     return _MenuScope(("free", catalog), shortcut_ok=False, value=catalog)
 
@@ -2317,21 +2028,14 @@ def window_size(width, height):
 
 
 def _accent(what, value):
-    """The wire field's domain, and NOTHING SEMANTIC: this clause is
-    Python's spelling of what the other bindings' u32 parameter TYPE
-    refuses at compile time, so the eight surfaces refuse the same
-    calls. A bool is excluded before int (which it subclasses) for the
-    same reason `_role_value` excludes it: `True` would silently become
-    the colour 0x000001, and an int outside u32 would otherwise reach
-    `struct.pack` and come back as "argument out of range" — true, and
-    about the wrong layer.
+    """The wire field's domain, and NOTHING SEMANTIC: Python's spelling
+    of what the other bindings' u32 parameter TYPE refuses at compile
+    time. A bool is excluded BEFORE int, which it subclasses: `True`
+    would silently become the colour 0x000001.
 
-    THE 24-BIT RULE IS DELIBERATELY NOT HERE. An in-u32 word with a
-    stray high byte (an ARGB constant pasted where 0xRRGGBB belongs)
-    dies at the ROOT's own wall, in the root's sentence, the same one
-    all eight languages get — a binding-local version of that refusal
-    was this file's alone for one fan-out and measured as the only
-    wall in eight (invariant 1).
+    THE 24-BIT RULE IS DELIBERATELY NOT HERE — it dies at the ROOT's
+    wall, in one sentence all eight languages get. A binding-local copy
+    of it was measured as the only wall in eight (invariant 1).
     """
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(
@@ -2355,38 +2059,23 @@ def brand_accent(seed, light=None, dark=None):
         kaya.brand_accent(0x3584E4)
         kaya.brand_accent(0x3584E4, dark=0x62A0EA)
 
-    ONE FUNCTION WHERE RUST HAS TWO (`brand_accent` and
-    `brand_accent_with`), because optional keyword arguments are how
-    Python spells an optional record — the semantics is the same one:
-    whatever an appearance does not state is filled from the seed.
+    Whatever an appearance does not state is filled from the seed.
 
-    A REQUEST, UNIFORMLY. A platform may let its user override the app's
-    accent, and macOS does today — an app accent applies only while the
-    user's system accent is multicolor. That is the semantics in every
-    binding rather than a macOS carve-out, so nothing here promises the
-    pixels; the app states a brand and the platform stays the judge of
-    its own chrome.
+    A REQUEST, UNIFORMLY: a platform may let its user override it, and
+    macOS does — an app accent applies only while the system accent is
+    multicolor. Nothing here promises the pixels.
 
     SET ONCE, BEFORE THE FIRST MOUNT: declare it inside the scene scope
-    (`with app.window():`) before the container that mounts. The root
-    refuses a second write and a late one — brand is identity, not state,
-    and a slot that could flip at runtime would promise a
-    theme-switching surface the vocabulary deliberately does not have.
+    before the container that mounts. The root refuses a second write and
+    a late one.
 
-    THE APP NEVER WRITES A FOREGROUND AND NEVER WRITES CONTRAST
-    VARIANTS. The core derives fill, on-fill, standalone and a
-    hover/pressed ramp per appearance (the danger-band clamp, D1) and
-    hands every backend values; an app-supplied foreground could be
-    illegible with nothing to catch it, and three of four platforms
-    compute or hard-code theirs anyway — so honoring one would be
-    honored on some platforms and ignored on others.
+    THE APP NEVER WRITES A FOREGROUND OR CONTRAST VARIANTS: the core
+    derives them per appearance, and an app-supplied foreground could be
+    illegible with nothing to catch it.
 
-    NO PER-PLATFORM MAP HERE, and the same absence in every binding:
-    D1's grammar allows one, the reference sugar (`Tx::brand_accent`)
-    does not spell it, and one binding growing a surface the other seven
-    lack is the divergence invariant 1 refuses. If it is ever admitted,
-    the Python spelling is a `per_platform=` mapping resolved through
-    `sys.platform` in this function — one function, no guest code.
+    NO PER-PLATFORM MAP HERE, and the same absence in every binding —
+    one binding growing a surface the other seven lack is the divergence
+    invariant 1 refuses.
     """
     mask = (1 if light is not None else 0) | (2 if dark is not None else 0)
     _records().append(wire.tx_set_brand_accent(
@@ -2399,19 +2088,13 @@ def brand_accent(seed, light=None, dark=None):
 
 class Platform:
     """WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
-    "platform"; docs/styling-plan.md Slice 2b): one entry per backend
-    roster row, closed. `brand_typeface` takes these as plain names too
-    — `{"linux": "DejaVu Serif"}` — the `role("heading")` /
-    `align="center"` spelling this binding uses for every closed set.
+    "platform"; docs/styling-plan.md Slice 2b), closed. `brand_typeface`
+    takes these as plain names too — `{"linux": "DejaVu Serif"}`.
 
     AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
-    `Platform.current()` and there will not be: a binding cannot answer
-    that question — `sys.platform` reads "linux" on Android exactly as
-    the JVM says "Linux" there — and it does not have to. Every row
-    travels to every backend and each backend picks its own, so the
-    question never arises on this side of the wire. A guest that branched
-    on its platform would also be a guest that ships different code per
-    platform, which is the thing kaya exists to not do.
+    `Platform.current()` and there will not be: `sys.platform` reads
+    "linux" on Android exactly as the JVM says "Linux" there. Every row
+    travels to every backend and each picks its own.
     """
 
     MAC = wire.PLATFORM_MAC
@@ -2421,13 +2104,10 @@ class Platform:
     ANDROID = wire.PLATFORM_ANDROID
 
 
-#: The name spelling of the same five, DERIVED from the class rather than
-#: typed a second time — `_SYMBOL_NAMES`' discipline one vocabulary over:
-#: two hand-written tables are two things to keep in step, and a drifted
-#: one hands a platform's family to a DIFFERENT platform with nothing
-#: raised anywhere and no lane able to see it (each backend reads only
-#: its own row). `sorted()` of this is what the refusals print, so an app
-#: that mistypes is told what it may say.
+#: The name spelling of the same five, DERIVED from the class rather
+#: than typed a second time: a drifted second table would hand a
+#: platform's family to a DIFFERENT platform, with nothing raised and no
+#: lane able to see it — each backend reads only its own row.
 _PLATFORM_NAMES = {
     name.lower(): value
     for name, value in vars(Platform).items()
@@ -2441,14 +2121,12 @@ _PLATFORM_NAME_OF = {value: name for name, value in _PLATFORM_NAMES.items()}
 
 def _platform_value(platform):
     """One platform tag, from either spelling, refused here if it is
-    neither — the `_role_value` wall one vocabulary over, and this
-    binding's spelling of what the other seven get from an enum TYPE at
-    compile time.
+    neither — this binding's spelling of what the other seven get from
+    an enum TYPE at compile time.
 
     WHAT STAYS THE ROOT'S, deliberately: naming one platform TWICE (two
-    spellings of the same row are two distinct dict keys, so a mapping
-    does not close that door) and an empty family on a row. Both die in
-    the root's own words, the same sentence all eight languages get.
+    spellings of the same row are two distinct dict keys) and an empty
+    family on a row.
     """
     if isinstance(platform, str):
         try:
@@ -2479,41 +2157,26 @@ def _platform_value(platform):
 class Asset:
     """One open asset: the bytes of a file the app's own BUILD shipped,
     held by the core and named the same way on five platforms
-    (docs/assets-plan.md, ratified 2026-08-18).
+    (docs/assets-plan.md).
 
         with kaya.asset("fonts/sora-wght.ttf") as font:
             kaya.brand_typeface("Sora", font=font)
 
     WHERE that name resolves is the core's knowledge and never the
-    app's: a directory in a repo checkout, a `.app` bundle's Resources,
-    an APK's packaged `assets/` which is not a directory and has no path
-    at all. Before this existed the rule was hand-written once per guest
-    language — eight environment-variable reads, eight repo-relative
-    defaults, eight sentences for one failure — and the Go copy read
-    `os.Getenv` from a c-shared library, where the environment is empty
-    forever.
+    app's: a repo directory, a `.app` bundle's Resources, an APK's
+    packaged `assets/`, which is not a directory and has no path at all.
 
-    TWO REDEMPTIONS, and the first is the interesting one:
+    TWO REDEMPTIONS: hand it to kaya (`font=asset`, `icon=asset` — the
+    bytes never enter Python, the core clones a refcount into the blob
+    table), or read it yourself (`bytes()`, `reader()`).
 
-    - HAND IT TO KAYA. `kaya.brand_typeface(family, font=asset)` and
-      `kaya.app_identity(name, icon=asset)` take an Asset, and the bytes
-      never enter Python: the core clones a refcount into the blob table
-      the wire already has.
-    - READ IT YOURSELF. `bytes()` copies them out and `reader()` wraps
-      that copy in a `BytesIO`, for an asset the app is the consumer of.
-
-    FILE-LIKE READING IS THIS BINDING'S SUGAR, with zero core surface:
-    `reader()` is a `BytesIO` the way Go's is a `bytes.Reader` and C#'s a
-    `MemoryStream`. THERE IS NO FILE DESCRIPTOR anywhere on the asset
-    surface — a descriptor was `PickedFile`'s necessity, because a
-    provider-opened file has no path behind it, and kaya resolved this
-    name and produced these bytes itself. Read-only structurally, too:
-    no call here takes a mode.
+    THERE IS NO FILE DESCRIPTOR anywhere on this surface and no call
+    takes a mode; the descriptor is `PickedFile`'s necessity, not this
+    one's.
 
     CLOSING. `close()` releases the core's handle, `with` closes on the
-    way out, and the finalizer closes an asset a guest forgot — so a
-    guest that never closes leaks nothing, and one that closes twice
-    pays nothing (the core's release is idempotent).
+    way out, and the finalizer closes an asset a guest forgot; the
+    core's release is idempotent.
     """
 
     __slots__ = ("_handle", "_name")
@@ -2530,14 +2193,9 @@ class Asset:
         return self._name
 
     def bytes(self):
-        """The asset's bytes, copied out of core memory.
-
-        Raises if the asset is closed, rather than answering `b""`: an
-        empty answer here would be indistinguishable from an asset that
-        legitimately had no bytes — except that none can, because the
-        core refuses a zero-byte asset at the open. Reading a released
-        handle is a bug in the guest, and it says so.
-        """
+        """The asset's bytes, copied out of core memory. RAISES if the
+        asset is closed rather than answering `b""`, which would be
+        indistinguishable from an asset with no bytes."""
         self._alive("bytes()")
         return runtime.asset_bytes(self._handle)
 
@@ -2548,16 +2206,11 @@ class Asset:
         return io.BytesIO(self.bytes())
 
     def _blob(self):
-        """THE BLOB REDEMPTION, used by the two consumers that take an
-        Asset. Registers the core's own bytes into the pending table and
-        returns the handle the next submit consumes — no copy, and
-        nothing passes through Python.
-
-        PRIVATE, because the redemption is the binding's business and
-        not the guest's: `brand_typeface(font=...)` and
-        `app_identity(icon=...)` are the whole offer, and they are the
-        same offer in all nine languages.
-        """
+        """THE BLOB REDEMPTION: register the core's own bytes into the
+        pending table and return the handle the next submit consumes — no
+        copy, nothing through Python. PRIVATE, because
+        `brand_typeface(font=...)` and `app_identity(icon=...)` are the
+        whole offer."""
         self._alive("a blob redemption")
         return runtime.asset_blob(self._handle)
 
@@ -2589,10 +2242,9 @@ class Asset:
         return False
 
     def __del__(self):
-        # The forgetting guest's net. Interpreter teardown can already
-        # have torn down what close() reaches, and a finalizer that
-        # raises prints an unraisable-exception warning nobody asked
-        # for, so this one is deliberately silent.
+        # The forgetting guest's net, deliberately SILENT: interpreter
+        # teardown can already have torn down what close() reaches, and a
+        # raising finalizer prints an unraisable-exception warning.
         try:
             self.close()
         except Exception:
@@ -2611,23 +2263,13 @@ def asset(name):
 
     Returns an `Asset`. Callable anywhere, including outside a
     transaction: opening one queues no record and touches no ambient
-    state, so it is not the app thread's business the way a widget is.
+    state.
 
-    A MISS RAISES, WITH THE CORE'S SENTENCE AND NOTHING ADDED. A
-    missing, unreadable, empty or malformed-name asset is a scene error
-    in every binding — the wall an app hits at startup, before it can
-    have drawn anything — and each raises in its own idiom: a panic in
-    Rust, an `InvalidOperationException` in C#, a `RuntimeError` here.
-    Every one of them carries `kaya_asset_why_not`'s sentence VERBATIM.
-    THIS BINDING WRITES NO PROSE OF ITS OWN for that failure, and it is
-    a rule rather than a habit: one author for the diagnostic means the
-    words a Python guest is handed and the words a Haskell guest is
-    handed are the same bytes, and one scene can freeze them.
-
-    That sentence names what the process measured — the name asked for,
-    the census of what the package does carry, the place it resolved and
-    the route that chose it — because a why-not may only print what it
-    went and got.
+    A MISS RAISES, WITH THE CORE'S SENTENCE AND NOTHING ADDED. THIS
+    BINDING WRITES NO PROSE OF ITS OWN for that failure, and it is a
+    rule rather than a habit: the words a Python guest is handed and the
+    words a Haskell guest is handed are the same bytes, so one scene can
+    freeze them.
 
     EACH CALL READS. No cache, no watch, no reload.
     """
@@ -2642,11 +2284,9 @@ def asset(name):
         return Asset(handle, name)
     sentence = runtime.asset_miss_sentence(name)
     raise RuntimeError(sentence or (
-        # Reachable only if the two calls disagree, which they can do
-        # because they are two calls: the open answered a miss and the
-        # why-not answered that it resolves. Both facts were measured;
-        # this binding has no third one to offer and does not invent a
-        # cause for them.
+        # Reachable only if the two calls disagree: the open answered a
+        # miss and the why-not answered that it resolves. Both facts were
+        # measured; this binding invents no third.
         f"kaya: asset({name!r}) did not open, and the core's own why-not "
         "answers that it resolves — those two facts were measured a "
         "moment apart, and this binding has nothing further to report"
@@ -2657,30 +2297,12 @@ def asset_miss_sentence(name):
     """Why `asset(name)` would fail — the sentence it would raise, handed
     over without raising. `""` means the name resolves.
 
-    WHY THIS EXISTS WHEN THE RAISE ALREADY CARRIES IT. Unwinding is not
-    one semantics in nine languages, and a conformance scene has to
-    observe this sentence on five platforms. Python catches a
-    `RuntimeError` happily; Swift's miss is a `fatalError`, which traps
-    rather than unwinding, so a Swift guest cannot catch a miss at all. A
-    total query has no such split — every binding answers the same string
-    the same way, and the scene can freeze it.
+    Line 1 (name, rule, census) is the same on every platform and is the
+    line a scene freezes; line 2 names the resolved place, which three
+    platforms spell three ways.
 
-    THE SAME SENTENCE, NOT A SECOND ONE. This and `asset`'s raise both
-    hand back the core's bytes, so what a scene freezes is what an app's
-    user would have been shown.
-
-    NAMED FOR THE CARRYING, not for the diagnosing: the sentence has one
-    author (`asset_why_not` in crates/kaya/src/assets.rs), and a `why_not`
-    here would put a diagnostic's name on a call that only copies bytes.
-
-    TWO LINES. Line 1 — the name, the rule it broke, and the census of
-    what the package carries — is the same on every platform and is the
-    line a scene freezes. Line 2 names the resolved place and the route
-    that chose it, which a bundle, a device directory and a repo checkout
-    spell three different ways.
-
-    It measures rather than predicts: each call reads (no cache, no watch,
-    no reload), so `""` is a fact about the moment it was asked.
+    Why a query and not just the raise: docs/deferred.md, the assets
+    entry.
     """
     if not isinstance(name, str):
         raise TypeError(
@@ -2694,13 +2316,11 @@ def asset_miss_sentence(name):
 
 def _blob_of(source):
     """The one place a blob-taking consumer turns its argument into a
-    handle: an `Asset` redeems (no copy, nothing through Python), and
-    bytes register the way they always have (one copy into core memory).
+    handle: an `Asset` redeems, bytes register.
 
-    ONE HELPER RATHER THAN TWO BRANCHES AT EACH CONSUMER, because the
-    two consumers must agree: `font=` and `icon=` are the same offer in
-    two records, and a per-callsite `isinstance` is how one of them
-    would quietly grow a third behaviour.
+    ONE HELPER RATHER THAN TWO BRANCHES AT EACH CONSUMER, because the two
+    must agree: a per-callsite `isinstance` is how one of them would
+    quietly grow a third behaviour.
     """
     return source._blob() if isinstance(source, Asset) \
         else runtime.register_blob(source)
@@ -2710,16 +2330,10 @@ def _typeface_family(what, family):
     """The wire field's domain and NOTHING SEMANTIC: this binding's
     spelling of the `&str` the other seven take at compile time.
 
-    THE EMPTY FAMILY IS DELIBERATELY NOT REFUSED HERE, and neither is a
-    family nothing has installed. The first is a real author error with
-    a real sentence, and that sentence is the ROOT's ("an app that wants
-    the platform's own typeface declares none at all") so all eight
-    languages read the same one — a binding-local copy of a root wall was
-    measured as the only wall in eight for the accent's 24-bit rule
-    (invariant 1), and this file does not repeat that. The second is not
-    answerable here at all: whether "Georgia" exists is a question about
-    the machine the app will RUN on, which the backend asks at lowering
-    time and reports through `expect_typeface`'s resolved read.
+    THE EMPTY FAMILY IS DELIBERATELY NOT REFUSED HERE — that sentence is
+    the ROOT's, so all eight languages read the same one (invariant 1).
+    Neither is a family nothing has installed: whether "Georgia" exists
+    is a question about the machine the app will RUN on.
     """
     if not isinstance(family, str):
         raise TypeError(
@@ -2739,46 +2353,26 @@ def brand_typeface(family, platforms=None, font=None):
         kaya.brand_typeface("Georgia", {kaya.Platform.LINUX: "DejaVu Serif"})
         kaya.brand_typeface("Kaya Sans", font=FONT_TTF_BYTES)
 
-    ONE FUNCTION WHERE RUST HAS TWO (`brand_typeface` and
-    `brand_typeface_with`), which is `brand_accent`'s precedent verbatim:
-    optional keyword arguments are how Python spells an optional record,
-    and the semantics is the one Rust's second function has.
+    THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights and
+    the whole type ramp stay the platform's, which is what makes the swap
+    safe. Emphasis is the role tier's, never a font size.
 
-    THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights,
-    metrics and the whole type ramp stay the platform's. Substituting a
-    family INTO the platform's own ramp is what makes the swap safe, and
-    it is the role tier — `.role(kaya.Role.HEADING)` — that carries
-    emphasis, never a font size.
+    THE PER-PLATFORM ROWS TRAVEL UNRESOLVED: this binding cannot know its
+    platform, but every lowering IS one, so each backend picks its own
+    row. An unnamed platform falls back to `family`.
 
-    THE PER-PLATFORM ROWS TRAVEL UNRESOLVED, unlike the accent's
-    per-platform values, and that asymmetry is the design: this binding
-    cannot know its platform, but every lowering IS one, so each backend
-    picks its own row out of the mapping and no platform id is ever
-    needed on this side. Rows are keyed by `kaya.Platform` members or
-    their names; an unnamed platform falls back to `family`.
+    FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: the backend
+    hands them to its platform's app-font API, reads back the family the
+    registration produced, and the NAME machinery takes over unchanged.
+    A registered blob's own family wins over `family` on that backend.
 
-    FONT BYTES RIDE THE BLOB CHANNEL, register-then-resolve: `font=`
-    takes a font FILE's bytes (one copy into core memory, the handle
-    consumed by the next submit, exactly like `kaya.image(source=...)`).
-    The backend hands them to its platform's app-font API, reads back the
-    family name the registration produced, and the NAME machinery takes
-    over unchanged — so both forms share one resolution, one observation
-    and one fallback. A registered blob's own family wins over `family`
-    on the backend that registered it.
-
-    SET ONCE, BEFORE THE FIRST MOUNT: declare it inside the scene scope
-    (`with app.window():`) before the container that mounts. The root
-    refuses a second write and a late one — brand is identity, not
-    state, and a slot that could flip at runtime would promise the
-    theme-switching surface the vocabulary deliberately does not have.
+    SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write and
+    a late one.
 
     THE RISK IS THE SILENT FALLBACK, which is why nothing here promises
     the pixels: every platform's font API renders SOMETHING for a family
-    it does not have, so a typo is invisible to every other observation
-    kaya owns. Each backend gates on the family being PRESENT and
-    otherwise leaves the platform's own typeface in place, and
-    `expect_typeface` reads the RESOLVED family off the real text system
-    rather than echoing this request back.
+    it does not have, so `expect_typeface` reads the RESOLVED family off
+    the real text system rather than echoing this request back.
     """
     pairs = []
     if platforms is not None:
@@ -2812,38 +2406,26 @@ def brand_typeface(family, platforms=None, font=None):
 
 def app_identity(name, icon=None):
     """DECLARE the app's identity (docs/app-identity-plan.md): the name
-    it goes by and the picture that stands for it, as the bytes of one
-    image file.
+    it goes by and the picture that stands for it.
 
         kaya.app_identity("Aurora Notes", icon=PNG_BYTES)
         kaya.app_identity("Aurora Notes")
 
-    ONE FUNCTION WHERE RUST HAS TWO (`app_identity` and
-    `app_identity_named`), which is `brand_typeface`'s precedent one verb
-    over: an optional keyword argument is how Python spells an optional
-    record, and the semantics is the one Rust's second function has —
     `icon=None` declares a name and leaves every platform's own mark in
     place, honestly and visibly.
 
     ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
-    tile, the Windows taskbar/alt-tab icon and the caption's mark, and an
-    X11 window's icon; the same FILE, read at build time, becomes the
-    Android launcher icon and the iOS Home Screen icon. Send a PNG: each
-    lowering converts, and no platform-specific artwork rides the wire.
+    tile, the Windows taskbar icon and an X11 window's icon; the same
+    FILE, read at build time, becomes the Android launcher and iOS Home
+    Screen icons. Send a PNG: each lowering converts.
 
-    SET ONCE, BEFORE THE FIRST MOUNT: declare it inside the scene scope
-    (`with app.window():`) before the container that mounts. The root
-    refuses a second write and a late one — identity is not state, and a
-    slot that could flip at runtime would promise the identity-switching
-    surface the vocabulary deliberately does not have. An empty name is
-    refused there too: an app that wants the platform's own identity
-    declares none at all.
+    SET ONCE, BEFORE THE FIRST MOUNT. The root refuses a second write, a
+    late one, and an empty name.
 
     THE BYTES ARE NEVER INSPECTED between here and the platform's own
-    decoder. Whether a blob is an image is a question only that decoder
-    can answer, so bytes that are not one leave every platform's default
-    in place — which is why `expect_app_icon` reads what the DECODER
-    produced rather than echoing what was sent.
+    decoder, so bytes that are not an image leave every platform's
+    default in place — which is why `expect_app_icon` reads what the
+    DECODER produced rather than echoing what was sent.
     """
     if icon is not None and not isinstance(icon, (Asset, bytes, bytearray,
                                                   memoryview)):
@@ -2879,30 +2461,18 @@ def undoable(label, window=0):
     (docs/undo-plan.md D2).
 
     The name is what the step is called; everything else in this
-    transaction is what the step did. The core keeps the inverse of what
-    the batch did to signals and collections and hands it back through
-    the window's `on_undone`, so there is no undo stack to write, no
-    command objects, and no re-run of any handler.
+    transaction is what the step did. The core keeps the inverse and
+    hands it back through the window's `on_undone`, so there is no undo
+    stack to write and no re-run of any handler.
 
     THE AMBIENT TIER SPELLS IT AS A CALL, not as a keyword on
-    `app.build()`, because a handler does not open its own transaction —
-    the binding does (`App._dispatch`), and a second scope inside a
-    handler raises. The label is usually computed in the handler
-    ("add milk"), so it could not ride the declaration either. The
-    marker goes AT THE HEAD of the batch wherever this call sits in the
-    body: a handler naturally builds first and knows what the step was
-    afterwards, and the wire's head-of-batch rule must not turn that
-    into a footgun.
+    `app.build()`, because a handler does not open its own transaction.
+    The marker goes AT THE HEAD of the batch wherever this call sits.
 
     THE UNDOABLE SET IS THE REACTIVE HALF (D4): signal writes and the
-    five collection deltas, whose inverse the core derives from state it
-    already keeps. Pure effects (focus) ride along and are simply not
-    restored — undo restores state, not where you were looking (A2).
-    Anything else in the same transaction — `clear`, create/destroy,
-    structure, const props, commands, dialog and clipboard requests — is
-    REFUSED at apply, loudly, naming the op, and the scene is left
-    exactly as it was. An app that wants a widget property undoable
-    binds it to a signal.
+    five collection deltas. Pure effects (focus) ride along and are not
+    restored. Anything else is REFUSED at apply, loudly, naming the op.
+    An app that wants a widget property undoable binds it to a signal.
     """
     text = _text_value("undoable", label)
     if not text:
@@ -2921,6 +2491,26 @@ def undoable(label, window=0):
     records.insert(0, wire.tx_undo_group(int(window), text))
 
 
+@dataclasses.dataclass(frozen=True)
+class Capabilities:
+    """WHAT THIS HOST CAN DO (crates/kaya/src/app.rs carries the
+    canonical note). Named booleans, never the bits: the core is free to
+    renumber. CAPABILITIES INFORM; WALLS REFUSE — a False here does not
+    make a call illegal, the root does, but it lets a guest ask first.
+    """
+
+    #: The host can materialize a surface beside the primary one
+    #: (`kaya.create_window`). False on iOS and Android, whose systems
+    #: own surface geometry; there `create_window` aborts at the root.
+    aux_windows: bool
+
+
+def capabilities():
+    """This host's capabilities, constant for the life of the process."""
+    bits = runtime.capability_bits()
+    return Capabilities(aux_windows=bool(bits & runtime.CAP_AUX_WINDOWS))
+
+
 def signal(initial):
     handle = Signal(_app._next("signal"), initial)
     # By id, for the undo path: a restored value arrives as a signal id
@@ -2936,10 +2526,8 @@ def collection(record_type=None):
     dataclass IS the schema (wire-typed fields, declaration order), and
     `element.field` / `patch(key, field=...)` project it."""
     handle = Collection(_app._next("collection"), record_type)
-    # THE UNDO PATH ARRIVES BY ID, not by handle: an `undone` payload
-    # names the collections it restored the way the core knows them, so
-    # the binding needs the way back. Registered here because this is
-    # the one place a collection is born.
+    # THE UNDO PATH ARRIVES BY ID, not by handle, so the binding needs
+    # the way back. Registered here, the one place a collection is born.
     _app._collections[handle._id] = handle
     _records().append(
         wire.tx_create_collection(handle._id,
@@ -2986,17 +2574,13 @@ def _align_value(align):
 
 class Role:
     """The role enum: SEMANTIC EMPHASIS, the closed vocabulary
-    (docs/styling-plan.md D4). `_Handle.role` — a live widget's and a
-    template node's alike — also accepts these names as plain strings,
-    `role("heading")`, the Pythonic spelling exactly as `align=` does.
+    (docs/styling-plan.md D4). `_Handle.role` also accepts these names as
+    plain strings, `role("heading")`.
 
-    Three, and what each is for: DESTRUCTIVE marks the press that
-    destroys something (the platform's own destructive affordance — red
-    text on Apple, an error-role container on Material,
-    `.destructive-action` on GTK); PROMINENT marks THE primary action,
-    one per dialog's worth of emphasis; HEADING marks a text hierarchy
-    heading, which is both the platform's heading style and the
-    accessibility heading trait."""
+    DESTRUCTIVE marks the press that destroys something; PROMINENT marks
+    THE primary action, one per dialog's worth of emphasis; HEADING marks
+    a text hierarchy heading, which is both the platform's heading style
+    and the accessibility heading trait."""
 
     DESTRUCTIVE = wire.ROLE_DESTRUCTIVE
     PROMINENT = wire.ROLE_PROMINENT
@@ -3014,10 +2598,8 @@ def _role_value(role):
     """One role, from either spelling, refused here if it is neither.
 
     THE CLOSED SET IS CHECKED IN THE BINDING because Python has no enum
-    to close it with: the seven other bindings make a role that is not a
-    role fail to compile, and this is where that becomes a raise. What
-    stays the ROOT's is the pairing — whether this role fits the kind it
-    was written on — which no handle here knows.
+    to close it with. What stays the ROOT's is the PAIRING — whether this
+    role fits the kind it was written on — which no handle here knows.
     """
     if isinstance(role, str):
         try:
@@ -3045,31 +2627,22 @@ def _role_value(role):
 
 class Symbol:
     """THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
-    docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
+    docs/styling-plan.md D6).
 
     An app names a CONCEPT and each backend draws its own platform's
-    glyph for it: `Symbol.COPY` is `doc.on.doc` on Apple, `content_copy`
-    on Material, `edit-copy-symbolic` on Adwaita, and no single asset is
-    right on all three — SF Symbols are license-locked to Apple
-    platforms, so a shared one is not even legal. The `icon=` blob slot
-    stays beside this one for genuinely app-specific art.
-
-    Closed, and small on purpose — the `Role` trick one tier over, and
-    spelled the same way here: every call also takes the plain name
-    (`symbol("copy")`), the Pythonic spelling `align=` and `role()`
-    already use.
+    glyph — SF Symbols are license-locked to Apple, so a shared asset is
+    not even legal. The `icon=` blob slot stays beside this one for
+    app-specific art. Every call also takes the plain name
+    (`symbol("copy")`).
 
     THE VALUES ARE WIRE VALUES AND ARE APPEND-ONLY. A new concept takes
     21; renumbering silently redraws every shipped app's menus.
 
-    What the entries mean where a word could go two ways: DELETE
-    destroys (the wastebasket idiom) while REMOVE takes an item out of a
-    list; CLOSE dismisses (the ✕ idiom) and is not DELETE; DONE is the
-    checkmark; MORE is the overflow ellipsis; STAR is favourite; PERSON
-    is a person or account. BACK and FORWARD are the direction-relative
-    pair — every platform mirrors them under a right-to-left layout, so
-    they mean BACKWARD and FORWARD in reading order, never "left" and
-    "right"."""
+    Where a word could go two ways: DELETE destroys (the wastebasket)
+    while REMOVE takes an item out of a list; CLOSE dismisses (the ✕) and
+    is not DELETE; DONE is the checkmark; MORE is the overflow ellipsis.
+    BACK and FORWARD mean BACKWARD and FORWARD in READING ORDER, never
+    left and right — every platform mirrors them under RTL."""
 
     ADD = wire.SYMBOL_ADD
     REMOVE = wire.SYMBOL_REMOVE
@@ -3093,11 +2666,10 @@ class Symbol:
     HOME = wire.SYMBOL_HOME
 
 
-#: The name spelling of the same twenty. Derived from the class rather
-#: than typed a second time: two hand-written tables are two things to
-#: keep in step, and the failure of a drifted one is that `symbol("home")`
-#: draws the wrong concept with nothing raised anywhere. `sorted()` of
-#: this is what the refusals print, so the app is told what it MAY say.
+#: The name spelling of the same twenty, DERIVED from the class rather
+#: than typed a second time: a drifted second table draws the wrong
+#: concept with nothing raised. `sorted()` of this is what the refusals
+#: print.
 _SYMBOL_NAMES = {
     name.lower(): value
     for name, value in vars(Symbol).items()
@@ -3106,15 +2678,11 @@ _SYMBOL_NAMES = {
 
 
 def _symbol_value(symbol):
-    """One symbol, from either spelling, refused here if it is neither —
-    the `_role_value` shape one vocabulary over.
+    """One symbol, from either spelling, refused here if it is neither.
 
     THE CLOSED SET IS CHECKED IN THE BINDING because Python has no enum
-    to close it with: the seven other bindings make a symbol that is not
-    a symbol fail to compile, and this is where that becomes a raise.
-    The ROOT keeps its own wall (`check_symbol`, crates/kaya/src/scene.rs)
-    and keeps the PAIRING too — a symbol on a separator, or bound to a
-    signal — which no handle here knows.
+    to close it with. The ROOT keeps its own wall and the PAIRING too — a
+    symbol on a separator, or bound to a signal.
     """
     if isinstance(symbol, str):
         try:
@@ -3125,9 +2693,8 @@ def _symbol_value(symbol):
                 f"{symbol!r}"
             ) from None
     # bool BEFORE int, which it subclasses: `symbol(True)` would
-    # otherwise read as 1, the `add` glyph, out of a value that meant
-    # nothing. A Signal lands in the same clause — a symbol is a fixed
-    # concept, declared once, so no binding binds one to a signal.
+    # otherwise read as 1, the `add` glyph. A Signal lands in the same
+    # clause — no binding binds a symbol to one.
     if isinstance(symbol, bool) or not isinstance(symbol, int):
         raise TypeError(
             f"kaya: symbol takes kaya.Symbol.COPY or its name, not "
@@ -3180,11 +2747,10 @@ def scroll(grow=None):
 
 
 def grid(columns, grow=None, spacing=None, inset=None):
-    """A grid container: `with kaya.grid(2):` parents its children,
-    laying them out row-major into `columns` columns — each column
-    takes its NATURAL width, aligned across rows (the thing nested
-    rows cannot express). `spacing` is the inter-cell gap on both
-    axes; `inset` its own padding inside its bounds."""
+    """A grid container laying its children out row-major into `columns`
+    columns — each column at its NATURAL width, aligned across rows.
+    `spacing` is the inter-cell gap on both axes; `inset` its own
+    padding."""
     handle = _widget(wire.KIND_GRID)
     _records().append(wire.tx_set_columns(handle.id, float(columns)))
     _set_grow(handle, grow)
@@ -3203,11 +2769,9 @@ def spacer(grow=1.0):
 
 
 def column(grow=None, spacing=None, align=None, inset=None):
-    """A column container: `with kaya.column():` parents everything
-    declared inside it. `grow` is its flex weight within the enclosing
-    container; `spacing` its inter-child gap (main axis, DIP; the
-    normalized default is 8); `inset` its own padding between its
-    bounds and those children (the window inset one level down)."""
+    """A column container: parents everything declared inside it. `grow`
+    is its flex weight; `spacing` its inter-child gap (main axis, DIP,
+    default 8); `inset` its own padding."""
     handle = _widget(wire.KIND_COLUMN)
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
@@ -3219,14 +2783,12 @@ def column(grow=None, spacing=None, align=None, inset=None):
 def button(text=None, bind=None, on_click=None, grow=None):
     """A button; `text` for a constant caption, `bind` for one the row
     supplies — a Signal, the enclosing For's element, or one of its
-    fields (`row.title`), which is the "Delete <that row's title>" shape
-    a list of per-row actions wants.
+    fields (`row.title`).
 
-    `bind` IS TEMPLATE-ONLY. A bound caption is a template-zone
+    `bind` IS TEMPLATE-ONLY: a bound caption is a template-zone
     constructor in all eight bindings and exists in no live zone
-    (docs/tpl-props-plan.md F5); the other seven refuse it live by
-    having no such live overload, and Python's transaction is ambient —
-    one function serves both zones — so it checks the zone instead.
+    (docs/tpl-props-plan.md F5). Python's transaction is ambient, so one
+    function serves both zones and it checks the ZONE instead.
     """
     handle = _widget(wire.KIND_BUTTON)
     if text is not None:
@@ -3248,10 +2810,9 @@ def button(text=None, bind=None, on_click=None, grow=None):
                 wire.tx_bind_text_element(handle.id, bind._level(), bind._index)
             )
         else:
-            # label's floor, for label's reason: the other seven type
-            # this argument, so a source they do not recognize fails to
-            # compile, and Python's equivalent of not compiling is
-            # raising here rather than binding nothing in silence.
+            # label's floor, for label's reason: Python's equivalent of
+            # not compiling is raising here, rather than binding nothing
+            # in silence.
             raise TypeError(
                 f"kaya: button bind takes a Signal, the enclosing For's "
                 f"element, or one of its fields (row.title), not "
@@ -3265,12 +2826,9 @@ def button(text=None, bind=None, on_click=None, grow=None):
 
 
 def row(grow=None, spacing=None, align=None, inset=None):
-    """A row container: column turned sideways; `with kaya.row():`
-    parents everything declared inside it. `grow` is its flex weight
-    within the enclosing container; `spacing` its inter-child gap
-    (main axis, DIP; the normalized default is 8); `inset` its own
-    padding between its bounds and those children (the window inset one
-    level down)."""
+    """A row container: column turned sideways. `grow` is its flex
+    weight; `spacing` its inter-child gap (main axis, DIP, default 8);
+    `inset` its own padding."""
     handle = _widget(wire.KIND_ROW)
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
@@ -3327,14 +2885,11 @@ def progress(value=None, indeterminate=None, grow=None):
 
 
 def select(options, selected=0, on_select=None, grow=None):
-    """A dropdown select over fixed options. Each option becomes a
-    label child (labels only, scene-checked; append-only — options are
-    the select's data, not harness-addressable labels). `selected` is
-    the initial 0-based index (an int or a Signal; domain-checked at
-    the root against the option count). Uncontrolled, like the slider:
-    the widget owns its selection and reports each USER pick to
-    `on_select` (the new 0-based index as an int; programmatic writes
-    never echo)."""
+    """A dropdown select over fixed options; each becomes a label child.
+    `selected` is the initial 0-based index, domain-checked at the root.
+    UNCONTROLLED, like the slider: the widget owns its selection and
+    reports each USER pick to `on_select`; programmatic writes never
+    echo."""
     handle = _widget(wire.KIND_SELECT)
     with _Container(handle):
         for option in options:
@@ -3373,11 +2928,10 @@ def radio(options, selected=0, on_select=None, grow=None):
 
 
 def slider(value=None, min=None, max=None, on_change=None, grow=None):
-    """A slider over a numeric range. Uncontrolled, like the entry: the
-    widget owns its position and reports each change to `on_change`
-    (the new value as a float; template copies get the stamped keys
-    first). `value` sets the position (a float, a Signal, or an element
-    field); `min`/`max` the range, 0..1 unless set."""
+    """A slider over a numeric range. UNCONTROLLED, like the entry: the
+    widget owns its position and reports each change to `on_change`, with
+    template copies getting the stamped keys first. `min`/`max` default
+    to 0..1."""
     handle = _widget(wire.KIND_SLIDER)
     if min is not None:
         _records().append(wire.tx_set_min(handle.id, min))
@@ -3442,13 +2996,10 @@ def label(text=None, bind=None, grow=None):
             wire.tx_bind_text_element(handle.id, bind._level(), bind._index)
         )
     elif bind is not None:
-        # The ladder needs a floor. The other seven bindings type this
-        # argument, so a source they do not recognize fails to compile;
-        # Python's equivalent of not compiling is raising here, and
-        # without this arm the call bound NOTHING and said nothing —
-        # `kaya.label(bind=el)` inside a `cases.case(...)` arm hands over
-        # the refined proxy, which is not an `Element`, so it declared a
-        # blank label and the row's text simply never appeared.
+        # The ladder needs a FLOOR: without this arm the call binds
+        # NOTHING and says nothing — `kaya.label(bind=el)` inside a
+        # `cases.case(...)` arm hands over the refined proxy, which is
+        # not an `Element`.
         raise TypeError(
             f"kaya: label bind takes a Signal, the enclosing For's element, "
             f"or one of its fields (el.title), not {type(bind).__name__} — "
@@ -3459,12 +3010,10 @@ def label(text=None, bind=None, grow=None):
 
 
 def image(source=None, grow=None):
-    """An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
-    decodes natively, and decode failure renders the placeholder, never
-    a crash. `source` is the encoded bytes — one registration copy into
-    core memory; the handle is consumed by the next submit, and the
-    guest's bytes are free to drop the moment the call returns — or a
-    Signal, or an element field (`row.pic`) inside a template."""
+    """An image displaying encoded bytes: the toolkit decodes natively,
+    and a decode failure renders the placeholder, never a crash. `source`
+    is the encoded bytes (one registration copy into core memory,
+    consumed by the next submit), a Signal, or an element field."""
     handle = _widget(wire.KIND_IMAGE)
     if source is not None:
         if isinstance(source, Signal):
@@ -3510,10 +3059,8 @@ def when(sig):
 def _window_props(window, title, width, height, veto_close, dirty,
                   list_detail, sections_presentation, inset):
     """The window construct's props, emitted into the ambient
-    transaction — ONE place, so the scene scope and the live call
-    cannot drift apart. The scope calls it from `__enter__` (right
-    after any create_window); `App.window` calls it directly when a
-    transaction is already open."""
+    transaction — ONE place, so the scene scope and the live call cannot
+    drift apart."""
     records = _records()
     if title is not None:
         records.append(wire.tx_set_window_title(window, str(title)))
@@ -3529,11 +3076,9 @@ def _window_props(window, title, width, height, veto_close, dirty,
     if sections_presentation is not None:
         records.append(wire.tx_set_window_sections_presentation(
             window, int(sections_presentation)))
-    # LAYOUT, and the one number here the root range-checks: see
-    # App.window for what it means. float() so the value lands as the F64
-    # the window prop is typed as — an int would arrive as I64 and the
-    # root would refuse the TYPE, which is a true complaint about the
-    # wrong mistake.
+    # LAYOUT, and the one number here the root range-checks. float() so
+    # it lands as the F64 the prop is typed as — an I64 would be refused
+    # for its TYPE, a true complaint about the wrong mistake.
     if inset is not None:
         records.append(wire.tx_set_window_inset(window, float(inset)))
     if width is not None or height is not None:
@@ -3548,11 +3093,9 @@ class _LiveWindow:
     props are already in the ambient transaction, so there is nothing
     left to enter.
 
-    It exists to make the other spelling's mistake loud. `with
-    app.window(dirty=True):` inside a handler would otherwise reach
-    `_TxScope.__enter__` and report "transactions do not nest", which is
-    true and unhelpful: the answer is not to find somewhere else to put
-    the transaction, it is that the live form takes no `with` at all.
+    It exists to make the other spelling's mistake LOUD: `with
+    app.window(dirty=True):` inside a handler would otherwise report
+    "transactions do not nest", which is true and unhelpful.
     """
 
     def __enter__(self):
@@ -3586,10 +3129,7 @@ class _TxScope:
         self._height = height
         self._window = int(window)
         # The window a SECTION scope adds its section into — 0 for the
-        # primary, an aux window's id otherwise. The other six bindings
-        # already spell this (add_section_in / a window: argument); it
-        # arrived here when the sidebar-coverage scene put sections in
-        # an aux window and this binding could not say so (2026-08-15).
+        # primary, an aux window's id otherwise.
         self._host_window = int(host_window)
         self._create = create
         self._veto_close = veto_close
@@ -3608,16 +3148,11 @@ class _TxScope:
         self._symbol = symbol
 
     def __del__(self):
-        # A construct that was BUILT AND NEVER ENTERED emitted nothing —
-        # its props went nowhere and no error said so. That silence is
-        # reachable only from the live spelling's shape: inside a
-        # transaction `app.window(dirty=True)` is a real call, and
-        # outside every transaction the same line is this object, which
-        # nobody enters. In CPython the temporary dies on the statement
+        # A construct BUILT AND NEVER ENTERED emitted nothing, and no
+        # error said so. In CPython the temporary dies on the statement
         # itself, so the complaint lands at the mistake rather than at
         # exit. Guarded because __del__ can run while the interpreter is
-        # tearing stderr down, and a stream error here would print a
-        # second, less useful message on top of this one.
+        # tearing stderr down.
         if self._entered:
             return
         try:
@@ -3662,14 +3197,11 @@ class _TxScope:
                 self._app._section_selected[self._window] = self._on_selected
             return self
         if self._push:
-            # A navigation entry's scope: push onto the primary's
-            # stack, entry props, and the body's root mounts INTO the
-            # entry on exit (self._window carries the entry's surface
-            # id — entries share the namespace with windows). Unlike
-            # every other scope this one NESTS inside an open
-            # transaction: pushes happen from click handlers, which
-            # already run inside the ambient build — the records join
-            # the same commit, and only the root-tracking is scoped.
+            # A navigation entry's scope: push, entry props, and the
+            # body's root mounts INTO the entry on exit. UNLIKE EVERY
+            # OTHER SCOPE this one NESTS inside an open transaction —
+            # pushes happen from click handlers — so the records join the
+            # same commit and only the root-tracking is scoped.
             self._nested = _tx is not None
             if not self._nested:
                 _tx = []
@@ -3711,11 +3243,9 @@ class _TxScope:
         global _tx, _recording, _journal, _pending_root
         if self._section or self._push:
             # Mount the scope's root into the entry, restore the outer
-            # scope's root-tracking, and — when the scope opened its
-            # own transaction (top-level use) — submit it. Inside a
-            # handler the ambient build owns the commit (and the
-            # rollback: a later exception drops these records with the
-            # rest of the transaction).
+            # scope's root-tracking, and submit only if this scope opened
+            # its own transaction. Inside a handler the ambient build
+            # owns the commit and the rollback.
             root = _pending_root
             _recording, _pending_root = self._outer
             if exc_type is not None:
@@ -3744,11 +3274,8 @@ class _TxScope:
         # already follows).
         _menu_scopes[:] = []
         if exc_type is not None or abandoned:
-            # Any abort (a raising body, a broken trace) resets the
-            # zone state — the surviving app must not inherit a
-            # poisoned template depth or parent stack (the rule every
-            # binding's abort path follows; pinned by the menu
-            # emission checks running after the break-trace check).
+            # Any abort resets the zone state: the surviving app must
+            # not inherit a poisoned template depth or parent stack.
             _tpl_depth = 0
             _parents[:] = []
             _for_stack[:] = []
@@ -3793,9 +3320,8 @@ class App:
         # Clipboard reads share the alert's request/result grammar and
         # so its table shape: one-shot, keyed by request id.
         self._clipboard_handlers = {}
-        # Menu items are their own id space — their own table ("two
-        # tables, always" — now N tables, still always), keyed by
-        # (occurrence kind, item id).
+        # Menu items are their own id space, so their own table, keyed
+        # by (occurrence kind, item id).
         self._menu_handlers = {}
         # Per-entry navigation handlers, keyed by entry surface id
         # (the request-bound alert precedent).
@@ -3807,9 +3333,8 @@ class App:
         self._close_requested = {}
         self._window_closed = {}
         # Per-window history handlers, keyed the same way and NOT
-        # one-shot: a history is walked as often as the user likes. Undo
-        # in one window has never meant "revert what happened in another
-        # one", so the ledger and its two handlers are per surface.
+        # one-shot: a history is walked as often as the user likes, and
+        # the ledger is per surface.
         self._undone = {}
         self._redone = {}
         # Collections and signals by their core id, for the undo path:
@@ -3818,10 +3343,9 @@ class App:
         self._collections = {}
         self._signals = {}
         self._node_handlers = {}
-        # Work handed over by other threads, waiting to run as
-        # transactions on the app thread. THE ONLY STATE HERE TOUCHED
-        # FROM ANOTHER THREAD, and the only reason App carries a lock at
-        # all — everything above is app-thread-only by construction.
+        # THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD, and the only
+        # reason App carries a lock — everything above is
+        # app-thread-only by construction.
         self._post_lock = threading.Lock()
         self._posted = []
         _app = self
@@ -3852,24 +3376,17 @@ class App:
                       on_close_requested=None, on_closed=None,
                       on_undone=None, on_redone=None):
         """An auxiliary surface's scene scope: create_window plus its
-        props on entry, and the single top-level container mounts INTO
-        IT on exit. Capability-gated — a phone host rejects at the
-        root (DESIGN.md, Presentation contexts).
+        props on entry, and the single top-level container mounts INTO IT
+        on exit. Capability-gated — a phone host rejects at the root.
 
-        The handlers ride the declaration (per-window — handlers scope
-        to the thing that creates them): on_close_requested() fires
-        per chrome close while veto_close is armed — nothing has
-        closed; answer with kaya.destroy_window to agree.
-        on_closed() fires when the non-veto auxiliary is chrome-closed
-        (informational; destroy_window reconciles) and retires with
-        it. on_undone(label, delta) / on_redone(label, delta) fire each
-        time kaya routes an undo at THIS surface — see App.window.
+        The handlers ride the declaration: on_close_requested() fires per
+        chrome close while veto_close is armed, and NOTHING HAS CLOSED —
+        answer with kaya.destroy_window to agree. on_closed() fires when
+        a non-veto auxiliary is chrome-closed and retires with it.
+        on_undone/on_redone fire per undo routed at THIS surface.
 
-        The prop set is App.window's, `dirty` and `inset` included: an
-        auxiliary surface holds unsaved work as readily as the primary
-        one, and an inspector wants its own content inset as much as the
-        main window does. To raise or lower the mark LATER, call the
-        construct again with this surface's id —
+        The prop set is App.window's. To raise or lower the mark LATER,
+        call the construct again with this surface's id —
         `app.window(dirty=True, window_id=7)`."""
         if on_close_requested is not None:
             self._close_requested[int(window_id)] = on_close_requested
@@ -3886,58 +3403,36 @@ class App:
                dirty=None, list_detail=None, sections_presentation=None,
                inset=None, on_close_requested=None, on_closed=None,
                on_undone=None, on_redone=None, window_id=0):
-        """The scene scope: an ambient transaction whose single
-        top-level container mounts into the default window on exit.
-        The attribute set is EXACTLY create_window's — a window's
-        attributes ride its window construct, and the primary differs
-        only in having no creation moment (the process owns it).
-        `title` names the surface; `width`/`height` request content
-        size in DIP (advisory); `veto_close` arms the close-veto
-        class; `list_detail` asks this surface to present its entry
-        stack as list-detail, and WHICH way it presents is the
-        platform's answer (DESIGN.md, Adaptive list-detail);
-        `sections_presentation` is the ADVISORY sections hint
-        (kaya.SECTIONS_AUTO/BAR/SIDEBAR); `window_id` names the surface
-        the attributes are about — 0, the primary, unless you say
-        otherwise (the trailing-id spelling C# and OCaml already carry).
+        """The scene scope: an ambient transaction whose single top-level
+        container mounts into the default window on exit. The attribute
+        set is EXACTLY create_window's — the primary differs only in
+        having no creation moment. `title` names the surface;
+        `width`/`height` request content size in DIP (advisory);
+        `veto_close` arms the close-veto class; `list_detail` asks for
+        list-detail presentation, and WHICH way is the platform's answer;
+        `sections_presentation` is the ADVISORY sections hint;
+        `window_id` names the surface the attributes are about, 0 unless
+        you say otherwise.
 
         `inset` is the window's CONTENT INSET in layout units — LAYOUT,
-        not appearance (docs/styling-plan.md D3): the space kaya's own
-        interpreters put around the mounted root. 16 unless you say
-        otherwise, so no existing scene moves; 0 is full bleed, which is
-        what an editor or a canvas asks for. HONORED UNCONDITIONALLY on
-        every platform, because the inset is kaya's own padding and
-        nothing platform-side defends it — the number is not advisory
-        the way `width`/`height` are. A platform's SAFE AREA is a
-        separate fact and is not removed by it: content extends to the
-        safe-area edge, not past it, and the notch keeps its space.
-        Negative is refused by the root — an inset is space, not an
-        offset.
+        not appearance (docs/styling-plan.md D3). 16 unless you say
+        otherwise; 0 is full bleed. HONORED UNCONDITIONALLY, because the
+        inset is kaya's own padding — not advisory the way
+        `width`/`height` are. A platform's SAFE AREA is a separate fact
+        and is not removed by it. Negative is refused by the root.
 
         `dirty` says this surface holds UNSAVED WORK, and each backend
-        spells its own platform's affordance: the dot in the close
-        button on macOS, a leading `*` in the RENDERED caption on
-        Windows, a bullet beside the header-bar title on GTK, nothing on
-        the phones, which have none (docs/dirty-plan.md D2/D4). STATE,
-        NOT CHROME — the title you declared is left untouched, with no
-        marker composed into it and no placeholder to leave room for
-        (Qt's `[*]` template is the named rejection, D1). And it ARMS
-        NOTHING (D3): "unsaved changes, close anyway?" is `veto_close`
-        plus `kaya.show_alert`, composed by the app, because apps
-        legitimately differ on what that flow should do. The two props
-        are orthogonal — either rides this construct without the other.
-
-        NOTHING INFERS IT. Writing the document's signal does not raise
-        the mark and saving does not lower it: say both, in the one
-        transaction the handler already is.
+        spells its own platform's affordance (docs/dirty-plan.md D2/D4).
+        STATE, NOT CHROME: the title you declared is left untouched. It
+        ARMS NOTHING (D3) — "unsaved changes, close anyway?" is
+        `veto_close` plus `kaya.show_alert`, composed by the app. NOTHING
+        INFERS IT: writing the document's signal does not raise the mark
+        and saving does not lower it.
 
         THE LIVE SPELLING IS THIS SAME CONSTRUCT, CALLED AGAIN, because
         no window attribute lives as a loose function outside it
-        (DESIGN.md, Binding conventions — `window_title` retired
-        2026-07-22). A handler does not open its own transaction; the
-        binding does (`App._dispatch`), so inside one the construct
-        drops the `with` and becomes a plain call whose props join the
-        transaction already running:
+        (DESIGN.md, Binding conventions). Inside a handler the construct
+        drops the `with` and becomes a plain call:
 
             with app.window(title="dirty", veto_close=True):   # the scene
                 ...
@@ -3947,13 +3442,10 @@ class App:
                 app.window(dirty=True)
 
         on_undone(label, delta) fires each time kaya routes an undo at
-        this surface, with the group's label — EMPTY for a typing
-        episode kaya took back itself, which the app spells however it
-        likes — and the whole restored state (kaya.UndoDelta). Per
-        window and PERSISTENT: a history is walked as often as the user
-        likes, so it never retires. on_redone is its twin. Neither
-        fires for a native-tier undo the platform's own affordance
-        drove (docs/undo-plan.md A6)."""
+        this surface, with the group's label — EMPTY for a typing episode
+        kaya took back itself — and the whole restored state. Per window
+        and PERSISTENT, so it never retires. on_redone is its twin.
+        Neither fires for a native-tier undo (docs/undo-plan.md A6)."""
         window_id = int(window_id)
         if on_close_requested is not None:
             self._close_requested[window_id] = on_close_requested
@@ -3961,13 +3453,10 @@ class App:
             self._window_closed[window_id] = on_closed
         self._register_history(window_id, on_undone, on_redone)
         if _tx is not None:
-            # THE LIVE FORM. A transaction is already open — this call
-            # is inside a handler, or inside `with app.build():` — so
-            # the props join it right here and there is nothing to
-            # enter. The thread check is the one the scope form does in
-            # `__enter__`: `_tx` is a module global, so a background
-            # thread would otherwise stamp records into the app
-            # thread's open transaction (see _require_app_thread).
+            # THE LIVE FORM: a transaction is already open, so the props
+            # join it here and there is nothing to enter. The thread
+            # check is the one the scope form does in `__enter__` —
+            # `_tx` is a module global (see _require_app_thread).
             _require_app_thread()
             _window_props(window_id, title, width, height, veto_close,
                           dirty, list_detail, sections_presentation, inset)
@@ -3986,20 +3475,16 @@ class App:
     def push_entry(self, entry_id, title=None, intercept_back=None,
                    on_popped=None, on_back=None):
         """A navigation entry's scene scope (DESIGN.md, Navigation):
-        push_entry onto the primary surface's stack plus the entry's
-        props on entry, and the single top-level container mounts
-        INTO IT on exit. Entry ids are guest-allocated in the shared
-        surface namespace (the create_window discipline). The covered
-        root stays alive — retained until popped.
+        push_entry plus the entry's props on entry, and the single
+        top-level container mounts INTO IT on exit. Entry ids are
+        guest-allocated in the shared surface namespace; the covered root
+        is retained until popped.
 
-        The handlers ride the push (per-entry, the show_alert
-        on_result precedent — no id inspection anywhere): on_popped()
-        fires when the user's back affordance pops THIS entry
-        natively (post-fact; a programmatic kaya.pop_entry does not
-        fire it — its caller already knows) and retires with the one
-        pop; on_back() fires per back request while intercept_back is
-        armed — nothing has popped; answer with kaya.pop_entry to
-        agree."""
+        on_popped() fires when the user's back affordance pops THIS entry
+        natively (post-fact; a programmatic kaya.pop_entry does not fire
+        it) and retires with the one pop. on_back() fires per back
+        request while intercept_back is armed, and NOTHING HAS POPPED —
+        answer with kaya.pop_entry to agree."""
         return _TxScope(
             self, mount_on_exit=True, window=entry_id, push=True,
             title=title, intercept_back=intercept_back,
@@ -4007,42 +3492,30 @@ class App:
 
     def add_section(self, section_id, title=None, symbol=None,
                     on_selected=None, window=0):
-        """A section's scene scope (DESIGN.md, Sections): add_section
-        into the primary window plus the section's props, and the
-        single top-level container mounts INTO IT on exit. Section
-        ids are guest-allocated in the shared surface namespace; the
-        set is append-only (no destruction grammar), and every
-        section's root is retained while covered — switching is
-        SELECTION, not lifecycle.
+        """A section's scene scope (DESIGN.md, Sections): add_section plus
+        the section's props, and the single top-level container mounts
+        INTO IT on exit. The set is append-only, and every section's root
+        is retained while covered — switching is SELECTION, not
+        lifecycle.
 
-        `symbol=` is the switcher item's SEMANTIC ICON (`kaya.Symbol`,
-        or its name): a tab bar without icons is not the platform's
-        real thing, and the glyph that means `home` differs per
-        platform, so the app names the CONCEPT and each backend draws
-        its own. It is REFUSED HERE, at the add_section call, and not
-        at the `with` — the scope object records nothing until it is
-        entered, so a raise from inside __enter__ would point at the
-        block rather than at the wrong word.
+        `symbol=` is the switcher item's SEMANTIC ICON. It is REFUSED
+        HERE, at the add_section call, and not at the `with`: the scope
+        object records nothing until it is entered, so a raise from
+        __enter__ would point at the block rather than at the word.
 
-        on_selected() rides the add (per-section): fires each time
-        the USER switches to this section through the platform's
-        switcher — post-fact and NOT one-shot. A programmatic
-        kaya.select_section does not fire it (the echo doctrine)."""
+        on_selected() fires each time the USER switches to this section —
+        post-fact and NOT one-shot. A programmatic kaya.select_section
+        does not fire it (the echo doctrine)."""
         return _TxScope(
             self, mount_on_exit=True, window=section_id, section=True,
             title=title, symbol=None if symbol is None else _symbol_value(symbol),
             on_selected=on_selected, host_window=window)
 
     def menu(self, label, enabled=None, icon=None, symbol=None, window=0):
-        """A top-level menu in `window`'s command catalog — the
-        menubar rides the window construct (DESIGN.md, Menus):
-        `with app.menu("File", enabled=can_export) as file:` declares
-        the children (kaya.item/kaya.toggle/nested kaya.menu/
-        kaya.radio_group/kaya.separator) and yields the retained
-        handle, which file.append() reopens at any time. `label` is
-        constant text or a bound Str signal; `enabled` a bool or a
-        bound Bool signal — disabling the menu disables its subtree
-        (the inherited-disabled contract)."""
+        """A top-level menu in `window`'s command catalog — the menubar
+        rides the window construct (DESIGN.md, Menus). Yields the
+        retained handle, which file.append() reopens at any time.
+        Disabling the menu disables its subtree."""
         it = _menu_create(wire.MENU_KIND_MENU, label)
         _records().append(wire.tx_menubar_append(int(window), it.id))
         if enabled is not None:
@@ -4055,13 +3528,9 @@ class App:
 
     def radio_group(self, label, value=None, enabled=None, icon=None,
                     symbol=None, on_select=None, window=0):
-        """A BAR-LEVEL radio group — admissible wherever a menu
-        grouping node is (it materializes as a top-level menu with the
-        platform's checkmark idiom): `with app.radio_group("Sort",
-        value=sort, on_select=f):` declares only kaya.option children.
-        `value` is the selected 0-based index (the Choice contract:
-        int or bound signal; programmatic writes are quiet), and
-        on_select receives each USER pick's new index."""
+        """A BAR-LEVEL radio group, declaring only kaya.option children.
+        `value` is the selected 0-based index; programmatic writes are
+        quiet, and on_select receives each USER pick's new index."""
         it = _menu_create(wire.MENU_KIND_RADIO_GROUP, label)
         _records().append(wire.tx_menubar_append(int(window), it.id))
         if enabled is not None:
@@ -4080,20 +3549,16 @@ class App:
                           on_exit=on_exit)
 
     def _dispatch(self, handler, *args):
-        """One handler dispatch, INSIDE an ambient transaction. The
-        rule is uniform across every binding (DESIGN.md, "a handler is
-        a transaction"): the runtime opens the transaction, the handler
-        body queues into it, and it commits atomically on return. An
-        exception crosses the build boundary — which rolled the mirrors
-        back and dropped the records — is logged, and the loop moves to
-        the next occurrence. Non-Exception aborts (KeyboardInterrupt)
-        still propagate: the fatal floor.
+        """One handler dispatch, INSIDE an ambient transaction: the
+        runtime opens it, the handler body queues into it, and it commits
+        atomically on return. An exception crossing the build boundary —
+        which rolled the mirrors back and dropped the records — is
+        logged, and the loop moves on. Non-Exception aborts
+        (KeyboardInterrupt) still propagate: the fatal floor.
 
-        The LIFECYCLE occurrences used to skip this and call the handler
-        bare, so `kaya.destroy_window` inside an on_close_requested
-        raised "no ambient transaction" and every scene opened one by
-        hand. Go wrapped all of them from the start; Python was the
-        outlier (fixed 2026-07-27).
+        EVERY occurrence goes through here, LIFECYCLE ones included: they
+        used to call the handler bare, so `kaya.destroy_window` inside an
+        on_close_requested raised "no ambient transaction".
         """
         try:
             with self.build():
@@ -4106,14 +3571,8 @@ class App:
             )
 
     def post(self, fn, *args):
-        """Run fn as a transaction on the app thread, soon. THE ONE
-        method safe to call from another thread, and the answer to "how
-        does background work reach the UI".
-
-        `with app.build():` is a transaction NOW on the calling thread;
-        post is the same transaction SOON on the app thread — so a
-        background thread writes ordinary blocking Python and hands back
-        only the result:
+        """Run fn as a transaction on the app thread, soon. THE ONE method
+        safe to call from another thread.
 
             def worker():
                 data = urlopen(url).read()      # blocks this thread
@@ -4121,10 +3580,9 @@ class App:
 
             threading.Thread(target=worker, daemon=True).start()
 
-        Signals are ids and are meant to be captured; that is how the
-        posted callable names what to write. A posted callable runs in
-        its OWN transaction, after whatever is running now, so posting
-        from inside a handler queues for after and never nests.
+        Signals are ids and are meant to be captured. A posted callable
+        runs in its OWN transaction, after whatever is running now, so
+        posting from inside a handler queues for AFTER and never nests.
         """
         with self._post_lock:
             self._posted.append((fn, args))
@@ -4134,59 +3592,35 @@ class App:
         runtime.wake()
 
     def _absorb_undo(self, delta):
-        """Fold an undo's payload into the collection mirrors.
+        """Fold an undo's payload into the collection mirrors — the
+        rollback journal in reverse, and the payload is core-authoritative
+        so nothing here re-derives anything.
 
-        The rollback journal in reverse: an abandoned transaction
-        restores a snapshot because nothing was shipped, while an undo
-        restores a delta because everything WAS — the core already
-        moved, and the mirror is what would otherwise be left behind.
-        Same machinery, opposite case, and the payload is
-        core-authoritative so nothing here re-derives anything.
-
-        BEFORE THE HANDLER AND WITHOUT ONE. An app that registered no
+        BEFORE THE HANDLER AND WITHOUT ONE: an app that registered no
         on_undone still has a mirror, and `len(todos)` after a routed
         undo must answer about the restored state either way.
 
-        A signal has no read-back and no mirror the app can see, by
-        doctrine — but this binding keeps the last written value to skip
-        no-op DERIVED writes, and an undo moves signals behind that
-        cache. So the cache follows the payload, which is why the
-        `signals` run is read here as well as handed to the app: the
-        core says what the value is, and a derived signal the group
-        wrote is an ordinary signal in that same run. Text is neither
-        mirrored nor cached, and passes straight through.
+        A signal has no read-back, but this binding caches the last
+        written value to skip no-op DERIVED writes, and an undo moves
+        signals behind that cache — so the `signals` run is read here as
+        well as handed to the app. Text is neither mirrored nor cached.
 
-        NO DERIVED RECOMPUTE, DELIBERATELY — the absence is the design,
-        not an omission. A derived signal's write rode the SAME
-        transaction as the mutation that caused it
-        (`Collection._recompute_derived` appends an ordinary
-        `tx_write_signal` after every mutation, unconditionally), so
-        when that transaction was a named step the group banked the
-        derived value in both of its directions, and the core has
-        already restored it — it arrives in the `signals` run above like
-        any other signal. Python says the same thing structurally, since
-        it has no type to say it with: recomputing appends to
-        `_records()`, and there is no ambient transaction here. This
-        runs straight off the occurrence loop (`_dispatch_loop`), before
-        and without any handler, so a recompute would have nowhere to
-        put the write.
+        NO DERIVED RECOMPUTE, DELIBERATELY. A derived signal's write rode
+        the SAME transaction as the mutation that caused it, so a named
+        step banked the derived value in both directions and the core has
+        already restored it. This runs straight off the occurrence loop,
+        before and without any handler, so there is no ambient
+        transaction to write into.
 
-        WHAT A RECOMPUTE HERE WOULD COST is worth spelling out, because
-        the call graph invites one (docs/deferred.md carries the
-        retracted "a derived signal goes stale after an undo" defect,
-        inferred from exactly this method calling nothing). Agreeing
-        with the banked value it writes nothing at all — `_recompute`'s
-        `!=` guard sees the cache this method just moved — so it is dead
-        code hiding the mechanism. Disagreeing, it raises "no ambient
-        transaction" in the middle of an occurrence; and were it handed
-        a transaction to write into, it would put a value the ledger
-        never banked on screen, so the screen and the ledger's record of
-        the step would drift apart and the next walk through the history
-        would jump back. Disagreement is reachable exactly two ways: a
-        compute that reads anything beyond the entries, or a derive
-        declared after that step was banked (deferred.md's one
-        residual). Neither is fixed by recomputing behind the core's
-        back.
+        WHAT A RECOMPUTE HERE WOULD COST, since the call graph invites
+        one (docs/deferred.md carries the retracted "a derived signal
+        goes stale after an undo" defect, inferred from exactly this
+        method calling nothing): agreeing with the banked value it writes
+        nothing and hides the mechanism; disagreeing it would put a value
+        the ledger never banked on screen, and the next walk through the
+        history would jump back. Disagreement is reachable two ways — a
+        compute reading beyond the entries, or a derive declared after
+        the step was banked (deferred.md's one residual).
         """
         for signal_id, value in delta.signals:
             sig = self._signals.get(signal_id)
@@ -4216,10 +3650,8 @@ class App:
             if table is None:
                 continue
             # Position by the payload's list, keeping anything it does
-            # not name at the end: the delta states one instance's whole
-            # order, and an entry it never mentions is one this undo did
-            # not touch. Insertion-ordered dicts have no move, so the
-            # named keys are re-added in order and the rest follow.
+            # not name at the end. Insertion-ordered dicts have no move,
+            # so the named keys are re-added in order.
             for key in list(keys) + [k for k in table if k not in keys]:
                 if key in table:
                     table[key] = table.pop(key)
@@ -4312,17 +3744,13 @@ class App:
                 continue
             if kind in (wire.OCC_UNDONE, wire.OCC_REDONE):
                 # ONE STEP CAME BACK. ident is the window whose ledger
-                # moved, and the payload is the label plus the whole
-                # restored state.
-                #
-                # NOT one-shot: a history is walked as often as the user
-                # likes, so both registrations outlive every step (the
-                # on_section_selected stance, not the alert's).
+                # moved. NOT one-shot: a history is walked as often as
+                # the user likes.
                 #
                 # THE MIRRORS FOLLOW FIRST, and unconditionally: an undo
-                # moved core state without a transaction, so a model
-                # read after one is stale otherwise — including in an
-                # app that registered no handler at all.
+                # moved core state without a transaction, so a model read
+                # after one is stale otherwise — including in an app that
+                # registered no handler at all.
                 label, signals, texts, entries, orders = payload
                 delta = UndoDelta(signals, texts, entries, orders)
                 self._absorb_undo(delta)
@@ -4366,20 +3794,16 @@ class App:
             args = list(keys)
             if kind == wire.OCC_PASTED:
                 # A paste rides a click tag verbatim, so it arrives on
-                # the ordinary widget/node path with the clip as its
-                # payload — one record kind, path_len deciding, exactly
-                # as a click on a stamped row is one record with a click
-                # on a live widget. Never empty: a paste that delivered
-                # nothing is not an occurrence.
+                # the ordinary widget/node path, path_len deciding. Never
+                # empty: a paste that delivered nothing is not an
+                # occurrence.
                 args.append(_representation(payload))
             elif payload is not None:
                 args.append(payload)
             # One handler dispatch: an exception crosses the build
-            # boundary (which rolled the mirrors back and dropped the
-            # records), is logged, and the loop moves to the next
-            # occurrence — the uniform dispatch discipline across every
-            # binding. Non-Exception aborts (KeyboardInterrupt) still
-            # propagate: the fatal floor.
+            # boundary — which rolled the mirrors back and dropped the
+            # records — is logged, and the loop moves on. Non-Exception
+            # aborts still propagate: the fatal floor.
             self._dispatch(handler, *args)
 
     def run(self):

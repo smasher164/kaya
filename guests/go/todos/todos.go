@@ -5,10 +5,9 @@
 //
 // AND THE ITEMS-LEFT LABEL COMES BACK FROM AN UNDO WITH NOBODY RESTORING
 // IT: the add is a named step (tx.Undoable) and the derive's write is in
-// that same batch, so the core banks the label in both directions of the
-// step. Which is why this file registers no OnUndone — a binding that
-// recomputed the derive while absorbing the payload would be writing a
-// value the ledger never banked.
+// that same batch. Which is why this file registers no OnUndone — a
+// binding that recomputed the derive while absorbing the payload would
+// be writing a value the ledger never banked.
 package todos
 
 import (
@@ -17,14 +16,6 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// Todo is the record type and, by reflection, the schema. kaya-gen reads
-// this declaration and emits todo_kaya.go.
-//
-// THE KEY TYPE IS I64 BECAUSE THE BINDING MINTS IT: a todo has no
-// identity of its own, so the name comes from kaya.InsertFresh
-// (docs/fresh-key-plan.md).
-//
-//go:generate go run dev.kaya/cmd/kaya-gen -type Todo -key int64
 type Todo struct {
 	Title string
 	Done  bool
@@ -71,14 +62,11 @@ func App() *kaya.App {
 				// derive's write is in this batch.
 				tx.Undoable(fmt.Sprintf("add %s", draft))
 				// NO KEY: a todo has no identity of its own, so the
-				// binding mints one and hands it back. Discarded here;
-				// the toggle handler receives the same key from the
-				// stamped row it came from.
+				// binding mints one and hands it back.
 				kaya.InsertFresh(tx, todos, Todo{Title: draft})
 				// FINISHING THE FORM IS NOT PART OF THE STEP — its own
-				// transaction, so undoing the add does not put the draft
-				// back beside a todo that is gone. Clear inside a group
-				// would be refused at apply anyway (D4).
+				// transaction. Clear inside a group would be refused at
+				// apply anyway (D4).
 				app.Post(func(tx *kaya.Tx) {
 					tx.Clear(field)
 					tx.Focus(field)
@@ -89,9 +77,6 @@ func App() *kaya.App {
 				row.Row(func() {
 					row.Checkbox(row.Done(),
 						func(tx *kaya.Tx, key int64, checked bool) {
-							// One field's delta through the generated
-							// named setter; the derived signal updates
-							// itself.
 							TodoPatch(todos, tx, key).Done(checked)
 						})
 					row.Label(row.Title())

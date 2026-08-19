@@ -1,14 +1,12 @@
-/* The dirty-state scene from C, at the explicit wire floor: unsaved work
- * is SET_WINDOW_PROP carrying KAYA_WPROP_DIRTY and a Bool, and the
- * veto/confirm flow around it is assembled by hand out of two
- * occurrences the generator emits no parser for (docs/dirty-plan.md
- * D1-D5). Annotated semantics in guests/rust/dirty.rs; the byte-frozen
- * contract in tools/scenes/dirty.steps.
+/* The dirty-state scene from C, at the explicit wire floor: unsaved
+ * work is SET_WINDOW_PROP carrying KAYA_WPROP_DIRTY and a Bool, and the
+ * veto/confirm flow is assembled by hand out of two occurrences the
+ * generator emits no parser for (docs/dirty-plan.md D1-D5). Semantics:
+ * guests/rust/dirty.rs. Contract: tools/scenes/dirty.steps.
  *
  * DECLARED, NEVER INFERRED: the edit handler writes the document signal
  * AND says dirty(true); neither implies the other, and kaya watches no
- * signals. The mark ARMS NOTHING (D3) — the veto class below is composed
- * of parts that predate it. */
+ * signals. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -47,9 +45,9 @@ static void build_scene(void) {
     uint8_t buf[1024];
     KayaTx tx = {buf, 0};
 
-    /* The title: the same record with a Str value. Titles are
-     * byte-compared across platforms, so the dirty mark never goes in
-     * the title string — the chrome diverges, the string may not. */
+    /* Titles are byte-compared across platforms, so the dirty mark never
+     * goes in the title string — the chrome diverges, the string may
+     * not. */
     {
         size_t start = kaya_wire_begin(&tx, KAYA_TX_SET_WINDOW_PROP);
         kaya_wire_u64(&tx, 0);
@@ -62,8 +60,7 @@ static void build_scene(void) {
      * already reached for the close button opted in too late. */
     window_bool(&tx, 0, KAYA_WPROP_VETO_CLOSE, 1);
     /* `dirty` IS DELIBERATELY NOT SET HERE: the script reads the clean
-     * window first, and that assertion is the one a write-only lowering
-     * cannot pass. */
+     * window first. */
 
     kaya_tx_create_signal(&tx, SIG_DOC, kaya_str("notes"));
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("saved"));
@@ -90,8 +87,7 @@ static void build_scene(void) {
 /* The veto class's first half: the user asked a veto_close window to
  * close and NOTHING HAS CLOSED. Header, then the window id, and that id
  * is the whole record — no correlation token, the core waits for no
- * response. The app matches on the window so a second window's close
- * cannot fall into this app's one dialog. */
+ * response. */
 static int parse_close_requested(const uint8_t *rec, uint64_t *window) {
     const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
     if (h->kind != KAYA_OCCURRENCE_CLOSE_REQUESTED)
@@ -101,10 +97,9 @@ static int parse_close_requested(const uint8_t *rec, uint64_t *window) {
 }
 
 /* The second half: the alert's one answer. Header, the alert id, then a
- * u32 choice — an action INDEX (0 or 1), or KAYA_ALERT_CHOICE_CANCEL for
- * every platform-native dismissal alike (Esc, back, a tap outside, the
- * cancel button). The trailing u32 is reserved and unread. The dialog is
- * already gone when this arrives and the id retires here. */
+ * u32 choice — an action INDEX (0 or 1), or KAYA_ALERT_CHOICE_CANCEL
+ * for every platform-native dismissal alike. The trailing u32 is
+ * reserved and unread. The id retires here. */
 static int parse_alert_result(const uint8_t *rec, uint64_t *alert,
                               uint32_t *choice) {
     const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
@@ -120,10 +115,10 @@ static int parse_alert_result(const uint8_t *rec, uint64_t *alert,
 static void *app(void *arg) {
     (void)arg;
     build_scene();
-    /* The alert-id counter the eight bindings keep inside `show_alert`
-     * (crates/kaya/src/app.rs), hand-spelled. `live` is this app's
-     * registration: the id says WHICH question was answered, and zero
-     * means nothing is being asked. */
+            /* The alert-id counter the eight bindings keep inside
+             * `show_alert`, hand-spelled. `live` is this app's
+             * registration: the id says WHICH question was answered,
+             * and zero means nothing is being asked. */
     uint64_t alerts = 0, live = 0;
     const uint8_t *rec;
     for (;;) {
@@ -140,8 +135,6 @@ static void *app(void *arg) {
             if (n_keys != 0)
                 continue;
             if (id == W_EDIT) {
-                /* Three statements in one transaction, none of them
-                 * derived from another. */
                 KayaTx tx = {buf, 0};
                 kaya_tx_write_signal(&tx, SIG_DOC, kaya_str("notes and a line"));
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("unsaved"));
@@ -163,9 +156,8 @@ static void *app(void *arg) {
             KayaTx tx = {buf, 0};
             /* One record for the whole dialog: window, id, HOW MANY of
              * the two action slots are real, and five Str values.
-             * `actions` is 1 here, so action1 rides empty and is
-             * ignored. The cancel slot is always present, because every
-             * native dismissal has to resolve to something. */
+             * `actions` is 1 here, so action1 rides empty. The cancel
+             * slot is always present. */
             kaya_tx_show_alert(&tx, 0, live, 1, kaya_str("unsaved changes"),
                                kaya_str("the document has unsaved changes"),
                                kaya_str("Discard"), kaya_str(""),
@@ -177,15 +169,14 @@ static void *app(void *arg) {
             live = 0;
             KayaTx tx = {buf, 0};
             if (choice == KAYA_ALERT_CHOICE_CANCEL) {
-                /* Kept: the mark STAYS UP, because answering a dialog is
-                 * not saving. Touching no prop here is what the script's
-                 * last assertion reads. */
+                /* The mark STAYS UP: answering a dialog is not saving.
+                 * Touching no prop here is what the last assertion
+                 * reads. */
                 kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str("kept editing"));
             } else {
                 /* THIS ARM ABORTS IF IT EVER RUNS: destroy_window(0) on
                  * the primary window is refused, so an app can veto a
-                 * close but cannot agree to one (docs/traps.md). The
-                 * scene answers cancel instead. */
+                 * close but cannot agree to one (docs/traps.md). */
                 kaya_tx_destroy_window(&tx, 0);
             }
             kaya_submit(tx.buf, tx.len);

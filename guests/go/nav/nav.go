@@ -25,7 +25,6 @@ func App() *kaya.App {
 		tx.Mount(tx.Column(func() {
 			tx.Label(status) // label#0
 			tx.Button("open detail", func(tx *kaya.Tx) { // button#0
-				// The popped handler rides the push, per entry.
 				entry := tx.PushEntry(detail).
 					Title("detail").
 					OnPopped(func(tx *kaya.Tx) {
@@ -37,7 +36,6 @@ func App() *kaya.App {
 					tx.Label(caption)
 				})
 				tx.MountIn(entry, pane)
-				// Retention: the covered root keeps taking writes.
 				tx.Write(status, "pushed detail")
 			})
 			tx.Button("open settings", func(tx *kaya.Tx) { // button#1

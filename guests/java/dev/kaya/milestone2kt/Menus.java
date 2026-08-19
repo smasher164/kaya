@@ -27,8 +27,6 @@ final class Menus {
             java.util.function.Consumer<KayaApp.Tx> onShare =
                     t -> t.write(status, "shared");
 
-            // File and its Export leaf share one enablement signal: one
-            // write moves both.
             KayaApp.WindowRef win = tx.window(0).title("menus");
             KayaApp.MenuItem file = win.menu("File").enabled(canExport);
             // Symbols are CONCEPTS, drawn per platform: the vocabulary
@@ -54,8 +52,6 @@ final class Menus {
                     t.write(status, index == 1 ? "sorted date" : "sorted name"));
 
             groups = tx.collection();
-            // One catalog shared across stamped copies: the template
-            // only attaches, and each activation carries its key path.
             KayaApp.ContextCatalog catalog = tx.contextCatalog();
             catalog.item("Remove").symbol(KayaApp.Symbol.DELETE)
                     .onActivateNode((t, keys) -> {
@@ -70,10 +66,9 @@ final class Menus {
                 tx.button("enable export", t -> // button#0
                         t.write(canExport, true));
                 tx.button("reset menu state", t -> { // button#1
-                    // The folds never echo the user's pick, so these
-                    // signals still hold false/0 — the writes are real
-                    // records (never coalesced) that reset the
-                    // backend's user-state mirror.
+                                        // The folds never echo the user's pick, so these
+                                        // writes are real records (never coalesced) that
+                                        // reset the backend's user-state mirror.
                     t.write(details, false);
                     t.write(sort, 0.0);
                     t.write(status, "ready");
@@ -96,7 +91,6 @@ final class Menus {
                         .symbol(KayaApp.Symbol.EDIT)
                         .onActivate(t -> t.write(status, "renamed"));
 
-                // Remove's activation names BOTH keys (group, then item).
                 for (var g : groups.rows()) {
                     g.column(() -> {
                         items = g.collection();

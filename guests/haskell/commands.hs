@@ -15,8 +15,6 @@ import KayaWire (Value (..))
 
 main :: IO ()
 main = kayaMain $ \app -> do
-  -- The settings command fires twice on purpose (once by the chord, once
-  -- at its declared path), so its count lives outside the build.
   settingsRef <- newIORef (0 :: Int)
 
   buildTx app $ do

@@ -1,9 +1,5 @@
 /* The gallery scene from C, on the function floor: the uncontrolled
- * contract with a bool and a double. Both controls own their state and
- * report each change as an occurrence; the app answers by writing the
- * paired signal.
- *
- * Built and run by the Linux container suite with KAYA_SELFTEST=gallery. */
+ * contract with a bool and a double. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -27,8 +23,7 @@
 #define W_IMAGE_BAD 10
 #define W_QUARTER 11
 
-/* A 2x2 RGB PNG (red/green over blue/white), embedded as source:
- * scenes carry their inputs, no runtime file I/O. */
+/* A 2x2 RGB PNG (red/green over blue/white), embedded as source. */
 static const uint8_t TEST_PNG[75] = {
     137, 80,  78,  71,  13,  10,  26,  10,  0,   0,   0,   13,  73,
     72,  68,  82,  0,   0,   0,   2,   0,   0,   0,   2,   8,   2,
@@ -54,19 +49,16 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_BAR, KAYA_KIND_SLIDER);
     kaya_tx_set_min(&tx, W_BAR, 0.0);
     kaya_tx_set_max(&tx, W_BAR, 1.0);
-    /* The slider's position binds a float signal: the programmatic write
-     * path the quarter button drives below. */
     kaya_tx_bind_value(&tx, W_BAR, SIG_POS);
     kaya_tx_create_widget(&tx, W_VOLUME, KAYA_KIND_LABEL);
     kaya_tx_bind_text(&tx, W_VOLUME, SIG_VOLUME);
     kaya_tx_create_widget(&tx, W_QUARTER, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_QUARTER, "quarter");
 
-    /* A valid 2x2 PNG decodes and reports its size; deliberately
-     * invalid bytes read 0x0, decode failure being the placeholder
-     * class and never a crash. A REGISTERED BLOB IS CONSUMED BY THE
-     * NEXT kaya_submit, and the guest's bytes may be dropped as soon as
-     * the register call returns. */
+    /* Deliberately invalid bytes read 0x0: decode failure is the
+     * placeholder class and never a crash. A REGISTERED BLOB IS CONSUMED
+     * BY THE NEXT kaya_submit, and the guest's bytes may be dropped as
+     * soon as the register call returns. */
     static const uint8_t not_an_image[] = "not an image";
     uint64_t png_handle = kaya_blob_register(TEST_PNG, sizeof TEST_PNG);
     uint64_t bad_handle =

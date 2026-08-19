@@ -13,27 +13,18 @@ import android.os.PersistableBundle
 import android.util.Base64
 
 // The Android lane's FOREIGN clipboard app (docs/clipboard-plan.md
-// §0e: "the outside process must be a real app" — a kaya-to-kaya test
-// cannot catch a malformed lowering). Two receivers and a never-shown
-// IME:
+// §0e). Two receivers and a never-shown IME:
 //
-//  SEED  writes the clipboard FROM THE BACKGROUND (writes are not
-//        focus-gated; measured across API 10..15 in the service's own
-//        source and on this pool). Every seed carries the emulator's
-//        overlay-suppression extra so nothing lingers over the guest
-//        while the harness asserts against it.
-//  READ  answers what is really on the clipboard, per representation,
-//        without touching the guest's focus: this package is made the
-//        DEFAULT IME once per lane run (`adb shell ime enable/set`),
-//        and ClipboardService admits the default IME's reads before
-//        it ever checks focus. The guest stays focused throughout —
-//        finding 4's constraint dissolves instead of being scheduled
-//        around.
+//  SEED  writes the clipboard FROM THE BACKGROUND — writes are not
+//        focus-gated. Every seed carries the overlay-suppression extra
+//        so nothing lingers over the guest mid-assertion.
+//  READ  reads without touching the guest's focus: this package is the
+//        DEFAULT IME for the lane run (`adb shell ime enable/set`),
+//        whose reads are admitted before focus is checked.
 //
 // Results ride ORDERED broadcast result data, which `am broadcast`
-// prints on stdout — and which the guest itself receives when it
-// orchestrates a seed app-to-app (sendOrderedBroadcast with a result
-// receiver).
+// prints on stdout and which the guest receives when it orchestrates a
+// seed app-to-app.
 private const val SUPPRESS = "com.android.systemui.SUPPRESS_CLIPBOARD_OVERLAY"
 
 class SeedReceiver : BroadcastReceiver() {
@@ -53,8 +44,8 @@ class SeedReceiver : BroadcastReceiver() {
                 )
                 "html" -> {
                     // BY HAND, both mimes: newHtmlText advertises
-                    // text/html alone (AOSP source), and a consumer
-                    // gating on text/plain would see nothing.
+                    // text/html alone, and a consumer gating on
+                    // text/plain would see nothing.
                     val html = String(payload)
                     ClipData(
                         suppressed(
@@ -67,8 +58,7 @@ class SeedReceiver : BroadcastReceiver() {
                     )
                 }
                 "image" -> {
-                    // The helper OWNS the seeded bytes: they land in
-                    // its files and ride its provider, so the guest's
+                    // The helper OWNS the seeded bytes, so the guest's
                     // read exercises the real cross-app grant path.
                     java.io.File(context.filesDir, "seed.png").writeBytes(payload)
                     ClipData(
@@ -189,8 +179,8 @@ class HelperProvider : android.content.ContentProvider() {
         uri: Uri, projection: Array<String>?, selection: String?,
         selectionArgs: Array<String>?, sortOrder: String?,
     ): android.database.Cursor? {
-        // OpenableColumns for consumers that ask a pasted file its
-        // display name — the picker capability's android spelling.
+        // OpenableColumns, for consumers that ask a pasted file its
+        // display name.
         val name = uri.getQueryParameter("name") ?: uri.lastPathSegment ?: "seed.bin"
         val cursor = android.database.MatrixCursor(
             arrayOf(

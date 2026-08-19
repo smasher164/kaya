@@ -1,22 +1,12 @@
 #!/usr/bin/env bash
 # ClipProbe — can the harness read the system clipboard from OUTSIDE
-# the guest, on both display protocols the linux lane runs?
-#
-# THE QUESTION THAT DECIDES THE LINUX ARM. Every other backend's
-# clipboard read is out of process (pbpaste, Get-Clipboard, simctl
-# pbpaste), which is the standard the file-dialog work set: read the
-# REAL system state, not kaya's record of it. On X11 that is xclip. On
-# Wayland it is wl-paste, which normally relies on the wlr-data-control
-# protocol — AND THIS LANE RUNS WESTON, which does not implement it.
-# Whether an out-of-process read works here at all is unknown, and it
-# decides whether the wayland leg can hold the same standard as the
-# rest.
+# the guest, on both display protocols the linux lane runs? Answers in
+# docs/clipboard-plan.md §Weston.
 #
 # Q1 Do the tools exist / install in the lane's image?
 # Q2 X11: does xclip round-trip a selection owned by another process?
 # Q3 Wayland under Weston: does wl-copy/wl-paste round-trip at all?
-# Q4 Does either need the reader to hold focus? (Both readers run with
-#    no surface of their own, which is the harness's situation.)
+# Q4 Does either need the reader to hold focus?
 #
 # Throwaway; nothing builds or runs this but a human. Answers land on
 # stdout under "PROBE".
@@ -35,9 +25,8 @@ say "Q1 xclip=$(command -v xclip || echo MISSING) wl-copy=$(command -v wl-copy |
 Xvfb :99 -screen 0 1280x800x24 &>/tmp/xvfb.log &
 sleep 1
 export DISPLAY=:99
-# xclip -i FORKS and holds the selection, which is the X11 model: the
-# owner serves every paste. That is also why this is a real test of
-# out-of-process reading — the reader talks to a different process.
+# xclip -i FORKS and holds the selection: in X11 the owner serves every
+# paste, so the reader below really does talk to another process.
 printf 'kaya-x11-payload' | xclip -selection clipboard -i
 sleep 1
 got_x11="$(xclip -selection clipboard -o 2>/tmp/xclip-err.txt)"
@@ -65,9 +54,5 @@ say "Q3 wayland read back: '${got_way}' (wanted 'kaya-wayland-payload')"
 [ -s /tmp/wlpaste-err.txt ] && say "Q3 wayland stderr: $(head -3 /tmp/wlpaste-err.txt)"
 say "Q3 wayland types: $(timeout 10 wl-paste --list-types 2>&1 | tr '\n' ' ')"
 
-# Q4: the reader holds no surface and therefore no keyboard focus in
-# either case above. If the reads worked, focus was not required of the
-# READER. Whether a WRITER needs it is the other half, and wl-copy is
-# the writer here.
 say "Q4 both readers ran with no surface of their own; see Q2/Q3"
 say "==== end"

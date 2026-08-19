@@ -1,21 +1,8 @@
 // The Swift arm of the generator family. Reads a guest source file for
-// types conforming to KayaGen — the declaration is the schema, nothing
-// restated — and writes <file>+Kaya.swift beside it. The declaration's
-// shape decides what is generated, the one KayaGen story every
-// language tells:
-//
-//   - an enum is a sum: the generated extension carries the
-//     KayaSumElement conformance (prototypes and init(variant:values:)
-//     — nothing hand-written), typed field tokens replace label
-//     strings, and the eliminator takes one required labeled parameter
-//     per constructor, so a missing arm is a missing argument — a
-//     compile error, with the scene checking totality again.
-//   - a struct is a record: the generated extension carries the
-//     KayaRecord conformance (prototype and init(values:)), plus field
-//     tokens and the collection factory.
-//
-// Generated files are checked in; tools/gen-guests.sh regenerates and
-// diffs.
+// types conforming to KayaGen and writes <file>+Kaya.swift beside it;
+// the DECLARATION'S SHAPE decides what comes out — an enum is a sum, a
+// struct is a record. Generated files are checked in;
+// tools/gen-guests.sh regenerates and diffs.
 //
 //     swift run --package-path tools/kaya-swift-gen kaya-swift-gen <guest.swift>
 
@@ -44,13 +31,11 @@ enum Decl {
     }
 }
 
-/// The wire vocabulary a field type maps into: the KayaValue case, the
-/// prototype's zero value. Any other type is a loud error — the wire
-/// has exactly these four scalars plus Data, the blob channel (encoded
-/// image bytes; VALUE_BLOB in the schema — KayaRecords.swift
-/// kayaSchema maps Data properties in, so a skipped Data field here
-/// would shift every later exact-index token off the runtime schema).
-/// Data is record-only: sums die loudly below.
+/// The wire vocabulary a field type maps into: the KayaValue case and
+/// the prototype's zero value. Any other type is a loud error.
+/// KayaRecords.swift's kayaSchema maps Data properties in, so a skipped
+/// Data field HERE shifts every later exact-index token off the runtime
+/// schema. Data is record-only: sums die loudly below.
 let wire: [String: (valueCase: String, zero: String)] = [
     "String": ("str", "\"\""),
     "Bool": ("bool", "false"),
@@ -287,13 +272,10 @@ func generateRecord(_ name: String, _ fields: [Field]) -> String {
     line("")
     line("    init(values: [KayaValue]) {")
     if fields.contains(where: { wire[$0.type]!.valueCase == "blob" }) {
-        // A blob slot carries a handle, not bytes: this rebuild cannot
-        // be inverted, so the generated init is honest about it. The
-        // runtime already guards the one path that would call it
-        // (KayaRecords.swift, token updateField's blob-schema
-        // precondition), so this is unreachable through supported
-        // paths — a record with a blob field patches through the
-        // key-path form.
+        // A blob slot carries a HANDLE, not bytes, so this rebuild
+        // cannot be inverted and the generated init says so. The runtime
+        // guards the one path that would call it, so a record with a
+        // blob field patches through the key-path form instead.
         line("        // A blob slot carries a handle, not bytes — see the")
         line("        // blob-schema precondition on token updateField in")
         line("        // KayaRecords.swift, which keeps this unreachable.")
@@ -376,11 +358,10 @@ func generate(_ decl: Decl) -> String {
     switch decl {
     case .sum(let name, let cases):
         for c in cases {
-            // Data is record-only: the runtime's sum rebuild
-            // (KayaSums.swift updateField reconstructs the entry via
-            // init(variant:values:)) cannot invert a blob handle back
-            // into bytes, so a blob field on a sum constructor is a
-            // generation-time error, not a runtime trap.
+            // Data is record-only: the runtime's sum rebuild cannot
+            // invert a blob handle back into bytes, so a blob field on a
+            // sum constructor is a GENERATION-time error, not a runtime
+            // trap.
             for f in c.fields where f.type == "Data" {
                 die("kaya-swift-gen: \(name).\(c.name).\(f.label): a Data (blob) field is record-only — a sum's witnessed update cannot rebuild blob bytes from the wire")
             }

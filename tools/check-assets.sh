@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain.
-# A shell entered before the flake last changed is a bystander
-# toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -14,88 +11,44 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 # THE ASSET ROOT'S DRIFT GATE (docs/assets-plan.md A6, gates 2 and 3).
-#
-# `asset(name)` moved one rule — where the bytes are and what to say
-# when they are not there — out of eight guests and into one Rust
-# module. That is only true while nothing ELSE resolves an asset for
-# itself, and while every lane that has to carry the root carries the
-# WHOLE root. Neither of those is checkable by the core, because both
-# are statements about files the core never reads.
-#
-# THE SIBLING RATHER THAN A GENERALIZATION, and the reason is measured
-# rather than stylistic. tools/check-app-identity.sh has six clauses and
-# three of them are about a DECLARATION — a manifest with a `name`, a
-# pixel expectation frozen in a scene, a name read back off a window —
-# which no other asset has or should have. Folding this in would put a
-# family-README walk and a census floor under a header whose whole
-# argument is "one declaration, two readers". The two files share their
-# self-test scaffolding below (shadow/doctor/applied/refuses) verbatim,
-# which is the part that would actually have drifted.
+# `asset(name)` holds one rule in one Rust module, which is true only
+# while nothing else resolves an asset and every lane carries the WHOLE
+# root — neither checkable by the core, which reads none of those files.
 #
 # SEVEN CLAUSES.
 #
-#   C1 PROVENANCE   Every family under the root carries a README that
-#                   says what the files are, where they came from, their
-#                   licence, and how to regenerate them. This is three
-#                   lines of shell and it is the thing that makes
-#                   vendoring safe: guests/assets/fonts/README.md passes
-#                   it and always did, and the file that FAILED it —
-#                   an opaque 1040-byte MRT index filed under tools/ —
-#                   is how the survey found there was a problem at all.
-#
-#   C2 CENSUS       The root's listing is printed with its count, every
-#                   name is legal as an asset name, and the count may
-#                   not fall below a floor. A census that reads two
-#                   files agrees with everything (docs/assets-plan.md
-#                   A6's first required property).
-#
+#   C1 PROVENANCE   Every family under the root carries a README saying
+#                   what the files are, where they came from, their
+#                   licence, and how to regenerate them.
+#   C2 CENSUS       The listing is printed with its count, every name is
+#                   legal as an asset name, and the count may not fall
+#                   below a floor: a census that reads two files agrees
+#                   with everything.
 #   C3 ONE RESOLVER Nothing outside the core resolves an asset path for
-#                   itself. A guest that spells `guests/assets/...` or
-#                   reads an asset environment variable has taken the
-#                   rule back out of the one place it lives, and the
-#                   eight-copies problem starts again one file at a
-#                   time. Table-driven, and the table's own claim is
+#                   itself. Table-driven, and the table's own claim is
 #                   checked: an exemption carries a reason and the
 #                   reason has to be about a file that still exists.
-#
 #   C4 EVERY LANE   Each of the five lanes either stages the root or
-#                   says why it needs nothing, and BOTH halves are here
-#                   rather than inferred. A lane that stages one FILE is
-#                   the shape this whole convention replaced: every
-#                   future asset would cost five more staging lines, and
-#                   the one that got forgotten would fail on the lane
-#                   furthest from the change.
-#
-#   C5 WHAT ARRIVED The staging lanes verify the bytes they staged
-#                   against the tree's, by HASH. A size check misses a
-#                   same-length corruption, which is exactly what a
-#                   half-written push or a re-encoding packaging step
-#                   produces (docs/assets-plan.md A5.1 asks for this
-#                   change in those words).
-#
+#                   says why it needs nothing, BOTH halves stated rather
+#                   than inferred. A lane that stages one FILE is the
+#                   shape this convention replaced.
+#   C5 WHAT ARRIVED The staging lanes verify what they staged by HASH: a
+#                   size check misses a same-length corruption.
 #   C6 THE FROZEN    tools/scenes/assets.steps expects the miss
 #      CENSUS        sentence's first line, which names every asset the
 #                    package carries — the one run-time observation that
-#                    a lane staged the WHOLE root. The consequence is
-#                    that adding an asset reddens five lanes, so this
-#                    clause turns that into ONE gate failure naming the
-#                    .steps file, before any lane runs.
-#
-#   C7 THE APK'S     Android is the one platform whose packaged assets
-#      PREFIX        are not files, so it is the one with a packaging
-#                    layout of its own: the tree is copied into
-#                    `assets/<prefix>/` and read back through
-#                    AssetManager. Three files spell that prefix and
-#                    this holds them equal. THE BYTES are checked where
-#                    they are packaged — `apk_assets_verify` in
-#                    tools/android/run-emulator.sh, right after the
-#                    assemble that wrote them — because that is where
-#                    invariant 3 puts a guard.
+#                    a lane staged the WHOLE root. Adding an asset
+#                    reddens five lanes, so this clause turns that into
+#                    ONE gate failure naming the .steps file.
+#   C7 THE APK'S     Android packages assets into `assets/<prefix>/`,
+#      PREFIX        read back through AssetManager. Three files spell
+#                    that prefix and this holds them equal. THE BYTES
+#                    are checked where they are packaged, by
+#                    `apk_assets_verify` in run-emulator.sh.
 #
 # NO FIXTURE ANYWHERE. Every negative below doctors a shadow of the REAL
-# tree, so what is proven is that the rule still bites on the sources as
-# they are actually written today — the wayland seat guard passed
-# vacuously twice against a pattern that matched nothing.
+# tree (docs/traps.md: the wayland seat guard passed vacuously twice
+# against a pattern that matched nothing).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -206,10 +159,8 @@ for family, leaves in sorted(families.items()):
 # One resolver. Nothing outside the core may spell an asset's path or
 # read an asset environment variable for itself.
 #
-# THE EXEMPTIONS ARE THE INTERESTING HALF. Each names a file and a
-# reason, and a stale exemption — one whose file is gone, or which no
-# longer matches — is itself a failure: an exemption nobody re-read is
-# how a rule quietly stops applying.
+# Each exemption names a file and a reason, and a stale one — file gone,
+# or no longer matching — is itself a failure.
 EXEMPT = {
     "crates/kaya/src/assets.rs":
         "the core's own resolver — this is the one place the rule lives",
@@ -234,15 +185,9 @@ CODE = (".rs", ".py", ".go", ".cs", ".java", ".swift", ".ml", ".mli", ".hs",
 ASSET_PATH = re.compile(r"guests/assets/")
 ASSET_ENV = re.compile(r"KAYA_(?:FONT_FILE|ICON_FILE|ASSET_DIR)")
 
-# THIS CLAUSE READS CODE AND NOT PROSE, and that is not a convenience.
-# Every guest this slice migrated explains in its own header what it
-# USED to do — "this scene used to read KAYA_FONT_FILE with a
-# repo-relative default" — which is exactly the sentence the next reader
-# needs and exactly the sentence a naive grep calls a violation. A gate
-# that fires on its own subject's documentation gets muted, and a muted
-# gate is worse than none (tools/check-diagnostics.sh costed and
-# rejected a prose regex for the same reason). So comments and string
-# literals come out first, and what is left is what the program does.
+# THIS CLAUSE READS CODE AND NOT PROSE: a header explaining what a file
+# USED to do is exactly the sentence a naive grep calls a violation, and
+# a gate that fires on its own subject's documentation gets muted.
 LINE_COMMENT = {".rs": "//", ".go": "//", ".cs": "//", ".java": "//",
                 ".swift": "//", ".kt": "//", ".kts": "//", ".c": "//",
                 ".h": "//", ".py": "#", ".hs": "--"}
@@ -289,12 +234,9 @@ for r in SEARCH_ROOTS:
             text = code_only(f.read_text(encoding="utf-8", errors="replace"),
                              os.path.splitext(fn)[1])
             hit_path = ASSET_PATH.search(text) is not None
-            # A BINDING MAY NAME THE VARIABLE AND MAY NOT READ A PATH.
+            # A BINDING MAY NAME THE VARIABLE AND MAY NOT READ A PATH:
             # KAYA_ASSET_DIR is part of the surface every binding
-            # documents — `asset(name)` resolves under it — and a doc
-            # comment that says so is the opposite of a second resolver.
-            # A hard-coded `guests/assets/...` in a binding is still a
-            # second resolver, so only the env half is relaxed.
+            # documents, so only the env half is relaxed.
             hit_env = (not rel.startswith("bindings/")
                        and ASSET_ENV.search(text) is not None)
             if not (hit_path or hit_env):
@@ -323,12 +265,9 @@ for rel, why in sorted(EXEMPT.items()):
         continue
     if len(why.strip()) < 20:
         bad.append(f"{rel} is exempted with no real reason given ({why!r})")
-    # AND THE EXEMPTION MUST STILL BE EARNED. A file that stopped
-    # resolving — because it migrated to `asset(name)`, or because the
-    # mention was only ever a comment this clause no longer reads —
-    # leaves a permission behind it, and the next edit to that file
-    # inherits it silently. That is the shape check-gates refuses in its
-    # own EXCLUDED table, one gate over.
+    # AND THE EXEMPTION MUST STILL BE EARNED: a file that stopped
+    # resolving leaves a permission behind it, and the next edit to that
+    # file inherits it silently.
     body = code_only(path.read_text(encoding="utf-8", errors="replace"),
                      os.path.splitext(rel)[1])
     if not (ASSET_PATH.search(body) or (not rel.startswith("bindings/")
@@ -339,14 +278,11 @@ for rel, why in sorted(EXEMPT.items()):
                    "without anyone deciding that it should")
 
 # ------------------------------------------------------------------ C4
-# Every lane, both halves stated. STAGES: must name KAYA_ASSET_DIR and
-# must copy the ROOT rather than a file under it. NOTHING_NEEDED: must
-# say why, at the staging site, rather than leaving it to be inferred.
+# Every lane, both halves stated. STAGES: copy the ROOT rather than a
+# file under it. NOTHING_NEEDED: say why, at the staging site.
 # lane -> (why it stages, the token that proves HOW the core will find
 # what it staged). The token differs per lane because the mechanism
-# does, and a single "must name KAYA_ASSET_DIR" rule would have forced
-# iOS to carry a variable it does not need — which is the opposite of
-# what the plan asks for there.
+# does: iOS needs no variable at all.
 STAGES = {
     "tools/deploy-win.sh": (
         "the VM has no repo; the deploy copies the root into the mirror path "
@@ -383,11 +319,8 @@ for rel, (_why, token) in sorted(STAGES.items()):
                    "connects it to the route the core will actually take, and "
                    "every asset call on that machine resolves to the "
                    "compile-time repo path it does not have")
-    # A COPY of one file under the root, never a mere mention of one.
-    # The deploy hashes the resource index into its stamp by path and
-    # that is a READ, not a staging — a pattern that could not tell the
-    # two apart would have to be silenced, and a silenced clause is a
-    # clause nobody reads.
+    # A COPY of one file under the root, never a mere mention of one:
+    # the deploy hashes the resource index by path, which is a READ.
     COPY = ("scp ", "adb push", "cp ", "copyTo", "install ", "rsync")
     for line in text.splitlines():
         if not re.search(r"guests/assets/(fonts|icons|win)/[A-Za-z0-9*]", line):
@@ -429,14 +362,9 @@ for rel in sorted(STAGES):
                    "corruption that preserved the length")
 
 # ------------------------------------------------------------------ C6
-# The conformance scene's FROZEN CENSUS equals the root's listing.
-#
-# tools/scenes/assets.steps expects the miss sentence's first line, which
-# names every asset the package carries, and that expectation is what
-# forces a lane to stage the WHOLE root rather than the one file it
-# happens to need (docs/assets-plan.md A5.1). The consequence is that
-# ADDING AN ASSET REDDENS FIVE LANES, and this clause is what turns that
-# into one gate failure naming the .steps file before any lane runs.
+# The conformance scene's FROZEN CENSUS equals the root's listing, which
+# is what forces a lane to stage the WHOLE root (docs/assets-plan.md
+# A5.1).
 SCENE = "tools/scenes/assets.steps"
 scene_path = root / SCENE
 if not scene_path.is_file():
@@ -473,22 +401,15 @@ else:
                        "asserting a sentence the core will never print")
 
 # ------------------------------------------------------------------ C7
-# The APK carries the root, under ONE prefix that three files spell.
+# The APK carries the root under ONE prefix that three files spell. The
+# prefix exists because an app's AssetManager root listing is not
+# exclusively the app's (framework directories are visible there, and
+# every AAR merges its own `assets/` in), which would make C6's frozen
+# census a fact about the toolchain.
 #
-# Android is the one platform whose packaged assets are not files, so it
-# is the one platform where the packaging step has a layout of its own:
-# the tree is copied into `assets/<prefix>/` and read back through
-# AssetManager. The prefix exists because an app's AssetManager root
-# listing is not exclusively the app's (framework asset directories are
-# visible there, and every AAR merges its own `assets/` in), which would
-# make C6's frozen census a fact about the toolchain.
-#
-# THE BYTES ARE CHECKED WHERE THEY ARE PACKAGED, not here:
-# tools/android/run-emulator.sh's `apk_assets_verify` opens the APK
-# gradle just wrote and compares every entry against the tree, which is
-# where invariant 3 puts a guard. This clause holds the one thing a
-# built artifact cannot show — that the three hand-written spellings of
-# the prefix are one string.
+# THE BYTES ARE CHECKED WHERE THEY ARE PACKAGED, by run-emulator.sh's
+# `apk_assets_verify`. This clause holds only what a built artifact
+# cannot show: that the three spellings are one string.
 APK_PREFIX_SITES = {
     "android/kaya/src/main/kotlin/dev/kaya/KayaAssets.kt":
         re.compile(r"""const\s+val\s+ROOT\s*=\s*"([^"]+)\""""),
@@ -537,9 +458,7 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
 # <destination> -> a shadow root of symlinks the checker can read.
-# tools/check-app-identity.sh's, verbatim but for the roots: the two
-# gates read overlapping trees and a second spelling of this walk is a
-# second thing to keep true.
+# Shared verbatim with tools/check-app-identity.sh but for the roots.
 shadow() {
     python3 -c '
 import os
@@ -562,14 +481,10 @@ for r in ROOTS:
                 continue
             out = dst / f.relative_to(root)
             out.parent.mkdir(parents=True, exist_ok=True)
-            # THE ASSET ROOT IS COPIED, EVERYTHING ELSE IS LINKED. C2
-            # refuses a symlink inside the root — fs::read follows one,
-            # so a link there is the escape wall 1 exists to close — and
-            # a shadow built entirely of links would fail that clause
-            # for a reason belonging to the shadow rather than to the
-            # perturbation. Copying one small directory buys a shadow
-            # the real clause can read; the rest stays links, which is
-            # what keeps this walk cheap enough to run seven times.
+            # THE ASSET ROOT IS COPIED, EVERYTHING ELSE IS LINKED: C2
+            # refuses a symlink inside the root, so an all-links shadow
+            # would fail that clause for a reason belonging to the
+            # shadow rather than to the perturbation.
             if f.relative_to(root).as_posix().startswith("guests/assets/"):
                 shutil.copyfile(f, out)
             else:
@@ -684,33 +599,30 @@ applied "$hits" "N7's hash removal"
 refuses "$s" "never hashes what arrived" "N7 (a size check standing in for a hash)"
 
 # N8 — C6: the root gains an asset and the scene's frozen census does
-# not. THIS IS THE ONE THE CLAUSE EXISTS FOR: without it the first
-# notice is five red lanes, each blaming a scene rather than the file
-# that was added.
+# not. Without the clause the first notice is five red lanes, each
+# blaming a scene rather than the file that was added.
 s="$(fresh n8)"
 printf 'a second font nobody told the scene about\n' >"$s/guests/assets/fonts/extra.bin"
 refuses "$s" "freezes a census of" "N8 (an asset the scene does not name)"
 
-# N9 — C6: the scene stops freezing a census at all, which is how the
-# expensive expectation gets quietly dropped rather than updated.
+# N9 — C6: the scene stops freezing a census at all — how the expensive
+# expectation gets quietly dropped rather than updated.
 s="$(fresh n9)"
 hits="$(doctor "$s" tools/scenes/assets.steps 'the package carries' 'the package holds')"
 applied "$hits" "N9's census removal"
 refuses "$s" "freezes no census" "N9 (a scene that stopped asserting the census)"
 
 # N10 — C7: the APK's prefix is spelled differently in two of the three
-# files. The build then copies into one directory and the reader reads
-# another, and the failure lands as a census the app cannot produce.
+# files, so the build copies into one directory and the reader reads
+# another.
 s="$(fresh n10)"
 hits="$(doctor "$s" android/kaya/src/main/kotlin/dev/kaya/KayaAssets.kt \
     'const val ROOT = "kaya"' 'const val ROOT = "kaya-assets"')"
 applied "$hits" "N10's prefix rename"
 refuses "$s" "asset prefix is spelled differently" "N10 (three files, two prefixes)"
 
-# N11 — C7: the APK stops carrying assets at all. The leg that runs
-# without a staged root would then fall through to a path no device has,
-# and the failure would name a directory rather than the packaging step
-# that stopped packaging.
+# N11 — C7: the APK stops carrying assets at all, and the failure names
+# a directory rather than the packaging step that stopped packaging.
 s="$(fresh n11)"
 hits="$(doctor "$s" android/build.gradle.kts 'assets\.srcDir' 'assets.ignored')"
 applied "$hits" "N11's removed assets source directory"

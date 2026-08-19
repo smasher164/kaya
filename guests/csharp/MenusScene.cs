@@ -24,8 +24,6 @@ static class MenusScene
 
             Action<Tx> onShare = t => t.Write(status, "shared");
 
-            // File and its Export leaf share one enablement signal: one
-            // write moves both.
             var share = tx.Item("Share", primary: true, onActivate: onShare);
             var file = tx.Menu("File", enabled: canExport, items: new[]
             {
@@ -51,8 +49,6 @@ static class MenusScene
             tx.Window(title: "menus", menus: new[] { file, view, sortGroup });
 
             groups = tx.Collection();
-            // Built live: the items are shared across stamped copies, the
-            // template only attaches, and each activation carries its key path.
             var catalog = tx.ContextCatalog(
                 tx.Item("Remove", symbol: Symbol.Delete, onActivate: (t, keys) =>
                 {
@@ -70,8 +66,8 @@ static class MenusScene
                 tx.Button("reset menu state", t => // button#1
                 {
                     // Menus are uncontrolled: the folds never echo the
-                    // user's pick, so details/sort still hold false/0 and
-                    // these writes are real records, never coalesced away.
+                    // user's pick, so these writes are real records,
+                    // never coalesced away.
                     t.Write(details, false);
                     t.Write(sort, 0.0);
                     t.Write(status, "ready");
@@ -101,7 +97,6 @@ static class MenusScene
                     tx.Item("Rename", symbol: Symbol.Edit,
                         onActivate: t => t.Write(status, "renamed")));
 
-                // Remove's activation names BOTH keys (group, then item).
                 tx.Each(groups, g => g.Column(() =>
                 {
                     items = g.Collection();

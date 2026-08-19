@@ -13,23 +13,8 @@
 // and KayaTextarea copied in shape — TextField/TextEditor over an
 // `@Observable` node, uncontrolled toward the app.
 //
-//  I1 WHICH RESPONDER, WHICH MANAGER. What is first responder when a
-//     SwiftUI TextField is focused, and where does its `undoManager`
-//     resolve — a private one per field, or one shared up the chain?
-//     (mac's answer differs per widget kind; assume nothing here.)
-//  I2 DOES TYPING REGISTER? Text entered through `insertText` — the
-//     method the keyboard itself calls on UIKeyInput — must move the
-//     model and leave canUndo true.
-//  I3 DOES A PROGRAMMATIC WRITE REGISTER? `node.text = "PROG"` on an
-//     EMPTY stack, then canUndo.
-//  I4 WHAT DOES UNDO DO AFTER A WRITE? The D7 hazard is a stale action
-//     replayed against content the app replaced.
-//  I5 DOES removeAllActions BUY D7, and does typing still work after?
-//  I6 SCOPE. Per-field managers? Does history survive a focus round
-//     trip? Does a write to an UNFOCUSED field register?
-//  P6 SHAKE. `applicationSupportsShakeToEdit`'s default in an app
-//     shaped like kaya's (kaya never sets it), whether a shake presents
-//     the system undo alert, and which manager it drives.
+// The cells and their answers are docs/undo-plan.md §0; the I- and
+// P-labels below mark which reading is which.
 //
 // Answers land on stdout under "PROBE". THROWAWAY; nothing builds it
 // but build.sh beside it.

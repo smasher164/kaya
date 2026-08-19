@@ -1,42 +1,15 @@
 #!/usr/bin/env python3
 """The TEMPLATE-zone census: every widget kind AND every prop, every binding.
 
-kaya has two construction zones. The LIVE zone is what an app builds in
-its build closure; the TEMPLATE zone is the prototype inside a
-collection, stamped once per row. `tools/check-sugar-surface.sh` has
-always swept the live one, and until 2026-08-10 nothing swept this one —
-so the surface was complete in eight languages and, in a collection row,
-reachable only through `widget(kind)`, the raw floor that passes a wire
-constant as a runtime value. kaya's own text editor spells its find
-bar's text field that way; the undo scene does it in seven languages.
-
-WHY THIS IS PYTHON AND NOT SEVEN MORE GREPS IN THE GATE. Three of the
-bindings namespace the template zone by SCOPE rather than by name:
-Rust's `Tpl` methods are `pub fn entry` exactly like `Tx`'s, OCaml's
-live in `module Tpl = struct`, and a line-oriented pattern cannot tell
-which block a line sits in. A regex keyed on the name alone would be
-satisfied by the LIVE constructor and report a zone it never read —
-which is the failure mode a gate exists to prevent, not one it may
-have. So each binding's zone is located by its real structure and the
-constructors are read from inside it.
-
-Every zone reader is watched: a binding whose zone yields fewer
-constructors than MIN_CTORS fails as a BROKEN READER rather than passing
-quietly, because two empty sets agree perfectly and a census that reads
-nothing is indistinguishable from a clean tree.
-
-IT ALSO CENSUSES PROPS, since 2026-08-17. It did not until then, and the
-gap was ledgered with three named consequences (docs/deferred.md, "sees
-constructors, not props"): the props slice's surfaces were held by
-check-sugar-surface's line patterns and per-binding tests instead, Go's
-reader could see neither a digit in a method name (`SetA11yID`) nor a
-generic one (`BindA11yID[`), and two hand-written FAÇADES — Java's
-`RowSurface` and C#'s generated `<Rec>Row` — had no level-holding clause
-at all, where Rust's `Row` had one. A file-scoped grep cannot replace
-this for the same reason the constructor census is not one: OCaml's live
-`set_grow (Widget id)` and its template `set_grow (Node id)` are the same
-eleven characters, and a pattern keyed on the name has ALREADY been
-measured passing with the template setter deleted (2026-08-10).
+WHY THIS IS PYTHON AND NOT SEVEN MORE GREPS IN THE GATE. Three bindings
+namespace the template zone by SCOPE rather than by name — Rust's `Tpl`
+methods are `pub fn entry` exactly like `Tx`'s, OCaml's live in
+`module Tpl = struct` — so a line-oriented pattern is satisfied by the
+LIVE constructor and reports a zone it never read. That has already been
+measured passing with the template setter deleted (2026-08-10). Each
+zone is therefore located by its real structure and read from inside it,
+and every reader is WATCHED: too few names is a broken reader, not a
+clean tree.
 
 Usage:
     tpl-surfaces.py [--kinds a,b,c] [<repo root>]
@@ -51,16 +24,12 @@ import sys
 
 ROOT = "."
 
-# The 14 widget kinds, passed in by the gate from the GENERATED wire file
-# so this list tracks the spec by construction rather than by memory.
+# The 14 widget kinds; the gate passes them in from the GENERATED wire
+# file, so this fallback tracks the spec by construction, not by memory.
 DEFAULT_KINDS = (
     "column button label entry row checkbox slider image "
     "scroll progress select radio grid textarea"
 ).split()
-
-# `spacer` is sugar for an empty grown column rather than a kind, so it
-# is not in the spec's list and not swept; it rides along in each
-# binding because the live zone has one.
 
 # Constructors that are plumbing rather than sugar. Named here so that
 # adding a plumbing method cannot quietly widen the Rust surface rule.
@@ -68,8 +37,8 @@ NOT_FORWARDED = {
     "widget", "set", "bind", "bind_element", "bind_field", "add_child",
     "case_arm", "collection", "for_each", "for_each_sum", "when",
     # context_menu is NOT here, deliberately: a row trace legitimately
-    # anchors one (the menus scene's item rows), so both surfaces must
-    # offer it. context_attach — the raw item-id/node floor — stays.
+    # anchors one, so both surfaces must offer it. context_attach — the
+    # raw item-id/node floor — stays.
     "context_attach",
 }
 
@@ -80,12 +49,7 @@ def read(path):
 
 
 def brace_block(src, header_re, open_ch="{", close_ch="}"):
-    """The body of the first block whose header matches, brace-matched.
-
-    A regex cannot find the end of a Rust impl or a C# class: the bodies
-    contain braces, strings and closures. Counting delimiters is crude,
-    but it is reading the real structure instead of guessing at it.
-    """
+    """The body of the first block whose header matches, brace-matched."""
     m = re.search(header_re, src, re.M)
     if not m:
         return None
@@ -106,9 +70,9 @@ def brace_block(src, header_re, open_ch="{", close_ch="}"):
 def keyword_block(src, start_re, end_re):
     """The body between a start line and its matching end line.
 
-    OCaml's `module Tpl = struct ... end` has no braces. `end` also ends
-    the nested `for_each`/`when_` bodies, so the reader tracks the
-    struct/sig/begin openers rather than stopping at the first `end`.
+    OCaml's `module Tpl = struct ... end` has no braces, and `end` also
+    ends the nested `for_each`/`when_` bodies — so the openers are
+    tracked rather than stopping at the first `end`.
     """
     m = re.search(start_re, src, re.M)
     if not m:
@@ -126,9 +90,8 @@ def keyword_block(src, start_re, end_re):
 
 # --- one reader per binding -------------------------------------------
 #
-# Each returns the set of widget-kind constructor names its template
-# zone offers, spelled in that language's own convention. The gate
-# compares against the kind list after normalising case.
+# Each returns the set of widget-kind constructor names its template zone
+# offers, in that language's own convention; compared case-normalised.
 
 def zone_rust(_):
     body = brace_block(read("crates/kaya/src/app.rs"), r"^impl Tpl<'_, '_> \{")
@@ -138,11 +101,8 @@ def zone_rust(_):
 
 
 def zone_go(_):
-    # DIGITS AND GENERICS BOTH COUNT. The first draft read
-    # `([A-Z][A-Za-z]*)\(` and could see neither `SetA11yID` (a digit in
-    # the name) nor `BindA11yID[` (a type parameter before the arguments),
-    # which is why Go's half of the props slice was ledgered as unswept
-    # while its pairing lived in bindings/go/tplzone_test.go instead.
+    # DIGITS AND GENERICS BOTH COUNT: `SetA11yID` has a digit in the name
+    # and `BindA11yID[` a type parameter before its arguments.
     src = read("bindings/go/app.go")
     return {
         m.lower()
@@ -180,22 +140,16 @@ def zone_ocaml(_):
 
 
 def zone_haskell(_):
-    # Haskell has no module scope here: the template constructors are
-    # distinguished by their RETURN TYPE, `Tpl Node`, which is exactly
-    # as structural as a block and rather more readable.
+    # Haskell has no module scope here: the zone is the RETURN TYPE.
     src = read("bindings/haskell/KayaApp.hs")
     return {m.lower() for m in re.findall(r"^([a-z][A-Za-z0-9]*) ::[^\n]*-> Tpl Node", src, re.M)}
 
 
-# Python is EXEMPT, and the exemption is a fact about its design rather
-# than a hole. Its transaction is ambient, so ONE module-level surface
-# serves both zones: `_tpl_depth` flips the allocator between Widget and
-# Node (bindings/python/kaya/__init__.py:182) and every constructor
-# funnels through it. Every kind already works in a template there, and
-# there is no second surface for one to be missing from — the live sweep
-# in check-sugar-surface covers Python's template zone by construction.
-# C is exempt with the rest of C: the generated kaya_tx_create_widget IS
-# its surface, deliberately (invariant 5).
+# Python is EXEMPT from this census, on the record: its transaction is
+# ambient, so ONE module-level surface serves both zones (`_tpl_depth`
+# flips the allocator between Widget and Node) and there is no second
+# surface for a kind to be missing from. C is exempt with the rest of C:
+# the generated kaya_tx_create_widget IS its surface (invariant 5).
 ZONES = [
     # (language, reader, zone description for the message, minimum
     #  constructors the reader must find before its verdict is believed)
@@ -211,27 +165,17 @@ ZONES = [
 
 # --- the PROP census ---------------------------------------------------
 #
-# The zone's PROPS, and the member each is spelled as INSIDE the zone.
-# Every name below is read out of the template zone's own block, never out
-# of the file: the whole reason this census is python is that a
-# line-oriented pattern is satisfied by the LIVE twin, and props are where
-# that bites hardest — `set_grow`, `setGrow` and `SetGrow` each name two
-# different surfaces in the same file.
-#
-# WHY THESE SEVEN. grow is the layout prop scroll forced; the a11y trio
-# and accepts are the props slice (docs/tpl-props-plan.md P1/P2); role and
-# inset are the styling pair (docs/styling-plan.md D3/D4), which the live
-# zone carried alone until 2026-08-17 — a stamped "Delete" button could be
-# declared destructive in no language, and the editor's find bar, a
-# STAMPED row, sat flush while the live status row beside it insets.
+# The zone's PROPS and the member each is spelled as INSIDE the zone.
+# `set_grow`, `setGrow` and `SetGrow` each name two different surfaces in
+# the same file, so every name is read out of the zone's own block.
+# The seven: grow (the layout prop scroll forced), the a11y trio and
+# accepts (docs/tpl-props-plan.md P1/P2), role and inset
+# (docs/styling-plan.md D3/D4).
 TPL_PROPS = ["grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", "role", "inset"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
-# named setter — the zone deliberately has one generic write and names
-# only the props whose spelling would otherwise be a wire constant. That
-# is a fact about the surface, so it is recorded here rather than hidden:
-# this row cannot tell grow from any other generic write, and the named
-# rows can.
+# named setter, so that one row cannot tell grow from any other generic
+# write. The named rows can.
 PROP_MEMBERS = {
     "rust": {
         "grow": "set", "a11y_id": "a11y_id", "a11y_label": "a11y_label",
@@ -264,8 +208,7 @@ PROP_MEMBERS = {
         "inset": "set_inset",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
-    # `TplAttr` GADT, applied by `applyTplAttr` — which is as structural a
-    # zone as a block and rather more so, since the type is the zone.
+    # `TplAttr` GADT, applied by `applyTplAttr`.
     "haskell": {
         "grow": "TplGrow", "a11y_id": "TplA11yId", "a11y_label": "TplA11yLabel",
         "a11y_hint": "TplA11yHint", "accepts": "TplAccepts", "role": "TplRole",
@@ -306,8 +249,7 @@ def members_swift(_):
 
 def members_ocaml(_):
     # ANY indent inside the zone, not the two the constructor reader
-    # wants: OCaml's template SETTERS sit one nesting deeper than its
-    # constructors (bindings/ocaml/kaya_app.ml, inside module Tpl).
+    # wants: OCaml's template SETTERS sit one nesting deeper.
     body = keyword_block(read("bindings/ocaml/kaya_app.ml"), r"^module Tpl = struct\b", r"^end")
     return None if body is None else set(re.findall(r"^\s+let ([a-z_0-9']+)", body, re.M))
 
@@ -331,38 +273,21 @@ PROP_ZONES = [
 
 # --- the TAKES-A-SOURCE census -----------------------------------------
 #
-# A constructor that EXISTS is not a constructor that can be handed the
-# row's own data, and until 2026-08-18 nothing in the tree asked the
-# second question. `Tpl.Button(string)` satisfied the kind census exactly
-# as `Tpl.button(Signal<String>)` did, so a per-row button caption was
-# sugar in five bindings, floor-only in C# and Swift, and inexpressible
-# in Python — for as long as the sweep only asked whether the kind was
-# there (docs/deferred.md, "the template button's caption is not
-# uniform", found 2026-08-17). It is the gap-shape the ledger already
-# named once for Python's `progress`: a check that asserts a constructor
-# EXISTS cannot see which arm is reachable.
+# A constructor that EXISTS is not one that can be handed the row's own
+# data (docs/deferred.md, "the template button's caption is not
+# uniform"). WHAT IS ASKED IS A PAIR: each point must accept BOTH a
+# SIGNAL and an ELEMENT FIELD. The signal arm alone proves nothing —
+# every LIVE constructor takes a signal too — while the field arm is
+# what only a template can spell, one caption per stamped copy. So the
+# two are reported by name, never summed.
 #
-# WHAT IS ASKED IS A PAIR, not "does it take a source". Each point must
-# accept BOTH a SIGNAL and an ELEMENT FIELD. The signal arm alone proves
-# nothing about this zone — every LIVE constructor in the tree takes a
-# signal too — while the field arm is the thing only a template can
-# spell: "Delete <that row's title>", one caption per stamped copy. A
-# binding with the signal arm and not the field arm is the drift this
-# census exists to see, so it is reported by name and not summed away.
+# PYTHON IS IN THIS CENSUS though it is exempt from both above, and the
+# difference is the point: a source is not a kind, and Python was the one
+# binding that could not spell the caption at all.
 #
-# PYTHON IS IN THIS CENSUS, though it is exempt from both censuses above,
-# and the difference IS the finding. Its transaction is ambient, so one
-# module-level surface serves both zones and every KIND works in a
-# template by construction — a kind census has nothing to measure there.
-# A SOURCE IS NOT A KIND: `_text_value` raises on anything but `str`, so
-# `kaya.button` refused a row's field while looking complete to every
-# sweep in the tree, and Python was the one binding that could not spell
-# the caption at all.
-#
-# Each reader returns the set of source flavours the point accepts, or
-# None when it cannot LOCATE the constructor — which is refused as a
-# broken reader, never reported as a binding with no sources. The two
-# outcomes look identical in a name set and could not be more different.
+# Each reader returns the flavours the point accepts, or None when it
+# cannot LOCATE the constructor — refused as a broken reader, never
+# reported as a binding with no sources.
 SOURCE_FLAVOURS = ("signal", "field")
 
 # The points, one per (kind, prop) that must be sourceable in the zone.
@@ -390,11 +315,9 @@ def sources_rust(_):
 
 
 def sources_go(_):
-    # The zone is the RECEIVER here, so the file is the block. Every
-    # `Button*` header is read — the constant arm and the bound one are
-    # different methods in this binding — and only the header, since a
-    # body mentioning Signal would otherwise answer for a signature that
-    # does not take one.
+    # The zone is the RECEIVER here, so the file is the block. Only the
+    # HEADERS are read: a body mentioning Signal would otherwise answer
+    # for a signature that does not take one.
     src = read("bindings/go/app.go")
     heads = re.findall(r"func \(t \*Tpl\) Button[A-Za-z0-9]*(.*?)\) Node \{", src, re.S)
     if not heads:
@@ -467,16 +390,14 @@ def sources_ocaml(_):
     body = keyword_block(read("bindings/ocaml/kaya_app.ml"), r"^module Tpl = struct\b", r"^end")
     if body is None:
         return None
-    # One `let button`, its sources spelled as optional arguments; the
-    # header runs to the `=` that opens the body.
+    # One `let button`; the header runs to the `=` that opens the body.
     m = re.search(r"^  let button\b(.*?)=\n", body, re.S | re.M)
     if m is None:
         return None
     head = m.group(1)
     got = set()
-    # `?bind` and `?bind_field` are different arguments and the first is
-    # a prefix of the second, so the signal arm is matched only where no
-    # further name follows.
+    # `?bind` is a PREFIX of `?bind_field`, so the signal arm is matched
+    # only where no further name follows.
     if re.search(r"\?bind(?![_a-z])", head):
         got.add("signal")
     if re.search(r"\?bind_field\b", head):
@@ -485,11 +406,9 @@ def sources_ocaml(_):
 
 
 def sources_haskell(_):
-    # The zone is the RETURN TYPE and the sources are the CLASS: the
-    # constructor's constraint names the class, and the class's instances
-    # say which flavours it admits. Both halves are read, because a
-    # constraint over a class with no Signal instance would be a source
-    # in name only.
+    # The zone is the RETURN TYPE and the sources are the CLASS. Both
+    # halves are read: a constraint over a class with no Signal instance
+    # would be a source in name only.
     src = read("bindings/haskell/KayaApp.hs")
     m = re.search(r"^buttonBound :: (\w+) s => s -> Tpl Node$", src, re.M)
     if m is None:
@@ -505,10 +424,9 @@ def sources_haskell(_):
 
 def sources_python(_):
     # ONE surface, both zones, so the "zone" here is the constructor
-    # itself: the `bind=` argument and the ladder under it. A signature
-    # with `bind=` whose body never reaches the element encoder would be
-    # the silent-nothing arm this binding has already shipped once
-    # (kaya.label(bind=) before its floor), so both are read.
+    # itself. Signature AND body: a `bind=` that never reaches the
+    # element encoder is the silent-nothing arm this binding has already
+    # shipped once.
     src = read("bindings/python/kaya/__init__.py")
     m = re.search(r"^def button\(([^)]*)\):\n(.*?)(?=^def )", src, re.S | re.M)
     if m is None:
@@ -548,42 +466,27 @@ SOURCE_ZONES = [
 # --- the FAÇADES, held level with the zone they forward to -------------
 #
 # A template zone can have a SECOND surface: a for-statement façade that
-# forwards the zone's methods one at a time, by hand. Three bindings have
-# one, and until 2026-08-17 only Rust's was checked — the other two were
-# ledgered follow-ups with a measured price (C#'s was offered at the props
-# fan-out with eleven missing forwards, including a year-old SetGrow
-# drift). A member on the zone and not on its façade is reachable through
-# `for_each` and not through `for row in rows`, which is a difference no
-# guest should have to know about.
+# forwards the zone's methods one at a time, by hand. A member on the
+# zone and not on its façade is reachable through `for_each` and not
+# through `for row in rows`, a difference no guest should have to know.
 #
-# Each façade carries its own NOT_FORWARDED set, because each binding drew
-# the plumbing line in its own place and the line is documented AT the
-# façade. Reading each one's own list is measuring; one shared list would
-# be legislating.
-# Java's set was MEASURED at the fan-out rather than guessed: every name
-# in Tpl and not in RowSurface was read off and classified, and only these
-# four survived as plumbing. `widget` is the kind floor itself and its
-# absence is load-bearing (it keeps a for-statement guest off the tier
-# invariant 5 excludes); `addChild` is the parenting floor; `onToggleNode`
-# is the bridge the generated typed sugar reaches through `tpl()`;
-# `forEach` is compensated, since `collection()` IS forwarded and a nested
-# `Collection.rows()` opens its trace off the ambient transaction.
-# Everything else that was missing was drift, and was forwarded rather
-# than excluded — including the five level-taking binds (the zone already
-# forwarded their three a11y twins) and `when`, whose absence was the
-# sharpest of them: `Tx.when` mints a LIVE widget id where `Tpl.when`
-# mints a node id, so a guest inside a row trace that reached for the
-# statement-level one emitted the wrong id space silently.
+# Each façade carries its OWN NOT_FORWARDED set, because each binding
+# drew the plumbing line in its own place; reading each one's own list is
+# measuring, one shared list would be legislating.
+#
+# Java's four: `widget` is the kind floor and its absence is load-bearing
+# (it keeps a for-statement guest off the tier invariant 5 excludes);
+# `addChild` is the parenting floor; `onToggleNode` is the bridge the
+# generated typed sugar reaches through `tpl()`; `forEach` is compensated
+# by `collection()`, which IS forwarded.
 NOT_FORWARDED_JAVA = {
     "widget", "addChild", "onToggleNode", "forEach",
 }
 
 # C#'s façade documents its own exclusions in its generated header
-# (guests/csharp/*Kaya.cs): "The zone's PLUMBING — Widget, the Bind*Field
-# setters, AddChild, Collection/ForEach/When, ContextMenu — stays off
-# deliberately". ContextMenu is on this list and off Rust's, which is a
-# real divergence between two façades over one zone rather than a fact
-# about C#; it is recorded here and ledgered rather than silently blessed.
+# (guests/csharp/*Kaya.cs). ContextMenu is on this list and off Rust's —
+# a real divergence between two façades over one zone, recorded and
+# ledgered rather than silently blessed.
 NOT_FORWARDED_CSHARP = {
     "Widget", "AddChild", "Collection", "ForEach", "Each", "When", "ContextMenu",
     "BindTextElement", "BindTextField", "BindCheckedField", "BindValueField",
@@ -625,12 +528,9 @@ def facade_java():
 def facade_csharp():
     """Every GENERATED `<Rec>Row` in the guest tree, against `Tpl`.
 
-    The generated files are what a guest actually calls, so they are what
-    is measured; the generator (tools/kaya-csgen) is what gets fixed when
-    this fires. Reading all of them and not one is deliberate — they are
-    stamped per record type, and a generator taught the forward emits it
-    into every file at once, so a single laggard means someone
-    hand-edited a generated file.
+    ALL of them, not one: a generator taught the forward emits it into
+    every file at once, so a single laggard means someone hand-edited a
+    generated file. tools/kaya-csgen is what gets fixed when this fires.
     """
     tpl = brace_block(read("bindings/csharp/KayaApp.cs"),
                       r"^\s*(public |internal )?sealed class Tpl\b")
@@ -654,29 +554,21 @@ def facade_csharp():
                 f"tools/kaya-csgen (the generator that emits {m.group(1)})",
             ))
     if not out:
-        # NOT a pass. The façades are generated files; finding none means
-        # the reader has stopped seeing them, which is the empty-census
-        # shape this whole file exists to refuse.
+        # NOT a pass: finding no generated façade means the reader has
+        # stopped seeing them.
         return None
     return out
 
 
 # THE FAÇADES THAT ARE NOT HERE, on the record rather than merely absent
-# (gates.sh's EXCLUDED rule, one file over — an exemption nobody wrote
-# down is indistinguishable from an oversight):
+# (gates.sh's EXCLUDED rule, one file over):
 #
-#   go — `type Row struct{ *Tpl }` EMBEDS the zone, so every method is
-#     promoted by the compiler and the pair cannot drift. Its two sealed
-#     surfaces (`SumCase`, and the `<name>Row` cmd/kaya-gen emits) hold a
-#     private `t` and ARE checked, by bindings/go/tplzone_test.go, which
-#     turns red on its own for any `*Tpl` prop they lack.
-#   swift — `struct <Rec>Row` (tools/kaya-swift-gen) forwards constructors
-#     and NO prop setter at all, and its `t: KayaTpl` is PUBLIC: guests
-#     reach the zone through it today (guests/swift/undo.swift), so the
-#     zone is not unreachable the way C#'s private field makes it. Being
-#     level with C#'s façade is a slice of its own (~7 setters and ~20
-#     constructors) and is ledgered as one; a clause here would be red
-#     for reasons this census cannot fix.
+#   go — `type Row struct{ *Tpl }` EMBEDS the zone, so the pair cannot
+#     drift. Its two sealed surfaces are checked by
+#     bindings/go/tplzone_test.go.
+#   swift — `struct <Rec>Row` (tools/kaya-swift-gen) forwards no prop
+#     setter, and its `t: KayaTpl` is PUBLIC, so the zone is reachable
+#     anyway. Levelling it is ledgered as a slice of its own.
 FACADES = [
     ("rust", facade_rust),
     ("java", facade_java),
@@ -687,9 +579,8 @@ FACADES = [
 def offers(names, kind):
     """Does this zone offer a constructor for `kind`?
 
-    Prefix-loose in the same way check-sugar-surface's live sweep is, so
-    a language's own flavour counts: `entryBound` and `entry_bound` are
-    both `entry`, `progressIndeterminate` is `progress`.
+    Prefix-loose as check-sugar-surface's live sweep is: `entryBound` and
+    `entry_bound` are both `entry`.
     """
     return any(n == kind or n.startswith(kind) for n in names)
 
@@ -723,8 +614,8 @@ def main():
             status = 1
             continue
 
-        # THE READER IS WATCHED. A census that reads nothing agrees with
-        # everything, and that is the shape a guard must never have.
+        # THE READER IS WATCHED: a census that reads nothing agrees with
+        # everything.
         if len(names) < minimum:
             print(
                 f"tpl-surfaces: {lang}'s zone reader found only {len(names)} "
@@ -749,8 +640,7 @@ def main():
             status = 1
 
     # THE PROP CENSUS. Same zones, read for what a stamped copy can be
-    # TOLD rather than for what it can be MADE — the half that was
-    # ledgered missing (docs/deferred.md, "sees constructors, not props").
+    # TOLD rather than for what it can be MADE.
     for lang, reader, where, minimum in PROP_ZONES:
         try:
             names = reader(None)
@@ -792,9 +682,8 @@ def main():
             status = 1
 
     # THE TAKES-A-SOURCE CENSUS. Same zones, read for whether the
-    # constructor can be handed the ROW rather than for whether it is
-    # there at all — the question the kind census structurally cannot
-    # ask, and the one the template button's caption drifted under.
+    # constructor can be handed the ROW rather than whether it exists —
+    # the question the kind census structurally cannot ask.
     for lang, reader, where, spelling in SOURCE_ZONES:
         try:
             got = reader(None)

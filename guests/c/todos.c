@@ -1,12 +1,8 @@
 /* The todos scene from C, on the function floor: records and field
  * projection with indexes spelled by hand. The derive the eight sugar
  * bindings recompute for their guest is write_items_left here, packed
- * into the CALLER'S transaction so the count rides the mutation's batch
- * — which is why the undone/redone arm folds the delta and writes
- * nothing (docs/deferred.md's retracted "a derived signal goes stale
- * after an undo").
- *
- * Built and run by the Linux container suite with KAYA_SELFTEST=todos. */
+ * into the CALLER'S transaction so the count rides the mutation's
+ * batch. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -36,8 +32,8 @@
 #define F_DONE 1
 
 static void build_scene(void) {
-    /* Overflow is the caller's to size against: the packers write
-     * through a bare pointer and nothing bounds-checks (kaya_wire.h). */
+    /* Overflow is the caller's to size against: the packers write through
+     * a bare pointer and nothing bounds-checks (kaya_wire.h). */
     uint8_t buf[4096];
     KayaTx tx = {buf, 0};
 
@@ -51,9 +47,9 @@ static void build_scene(void) {
         kaya_wire_value(&tx, kaya_str("todos"));
         kaya_wire_end(&tx, start);
     }
-    /* The whole undo surface this app declares: two items with the
-     * closed wire roles. No handler answers them and no signal tracks
-     * their enablement — the platform works both out. */
+    /* The whole undo surface this app declares: two items with the closed
+     * wire roles. No handler answers them and no signal tracks their
+     * enablement — the platform works both out. */
     kaya_tx_menu_item_create(&tx, M_EDIT, KAYA_MENU_KIND_MENU);
     kaya_tx_set_menu_label(&tx, M_EDIT, "Edit");
     kaya_tx_menu_item_create(&tx, M_UNDO, KAYA_MENU_KIND_ACTION);
@@ -125,9 +121,8 @@ static void str_copy(char *dst, size_t cap, const KayaVal *v) {
 }
 
 /* Takes the CALLER'S transaction, so the recomputed count lands in the
- * same batch as the mutation and is banked with it. Called from the two
- * mutation handlers and from nowhere else — never from the undo path,
- * where the core has already restored what this would compute. */
+ * same batch as the mutation. Never called from the undo path, where
+ * the core has already restored what this would compute. */
 static void write_items_left(KayaTx *tx) {
     unsigned left = 0;
     for (unsigned i = 0; i < n_todos; i++)
@@ -140,8 +135,7 @@ static void write_items_left(KayaTx *tx) {
 }
 
 /* An undone/redone body's fixed head, plus where its delta starts: the
- * shape is crates/kaya/src/spec.rs's `undone`, decoded run by run in
- * guests/c/undo.c, which reads the same record. */
+ * shape is crates/kaya/src/spec.rs's `undone`. */
 typedef struct {
     uint64_t window;
     uint32_t n_signals, n_texts, n_entries, n_orders;
@@ -165,38 +159,35 @@ static int parse_undo(const uint8_t *rec, uint16_t kind, KayaUndo *u) {
     memcpy(&u->n_orders, rec + at, 4);
     at += 4;
     at = kaya_parse_value(rec, at, &u->label);
-    /* +8 skips the flat list's own head, {u32 count, u32 reserved}: the
-     * run counts above already say how the values divide. */
+    /* +8 skips the flat list's own head, {u32 count, u32 reserved}. */
     u->at = at + 8;
     return 1;
 }
 
 /* Fold one undone/redone payload into this app's own model — the work
- * the other eight bindings do in absorb_undo before the guest's handler
- * runs (crates/kaya/src/app.rs). A delta STATES the restored state, so
- * folding it twice is folding it once. */
+ * the other eight bindings do in absorb_undo (crates/kaya/src/app.rs).
+ * A delta STATES the restored state, so folding it twice is folding it
+ * once. */
 static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
                        size_t draft_cap) {
     size_t at = u->at;
     KayaVal v, w;
 
     /* 1. signals: PAIRS of (I64 signal id, restored value). NOTHING TO
-     *    FOLD AND NOTHING TO RECOMPUTE. One of the pairs walked past is
-     *    SIG_LEFT — the count write_items_left made inside the add's
-     *    group, banked with the insert and already restored. Calling
-     *    write_items_left here would write a value the ledger never
-     *    banked. The run is still walked, because the next one begins
-     *    where it ends. */
+     *    FOLD AND NOTHING TO RECOMPUTE — one of the pairs walked past
+     *    is SIG_LEFT, banked with the insert and already restored.
+     *    Calling write_items_left here would write a value the ledger
+     *    never banked. The run is still walked, because the next one
+     *    begins where it ends. */
     for (uint32_t i = 0; i < u->n_signals; i++) {
         at = kaya_parse_value(rec, at, &v);
         at = kaya_parse_value(rec, at, &v);
     }
 
     /* 2. texts: PAIRS of (I64 widget id, restored Str). Empty in this
-     *    scene and folded anyway — a restore is a programmatic write and
-     *    never echoes as text_changed, so the delta is the only
-     *    notification an uncontrolled field's mirror gets.
-     *    guests/c/undo.c is where this run carries something. */
+     *    scene and folded anyway — a restore is a programmatic write
+     *    and never echoes as text_changed, so the delta is the only
+     *    notification an uncontrolled field's mirror gets. */
     for (uint32_t i = 0; i < u->n_texts; i++) {
         at = kaya_parse_value(rec, at, &v);
         at = kaya_parse_value(rec, at, &w);
@@ -207,10 +198,9 @@ static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
     /* 3. entries: ARITY-FIRST groups — I64 size (counting itself),
      *    collection, flags (bit 0 = the entry EXISTS), variant,
      *    path_len, path_len instance-path keys, the entry's key, then
-     *    the record's fields. This app models one of the two, `done`.
-     *    A restored entry carries its record and a removed one carries
-     *    none, so `size` is 6 + path + fields for the first and 6 + path
-     *    for the second. */
+     *    the record's fields. A restored entry carries its record and a
+     *    removed one carries none, so `size` is 6 + path + fields for
+     *    the first and 6 + path for the second. */
     for (uint32_t i = 0; i < u->n_entries; i++) {
         KayaVal size, collection, flags, variant, path_len, key;
         KayaVal done = kaya_bool(0);
@@ -230,9 +220,8 @@ static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
         }
         int index = key_index(&key);
         if (flags.i & 1) {
-            /* THE KEY IS THE ONE THE ENTRY ALREADY HAD: the core kept
-             * it, so nothing here mints and the minter in `app` below
-             * never hears about a history walk. */
+            /* THE KEY IS THE ONE THE ENTRY ALREADY HAD: the core kept it,
+             * so nothing here mints. */
             if (index < 0 && n_todos < MAX_TODOS) {
                 index = (int)n_todos;
                 str_copy(todos[index].key, sizeof todos[index].key, &key);
@@ -250,9 +239,8 @@ static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
     /* 4. orders: ARITY-FIRST likewise — I64 size, collection, path_len,
      *    path keys, then the instance's keys IN ORDER. "Changed the
      *    order" includes an insert or a remove
-     *    (crates/kaya/src/spec.rs), so this scene's add carries one even
-     *    though the app only ever appends. Folded because position is
-     *    what a per-entry statement cannot carry. */
+     *    (crates/kaya/src/spec.rs). Folded because position is what a
+     *    per-entry statement cannot carry. */
     for (uint32_t i = 0; i < u->n_orders; i++) {
         KayaVal size, collection, path_len, key;
         at = kaya_parse_value(rec, at, &size);
@@ -292,8 +280,8 @@ static void *app(void *arg) {
     /* The minter the sugar bindings spell `insert_fresh`, hand-kept
      * (docs/fresh-key-plan.md). NOTHING DECREMENTS IT: undo and redo
      * replay captured keys inside the core and never re-enter this
-     * handler, so counting the model instead would rewind on an undo and
-     * hand one name to two todos. */
+     * handler, so counting the model instead would rewind on an undo
+     * and hand one name to two todos. */
     unsigned fresh = 0;
     const uint8_t *rec;
     for (;;) {
@@ -316,8 +304,6 @@ static void *app(void *arg) {
                     todos[index].done = payload.i != 0;
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0};
-                /* The 0 after F_DONE is the witnessed variant — a record
-                 * collection has one constructor. */
                 kaya_tx_collection_update_field(&tx, C_TODOS, 0, 0, keys[0],
                                                 F_DONE, 0,
                                                 kaya_bool(payload.i != 0));
@@ -326,8 +312,7 @@ static void *app(void *arg) {
             }
         } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys)) {
             if (id == W_ADD && n_keys == 0 && n_todos < MAX_TODOS) {
-                /* The empty-draft guard, and NOT an undoable step: a
-                 * refused add is not a step a user expects back. */
+                /* The empty-draft guard, and NOT an undoable step. */
                 if (draft[0] == '\0')
                     continue;
                 char step[160];
@@ -339,9 +324,8 @@ static void *app(void *arg) {
                 n_todos += 1;
                 uint8_t buf[512];
                 KayaTx tx = {buf, 0};
-                /* AT THE FRONT OF THE BUFFER: everything after it is
-                 * what the step did — the insert, and the count the
-                 * insert changed. */
+                /* AT THE FRONT OF THE BUFFER: everything after it is what
+                 * the step did. */
                 kaya_tx_undo_group(&tx, 0, kaya_str(step));
                 kaya_tx_collection_insert(
                     &tx, C_TODOS, 0, 0, kaya_str(todos[n_todos - 1].key), 0,
@@ -350,9 +334,7 @@ static void *app(void *arg) {
                 kaya_submit(tx.buf, tx.len);
                 /* Finishing the form gets its OWN transaction: `clear`
                  * inside an undo group is REFUSED at apply, destroying
-                 * widget-owned text the core never held. The field then
-                 * reports text_changed("") and the branch above empties
-                 * the draft. */
+                 * widget-owned text the core never held. */
                 uint8_t finish[128];
                 KayaTx form = {finish, 0};
                 kaya_tx_widget_command(&form, W_FIELD, KAYA_COMMAND_CLEAR);
@@ -362,10 +344,8 @@ static void *app(void *arg) {
         } else if (parse_undo(rec, KAYA_OCCURRENCE_UNDONE, &undo) ||
                    parse_undo(rec, KAYA_OCCURRENCE_REDONE, &undo)) {
             /* THE FOLD AND NOTHING ELSE, IN BOTH DIRECTIONS: no signal
-             * write, no recompute, no transaction. The label the script
-             * reads after Edit>Undo and Edit>Redo is the core's, banked
-             * into the add's group. Both directions want the same fold —
-             * a delta says what things now ARE. */
+             * write, no recompute, no transaction. Both directions want
+             * the same fold — a delta says what things now ARE. */
             fold_delta(rec, &undo, draft, sizeof draft);
         }
     }

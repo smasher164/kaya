@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain.
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     echo "$0: not inside the dev shell — run this under \`nix develop\`" >&2
     exit 1
 fi
 # THROWAWAY runner for the WinUI undo-arm probe (docs/undo-plan.md §3a).
-# Builds the probe-hooked libkaya + the REAL undo example, ships them
-# into C:\kaya\undoarmprobe (NEVER into C:\kaya itself — the lane's
+# Ships into C:\kaya\undoarmprobe, NEVER into C:\kaya itself: the lane's
 # deployed artifacts must not gain a probe hook behind a deploy stamp
-# that says they are unchanged), and runs one interactive task.
+# that says they are unchanged.
 #
 # Usage: run.sh <user@host>
 set -uo pipefail
@@ -72,7 +70,6 @@ until ssh -n -o BatchMode=yes "$HOST" 'cmd /c type C:\kaya\undoarmprobe\out.txt'
 done
 sleep 1
 ssh -n -o BatchMode=yes "$HOST" 'cmd /c type C:\kaya\undoarmprobe\out.txt'
-# The probe exits itself; this is the belt, and it clears the task so
-# nothing of the probe survives the run.
+# Belt: the probe exits itself, but nothing of it may survive the run.
 ssh -n -o BatchMode=yes "$HOST" 'cmd /c "taskkill /f /im undo.exe & exit /b 0"' >/dev/null 2>&1
 ssh -n -o BatchMode=yes "$HOST" 'cmd /c "schtasks /delete /tn kaya_undoarmprobe /f & exit /b 0"' >/dev/null 2>&1

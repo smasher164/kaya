@@ -1,10 +1,5 @@
 /* The feed scene from C, on the function floor: sum-typed elements with
- * the discriminants spelled by hand. The collection declares two variant
- * schemas, the For declares one case per constructor, promote re-sends
- * an entry under the other constructor (the core restamps it in place),
- * and the toggle's field write carries the witnessed variant.
- *
- * Built and run by the Linux container suite with KAYA_SELFTEST=feed. */
+ * the discriminants spelled by hand. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -25,7 +20,6 @@
 #define N_TODO_CHECK 3
 #define N_TODO_TITLE 4
 
-/* The constructors' discriminants and field indexes. */
 #define V_NOTE 0
 #define V_TODO 1
 #define F_NOTE_TEXT 0

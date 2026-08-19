@@ -20,15 +20,13 @@ import java.util.concurrent.CountDownLatch;
  * <p>The Java binding builds a {@link java.io.FileDescriptor} from JNI:
  * reflecting into its private field throws on JDK 17 and would force
  * every kaya application to launch with --add-opens
- * (docs/file-dialogs-plan.md §6f). From there it is an ordinary stream.
+ * (docs/file-dialogs-plan.md §6f).
  *
- * <p>THE READ RUNS OFF THE APP THREAD — open blocks, and a cloud
- * provider may download the whole file first. The worker MUST be a
- * daemon thread: a parked non-daemon thread keeps the JVM alive, which
- * never shows on a passing run and turns a FAILING one into a timeout
- * instead of a report. It parks between reading and posting, so a guest
- * that read inline fails {@code expect label#0 "reading"} and one that
- * worked on the app thread wedges everything after.
+ * <p>THE READ RUNS OFF THE APP THREAD — open blocks. The worker MUST be
+ * a daemon thread: a parked non-daemon thread keeps the JVM alive,
+ * which turns a FAILING run into a timeout instead of a report. It
+ * parks between reading and posting, so a guest that read inline fails
+ * {@code expect label#0 "reading"}.
  */
 final class FileDialog {
     private FileDialog() {}
@@ -58,8 +56,6 @@ final class FileDialog {
             throw new RuntimeException("failed to make the scene's files", e);
         }
 
-        // The release gate: the app thread counts down, the worker
-        // awaits.
         CountDownLatch release = new CountDownLatch(1);
 
         app.build(tx -> {
@@ -68,8 +64,6 @@ final class FileDialog {
             tx.mount(tx.column(() -> {
                 tx.label(status).a11yId("status"); // label#0
                 tx.button("open", inner -> // button#0
-                        // The filter is ADVISORY on every platform, so
-                        // the guest still validates what it got.
                         inner.pickFiles()
                                 .filter("Text", "txt")
                                 .onResult((t, files) -> picked(app, status, release, t, files))

@@ -5,14 +5,11 @@ import dev.kaya.KayaRing;
 /**
  * The desktop twin of the Android shell's MainActivity: load the cdylib
  * (KAYA_LIB when set, the library path otherwise), attach the KayaRing
- * natives, spawn the scene thread, and give the main thread to
- * kaya_run. KAYA_SELFTEST selects the scene; any unrecognized value
- * (including the bare "1" the harness sets) runs milestone2.
+ * natives, spawn the scene thread, and give the main thread to kaya_run.
  *
- * <p>Same package as the scenes (their app() entries are
- * package-private), different source root: the Android build's srcDirs
- * sweep guests/java wholesale, and this file must never compile there
- * — KayaRing.attach() has no Activity on the desktop.
+ * <p>Same package as the scenes, different source root: the Android
+ * build's srcDirs sweep guests/java wholesale, and this file must never
+ * compile there — KayaRing.attach() has no Activity on the desktop.
  */
 public final class Main {
     public static void main(String[] args) {
@@ -84,7 +81,6 @@ public final class Main {
             case "stall":
                 app = Stall::app;
                 break;
-            // One app behind both list-detail scripts.
             case "split":
             case "listdetail":
                 app = Split::app;

@@ -1,7 +1,6 @@
 // The text-ranges conformance scene, Go port: HIGHLIGHT a set of ranges,
-// SELECT one, REVEAL one, driven by a search this file writes in eight
-// lines. kaya ships no find engine and no dialect
-// (docs/ranges-plan.md §3); what it ships is the half no app can write.
+// SELECT one, REVEAL one. kaya ships no find engine and no dialect
+// (docs/ranges-plan.md §3).
 //
 // THE OFFSETS ARE GO STRING INDICES. strings.Index yields byte offsets
 // and that is what kaya.TextRange holds, so nothing converts anywhere in
@@ -72,8 +71,7 @@ line 39: the last line`
 const needle = "alpha"
 
 // THE WHOLE SEARCH: literal, forward, non-overlapping. An editor that
-// wants case folding, word boundaries or a regex dialect writes it here,
-// in the app.
+// wants case folding, word boundaries or a regex dialect writes it here.
 func findAll(doc, needle string) []kaya.TextRange {
 	var hits []kaya.TextRange
 	for at := 0; ; {
@@ -107,9 +105,8 @@ func App() *kaya.App {
 			editor = tx.Textarea(func(tx *kaya.Tx, text string) {
 				doc = text
 				// THE SEARCH RESULTS ARE STALE AND THE APP SAYS SO: kaya
-				// has already dropped the decorations, because a
-				// declared set is bound to the text it was declared
-				// against.
+				// has already dropped the decorations, because a declared
+				// set is bound to the text it was declared against.
 				tx.Write(status, "0 matches")
 			}).A11yID("doc").A11yLabel("Document")
 			tx.SetText(editor, document)

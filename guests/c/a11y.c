@@ -1,14 +1,7 @@
-/* The accessibility conformance scene from C, on the function floor:
- * the two universal props (kaya_tx_set_a11y_id / _label), read back out
- * of the PLATFORM'S OWN accessibility tree rather than kaya's model.
- *
- * EVERY WIDGET KIND APPEARS, AND EXACTLY ONE CONTAINER OF EACH
- * CONTAINER KIND: the script addresses containers ordinally, so a
- * second one of any kind moves the targets. The full note is in
- * guests/rust/a11y.rs; the byte-frozen contract is
- * tools/scenes/a11y.steps.
- *
- * Built and run by the Linux container suite with KAYA_SELFTEST=a11y. */
+/* The accessibility conformance scene from C, on the function floor.
+ * EXACTLY ONE CONTAINER OF EACH CONTAINER KIND: the script addresses
+ * containers ordinally, so a second one moves the targets.
+ * Contract: tools/scenes/a11y.steps. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -42,8 +35,7 @@
 #define W_CANCEL 23
 #define W_OK 24
 
-/* A 2x2 RGB PNG (red/green over blue/white), embedded as source:
- * scenes carry their inputs, no runtime file I/O. */
+/* A 2x2 RGB PNG (red/green over blue/white), embedded as source. */
 static const uint8_t TEST_PNG[75] = {
     137, 80,  78,  71,  13,  10,  26,  10,  0,   0,   0,   13,  73,
     72,  68,  82,  0,   0,   0,   2,   0,   0,   0,   2,   8,   2,
@@ -60,8 +52,8 @@ static void build_scene(void) {
     kaya_tx_set_a11y_id(&tx, W_FORM, "form");
     kaya_tx_set_a11y_label(&tx, W_FORM, "Form");
 
-    /* Caption-bearing controls: identified, but deliberately NOT
-     * labelled. The platform must speak the caption. */
+    /* Caption-bearing controls: identified, deliberately NOT labelled.
+     * The platform must speak the caption. */
     kaya_tx_create_widget(&tx, W_SAVE, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_SAVE, "Save");
     kaya_tx_set_a11y_id(&tx, W_SAVE, "save");
@@ -77,8 +69,7 @@ static void build_scene(void) {
     kaya_tx_set_text(&tx, W_STATUS, "Ready");
     kaya_tx_set_a11y_id(&tx, W_STATUS, "status");
 
-    /* Caption-less controls: an app MUST name these, and the tree must
-     * report the authored name. */
+    /* Caption-less controls: an app MUST name these. */
     kaya_tx_create_widget(&tx, W_NAME, KAYA_KIND_ENTRY);
     kaya_tx_set_a11y_id(&tx, W_NAME, "name");
     kaya_tx_set_a11y_label(&tx, W_NAME, "Full name");
@@ -100,8 +91,6 @@ static void build_scene(void) {
     kaya_tx_set_a11y_id(&tx, W_LOGO, "logo");
     kaya_tx_set_a11y_label(&tx, W_LOGO, "Logo");
 
-    /* The two CHOICE kinds: their option children are labels, and the
-     * choice itself carries the authored name. */
     kaya_tx_create_widget(&tx, W_COLOR, KAYA_KIND_SELECT);
     kaya_tx_create_widget(&tx, W_COLOR_RED, KAYA_KIND_LABEL);
     kaya_tx_set_text(&tx, W_COLOR_RED, "Red");
@@ -123,7 +112,6 @@ static void build_scene(void) {
     kaya_tx_set_a11y_id(&tx, W_SIZE, "size");
     kaya_tx_set_a11y_label(&tx, W_SIZE, "Size");
 
-    /* Naming a container is how an app declares it a GROUP. */
     kaya_tx_create_widget(&tx, W_CELLS, KAYA_KIND_GRID);
     kaya_tx_set_columns(&tx, W_CELLS, 2.0);
     kaya_tx_set_a11y_id(&tx, W_CELLS, "cells");
@@ -176,7 +164,6 @@ static void build_scene(void) {
 static void *app(void *arg) {
     (void)arg;
     build_scene();
-    /* No handler: the loop blocks until shutdown. */
     const uint8_t *rec;
     while (kaya_next_occurrence(&rec) != 0) {
     }

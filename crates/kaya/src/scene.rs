@@ -1,21 +1,17 @@
 //! The scene core: signal and collection storage, the binding indexes,
 //! the template registry, and the stamping machinery. Transactions come
-//! in; resolved apply-ops come out. This is the whole of kaya's
-//! reactivity — backends apply what this module emits and never see a
-//! signal, a collection, or a template.
+//! in; resolved apply-ops come out. Backends apply what this module emits
+//! and never see a signal, a collection, or a template.
 //!
-//! Structure follows the milestone-2 design: a For binds a collection
-//! and stamps one copy of its template per entry; a When is For over a
-//! zero-or-one collection wired to a Bool signal. Stamped widgets get
-//! core-allocated internal ids (top bit set — opaque to backends, never
-//! guest-visible); the guest-visible name of a copy is (template node,
-//! key path), which interactive widgets carry pre-encoded as a click
-//! tag. Everything inside a For is reproducible from template plus
-//! collection data, so teardown is always safe.
+//! A For binds a collection and stamps one copy of its template per
+//! entry; a When is For over a zero-or-one collection wired to a Bool
+//! signal. Stamped widgets get core-allocated internal ids (top bit set,
+//! opaque to backends and never guest-visible); the guest-visible name of
+//! a copy is (template node, key path), which interactive widgets carry
+//! pre-encoded as a click tag.
 //!
-//! Lives on the UI thread, one instance per core. Validation fails
-//! loudly: every panic here is a broken guest or binding, not a runtime
-//! condition (the same policy as the full ring).
+//! Lives on the UI thread, one instance per core. Every panic here is a
+//! broken guest or binding, not a runtime condition.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,6 +25,24 @@ use crate::protocol::{
 
 /// Internal instance ids live above this bit; guest widget ids below it.
 const INTERNAL_BIT: u64 = 1 << 63;
+
+/// Auxiliary windows: the host can materialize a surface beside the
+/// primary one. Clear on the phones, whose systems own surface geometry.
+pub(crate) const CAP_AUX_WINDOWS: u64 = 1;
+
+/// THE HOST'S CAPABILITY WORD, AND THE ONLY PLACE THE PREDICATE IS
+/// WRITTEN. `kaya_capabilities()` returns this const and the walls below
+/// test it, so the answer a guest is told and the refusal a guest walks
+/// into cannot disagree.
+///
+/// `cfg!` rather than a `#[cfg]` pair on purpose: it is a const-folded
+/// bool, so both arms of every wall below COMPILE on every target and a
+/// typo in the phone arm fails the mac build.
+pub(crate) const CAPABILITIES: u64 = if cfg!(any(target_os = "ios", target_os = "android")) {
+    0
+} else {
+    CAP_AUX_WINDOWS
+};
 
 /// A copy's key path, in hashable form (wire paths are Vec<Value>).
 type PathKey = Vec<Key>;
@@ -51,11 +65,10 @@ enum TplOp {
     /// discriminant; a For over a record collection has exactly one.
     For { node: u64, collection: CollectionId, bodies: Vec<Arc<TplBody>> },
     When { node: u64, signal: SignalId, body: Arc<TplBody> },
-    /// A context catalog attached to a template node: every stamped
-    /// copy shows the shared `item` tree, and each stamp emits a
-    /// CONTEXT_ATTACH_NODE apply carrying that copy's key path (the
-    /// noun). Menu items are not stamped in v1 — the tree is shared, the
-    /// path is what differs per copy.
+    /// A context catalog attached to a template node: every stamped copy
+    /// shows the shared `item` tree, and each stamp emits a
+    /// CONTEXT_ATTACH_NODE apply carrying that copy's key path. Menu
+    /// items are not stamped in v1.
     ContextAttachNode { node: u64, item: MenuItemId },
 }
 
@@ -174,17 +187,14 @@ struct WhenSite {
 struct Stamp {
     /// Internal widget ids in creation order; destroyed in reverse.
     widgets: Vec<WidgetId>,
-    /// Which TEMPLATE NODE each of this copy's widgets came from — the
-    /// map `run_body` builds while stamping, kept instead of thrown
-    /// away.
+    /// Which TEMPLATE NODE each of this copy's widgets came from — the map
+    /// `run_body` builds while stamping, kept instead of thrown away.
     ///
-    /// It is the translation between the copy's two names. A stamped
-    /// widget has an internal id, which is what a programmatic write
-    /// names and what the ledger keys on; the app knows the same widget
-    /// as (template node, key path), which is what its occurrences
-    /// carry and the only name it could resolve. Everything that has to
-    /// cross between those two — banking a row's typing, and naming the
-    /// restored text in an `undone` payload — reads this map.
+    /// It is the translation between the copy's two names: a stamped
+    /// widget has an internal id, which a programmatic write names and the
+    /// ledger keys on, while the app knows it as (template node, key
+    /// path). Banking a row's typing and naming the restored text in an
+    /// `undone` payload both read this map.
     nodes: HashMap<u64, WidgetId>,
     /// The copy's root widgets (children of the For's container), in
     /// body order — what a move repositions.
@@ -229,13 +239,11 @@ struct MenuItem {
 /// One window's history, newest LAST. `done` is what an undo walks;
 /// `redo` is what a redo walks, and any new step clears it.
 ///
-/// ONE ORDERED LIST, NOT TWO STACKS. The whole point of banking typing
-/// episodes beside groups is that the user's history has no holes and no
-/// interleave: "ask the focused text first" and "ask the most recent
-/// first" are the same question, because a group commit clears the
-/// focused field's native stack (A1) and every episode therefore begins
-/// with an empty one. Nothing in a native stack can reach past the
-/// frontier episode's start.
+/// ONE ORDERED LIST, NOT TWO STACKS: "ask the focused text first" and
+/// "ask the most recent first" are the same question, because a group
+/// commit clears the focused field's native stack (A1) and every episode
+/// therefore begins with an empty one. Nothing in a native stack can
+/// reach past the frontier episode's start.
 #[derive(Default)]
 struct Ledger {
     done: Vec<LedgerEntry>,
@@ -255,11 +263,9 @@ enum LedgerEntry {
     Episode(Episode),
 }
 
-/// A banked run of edits on one field.
-///
-/// The core tracks this PURELY from the occurrence stream it already
-/// receives — never by reading the widget, which the no-mirror-reads
-/// doctrine forbids and which nothing here needs.
+/// A banked run of edits on one field, tracked PURELY from the occurrence
+/// stream — never by reading the widget, which the no-mirror-reads
+/// doctrine forbids.
 struct Episode {
     field: WidgetId,
     /// The field's text when the run started.
@@ -276,11 +282,9 @@ struct Episode {
     open: bool,
 }
 
-/// Where an undo request should go (D6, widened to §3's three-way).
-///
-/// A4: the "can the focused widget undo?" question is asked ONCE, by
-/// name, and answered per backend — never re-expressed as a fifth
-/// hard-coded predicate the way the role filters were.
+/// Where an undo request should go (D6, widened to §3's three-way). A4:
+/// the "can the focused widget undo?" question is asked ONCE, by name,
+/// and answered per backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UndoRoute {
     /// The focused text widget's own stack answers: call its native
@@ -293,13 +297,9 @@ pub(crate) enum UndoRoute {
 }
 
 /// A group under construction: the pre-state of everything the batch has
-/// touched so far.
-///
-/// Kept for two jobs at once — computing the inverse at the end, and
-/// PUTTING THE SCENE BACK if a later op turns out to be one the core
-/// cannot invert. A refused group therefore leaves the scene exactly as
-/// it was, which the menu barrier already promises for signals and this
-/// extends to collections.
+/// touched so far. Kept for two jobs — computing the inverse at the end,
+/// and PUTTING THE SCENE BACK if a later op turns out to be one the core
+/// cannot invert.
 struct GroupCapture {
     window: WindowId,
     label: String,
@@ -339,14 +339,10 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
             ..
         } => UndoVerdict::PureEffect,
         // ALL THREE, together, so no app author has to remember which of
-        // them a group admits. reveal is A2's own example. select moves
-        // the caret, which is where you were looking. And HIGHLIGHT,
-        // which looks like state and is not: the core keeps no declared
-        // set to invert (docs/ranges-plan.md D2 rejects tracking
-        // outright), and a set is bound to the text it was declared
-        // against — an undo that restores the text therefore drops it
-        // anyway, and the app re-declares from the `undone` occurrence
-        // exactly as it re-declares from `text_changed`.
+        // them a group admits. HIGHLIGHT looks like state and is not: the
+        // core keeps no declared set to invert (docs/ranges-plan.md D2),
+        // and a set is bound to the text it was declared against — an undo
+        // that restores the text drops it anyway.
         TxOp::HighlightRanges { .. } | TxOp::SelectRange { .. } | TxOp::RevealRange { .. } => {
             UndoVerdict::PureEffect
         }
@@ -411,11 +407,9 @@ pub(crate) struct Scene {
     /// signal -> the (widget, property) pairs it feeds (live and stamped).
     bindings: HashMap<SignalId, Vec<(WidgetId, Prop)>>,
     window_bindings: HashMap<SignalId, Vec<(WindowId, WindowProp)>>,
-    /// Live AUXILIARY windows (the primary, window 0, always exists
-    /// and is never in this set). Auxiliaries join at create_window
-    /// and leave at destroy_window; chrome-closed non-veto windows
-    /// stay until the guest's destroy_window reconciles
-    /// (window_closed is informational).
+    /// Live AUXILIARY windows (the primary, window 0, always exists and is
+    /// never in this set). Chrome-closed non-veto windows stay until the
+    /// guest's destroy_window reconciles.
     windows: std::collections::HashSet<WindowId>,
     /// Live navigation entries: entry surface id -> the window whose
     /// stack holds it. Entries share the surface namespace with
@@ -426,11 +420,10 @@ pub(crate) struct Scene {
     /// user pops reconcile through `user_popped`.
     nav_stacks: HashMap<WindowId, Vec<WindowId>>,
     entry_bindings: HashMap<SignalId, Vec<(WindowId, EntryProp)>>,
-    /// Live sections: section surface id -> the window whose section
-    /// set holds it. Sections share the surface namespace with
-    /// windows and entries (one guest allocator; mount and push_entry
-    /// target any of them). APPEND-ONLY by design: this grammar has
-    /// no destruction verbs, and a section only dies with its window.
+    /// Live sections: section surface id -> the window whose section set
+    /// holds it. Sections share the surface namespace with windows and
+    /// entries. APPEND-ONLY by design: this grammar has no destruction
+    /// verbs, and a section only dies with its window.
     section_of: HashMap<WindowId, WindowId>,
     /// Per-window section sets, in add order.
     sections: HashMap<WindowId, Vec<WindowId>>,
@@ -468,20 +461,16 @@ pub(crate) struct Scene {
     when_sites: HashMap<u64, WhenSite>,
     when_by_signal: HashMap<SignalId, Vec<u64>>,
     /// Every live surface that has a mounted root, and WHICH widget that
-    /// root is. `Mount` is the only site that inserts; six sites remove
-    /// (DestroyWindow's window, its entries and its sections' entries,
-    /// PopEntry, user_popped). Held as one map rather than a set plus a
-    /// side table because the two facts have one lifetime: a seventh
-    /// removal site that updated only one of them would make an
-    /// unreachable widget look reachable, which is the exact defect the
-    /// barrier below exists to catch.
+    /// root is. `Mount` is the only site that inserts; six sites remove.
+    /// Held as one map rather than a set plus a side table because the two
+    /// facts have one lifetime: a seventh removal site that updated only
+    /// one of them would make an unreachable widget look reachable.
     mounted_windows: HashMap<WindowId, WidgetId>,
     /// child -> parent, LIVE ZONE ONLY. The template zone keeps its own
-    /// (`TplSection::childed`) and promotes an unparented node to a root
-    /// of the stamped copy; the live zone has nowhere to promote to, so
-    /// an unclaimed widget renders nowhere while still answering every
-    /// read. This map plus `mounted_windows` is what proves it does not
-    /// happen (`check_reachable_from_mounted_root`).
+    /// and promotes an unparented node to a root of the stamped copy; the
+    /// live zone has nowhere to promote to, so an unclaimed widget renders
+    /// nowhere while still answering every read. This map plus
+    /// `mounted_windows` is what proves it does not happen.
     parent_of: HashMap<WidgetId, WidgetId>,
     /// Scroll viewports that already hold their one child: a scroll
     /// takes EXACTLY ONE (the ScrolledWindow shape) and a second
@@ -496,16 +485,13 @@ pub(crate) struct Scene {
     next_scope: u64,
     /// One undo ledger per window (docs/undo-plan.md §3). Keyed by the
     /// window a group NAMES: the core cannot derive it — a signal write
-    /// addresses no surface, and the scene keeps no widget-to-window map
-    /// — so `undo_group` carries it and every episode entry point takes
-    /// it from the backend, which knows.
+    /// addresses no surface — so `undo_group` carries it.
     ledgers: HashMap<WindowId, Ledger>,
     /// The text the core has SEEN each field hold: seeded by every
     /// programmatic write it resolves, advanced by every text_changed it
-    /// is told about. NOT A MIRROR READ — nothing here ever asks a
-    /// widget anything; this is the core's record of what it watched go
-    /// past, and it exists because an episode's before-image is the text
-    /// as of the event BEFORE the first one in the run.
+    /// is told about. NOT A MIRROR READ — this is the core's record of
+    /// what it watched go past, and it exists because an episode's
+    /// before-image is the text as of the event BEFORE the run's first.
     field_text: HashMap<WidgetId, String>,
 }
 
@@ -528,11 +514,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Textarea
         ),
         Prop::Checked => matches!(kind, WidgetKind::Checkbox),
-        // Value is the slider's position AND the progress bar's
-        // determinate fraction AND the select's 0-based selected index
-        // (per-kind domains, checked below); min/max stay slider-only
-        // (progress is fixed 0..=1, the select's range is its option
-        // count).
+        // Value is the slider's position AND the progress bar's fraction
+        // AND the select's 0-based index (per-kind domains, checked
+        // below); min/max stay slider-only.
         Prop::Value => {
             matches!(kind, WidgetKind::Slider | WidgetKind::Progress) || is_choice(kind)
         }
@@ -561,32 +545,23 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // The grid's own shape: how many columns children fill
         // row-major.
         Prop::Columns => matches!(kind, WidgetKind::Grid),
-        // The first UNIVERSAL props. Every other prop is kind-scoped
-        // because it names something only some controls have; these
-        // name something every element in the tree has — an identity
-        // and a spoken name. Containers included, deliberately: a
-        // column is a labelled group to an assistive client, and a
-        // harness must be able to address one.
+        // The first UNIVERSAL props: every element in the tree has an
+        // identity and a spoken name. Containers included, deliberately —
+        // a column is a labelled group to an assistive client.
         Prop::A11yId | Prop::A11yLabel => true,
-        // Acceptance is scoped to what can RECEIVE a paste. A column
-        // cannot take content; an entry and a textarea can, and so can
-        // any widget an app makes its own paste target. Kept to the
-        // text kinds for now because those are the ones with native
-        // paste behaviour to override — widening it is a decision about
-        // which kinds get a paste hook, not about this prop.
+        // Acceptance is scoped to what can RECEIVE a paste. Kept to the
+        // text kinds for now because those are the ones with native paste
+        // behaviour to override; widening it is a decision about which
+        // kinds get a paste hook, not about this prop.
         Prop::Accepts => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
         // The hint is the ONE accessibility prop that is not universal,
-        // and the reason is the platforms' own definition rather than a
-        // lowering gap: a hint says what ACTIVATING the control does,
-        // so it needs an activation to describe. Android carries it as
-        // the click ACTION's label and has nowhere to put one without
-        // an action; Apple's guidance scopes hints to actions too. So
-        // the root admits it exactly where "activate" means something,
-        // and a hint on a label, an image or a container dies here
-        // rather than silently reaching four backends and not the
-        // fifth. Adjustable and editable kinds (slider, entry,
-        // textarea) are a deliberate cut: their Android route is a
-        // different action's label, and they wait for an artifact.
+        // and the reason is the platforms' own definition: a hint says
+        // what ACTIVATING the control does, so it needs an activation.
+        // Android carries it as the click ACTION's label and has nowhere
+        // to put one without an action. So a hint on a label, an image or
+        // a container dies here rather than reaching four backends and not
+        // the fifth. Adjustable and editable kinds are a deliberate cut:
+        // their Android route is a different action's label.
         Prop::A11yHint => matches!(
             kind,
             WidgetKind::Button
@@ -594,22 +569,18 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Select
                 | WidgetKind::Radio
         ),
-        // Semantic emphasis (docs/styling-plan.md D4). KIND legality
-        // here is the union of the variants' homes — buttons and
-        // labels; WHICH variant fits which kind is value-dependent and
-        // lives in check_prop_value, where a destructive label dies at
-        // declare time naming both the role and the kind.
+        // Semantic emphasis (docs/styling-plan.md D4). KIND legality here
+        // is the union of the variants' homes; WHICH variant fits which
+        // kind is value-dependent and lives in check_prop_value.
         Prop::Role => matches!(kind, WidgetKind::Button | WidgetKind::Label),
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
 
-/// A command is momentary and kind-scoped: clear drops an entry's
-/// content, focus lands on anything interactive. The same check class
-/// as check_prop — misuse fails loudly at the call site, never on a
-/// backend. (The silent no-op is reserved for instance-addressed
-/// commands, where a stamped target can legitimately vanish under
-/// rebuild; a live id only vanishes by the guest's own hand.)
+/// A command is momentary and kind-scoped. The same check class as
+/// check_prop — misuse fails loudly at the call site, never on a backend.
+/// (The silent no-op is reserved for instance-addressed commands, where a
+/// stamped target can legitimately vanish under rebuild.)
 fn check_command(kind: WidgetKind, command: CommandKind) {
     let ok = match command {
         CommandKind::Clear => matches!(kind, WidgetKind::Entry | WidgetKind::Textarea),
@@ -628,8 +599,7 @@ fn check_command(kind: WidgetKind, command: CommandKind) {
 /// A UTF-8 byte offset into `text`, converted into the unit THIS BUILD'S
 /// backend counts. `cfg!` and not `#[cfg]` on purpose: both arms compile
 /// on every target, so the linux conversion is type-checked and
-/// unit-tested on the machine writing it rather than discovered by the
-/// linux lane.
+/// unit-tested rather than discovered by the linux lane.
 pub(crate) fn native_offset(text: &str, byte: u64) -> u64 {
     if cfg!(target_os = "linux") {
         native_offset_chars(text, byte)
@@ -646,13 +616,13 @@ fn native_offset_utf16(text: &str, byte: u64) -> u64 {
 
 /// GTK's `GtkTextBuffer` counts CODE POINTS: `gtk_text_buffer_get_char_count`
 /// is 5 for `ab😀cd`, whose UTF-8 length is 8 (measured live on GTK
-/// 4.18.6, scratchpad/ranges-units.md §3).
+/// 4.18.6, docs/ranges-units.md §3).
 fn native_offset_chars(text: &str, byte: u64) -> u64 {
     text[..byte as usize].chars().count() as u64
 }
 
 /// THE ONE CHOKEPOINT every declared range crosses (docs/ranges-plan.md
-/// D2, scratchpad/ranges-units.md §7): validate against the text, then
+/// D2, docs/ranges-units.md §7): validate against the text, then
 /// convert to the backend's unit. Both halves here, in this order,
 /// because the conversion is only meaningful on an offset that is
 /// already known to be a code-point boundary inside the text —
@@ -738,12 +708,9 @@ fn prop_value_type(prop: Prop) -> ValueType {
     }
 }
 
-/// The typed setters the bindings generate enforce prop types at
-/// compile time — but the wire itself is untyped, so an ill-typed
-/// record from a raw guest must die here, not in whichever backend
-/// Window property values: the title takes any string; the size
-/// request takes finite positive DIP. Nonsense dies at the root, the
-/// grow/spacing precedent.
+/// Window property values: the title takes any string; the size request
+/// takes finite positive DIP. The wire is untyped, so an ill-typed record
+/// from a raw guest dies here, the grow/spacing precedent.
 fn check_window_prop_value(prop: WindowProp, value: &Value) {
     match (prop, value) {
         (WindowProp::Title, Value::Str(_)) => {}
@@ -800,13 +767,9 @@ fn check_section_prop_value(prop: SectionProp, value: &Value) {
 
 /// THE VALUE WALL for the semantic icon vocabulary (docs/styling-plan.md
 /// D6), the `role` precedent: an out-of-enum number dies AT THE ROOT,
-/// naming the vocabulary, before any backend improvises on it. Without
-/// it the wire slot is a bare integer, and the failure is silent in the
-/// worst direction — a backend's glyph table simply misses, the item
-/// draws with no icon, and nothing anywhere says why.
-///
-/// The sentence lists the whole vocabulary rather than the count,
-/// because the reader's next question is always "then what may I say?".
+/// naming the vocabulary. Without it the failure is silent in the worst
+/// direction — a backend's glyph table simply misses and nothing says
+/// why. The sentence lists the whole vocabulary rather than the count.
 fn check_symbol(value: i64) {
     assert!(
         crate::wire::symbol_name(value).is_some(),
@@ -845,13 +808,10 @@ fn is_menu_group(kind: MenuItemKind) -> bool {
     matches!(kind, MenuItemKind::Menu | MenuItemKind::RadioGroup)
 }
 
-/// Which kinds carry which property (DESIGN.md, Menus): label/enabled
-/// on everything but a separator; checked toggle-only; value
+/// Which kinds carry which property (DESIGN.md, Menus): label/enabled on
+/// everything but a separator; checked toggle-only; value
 /// radio-group-only; primary and role action-only; shortcut on any LEAF
-/// command — a checkable item takes a chord as readily as a plain one
-/// on every host, and "Show Sidebar" wants both its checkmark and its
-/// key; icon on everything but a separator. Misuse dies at the root,
-/// the check_prop precedent.
+/// command; icon on everything but a separator. Misuse dies at the root.
 fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
     let ok = match prop {
         MenuProp::Label | MenuProp::Enabled | MenuProp::Icon | MenuProp::Symbol => {
@@ -869,24 +829,13 @@ fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
 /// role is the only thing that can move an authored item into
 /// dress-owned chrome, or hand its behaviour to the platform.
 ///
-/// `settings` names the app's settings command, which macOS places in
-/// the application menu and every other host leaves where the app put
-/// it.
-///
 /// `cut`, `copy` and `paste` are THE GESTURE LAYER, and they exist
 /// because kaya has no selection API: only the widget knows what is
-/// selected, so "copy the selection" cannot be assembled by an app out
-/// of the data layer. A role item lowers to the platform's own command,
-/// acts on the FOCUSED widget, and configures its own enablement —
-/// which kaya computes rather than handing the app a signal to compute
-/// it with, since kaya already knows what is focused, what the
-/// clipboard offers, and what the widget declared it accepts.
-/// `undo` and `redo` are the same gesture layer one tier deeper. They
-/// act on the FOCUSED widget first — a text widget whose native stack
-/// has something to give answers before the core's ledger does — and
-/// configure their own enablement from that same question, which is
-/// why they are roles and not app-authored actions (docs/undo-plan.md
-/// D6). tools/check-roles.sh holds every backend to this line.
+/// selected. A role item lowers to the platform's own command, acts on
+/// the FOCUSED widget, and configures its own enablement, which kaya
+/// computes. `undo` and `redo` are the same layer one tier deeper
+/// (docs/undo-plan.md D6). tools/check-roles.sh holds every backend to
+/// this line.
 pub(crate) const MENU_ROLES: &[&str] =
     &["settings", "cut", "copy", "paste", "undo", "redo"];
 
@@ -915,11 +864,9 @@ fn menu_prop_value_type(prop: MenuProp) -> ValueType {
     }
 }
 
-/// The signal-bindable menu props: label, enabled, checked, value. icon,
-/// symbol, primary, shortcut and role are const-only (DESIGN.md, Menus;
-/// docs/styling-plan.md D6 for the symbol). Kept in lockstep with
-/// kaya-bindgen's menu_prop_bindable, which panics on an undeclared
-/// prop rather than guessing.
+/// The signal-bindable menu props: label, enabled, checked, value. The
+/// rest are const-only. Kept in lockstep with kaya-bindgen's
+/// menu_prop_bindable, which panics on an undeclared prop.
 fn is_bindable_menu_prop(prop: MenuProp) -> bool {
     matches!(
         prop,
@@ -960,13 +907,11 @@ fn is_named_key(key: &str) -> bool {
 }
 
 /// The closed punctuation set, named rather than spelled with the
-/// character itself — `enter`/`delete` are the precedent, and a name
-/// keeps the wire spelling free of characters the step grammar and the
-/// path syntax already use. Each names the UNSHIFTED US position; the
-/// host binds its own key code and displays the chord its own way, so
-/// `primary+shift+equal` is how an app asks for what macOS draws as
-/// Command-plus. Typing protection is the alphanumeric rule: these
-/// keys need primary or alt too.
+/// character itself — a name keeps the wire spelling free of characters
+/// the step grammar and the path syntax already use. Each names the
+/// UNSHIFTED US position; the host binds its own key code and displays
+/// the chord its own way. Typing protection is the alphanumeric rule:
+/// these keys need primary or alt too.
 fn is_punctuation_key(key: &str) -> bool {
     matches!(
         key,
@@ -1005,11 +950,9 @@ fn is_ascii_alnum_key(key: &str) -> bool {
 /// policy — the one shortcut checker, validating and never rewriting
 /// (DESIGN.md, Menus). Canonical form: `+`-joined lowercase tokens,
 /// optional `primary`, `shift`, `alt` in that order, then exactly one
-/// key. The strict key floor is one ASCII alphanumeric or one closed
-/// named key; `escape` is recognized but always rejected; `shift` and
-/// an alphanumeric key both require `primary` or `alt`; `primary+q` and
-/// `alt+f4` are the reserved cross-platform union. Returns the exact
-/// error a raw non-canonical or inapplicable spelling must die with.
+/// key. `escape` is recognized but always rejected; `shift` and an
+/// alphanumeric key both require `primary` or `alt`; `primary+q` and
+/// `alt+f4` are the reserved cross-platform union.
 fn validate_shortcut(spelling: &str) -> Result<(), String> {
     if spelling.is_empty() {
         return Err("kaya: shortcut is empty".to_string());
@@ -1090,14 +1033,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         "kaya: {prop:?} cannot hold {value:?}"
     );
     // Grow's domain is narrower than its type. A negative weight has no
-    // reading under "divide the leftover in proportion to the weights" —
-    // it is not a small share, it is not a contract at all — and every
-    // backend would have to invent its own answer: the AppKit path would
-    // build a constraint with a negative multiplier, the GTK one would
-    // hand out a negative allocation, and neither would look like the
-    // other. Nonsense dies at the root, where the answer is the same in
-    // all eight languages, rather than turning into seven silent
-    // behaviours.
+    // reading under "divide the leftover in proportion to the weights",
+    // and every backend would invent its own answer. Nonsense dies at the
+    // root, where the answer is the same in all eight languages.
     if let (Prop::Grow, Value::F64(weight)) = (prop, value) {
         assert!(
             *weight >= 0.0 && weight.is_finite(),
@@ -1115,8 +1053,7 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     // The ROLE'S VARIANT is what decides the kind, not the prop
     // (docs/styling-plan.md D4): check_prop admits Role on the union of
     // the variants' homes, and this is where a destructive LABEL dies —
-    // at declare time, in one sentence naming both sides, rather than
-    // as four backends' improvisations on a meaningless combination.
+    // at declare time, in one sentence naming both sides.
     if let (Prop::Role, Value::I64(role)) = (prop, value) {
         let ok = match *role {
             // destructive, prominent: an ACTION's emphasis — what
@@ -1141,18 +1078,13 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
         );
     }
     // The accept list's own domain: at least one token, no token twice.
-    // "You structurally cannot declare text twice" was the promise the
-    // set shape made, and a string carrier keeps it only if the root
-    // checks — so it checks, once, where the answer is the same in all
-    // eight languages.
+    // The set shape promised "you structurally cannot declare text twice"
+    // and a string carrier keeps it only if the root checks.
     if let (Prop::Accepts, Value::Str(list)) = (prop, value) {
         crate::wire::check_accept_list(list, "accepts");
     }
-    // Same argument as grow's domain: a negative gap has no reading
-    // under "8 units between adjacent children", and every backend
-    // would invent its own overlap. Nonsense dies at the root.
-    // Same domain as the window inset's, for the same reason: negative
-    // padding has no reading, and every backend would invent one.
+    // Same argument as grow's domain: negative padding has no reading,
+    // and every backend would invent one.
     if let (Prop::Inset, Value::F64(pad)) = (prop, value) {
         assert!(
             *pad >= 0.0 && pad.is_finite(),
@@ -1245,25 +1177,21 @@ impl Scene {
         Some(crate::wire::click_tag(id, &path_values(path)))
     }
 
-    /// Apply one transaction atomically, returning the ops a backend
-    /// must perform. Construction ops come out in submission order;
-    /// signal writes coalesce (last write wins per signal within the
-    /// batch) and flush — as targeted property sets and When toggles —
-    /// at the end. A property bound mid-transaction is also set
-    /// immediately at bind time, so a scene arrives fully valued; the
-    /// end-of-batch flush may repeat such a set with the same value,
-    /// which is harmless. Collection delta ops are edits, not writes:
-    /// they apply in place, in order, never coalesced.
+    /// Apply one transaction atomically, returning the ops a backend must
+    /// perform. Construction ops come out in submission order; signal
+    /// writes coalesce (last write wins per signal within the batch) and
+    /// flush at the end. A property bound mid-transaction is also set
+    /// immediately at bind time, so a scene arrives fully valued.
+    /// Collection delta ops are edits, not writes: they apply in place, in
+    /// order, never coalesced.
     pub(crate) fn apply(&mut self, tx: Transaction) -> Vec<ApplyOp> {
         let mut out = Vec::new();
         // First-dirtied order, deduped.
         let mut dirty: Vec<SignalId> = Vec::new();
         // Pre-transaction values of the signals this batch writes,
-        // captured on first write. If a menu binding's COALESCED value
-        // fails its domain check at the barrier, these restore every
-        // signal this batch touched before the panic propagates — so a
-        // caught panic never leaves partially-applied signal state
-        // (DESIGN.md, Menus: barrier validation with rollback).
+        // captured on first write. If a coalesced value fails its domain
+        // check at the barrier these restore every signal this batch
+        // touched before the panic propagates.
         let mut rollback: HashMap<SignalId, Value> = HashMap::new();
         // Template scopes currently open; while non-empty, creation
         // records describe a blueprint instead of executing.
@@ -1273,11 +1201,9 @@ impl Scene {
         let mut group: Option<GroupCapture> = None;
         // Every LIVE widget this batch minted, in creation order — the
         // domain of the reachability barrier below. Batch-scoped, not a
-        // global sweep over `self.widgets`, because the core never
-        // prunes that map: DestroyWindow (:1401) and PopEntry (:1584)
-        // drop the surfaces and leave their widget ids behind forever,
-        // so a global sweep would re-accuse widgets that were checked
-        // when they were alive and parented.
+        // global sweep over `self.widgets`, because the core never prunes
+        // that map: DestroyWindow and PopEntry drop the surfaces and leave
+        // their widget ids behind forever.
         let mut created: Vec<WidgetId> = Vec::new();
 
         for (at, op) in tx.into_iter().enumerate() {
@@ -1365,11 +1291,9 @@ impl Scene {
                     let clash = self.widgets.insert(id, kind).is_some();
                     assert!(!clash, "kaya: widget id {id:?} already exists");
                     created.push(id);
-                    // Interactive widgets carry their identity tag:
-                    // buttons emit it on click, entries on edit. The
-                    // predicate is shared with the STAMPING site below,
-                    // which is the whole point — see
-                    // WidgetKind::carries_tag.
+                    // Interactive widgets carry their identity tag. The
+                    // predicate is shared with the STAMPING site below —
+                    // see WidgetKind::carries_tag.
                     let tag = kind
                         .carries_tag()
                         .then(|| Self::button_tag(id.0, &vec![]))
@@ -1390,10 +1314,9 @@ impl Scene {
                         PropValue::Const(v) => {
                             check_prop_value(kind, prop, &v);
                             // The select index's upper bound is scene
-                            // state: options added SO FAR in op order
-                            // (append-only), so "add options, then
-                            // select" is the required tx shape and an
-                            // out-of-range index dies at the root.
+                            // state: options added SO FAR in op order, so
+                            // "add options, then select" is the required
+                            // tx shape.
                             if is_choice(kind) && prop == Prop::Value {
                                 if let Value::F64(idx) = &v {
                                     let count =
@@ -1497,33 +1420,28 @@ impl Scene {
                     }
                 }
                 TxOp::CreateWindow { window } => {
-                    // Capability gate: the phones' systems own surface
-                    // geometry — a host without aux windows rejects at
-                    // the root, the column-baseline precedent
-                    // (DESIGN.md, Presentation contexts).
-                    #[cfg(any(target_os = "ios", target_os = "android"))]
-                    {
-                        let _ = window;
-                        panic!(
-                            "kaya: this host has no auxiliary windows \
-                             (KAYA_CAP_AUX_WINDOWS is unset); the primary \
-                             surface is the one window"
-                        );
-                    }
-                    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-                    {
-                        assert!(
-                            window.0 != 0,
-                            "kaya: window 0 is the primary and always exists"
-                        );
-                        assert!(
-                            window.0 & INTERNAL_BIT == 0,
-                            "kaya: window id {window:?} uses the reserved internal bit"
-                        );
-                        let fresh = self.windows.insert(window);
-                        assert!(fresh, "kaya: window id {window:?} already exists");
-                        out.push(ApplyOp::CreateWindow { window });
-                    }
+                    // Capability gate: a host without aux windows rejects
+                    // at the root (DESIGN.md, Presentation contexts).
+                    // CAPABILITIES INFORM; THIS WALL REFUSES — both read
+                    // the one const above, so "what you were told" and
+                    // "what you hit" are the same bit by construction.
+                    assert!(
+                        CAPABILITIES & CAP_AUX_WINDOWS != 0,
+                        "kaya: this host has no auxiliary windows \
+                         (KAYA_CAP_AUX_WINDOWS is unset); the primary \
+                         surface is the one window"
+                    );
+                    assert!(
+                        window.0 != 0,
+                        "kaya: window 0 is the primary and always exists"
+                    );
+                    assert!(
+                        window.0 & INTERNAL_BIT == 0,
+                        "kaya: window id {window:?} uses the reserved internal bit"
+                    );
+                    let fresh = self.windows.insert(window);
+                    assert!(fresh, "kaya: window id {window:?} already exists");
+                    out.push(ApplyOp::CreateWindow { window });
                 }
                 TxOp::DestroyWindow { window } => {
                     assert!(
@@ -1554,11 +1472,9 @@ impl Scene {
                     }
                     self.selected_section.remove(&window);
                     // ... and its command catalog: the chords free with
-                    // the window (window ids are recreatable — a fresh
-                    // window must not inherit a dead catalog's
-                    // shortcuts), and the anchored trees revert to free
-                    // roots. Items are append-only and outlive the
-                    // window; their anchor does not.
+                    // the window (window ids are recreatable, so a fresh
+                    // window must not inherit a dead catalog's shortcuts),
+                    // and the anchored trees revert to free roots.
                     self.window_shortcuts.remove(&window);
                     for root in self.window_menus.remove(&window).unwrap_or_default() {
                         self.menu_items.get_mut(&root).unwrap().anchor = None;
@@ -1591,10 +1507,9 @@ impl Scene {
                          slot always exists and needs a name"
                     );
                     // Liveness is process-global (the platform floor:
-                    // ContentDialog throws on a second per root), and
-                    // the result that frees the slot arrives on the
-                    // presentation side — so the slot lives in capi's
-                    // singleton, the one state both ends share.
+                    // ContentDialog throws on a second per root), and the
+                    // result that frees the slot arrives on the
+                    // presentation side, so the slot lives in capi.
                     crate::capi::alert_shown(spec.alert);
                     out.push(ApplyOp::PresentAlert(spec));
                 }
@@ -1622,13 +1537,10 @@ impl Scene {
                 }
                 TxOp::SetBrandAccent { seed, light, dark } => {
                     // SET ONCE, BEFORE THE FIRST MOUNT. Brand is
-                    // identity, not state: a second write is a program
-                    // error, and a post-mount write would promise the
-                    // runtime theme-switching surface the vocabulary
-                    // deliberately does not have (docs/styling-plan.md
-                    // §2). Both die here, in the root's words, before
-                    // any backend sees an accent it would have to
-                    // un-apply.
+                    // identity, not state, and a post-mount write would
+                    // promise the runtime theme-switching surface the
+                    // vocabulary deliberately does not have
+                    // (docs/styling-plan.md §2).
                     assert!(
                         self.brand_accent.is_none(),
                         "kaya: set_brand_accent called twice — brand is set once, \
@@ -1643,15 +1555,12 @@ impl Scene {
                          unbranded frame it must repaint"
                     );
                     // THE SEED IS A PACKED sRGB HEX AND NOTHING ELSE.
-                    // Without this wall the binding-side spelling decides
-                    // what a stray high byte means: an ARGB constant
-                    // pasted where 0xRRGGBB belongs applied cleanly and
-                    // reached every backend as seed AND fill (measured by
-                    // the fan-out through Swift and Java — Java can even
-                    // spell it as a negative int), while Compose feeds
-                    // the raw word to Material's own derivation. One
-                    // refusal here is the same answer in all eight
-                    // languages; a per-binding precondition is eight.
+                    // Without this wall an ARGB constant pasted where
+                    // 0xRRGGBB belongs applied cleanly and reached every
+                    // backend as seed AND fill (measured through the Swift
+                    // and Java fan-out — Java can even spell it as a
+                    // negative int), while Compose feeds the raw word to
+                    // Material's own derivation.
                     for (word, which) in [(Some(seed), "seed"), (light, "light"), (dark, "dark")] {
                         if let Some(w) = word {
                             assert!(
@@ -1668,11 +1577,7 @@ impl Scene {
                 }
                 TxOp::SetBrandTypeface(req) => {
                     // THE ACCENT'S TWO WALLS, VERBATIM, and for the
-                    // accent's reasons: brand is identity, not state,
-                    // and a post-mount write would promise the runtime
-                    // theme-switching surface the vocabulary does not
-                    // have (docs/styling-plan.md §2). Both die here, in
-                    // the root's words, in every language at once.
+                    // accent's reasons (docs/styling-plan.md §2).
                     assert!(
                         self.brand_typeface.is_none(),
                         "kaya: set_brand_typeface called twice — brand is set once, \
@@ -1686,30 +1591,25 @@ impl Scene {
                          BEFORE the first mount, so no backend ever shows an \
                          unbranded frame it must repaint"
                     );
-                    // A FAMILY NAME IS THE WHOLE REQUEST, so an empty
-                    // one is an author who filled no field rather than
-                    // a request for the platform default: every
-                    // platform's font API renders SOMETHING for a name
-                    // it cannot match, so an empty string would sail
-                    // through four lowerings and land as the system
-                    // font — indistinguishable, on every observation
-                    // this slice has, from a typeface that applied.
-                    // Declaring no typeface at all is what asks for the
-                    // platform's own (and is how an app asks for SF,
-                    // which is not reachable by family name anyway).
+                    // A FAMILY NAME IS THE WHOLE REQUEST, so an empty one
+                    // is an author who filled no field rather than a
+                    // request for the platform default: every font API
+                    // renders SOMETHING for a name it cannot match, so an
+                    // empty string would sail through four lowerings and
+                    // land as the system font — indistinguishable from a
+                    // typeface that applied. Declaring no typeface at all
+                    // is what asks for the platform's own.
                     assert!(
                         !req.family.is_empty(),
                         "kaya: set_brand_typeface has an empty family — an app that \
                          wants the platform's own typeface declares none at all \
                          (docs/styling-plan.md Slice 2b)"
                     );
-                    // THE PLATFORM TAGS ARE A CLOSED VOCABULARY and the
+                    // THE PLATFORM TAGS ARE A CLOSED VOCABULARY, and the
                     // wall is here for the seed's reason: a tag nobody
-                    // serves is silently ignored by all four lowerings —
-                    // each picks its own row and finds none — so a
-                    // mistyped constant reads exactly like a platform
-                    // that chose the default. One refusal here is the
-                    // same answer in all eight languages.
+                    // serves is silently ignored by all four lowerings, so
+                    // a mistyped constant reads exactly like a platform
+                    // that chose the default.
                     let mut seen: Vec<u32> = Vec::new();
                     for (tag, family) in &req.platforms {
                         assert!(
@@ -1734,27 +1634,19 @@ impl Scene {
                         );
                         seen.push(*tag);
                     }
-                    // THE BYTES ARE NOT INSPECTED HERE. Whether a blob
-                    // is a font, and what family it declares, is a
-                    // question only the platform's own font manager can
-                    // answer — the core would have to parse sfnt tables
-                    // to guess, and a guess that disagreed with the
-                    // registration would be worse than no answer. Each
-                    // backend registers, reads the family back, and
-                    // says so; the observation reads the RESOLVED
-                    // family either way, so a blob that registers as
-                    // nothing fails exactly like a family that is not
-                    // installed.
+                    // THE BYTES ARE NOT INSPECTED HERE. Whether a blob is
+                    // a font, and what family it declares, is a question
+                    // only the platform's own font manager can answer, and
+                    // a guess that disagreed with the registration would
+                    // be worse than no answer. The observation reads the
+                    // RESOLVED family, so a blob that registers as nothing
+                    // fails exactly like a family that is not installed.
                     self.brand_typeface = Some(req.clone());
                     out.push(ApplyOp::SetTypeface(req));
                 }
                 TxOp::SetAppIdentity(identity) => {
                     // THE BRAND'S TWO WALLS, VERBATIM, and for the
-                    // brand's reasons (docs/app-identity-plan.md I5):
-                    // identity is not state, and a post-mount write would
-                    // make a backend show an unidentified frame it then
-                    // has to repaint. Both die here, in the root's words,
-                    // in every language at once.
+                    // brand's reasons (docs/app-identity-plan.md I5).
                     assert!(
                         self.app_identity.is_none(),
                         "kaya: set_app_identity called twice — an app's identity is \
@@ -1770,25 +1662,20 @@ impl Scene {
                          unidentified frame it must repaint"
                     );
                     // A NAME IS HALF THE DECLARATION, so an empty one is
-                    // an author who filled no field rather than a request
-                    // for the platform's own identity. An empty string
-                    // would sail through five lowerings and land as the
-                    // launcher binary's name — indistinguishable, on
-                    // every observation, from an identity that applied.
-                    // Declaring none at all is what asks for the
-                    // platform's own.
+                    // an author who filled no field: an empty string would
+                    // sail through five lowerings and land as the launcher
+                    // binary's name, indistinguishable from an identity
+                    // that applied.
                     assert!(
                         !identity.name.is_empty(),
                         "kaya: set_app_identity has an empty name — an app that wants \
                          the platform's own identity declares none at all \
                          (docs/app-identity-plan.md)"
                     );
-                    // AND SO IS THE MARK, by the same argument. An icon
-                    // slot present but empty is the silent fallback with
-                    // a mask bit set: the wire's decoder already refuses
-                    // a blob the mask denies, and this refuses the
-                    // mirror — a mask that promises a picture over no
-                    // bytes at all.
+                    // AND SO IS THE MARK. An icon slot present but empty
+                    // is the silent fallback with a mask bit set: the
+                    // wire's decoder already refuses a blob the mask
+                    // denies, and this refuses the mirror.
                     assert!(
                         identity.icon.as_ref().is_none_or(|icon| !icon.0.is_empty()),
                         "kaya: set_app_identity carries an EMPTY icon blob — every \
@@ -1798,15 +1685,11 @@ impl Scene {
                          picture's bytes or declare no icon"
                     );
                     // THE BYTES ARE NOT INSPECTED HERE, the typeface's
-                    // rule verbatim: whether a blob is an image, and what
-                    // picture it holds, is a question only the platform's
-                    // own decoder can answer. The core would have to
-                    // carry a PNG parser to guess, and a guess that
-                    // disagreed with the decoder would be worse than no
-                    // answer. Each backend decodes and says what came
-                    // out; the observation reads the DECODED result, so
-                    // bytes that are not an image fail exactly like an
-                    // icon that never applied.
+                    // rule verbatim: whether a blob is an image is a
+                    // question only the platform's own decoder can answer.
+                    // The observation reads the DECODED result, so bytes
+                    // that are not an image fail exactly like an icon that
+                    // never applied.
                     self.app_identity = Some(identity.clone());
                     out.push(ApplyOp::SetAppIdentity(identity));
                 }
@@ -1826,11 +1709,10 @@ impl Scene {
                         );
                     }
                     // A SAVE DIALOG IS FOR NAMING A FILE, so an empty
-                    // suggested name is an author who filled no field
-                    // rather than a request for no name: every platform
-                    // opens with SOMETHING in that box, and the one that
-                    // does not (an empty NSSavePanel name field) disables
-                    // its own Save button — a dialog nobody can complete.
+                    // suggested name is an author who filled no field:
+                    // every platform opens with SOMETHING in that box, and
+                    // the one that does not (an empty NSSavePanel name
+                    // field) disables its own Save button.
                     assert!(
                         !spec.suggested_name.is_empty(),
                         "kaya: show_save_dialog has an empty suggested_name — \
@@ -1845,10 +1727,8 @@ impl Scene {
                 }
                 TxOp::Copy(clip) => {
                     // AN EMPTY CLIP IS A MISTAKE, not a way to clear:
-                    // every platform distinguishes putting nothing on
-                    // the clipboard from putting an empty string, and a
-                    // copy that offers no representation at all can
-                    // only be an author who filled none of the record.
+                    // every platform distinguishes putting nothing on the
+                    // clipboard from putting an empty string.
                     assert!(
                         clip.text.is_some()
                             || clip.html.is_some()
@@ -1869,11 +1749,9 @@ impl Scene {
                         // check itself.
                         crate::wire::check_custom_id(id, "copy");
                     }
-                    // Resolve every file handle to what the PLATFORM
-                    // calls that file, here and not in four backends:
-                    // this is where the picked table lives, and the
-                    // two Rust-native backends would otherwise need a
-                    // C entry to ask.
+                    // Resolve every file handle to what the PLATFORM calls
+                    // that file, here and not in four backends: this is
+                    // where the picked table lives.
                     out.push(ApplyOp::Copy(crate::protocol::ClipOut {
                         text: clip.text,
                         html: clip.html,
@@ -1887,23 +1765,19 @@ impl Scene {
                     }));
                 }
                 TxOp::ReadClipboard { request, accepting } => {
-                    // ACCEPTING NOTHING CANNOT SUCCEED, so it is an
-                    // author error rather than a read that always
-                    // answers empty — the empty answer means denied or
-                    // absent, and conflating the two would hide a typo
-                    // behind a legitimate outcome.
+                    // ACCEPTING NOTHING CANNOT SUCCEED, so it is an author
+                    // error rather than a read that always answers empty —
+                    // the empty answer means denied or absent, and
+                    // conflating the two would hide a typo.
                     crate::wire::check_accept_list(&accepting, "read_clipboard");
                     out.push(ApplyOp::ReadClipboard { request, accepting });
                 }
                 TxOp::PushEntry { window, entry } => {
                     // No capability gate — every host materializes a
-                    // serial stack natively (the deliberate contrast
-                    // with create_window; DESIGN.md, Navigation).
-                    // Stacks are PER-SURFACE: a section hosts its own
-                    // stack (pushing into a section fell out of the
-                    // same generalization mount made; DESIGN.md,
-                    // Sections), and back routes to the ACTIVE
-                    // section's stack on the backends.
+                    // serial stack natively (the deliberate contrast with
+                    // create_window; DESIGN.md, Navigation). Stacks are
+                    // PER-SURFACE: a section hosts its own, and back routes
+                    // to the ACTIVE section's stack on the backends.
                     assert!(
                         window == crate::protocol::DEFAULT_WINDOW
                             || self.windows.contains(&window)
@@ -2167,11 +2041,10 @@ impl Scene {
                             "kaya: scroll {parent:?} already holds its one                              child — a scroll viewport takes exactly one                              (wrap the content in a column)"
                         );
                     }
-                    // A choice widget's children ARE its options:
-                    // label widgets, one per row/entry. Anything else
-                    // has no options reading, so it dies here with
-                    // one message rather than as four backend
-                    // improvisations.
+                    // A choice widget's children ARE its options: label
+                    // widgets, one per row. Anything else has no options
+                    // reading, so it dies here with one message rather
+                    // than as four backend improvisations.
                     if is_choice(self.widgets[&parent]) {
                         assert!(
                             self.widgets[&child] == WidgetKind::Label,
@@ -2182,11 +2055,10 @@ impl Scene {
                         );
                         *self.select_options.entry(parent).or_insert(0) += 1;
                     }
-                    // The edge, kept. Everything above validates it and
-                    // forgets it; the reachability barrier needs it to
+                    // The edge, kept: everything above validates it and
+                    // forgets it, and the reachability barrier needs it to
                     // survive the op. Last write wins, matching the
-                    // backends: a second add_child of the same child
-                    // reparents it.
+                    // backends.
                     assert!(
                         parent != child,
                         "kaya: add_child of {child:?} to itself"
@@ -2375,22 +2247,19 @@ impl Scene {
         );
 
         // Barrier: validate every signal-bound menu prop on its COMPLETE
-        // coalesced value BEFORE any fan-out mutates derived state
-        // (SetProp emissions, When stamps). label/enabled/checked are
-        // type-fixed by their signal; a radio group's `value` has a live
-        // domain a late write can break. A rejection must not leave
-        // partially-applied signal state — so restore every signal this
-        // batch wrote, then propagate the panic (DESIGN.md, Menus).
+        // coalesced value BEFORE any fan-out mutates derived state. A
+        // radio group's `value` has a live domain a late write can break.
+        // A rejection must not leave partially-applied signal state, so
+        // restore every signal this batch wrote, then propagate.
         for id in &dirty {
             if let Some(bound) = self.menu_bindings.get(id).cloned() {
                 let value = self.signals[id].clone();
                 for (item, prop) in bound {
                     if let Err(msg) = self.check_menu_binding_domain(item, prop, &value) {
-                        // A marked batch can put its COLLECTION edits
-                        // back too, not just its signals: the group
-                        // captured their pre-state on first touch. Same
-                        // promise either way — a rejected batch leaves
-                        // the scene as it was.
+                        // A marked batch can put its COLLECTION edits back
+                        // too: the group captured their pre-state on first
+                        // touch. A rejected batch leaves the scene as it
+                        // was, either way.
                         match group.take() {
                             Some(cap) => self.rollback_group(&cap, &rollback),
                             None => {
@@ -2405,24 +2274,18 @@ impl Scene {
             }
         }
 
-        // Barrier: every widget this batch created must be reachable
-        // from a mounted root. Here — beside the menu domain check and
-        // before the fan-out — for the same two reasons that one is
-        // here. It must be a BARRIER and not a per-op check, because
-        // ordering inside a transaction is free and a widget is an
-        // orphan for most of the batch's length by design (guests/c/
-        // a11y.c mints every widget, then makes 24 add_child calls, then
-        // mounts, in one transaction). And it must run BEFORE the
-        // fan-out, so a refusal has nothing derived to unwind.
+        // Barrier: every widget this batch created must be reachable from
+        // a mounted root. It must be a BARRIER and not a per-op check,
+        // because ordering inside a transaction is free and a widget is an
+        // orphan for most of the batch's length by design (guests/c/a11y.c
+        // mints every widget, then makes 24 add_child calls, then mounts,
+        // in one transaction). And it must run BEFORE the fan-out, so a
+        // refusal has nothing derived to unwind.
         if let Some(orphan) = self.first_unreachable(&created) {
             // Signals only, and that is not an omission: a MARKED batch
             // cannot get here with anything to check, because
             // `undo_verdict` refuses create_widget/create_for/create_when
-            // outright (:359, :383-384), so `created` is empty whenever
-            // `group` is live and `first_unreachable` has already
-            // returned None. The menu barrier above needs both arms; this
-            // one has only the reachable arm, so it does not carry a
-            // second that no input can take.
+            // outright, so `created` is empty whenever `group` is live.
             debug_assert!(group.is_none(), "a marked batch cannot create widgets");
             for (sid, old) in &rollback {
                 self.signals.insert(*sid, old.clone());
@@ -2432,12 +2295,12 @@ impl Scene {
 
         self.fan_out_signals(&dirty, &mut out);
 
-        // EVERY programmatic text write this batch produced, read off
-        // the ops themselves rather than from the four sites that emit
-        // them. One place, and it cannot be bypassed by a fifth site:
-        // this is what advances the core's record of each field's text
-        // and what closes an episode when an app write changes it
-        // (D7, narrowed by A3 to writes that actually differ).
+        // EVERY programmatic text write this batch produced, read off the
+        // ops themselves rather than from the four sites that emit them.
+        // One place, and it cannot be bypassed by a fifth site: this is
+        // what advances the core's record of each field's text and what
+        // closes an episode when an app write changes it (D7, narrowed by
+        // A3 to writes that actually differ).
         self.absorb_text_writes(&out);
 
         if let Some(cap) = group {
@@ -2447,10 +2310,9 @@ impl Scene {
     }
 
     /// The end-of-batch fan-out: every dirtied signal reaches everything
-    /// bound to it. Its own method because an INVERSE takes the same
-    /// path — a restored signal has to reach its widgets exactly as the
-    /// write that is being undone did, and two copies of this walk would
-    /// agree right up until they didn't.
+    /// bound to it. Its own method because an INVERSE takes the same path,
+    /// and two copies of this walk would agree right up until they
+    /// didn't.
     fn fan_out_signals(&mut self, dirty: &[SignalId], out: &mut Vec<ApplyOp>) {
         for id in dirty.iter().copied() {
             let value = self.signals[&id].clone();
@@ -2520,12 +2382,11 @@ impl Scene {
             .cloned()
     }
 
-    /// Snapshot what an about-to-run delta op is going to disturb.
-    ///
-    /// FIRST TOUCH WINS, the rollback map's rule: the pre-state of the
-    /// whole batch is what an inverse needs, not the state between two
-    /// of its own ops. Takes the tables rather than `&self` so it can be
-    /// called while the capture is borrowed out of the loop.
+    /// Snapshot what an about-to-run delta op is going to disturb. FIRST
+    /// TOUCH WINS, the rollback map's rule: an inverse needs the whole
+    /// batch's pre-state, not the state between two of its own ops. Takes
+    /// the tables rather than `&self` so it can be called while the
+    /// capture is borrowed out of the loop.
     fn capture_for_undo(
         collections: &HashMap<CollectionId, CollDecl>,
         instances: &HashMap<(CollectionId, PathKey), CollInstance>,
@@ -2577,12 +2438,10 @@ impl Scene {
     }
 
     /// Put the scene back to where a group found it, emitting nothing.
-    ///
-    /// The silence is the point: this runs on the refusal path, where
-    /// the batch's ApplyOps die with the panic and no backend ever saw
-    /// them. Signals first (the menu barrier's own restore), then
-    /// entries, then orders — the same sequence an inverse uses, for the
-    /// same reason: an entry cannot be positioned before it exists.
+    /// The silence is the point: this runs on the refusal path, where the
+    /// batch's ApplyOps die with the panic. Signals, then entries, then
+    /// orders — the same sequence an inverse uses, because an entry cannot
+    /// be positioned before it exists.
     fn rollback_group(&mut self, cap: &GroupCapture, rollback: &HashMap<SignalId, Value>) {
         for (id, old) in rollback {
             self.signals.insert(*id, old.clone());
@@ -2611,18 +2470,15 @@ impl Scene {
         }
     }
 
-    /// Close the group: compute both directions, push it onto the
-    /// window's ledger, and tell the backend to clear the focused
-    /// field's native history.
+    /// Close the group: compute both directions, push it onto the window's
+    /// ledger, and tell the backend to clear the focused field's native
+    /// history.
     ///
-    /// THE CLEAR IS THE KEYSTONE (A1, §3). It runs on every group
-    /// commit, unconditionally, because the core does not know what is
-    /// focused and the backend that does can no-op in a nanosecond. What
-    /// it buys: every episode begins with an empty native stack, so the
-    /// native stack can never reach past the frontier episode's start,
-    /// so one ledger read newest-first IS the user's history. The
-    /// episode was banked before the clear, so no history is lost — only
-    /// granularity.
+    /// THE CLEAR IS THE KEYSTONE (A1, §3). It runs on every group commit,
+    /// unconditionally, because the core does not know what is focused.
+    /// What it buys: every episode begins with an empty native stack, so
+    /// one ledger read newest-first IS the user's history. The episode was
+    /// banked before the clear, so only granularity is lost.
     fn bank_group(
         &mut self,
         cap: GroupCapture,
@@ -2694,11 +2550,11 @@ impl Scene {
 
     /// Read every programmatic text write out of a finished batch's ops.
     ///
-    /// ON THE OPS, NOT AT THE FOUR EMISSION SITES. A const set, a
-    /// bind-time set, the end-of-batch signal flush, an element binding
-    /// re-resolving, and `clear` all reach a field the same way — as one
-    /// of these two ops — so reading them here is the only place that
-    /// cannot be bypassed by a sixth site nobody remembers to visit.
+    /// ON THE OPS, NOT AT THE FOUR EMISSION SITES: a const set, a bind-time
+    /// set, the end-of-batch flush, an element binding re-resolving and
+    /// `clear` all reach a field as one of these two ops, so reading them
+    /// here is the only place a sixth site cannot bypass.
+    ///
     ///
     /// A3: only a write that CHANGES the text closes an episode. An app
     /// that mirrors a field into a signal and writes it back would
@@ -2720,7 +2576,7 @@ impl Scene {
     /// — would then be validated and converted against the old document.
     /// That is not a wrong colour: on macOS an out-of-range attribute is
     /// an NSRangeException and the process dies with exit 134
-    /// (scratchpad/ranges-units.md §3, measured). So the ops this batch
+    /// (docs/ranges-units.md §3, measured). So the ops this batch
     /// has already produced are consulted first, newest write wins.
     ///
     /// TEXTAREA ONLY (docs/ranges-plan.md D1): the entry's deferral is
@@ -2808,22 +2664,19 @@ impl Scene {
 
     // --- Undo: episode banking (docs/undo-plan.md §3) -------------------
 
-    /// A text_changed the backend is about to deliver to the guest,
-    /// shown to the ledger on the way past.
+    /// A text_changed the backend is about to deliver to the guest, shown
+    /// to the ledger on the way past.
     ///
     /// This is banking: the run of edits on one field between clears is
-    /// ONE ledger entry, opened by the first event and extended by each
-    /// one after. Nothing is copied — the two images plus the current
-    /// position are all a coarse restore needs, and they are what a
-    /// textarea-scale payload can afford.
+    /// ONE ledger entry, opened by the first event and extended by each one
+    /// after. Nothing is copied — the two images plus the current position
+    /// are all a coarse restore needs.
     ///
     /// `focused` is the backend's answer for the field this event names.
-    /// An event on an UNFOCUSED field closes the episode as it stands:
-    /// the user is no longer there, so nothing further belongs to it.
+    /// An event on an UNFOCUSED field closes the episode as it stands.
     ///
-    /// NOT for a text_changed the core itself provoked by routing a
-    /// native undo — that one goes to `note_native_undo`, which walks
-    /// the episode backwards instead of extending it forwards.
+    /// NOT for a text_changed the core itself provoked by routing a native
+    /// undo — that one goes to `note_native_undo`.
     pub(crate) fn note_text_changed(
         &mut self,
         window: WindowId,
@@ -2838,22 +2691,14 @@ impl Scene {
             .unwrap_or_default();
         // AN EVENT THAT TELLS THE LEDGER NOTHING IT ALREADY KNOWS IS NOT
         // A STEP. A COMMAND ACTS LIKE THE USER — `clear` deliberately
-        // echoes, so the field emits its own text_changed("") and the
-        // entry scene's second-add round depends on that (gtk.rs's Clear
-        // arm) — but `absorb_text_writes` already recorded the field as
-        // empty when the write went out. The echo therefore describes a
-        // run from "" to "", and pushing it would put a step that does
-        // nothing on top of the ledger: the user clicks add and the
-        // first Cmd+Z spends itself on the clear's shadow instead of
-        // taking back the add. That is the exact bug this milestone
-        // exists to fix, one move over.
+        // echoes — but `absorb_text_writes` already recorded the field as
+        // empty when the write went out, so the echo describes a run from
+        // "" to "", and pushing it would put a step that does nothing on
+        // top of the ledger: the user clicks add and the first Cmd+Z spends
+        // itself on the clear's shadow instead of taking back the add.
         //
-        // The extend arm below already drops an episode that has typed
-        // its way back to its own before-image, for the same reason
-        // stated once. This is that rule where the run has not started
-        // yet — and it is also why the redo stack survives: a report of
-        // no change is not new typing, so the forward history has no
-        // business dying on it.
+        // It is also why the redo stack survives: a report of no change is
+        // not new typing, so the forward history has no business dying.
         if before == text {
             return;
         }
@@ -2870,21 +2715,13 @@ impl Scene {
                 // native undo has walked the run backwards.
                 //
                 // A routed native undo is reported ONCE, by
-                // `note_native_undo`: the backend marks the ordinary
-                // text_changed its own undo provokes ledger-quiet, so that
-                // one never arrives here. This is the second line — a
-                // backend that forgets the mark delivers a text_changed
-                // restating the walk's position, and lowering `after` to
-                // it would erase the walk the redo side needs. The
-                // no-change return above catches that too, whenever the
-                // core's record of the field is current; this holds when
-                // it is not, and its test drives exactly that state
-                // because nothing else reaches this line.
+                // `note_native_undo`. This is the second line: a backend
+                // that forgets the ledger-quiet mark delivers a
+                // text_changed restating the walk's position, and lowering
+                // `after` to it would erase the walk the redo side needs.
                 //
                 // Ordinary typing is unaffected, mid-walk included: a new
-                // position is a new high-water, and the platform's own
-                // rule that a keystroke kills the native redo history is
-                // inherited rather than fought (§3).
+                // position is a new high-water.
                 if text != ep.current {
                     ep.after = text.to_owned();
                 }
@@ -2914,16 +2751,12 @@ impl Scene {
     }
 
     /// The field a text_changed's identity tag names — the ledger's half
-    /// of the emit, which carries the widget's stored tag rather than an
-    /// id (the backend never learns what the tag means; it hands back
-    /// what it was given).
+    /// of the emit, which carries the widget's stored tag rather than an id.
     ///
     /// A STAMPED COPY ANSWERS WITH ITS OWN INTERNAL ID, which is the
-    /// identity that CARRIES the text: it is what a programmatic write
-    /// to the same field names (so `absorb_text_writes` and this agree),
-    /// and what the backend reports as focused. The copy's app-facing
-    /// name — (template node, key path) — is restored on the way out,
-    /// where the payload is built.
+    /// identity that CARRIES the text: it is what a programmatic write to
+    /// the same field names and what the backend reports as focused. The
+    /// copy's app-facing name is restored where the payload is built.
     pub(crate) fn text_field_of_tag(&self, tag: &[u8]) -> Option<WidgetId> {
         match crate::wire::decode_text_changed_tag(tag, "") {
             Occurrence::TextChanged { id, .. } => Some(id),
@@ -2934,21 +2767,18 @@ impl Scene {
         }
     }
 
-    /// The internal widget a stamped copy's template node became, for
-    /// the copy addressed by `path`.
+    /// The internal widget a stamped copy's template node became, for the
+    /// copy addressed by `path`.
     ///
     /// The stamps table is keyed by (collection, site path, key) and the
-    /// copy's own path is the site path plus the key — the same
-    /// `copy_path` the tag was built from (`button_tag`) — so the
-    /// candidates are the stamps at that path, and the node map picks
-    /// the widget among them. The collection is not in the tag and does
-    /// not need to be: a template node belongs to exactly one blueprint.
+    /// copy's own path is the site path plus the key, so the candidates
+    /// are the stamps at that path and the node map picks among them. The
+    /// collection is not in the tag and does not need to be: a template
+    /// node belongs to exactly one blueprint.
     ///
-    /// Linear in live copies, and deliberately so: the map that makes it
-    /// O(1) would be a second index over the same facts, and a second
-    /// index is a thing that drifts. If a scene ever makes this hot, the
-    /// answer is a node-to-collection table built at declaration, not a
-    /// copy of this one.
+    /// Linear in live copies, deliberately: the map that makes it O(1)
+    /// would be a second index over the same facts, and a second index
+    /// drifts.
     fn instance_widget(&self, node: u64, path: &[Value]) -> Option<WidgetId> {
         let (key, site) = path.split_last()?;
         let key = Key::from_value(key);
@@ -2960,15 +2790,12 @@ impl Scene {
         })
     }
 
-    /// What an `undone`/`redone` payload calls this field.
-    ///
-    /// A live widget is its own name. A stamped copy's internal id is
-    /// NOT a name — no app has ever seen it, it cannot be resolved
-    /// through any binding, and it changes when the row is stamped again
-    /// — so the copy is named the way its own occurrences name it:
-    /// template node plus key path (D5, and the option-A ruling of
-    /// 2026-08-06). None means the field cannot be named at all, which
-    /// after `teardown`'s drop is a field no ledger holds.
+    /// What an `undone`/`redone` payload calls this field. A live widget
+    /// is its own name; a stamped copy's internal id is NOT a name — no
+    /// app has ever seen it and it changes when the row is stamped again —
+    /// so the copy is named the way its own occurrences name it: template
+    /// node plus key path (D5). None means the field cannot be named at
+    /// all, which after `teardown`'s drop is a field no ledger holds.
     fn field_identity(&self, field: WidgetId) -> Option<(u64, crate::protocol::Path)> {
         if field.0 & INTERNAL_BIT == 0 {
             return Some((field.0, Vec::new()));
@@ -2981,11 +2808,10 @@ impl Scene {
         })
     }
 
-    /// An episode's restored text as the payload's one-entry texts run,
-    /// or an EMPTY run for a field that can no longer be named — which
-    /// is not a state a ledger reaches (`teardown` drops the episodes of
-    /// a copy it destroys), and is an empty statement rather than a
-    /// wrong one if it ever is.
+    /// An episode's restored text as the payload's one-entry texts run, or
+    /// an EMPTY run for a field that can no longer be named — not a state
+    /// a ledger reaches, and an empty statement rather than a wrong one if
+    /// it ever is.
     fn text_delta(&self, field: WidgetId, text: &str) -> Vec<crate::protocol::UndoText> {
         self.field_identity(field)
             .map(|(id, path)| crate::protocol::UndoText {
@@ -2999,11 +2825,8 @@ impl Scene {
 
     /// The live widget an `undone` text entry describes: itself when it
     /// names one, or the copy that carries that template node now.
-    ///
-    /// RESOLVED AT APPLY, not stored: between banking and restoring, a
-    /// row can be stamped again (an undone removal re-inserts it) and
-    /// the copy's internal ids are new. The path names the row, so the
-    /// write follows it.
+    /// RESOLVED AT APPLY, not stored: between banking and restoring a row
+    /// can be stamped again and the copy's internal ids are new.
     fn text_target(&self, text: &crate::protocol::UndoText) -> Option<WidgetId> {
         if text.path.is_empty() {
             Some(WidgetId(text.id))
@@ -3015,34 +2838,24 @@ impl Scene {
     /// The text_changed a NATIVE undo produced, plus the field's own
     /// answer to "can you still undo?".
     ///
-    /// Walks the frontier episode backwards rather than extending it. It
-    /// ends three ways, and the third is the interesting one:
+    /// Walks the frontier episode backwards rather than extending it, and
+    /// ends three ways:
     ///
-    /// - the text reached the before-image: the episode is spent as a
-    ///   step back and is BANKED FORWARD, so the next undo takes whatever
-    ///   is under it and a redo brings the typing back (below);
+    /// - the text reached the before-image: the episode is spent as a step
+    ///   back and is BANKED FORWARD, so a redo brings the typing back;
     /// - the field can still undo: the episode stays OPEN at its current
-    ///   position, and further typing extends it (the platform's own
-    ///   rule that a keystroke kills the redo history is inherited, not
-    ///   fought);
+    ///   position and further typing extends it;
     /// - the field is EXHAUSTED without having reached the before-image,
     ///   which means the platform coalesced across the episode's start.
-    ///   A1's clear is supposed to make that unreachable — so this arm
-    ///   falls back to the coarse restore and its test's job is to prove
-    ///   the arm cannot be entered.
+    ///   A1's clear is supposed to make that unreachable, so this arm falls
+    ///   back to the coarse restore and its test's job is to prove the arm
+    ///   cannot be entered.
     ///
-    /// THE FORWARD BANK IS WHAT KEEPS THE LEDGER SYMMETRIC. A walk that
-    /// reaches the run's start has spent the platform's stack, so the
-    /// episode leaves the done side — and the frontier moves to the entry
-    /// underneath, which is a GROUP whenever A1's clear did its job. So
-    /// `route_redo` can no longer offer the native tier, and if the
-    /// episode were merely dropped the typing would be unreachable in
-    /// both directions: the one hole D5's "walk back as often as you
-    /// like" promise cannot have. Banked, it redoes through exactly the
-    /// machinery a coarsely-undone episode already uses — its after-image
-    /// written by the core, named by the same `redone` occurrence — and
-    /// the only thing the user loses is the platform's finer granularity,
-    /// which is the granularity degradation §3 already charges for.
+    /// THE FORWARD BANK IS WHAT KEEPS THE LEDGER SYMMETRIC: a walk that
+    /// reaches the run's start has spent the platform's stack, so
+    /// `route_redo` can no longer offer the native tier, and a merely
+    /// dropped episode would leave the typing unreachable in both
+    /// directions — the one hole D5's promise cannot have.
     pub(crate) fn note_native_undo(
         &mut self,
         window: WindowId,
@@ -3078,15 +2891,11 @@ impl Scene {
 
     // --- Undo: routing and the two entry points (D6, §3) ----------------
 
-    /// Where an undo should go: the focused field's own stack, the
-    /// core's ledger, or nowhere.
-    ///
-    /// `focused_can_undo` is A4's named query, answered by the backend
-    /// (CanUndo, canUndo, undoManager.canUndo) and consumed here — ONE
-    /// expression of the question, not a fifth hard-coded predicate.
-    /// Enablement is this same call: `Nothing` is what a disabled
-    /// Edit>Undo means, computed live at activation the way paste's
-    /// offer-meets-accepts already is.
+    /// Where an undo should go: the focused field's own stack, the core's
+    /// ledger, or nowhere. `focused_can_undo` is A4's named query,
+    /// answered by the backend and consumed here — ONE expression of the
+    /// question. Enablement is this same call: `Nothing` is what a
+    /// disabled Edit>Undo means, computed live at activation.
     pub(crate) fn route_undo(
         &self,
         window: WindowId,
@@ -3133,13 +2942,11 @@ impl Scene {
         }
     }
 
-    /// Undo the newest ledger entry: apply its inverse, move it to the
-    /// redo side, and say what was put back.
-    ///
-    /// ONE OCCURRENCE AND NOTHING ELSE (D5). The inverse is a
-    /// programmatic write, so the echo doctrine silences everything it
-    /// touches — which is why the occurrence carries the whole restored
-    /// state rather than a notification.
+    /// Undo the newest ledger entry: apply its inverse, move it to the redo
+    /// side, and say what was put back. ONE OCCURRENCE AND NOTHING ELSE
+    /// (D5) — the inverse is a programmatic write, so the echo doctrine
+    /// silences everything it touches, which is why the occurrence carries
+    /// the whole restored state rather than a notification.
     pub(crate) fn undo(&mut self, window: WindowId) -> Option<(Vec<ApplyOp>, Occurrence)> {
         let mut out = Vec::new();
         let occurrence = self.restore_episode_backwards(window, &mut out)?;
@@ -3243,11 +3050,10 @@ impl Scene {
     /// Put a delta's state back into the scene and emit what the backend
     /// must do about it.
     ///
-    /// THE ORDER IS THE CORRECTNESS. Signals first, so bound widgets
-    /// follow their props. Then entries, so everything the order names
-    /// exists. Then orders, so position is decided once and by the run
-    /// that owns it. Then texts, which are the only part that touches
-    /// widget-owned state and does so as an ordinary programmatic write.
+    /// THE ORDER IS THE CORRECTNESS. Signals first, so bound widgets follow
+    /// their props. Then entries, so everything the order names exists.
+    /// Then orders. Then texts, the only part that touches widget-owned
+    /// state.
     fn apply_delta(&mut self, delta: &UndoDelta, out: &mut Vec<ApplyOp>) {
         let from = out.len();
         let mut dirty: Vec<SignalId> = Vec::new();
@@ -3299,13 +3105,10 @@ impl Scene {
             self.restore_order(order.collection, &path, &keys, out);
         }
         for text in &delta.texts {
-            // THE PAYLOAD NAMES THE FIELD THE APP'S WAY, so the write
-            // has to translate back: a live widget is its own id, and a
-            // stamped copy's field is whichever widget carries that
-            // template node at that key path RIGHT NOW. A copy whose row
-            // is gone resolves to nothing and writes nothing — the same
-            // statement, applied to a world that no longer has the
-            // widget, rather than a write into a destroyed id.
+            // THE PAYLOAD NAMES THE FIELD THE APP'S WAY, so the write has
+            // to translate back. A copy whose row is gone resolves to
+            // nothing and writes nothing — the same statement applied to a
+            // world that no longer has the widget.
             let Some(field) = self.text_target(text) else {
                 continue;
             };
@@ -3317,24 +3120,19 @@ impl Scene {
             });
         }
         // An inverse is a programmatic write like any other, so D7 holds
-        // for it too: restoring a signal bound to a field's text ends
-        // that field's run and resets its native history. Read off the
-        // ops this call added, the same one place a forward batch reads
-        // its own from — the texts run above is already reconciled, so
-        // it passes through as a no-change.
+        // for it too: restoring a signal bound to a field's text ends that
+        // field's run. Read off the ops this call added, the same one place
+        // a forward batch reads its own from.
         let added = out.split_off(from);
         self.absorb_text_writes(&added);
         out.extend(added);
     }
 
     /// Restore an instance's key order, and its stamped copies with it.
-    ///
-    /// RIGHT TO LEFT, each copy moved before the one already placed
-    /// after it: the last entry appends, and every earlier one anchors
-    /// on its successor, so the container ends in exactly this order
-    /// whatever it held before. O(entries) rather than O(change),
-    /// deliberately — an order is not a set of independent facts, and a
-    /// minimal move sequence would be a second reconciler.
+    /// RIGHT TO LEFT, each copy moved before the one already placed after
+    /// it, so the container ends in exactly this order whatever it held
+    /// before. O(entries) rather than O(change), deliberately — a minimal
+    /// move sequence would be a second reconciler.
     fn restore_order(
         &mut self,
         id: CollectionId,
@@ -3369,12 +3167,10 @@ impl Scene {
         }
     }
 
-    /// The user's back affordance popped an entry natively (predictive
-    /// back, swipe-back, the desktop back button) — the backend informs
-    /// the core POST-FACT, and the core-owned stack reconciles here.
-    /// The counterpart of pop_entry with no ApplyOp: the platform
-    /// already animated the pop. A user pop always takes the visible
-    /// top; anything else is a backend bug and fails loudly.
+    /// The user's back affordance popped an entry natively — the backend
+    /// informs the core POST-FACT and the core-owned stack reconciles here.
+    /// The counterpart of pop_entry with no ApplyOp: the platform already
+    /// animated the pop. A user pop always takes the visible top.
     #[cfg_attr(
         not(any(target_os = "macos", target_os = "ios", target_os = "android")),
         allow(dead_code)
@@ -3386,22 +3182,16 @@ impl Scene {
     // registries at create time, so `kind#index` resolves to it and every
     // harness read answers about it — while the screen shows nothing.
     // Swift's milestone2 window displayed two widgets for over two weeks
-    // with every leg green (docs/deferred.md, the orphan entry), and its
-    // menus.swift sibling shipped the same shape in the same commit.
+    // with every leg green (docs/deferred.md, the orphan entry).
     //
-    // The core is the one layer that can refuse it once for everybody:
-    // `Scene::apply` is the funnel for all five backends (gtk.rs:1079 and
-    // :6412, winui/mod.rs:829, capi.rs:2335 for the two interpreters), so
-    // this walk is one implementation covering nine guest languages, and
-    // it fires in a real app that never runs the harness.
+    // `Scene::apply` is the funnel for all five backends, so this walk is
+    // one implementation covering nine guest languages, and it fires in a
+    // real app that never runs the harness.
     //
     // WHAT IT DOES NOT COVER, stated so nobody reads it as total: an
     // orphan made by a BACKEND — one that receives ApplyOp::AddChild and
     // fails to reparent — is invisible here, because the core sees the op
-    // and not the toolkit's tree. Only GTK's `WidgetExt::root()`, WinUI's
-    // `XamlRoot` and the interpreters' `parents` maps can see that one.
-    // No such defect is on record; all three recorded instances were made
-    // above the core, in a binding.
+    // and not the toolkit's tree.
 
     /// Is `target` inside `root`'s subtree (or `root` itself)? Walks
     /// UP from `target`, which is the direction the map runs. Bounded by
@@ -3451,13 +3241,11 @@ impl Scene {
         at
     }
 
-    /// The refusal text. It carries the diagnosis because the whole
-    /// failure class is "it looked fine": the reader's screen is missing
-    /// a widget and every assertion passed, so a bare "invalid tree"
-    /// would send them to the backend. Every clause here is READ OFF THE
-    /// SCENE, not guessed (docs/traps.md, "a diagnostic may only print
-    /// what it measured"): the kind, the chain that was actually walked,
-    /// and how many surfaces have a root at all.
+    /// The refusal text. It carries the diagnosis because the whole failure
+    /// class is "it looked fine". Every clause here is READ OFF THE SCENE,
+    /// not guessed (docs/traps.md, "a diagnostic may only print what it
+    /// measured"): the kind, the chain that was actually walked, and how
+    /// many surfaces have a root at all.
     fn orphan_message(&self, orphan: WidgetId) -> String {
         let kind = self.widgets.get(&orphan);
         let top = self.top_ancestor(orphan);
@@ -3670,12 +3458,9 @@ impl Scene {
             "kaya: menu_item_append of {child:?} under {parent:?} would create a cycle"
         );
         // If the parent's tree is anchored, the child joins that catalog
-        // now — re-validate at the child's would-be absolute grouping
-        // depth BEFORE linking, so a reject leaves the tree and the
-        // catalog untouched (the MenubarAppend standard). The depth is
-        // computed from the parent pre-link: the child is a free root,
-        // so its post-link depth is the parent's plus its own grouping
-        // contribution.
+        // now — re-validate at the child's would-be absolute grouping depth
+        // BEFORE linking, so a reject leaves the tree and the catalog
+        // untouched (the MenubarAppend standard).
         if let Some(anchor) = self.anchored_root(parent) {
             let is_bar = matches!(anchor, MenuAnchor::Window(_));
             let start = self.menu_group_depth(parent) + u32::from(is_menu_group(child_kind));
@@ -3719,14 +3504,12 @@ impl Scene {
     }
 
     /// Store a validated canonical shortcut on an action, and — for an
-    /// action already in a window catalog — dup-check and register it.
-    /// A shortcut on a context-anchored item is a root error.
+    /// action already in a window catalog — dup-check and register it. A
+    /// shortcut on a context-anchored item is a root error.
     ///
-    /// Props mutate freely (DESIGN.md, Menus), so a re-set REPLACES the
-    /// item's own registration: the item's previous spelling leaves the
-    /// window set before the new one is dup-checked in. The dup-check
-    /// runs before any mutation, so a reject leaves both the registry
-    /// and the item untouched.
+    /// Props mutate freely, so a re-set REPLACES the item's registration.
+    /// The dup-check runs before any mutation, so a reject leaves both the
+    /// registry and the item untouched.
     fn set_item_shortcut(&mut self, item: MenuItemId, spelling: String) {
         match self.anchored_root(item) {
             Some(MenuAnchor::Context) => panic!(
@@ -3750,12 +3533,10 @@ impl Scene {
         self.menu_items.get_mut(&item).unwrap().shortcut = Some(spelling);
     }
 
-    /// One standard command per role, window-anchored: a role can move
-    /// an authored item into dress-owned chrome (macOS puts `settings`
-    /// in the application menu), so two claimants would be two items
-    /// racing for one native slot, and a context anchor has no such
-    /// slot at all. Re-setting the same role on the same item is idle,
-    /// the shortcut precedent.
+    /// One standard command per role, window-anchored: a role can move an
+    /// authored item into dress-owned chrome, so two claimants would be two
+    /// items racing for one native slot, and a context anchor has no such
+    /// slot at all. Re-setting the same role on the same item is idle.
     fn claim_menu_role(&mut self, item: MenuItemId, value: &Value) {
         let Value::Str(role) = value else { return };
         if let Some(MenuAnchor::Context) = self.anchored_root(item) {
@@ -3832,10 +3613,9 @@ impl Scene {
     }
 
     /// A menu binding's COALESCED value against its live domain, at the
-    /// barrier. Only a radio group's `value` has a domain that a later
-    /// coalesced write can break (label/enabled/checked are type-fixed
-    /// by their signal). Returns the exact message the barrier must
-    /// panic with (after restoring signal state).
+    /// barrier. Only a radio group's `value` has a domain a later coalesced
+    /// write can break. Returns the exact message the barrier must panic
+    /// with (after restoring signal state).
     fn check_menu_binding_domain(
         &self,
         item: MenuItemId,
@@ -3906,11 +3686,9 @@ impl Scene {
                             "kaya: element level {level} exceeds For nesting depth {depth}"
                         );
                         // The For `level` Fors up names a collection whose
-                        // schema is already declared — and the case being
-                        // parsed there names which variant's schema this
-                        // binding sees. Validated here, before anything
-                        // ever stamps: index in bounds, field type
-                        // against prop type, within that variant.
+                        // schema is already declared, and the case being
+                        // parsed names which variant's schema this binding
+                        // sees. Validated here, before anything stamps.
                         let (collection, variant) = scopes
                             .iter()
                             .rev()
@@ -3966,21 +3744,14 @@ impl Scene {
                     child.0
                 );
                 // THE STRUCTURAL RULES THE LIVE PATH ENFORCES, ENFORCED
-                // HERE TOO. A scroll takes exactly one child and a
-                // choice's children are its options, and both were
-                // checked only on the live `AddChild`
-                // (crates/kaya/src/scene.rs, the `TxOp::AddChild` arm
-                // outside a template). Recording a template ran none of
-                // them, so a malformed prototype recorded clean,
-                // declared clean, and reached four backends as a shape
-                // none of them has a reading for.
-                //
-                // It was unreachable through sugar until 2026-08-10 for
-                // the same reason D1 was: no binding had a template
-                // constructor for scroll, select or radio, so only the
-                // widget-kind floor could build one. The sugar pass
-                // shipped those constructors, which is exactly when a
-                // rule enforced on one path and not the other stops
+                // HERE TOO. A scroll takes exactly one child and a choice's
+                // children are its options, and both were checked only on
+                // the live `AddChild`. Recording a template ran neither, so
+                // a malformed prototype recorded clean, declared clean, and
+                // reached four backends as a shape none of them has a
+                // reading for. It was unreachable through sugar until the
+                // template zone gained those constructors, which is exactly
+                // when a rule enforced on one path and not the other stops
                 // being theoretical (docs/sugar-pass-plan.md).
                 //
                 // Checked at RECORD time, not at stamp: the prototype is
@@ -4170,12 +3941,11 @@ impl Scene {
         }
     }
 
-    /// Assemble a closed scope's blueprint(s). A For's cases must be
-    /// total — one body per variant of its collection's sum, in
-    /// discriminant order — with the caseless scope standing for the
-    /// one-variant For. An empty case is the explicit way to render a
-    /// constructor as nothing; a missing one dies here, at declaration,
-    /// not on the first insert of the unlucky variant.
+    /// Assemble a closed scope's blueprint(s). A For's cases must be total
+    /// — one body per variant of its collection's sum, in discriminant
+    /// order — with the caseless scope standing for the one-variant For. An
+    /// empty case is the explicit way to render a constructor as nothing;
+    /// a missing one dies here, at declaration.
     fn close_scope_bodies(&self, scope: TplScope) -> ClosedScope {
         let TplScope { header, closed, current, explicit_cases, .. } = scope;
         match header {
@@ -4224,10 +3994,9 @@ impl Scene {
     }
 
     /// The schema-shape checks shared by live and template collection
-    /// declarations. A unit variant (no fields) is legal inside a real
-    /// sum — a `Divider` constructor carries no data — but the
-    /// one-variant zero-field collection stays an error, as it always
-    /// was: a record with no fields holds nothing.
+    /// declarations. A unit variant is legal inside a real sum, but the
+    /// one-variant zero-field collection stays an error: a record with no
+    /// fields holds nothing.
     fn check_variants(id: CollectionId, variants: &[Vec<ValueType>]) {
         assert!(
             !variants.is_empty(),
@@ -4458,10 +4227,9 @@ impl Scene {
 
     /// One field's delta: only bindings on that field re-resolve — the
     /// O(change) doctrine applied within an entry. `variant` is the
-    /// discriminant the guest witnessed in the match that produced this
-    /// write; a mismatch with the stored one means the binding's model
-    /// has drifted from the core, and dies here rather than writing a
-    /// type-correct field of the wrong constructor.
+    /// discriminant the guest witnessed; a mismatch with the stored one
+    /// means the binding's model has drifted from the core, and dies here
+    /// rather than writing the wrong constructor's field.
     fn update_field_entry(
         &mut self,
         id: CollectionId,
@@ -4838,16 +4606,13 @@ impl Scene {
                 bound.retain(|(w, _, _)| w != widget);
             }
         }
-        // THE COPY TAKES ITS TYPING HISTORY WITH IT. An episode on a
-        // field that no longer exists is a step that would visibly do
-        // nothing — the user presses Cmd+Z and the screen does not move
-        // — which is the exact shape this milestone exists to remove
-        // (`note_text_changed`'s no-change rule, one level up). The row's
-        // own removal is a step in its own right and still walks back;
-        // what it brings back is a fresh copy, because an uncontrolled
-        // field's text is widget-owned state and undo restores app state
-        // (D4). An app that wants a row's text to survive its removal
-        // binds it to a record field, and the entries run carries it.
+        // THE COPY TAKES ITS TYPING HISTORY WITH IT. An episode on a field
+        // that no longer exists is a step that would visibly do nothing.
+        // The row's own removal is a step in its own right and still walks
+        // back; what it brings back is a fresh copy, because an
+        // uncontrolled field's text is widget-owned state and undo restores
+        // app state (D4). An app that wants a row's text to survive its
+        // removal binds it to a record field.
         for ledger in self.ledgers.values_mut() {
             let spent = |entry: &LedgerEntry| match entry {
                 LedgerEntry::Episode(ep) => stamp.widgets.contains(&ep.field),
@@ -4971,19 +4736,15 @@ mod tests {
     //
     // The two negatives below RE-CREATE THE SHIPPED DEFECT rather than a
     // synthetic one. `milestone2_scene()` above is byte-for-byte the shape
-    // guests/swift/milestone2.swift had before aadbe9e: a column, a When
-    // container and a For container, with the two AddChild ops that claim
-    // them. Delete the first and you have the Swift result builder
-    // discarding `banner`; delete the second and you have menus.swift's
-    // `itemList`, built outside its column and only mentioned inside it.
-    // Both shipped in the same commit and both rendered nothing while
-    // every leg stayed green.
+    // guests/swift/milestone2.swift had before aadbe9e. Delete the first
+    // AddChild and you have the Swift result builder discarding `banner`;
+    // delete the second and you have menus.swift's `itemList`, built
+    // outside its column and only mentioned inside it. Both shipped in the
+    // same commit and both rendered nothing while every leg stayed green.
     //
-    // Each negative asserts the PERTURBATION COUNT. A `should_panic` test
+    // Each negative asserts the PERTURBATION COUNT: a `should_panic` test
     // whose edit silently matched nothing passes for the wrong reason, and
-    // this repo has been bitten by exactly that twice (check-tx-liveness's
-    // three vacuous clauses, the wayland seat guard's two vacuous runs).
-    // An unchanged fixture fails here as loudly as a missing wall.
+    // this repo has been bitten by exactly that twice.
 
     /// Remove every `AddChild` that claims `child`, returning how many
     /// went. Printed, and every caller asserts on it.
@@ -5043,12 +4804,10 @@ mod tests {
         ]);
     }
 
-    /// The scene that creates widgets and never mounts at all. The
-    /// SwiftUI interpreter carries a diagnosis for exactly this
-    /// (KayaSwiftUI.swift's UNMOUNTED-SCENE DIAGNOSIS, and the comment
-    /// there records the afternoon it cost) — but that one runs only on
-    /// the failure path, so a scene whose legs all pass never reaches it.
-    /// This fires first, in the core, for every backend.
+    /// The scene that creates widgets and never mounts at all. The SwiftUI
+    /// interpreter carries a diagnosis for exactly this, but that one runs
+    /// only on the failure path, so a scene whose legs all pass never
+    /// reaches it. This fires first, in the core, for every backend.
     #[test]
     #[should_panic(expected = "missing its mount(root)")]
     fn a_scene_that_never_mounts_is_refused() {
@@ -5121,11 +4880,9 @@ mod tests {
     }
 
     /// The batch scope, and why it is not a nicety: the core NEVER prunes
-    /// `self.widgets` (DestroyWindow at :1401 and PopEntry at :1584 drop
-    /// the surface and leave the widget ids behind forever), so a global
-    /// sweep would re-accuse a destroyed window's widgets on every later
-    /// transaction and redden three scenes in the matrix today —
-    /// guests/rust/dirty.rs, guests/rust/panels.rs, guests/rust/nav.rs.
+    /// `self.widgets`, so a global sweep would re-accuse a destroyed
+    /// window's widgets on every later transaction and redden three scenes
+    /// in the matrix today.
     #[test]
     fn a_destroyed_windows_widgets_are_not_re_accused() {
         let mut scene = Scene::new();
@@ -5152,8 +4909,7 @@ mod tests {
     ///
     /// It is also the case that exercises the WALK: widget 6's immediate
     /// parent exists and is perfectly real, so only following the chain to
-    /// its top finds the problem — which is what the expected substring
-    /// pins.
+    /// its top finds the problem.
     #[test]
     #[should_panic(expected = "no live surface has that widget as its root")]
     fn a_widget_added_to_a_destroyed_windows_tree_is_refused() {
@@ -5189,9 +4945,7 @@ mod tests {
 
     /// Stamped copies are out of scope BY CONSTRUCTION, not by an
     /// exemption: `run_body` mints them with `alloc_internal()` and never
-    /// puts them in `self.widgets`, so they are never in `created`. The
-    /// inserts here stamp three group copies with nested item copies; a
-    /// wall that swept the whole widget map would drown in them.
+    /// puts them in `self.widgets`, so they are never in `created`.
     #[test]
     fn stamped_copies_are_not_live_widgets() {
         let mut scene = Scene::new();
@@ -5290,23 +5044,18 @@ mod tests {
     }
 
     /// A STAMPED COPY IS TAGGED EXACTLY WHERE A LIVE WIDGET IS, and the
-    /// two `button_tag` callsites are twelve hundred lines apart. They
-    /// were the same fact written twice and had already drifted:
-    /// Textarea, Select and Radio were tagged live and untagged when
-    /// stamped, which is the one shape that reaches a backend as a
-    /// choice between a panic and a silence. GTK and WinUI unwrap the
-    /// tag for exactly those three (`tag.expect("selects carry a tag")`,
-    /// gtk.rs:3897 and winui/mod.rs:6008), so a stamped select aborted
-    /// the process there; the SwiftUI interpreter reads a zero-length
-    /// tag without complaint, so on mac and iOS the control appeared and
-    /// never reported. Nothing could see it, because no BINDING had a
-    /// template constructor for those kinds — only the raw floor did
+    /// two `button_tag` callsites are twelve hundred lines apart. They were
+    /// the same fact written twice and had already drifted: Textarea,
+    /// Select and Radio were tagged live and untagged when stamped. GTK and
+    /// WinUI unwrap the tag for exactly those three, so a stamped select
+    /// aborted the process there; the SwiftUI interpreter reads a
+    /// zero-length tag without complaint, so on mac and iOS the control
+    /// appeared and never reported. Nothing could see it, because no
+    /// BINDING had a template constructor for those kinds
     /// (docs/sugar-pass-plan.md D1).
     ///
     /// EXHAUSTIVE OVER THE KIND ENUM, deliberately: it compares the two
-    /// paths for every variant rather than checking a list, so a kind
-    /// added later cannot diverge without this failing. `carries_tag` is
-    /// what makes them one fact; this is what proves it stayed one.
+    /// paths for every variant rather than checking a list.
     #[test]
     fn a_stamped_copy_is_tagged_exactly_where_a_live_one_is() {
         for kind in WidgetKind::ALL {
@@ -5356,13 +5105,11 @@ mod tests {
 
     /// A template scroll takes exactly one child, like a live one.
     ///
-    /// This rule and the choice rule below lived on the live `AddChild`
-    /// arm only. Recording a template ran neither, so a two-child
-    /// scroll prototype recorded clean and reached the backends as a
-    /// shape none of them reads. Unreachable through sugar until the
-    /// template zone gained a `scroll` constructor, which is precisely
-    /// when a rule enforced on one path and not the other stops being
-    /// theoretical (docs/sugar-pass-plan.md).
+    /// This rule and the choice rule below lived on the live `AddChild` arm
+    /// only, so a two-child scroll prototype recorded clean and reached the
+    /// backends as a shape none of them reads. Unreachable through sugar
+    /// until the template zone gained a `scroll` constructor
+    /// (docs/sugar-pass-plan.md).
     #[test]
     #[should_panic(expected = "already holds its one child")]
     fn a_template_scroll_refuses_a_second_child() {
@@ -5542,11 +5289,9 @@ mod tests {
     }
 
     /// AND THE DOMAIN WALL: the seed is 0xRRGGBB and nothing else. The
-    /// fan-out measured an ARGB constant sailing through seven bindings
-    /// and reaching every backend as seed AND fill (only Python's local
-    /// precondition caught it); the refusal belongs here, where the
-    /// answer is the same in all eight languages. All three words are
-    /// walled — the overrides take the same grammar as the seed.
+    /// fan-out measured an ARGB constant sailing through seven bindings and
+    /// reaching every backend as seed AND fill (only Python's local
+    /// precondition caught it). All three words are walled.
     #[test]
     #[should_panic(expected = "brand seed 0xff3584e4 is not a packed")]
     fn an_alpha_carrying_seed_dies() {
@@ -5751,10 +5496,9 @@ mod tests {
     }
 
     /// THE CLEAN PATH: one SetAppIdentity out, carrying the declaration
-    /// UNINSPECTED — the name and the bytes — because the lowering is
-    /// what decodes a picture. The bytes here are NOT a PNG on purpose:
-    /// the core must pass them on regardless, and the platform's decoder
-    /// is the only party entitled to an opinion about them.
+    /// UNINSPECTED. The bytes here are NOT a PNG on purpose — the core must
+    /// pass them on regardless, and the platform's decoder is the only
+    /// party entitled to an opinion about them.
     #[test]
     fn the_identity_rides_out_uninspected() {
         let mut scene = Scene::new();
@@ -5974,15 +5718,13 @@ mod tests {
         ]);
     }
 
-    /// The custom-id grammar (DESIGN.md, Clipboard): mime-shaped — a
-    /// slash, lowercase, no whitespace. The slash is GDK's measured
-    /// charge: its serving path interns the requested type as a mime
-    /// type, so a slashless id is ADVERTISED AND NEVER SERVED on GTK,
-    /// with no error anywhere; the same path lowercases, so a
-    /// mixed-case id would surface differently there than everywhere
-    /// else (docs/clipboard-plan.md §5b finding 4). Checked at apply —
-    /// the one gate every binding passes — so a bad id fails HERE,
-    /// naming the rule, on every platform alike.
+    /// The custom-id grammar (DESIGN.md, Clipboard): mime-shaped — a slash,
+    /// lowercase, no whitespace. The slash is GDK's measured charge: its
+    /// serving path interns the requested type as a mime type, so a
+    /// slashless id is ADVERTISED AND NEVER SERVED on GTK with no error
+    /// anywhere; the same path lowercases (docs/clipboard-plan.md §5b
+    /// finding 4). Checked at apply, so a bad id fails HERE on every
+    /// platform alike.
     fn copy_of_custom(id: &str) -> TxOp {
         TxOp::Copy(crate::protocol::Clip {
             custom: vec![(
@@ -6092,14 +5834,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "rejects value")]
     fn dirty_rejects_a_non_bool() {
-        // The prop is a BOOLEAN, and a string here is exactly the
-        // design it replaces: Qt spells unsaved work as a `[*]`
-        // placeholder inside the app's own title, which puts the
-        // mechanism in app-facing text and the constraint on a string
-        // no type system sees (docs/dirty-plan.md D1). kaya's window
-        // titles are compared byte-for-byte across platforms, so the
-        // declared string stays identical everywhere and only the
-        // chrome diverges.
+        // The prop is a BOOLEAN, and a string here is exactly the design
+        // it replaces: Qt spells unsaved work as a `[*]` placeholder inside
+        // the app's own title (docs/dirty-plan.md D1). kaya's window titles
+        // are compared byte-for-byte across platforms.
         let mut scene = Scene::new();
         scene.apply(vec![TxOp::SetWindowProp {
             window: DEFAULT_WINDOW,
@@ -6122,12 +5860,11 @@ mod tests {
         ]);
     }
 
-    /// THE SYMBOL VALUE WALL, section side (docs/styling-plan.md D6).
-    /// The slot is a bare integer on the wire, so without this an
-    /// out-of-vocabulary number reaches four backends' glyph tables,
-    /// misses in each, and the tab simply draws with no icon — silent
-    /// everywhere. 21 is the first free id, i.e. exactly what a guest
-    /// generated against a NEWER spec would send.
+    /// THE SYMBOL VALUE WALL, section side (docs/styling-plan.md D6). The
+    /// slot is a bare integer on the wire, so without this an
+    /// out-of-vocabulary number reaches four backends' glyph tables, misses
+    /// in each, and the tab simply draws with no icon. 21 is the first free
+    /// id, i.e. exactly what a guest generated against a NEWER spec sends.
     #[test]
     #[should_panic(expected = "21 is not a symbol")]
     fn section_symbol_rejects_a_value_outside_the_vocabulary() {
@@ -6669,9 +6406,8 @@ mod tests {
         ]);
     }
 
-    /// The hint is the one accessibility prop with a domain, and the
-    /// domain is the platforms' own: a hint describes what ACTIVATING
-    /// the control does, and Android has nowhere to put one without an
+    /// The hint is the one accessibility prop with a domain, and the domain
+    /// is the platforms' own: Android has nowhere to put a hint without an
     /// action to hang it on. So a hint on a label dies here rather than
     /// reaching four backends and silently missing the fifth.
     #[test]
@@ -8341,7 +8077,7 @@ mod tests {
         ]);
     }
 
-    // --- Text ranges (docs/ranges-plan.md, scratchpad/ranges-units.md) ---
+    // --- Text ranges (docs/ranges-plan.md, docs/ranges-units.md) ---
 
     /// The five hazard strings the units arm measured, so every test
     /// below argues over the same material.
@@ -8381,10 +8117,9 @@ mod tests {
     }
 
     /// THE CONVERSION TABLE ITSELF, pinned against the units arm's
-    /// measurements — both units, on every hazard string, on every
-    /// platform. `native_offset` picks one of these at build time and a
-    /// test of the picked one alone would say nothing about the arm the
-    /// linux lane runs.
+    /// measurements — both units, on every hazard string. `native_offset`
+    /// picks one at build time and a test of the picked one alone would say
+    /// nothing about the arm the linux lane runs.
     #[test]
     fn the_two_offset_conversions_match_the_measured_table() {
         // ab😀cd: the emoji is bytes 2..6, UTF-16 units 2..4, scalars 2..3.
@@ -8440,7 +8175,7 @@ mod tests {
 
     /// ACCEPTANCE, and it matters as much as the refusals: a guard that
     /// refused these would make the framework unable to express a
-    /// correct range (scratchpad/ranges-units.md §8.2).
+    /// correct range (docs/ranges-units.md §8.2).
     #[test]
     fn a_grapheme_split_is_accepted_because_the_platforms_disagree() {
         let mut scene = Scene::new();
@@ -8482,7 +8217,7 @@ mod tests {
 
     /// THE CLAUSE THAT IS NOT POLITENESS: an out-of-range attribute on
     /// macOS is an NSRangeException and the process dies with exit 134
-    /// (scratchpad/ranges-units.md §3, measured).
+    /// (docs/ranges-units.md §3, measured).
     #[test]
     #[should_panic(expected = "end 40 is past the end of the text (5 bytes)")]
     fn an_offset_past_the_end_is_refused() {
@@ -8549,12 +8284,12 @@ mod tests {
         scene.apply(vec![highlight(&[(0, 0)])]);
     }
 
-    /// THE SAME-BATCH ORDERING HAZARD. `absorb_text_writes` runs at the
-    /// END of a batch, so `field_text` still holds the old text while
-    /// the batch is applying. A range declared over text this same
-    /// transaction wrote must be read against the NEW text — otherwise
-    /// the obvious app spelling validates against the wrong document,
-    /// and on macOS that is not a wrong colour, it is exit 134.
+    /// THE SAME-BATCH ORDERING HAZARD. `absorb_text_writes` runs at the END
+    /// of a batch, so `field_text` still holds the old text while the batch
+    /// is applying. A range declared over text this same transaction wrote
+    /// must be read against the NEW text — otherwise the obvious app
+    /// spelling validates against the wrong document, and on macOS that is
+    /// not a wrong colour, it is exit 134.
     #[test]
     fn a_range_reads_the_text_this_batch_wrote() {
         let mut scene = Scene::new();
@@ -9282,21 +9017,15 @@ mod tests {
     }
 
     /// THE SCENARIO THAT MOTIVATED THE MILESTONE (docs/undo-plan.md §2),
-    /// in the shape guests/rust/undo.rs and tools/scenes/undo.steps
-    /// drive it: the user types "milk", clicks add, and the handler
-    /// appends a todo AND clears the field. One Cmd+Z must take back the
-    /// ADD. Under two bare stacks it takes back the CLEAR — "milk"
-    /// returns, the todo stays, and the user is looking at a state that
-    /// never existed.
+    /// in the shape guests/rust/undo.rs and tools/scenes/undo.steps drive
+    /// it: the user types "milk", clicks add, and the handler appends a
+    /// todo AND clears the field. One Cmd+Z must take back the ADD. Under
+    /// two bare stacks it takes back the CLEAR.
     ///
-    /// THE CLEAR ACTS LIKE THE USER, which is what makes this delicate:
-    /// unlike a property write it echoes, so the field really does emit
-    /// its own `text_changed("")` (gtk.rs's Clear arm says so, and the
-    /// entry scene's second-add round depends on it). That echo arrives
-    /// at the ledger AFTER `absorb_text_writes` has already recorded the
-    /// field as empty — so it describes a run from "" to "", and an
-    /// entry that describes nothing must not become a step that does
-    /// nothing.
+    /// THE CLEAR ACTS LIKE THE USER, which is what makes this delicate: it
+    /// echoes, so the field really does emit its own `text_changed("")`,
+    /// and that echo arrives at the ledger AFTER `absorb_text_writes` has
+    /// recorded the field as empty — so it describes a run from "" to "".
     #[test]
     fn the_add_scenario_undoes_the_add_and_not_the_clear() {
         let mut scene = Scene::new();
@@ -9455,11 +9184,10 @@ mod tests {
     #[test]
     fn a_native_walk_to_the_start_banks_the_episode_forward() {
         // THE OTHER HALF OF CONSUMING AN EPISODE: it is spent as a step
-        // BACK, not thrown away. The walk emptied the platform's stack
-        // and the frontier moved to the group underneath, so the native
-        // tier can offer this typing in NEITHER direction any more —
-        // and a redo that found nothing here would be the one hole the
-        // ledger promises not to have.
+        // BACK, not thrown away. The walk emptied the platform's stack and
+        // the frontier moved to the group underneath, so a redo that found
+        // nothing here would be the one hole the ledger promises not to
+        // have.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "tea", true);
@@ -9505,12 +9233,9 @@ mod tests {
 
     #[test]
     fn a_new_step_after_a_banked_walk_spends_the_forward_history() {
-        // A banked episode is forward history like any other, so the
-        // rule every undo system has applies to it unchanged: a new step
-        // invalidates it. THIS IS ALSO WHY tools/scenes/undo.steps asks
-        // for the redo before the next app action — a click that commits
-        // a group would take the banked typing with it, whatever it did
-        // to focus.
+        // A banked episode is forward history like any other, so a new step
+        // invalidates it. THIS IS ALSO WHY tools/scenes/undo.steps asks for
+        // the redo before the next app action.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
@@ -9578,17 +9303,15 @@ mod tests {
 
     #[test]
     fn a_restated_walk_position_is_not_a_new_high_water() {
-        // EXACTLY ONE FUNCTION REPORTS A ROUTED NATIVE UNDO. The backend
-        // marks the ordinary text_changed its own undo provokes
-        // ledger-quiet, so the walk is told to the core once, by
-        // note_native_undo. This is what happens when a backend forgets
-        // the mark and the same undo is reported twice.
+        // EXACTLY ONE FUNCTION REPORTS A ROUTED NATIVE UNDO. This is what
+        // happens when a backend forgets the ledger-quiet mark and the same
+        // undo is reported twice.
         //
         // The no-change return at the top of note_text_changed catches it
-        // whenever the core's record of the field is current — which it
-        // is, right after a walk — so the record is made STALE here by
-        // hand. That is the only way to reach the high-water rule at all,
-        // and a guard nobody can reach is a guard nobody can watch fail.
+        // whenever the core's record of the field is current — which it is,
+        // right after a walk — so the record is made STALE here by hand.
+        // That is the only way to reach the high-water rule at all, and a
+        // guard nobody can reach is a guard nobody can watch fail.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk bread", true);
@@ -9614,11 +9337,9 @@ mod tests {
 
     #[test]
     fn an_exhausted_native_stack_short_of_the_before_image_falls_back_to_the_coarse_restore() {
-        // The arm A1's clear is supposed to make unreachable — see the
-        // test below, which is the one that proves it cannot be entered
-        // through the ordinary lifecycle. Reached here only by lying to
-        // the core about CanUndo, which is what a platform that
-        // coalesced across the episode start would look like.
+        // The arm A1's clear is supposed to make unreachable. Reached here
+        // only by lying to the core about CanUndo, which is what a platform
+        // that coalesced across the episode start would look like.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk bread", true);
@@ -9635,13 +9356,9 @@ mod tests {
 
     #[test]
     fn the_clear_puts_the_exhausted_case_out_of_reach() {
-        // THE KEYSTONE, asserted rather than assumed: every episode
-        // begins with an empty native stack, so a native undo can walk
-        // the frontier episode and physically nothing else. Provoke the
-        // shape that would break it — a group commits mid-run, then the
-        // user types again — and the new run's before-image is where the
-        // clear left the field, so walking it back cannot pass the
-        // group.
+        // THE KEYSTONE, asserted rather than assumed: every episode begins
+        // with an empty native stack, so a native undo can walk the
+        // frontier episode and physically nothing else.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.note_text_changed(DEFAULT_WINDOW, WidgetId(2), "milk", true);
@@ -9711,12 +9428,10 @@ mod tests {
         }
     }
 
-    /// The map the stamping pass used to throw away is kept, and it is
-    /// kept per copy: every template node the body created answers with
-    /// the widget THIS copy got, and two copies of one template answer
-    /// differently. Without it the two names for a row's field — the
-    /// internal id the text arrives under and the (node, key path) the
-    /// app knows it by — cannot be translated in either direction.
+    /// The map the stamping pass used to throw away is kept, and per copy:
+    /// every template node the body created answers with the widget THIS
+    /// copy got. Without it the two names for a row's field cannot be
+    /// translated in either direction.
     #[test]
     fn a_stamp_remembers_which_node_each_widget_came_from() {
         let mut scene = Scene::new();
@@ -9739,12 +9454,11 @@ mod tests {
         );
     }
 
-    /// THE ITEM THIS SLICE EXISTS FOR. A row's field banks a typing
-    /// episode like any other field, walks back through the ledger, and
-    /// is named in the payload the way the app knows it: template node
-    /// plus key path, never the copy's internal id (D5 — this record is
-    /// the only thing the app hears, so every name in it must be one the
-    /// app can resolve).
+    /// THE ITEM THIS SLICE EXISTS FOR. A row's field banks a typing episode
+    /// like any other field and is named in the payload the way the app
+    /// knows it: template node plus key path, never the copy's internal id
+    /// (D5 — this record is the only thing the app hears, so every name in
+    /// it must be one the app can resolve).
     #[test]
     fn a_stamped_rows_field_banks_an_episode_and_names_itself_to_the_app() {
         let mut scene = Scene::new();
@@ -9837,11 +9551,9 @@ mod tests {
         assert_eq!(delta.texts[0].path, vec![v("r1")]);
     }
 
-    /// A removed row takes its typing history with it. The alternative
-    /// is a step that visibly does nothing — the user presses Cmd+Z, the
-    /// core writes text into a widget that no longer exists, and the
-    /// screen does not move — which is the shape this milestone exists
-    /// to remove, one level down.
+    /// A removed row takes its typing history with it. The alternative is a
+    /// step that visibly does nothing: the core writes text into a widget
+    /// that no longer exists and the screen does not move.
     #[test]
     fn a_removed_row_takes_its_episode_with_it() {
         let mut scene = Scene::new();
@@ -9880,11 +9592,9 @@ mod tests {
 
     #[test]
     fn an_inverse_that_rewrites_a_field_ends_that_field_s_run() {
-        // An inverse is a programmatic write like any other, so D7 does
-        // not stop applying just because the core is the one writing:
-        // restoring a signal bound to a field's text ends the run the
-        // user was in, and the next keystroke starts a new one from
-        // where the inverse left the field.
+        // An inverse is a programmatic write like any other, so D7 does not
+        // stop applying just because the core is the one writing: restoring
+        // a signal bound to a field's text ends the run the user was in.
         let mut scene = Scene::new();
         scene.apply(undo_scene());
         scene.apply(vec![TxOp::CreateSignal { id: SignalId(2), initial: v("") }]);

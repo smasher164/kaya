@@ -43,10 +43,8 @@ with app.window(title="typeface", width=480.0, height=360.0):
     # BEFORE THE FIRST MOUNT, per the set-once wall. The scope mounts on
     # exit, so anywhere in this body is before it. The blob registers
     # with the platform's app-font machinery and the "Sora" request then
-    # resolves to it.
-    # The asset's bytes go from the core's read straight to the
-    # platform's font API: this scene never holds them, and the `with`
-    # releases the core's handle on the way out.
+    # resolves to it; the `with` releases the core's handle on the way
+    # out.
     with kaya.asset("fonts/sora-wght.ttf") as font:
         kaya.brand_typeface("Sora", font=font)
     heading = kaya.signal("typeface")

@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain.
-# A shell entered before the flake last changed is a bystander
-# toolchain; the marker carries the fingerprint the shell was built
-# from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -13,13 +9,12 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# The uniform-abort gate: every binding carries the same negative test
-# — a handler abort rolls the model mirror back, ships nothing, and
-# the app continues (idiom decides the spelling, never the semantics).
-# Headless: libraries load, records queue, the core loop is never
-# entered. Rust's pin lives in `cargo test -p kaya`; Python's in
-# kaya_app_checks.py; C has no mirror and no dispatch (caller-owned
-# buffers) so there is nothing to pin.
+# The uniform-abort gate: every binding's negative test that a handler
+# abort rolls the model mirror back, ships nothing, and lets the app
+# continue. Headless — the core loop is never entered.
+#
+# Not here: Rust's pin is in `cargo test -p kaya`, Python's in
+# kaya_app_checks.py, and C has no mirror to roll back.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -40,8 +35,7 @@ fail() {
 go test dev.kaya/bindings/go >"$TMP/go.log" 2>&1 || { cat "$TMP/go.log"; fail go; }
 
 # Swift: one module with the bindings, so internal mirrors are
-# assertable. The swiftc selection mirrors swift-typecheck.sh (nix
-# shells break xcrun's DEVELOPER_DIR).
+# assertable.
 if SWIFTC="$(env -u DEVELOPER_DIR -u SDKROOT xcrun --find swiftc 2>/dev/null)"; then
     SDK_ARGS=()
 else
@@ -55,8 +49,7 @@ env -u DEVELOPER_DIR -u SDKROOT "$SWIFTC" "${SDK_ARGS[@]}" -o "$TMP/swift-abort"
     >"$TMP/swift.log" 2>&1 || { cat "$TMP/swift.log"; fail swift-build; }
 "$TMP/swift-abort" >"$TMP/swift.log" 2>&1 || { cat "$TMP/swift.log"; fail swift; }
 
-# C#: the KAYA_CHECK=abort branch of the guest binary (assumes the
-# suite's dotnet build ran; build here if not).
+# C#: the KAYA_CHECK=abort branch of the guest binary.
 [ -f guests/csharp/bin/Debug/net10.0/kaya-guests.dll ] \
     || dotnet build --nologo -v q guests/csharp/kaya-guests.csproj >"$TMP/cs.log" 2>&1 \
     || { cat "$TMP/cs.log"; fail csharp-build; }
@@ -64,7 +57,7 @@ KAYA_CHECK=abort dotnet exec guests/csharp/bin/Debug/net10.0/kaya-guests.dll \
     >"$TMP/cs.log" 2>&1 || { cat "$TMP/cs.log"; fail csharp; }
 
 # Java: pure JVM against the ring stub — no natives, so mutating
-# transactions always abort (the check's header explains the shape).
+# transactions always abort (AbortCheck.java's header has the shape).
 rm -rf "$TMP/java"
 javac -encoding UTF-8 -d "$TMP/java" bindings/java-desktop/dev/kaya/KayaRing.java \
     bindings/java/dev/kaya/*.java tools/checks/java-abort/AbortCheck.java \
@@ -85,15 +78,9 @@ dune exec bindings/ocaml/checks/abort_check.exe >"$TMP/ml.log" 2>&1 \
 #
 # Inside that private tree the component's build directory goes EVERY
 # run, so the library and the executable genuinely recompile and LINK
-# here. The class this
-# closes is a gate that passes without doing its work: cabal skips a
-# link whose inputs are unchanged — and trusts its plan cache over the
-# artifact's existence, so neither deleting the binary nor
-# -fforce-recomp forces it (both measured) — which is how this binding
-# went weeks never linking, green throughout, and then failed the
-# moment a regenerated binding forced a real build (docs/traps.md).
-# Costs about ten seconds, and the mac lane is not the matrix's
-# bottleneck.
+# here: cabal skips a link whose inputs are unchanged and trusts its
+# plan cache over the artifact's existence, so neither deleting the
+# binary nor -fforce-recomp forces it (docs/traps.md).
 HS_DIST="$ROOT/target/hs-abort-dist"
 rm -rf "$HS_DIST"/build/*/*/kaya-guests-0
 (cd guests/haskell && cabal build kaya-abort-check --builddir="$HS_DIST" \
@@ -103,10 +90,9 @@ rm -rf "$HS_DIST"/build/*/*/kaya-guests-0
 "$(cd guests/haskell && cabal list-bin kaya-abort-check --builddir="$HS_DIST" -v0)" >"$TMP/hs.log" 2>&1 \
     || { cat "$TMP/hs.log"; fail haskell; }
 
-# Haskell's mirror-read guard is the Build/Tpl monad wall itself; pin
-# it with a must-not-compile fixture. -fno-code type-checks without
-# linking libkaya; the grep insists on the type error (a syntax error
-# must not pass as "didn't compile").
+# Haskell's mirror-read guard is the Build/Tpl monad wall itself, pinned
+# by a must-not-compile fixture. The grep insists on the TYPE error — a
+# syntax error must not pass as "didn't compile".
 if ghc -fno-code -XGHC2021 -ibindings/haskell -hidir "$TMP/hs-guard" -odir "$TMP/hs-guard" \
     tools/checks/haskell-guard-fail/TplRead.hs >"$TMP/hs-guard.log" 2>&1; then
     echo "check-abort: haskell guard fixture COMPILED — the Build/Tpl wall fell" >&2

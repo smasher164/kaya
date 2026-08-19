@@ -1,6 +1,5 @@
 // The save conformance scene, C# port — the round trip an editor walks:
-// open, edit, save, save-as, reopen. What it proves and why is
-// docs/save-plan.md §0 and D1/D3/D5.
+// open, edit, save, save-as, reopen (docs/save-plan.md §0, D1/D3/D5).
 //
 // Every status is a READ-BACK off the disk, and every file operation
 // runs off the app thread because Open blocks. A destination is read
@@ -119,7 +118,6 @@ static class SaveScene
             {
                 if (files.Count == 0)
                 {
-                    // The empty list IS cancel.
                     inner.Write(status, "open cancelled");
                     return;
                 }
@@ -132,7 +130,6 @@ static class SaveScene
             {
                 if (file == null)
                 {
-                    // Cancel is null, and no destination is remembered.
                     inner.Write(status, "save cancelled");
                     return;
                 }
@@ -157,11 +154,10 @@ static class SaveScene
                 });
 
                 // "copy" is the name the dialog OPENS with; the harness
-                // types over it, which is what a save dialog is for.
+                // types over it.
                 tx.Button("save as", onClick: inner =>    // button#2
                     inner.SaveFile("copy", onResult: Saved));
 
-                // Both handles, in order: source first, destination second.
                 tx.Button("reopen", onClick: _ =>         // button#3
                 {
                     var first = source ?? throw new InvalidOperationException(

@@ -14,14 +14,13 @@ import dev.kaya.KayaRecords;
  * {@code KayaApp.absorbUndo}).
  */
 final class Todos {
-    /**
-     * The annotation processor reads this and generates TodoKaya: the
-     * collection factory, the field tokens and the named-setter patch.
-     *
-     * <p>KEYED BY Long because the key comes from {@code insertFresh}
-     * and the minter's keys are I64; the annotation is what makes the
-     * generated surface a {@code Collection<Long, Todo>}.
-     */
+        /**
+         * The annotation processor reads this and generates TodoKaya: the
+         * collection factory, the field tokens and the named-setter patch.
+         *
+         * <p>KEYED BY Long because the key comes from {@code insertFresh}
+         * and the minter's keys are I64.
+         */
     @KayaGen(key = "Long")
     record Todo(String title, boolean done) {}
 

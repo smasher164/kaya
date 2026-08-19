@@ -1,8 +1,7 @@
-{- The gallery scene from Haskell: a row with a checkbox and its
-   status label, and a row with a slider and its volume label. Both
-   controls own their state and report each change; the app answers by
-   writing the paired signal — the entry's uncontrolled contract, with
-   a Bool and a Double.
+{- The gallery scene from Haskell: a checkbox and a slider, each owning
+   its state and reporting each change while the app answers by writing
+   the paired signal — the uncontrolled contract with a Bool and a
+   Double.
 
    Build like milestone2.hs, then run with KAYA_SELFTEST=gallery. -}
 
@@ -13,7 +12,7 @@ import KayaApp
 import KayaWire (Value (..))
 
 {- A 2x2 RGB PNG (red/green over blue/white), 75 bytes, embedded as
-   source: scenes carry their inputs, with no runtime file I/O. -}
+   source. -}
 testPng :: BS.ByteString
 testPng =
   BS.pack
@@ -40,8 +39,6 @@ main = kayaMain $ \app -> do
           submitTx app $
             writeSignal volume
               (VStr ("volume: " ++ show (round (v * 100) :: Int) ++ "%"))
-        -- The programmatic write: fans out to the control and must
-        -- NOT come back as an onVolume occurrence.
         onQuarter = submitTx app $ writeSignal pos (VF64 0.25)
 
     root <-

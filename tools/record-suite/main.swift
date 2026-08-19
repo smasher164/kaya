@@ -5,13 +5,12 @@
 //   record-suite <output.mov> <pidfile>
 //   record-suite --probe
 //
-// One stream on purpose: concurrent SCK window streams starve and die
+// ONE STREAM on purpose: concurrent SCK window streams starve and die
 // ("connection interrupted", frameless legs) where a single stream is
-// reliable — so parallel legs share this stream and become crops. The
-// filter is display-scoped but INCLUDE-LISTED: only windows owned by
-// pids in <pidfile> (runner-appended, polled live) are composited;
-// everything else on the display never appears in the film. Guests
-// tile themselves into slots (KAYA_WIN_SLOT) so crops never overlap.
+// reliable, so parallel legs share this one and become crops. The filter
+// is display-scoped but INCLUDE-LISTED — only windows owned by pids in
+// <pidfile> (runner-appended, polled live) are composited. Guests tile
+// themselves into slots (KAYA_WIN_SLOT) so crops never overlap.
 //
 // Protocol on stdout, consumed by tools/validate-mac.sh:
 //   RECORDING_START <epoch_ms>    wall time of video t=0 (the anchor)
@@ -27,10 +26,9 @@
 // film, and stamps the anchor. On SIGINT/SIGTERM the recorder drains
 // until frames go idle, then finalizes — no fixed grace anywhere.
 //
-// Never rebuild this binary in place: repeated rebuilds at one path
-// poison that identity's standing with the capture stack (hangs, bogus
-// TCC declines) and the damage survives reboots. The runner builds it
-// to a content-hashed path.
+// Never rebuild this binary in place — it poisons the TCC identity, and
+// the damage survives reboots (docs/traps.md). The runner builds it to a
+// content-hashed path.
 
 import AppKit
 import AVFoundation

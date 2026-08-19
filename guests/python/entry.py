@@ -3,15 +3,8 @@ uncontrolled contract end to end. The field owns its text and reports
 each edit as a text-changed occurrence; the app folds those into
 `draft` and never reads back from the widget.
 
-The backend selftest (KAYA_SELFTEST=entry) sets the field's text to
-"milk", emits the change through the delegate's own path, clicks add,
-and expects: the status label "added milk, 1 total", the field cleared
-and refocused (one-shot commands riding the insert's transaction), and
-a second add answering "nothing to add, 1 total" — the clear's
-text_changed("") re-entered through the fold and emptied the draft.
-
 Build the library first (cargo build), then:
-    KAYA_SELFTEST=entry python3 crates/kaya/examples/entry.py
+    KAYA_SELFTEST=entry python3 guests/python/entry.py
 """
 
 import sys
@@ -32,8 +25,6 @@ def on_change(text):
 
 
 def on_add():
-    # Also the scene's proof that clear emptied the draft through the
-    # occurrence fold rather than a side assignment.
     if not draft:
         status.set(f"nothing to add, {len(todos)} total")
         return

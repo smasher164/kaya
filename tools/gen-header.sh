@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,16 +9,11 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# Regenerate crates/kaya/include/kaya.h from the Rust source. The one
-# spelling of the cbindgen invocation, so the header cannot drift by
-# being regenerated with different flags (or forgotten).
+# Regenerate crates/kaya/include/kaya.h from the Rust source — the one
+# spelling of the cbindgen invocation.
 #
-# Usage: tools/gen-header.sh [--check]
-#
-# --check regenerates into a temp file and fails if the checked-in
-# header is out of date, touching nothing. The validation scripts run
-# this so a stale header fails loudly instead of letting guests compile
-# against yesterday's ABI.
+# Usage: tools/gen-header.sh [--check]   (--check fails on a stale
+# header and touches nothing)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

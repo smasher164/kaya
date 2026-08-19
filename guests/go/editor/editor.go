@@ -1,6 +1,5 @@
 // THE TEXT EDITOR — kaya's forcing artifact (docs/editor-plan.md).
-// Written in Go, on the sugar tier, so what this file spells out is what
-// an app has to spell out. Byte-frozen contract:
+// Written in Go, on the sugar tier. Byte-frozen contract:
 // tools/scenes/editor.steps.
 //
 // TWO FRAMEWORK CONSTRAINTS IT BENDS AROUND, both in docs/traps.md:
@@ -54,8 +53,7 @@ func workingDir() string {
 
 // notesDoc is the document the scene opens: 59 short lines with exactly
 // three numeric tokens. TALL ON PURPOSE — reveal_range moves a viewport,
-// and on a document that fits there is nothing to move, so the assertion
-// would pass vacuously.
+// and on a document that fits there is nothing to move.
 //
 // A RAW STRING LITERAL, and the opening backtick is followed immediately
 // by `top 7`: a newline there would be a byte of document, and every
@@ -121,8 +119,7 @@ mid 13
 end 42`
 
 // readDoc reads a picked file whole. THE BYTES ARE THE ASSERTION and
-// never what the app hoped: a write that returned nil and landed nowhere
-// is exactly the failure "save" has, and only reopening can see it.
+// never what the app hoped.
 func readDoc(file kaya.PickedFile) (string, error) {
 	f, _, err := file.Open(kaya.FileModeRead)
 	if err != nil {
@@ -139,8 +136,7 @@ func readDoc(file kaya.PickedFile) (string, error) {
 // writeDoc writes the document through the handle and answers with what
 // the FILE says afterwards, reopened and counted. FileModeWrite truncates
 // on a picked file and on a save destination alike; the destination adds
-// the create, because a desktop save panel answers with a name for a file
-// nobody has made (docs/save-plan.md D1).
+// the create (docs/save-plan.md D1).
 func writeDoc(file kaya.PickedFile, body string) (int, error) {
 	f, _, err := file.Open(kaya.FileModeWrite)
 	if err != nil {
@@ -161,17 +157,14 @@ func writeDoc(file kaya.PickedFile, body string) (int, error) {
 	return len(back), nil
 }
 
-// untitled is what an editor calls a buffer that has no destination yet —
-// Sublime's word, and TextEdit's, and gedit's.
+// untitled is what an editor calls a buffer that has no destination yet.
 const untitled = "untitled"
 
 // docName is the window's name: the destination's own name, or the
 // convention above. THE PICKER'S NAME IS ALREADY A BASENAME on every
-// platform, and tools/scenes/editor.steps pins that byte-for-byte on five
-// lanes — so there is no filepath.Base here, which on Android would be
-// claiming a display name is a path. It TAKES the destination so it can
-// serve the window's construction and the save panel's suggested name
-// from one spelling.
+// platform and tools/scenes/editor.steps pins that byte-for-byte, so
+// there is no filepath.Base here, which on Android would be claiming a
+// display name is a path.
 func docName(dest *kaya.PickedFile) string {
 	if dest == nil {
 		return untitled
@@ -179,8 +172,6 @@ func docName(dest *kaya.PickedFile) string {
 	return dest.Name
 }
 
-// findKey names the find bar's one row; the only question ever asked of
-// it is whether it is in there.
 const findKey = "bar"
 
 // tally is what the find bar says about a set. Spelled rather than
@@ -213,16 +204,12 @@ func App() *kaya.App {
 		panic("kaya: the editor could not write the decoy: " + err.Error())
 	}
 
-	// ---- the document ------------------------------------------------
-	//
 	// text is the app's authority on what the document says, saved is what
 	// the destination holds, and the comparison is the dirty mark.
 	text := ""
 	saved := ""
 	var dest *kaya.PickedFile
 
-	// ---- find --------------------------------------------------------
-	//
 	// open is the app's own copy of whether the bar is up, because a
 	// signal is written and never read back.
 	pattern := ""
@@ -243,22 +230,18 @@ func App() *kaya.App {
 		query, prev, next, done kaya.Node
 	)
 
-	// mark is the whole of the dirty contract: one comparison, one
-	// declaration, called from every path that can move either side of it.
 	mark := func(tx *kaya.Tx) { tx.Window(0).Dirty(text != saved) }
 
 	// refind re-runs the search and RE-DECLARES the highlight set: a
 	// declared set is bound to the text it was declared against, so any
 	// edit drops it in the core (docs/ranges-plan.md D2). HIGHLIGHTS ONLY,
-	// never the selection — this runs while somebody is typing, and moving
-	// the selection there would move their caret out from under them.
+	// never the selection — this runs while somebody is typing.
 	refind := func(tx *kaya.Tx) {
 		hits = nil
 		at = 0
-		// THE TALLY IS THE BAR'S, and says nothing while the bar is away.
-		// It is the one part of find that stays in the LIVE zone, because
-		// a stamped copy has no id an app can aim select_range or
-		// reveal_range at.
+		// THE TALLY IS THE BAR'S. It is the one part of find that stays in
+		// the LIVE zone, because a stamped copy has no id an app can aim
+		// select_range or reveal_range at.
 		if !open {
 			tx.HighlightRanges(buffer, nil)
 			tx.Write(count, "")
@@ -280,12 +263,10 @@ func App() *kaya.App {
 			return
 		}
 		// THE OFFSETS ARE GO STRING INDICES AND NOTHING CONVERTS THEM; a
-		// backend that counts UTF-16 converts on its own side, where it
-		// has the text.
+		// backend that counts UTF-16 converts on its own side.
 		for _, m := range re.FindAllStringIndex(text, -1) {
 			// AN EMPTY MATCH DECORATES NOTHING: a zero-width range is a
-			// caret rather than a span. An app decision, not a framework
-			// one.
+			// caret rather than a span. An app decision, not a framework one.
 			if m[0] == m[1] {
 				continue
 			}
@@ -295,8 +276,6 @@ func App() *kaya.App {
 		tx.Write(count, tally(len(hits)))
 	}
 
-	// show walks to a match: the selection goes there and the viewport
-	// follows, wrapping in both directions.
 	show := func(tx *kaya.Tx, i int) {
 		if len(hits) == 0 {
 			return
@@ -309,10 +288,9 @@ func App() *kaya.App {
 	}
 
 	// retarget is the ONLY place the destination moves, which is why the
-	// title is written here rather than at the three call sites — a fourth
-	// entry point cannot forget it. A nil destination is New's answer and
-	// gets the same treatment. Only ever called from a posted transaction,
-	// i.e. on the app goroutine, so it needs no lock.
+	// title is written here rather than at the three call sites. Only ever
+	// called from a posted transaction, i.e. on the app goroutine, so it
+	// needs no lock.
 	retarget := func(tx *kaya.Tx, file *kaya.PickedFile, body string) {
 		dest = file
 		saved = body
@@ -320,8 +298,7 @@ func App() *kaya.App {
 	}
 
 	// saveTo writes off the app goroutine, which is what PickedFile.Open
-	// tells every caller to do: it BLOCKS, and a cloud provider may upload
-	// the whole file first.
+	// tells every caller to do: it BLOCKS.
 	saveTo := func(file kaya.PickedFile, body string) {
 		go func() {
 			n, err := writeDoc(file, body)
@@ -355,9 +332,7 @@ func App() *kaya.App {
 				retarget(tx, &file, body)
 				// A PROGRAMMATIC WRITE, which does not echo, so the fold
 				// is done by hand. It also spends the field's native undo
-				// history and drops whatever ranges were declared, both of
-				// which are what "this is a different document now" should
-				// mean.
+				// history and drops whatever ranges were declared.
 				tx.SetText(buffer, body)
 				tx.Focus(buffer)
 				tx.Write(status, fmt.Sprintf("opened, %d bytes", len(body)))
@@ -371,21 +346,16 @@ func App() *kaya.App {
 		// THE BRAND, before anything mounts (the set-once wall): one hex,
 		// and the core derives every fill, foreground and state ramp from
 		// it (docs/styling-plan.md D1). It is a REQUEST (D2) — a system
-		// accent the user chose wins and this line is then a no-op, which
-		// is the semantics and not a failure of it.
+		// accent the user chose wins and this line is then a no-op.
 		tx.BrandAccent(0x0F7B6C)
 		// VETO_CLOSE says this window's close is the app's to answer. THE
 		// TITLE IS docName(dest) FROM THE FIRST FRAME and not the literal,
 		// so one expression names this window in all four places it can be
 		// named. AND INSET 0 IS THE FULL BLEED (docs/styling-plan.md D3):
-		// kaya's 16-unit default is a frame around a document, and no
-		// editor draws one. LAYOUT, not appearance — the phones' safe area
-		// is untouched.
+		// LAYOUT, not appearance — the phones' safe area is untouched.
 		win := tx.Window(0).Title(docName(dest)).Size(640, 420).Inset(0).VetoClose(true)
 
 		status = tx.Signal("new file")
-		// EMPTY, because the bar is not up: "no matches" on a screen with
-		// no search field answers a question nobody asked.
 		count = tx.Signal("")
 
 		// ---- the actions the menus name ------------------------------
@@ -393,8 +363,7 @@ func App() *kaya.App {
 		newDoc := func(tx *kaya.Tx) {
 			text = ""
 			// THE DESTINATION IS DROPPED, and dropping it renames the
-			// window back — the only one of the three ways it moves with
-			// no dialog to announce it.
+			// window back.
 			retarget(tx, nil, "")
 			tx.SetText(buffer, "")
 			tx.Focus(buffer)
@@ -408,7 +377,6 @@ func App() *kaya.App {
 		openDoc := func(tx *kaya.Tx) {
 			tx.PickFile().OnResult(func(tx *kaya.Tx, files []kaya.PickedFile) {
 				if len(files) == 0 {
-					// THE EMPTY LIST IS CANCEL.
 					tx.Write(status, "open cancelled")
 					return
 				}
@@ -424,7 +392,6 @@ func App() *kaya.App {
 			body := text
 			tx.SaveFile(suggested).OnResult(func(tx *kaya.Tx, file *kaya.PickedFile) {
 				if file == nil {
-					// CANCEL IS NIL.
 					tx.Write(status, "save cancelled")
 					return
 				}
@@ -432,9 +399,8 @@ func App() *kaya.App {
 			}).Show()
 		}
 
-		// save needs no dialog once there is a destination: the user
-		// already chose this file and the handle they chose it with is
-		// writable.
+		// save needs no dialog once there is a destination: the handle the
+		// user chose the file with is writable.
 		save := func(tx *kaya.Tx) {
 			if dest == nil {
 				saveAs(tx)
@@ -445,9 +411,7 @@ func App() *kaya.App {
 
 		// ask is the unsaved-work guard, and it is a COMPOSITION: kaya has
 		// no "confirm before you discard". The continuation is a closure
-		// per call site, which is what keeps three entry points from
-		// needing one app-global handler that has to work out which of
-		// them asked.
+		// per call site.
 		ask := func(tx *kaya.Tx, then func(*kaya.Tx)) {
 			if text == saved {
 				then(tx)
@@ -472,13 +436,11 @@ func App() *kaya.App {
 		// docs/traps.md, "An app can VETO a close but cannot AGREE to
 		// one". The platform's own quit chord is reserved away from apps,
 		// so the close button is the only door an unsaved-work warning can
-		// watch. Abrupt by construction, and unreachable on the phones,
-		// which have no close affordance.
+		// watch. Unreachable on the phones, which have no close affordance.
 		quit := func(_ *kaya.Tx) { os.Exit(0) }
 
 		// The close handler binds to THE WINDOW at its declaration.
-		// Nothing has closed yet — that is what the veto class buys — so
-		// the app is free to ask, and to do nothing if the answer is no.
+		// Nothing has closed yet — that is what the veto class buys.
 		win.OnCloseRequested(func(tx *kaya.Tx) { ask(tx, quit) })
 
 		// ---- the menu bar --------------------------------------------
@@ -493,8 +455,7 @@ func App() *kaya.App {
 		// names no toolbar, no placement and no capacity, and the host
 		// promotes the first k primaries in catalog preorder. SymbolDone
 		// is the save idiom — the closed symbol set has no save-specific
-		// glyph and neither has Apple's own catalog (docs/styling-plan.md
-		// D6).
+		// glyph (docs/styling-plan.md D6).
 		file.Item("Save").Symbol(kaya.SymbolDone).Primary(true).
 			Shortcut("primary+s").OnActivate(save)
 		file.Item("Save As…").Shortcut("primary+shift+s").OnActivate(saveAs)
@@ -502,8 +463,7 @@ func App() *kaya.App {
 		// EDIT IS SIX DECLARATIONS AND ONE HANDLER; five are ROLES, which
 		// lower to the platform's own command, act on whatever is focused,
 		// and work out their own enablement. NO SHORTCUTS ON THE ROLES: a
-		// role already carries the platform's own chord, and spelling one
-		// would override the host.
+		// role already carries the platform's own chord.
 		edit := win.Menu("Edit")
 		edit.Item("Undo").Role(kaya.RoleUndo)
 		edit.Item("Redo").Role(kaya.RoleRedo)
@@ -519,9 +479,8 @@ func App() *kaya.App {
 		// an app may claim.
 		//
 		// AND FIND IS THE SECOND PRIMARY: preorder walks File before Edit
-		// and Save before Find…, so the catalog already said which comes
-		// first. THE ELLIPSIS RIDES ALONG, because the promoted button IS
-		// this item.
+		// and Save before Find…. THE ELLIPSIS RIDES ALONG, because the
+		// promoted button IS this item.
 		edit.Item("Find…").Symbol(kaya.SymbolSearch).Primary(true).
 			Shortcut("primary+f").OnActivate(func(tx *kaya.Tx) {
 			if open {
@@ -535,14 +494,11 @@ func App() *kaya.App {
 		// ---- the surface ---------------------------------------------
 		//
 		// Sublime-shaped: one buffer filling the window and one status
-		// line at the bottom. No tabs and no panes (ratified 2026-08-10),
-		// and NO FIND BAR until Edit>Find… asks for one. STRETCH IS THE
-		// OTHER HALF OF "IT FILLS THE WINDOW": grow divides the MAIN axis
-		// and align owns the cross one, so a full-window buffer needs
-		// both.
+		// line at the bottom. No tabs and no panes, and NO FIND BAR until
+		// Edit>Find… asks for one. STRETCH IS THE OTHER HALF OF "IT FILLS
+		// THE WINDOW": grow divides the MAIN axis and align owns the cross
+		// one, so a full-window buffer needs both.
 		tx.Mount(tx.Column(func() {
-			// THE BUFFER TAKES THE LEFTOVER: the bar and the status line
-			// are at natural size and one grower eats the rest.
 			buffer = tx.Textarea(func(tx *kaya.Tx, s string) {
 				// THE FOLD. Every user edit arrives here — keystrokes, the
 				// platform's own paste, a native undo — and this is the
@@ -554,14 +510,12 @@ func App() *kaya.App {
 
 			// THE FIND BAR, DECLARED AND NOT MOUNTED. Conditional display
 			// in kaya is STAMPING: these four controls do not exist while
-			// the collection is empty, and Edit>Find… builds them by
-			// putting a row in it. There is no visibility property and no
-			// way to take a live widget out of a tree, so "shown and
+			// the collection is empty. There is no visibility property and
+			// no way to take a live widget out of a tree, so "shown and
 			// hidden" (docs/editor-plan.md E1) means built and torn down.
 			//
 			// SetInset on the STAMPED row is what lets the bar keep its
-			// margin under a full-bleed window, agreeing with the live
-			// status row below.
+			// margin under a full-bleed window.
 			findRows = tx.Collection()
 			for row := range findRows.Rows(tx) {
 				bar := row.Row(func() {
@@ -576,19 +530,14 @@ func App() *kaya.App {
 				row.SetInset(bar, 8)
 			}
 
-			// ONE STATUS LINE, carrying NO FILE NAME. That is the
-			// division: the TITLE BAR says which document this is, because
-			// identity is persistent; the status line says what just
-			// HAPPENED and what the search found, because both are
-			// transient. The byte counts are the app's proof that a write
-			// reached the disk and came back.
+			// ONE STATUS LINE, carrying NO FILE NAME. The TITLE BAR says
+			// which document this is; the status line says what just
+			// HAPPENED and what the search found.
 			//
 			// INSET 8 ON THE CHROME, NOT ON THE WINDOW: the window's
 			// Inset(0) above is the buffer's full bleed and it took this
 			// row's margin with it, so the status text sat flush on the
-			// window edge (maintainer, 2026-08-12). The find bar's row
-			// says the same thing with the same number, through the
-			// template zone's own spelling.
+			// window edge (maintainer, 2026-08-12).
 			tx.Row(func() {
 				tx.Label(status).Grow(1).A11yID("status") // label#0
 				tx.Label(count).A11yID("matches")         // label#1
@@ -596,8 +545,7 @@ func App() *kaya.App {
 		}).Align(kaya.AlignStretch))
 
 		// AN EDITOR OPENS WITH THE CURSOR IN THE DOCUMENT, and it is the
-		// routing question the Edit menu turns on: undo, cut and paste all
-		// act on what is focused, so something has to be.
+		// routing question the Edit menu turns on.
 		tx.Focus(buffer)
 	})
 
@@ -605,23 +553,20 @@ func App() *kaya.App {
 	//
 	// REGISTERED AGAINST THE TEMPLATE NODE, once, for every copy that will
 	// ever be stamped: a live-zone func(*Tx) has nowhere to put the copy's
-	// identity, so the node-shaped registration is the only one a
-	// blueprint can take.
+	// identity.
 	app.OnChangeNode(query, func(tx *kaya.Tx, _ []any, s string) {
 		pattern = s
 		refind(tx)
 		// FIND AS YOU TYPE parks on the first match, the one place the
-		// selection may move without a person asking: they are looking at
-		// the find field.
+		// selection may move without a person asking.
 		show(tx, 0)
 	})
 	app.OnClickNode(prev, func(tx *kaya.Tx, _ []any) { show(tx, at-1) })
 	app.OnClickNode(next, func(tx *kaya.Tx, _ []any) { show(tx, at+1) })
 
 	// DISMISS TEARS THE BAR DOWN — it is not hidden, it stops existing.
-	// The search goes with it. Nothing here clears the query FIELD, so a
-	// field that reads empty after the next Find… is a NEW field: the
-	// scene's proof that the teardown happened.
+	// Nothing here clears the query FIELD, so a field that reads empty
+	// after the next Find… is a NEW field.
 	app.OnClickNode(done, func(tx *kaya.Tx, _ []any) {
 		open = false
 		pattern = ""

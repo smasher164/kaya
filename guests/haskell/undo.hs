@@ -5,8 +5,8 @@
 {- The undo scene from Haskell: two tiers, one Edit menu, and one ledger
    that orders them.
 
-   The transaction is ambient in this binding, so the scope that opens it
-   is where the step is named — 'undoableTx' takes the name
+   The transaction is ambient in this binding, so the scope that opens
+   it is where the step is named — 'undoableTx' takes the name
    (docs/undo-plan.md D2).
 
    Canonical semantics in guests/rust/undo.rs; the byte-frozen contract
@@ -122,8 +122,6 @@ main = kayaMain $ \app -> do
           draft <- readIORef draftRef
           if null draft
             then submitTx app $ do
-              -- Not a step: it names no group, so the forward history
-              -- survives it.
               total <- count (recordHandle todos)
               writeSignal status (VStr ("nothing to add, " ++ show total ++ " total"))
             else do

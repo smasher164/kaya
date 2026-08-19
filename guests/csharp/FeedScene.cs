@@ -9,9 +9,6 @@ using System.Linq;
 // hosts every scene, and todos already owns the bare Todo.
 namespace Feed;
 
-// The abstract record is the sum, the derived records its constructors.
-// kaya-csgen reads this and generates PostKaya: the collection factory
-// and the compile-total EachSum eliminator.
 [KayaGen]
 abstract record Post;
 record Note(string Text) : Post;
@@ -33,8 +30,8 @@ static class FeedScene
             {
                 tx.Button("promote", t =>
                 {
-                    // The first note, promoted to a finished todo: the
-                    // new constructor restamps that key's copy in place.
+                    // Promote: the new constructor restamps that key's
+                    // copy in place.
                     foreach (var entry in feed.Items(t))
                     {
                         if (entry.Value is Note note)
@@ -45,8 +42,6 @@ static class FeedScene
                     }
                 });
                 tx.Label(bind: doneCount);
-                // The generated eliminator: one required delegate per
-                // constructor, so a missing arm is a compile error.
                 PostKaya.EachSum(tx, feed,
                     note: (t, note) =>
                     {

@@ -1,29 +1,11 @@
 /* The assets conformance scene from C, on the function floor: the whole
- * asset surface written longhand, with no binding between this file and
- * the C ABI (docs/assets-plan.md, ratified 2026-08-18).
+ * asset surface written longhand (docs/assets-plan.md).
  *
- * WHY THE FLOOR HAS THIS SCENE AND NOT THE TYPEFACE ONE. Every other C
- * guest is wired to a scene whose assertions a brand typeface would
- * move — styling.c is the closest fit and its scene asserts insets and
- * shares, which a font swap changes. This scene's assertions were
- * written for the asset surface itself, so the floor can exercise it
- * against expectations that mean something here.
- *
- * FIVE OF THE SIX ENTRY POINTS ARE CALLED BELOW: kaya_asset_open,
- * kaya_asset_blob, kaya_asset_bytes, kaya_asset_release and
- * kaya_asset_why_not. kaya_asset_len is the sizing-only sibling of
- * kaya_asset_bytes — a binding that wants a length before it allocates
- * calls it; this guest already has the pointer, so it reads the length
- * that came with it.
- *
- * ZERO IS THE MISS, NEVER A PANIC. kaya_asset_open answers 0 and
+ * ZERO IS THE MISS, NEVER A PANIC — kaya_asset_open answers 0 and
  * kaya_asset_why_not says why, because a panic inside an `extern "C"`
- * frame is an uncatchable abort in every guest. At the floor that shows
- * as a plain `if`, which is the whole shape the eight hosted bindings
- * wrap in their own idioms.
+ * frame is an uncatchable abort in every guest.
  *
- * The byte-frozen contract is tools/scenes/assets.steps.
- * Run with KAYA_SELFTEST=assets. */
+ * Contract: tools/scenes/assets.steps. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -64,20 +46,16 @@ static void window_prop(KayaTx *tx, uint64_t window, uint32_t prop, KayaVal valu
     kaya_wire_end(tx, start);
 }
 
-/* Open an asset or die naming the core's own sentence. THE FLOOR WRITES
- * NO PROSE OF ITS OWN for that failure, exactly as the eight hosted
- * bindings do not: there is one author for the diagnostic, so the words
- * a C guest prints and the words a Haskell guest raises are the same
- * bytes. */
+/* Open an asset or die naming the CORE's own sentence: there is one
+ * author for the diagnostic, so the bytes a C guest prints and the
+ * bytes a Haskell guest raises are the same. */
 static uint64_t open_or_die(const char *name);
 
-/* The sentence kaya_asset_open would fail with, or "" — SIZED, THEN
- * READ, which is the whole convention of this C entry point: the first
- * call passes a NULL buffer and cap 0 and returns the sentence's TRUE
- * length, the second fills a buffer of that size. A guessed buffer
- * would cut the half that names the root and the route, which is the
- * half a reader is chasing, so a sentence that does not fit is a hard
- * error here rather than a quiet truncation. */
+/* SIZED, THEN READ: the first call passes a NULL buffer and cap 0 and
+ * returns the sentence's TRUE length, the second fills a buffer of that
+ * size. A guessed buffer cuts the half naming the root and the route,
+ * so a sentence that does not fit is a hard error rather than a quiet
+ * truncation. */
 static void why_not(const char *name, char *out, size_t cap) {
     size_t needed = kaya_asset_why_not((const uint8_t *)name, strlen(name), NULL, 0);
     if (needed + 1 > cap) {
@@ -91,11 +69,9 @@ static void why_not(const char *name, char *out, size_t cap) {
     if (needed > 0)
         kaya_asset_why_not((const uint8_t *)name, strlen(name), (uint8_t *)out, needed);
     out[needed] = '\0';
-    /* LINE 1 ONLY. The sentence is two lines on purpose: the first names
-     * the asset, the rule and the CENSUS of what the package carries and
-     * is the same on five platforms; the second names the resolved place
-     * and the route that chose it, which a bundle, a device directory
-     * and a repo checkout spell three different ways. */
+    /* LINE 1 ONLY: line 2 names the resolved place and the route that
+     * chose it, which a bundle, a device directory and a repo checkout
+     * spell three different ways. */
     char *newline = strchr(out, '\n');
     if (newline != NULL)
         *newline = '\0';
@@ -123,25 +99,15 @@ static void build_scene(void) {
     uint64_t mark = open_or_die(MARK);
     uint64_t font = open_or_die(FONT);
 
-    /* THE BLOB REDEMPTION, which at the floor is the only spelling that
-     * makes sense for a picture: kaya_tx_set_source takes exactly the
-     * handle kaya_asset_blob mints, and the Arc is cloned rather than
-     * the bytes. Reading the bytes out with kaya_asset_bytes and handing
-     * them back to kaya_blob_register would copy a buffer the core is
-     * already holding. The eight hosted guests spell the bytes route
-     * because their `image` constructors take bytes; both put the same
-     * bytes in front of the same decoder, which is what the scene
-     * asserts.
-     *
-     * The registration is valid for exactly ONE submit, drained whether
-     * referenced or not (wall 5), so it happens inside the transaction
+    /* THE BLOB REDEMPTION: kaya_tx_set_source takes exactly the handle
+     * kaya_asset_blob mints, and the Arc is cloned rather than the
+     * bytes. The registration is valid for exactly ONE submit, drained
+     * whether referenced or not, so it happens inside the transaction
      * that mounts. */
     uint64_t mark_blob = kaya_asset_blob(mark);
 
-    /* THE BYTES REDEMPTION, for the one thing this guest is itself the
-     * consumer of: the font's length. The pointer borrows core memory
-     * and stays valid until the release below — copy, then release —
-     * and nothing here copies, because the length is all it wants. */
+    /* THE BYTES REDEMPTION: the pointer borrows core memory and stays
+     * valid until the release below — copy, then release. */
     uintptr_t font_len = 0;
     const uint8_t *font_bytes = kaya_asset_bytes(font, &font_len);
     if (font_bytes == NULL) {
@@ -152,10 +118,6 @@ static void build_scene(void) {
     char census[1024];
     why_not(MISSING, census, sizeof census);
 
-    /* The other end of the same query: for a name that resolves it
-     * answers the empty string. When it does not, this shows the
-     * sentence rather than a word about it — a failure has to print what
-     * was measured. */
     char complaint[1024];
     why_not(FONT, complaint, sizeof complaint);
     char sizes[1152];
@@ -184,8 +146,6 @@ static void build_scene(void) {
 
     kaya_submit(tx.buf, tx.len);
 
-    /* Idempotent, and a guest that forgot would leak only until exit —
-     * it is here because the floor is where the release is documented. */
     kaya_asset_release(mark);
     kaya_asset_release(font);
 }
@@ -193,8 +153,6 @@ static void build_scene(void) {
 static void *app(void *arg) {
     (void)arg;
     build_scene();
-    /* Nothing to drive: every observation is a read of the first mount.
-     * The loop is the app thread's, not the scene's. */
     const uint8_t *rec;
     for (;;) {
         size_t size = kaya_next_occurrence(&rec);

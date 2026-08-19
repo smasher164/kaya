@@ -23,7 +23,6 @@ var visitCount = 0
 var visits: KayaSignal!
 
 app.build { tx in
-    // The presentation hint is ADVISORY: no observable rides on it.
     tx.window(
         title: "sections",
         sectionsPresentation: Int64(KAYA_SECTIONS_PRESENTATION_BAR))

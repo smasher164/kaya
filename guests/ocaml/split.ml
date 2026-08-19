@@ -20,12 +20,10 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     (* The one adaptive declaration in the whole guest. *)
      window ~title:"split" ~list_detail:true ();
      let s = signal (Str "list pane") in
      let on_detail () =
        push_entry ~title:"detail"
-         (* Retention: the base root took this write while the detail was up. *)
          ~on_popped:(fun () -> write s (Str "popped detail"))
          detail;
        (let caption = signal (Str "detail pane") in

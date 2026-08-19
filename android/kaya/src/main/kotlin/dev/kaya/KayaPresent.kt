@@ -3,17 +3,14 @@ package dev.kaya
 import android.net.Uri
 
 /**
- * The presentation-side C API over JNI, for guest-side backends: emit
- * occurrences exactly as a core backend's action handler would, and pump
- * resolved apply-op records with a blocking call — the same contract the
- * SwiftUI backend consumes through KayaHostApi. Natives are registered
- * when [Kaya.attach] selects a guest-side backend.
+ * The presentation-side C API over JNI, for guest-side backends — the
+ * same contract the SwiftUI backend consumes through KayaHostApi.
+ * Natives are registered when [Kaya.attach] selects a guest-side
+ * backend.
  */
 object KayaPresent {
-    /**
-     * Emit a click: [tag] is the click-tag bytes delivered with the
-     * widget's CREATE record, handed back verbatim.
-     */
+    /** Emit a click: [tag] is the click-tag bytes delivered with the
+     * widget's CREATE record, handed back verbatim. */
     @JvmStatic external fun emitClicked(tag: ByteArray)
 
     /** Milliseconds the app thread has been ignoring pending
@@ -26,15 +23,11 @@ object KayaPresent {
      * entry's CREATE record, [text] the field's current content.
      *
      * [focused] and [quiet] are the undo ledger's (docs/undo-plan.md
-     * §3), and they ride here rather than on a second call because the
-     * alternative is two boundary crossings per keystroke. [focused]
-     * says whether the field this event names holds focus — an event on
-     * an unfocused field closes the typing episode as it stands.
-     * [quiet] is LEDGER-QUIET: a backend that ROUTES a native undo
-     * reports it once, with its own sample, and marks the ordinary
-     * report the same undo provokes so the change is not banked twice.
-     * The app still hears the edit either way; only the banking is
-     * suppressed.
+     * §3). [focused] says whether the field this event names holds
+     * focus — an event on an unfocused field closes the typing episode
+     * as it stands. [quiet] is LEDGER-QUIET: it marks the ordinary
+     * report a routed native undo also provokes, so the change is not
+     * banked twice. The app hears the edit either way.
      */
     @JvmStatic external fun emitTextChanged(
         tag: ByteArray,
@@ -43,10 +36,6 @@ object KayaPresent {
         quiet: Boolean,
     )
 
-    /**
-     * Emit a checkbox flip: [tag] is the tag bytes delivered with the
-     * box's CREATE record, [checked] its new state.
-     */
     @JvmStatic external fun emitToggled(tag: ByteArray, checked: Boolean)
     @JvmStatic external fun emitValueChanged(tag: ByteArray, value: Double)
 
@@ -57,12 +46,8 @@ object KayaPresent {
 
     /**
      * The picker's one answer: parallel arrays of `content://` URIs and
-     * the display names beside them. EMPTY IS CANCEL — no platform can
-     * confirm an empty selection, so there is no sentinel to invent.
-     *
-     * The core mints the handles from these, wrapping each URI in the
-     * source that knows how to open it. kaya_emit_file_dialog_result's
-     * JNI spelling.
+     * the display names beside them. EMPTY IS CANCEL — there is no
+     * sentinel. kaya_emit_file_dialog_result's JNI spelling.
      */
     @JvmStatic external fun emitFileDialogResult(
         dialog: Long,
@@ -77,15 +62,12 @@ object KayaPresent {
      * because it may answer with many and this may not.
      *
      * ITS OWN ENTRY RATHER THAN [emitFileDialogResult] WITH A LIST OF
-     * ONE, and not for tidiness: the core decides what a handle IS from
-     * which entry it arrives on. A save destination opens with create,
-     * so that mac/linux/windows can open a file their panel only NAMED;
-     * a picked file must not, or "save" quietly becomes "clobber"
-     * (docs/save-plan.md D1). Android's two sources happen to coincide —
-     * a created document exists, so the picker's `UriSource` would
-     * behave identically today — and answering on the picker's entry
-     * would therefore be a mistake that works, which is the kind that
-     * survives. kaya_emit_save_dialog_result's JNI spelling.
+     * ONE: the core decides what a handle IS from which entry it
+     * arrives on, and a save destination opens with create where a
+     * picked file must not (docs/save-plan.md D1). Android's two
+     * sources coincide today, so answering on the picker's entry would
+     * be a mistake that works. kaya_emit_save_dialog_result's JNI
+     * spelling.
      */
     @JvmStatic external fun emitSaveDialogResult(
         dialog: Long,
@@ -94,23 +76,18 @@ object KayaPresent {
     )
 
     /**
-     * The privileged read's one answer, FLATTENED — the representation
-     * crosses as scalars rather than as a struct, the way
-     * [emitFileDialogResult] flattens the picker's answer, because a
-     * struct would have to be built on both sides of the JNI boundary
-     * and agreed on twice.
+     * The privileged read's one answer, FLATTENED into scalars.
      *
-     * [clip] is ONE of the wire's CLIP_* values, never a mask — and 0
-     * is the universal no (denied, unfocused, empty, or nothing the
-     * request accepted), which every platform reports the same way
-     * because none of them says which. [clip] alone decides which
-     * argument carries the payload: text and html ride [text], an
-     * image rides [bytes], a custom format rides its id in [text] and
-     * its bytes in [bytes], and files ride parallel [locators]
-     * (`content://` URI strings) and [names] (their display names).
-     * The arguments the kind does not name pass "" and empty arrays.
+     * [clip] is ONE of the wire's CLIP_* values, never a mask; 0 is the
+     * universal no (denied, unfocused, empty, or nothing the request
+     * accepted). [clip] alone decides which argument carries the
+     * payload: text and html ride [text], an image rides [bytes], a
+     * custom format rides its id in [text] and its bytes in [bytes],
+     * and files ride parallel [locators] (`content://` URI strings) and
+     * [names]. The arguments the kind does not name pass "" and empty
+     * arrays.
      *
-     * The request retires here: answer exactly once, and answering
+     * ANSWER EXACTLY ONCE — the request retires here — and answering
      * empty is always correct. kaya_emit_clipboard_result's JNI
      * spelling.
      */
@@ -125,16 +102,11 @@ object KayaPresent {
 
     /**
      * Content arriving at a widget because the USER pasted. [tag] is
-     * the widget's own click-tag bytes, handed back verbatim — the
-     * same identity [emitClicked] and [emitTextChanged] ride, so a
-     * stamped copy's paste needs no second entry.
+     * the widget's own click-tag bytes, handed back verbatim.
      *
-     * The payload flattens exactly as [emitClipboardResult]'s does,
-     * with one difference: A PASTE THAT DELIVERED NOTHING IS NOT AN
-     * OCCURRENCE, so [clip] is never 0 here. The empty answer belongs
-     * to the read, which asked and may be refused; a paste that
-     * reached a widget already carries content by definition. The core
-     * refuses a 0 rather than inventing an empty occurrence.
+     * The payload flattens as [emitClipboardResult]'s does, with one
+     * difference: A PASTE THAT DELIVERED NOTHING IS NOT AN OCCURRENCE,
+     * so [clip] is never 0 here and the core refuses a 0.
      *
      * kaya_emit_pasted's JNI spelling.
      */
@@ -151,26 +123,18 @@ object KayaPresent {
      * Redeem a picked URI: `openFileDescriptor(uri, mode)` then
      * `detachFd`, returning the descriptor the guest now owns.
      *
-     * A PASTED FILE COMES THROUGH HERE TOO, and that is the point of
-     * the shared shape: [emitPasted]'s and [emitClipboardResult]'s
-     * `locators` register the same source the picker's do, so the
-     * guest redeems a file it pasted exactly as one it picked.
-     *
-     * CALLED FROM THE CORE, not from Kotlin — the one native method that
-     * runs the other way. It exists because a handle is redeemable more
-     * than once by design, so every `open` has to be a real open through
-     * the resolver; handing over a descriptor at pick time would be
-     * simpler and would give that property up.
+     * CALLED FROM THE CORE, not from Kotlin. A handle is redeemable
+     * more than once by design, so every `open` is a real open through
+     * the resolver. A pasted file comes through here too.
      *
      * The mode is the ContentResolver's spelling and the core decides
      * it (see `android_open_mode`) — in particular Write arrives as
      * `wt`, because a bare `w` does not truncate.
      *
-     * Runs on whatever thread the guest called `open` from, which is
-     * the point: `openFileDescriptor` blocks, and a provider may
-     * download the file before it returns. Throws rather than returning
-     * a bare -1 where the platform gives a reason — the core turns the
-     * exception's message into the guest's io error.
+     * RUNS ON WHATEVER THREAD THE GUEST CALLED `open` FROM:
+     * `openFileDescriptor` blocks, and a provider may download the file
+     * before it returns. Throws rather than returning -1 where the
+     * platform gives a reason.
      */
     @JvmStatic
     fun openPickedUri(uri: String, mode: String): Int {
@@ -178,10 +142,8 @@ object KayaPresent {
             ?: throw IllegalStateException("kaya: no mounted activity to open $uri through")
         val pfd = resolver.openFileDescriptor(Uri.parse(uri), mode)
             ?: throw java.io.IOException("kaya: the provider returned no descriptor for $uri")
-        // detachFd, NOT getFd: ownership crosses to the guest, which
-        // closes it with its own file API. Closing the
-        // ParcelFileDescriptor here would hand back a descriptor that is
-        // already gone.
+        // detachFd, NOT getFd: ownership crosses to the guest. Closing
+        // the ParcelFileDescriptor here would hand back a dead fd.
         return pfd.detachFd()
     }
 
@@ -229,22 +191,17 @@ object KayaPresent {
     @JvmStatic external fun nextCommands(buffer: ByteArray): Int
 
     /**
-     * Fetch a blob's bytes by the [handle] an apply record carried,
-     * copied into a fresh array. Handles are batch-local: the current
-     * batch's table is replaced by the next [nextCommands] call, so
-     * fetch within the batch. Null for a dead handle.
+     * Fetch a blob's bytes by the [handle] an apply record carried.
+     * HANDLES ARE BATCH-LOCAL: the next [nextCommands] call replaces
+     * the table, so fetch within the batch. Null for a dead handle.
      */
     @JvmStatic external fun blobData(handle: Long): ByteArray?
 
     // ---- The undo tier (docs/undo-plan.md D6/§3) -------------------
     //
-    // The five entries KayaHostApi carries as vtable rows on the Apple
-    // side. THE WINDOW IS ALWAYS 0 HERE and that is a platform fact
-    // rather than a shortcut: Android is one Activity and one surface,
-    // the same reason [emitTextChanged] does not carry a window across
-    // this boundary. It stays in the signature so the JNI thunks are a
-    // straight forward to the C entries and the ledger keeps its
-    // per-window shape.
+    // THE WINDOW IS ALWAYS 0 HERE: Android is one Activity and one
+    // surface. It stays in the signature so the JNI thunks forward
+    // straight to the C entries.
 
     /**
      * Where an undo would go RIGHT NOW: 0 nowhere (the command is inert
@@ -252,10 +209,10 @@ object KayaPresent {
      * ledger.
      *
      * [focused] is the widget the backend has focus on, 0 for none;
-     * [canUndo] is A4's one named query, answered in this platform's own
-     * vocabulary (`TextUndoManager.canUndo`). ENABLEMENT AND ACTIVATION
-     * ARE THE SAME CALL, so the two cannot drift.
-     * kaya_undo_route's JNI spelling.
+     * [canUndo] is A4's one named query in this platform's vocabulary
+     * (`TextUndoManager.canUndo`). ENABLEMENT AND ACTIVATION ARE THE
+     * SAME CALL, so the two cannot drift. kaya_undo_route's JNI
+     * spelling.
      */
     @JvmStatic external fun undoRoute(window: Long, focused: Long, canUndo: Boolean): Int
 
@@ -263,14 +220,12 @@ object KayaPresent {
      *  kaya_redo_route's JNI spelling. */
     @JvmStatic external fun redoRoute(window: Long, focused: Long, canRedo: Boolean): Int
 
-    /** The core tier answers: apply the newest ledger entry's inverse
-     *  and emit `undone` carrying the label and the restored state. The
-     *  ops reach this backend through [nextCommands] like any other
-     *  apply, so nothing comes back here. kaya_undo's JNI spelling. */
+    /** The core tier answers. The ops reach this backend through
+     *  [nextCommands] like any other apply, so nothing comes back
+     *  here. kaya_undo's JNI spelling. */
     @JvmStatic external fun undo(window: Long)
 
-    /** Redo's twin: the forward delta was computed at apply beside the
-     *  inverse, so nothing is re-run. kaya_redo's JNI spelling. */
+    /** kaya_redo's JNI spelling. */
     @JvmStatic external fun redo(window: Long)
 
     /**

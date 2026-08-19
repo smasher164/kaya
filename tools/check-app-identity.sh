@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,102 +10,62 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# ONE DECLARATION, TWO READERS, AND NOTHING BETWEEN THEM THAT CAN DRIFT.
+# ONE DECLARATION, TWO READERS, AND NOTHING BETWEEN THEM THAT CAN DRIFT
+# (docs/app-identity-plan.md ruling 4). The identity is a NAME and a
+# PICTURE FILE in guests/assets/identity.toml; the BUILD reads it before
+# any program runs, and the RUNNING APP sends the same file's BYTES over
+# the wire. Five routes reading five different files is how the promise
+# gets broken quietly, with every test still passing because each reader
+# is internally consistent.
 #
-# docs/app-identity-plan.md ruling 4: an app's identity is a NAME and a
-# PICTURE FILE declared in one place, guests/assets/identity.toml, and
-# two different kinds of consumer read it.
+# WHERE THE WALL SITS: the byte comparison itself lives in each
+# packaging step, on the path nobody can avoid. This gate is the STATIC
+# half — it holds the DECLARATION and every hand-written copy of it
+# level, including on platforms whose packaging step does not exist yet.
 #
-#   the BUILD, before any program has run — the APK's mipmap resource
-#   and android:icon/android:label, the iOS bundle's icon and
-#   CFBundleDisplayName, a .desktop file's Icon=/Name=;
-#   the RUNNING APP, which sends that same file's BYTES over the wire in
-#   `set_app_identity`, reaching the macOS Dock, the Windows taskbar and
-#   caption, and an X11 window.
-#
-# The plan states the failure this gate exists for in one sentence:
-# "five routes reading five different files is how a promise like this
-# one gets broken quietly". The launcher shows last month's icon, the
-# running window shows this month's, and every test still passes,
-# because each reader is internally consistent. Nothing else in the tree
-# compares two readers with each other.
-#
-# WHERE THE WALL SITS. Invariant 3 asks for the guard on a path nobody
-# can avoid, so the byte comparison ITSELF lives in each packaging step —
-# the step that copies the icon into an artifact compares what it wrote
-# with what the manifest declares and refuses. This gate is the static
-# half: it holds the DECLARATION and every hand-written copy of it level
-# with each other, on every platform at once, including the platforms
-# whose packaging step does not exist yet.
-#
-# THE CLAUSES, and what each one is for:
+# THE CLAUSES:
 #
 #   C1  the manifest declares a non-empty name and an icon file that
 #       exists and is not empty. Everything below reads those two values
 #       out of it; neither is ever written down in this gate.
 #
 #   C2  THE PIXELS ARE THE EXPECTATION. tools/scenes/*.steps are shared
-#       verbatim across every platform and language and are compared
-#       byte-for-byte, so `expect_app_icon "E01B24/33D17A/1C71D8/F6D32D"`
-#       is a frozen string — and it is a claim about the CONTENT of the
-#       declared icon. This clause decodes the icon and samples the four
-#       quadrant centres, so swapping the asset without moving the
-#       expectation fails HERE rather than on five lanes at once. It is
-#       also what keeps guests/assets/icons/README.md's argument true:
-#       the mark's four flat quadrants are what survives a per-platform
-#       conversion, and a mark that stopped having them would make every
-#       identity leg unfalsifiable.
+#       verbatim and compared byte-for-byte, so `expect_app_icon
+#       "E01B24/33D17A/1C71D8/F6D32D"` is a frozen claim about the
+#       CONTENT of the declared icon. Decoding it here means swapping the
+#       asset fails HERE rather than on five lanes at once.
 #
-#   C3  THE DECLARATION IS WRITTEN DOWN ONCE. The runtime readers are
-#       eight languages and a batch file, none of which parses TOML, so
-#       a site may name the declaration in THREE ways and no fourth:
+#   C3  THE DECLARATION IS WRITTEN DOWN ONCE. None of the runtime
+#       readers parses TOML, so a site may name it in THREE ways and no
+#       fourth: READ THE MANIFEST; SPELL THE DECLARED PATH (backslashes
+#       and a drive-letter mirror allowed, since deploy-win stages the
+#       tree to C:\kaya); or OPEN IT AS AN ASSET, which this gate
+#       DERIVES from the manifest rather than typing. NO COMMENT IN THIS
+#       FILE MAY SPELL AN ASSET NAME IN THE MARK'S FAMILY: the checker
+#       reads this file too, and it will refuse it.
 #
-#         READ THE MANIFEST — what a script that can parse TOML does;
-#         SPELL THE DECLARED PATH — what the .cmd launchers and the lane
-#           scripts' repo-relative KAYA_ICON_FILE default do (backslashes
-#           and a drive-letter mirror allowed, since tools/deploy-win.sh
-#           stages the tree to C:\kaya);
-#         OPEN IT AS AN ASSET — `asset("icons/kaya-mark.png")`, which is
-#           the manifest's path with the asset root's prefix removed, and
-#           is what the eight identity guests say since they stopped
-#           resolving their own icon path (docs/assets-plan.md). This
-#           gate DERIVES that name from the manifest; typing it here
-#           would be the very second source of truth the clause exists
-#           to prevent.
-#
-#       They may spell it, but they may not DISAGREE with it. Two ways to
-#       disagree, and both are checked: naming KAYA_ICON_FILE while
-#       naming none of the three is a third source of truth wearing the
-#       override's name, and opening some OTHER file out of the mark's
-#       own asset family is a second mark — which is silent at runtime,
-#       because an asset name nothing answers to leaves each platform's
-#       own icon in place.
+#       They may spell it, they may not DISAGREE with it: naming
+#       KAYA_ICON_FILE while naming none of the three is a third source
+#       of truth wearing the override's name, and opening some OTHER
+#       file out of the mark's asset family is a second mark — silent at
+#       runtime, because an asset name nothing answers to leaves each
+#       platform's own icon in place.
 #
 #   C4  THE NAME IS WRITTEN DOWN ONCE, same rule one field over: every
-#       identity guest declares it, and the scene's own
-#       `expect_title window#1` reads it back off the platform. Those are
-#       the two ends of the name half of the declaration and they cannot
-#       be allowed to part.
+#       identity guest declares it and `expect_title window#1` reads it
+#       back off the platform.
 #
-#   C5  ONE PICTURE. Any app-icon resource anywhere in the tree — an
-#       Android mipmap/drawable launcher icon, a .ico, a .icns, an
-#       AppIcon — must be BYTE-IDENTICAL to the declared icon, or be in
-#       EXCLUDED with a reason. This is the byte-equality half that can
-#       be checked without building anything, and it is what stops a
-#       packaging step from growing its own private copy of the art.
+#   C5  ONE PICTURE. Any app-icon resource anywhere in the tree must be
+#       BYTE-IDENTICAL to the declared icon or be in EXCLUDED with a
+#       reason.
 #
-#   C6  A PACKAGING CONSUMER READS THE MANIFEST. A tools/ script that
-#       stages or packages the icon must obtain the path FROM
-#       guests/assets/identity.toml rather than hard-coding it; a script
-#       that names the icon and not the manifest fails. The .cmd
-#       launchers are exempt and C3 covers them instead — a batch file
-#       cannot read TOML, which is a fact about cmd.exe and not a
-#       loophole.
+#   C6  A PACKAGING CONSUMER READS THE MANIFEST rather than hard-coding
+#       the path. The .cmd launchers are exempt and C3 covers them
+#       instead: a batch file cannot read TOML.
 #
-# THE SELF-TEST at the bottom runs the real checker over a shadow root of
-# symlinks with one file doctored, and requires the red. A fixture would
-# only ever prove the patterns match the fixture, which is how the
-# wayland seat guard passed vacuously twice (docs/traps.md).
+# THE SELF-TEST runs the real checker over a shadow root of symlinks with
+# one file doctored and requires the red (docs/traps.md: the wayland seat
+# guard passed vacuously twice against a fixture).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -131,22 +86,14 @@ bad = []
 
 MANIFEST = "guests/assets/identity.toml"
 
-# Directory names that hold BUILD OUTPUT rather than tree. Pruned by
-# name while walking, not filtered after: the unpruned walk of this
-# repo visits 752,511 paths, 750,000 of which are cargo's, and a gate
-# that takes a minute and a half is a gate people stop running.
+# Directory names that hold BUILD OUTPUT rather than tree, pruned by
+# name while walking (the unpruned walk visits 752,511 paths, 750,000 of
+# them cargo's).
 #
-# `build` is in the list for a second reason, and it is a rule about
-# WHERE each half of the byte-equality check belongs. This gate is the
-# STATIC half; the bytes actually written into an artifact are checked
-# by the packaging step itself, which is the path nobody can avoid
-# (invariant 3). Reading a build directory here would make the verdict
-# depend on whatever the last build — or the last WATCHED NEGATIVE —
-# left lying around: measured 2026-08-18, this clause went red on
-# `android/*/build/generated/kaya-identity/res/mipmap/kaya_mark.png`,
-# a gitignored artifact of the android arm's own disagreement test.
-# A gate that a negative test can turn red afterwards is a gate whose
-# red means nothing.
+# `build` is here for a second reason: reading a build directory would
+# make the verdict depend on whatever the last build — or the last
+# WATCHED NEGATIVE — left lying around, and a gate a negative test can
+# turn red afterwards is a gate whose red means nothing.
 PRUNE = {".git", ".gradle", ".build", "build", "target", "_build", "obj",
          "bin", "node_modules", "__pycache__", "DerivedData"}
 
@@ -333,13 +280,9 @@ else:
 # ---------------------------------------------------------------- C3/C6
 icon_posix = icon_rel.replace("\\", "/")
 
-# THE THIRD WAY TO NAME THE DECLARATION, DERIVED AND NEVER RETYPED. A
-# guest that opens the mark as an ASSET names it the way the core
-# resolves it — by its path UNDER THE ASSET ROOT, with no repo checkout,
-# bundle or APK in front of it — so the accepted string is the manifest's
-# own `icon` minus that prefix and nothing else. Deriving it is the whole
-# point of the clause: a literal "icons/kaya-mark.png" written down here
-# would be exactly the second source of truth C3 exists to refuse.
+# THE THIRD WAY TO NAME THE DECLARATION, DERIVED AND NEVER RETYPED: the
+# accepted string is the manifest's own `icon` minus the asset root's
+# prefix. Typing it here would be the second source of truth C3 refuses.
 ASSET_ROOT = "guests/assets/"
 icon_under_root = (icon_posix[len(ASSET_ROOT):]
                    if icon_posix.startswith(ASSET_ROOT) else None)
@@ -351,19 +294,11 @@ if icon_under_root is None:
 # The family the mark lives in (`icons`), for the wrong-name half below.
 icon_family = icon_under_root.split("/")[0] if icon_under_root else None
 
-# Every language's spelling of one call, and they differ only in what
-# sits in front of the word and whether a paren follows:
-#
-#   tx.asset("...")      kaya.asset("...")     tx.Asset("...")
-#   KayaApp.asset("...") KayaAsset("...")      asset "..."
-#
-# No leading word boundary, because Swift's constructor is `KayaAsset(`
-# and OCaml's is a bare `asset `. The looseness costs nothing: the only
-# two questions asked of a captured name are whether the DECLARED one is
-# among them and whether any of them is in the mark's family but is not
-# the declared one, and a stray capture (`AppIdentityAsset("Aurora
-# Notes"` matches, and its argument is the app's NAME) answers no to
-# both.
+# Every language's spelling of one call. NO leading word boundary,
+# because Swift's constructor is `KayaAsset(` and OCaml's is a bare
+# `asset `. The looseness costs nothing: a captured name is only ever
+# asked whether it IS the declared one and whether it is in the mark's
+# family but is not, and a stray capture answers no to both.
 ASSET_CALL = re.compile(r'(?i)asset\s*\(?\s*"([^"\n]+)"')
 
 manifest_readers, icon_namers = [], []
@@ -393,17 +328,13 @@ for r in SOURCE_ROOTS:
         # demanding they parse the manifest would be a rule about
         # documentation rather than about drift.
         prose = rel.endswith(".md") or rel.startswith("tools/scenes/")
-        # C3, THE ASSET FORM'S OWN HALF, and it is asked BEFORE the
-        # is-this-a-namer question below rather than after. A file that
-        # opens the WRONG file out of the mark's family names none of the
-        # three accepted forms, so it would fall out of this loop
-        # unlooked-at — and it is precisely the failure the asset form
-        # introduced: an asset call carrying a mistyped name compiles in
-        # all eight languages and, at runtime, leaves whatever icon the
-        # platform already had. (No comment here may quote such a name;
-        # the arm would read it and refuse this file. See `declared`
-        # below, which is where the self-test's own counterexample comes
-        # from.)
+        # C3, THE ASSET FORM'S OWN HALF, asked BEFORE the is-this-a-namer
+        # question below: a file opening the WRONG file out of the mark's
+        # family names none of the three accepted forms and would fall
+        # out of this loop unlooked-at. A mistyped asset name compiles in
+        # all eight languages and leaves whatever icon the platform had.
+        # (NO COMMENT HERE MAY QUOTE SUCH A NAME — the arm would read it
+        # and refuse this file.)
         if not prose and icon_family:
             for other in sorted(n for n in asset_names
                                 if n.startswith(icon_family + "/")
@@ -653,17 +584,11 @@ fresh() { # <name> -> path to a new shadow root
 # `icon` with the asset root's prefix removed), a regex matching it, or a
 # NEIGHBOUR of it: same family, not the declared file.
 #
-# THE SELF-TEST DERIVES ITS DATA FOR THE SAME REASON THE CLAUSE DOES, and
-# for one more. C3 derives so it holds one source of truth; this derives
-# so it does not become a second one — and because THIS SCRIPT IS IN THE
-# TREE THE CHECKER READS. An asset call spelled out here, naming any file
-# in the mark's family other than the declared one, is a file in the tree
-# opening an asset the manifest does not declare, and the arm above
-# refuses it in the real run with the gate pointing at itself. Measured:
-# it did, twice, the first time this was written — once for the
-# perturbation's own data and once for a COMMENT that quoted a
-# counterexample. The rule reaches prose because prose is text, so no
-# comment in this file may spell one either.
+# THE SELF-TEST DERIVES ITS DATA, because THIS SCRIPT IS IN THE TREE THE
+# CHECKER READS: an asset call spelled out here, naming any file in the
+# mark's family other than the declared one, makes the gate refuse
+# itself. The rule reaches PROSE because prose is text, so no comment in
+# this file may spell one either.
 declared() {
     python3 -c '
 import pathlib
@@ -749,18 +674,10 @@ hits="$(doctor "$s" tools/scenes/identity.steps 'expect_app_icon' 'expect_app_ha
 applied "$hits" "the no-observation perturbation"
 refuses "$s" "would agree with anything" "a tree where no scene reads the icon"
 
-# N8 — C3'S OWN NEGATIVE, which the clause went without until the identity
-# guests stopped resolving their own path. Put the environment read back
-# into a guest and take the asset call away: the file then names
-# KAYA_ICON_FILE, the declared path nowhere, the manifest nowhere and no
-# asset at all, which is the third source of truth the clause is about.
-#
-# It is also the reason C3's positive side cannot rot unnoticed. All
-# eight migrated guests still SAY "KAYA_ICON_FILE" — in the paragraph
-# explaining what they stopped doing — so the asset form is the only
-# thing keeping them on the right side of this clause. If the asset arm
-# below ever stopped matching, N0 would go red eight times over before
-# anyone reached this test.
+# N8 — C3'S OWN NEGATIVE: put the environment read back into a guest and
+# take the asset call away, so the file names KAYA_ICON_FILE and neither
+# the declared path, the manifest nor an asset — the third source of
+# truth the clause is about.
 mark_re="$(declared pattern)" || exit 1
 s="$(fresh envreader)"
 hits="$(doctor "$s" guests/rust/identity.rs \
@@ -771,13 +688,10 @@ refuses "$s" "names the declaration in none of C3's three ways" \
     "a guest that names the override with no declaration behind it"
 
 # N9 — THE ASSET ARM'S OWN NEGATIVE: a guest that opens a DIFFERENT file
-# out of the mark's family. A name is not a path and nothing checks it at
-# compile time, so the guest still builds in all eight languages; at
-# runtime the name answers to nothing and each platform keeps whatever
-# icon it already had. The Swift guest is the one doctored on purpose —
-# its spelling is the constructor `KayaAsset(`, with no word boundary in
-# front of the word, so a pattern written for `tx.asset(` alone would
-# read this file and find nothing in it.
+# out of the mark's family. Nothing checks an asset name at compile
+# time. The SWIFT guest is doctored on purpose — its spelling is the
+# constructor `KayaAsset(`, with no word boundary in front, so a pattern
+# written for `tx.asset(` alone would find nothing in it.
 other_mark="$(declared other)" || exit 1
 s="$(fresh othermark)"
 hits="$(doctor "$s" guests/swift/identity.swift \

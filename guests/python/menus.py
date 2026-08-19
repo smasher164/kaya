@@ -75,8 +75,6 @@ with app.window(title="menus"):
     details = kaya.signal(False)
     sort = kaya.signal(0.0)
 
-    # File and its Export leaf share one enablement signal: one write
-    # moves both.
     with app.menu("File", enabled=can_export) as file:
         # The symbol is a CONCEPT drawn by each platform in its own set
         # (docs/styling-plan.md D6). The vocabulary has no `save`, so
@@ -96,8 +94,6 @@ with app.window(title="menus"):
         kaya.option("Date")
 
     groups = kaya.collection()
-    # Catalog built LIVE: items are shared across stamped copies, the
-    # template only attaches, and each activation carries its key path.
     with kaya.context_catalog() as catalog:
         kaya.item("Remove", symbol=kaya.Symbol.DELETE, on_activate=on_remove)
 
@@ -112,7 +108,6 @@ with app.window(title="menus"):
         with target.context_menu():
             kaya.item("Rename", symbol=kaya.Symbol.EDIT, on_activate=on_rename)
 
-        # Remove's activation names BOTH keys (group, then item).
         for _g in groups:
             with kaya.column():
                 items = kaya.collection(Task)

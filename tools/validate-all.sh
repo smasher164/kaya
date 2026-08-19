@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,13 +10,10 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# The whole matrix, one invocation. The five lanes are independent
-# (each proves its own platform against its own devices), so they run
-# CONCURRENTLY by default — the matrix is bounded by its slowest lane
-# (~1 minute warm, ratified 2026-07-22) instead of the ~4 minute sum.
-# --serial keeps the old one-at-a-time behavior for the special
-# cases: benchmarking a single lane's honest numbers, debugging under
-# contention, or recording mode (one screen, one recorder).
+# The whole matrix, one invocation. The five lanes are independent, so
+# they run CONCURRENTLY by default; --serial for benchmarking a single
+# lane's honest numbers, debugging under contention, or recording mode
+# (one screen, one recorder).
 #
 # Usage: validate-all.sh [--serial] [windows-host]
 #   windows-host defaults to akhil@192.168.64.2 (the UTM VM;
@@ -41,13 +33,9 @@ for arg in "$@"; do
 done
 
 LANES_DIR="$(mktemp -d)"
-# A FAILING LANE'S LOG OUTLIVES THE RUN, because the run is where the
-# evidence is and a matrix that goes red once is the case you most need
-# it for. It used to live only in $LANES_DIR, printed to stdout and
-# then deleted with it: a run where three lanes failed and the
-# immediate re-run passed left NOTHING to diagnose from (2026-07-31),
-# and a transient nobody can look at is indistinguishable from a bug
-# nobody found. Passing lanes leave nothing behind.
+# A FAILING LANE'S LOG OUTLIVES THE RUN: a transient nobody can look at
+# is indistinguishable from a bug nobody found. Passing lanes leave
+# nothing behind.
 KEEP_DIR="$ROOT/target/validate-failures"
 trap 'rm -rf "$LANES_DIR"' EXIT
 
@@ -106,20 +94,12 @@ if [ "$MODE" = parallel ]; then
         legs=$(grep -c ": PASS" "$LANES_DIR/$name.log" 2>/dev/null)
         legs=${legs:-0}
         echo "$name: $verdict (${secs}s, $legs legs)"
-        # DURATION IS A CORRECTNESS SIGNAL, not just a stat. CLAUDE.md
-        # states that a duration anomaly is a bug signal; until now
-        # nothing enforced it, so a lane could quietly get six times
-        # slower and still report ALL PASS.
-        #
+        # DURATION IS A CORRECTNESS SIGNAL (CLAUDE.md invariant 8): a
+        # lane can get six times slower and still report ALL PASS.
         # Measured 2026-07-25: exporting GTK_A11Y=atspi lane-wide took
         # linux from 65s to 393s — a change in blast radius, not in any
-        # assertion. The failures it caused were legible, but a
-        # SLOWDOWN with no failures is exactly the shape that ships.
-        #
-        # Ceilings are per lane and deliberately loose (roughly 3x the
-        # warm time): this catches a regression in KIND, not jitter. A
-        # legitimately slower lane raises its number in the same commit
-        # that makes it slower, which is the conversation worth forcing.
+        # assertion. A slower lane raises its number in the same commit
+        # that makes it slower; each `case` arm carries that measurement.
         case "$name" in
             # 900 since 2026-08-10, raised in the commit that makes the
             # lane slower, as this block asks. The save scene brought

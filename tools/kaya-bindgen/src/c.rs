@@ -216,13 +216,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The set_property arms, one trio per property: spec-driven so new
-    // props reach every binding without emitter edits. The constant arm
+    // The set_property arms, one trio per property, spec-driven. The constant arm
     // takes a KayaVal; strings stay the common case via kaya_str.
     for (prop, _, kind) in prop_variants(spec) {
         let up = prop.to_uppercase();
-        // Blob setters take the u64 kaya_blob_register handle (see
-        // kaya_blob), so the parameter says so.
+        // Blob setters take the u64 kaya_blob_register handle (kaya_blob).
         let (ty, ctor, param) = match kind {
             crate::PropKind::Str => ("const char *", "kaya_str", *prop),
             crate::PropKind::Bool => ("int ", "kaya_bool", *prop),
@@ -266,13 +264,12 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
-    // The menu-prop setters (const for every prop; signal binders only
-    // for the bindable ones — icon/primary/shortcut are const-only and
-    // SOURCE_SIGNAL on them dies at the root). The C floor is the ONE
-    // surface with no shortcut canonicalizer, BY DESIGN: the floor
-    // writes the canonical wire spelling itself and the core validates
-    // it, rejecting rather than rewriting — the same root errors every
-    // generated binding gets after its canonicalizer (DESIGN.md, Menus).
+    // The menu-prop setters: a const setter for every prop, signal
+    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
+    // dies at the root). The C floor is the ONE surface with no
+    // shortcut canonicalizer, BY DESIGN: it writes the canonical wire
+    // spelling itself and the core validates rather than rewrites
+    // (DESIGN.md, Menus).
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (ty, ctor, param) = match kind {

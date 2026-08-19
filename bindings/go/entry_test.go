@@ -1,29 +1,11 @@
 package kaya
 
-// THE ENTRY-POINT CONTRACT, pinned rather than described.
-//
-// Two properties, both of which are invisible to every compiler and
-// unreachable from the matrix:
-//
-//  1. App.Run BLOCKS UNTIL THE APP IS OVER ON EVERY PLATFORM, including
-//     Android. This is the wart kaya refuses: Gio's app.Main "blocks
-//     forever" on the desktops and "returns immediately" on Android and
-//     iOS, so one call means two things and every line after it is live
-//     on one host and dead on another. Nothing in the matrix can catch a
-//     regression here, because the whole validation APK ends in
-//     App.Serve rather than App.Run.
-//  2. WHICH FUNCTION IS THE APP on Android — a registration if the guest
-//     made one, otherwise the app's own `main` reached by
-//     //go:linkname. The attach entry that decides cannot be called off
-//     Android and the linkname does not exist there, so the rule is
-//     factored out into androidEntry precisely so a test on this host
-//     can drive it.
-//
-// These run in `go test dev.kaya/bindings/go`, which tools/check-abort.sh
-// runs, which tools/gates.sh runs, which tools/validate-mac.sh runs
-// whole. The structural half — that the android arm compiles at all and
-// that the linkname resolves and is REFERENCED — is
-// tools/check-targets.sh's go-android clause.
+// The entry-point contract (docs/go-mobile-plan.md §D3): App.Run blocks
+// until the app is over on EVERY platform including Android, and
+// androidEntry decides which function is the app. Both are invisible to
+// every compiler and unreachable from the matrix, which ends in
+// App.Serve rather than App.Run. The structural half — the android arm
+// compiling and the linkname resolving — is tools/check-targets.sh.
 
 import (
 	"runtime"
@@ -31,16 +13,12 @@ import (
 	"time"
 )
 
-// settle is how long a "did it come back?" assertion waits before
-// believing the answer. Generous on purpose: a false PASS here would be
-// the test not noticing a regression, and a false FAIL would be a
-// flake, so the cost of waiting is the cheaper mistake.
+// How long a "did it come back?" assertion waits before believing it.
 const settle = 250 * time.Millisecond
 
-// TestRunBlocksWhereTheOSOwnsTheEntry is the Android arm. Run must not
-// come back while the dispatch loop is running, and must run it on the
-// CALLING goroutine — that goroutine is the locked OS thread the attach
-// entry made, and the occurrence ring has exactly one consumer.
+// The Android arm. Run must not come back while the dispatch loop is
+// running, and must run it on the CALLING goroutine — that goroutine is
+// the locked OS thread attach made, and the ring has one consumer.
 func TestRunBlocksWhereTheOSOwnsTheEntry(t *testing.T) {
 	var app App
 	release := make(chan struct{})
@@ -52,10 +30,7 @@ func TestRunBlocksWhereTheOSOwnsTheEntry(t *testing.T) {
 			close(serving)
 			<-release
 		}, func() int {
-			// kaya_run is a hard panic on Android
-			// (crates/kaya/src/capi.rs). Reaching it would mean the
-			// hosted arm tried to take a process entry it was never
-			// given.
+			// kaya_run is a hard panic on Android (capi.rs).
 			t.Error("the hosted arm entered the core loop; Android has no process entry to give it")
 			return 7
 		})
@@ -79,12 +54,8 @@ func TestRunBlocksWhereTheOSOwnsTheEntry(t *testing.T) {
 	}
 }
 
-// TestHostedRunServesOnTheCallingGoroutine proves the same-goroutine
-// part directly rather than by inference. A panic unwinds ONE
-// goroutine: if the hosted arm ran serve where it is supposed to, the
-// recover below sees it. If it had spawned one instead, the panic would
-// be unrecovered and take the whole test binary down — which is a
-// failure too, just a louder one.
+// The same-goroutine part, directly: a panic unwinds ONE goroutine, so
+// the recover below sees it only if serve ran here.
 func TestHostedRunServesOnTheCallingGoroutine(t *testing.T) {
 	var app App
 	defer func() {
@@ -103,12 +74,9 @@ func TestHostedRunServesOnTheCallingGoroutine(t *testing.T) {
 	t.Fatal("runWith returned normally; serve did not run on this goroutine")
 }
 
-// TestRunBlocksWhereTheGuestOwnsTheEntry is the desktop and iOS arm.
-// The two halves run concurrently — the dispatch loop on a second
-// goroutine, the core on the caller's thread — and Run waits for BOTH.
-// Waiting for the dispatch loop is not decoration: the core loop
-// returning is the shutdown, and a Run that raced past it would let the
-// guest's `os.Exit` run while the loop was still draining.
+// The desktop and iOS arm: the dispatch loop on a second goroutine, the
+// core on the caller's thread, and Run waits for BOTH — a Run that
+// raced past the loop would let the guest's os.Exit run mid-drain.
 func TestRunBlocksWhereTheGuestOwnsTheEntry(t *testing.T) {
 	var app App
 	releaseServe := make(chan struct{})
@@ -144,11 +112,6 @@ func TestRunBlocksWhereTheGuestOwnsTheEntry(t *testing.T) {
 	}
 }
 
-// TestHostedEntryIsAndroidAndNothingElse keeps the selector honest from
-// the other side. hostedEntry decides which arm above is compiled, and
-// it is a constant, so a wrong answer is not a bug that shows up
-// somewhere — it is every Go guest on this host losing its process
-// entry, or Android calling kaya_run and panicking inside the core.
 func TestHostedEntryIsAndroidAndNothingElse(t *testing.T) {
 	if hostedEntry != (runtime.GOOS == "android") {
 		t.Fatalf("hostedEntry is %v on GOOS=%s", hostedEntry, runtime.GOOS)
@@ -158,16 +121,11 @@ func TestHostedEntryIsAndroidAndNothingElse(t *testing.T) {
 	}
 }
 
-// TestAndroidEntryPrefersARegistration pins the rule attach uses to
-// decide what to boot. The order is load-bearing in one direction only:
-// guests/go/cmd registers an app AND carries `func main() {}`, because
-// -buildmode=c-shared demands a main package and one library cannot
-// have thirty-one mains — so a linkname that won would boot an empty
-// function and the whole Android lane would go dark.
+// The rule attach uses to decide what to boot. guests/go/cmd registers
+// an app AND carries `func main() {}`, so a linkname that won would
+// boot an empty function and the whole Android lane would go dark.
 func TestAndroidEntryPrefersARegistration(t *testing.T) {
-	// WHICH ONE RAN, not which one it looks like: func values are not
-	// comparable in Go, and a code-pointer comparison would be reading
-	// the answer through reflection when the question is behavioural.
+	// Which one RAN: func values are not comparable in Go.
 	var ran string
 	registered := func() { ran = "registration" }
 	viaLinkname := func() func() { return func() { ran = "main.main" } }
@@ -192,9 +150,7 @@ func TestAndroidEntryPrefersARegistration(t *testing.T) {
 		t.Fatalf("attach would boot %q, not the app's own main", ran)
 	}
 
-	// The `!android` reality: guestMain has no linkname to answer with,
-	// so there is nothing to boot and attach says so rather than
-	// starting a nil.
+	// The `!android` reality: guestMain has no linkname to answer with.
 	app, fromMain = androidEntry(nil, func() func() { return nil })
 	if app != nil || fromMain {
 		t.Fatalf("with neither source there is no app (got app!=nil=%v fromMain=%v)", app != nil, fromMain)

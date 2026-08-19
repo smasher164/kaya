@@ -1,10 +1,8 @@
 // Sum-typed collections: the sealed marker interface is the sum, the
-// prototype structs are its constructors, and elimination happens the
-// Go way — a type switch where the guest holds the value, a record of
-// typed case arms where the core does. Totality of the template arms
-// is the scene's declaration-time check (Go has no exhaustiveness to
-// borrow); mutation is witnessed — a field write names the constructor
-// the caller matched, and the model refuses if the entry disagrees.
+// prototype structs are its constructors, elimination is a type switch
+// on the guest side and typed case arms on the core's. Totality of the
+// template arms is the scene's declaration-time check; mutation is
+// witnessed. DESIGN.md, Sum-typed elements.
 
 package kaya
 
@@ -44,8 +42,7 @@ func SumOf[K Key, T any](tx *Tx, prototypes ...T) SumCollection[K, T] {
 	tx.app.c.collection++
 	c := Collection{id: tx.app.c.collection}
 	tx.app.registerCollection(c.id)
-	// An undone entry names its own constructor: the variant is the
-	// discriminant the forward insert witnessed, so the mirror gets the
+	// An undone entry names its own constructor, so the mirror gets the
 	// same struct back behind T.
 	tx.app.shapes[c.id] = undoShape{
 		key: restoreKey[K](),
@@ -73,17 +70,15 @@ func (c SumCollection[K, T]) variantOf(t reflect.Type) (uint32, *recordInfo) {
 	panic(fmt.Sprintf("kaya: %v is not a constructor of this sum", t))
 }
 
-// Insert witnesses the value's own constructor onto the wire. Through
-// Tx.insertEntry, the one insert path — so an explicit numeric key is
-// shown to the fresh-key minter here exactly as it is on the untyped and
-// record surfaces.
+// Insert witnesses the value's own constructor onto the wire, through
+// Tx.insertEntry — the one insert path, so an explicit numeric key
+// reaches the fresh-key minter here too.
 func (c SumCollection[K, T]) Insert(tx *Tx, key K, value T) {
 	variant, info := c.variantOf(reflect.TypeOf(value))
 	tx.insertEntry(c.Collection, key, variant, value, info.values(value))
 }
 
-// handle is the plain (collection, path) handle behind this typed
-// collection: what the minter counts per (see FreshCollection).
+// handle is the plain (collection, path) handle the minter counts per.
 func (c SumCollection[K, T]) handle() Collection { return c.Collection }
 
 // Update replaces a record wholesale; a different constructor than the
@@ -97,7 +92,7 @@ func (c SumCollection[K, T]) Update(tx *Tx, key K, value T) {
 }
 
 // Items is the typed model, in insertion order; the values are the
-// constructor structs behind T — a type switch eliminates them.
+// constructor structs behind T.
 func (c SumCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 	tx.app.guardMirrorRead()
 	in := tx.app.instanceOf(c.id, c.path)
@@ -111,8 +106,7 @@ func (c SumCollection[K, T]) Items(tx *Tx) []RecordEntry[K, T] {
 	return out
 }
 
-// Get is the entry's current value — the scrutinee for the type
-// switch that precedes a patch. ok is false for a missing key.
+// Get is the entry's current value. ok is false for a missing key.
 func (c SumCollection[K, T]) Get(tx *Tx, key K) (T, bool) {
 	tx.app.guardMirrorRead()
 	var zero T
@@ -128,10 +122,8 @@ func (c SumCollection[K, T]) Get(tx *Tx, key K) (T, bool) {
 	return zero, false
 }
 
-// UpdateField is the witnessed field write: V names the constructor
-// the caller just matched (the type switch is the refinement), the
-// selector names the field, and the model refuses if the entry holds
-// a different constructor — so the guard is checked, not trusted.
+// UpdateField is the witnessed field write: V names the constructor the
+// caller just matched, and the model refuses if the entry holds another.
 func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*V) *F, value F) {
 	variant, info := c.variantOf(reflect.TypeFor[V]())
 	in := tx.app.instanceOf(c.id, c.path)
@@ -152,10 +144,8 @@ func (c SumCollection[K, T]) UpdateField[V any, F any](tx *Tx, key K, sel func(*
 		rv := reflect.ValueOf(&record).Elem()
 		rv.Field(info.indexes[f.index]).Set(reflect.ValueOf(value))
 		tx.app.modelSet(c.id, c.path, key, any(record).(T))
-		// Through the encoder, like the record path and every other
-		// language's sum path: a blob field registers its bytes at
-		// encode time (handles are single-submit); scalars pass
-		// through unchanged.
+		// Through the encoder: a blob field registers its bytes at
+		// encode time (handles are single-submit).
 		tx.emit(
 			TxCollectionUpdateField(c.id, c.path, key, f.index, variant, info.encode(f.index, value)))
 		tx.recomputeDerived(c.id, c.path)
@@ -174,13 +164,10 @@ func (c SumCollection[K, T]) Derive[V Scalar](tx *Tx, compute func(items []Recor
 }
 
 // Case declares one arm of the template eliminator: the records the
-// arm's body writes are constructor V's blueprint. The scene holds
-// the arms to totality at template_end — a missing constructor is a
-// startup error naming it, and an empty body renders one as nothing,
-// explicitly. The head token (Case[Note]) is the arm's match label —
-// keep it; Go function literals cannot infer their parameter types,
-// so the SumCase carries the Tpl to keep the closure down to the one
-// parameter the head already named.
+// arm's body writes are constructor V's blueprint. The scene holds the
+// arms to totality at template_end. The head token (Case[Note]) is the
+// arm's match label — Go function literals cannot infer parameter
+// types, so the SumCase carries the Tpl.
 func (c SumCollection[K, T]) Case[V any](t *Tpl, arm func(SumCase[K, V])) {
 	variant, info := c.variantOf(reflect.TypeFor[V]())
 	t.tx.emit(TxVariantCase(variant))
@@ -194,22 +181,14 @@ type SumCase[K Key, V any] struct {
 	info *recordInfo
 }
 
-// The arm's construction vocabulary. IT IS THE WHOLE OF ONE, because an
-// arm body holds a SumCase and nothing else — the *Tpl behind it is
-// unexported, deliberately, so an arm cannot reach past its own
-// refinement. That makes this surface the one place where a missing
-// constructor is not a matter of ergonomics: before 2026-08-10 a sum
-// arm could build a label, a checkbox and two containers, and there was
-// no spelling for an entry inside one at any tier, floor included.
+// The arm's construction vocabulary, and it must be the WHOLE of one:
+// the *Tpl behind this surface is unexported, so a constructor missing
+// here cannot be spelled at any tier, floor included.
 //
-// Every constructor here is its *Tpl twin with the arm's refinement
-// substituted for the source: where the base surface takes a signal or
-// a resolved token, this one takes the FIELD SELECTOR, resolved against
-// constructor V's own schema — that is what an arm is for, and a
-// constant there would throw the match away. Structure and captions,
-// which name the prototype rather than the row, stay plain values and
-// pass straight through. Handlers are co-located because the receiver's
-// K types the stamped copy's key.
+// Every constructor is its *Tpl twin with the FIELD SELECTOR
+// substituted for the source, resolved against constructor V's own
+// schema. Structure and captions name the prototype rather than the row
+// and stay plain values.
 
 // Row is the template container sugar, on the arm's own recorder:
 // the body's constructors parent into it ambiently.
@@ -228,8 +207,7 @@ func (sc SumCase[K, V]) Grid(columns int, body func()) Node { return sc.t.Grid(c
 // Spacer is the empty grown column between an arm's siblings.
 func (sc SumCase[K, V]) Spacer() Node { return sc.t.Spacer() }
 
-// LabelText is a label with constant text — the arm's chrome, the
-// caption that says which constructor this is.
+// LabelText is a label with constant text.
 func (sc SumCase[K, V]) LabelText(text string) Node { return sc.t.LabelText(text) }
 
 // Label bound to the field the selector names.
@@ -260,7 +238,7 @@ func (sc SumCase[K, V]) Button(text string, onClick func(*Tx, K)) Node {
 }
 
 // ButtonBound is Button with the caption from the field the selector
-// names — the row's own noun on the button that acts on it.
+// names.
 func (sc SumCase[K, V]) ButtonBound(sel func(*V) *string, onClick func(*Tx, K)) Node {
 	n := sc.t.Widget(KindButton)
 	sc.t.BindTextField(n, 0, FieldBy(sel))
@@ -317,8 +295,7 @@ func (sc SumCase[K, V]) onChange(n Node, onChange func(*Tx, K, string)) {
 	})
 }
 
-// Image bound to the blob field the selector names — the arm's own
-// picture, one per stamped copy.
+// Image bound to the blob field the selector names.
 func (sc SumCase[K, V]) Image(sel func(*V) *[]byte) Node {
 	n := sc.t.Widget(KindImage)
 	sc.t.BindSourceField(n, 0, FieldBy(sel))
@@ -333,9 +310,8 @@ func (sc SumCase[K, V]) Progress(sel func(*V) *float64) Node {
 	return n
 }
 
-// Slider over min..max whose position is the field the selector names,
-// with its change handler co-located. The range describes the prototype
-// and stays constant; see Tpl.Slider.
+// Slider over min..max whose position is the field the selector names.
+// The range describes the prototype and stays constant (Tpl.Slider).
 func (sc SumCase[K, V]) Slider(min, max float64, sel func(*V) *float64, onChange func(*Tx, K, float64)) Node {
 	n := sc.t.Widget(KindSlider)
 	sc.t.tx.emit(TxSetMin(n.id, min))
@@ -346,9 +322,8 @@ func (sc SumCase[K, V]) Slider(min, max float64, sel func(*V) *float64, onChange
 }
 
 // Select over fixed options whose 0-based index is the field the
-// selector names, with its pick handler co-located. The option list
-// stays constant (Tpl.Select says why it cannot be otherwise) and the
-// index field is float64 (Tpl.BindValueField says why).
+// selector names. The option list stays constant (Tpl.Select) and the
+// index field is float64 (Tpl.BindValueField).
 func (sc SumCase[K, V]) Select(options []string, sel func(*V) *float64, onSelect func(*Tx, K, int)) Node {
 	return sc.choice(KindSelect, options, sel, onSelect)
 }
@@ -376,17 +351,10 @@ func (sc SumCase[K, V]) onValue(n Node, onChange func(*Tx, K, float64)) {
 	})
 }
 
-// The arm's PROPS, forwarded one at a time like its constructors and
-// for the same reason: the *Tpl behind this surface is unexported, so
-// an arm that cannot spell a prop here cannot spell it at all — not at
-// the floor, not by reaching past its own refinement. Grow was in
-// exactly that state until this pass: it had been the template zone's
-// one prop for a milestone and three of the five surfaces had it.
-//
-// The pair is the base surface's (Set for the constant, Bind for the
-// source) with the arm's refinement substituted, as every constructor
-// here does: the source is ALWAYS the field selector, since a constant
-// where the arm expects a field would throw the match away.
+// The arm's PROPS, forwarded one at a time for the constructors' reason:
+// a prop missing here cannot be spelled at any tier. Set is the
+// constant, Bind is the source, and the source is ALWAYS the field
+// selector.
 
 // SetGrow weights this arm's node within its stamped row or column.
 func (sc SumCase[K, V]) SetGrow(n Node, weight float64) { sc.t.SetGrow(n, weight) }
@@ -400,7 +368,7 @@ func (sc SumCase[K, V]) BindA11yID(n Node, sel func(*V) *string) {
 }
 
 // SetA11yLabel gives every stamped copy of this arm the same spoken
-// name — the arm's own noun, where the row's is the bound flavor.
+// name.
 func (sc SumCase[K, V]) SetA11yLabel(n Node, label string) { sc.t.SetA11yLabel(n, label) }
 
 // BindA11yLabel speaks the field the selector names, per copy.
@@ -421,10 +389,8 @@ func (sc SumCase[K, V]) BindA11yHint(n Node, sel func(*V) *string) {
 // only, and the declaration App.OnPasteNode needs (Tpl.SetAccepts).
 func (sc SumCase[K, V]) SetAccepts(n Node, kinds ...string) { sc.t.SetAccepts(n, kinds...) }
 
-// SetRole declares what a copy of this arm MEANS — and an ARM is where
-// the const-only rule reads most naturally, since an arm IS the shape
-// its rows share: the deleted variant's button is destructive for every
-// row it stamps (Tpl.SetRole).
+// SetRole declares what a copy of this arm MEANS; const only, since an
+// arm is the shape its rows share (Tpl.SetRole).
 func (sc SumCase[K, V]) SetRole(n Node, role int64) { sc.t.SetRole(n, role) }
 
 // SetInset pads a container this arm stamps; containers only, const

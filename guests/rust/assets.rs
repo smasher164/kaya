@@ -10,11 +10,9 @@
 //! or a resolution rule that found the wrong root cannot survive that.
 //!
 //! AND THE MISS, WITHOUT UNWINDING. The sentence a miss raises is also
-//! readable as a total query, and that is the only shape that works in
-//! nine languages: Swift's raise is `fatalError`, which traps rather
-//! than unwinding, so a Swift guest could not catch one. The query
-//! answers the SAME bytes the raise carries, so what this scene freezes
-//! is what an app's author would have been shown.
+//! readable as a total query, and that is the only shape all nine share
+//! — the C floor catches nothing at all (docs/deferred.md, the assets
+//! entry).
 //!
 //! LINE 1 ONLY. The sentence is two lines on purpose: the first names
 //! the asset, the rule and the CENSUS of what the package carries, and
@@ -42,7 +40,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let mark = tx.asset(MARK);
         let font = tx.asset(FONT);
 
-        // The query, not a catch. Empty means it resolves.
         let miss = tx.asset_miss_sentence(MISSING);
         let first = miss.lines().next().unwrap_or("").to_owned();
         let complaint = tx.asset_miss_sentence(FONT);
@@ -73,8 +70,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tx.mount(root);
     });
 
-    // Nothing to drive: every observation is a read of the first mount.
-    // The loop is the app thread's, not the scene's.
     loop {
         ctx.next();
     }

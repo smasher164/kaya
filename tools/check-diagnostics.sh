@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain.
-# A shell entered before the flake last changed is a bystander
-# toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -13,131 +10,76 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# THE SOLE-BRANCH GATE. A diagnostic — a function whose whole job is to
-# answer "why did that fail?" — is believed. Whatever sentence it prints
-# is what the next reader chases, so a sentence it cannot NOT print is a
-# sentence that will be chased for every cause it does not name.
-#
-# That is not hypothetical here. `kayaOpenPanelWhyNot()` shipped with an
-# arm reading `!NSApplication.shared.isActive`, which is ALWAYS true for
-# kaya's `.accessory` guests, printing a confident story about a
-# fullscreen application and XPC-hosted NSOpenPanel. Every load-bearing
-# claim in it was false and the branch below it was dead. It cost half
-# an hour when it was written, and months later it misdirected an entire
-# session onto macOS cooperative activation while the real cause was the
-# panel's view mode — a machine-wide preference. The rule that came out
-# of it is `docs/traps.md`, "The diagnostic that named a cause nobody
-# had measured": A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED. This is
-# that rule, mechanized as far as a script honestly can.
+# THE SOLE-BRANCH GATE. A DIAGNOSTIC MAY ONLY PRINT WHAT IT MEASURED
+# (CLAUDE.md invariant 3; docs/traps.md, "The diagnostic that named a
+# cause nobody had measured"). A sentence a why-not cannot NOT print is
+# a sentence that will be chased for every cause it does not name.
 #
 # TWO CLAUSES.
 #
 #   SOLE-ANSWER   A diagnostic that can return exactly one string
-#                 distinguishes nothing: every failure gets that
-#                 sentence, and the caller consults it as if it had
-#                 chosen. This is the degenerate shape, and the one
-#                 people write first.
-#
+#                 distinguishes nothing.
 #   FIXED-PROSE   An answer that interpolates NOTHING is the same
-#                 sentence for every state that reaches it — the
-#                 mechanical form of "unconditionally the answer". A
-#                 diagnostic gets exactly ONE of those and it must be
-#                 its first clause: the early-out, which fires before
-#                 the function has looked at anything and whose entire
-#                 content is the guard it just tested (`kayaLiveOpenPanel
-#                 == nil` -> "no panel was requested"). Every clause
-#                 after it stands on the failure path and must print at
-#                 least one value this process went and got.
+#                 sentence for every state that reaches it. A diagnostic
+#                 gets exactly ONE of those and it must be its first
+#                 clause: the early-out, whose entire content is the
+#                 guard it just tested. Every clause after it stands on
+#                 the failure path and must print at least one value
+#                 this process went and got.
 #
-# FIXED-PROSE is the clause that fails the real defect; SOLE-ANSWER does
-# not (the pre-fix body had three answers, one of them dead). Both are
-# here because they are different mistakes.
+# WHAT THIS GATE DOES NOT DO: it does not read English. A causal-claim
+# regex was costed and REJECTED — over 220k lines its false-positive
+# rate would mute the gate. It also cannot tell a measurement from a
+# constant. What it enforces is the shape.
 #
-# WHAT THIS GATE DOES NOT DO. It does not read English. A causal-claim
-# regex over "probably"/"must be"/"is not frontmost" was costed and
-# REJECTED: on 220k lines of heavily commented Rust, Swift and Kotlin
-# its false-positive rate would be high, and a noisy gate gets muted,
-# which is worse than the prose rule alone. It also cannot tell a
-# measurement from a constant — a clause interpolating a hardcoded
-# identifier satisfies it. What it enforces is the shape: every answer
-# on the failure path had to go and look at something.
+# HOW A NEW DIAGNOSTIC OPTS IN: by its NAME, with nothing to register.
+# Any function ending in WhyNot, whyNot, why_not, Reason or reason is
+# read as a diagnostic from the next run.
 #
-# HOW A NEW DIAGNOSTIC OPTS IN — by its NAME, and there is nothing to
-# register. Any function whose name ends in WhyNot, whyNot, why_not,
-# Reason or reason is read as a diagnostic from the next run. That is
-# the convention: if a function's job is to answer why, say so in its
-# name and this gate holds it to the rule.
-#
-# TWO LANGUAGES, EACH WITH ITS OWN ANSWER RULE. The clause analysis
-# reads Swift and Rust, because that is where the tree's diagnostics are
-# written: the SwiftUI interpreter's four, and the core's
-# `asset_why_not`. An arm no source exercises is an arm that rots — this
-# repo has been burned twice by guards that passed vacuously because
-# their pattern matched nothing — so a language joins this gate when a
-# diagnostic in it lands, and not before. A diagnostic named in a
-# language still unread (kt, kts, java, cs, go, py, ml, mli, hs, c, h,
-# m) FAILS this gate naming the extension point rather than being
-# skipped: a loud gap, never a silent one. Same reason the census below
-# fails when it is EMPTY — a gate that reads zero functions must not
-# print OK.
+# TWO LANGUAGES, EACH WITH ITS OWN ANSWER RULE — Swift and Rust, where
+# the tree's diagnostics are. An arm no source exercises rots, so a
+# language joins when a diagnostic in it lands and not before; a
+# diagnostic named in a language still unread FAILS this gate naming the
+# extension point rather than being skipped. Same reason the census
+# fails when EMPTY.
 #
 # WHAT AN ANSWER IS, IN SWIFT: the string literals at paren depth 0 of a
-# `return` expression, interpolating when one of them carries a \(…).
+# `return` expression, interpolating when one carries a \(…).
 #
-# WHAT AN ANSWER IS, IN RUST — a different rule, and it has to be,
-# because the Swift one reads NOTHING here: a Rust answer is
-# `return format!("… {x} …");` and every literal in the function sits
-# inside a macro's parens, one bracket down from where Swift's rule
-# looks. So:
+# WHAT AN ANSWER IS, IN RUST — necessarily a different rule, because a
+# Rust answer is `return format!("… {x} …")` and every literal sits one
+# bracket down from where Swift's rule looks:
 #
 #   THE VALUE POSITIONS of a body are (1) every `return E`, (2) every
 #   match arm `P => E`, and (3) the body's own tail expression. The
-#   value of a BLOCK — an arm's body, or the fn's — is whatever follows
-#   its last top-level `;`; a block whose statements all end in `;` has
-#   no value of its own and contributes nothing, its `return`s having
-#   been counted already by (1). That is Rust's rule for what a block
-#   evaluates to, and reading it here is what keeps `{ format!(…) }`
-#   and `format!(…)` from being two different things to this gate.
+#   value of a BLOCK is whatever follows its last top-level `;`; a block
+#   whose statements all end in `;` contributes nothing, its `return`s
+#   having been counted by (1).
 #
 #   THE ANSWER LITERALS of a value position are the string literals at
-#   bracket depth 0 of it, plus those at depth 1 when the bracket that
-#   opened depth 1 belongs to a prose builder — `format!`, `panic!`,
-#   `concat!`, `String::from`. (`.to_owned()` and `.to_string()` need no
-#   rule of their own: their literal is the RECEIVER, already at depth
-#   0.) As in Swift, several literals in one position are ONE answer in
-#   pieces, so `concat!("a", "b")` is one sentence and not two.
+#   bracket depth 0, plus those at depth 1 when the bracket belongs to a
+#   prose builder — `format!`, `panic!`, `concat!`, `String::from`.
+#   (`.to_owned()`/`.to_string()` need no rule: their literal is the
+#   RECEIVER, already at depth 0.) Several literals in one position are
+#   ONE answer in pieces.
 #
-#   INTERPOLATION, for a Rust answer, is a format placeholder in the
-#   literal: a `{` that is not the `{{` escape, in a format!/panic!
-#   format string. A `concat!` or `String::from` argument is a constant
-#   however many braces it contains, and can never interpolate — the
-#   same reason a Swift literal without \(…) cannot.
+#   INTERPOLATION is a format placeholder — a `{` that is not the `{{`
+#   escape — in a format!/panic! format string. A `concat!` or
+#   `String::from` argument is a constant however many braces it has.
 #
-# TAIL EXPRESSIONS ARE READ rather than a `return` being demanded, and
-# that was the choice to make. Demanding `return` would have read 5 of
-# `asset_why_not`'s 8 answers and been blind to exactly the three that
-# go to the filesystem — the arms of its closing `match read_raw(…)`,
-# which are the branches with something measured in them. What this
-# gate still does NOT read is an answer built by an `if/else` tail, a
-# `?` chain, a helper, or a `write!` into a buffer; those yield no
-# literals, and a prose-returning function whose answers are ALL
-# invisible fails saying which shapes are read, naming what to write.
-# A function some of whose answers are invisible is under-read in
-# silence — the same hole Swift's rule has, and the reason neither rule
-# may be quietly widened without a self-test that watches it bite.
+# TAIL EXPRESSIONS ARE READ rather than a `return` demanded: demanding
+# `return` would have been blind to exactly the arms that go to the
+# filesystem. NOT read: an answer built by an if/else tail, a `?` chain,
+# a helper, or a `write!` into a buffer. A prose-returning function
+# whose answers are ALL invisible fails, naming what to write; one whose
+# answers are PARTLY invisible is under-read in silence, which is why
+# neither rule may be widened without a self-test that watches it bite.
 #
 # TRANSPORT IS NOT AUTHORSHIP, and the SHAPE says which is which — no
-# name list, no exemption. `kaya_asset_why_not` (crates/kaya/src/capi.rs)
-# copies the core's sentence into a caller's buffer and returns its
-# length; `ring_asset_why_not` (crates/kaya/src/jvm.rs) hands the same
-# bytes to the JVM. Both match the naming convention, and neither
-# authors a word: they return a `usize` and a `JByteArray`, and no value
-# position in either carries a string literal. They are CENSUSED, so a
-# reader can see the gate read them and found nothing to hold, and they
-# raise nothing. The rule stays "a function that returns PROSE and whose
-# answers this gate cannot see is a finding" — a function that returns
-# no prose has no sentence anyone can believe, so there is nothing here
-# to check.
+# name list, no exemption. `kaya_asset_why_not` and `ring_asset_why_not`
+# match the naming convention and author no word: they return a `usize`
+# and a `JByteArray`, and no value position in either carries a string
+# literal. They are CENSUSED and raise nothing.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -181,9 +123,8 @@ import sys
 # ONE LEXER PER LANGUAGE, because the differences are not cosmetic: a
 # Swift string may not contain a raw newline while a Rust one may, Rust
 # spells its raw strings `r#"…"#` where Swift spells them `#"…"#`, and
-# Rust has char literals — `'"'`, `'{'` — that would each derail a
-# reader written for the other language. Both return the same span
-# shape (start, end, kind, interpolates) so everything below is shared.
+# Rust has char literals that would derail a reader written for the
+# other language. Both return the same span shape.
 CONTINUE_TAIL = ("+", "-", "*", "/", "%", ",", "(", "[", "{", "?", ":",
                  "=", "&", "|", ".", "!", "<", ">")
 CONTINUE_HEAD = ("+", "-", "*", "/", "%", ",", ")", "]", "}", "?", ":",
@@ -375,10 +316,6 @@ def close_paren(code, open_at):
 
 # The convention. A function whose name ENDS in any of these is a
 # diagnostic; the prefix is optional, so a bare `whyNot()` counts too.
-# Measured over swift/ crates/ bindings/ android/ guests/ tools/ cmd/
-# on 2026-08-07: exactly one function in the tree matches, and widening
-# the pattern this far adds no other hit — so the convention costs
-# nothing today and catches the next one by its name alone.
 NAME = r"(?:[A-Za-z_][A-Za-z0-9_]*)?(?:WhyNot|whyNot|why_not|Reason|reason)"
 SWIFT_FUNC = re.compile(r"\bfunc\s+(" + NAME + r")\s*\(")
 # The name is followed by `(` or `<` — a generic parameter list comes
@@ -514,11 +451,9 @@ def expr_end(code, start, stop, terminator):
 def rust_sites(code, spans, body_start, body_end):
     """Every VALUE POSITION in a Rust fn body, as (start, end)."""
     # Where a literal or char begins. The masked code writes SPACES over
-    # both, so "skip the whitespace after `=>` and look for a block" —
-    # which is how the first draft of this was written — steps straight
-    # over `=> "third".to_owned()` and reads the answer as `.to_owned()`,
-    # with no literal in it. Measured while writing this: one arm of the
-    # test fixture went missing and the count was quietly short by one.
+    # both, so "skip the whitespace after `=>` and look for a block"
+    # steps straight over `=> "third".to_owned()` and reads the answer
+    # as `.to_owned()`, with no literal in it.
     lit = {s0 for s0, _s1, kind, _i in spans if kind in ("string", "char")}
     sites = []
     for m in re.finditer(r"\breturn\b", code[body_start:body_end]):
@@ -642,12 +577,10 @@ def find_rust_fn(code, name):
 
 
 # ------------------------------------------------------------ the rules
-# ONE REPORTER, TWO FRONT ENDS. SOLE-ANSWER and FIXED-PROSE are stated
+# ONE REPORTER, TWO FRONT ENDS: SOLE-ANSWER and FIXED-PROSE are stated
 # once, so the two languages cannot drift into enforcing two different
-# rules — which is the whole point of holding every diagnostic to the
-# same standard. A front end's only job is to say what the answers of a
-# function are in its language, and what it should print when it can see
-# none of them.
+# rules. A front end says only what a function's answers are in its
+# language, and what to print when it can see none of them.
 def report(path, text, line, name, cl, prose, cannot_see):
     bad = []
     census = (path, line, name, len(cl),
@@ -862,17 +795,10 @@ if cmd in ("splice", "sole"):
     sys.exit(0)
 
 if cmd in ("rust-sole", "rust-prose"):
-    # The Rust arm's two negatives, same discipline as the Swift pair:
-    # doctor a COPY of the real file and print what changed, because a
-    # perturbation that did not apply is a failed self-test and not a
-    # passed one.
-    #
-    # NO HISTORICAL FIXTURE HERE — the Rust diagnostic has no pre-fix
-    # revision to splice, so both perturbations are built from the
-    # CURRENT body, which is the stronger of the two anyway: what gets
-    # proven is that the rule bites on the source as it is written
-    # today. Everything is located by PARSING, never by offset: this
-    # file moves.
+    # The Rust arm's two negatives: doctor a COPY of the real file and
+    # print what changed. Both perturbations are built from the CURRENT
+    # body, and everything is located by PARSING, never by offset —
+    # this file moves.
     target, out = rest[0], rest[1]
     name = "asset_why_not"
     with open(target, encoding="utf-8") as fh:
@@ -895,11 +821,10 @@ if cmd in ("rust-sole", "rust-prose"):
         note = (f"replaced the body with a single answer: "
                 f"{here[2] + 1 - here[0]} bytes out, {len(body)} bytes in")
     else:
-        # FIXED-PROSE: the SECOND answer made to interpolate nothing —
-        # the second, because the first is the early-out the rule
-        # allows. Which answer that is is asked of the gate's own
-        # reader, so the perturbation lands on the clause the rule will
-        # actually number 2 however the file has been edited since.
+        # FIXED-PROSE: the SECOND answer made to interpolate nothing,
+        # the second because the first is the early-out the rule allows.
+        # Which answer that is is asked of the gate's own reader, so the
+        # perturbation lands on the right clause however the file moves.
         cl = rust_answers(code, spans, text, here[1] + 1, here[2])
         if len(cl) < 2:
             sys.exit(f"check-diagnostics: self-test: {name} has {len(cl)} "
@@ -925,9 +850,7 @@ PY
 
 # ---------------------------------------------------------------------
 # THE SELF-TESTS, first, because a gate that has never been seen failing
-# is not a guard. Both doctor a COPY of the real file — the pattern
-# check-universal-props.sh uses — so what is proven is that the rule
-# still bites on the source as it is actually written today.
+# is not a guard. Both doctor a COPY of the real file.
 
 if ! git show "$PREFIX_REV:swift/KayaSwiftUI.swift" >"$TMP/prefix.swift" 2>"$TMP/git.log"; then
     cat "$TMP/git.log" >&2
@@ -982,14 +905,10 @@ if ! grep -q "kayaOpenPanelWhyNot has exactly ONE answer" "$TMP/st2.err"; then
     exit 1
 fi
 
-# 3 and 4. THE SAME TWO CLAUSES, ON THE RUST ARM. A rule stated for two
-#    languages and watched failing in one is a rule proven in one: the
-#    Rust front end finds its answers by a completely different route
-#    (match arms and tail expressions, literals one bracket down inside
-#    format!), so nothing the Swift pair proves carries over. Both
-#    perturbations are applied to a COPY of the core's diagnostic and
-#    audited through the same --override the Swift pair uses; the real
-#    file is never written.
+# 3 and 4. THE SAME TWO CLAUSES, ON THE RUST ARM. The Rust front end
+#    finds its answers by a completely different route, so nothing the
+#    Swift pair proves carries over. Both perturbations go to a COPY,
+#    through the same --override; the real file is never written.
 if ! run_py rust-sole "$RUST_TARGET" "$TMP/sole.rs"; then
     echo "check-diagnostics: self-test: could not build the one-answer" \
         "rust copy" >&2
@@ -1041,12 +960,9 @@ echo "check-diagnostics: self-test: the pre-fix body ($PREFIX_REV) fails" \
 # The tree as it stands.
 run_py audit "${ROOTS[@]}" >"$TMP/census.out" 2>"$TMP/census.err"
 audit_rc=$?
-# THE CENSUS PRINTS ON BOTH PATHS. It used to print only on the green
-# one, which is backwards: the first question a refusal raises is what
-# this gate actually read, and the answer to "is my new diagnostic even
-# being checked?" was available only once it already passed. A gate
-# reporting a failure may only print what it measured, and the census
-# IS the measurement.
+# THE CENSUS PRINTS ON BOTH PATHS: the first question a refusal raises
+# is what this gate actually read, and a gate reporting a failure may
+# only print what it measured.
 while IFS= read -r line; do
     echo "check-diagnostics: ${line#census }"
 done <"$TMP/census.out"

@@ -2,15 +2,13 @@
 // orders them (DESIGN.md, Menus; docs/undo-plan.md D1-D6, §3).
 //
 // WHAT AN APP WRITES FOR UNDO IS ONE CALL PER STEP. tx.Undoable(...)
-// names a transaction and that name is the step; there is no undo stack
-// in this file, no command objects, and no re-run of any handler.
+// names a transaction and that name is the step.
 //
 // THE ADD IS TWO TRANSACTIONS, DELIBERATELY: the undoable group is the
 // insert and the status it wrote, and the clear that finishes the form is
 // not part of the step. Merged, one Cmd+Z would take back the CLEAR and
 // leave a state that never existed (docs/undo-plan.md §2). Clear inside a
-// group is refused at apply anyway, because it destroys widget-owned text
-// the core never held (D4).
+// group is refused at apply anyway (D4).
 //
 // Canonical semantics in guests/rust/undo.rs; the byte-frozen contract in
 // tools/scenes/undo.steps.
@@ -39,8 +37,7 @@ func what(label string) string {
 // keyList is the app's collection mirror, rendered. THIS IS THE ONLY PART
 // OF AN UNDO A COUNT CANNOT SEE: an entry restored under a fresh name, or
 // at the end instead of where it was, leaves every total in this file
-// correct — the delta's entries and orders runs are what say otherwise,
-// and this is where the scene reads them (D5).
+// correct — the delta's entries and orders runs are what say otherwise (D5).
 func keyList(tx *kaya.Tx, todos kaya.Collection) string {
 	items := tx.Items(todos)
 	if len(items) == 0 {
@@ -48,8 +45,6 @@ func keyList(tx *kaya.Tx, todos kaya.Collection) string {
 	}
 	keys := make([]string, len(items))
 	for i, e := range items {
-		// The minter's keys are I64; any other type here would be a
-		// binding bug.
 		keys[i] = strconv.FormatInt(e.Key.(int64), 10)
 	}
 	return "keys " + strings.Join(keys, ",")
@@ -112,11 +107,9 @@ func App() *kaya.App {
 
 	app.Build(func(tx *kaya.Tx) {
 		// THE HISTORY OBSERVERS RIDE THE WINDOW CONSTRUCT: the ledger is
-		// per window, and they are persistent. THE DELTA IS THE ONLY
-		// NOTIFICATION for restored text — restoring is a programmatic
-		// write and a programmatic write never echoes — and THE RUN IS
-		// FOLDED WHOLE, because each entry names the field it restores
-		// (D5).
+		// per window. THE DELTA IS THE ONLY NOTIFICATION for restored
+		// text — a programmatic write never echoes — and THE RUN IS
+		// FOLDED WHOLE, because each entry names the field it restores (D5).
 		win := tx.Window(0).Title("undo").
 			OnUndone(func(tx *kaya.Tx, label string, delta kaya.UndoDelta) {
 				foldTexts(&draft, rowNotes, delta.Texts)
@@ -124,8 +117,7 @@ func App() *kaya.App {
 				tx.Write(history, fmt.Sprintf("undid %s, %d total", what(label), total))
 				// ONE TRANSACTION WITH THE LABEL ABOVE, deliberately: the
 				// script reads that label first, so by the time it reads
-				// this one the app's own answer is what is on screen, not
-				// the value the core restored on its way past.
+				// this one the app's own answer is what is on screen.
 				tx.Write(keys, keyList(tx, todos))
 				tx.Write(notes, noteList(rowNotes))
 			}).
@@ -164,7 +156,6 @@ func App() *kaya.App {
 					tx.Write(status, fmt.Sprintf("nothing to add, %d total", total))
 					return
 				}
-				// ONE CALL, AND IT IS THE WHOLE UNDO SURFACE.
 				tx.Undoable(fmt.Sprintf("add %s", draft))
 				// NO KEY: the binding mints the name and hands it back,
 				// and this app has no use for it.
@@ -176,12 +167,10 @@ func App() *kaya.App {
 				// undo restores state, not where you were looking (A2).
 				tx.Focus(field)
 				// FINISHING THE FORM IS NOT PART OF THE STEP — its own
-				// transaction, so undoing the add does not put the draft
-				// back beside a todo that is gone. The field reports
-				// text_changed("") and the fold above empties draft.
+				// transaction. The field reports text_changed("") and the
+				// fold above empties draft.
 				app.Post(func(tx *kaya.Tx) { tx.Clear(field) })
 			})
-			// A group at its smallest: one signal write.
 			tx.Button("star", func(tx *kaya.Tx) { // button#1
 				tx.Undoable("star")
 				tx.Write(status, "starred")
@@ -194,8 +183,8 @@ func App() *kaya.App {
 			})
 			// THE STEP WHOSE INVERSE IS AN IDENTITY, not a content: the
 			// core captured the entry and the instance's order before the
-			// removal. The target is the collection's FIRST entry, taken
-			// from the model, never from a widget.
+			// removal. The target is taken from the model, never from a
+			// widget.
 			tx.Button("remove", func(tx *kaya.Tx) { // button#3
 				items := tx.Items(todos)
 				if len(items) == 0 {
@@ -214,13 +203,10 @@ func App() *kaya.App {
 			for row := range todos.Rows(tx) {
 				row.Row(func() {
 					row.Label(row.Value())
-					// THE ROW'S OWN FIELD: a copy's text edits are the
-					// same occurrence a live field's are, one identity
-					// deeper, and the ledger banks them the same way.
-					// Nothing binds it — the unbound Entry is the
-					// template-zone constructor for exactly this case,
-					// and EntryBound is the one that seeds a copy from
-					// its row.
+					// THE ROW'S OWN FIELD: nothing binds it — the
+					// unbound Entry is the template-zone constructor
+					// for exactly this case, and EntryBound is the one
+					// that seeds a copy from its row.
 					note = row.Entry()
 				})
 			}
@@ -234,8 +220,7 @@ func App() *kaya.App {
 	// The row field's edits, folded exactly as the payload's restore of
 	// the same field will be — one rule, two arrival paths. A stamped
 	// copy's handler is registered once against the TEMPLATE NODE and
-	// hands the copy's keys; the live zone's func(*Tx, string) has
-	// nowhere to put them.
+	// hands the copy's keys.
 	app.OnChangeNode(note, func(tx *kaya.Tx, path []any, text string) {
 		key := rowKey(path)
 		if text == "" {

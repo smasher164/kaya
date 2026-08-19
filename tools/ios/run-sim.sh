@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # The menus scene runs every one of this runner's flavors: the swift
 # guest (IOS_SWIFT_SCENES), the go guest (IOS_GO_SCENES) and the rust
-# example (rust-swiftui). The phone half of the command vocabulary is
-# the interesting part — promoted primaries in the bar, everything else
-# behind More.
+# example (rust-swiftui).
 
 # The split scene is desktop-only BY DESIGN and deliberately not a leg
 # here: it drives resize_window, and a phone or tablet host does not
@@ -15,12 +13,7 @@
 # leg here: create_window is capability-rejected on this host (no
 # KAYA_CAP_AUX_WINDOWS — the system owns surfaces; DESIGN.md,
 # Presentation contexts).
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -78,11 +71,9 @@ cd "$ROOT"
 tools/gen-header.sh --check
 tools/gen-bindings.sh --check
 
-# The host-side picker driver, built ONCE per run and before any leg.
-# Only the filedialog and clipboard legs use it, but building it here
-# means a break in it fails the run at the top rather than inside one
-# leg's watcher, where the symptom would be a scene timing out with no
-# reason given.
+# The host-side picker driver, built ONCE per run and before any leg, so
+# a break in it fails at the top rather than inside one leg's watcher,
+# where the symptom would be a scene timing out with no reason.
 SIMDRIVE=$(tools/ios/simdrive/build.sh)
 # The lane's foreign clipboard reader, built once for the same reason.
 # It is a separate binary rather than a verb of simdrive because it runs
@@ -91,14 +82,10 @@ SIMDRIVE=$(tools/ios/simdrive/build.sh)
 CLIPCTL=$(tools/ios/clipctl/build.sh)
 
 # THE DECLARED APP IDENTITY, READ ONCE, FROM THE ONE PLACE IT IS WRITTEN
-# (docs/app-identity-plan.md ruling 4). This lane is one of the two
-# BUILD-TIME readers the ruling names — it assembles a real .app with a
-# real Info.plist, so the icon goes into the bundle and the name into
-# CFBundleDisplayName, neither of which this plist declared before.
-#
-# THE VALUES COME OUT OF THE DECLARATION, never retyped: retyping either
-# one here is the second reader ruling 4 exists to prevent, and
-# tools/check-app-identity.sh C6 holds this file to it.
+# (docs/app-identity-plan.md ruling 4). THE VALUES COME OUT OF THE
+# DECLARATION, never retyped: retyping either one here is the second
+# reader ruling 4 exists to prevent, and check-app-identity C6 holds
+# this file to it.
 KAYA_IDENTITY_MANIFEST="$ROOT/guests/assets/identity.toml"
 IDENTITY_DECL="$(python3 - "$KAYA_IDENTITY_MANIFEST" <<'PY'
 import pathlib
@@ -136,23 +123,15 @@ fi
 
 # THE ASSET ROOT, INTO EVERY BUNDLE. This is the one lane where staging
 # and PACKAGING are the same act: an iOS app resolves its resources out
-# of its own bundle, so copying the root into the `.app` is both how a
-# shipped kaya app would carry its assets and how this lane delivers
-# them (docs/assets-plan.md A4's iOS row and A5.3).
+# of its own bundle (docs/assets-plan.md A4's iOS row and A5.3).
 #
-# NO KAYA_ASSET_DIR HERE, AND THAT IS THE POINT. Every other lane that
-# cannot see the repo names a path in an environment variable; this one
-# does not have to, because the core asks `Bundle.main` for its resource
-# directory before it falls back to anything (crates/kaya/src/assets.rs,
-# route 2). So iOS is the first lane whose asset delivery is the real
-# mechanism rather than a test convenience — which is exactly what the
-# plan's A4 says the fix should be. If the bundle copy stops happening,
-# the guest does not silently read a stale file: it gets the core's miss
-# sentence naming the bundle it looked in.
+# NO KAYA_ASSET_DIR HERE, AND THAT IS THE POINT: the core asks
+# `Bundle.main` for its resource directory before it falls back to
+# anything (crates/kaya/src/assets.rs, route 2). If the bundle copy
+# stops happening the guest does not read a stale file — it gets the
+# core's miss sentence naming the bundle it looked in.
 #
-# THE WHOLE ROOT, not the files a scene happens to want. A lane stages
-# the root as a unit (A5.1); the bundle is 116 KB of assets and the
-# simulator does not care.
+# THE WHOLE ROOT, not the files a scene happens to want (A5.1).
 ASSET_SRC="$ROOT/guests/assets"
 if [ ! -d "$ASSET_SRC" ]; then
     echo "run-sim: the asset root $ASSET_SRC is missing — every bundle this" >&2
@@ -163,16 +142,10 @@ fi
 
 make_bundle() {
     # A fourth argument, ANY non-empty value, puts the declared identity
-    # into this bundle: the mark copied in verbatim and the plist's icon
-    # keys plus CFBundleDisplayName filled from the manifest. Empty — the
-    # default, and every other bundle on this lane — leaves the plist
-    # exactly as it was before identity existed.
-    #
-    # OPT-IN AND NOT GLOBAL. The interpreter's iOS `expect_app_icon` reads
-    # THIS artifact and holds it equal to what the guest declared over the
-    # wire, so a bundle carrying an identity its guest never declared
-    # would be an icon nobody asked for, and the read could report one for
-    # an app with no declaration at all.
+    # into this bundle. OPT-IN AND NOT GLOBAL: `expect_app_icon` reads
+    # THIS artifact and holds it equal to what the guest declared over
+    # the wire, so a bundle carrying an identity its guest never declared
+    # would let the read report one for an app with no declaration.
     local name="$1" bundle_id="$2" executable_path="$3" identity="${4:-}"
     local app="$BUNDLES/$name.app"
     rm -rf "$app"
@@ -208,12 +181,10 @@ sys.stdout.write(tpl.replace("@EXECUTABLE@", os.environ["KAYA_NAME"])
                     .replace("@BUNDLE_ID@", os.environ["KAYA_BUNDLE_ID"])
                     .replace("@NAME@", os.environ["KAYA_NAME"])
                     .replace("@IDENTITY@", block))' > "$app/Info.plist"
-    # The asset root, verbatim and entire, where Bundle.main will find
-    # it. `cp -R <dir>/. <dst>/` rather than `cp -R <dir> <dst>` so the
-    # ROOT'S CONTENTS land at assets/ regardless of whether the
-    # destination already exists — the two spellings differ only on a
-    # second run, which is the run that would have nested
-    # assets/assets/.
+    # `cp -R <dir>/. <dst>/` rather than `cp -R <dir> <dst>` so the
+    # ROOT'S CONTENTS land at assets/ whether or not the destination
+    # exists — the two spellings differ only on a second run, which is
+    # the run that would have nested assets/assets/.
     mkdir -p "$app/assets"
     cp -R "$ASSET_SRC/." "$app/assets/" || return 1
     # What arrived is what was sent, by hash. The bundle assembly is a
@@ -247,29 +218,22 @@ PY
 }
 
 # A pool of dedicated simulators (kaya-sim-0..N-1, KAYA_IOS_SIMS wide)
-# runs the legs in parallel. Devices are created on first use from the
-# newest iPhone device type + iOS runtime, stay booted across runs
-# (second and later boots ride shared caches, ~15s), and never touch
-# the user's own simulators.
+# runs the legs in parallel. Devices are created on first use, stay
+# booted across runs, and never touch the user's own simulators.
 POOL="${KAYA_IOS_SIMS:-3}"
 UDIDS=()
-# One iPad alongside the phone pool. It exists for exactly one reason:
-# the phone pool is ALWAYS a compact horizontal size class, so nothing
-# in this lane could observe the regular-width lowering, and the iPad
-# menu-bar defect (DESIGN.md, "Form factor and adaptivity") shipped
-# unseen because of it. It is a single device carrying a single scene,
-# not a second pool — form-factor coverage, not device-matrix breadth.
+# One iPad alongside the phone pool, for one reason: the phone pool is
+# ALWAYS a compact horizontal size class, so nothing else in this lane
+# observes the regular-width lowering. Form-factor coverage, not
+# device-matrix breadth.
 PAD_UDID=""
 
 # Resolve a pool device by name, RECREATING it if its type has drifted.
 # Reuse-by-name alone is a trap: a device created under a different
-# selector or a different Xcode keeps its old type forever, so the pool
-# silently goes heterogeneous — this machine's held two iPhone 11 Pros
-# and an iPhone 17 Pro before this guard, and since slot claiming is a
-# race, which screen a leg got varied run to run. For the iPad it is
-# worse than flaky: a stale kaya-sim-pad of the wrong type would make
-# the form-factor gate VACUOUS while still reporting PASS, and a gate
-# that passes without exercising the real thing is a bug in the gate.
+# selector or Xcode keeps its old type forever, so the pool silently
+# goes heterogeneous and which screen a leg gets varies run to run. For
+# the iPad it is worse than flaky — a stale kaya-sim-pad of the wrong
+# type makes the form-factor gate VACUOUS while still reporting PASS.
 device_of() { # name dtype runtime -> udid
     local name="$1" dtype="$2" runtime="$3" udid have
     udid=$(xcrun simctl list devices | grep -m1 "$name (" \
@@ -330,13 +294,11 @@ boot_pool() {
     done
 }
 
-# Recording mode (KAYA_RECORD=1): the simulator is its own isolated
-# surface and shows one app at a time, so ONE suite-long recording
-# contains every leg in sequence — per-leg start/stop is not just
-# unnecessary, it wedges (the device-side session of a stopped
-# recording lingers, and later recorders fail with "Host recording is
-# already in progress"). Each leg notes its launch anchor; extraction
-# happens after the recorder stops, one lead per leg.
+# Recording mode (KAYA_RECORD=1): ONE suite-long recording contains
+# every leg in sequence. Per-leg start/stop WEDGES — the device-side
+# session of a stopped recording lingers and later recorders fail with
+# "Host recording is already in progress". Each leg notes its launch
+# anchor; extraction happens after the recorder stops.
 rec_suite_start() {
     [ -n "${KAYA_RECORD:-}" ] || return 0
     command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null \
@@ -344,18 +306,12 @@ rec_suite_start() {
     "$ROOT/tools/harness-extract.sh" --selftest || exit 1
     REC_ROOT="$ROOT/target/recordings/ios"
     mkdir -p "$REC_ROOT"
-    # Extraction sweeps this root, so a leg directory left by an
-    # EARLIER run — a suite this invocation does not run, or a leg
-    # name the runner no longer produces — would be extracted against
-    # TODAY's film and fail "anchor implausible" forever, reddening
-    # every recorded run regardless of the code (observed 2026-07-24:
-    # eight `*-rust` directories from the pre-roster naming, four days
-    # stale, with each recorded run since). A stamp rather than a
-    # wipe, because `run-sim.sh swift` must not delete the
-    # rust-swiftui suite's films: this run's legs carry its id and
-    # extraction ignores everything else. Directories with no stamp
-    # predate the mechanism and can never be matched to a film, so
-    # they go now.
+    # Extraction sweeps this root, so a leg directory left by an EARLIER
+    # run would be extracted against TODAY's film and fail "anchor
+    # implausible" forever. A STAMP rather than a wipe, because
+    # `run-sim.sh swift` must not delete the rust-swiftui suite's films:
+    # this run's legs carry its id and extraction ignores everything
+    # else. Directories with no stamp can never be matched to a film.
     REC_RUN="$$-$(date +%s)"
     local stale
     for stale in "$REC_ROOT"/*/; do
@@ -407,12 +363,11 @@ rec_suite_start() {
         echo "recording: sessions still wedged after a service reset; giving up"
         exit 1
     fi
-    # simctl announces capture in its own log ("Recording started") —
-    # and nothing else can: the output file stays ZERO bytes until
-    # finalize, so no file-based signal exists. Flipping the fiducial
-    # before the announcement films neither edge, and the run dies at
-    # extraction after every leg passed. Wait for the announcement,
-    # bounded.
+    # simctl announces capture in its own log ("Recording started") and
+    # nothing else can — the output file stays ZERO bytes until
+    # finalize. Flipping the fiducial before the announcement films
+    # neither edge, and the run dies at extraction after every leg
+    # passed. Wait for it, bounded.
     i=0
     local tries
     for udid in "${UDIDS[@]}"; do
@@ -432,24 +387,18 @@ rec_suite_start() {
     # buffered tail when stopped. So plant a fiducial per device: flip
     # the UI appearance dark and stamp the wall time when the flip is
     # actually VISIBLE — the ui command returns seconds before the
-    # render lands on a busy, freshly booted simulator, and stamping
-    # the command time skews every still by that latency. The
-    # screenshot poll pins the stamp to the render within ~300ms — and
-    # a stamp is only ever written for an OBSERVED render: stamping
-    # after an unrendered flip once anchored a film to a moment that
-    # never appeared in it.
+    # render lands, and a stamp is only ever written for an OBSERVED
+    # render.
     #
     # The flip is an EDGE, never an absolute level: the home screen
-    # accumulates one bright placeholder icon per installed scene
-    # bundle, and by this milestone their tiles held the dark
-    # appearance at YAVG ~107 — an absolute <100 test concluded the
-    # flip "never rendered" while staring straight at it. Measured
-    # flip delta on that icon-heavy screen: 68; the threshold is 25.
+    # accumulates one bright placeholder icon per installed bundle, and
+    # their tiles held the dark appearance at YAVG ~107, so an absolute
+    # <100 test concluded the flip "never rendered" while staring
+    # straight at it. Measured flip delta there: 68; threshold 25.
     #
-    # The pool's appearance is whatever the previous run left behind —
-    # an aborted run leaves devices already dark, and a drop edge
-    # cannot fire from a dark base. Normalize to light first; this
-    # pre-flip is never stamped, so a plain settle suffices.
+    # The pool's appearance is whatever the previous run left behind, and
+    # a drop edge cannot fire from a dark base. Normalize to light first;
+    # this pre-flip is never stamped.
     for udid in "${UDIDS[@]}"; do
         xcrun simctl ui "$udid" appearance light
     done
@@ -483,12 +432,10 @@ rec_suite_start() {
         echo "${T_MARKS[$i]}" >"$REC_ROOT/t_mark-$i"
         i=$((i + 1))
     done
-    # The flip BACK is a second fiducial, stamped the same way. A
-    # recorder that attaches mid-flip produces a film that OPENS dark —
-    # the dark EDGE is then not in the film at all, and the run used to
-    # die at extraction ("no dark fiducial") after every leg passed.
-    # With both edges stamped, extraction anchors on whichever edge the
-    # film actually contains.
+    # The flip BACK is a second fiducial, stamped the same way: a
+    # recorder that attaches mid-flip produces a film that OPENS dark, so
+    # the dark EDGE is not in it at all. With both edges stamped,
+    # extraction anchors on whichever edge the film contains.
     i=0
     for udid in "${UDIDS[@]}"; do
         xcrun simctl io "$udid" screenshot "$REC_ROOT/.flip-probe.png" >/dev/null 2>&1 || true
@@ -540,13 +487,11 @@ rec_suite_stop() {
     done
     # Locate each device's appearance-flip fiducial. Both edges were
     # stamped when they became VISIBLE, and both are EDGES, not levels:
-    # the home screen's icon load moves the absolute luma of "dark"
-    # from run to run (it read 107 this milestone — over any fixed
-    # threshold — while the flip's drop stayed a clean 68). Anchor on
-    # whichever edge the film contains: the drop to dark if the
-    # recorder was live for it, else the rise back to light (the
-    # recorder attached mid-flip). Boot and install churn is
-    # bright-to-bright and crosses neither threshold.
+    # the home screen's icon load moves the absolute luma of "dark" run
+    # to run (107 measured, over any fixed threshold, while the flip's
+    # drop stayed a clean 68). Anchor on whichever edge the film
+    # contains. Boot and install churn is bright-to-bright and crosses
+    # neither threshold.
     # The reader takes what it needs but DRAINS the whole stream: head -1
     # would SIGPIPE ffprobe, which set -o pipefail turns fatal.
     local ANCHORS=()
@@ -649,27 +594,21 @@ rec_finish() {
 }
 
 # THE CLIPBOARD SCENE'S FOREIGN SIDE, ON THE HOST. iOS has no child
-# processes — Process is macOS-only, so the interpreter cannot run the
-# foreign tools the mac arm runs — and an app reading its own writes is
-# a check that cannot fail for the reason the scene exists. So the seed
-# and the foreign read are answered here, over the same two files the
-# picker verbs use, with payloads base64'd because the request line is
-# word-split below and a seed's content has spaces.
+# processes, so the interpreter cannot run the foreign tools the mac arm
+# runs, and an app reading its own writes cannot fail for the reason the
+# scene exists. The seed and the foreign read are answered here, over
+# the same two files the picker verbs use, payloads base64'd because the
+# request line is word-split below.
 #
 # Every rule below was measured (docs/clipboard-plan.md §8):
 #   - BOTH DIRECTIONS ARE A SPAWNED PROCESS, not a tool
-#     (tools/ios/clipctl). Reading: `simctl pbpaste` reads a union clip
-#     as empty and `pbsync <device> host` drops app-defined types.
-#     Seeding: `simctl pbcopy` is text-only, and `pbsync host <device>`
-#     exits rc=0 while delivery is still in flight — the window that
-#     intermittently handed the guest an empty board (§8 finding 6) —
-#     besides transiting the ONE macOS pasteboard this lane must never
-#     touch (validate-all runs it beside the mac lane's clipboard
-#     legs). A spawned principal is gated by the system as another app,
-#     which is the only sense of "foreign" that matters here.
+#     (tools/ios/clipctl). `simctl pbpaste` reads a union clip as empty
+#     and `pbsync <device> host` drops app-defined types; `simctl
+#     pbcopy` is text-only and `pbsync host <device>` exits rc=0 while
+#     delivery is still in flight (§8 finding 6), besides transiting the
+#     ONE macOS pasteboard this lane must never touch.
 #   - `simctl` writes its "unhandled Platform key" warnings to STDERR,
-#     so every capture here drops it rather than gluing 18 lines in
-#     front of the content.
+#     so every capture here drops it.
 
 # base64 in and out, in python3 — the repo's rule for text processing,
 # and the spelling that cannot line-wrap a long payload into several
@@ -684,13 +623,11 @@ clip_encode() { # bytes on stdin -> one base64 token on stdout
 sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())'
 }
 
-# The process that HOSTS the paste alert. Resolved per call and cached
+# The process that HOSTS the paste alert, resolved per call and cached
 # per device: the alert is SpringBoard's, and SpringBoard's own tree is
 # the one place it is ALWAYS readable — the hit-test route goes blind
 # exactly when the alert was raised by the foreground app's own blocked
-# read (measured 2026-08-03: `describe` answered "no picker" for six
-# straight seconds with the alert filling the screen, while a tree walk
-# of SpringBoard's pid found the button first try).
+# read.
 clip_sb_pid() { # udid -> pid (0 when unresolved, which press tolerates)
     local udid="$1" pid
     local cache="$LEGS_DIR/sb-pid-$udid"
@@ -704,15 +641,13 @@ clip_sb_pid() { # udid -> pid (0 when unresolved, which press tolerates)
 }
 
 # Answer the per-clip paste prompt, or report that there was none — an
-# own-content read never raises one, so "none" is an answer rather than
-# a failure.
+# own-content read never raises one, so "none" is an answer.
 #
-# The press verb is the one that looks: it searches the hit-test
-# overlay AND SpringBoard's own tree each try, refuses to tap a button
-# whose frame is still animating, and FAILS when nothing carries the
-# label — which is this function's "no alert" signal. Pressed again
-# until that failure, because the alert leaving the screen is the only
-# proof a tap landed.
+# The press verb searches the hit-test overlay AND SpringBoard's tree
+# each try, refuses to tap a button whose frame is still animating, and
+# FAILS when nothing carries the label, which is this function's "no
+# alert" signal. Pressed again until that failure, because the alert
+# leaving the screen is the only proof a tap landed.
 clip_press() { # udid -> pressed | none
     local udid="$1" sb i did=0
     sb=$(clip_sb_pid "$udid")
@@ -736,17 +671,13 @@ clip_press() { # udid -> pressed | none
 # is a bare token; the payload rides base64 and is the literal content
 # for text/html, or an ALREADY-EXPANDED absolute path for image/files.
 #
-# THE HOST PASTEBOARD IS NOT IN THIS PATH, deliberately, and it was
-# once: the first shape seeded the HOST board and pushed it with
-# `pbsync host <device>`, which exits rc=0 while DELIVERY IS STILL IN
-# FLIGHT — the guest's read then snapshots the board mid-replacement
-# and answers empty, which run after run failed a DIFFERENT two of the
-# four foreign reads (docs/clipboard-plan.md §8 finding 6). The
-# spawned write is synchronous and visible to other processes before
-# the spawn exits (measured, 246ms), and it keeps the ONE macOS
-# pasteboard out of a lane that runs beside validate-mac's clipboard
-# legs under validate-all — through the host board this lane would
-# race the mac lane's, and check-steps' iOS clause now pins the
+# THE HOST PASTEBOARD IS NOT IN THIS PATH, deliberately: `pbsync host
+# <device>` exits rc=0 while DELIVERY IS STILL IN FLIGHT, so the guest's
+# read snapshots the board mid-replacement and answers empty
+# (docs/clipboard-plan.md §8 finding 6). The spawned write is
+# synchronous and visible to other processes before the spawn exits, and
+# it keeps the ONE macOS pasteboard out of a lane that runs beside
+# validate-mac's clipboard legs. check-steps' iOS clause pins the
 # absence.
 #
 # Custom formats are not seedable, here as everywhere: no stock tool
@@ -785,12 +716,10 @@ clip_seed() { # udid kind b64 -> ok
             return 1
             ;;
     esac
-    # THE WRITER IS HELD ALIVE, not exit-and-hope: the pasteboard
-    # daemon serves item DATA by fetching it from the setter, and a
-    # writer that exits at once intermittently leaves a reader empty
-    # (measured 1-in-5 solo for the png; §8 finding 6). Each seed
-    # kills the previous holder — the board is replaced wholesale — and
-    # the leg teardown kills the last one.
+    # THE WRITER IS HELD ALIVE: the pasteboard daemon serves item DATA
+    # by fetching it from the setter, and a writer that exits at once
+    # intermittently leaves a reader empty (measured 1-in-5 solo for the
+    # png; §8 finding 6). Each seed kills the previous holder.
     local holder_file="$LEGS_DIR/seed-holder-$udid"
     local seed_log="$LEGS_DIR/seed-$udid.out"
     if [ -f "$holder_file" ]; then
@@ -846,9 +775,8 @@ clip_read() { # udid b64-kind -> b64 answer
     fi
     # THE MISSING LINE IS THE DIAGNOSIS. A kind the board does not carry
     # still prints an EMPTY `S b64=`; no line at all means the read never
-    # returned, which is an unanswered prompt and not an empty clipboard.
-    # Saying so here is the difference between one message and a scene
-    # that reports the backend wrote nothing.
+    # returned, which is an unanswered prompt and not an empty
+    # clipboard.
     if ! grep -q "^S b64=" "$log"; then
         echo "the $kind read never returned after $tries presses — the paste prompt" \
             "went unanswered; the board offered $(grep "^S types=" "$log")" >&2
@@ -889,41 +817,31 @@ sys.stdout.write("\n".join(names))' | clip_encode
     esac
 }
 
-# THE DEVICE PASTEBOARD IS NOT ALWAYS THE DEVICE'S, and this is the
-# wall in front of that. Simulator.app carries an Edit > Automatically
-# Sync Pasteboard, ON BY DEFAULT (`PasteboardAutomaticSync` in
-# com.apple.iphonesimulator), which RELAYS the macOS pasteboard into and
-# out of every booted simulator — measured 2026-08-03: a host `pbcopy`
-# replaced a booted device's clip in 260ms, and two booted devices
-# ground each other's clips down to one shared board through the host.
-# §8 finding 5's "strictly per-device" holds only while that app is not
-# running, which is exactly the state it was measured in.
+# THE DEVICE PASTEBOARD IS NOT ALWAYS THE DEVICE'S. Simulator.app's
+# Edit > Automatically Sync Pasteboard is ON BY DEFAULT
+# (`PasteboardAutomaticSync` in com.apple.iphonesimulator) and RELAYS
+# the macOS pasteboard into and out of every booted simulator —
+# measured 2026-08-03: a host `pbcopy` replaced a booted device's clip
+# in 260ms, and two booted devices ground each other's clips down to one
+# shared board. §8 finding 5's "strictly per-device" holds only while
+# that app is not running.
 #
-# What that costs this lane is not theoretical: under validate-all the
-# mac lane's clipboard legs rewrite the macOS pasteboard for eight
-# languages throughout, so the guest's clip is replaced mid-scene and a
-# DIFFERENT step reads empty every run while the lane passes solo. That
-# is three matrix runs of chasing a race that was never in kaya's code.
-#
-# So MEASURE IT, before any leg, on the two devices this lane already
-# booted. A pref read would not do: a running Simulator.app ignores a
-# `defaults write` (measured), so the pref can say NO while the relay is
-# live. Two devices, two different clips, and each must keep its own —
-# types only, which is prompt-free at every stage (§8 finding 2), so
-# this costs no alert and touches no data. And no host pasteboard: this
-# lane must never write the board the mac lane is using (§8 finding 6,
-# pinned by check-steps).
+# So MEASURE IT, before any leg, on the two devices this lane booted. A
+# pref read would not do: a running Simulator.app ignores a `defaults
+# write` (measured), so the pref can say NO while the relay is live. Two
+# devices, two different clips, each keeping its own — types only, which
+# is prompt-free at every stage (§8 finding 2). And no host pasteboard:
+# this lane must never write the board the mac lane is using.
 clip_relay_check() { # udid_a udid_b -> 0 when the boards are separate
     local a="$1" b="$2" i seen_a seen_b shared
     timeout 60 xcrun simctl spawn "$a" "$CLIPCTL" write html \
         "$(printf '%s' '<b>kaya relay check</b>' | clip_encode)" >/dev/null 2>&1
     timeout 60 xcrun simctl spawn "$b" "$CLIPCTL" write text \
         "$(printf '%s' 'kaya relay check' | clip_encode)" >/dev/null 2>&1
-    # The relay is FAST (260ms), so a look a second later is already
-    # decisive; three of them is slack for a loaded machine. Device A
-    # wrote first, so last-writer-wins leaves A carrying B's text — A
-    # LOSING html and B GAINING it are two independent tells, and either
-    # one is a shared board.
+    # The relay is FAST (260ms), so a look a second later is decisive;
+    # three is slack for a loaded machine. Device A wrote first, so
+    # last-writer-wins leaves A carrying B's text: A LOSING html and B
+    # GAINING it are two independent tells of a shared board.
     for i in 1 2 3; do
         sleep 1
         seen_a=$(timeout 60 xcrun simctl spawn "$a" "$CLIPCTL" 2>/dev/null | grep -m1 '^S types=')
@@ -965,45 +883,24 @@ clip_relay_check() { # udid_a udid_b -> 0 when the boards are separate
 }
 
 # THE FIRST PICKER A DEVICE SHOWS AFTER A BOOT OPENS IN THE WRONG
-# DIRECTORY, and this is the warm-up in front of that.
-#
-# `UIDocumentPickerViewController.directoryURL` is not applied at
-# presentation the way NSOpenPanel's is. The app's request crosses to
-# com.apple.DocumentManager.Service as a REVEAL, and that service is
-# concurrently running its own "which location does this picker open
-# at" strategy, which ends in `getSaveLocation` — the app's container
-# root. Whichever of the two lands LAST wins, and the service says so in
-# its own log ("Will reveal location <kaya-picked-N>" vs "2.2.2 Will use
-# getSaveLocation's suggested location <appname>", with an "Attempt to
-# reset locations, while a reset is already in progress" between them).
-#
-# Measured on this machine, 2026-08-03, ten leg runs across three
-# devices — five on a device whose first picker this was, all five at
-# the root; five after one, all five where they were aimed:
+# DIRECTORY (docs/traps.md), and this is the warm-up in front of that.
+# The app's reveal races DocumentManager's own default-location
+# strategy, whose `getSaveLocation` answer is the app's container root,
+# and whichever lands LAST wins. Measured 2026-08-03 over ten leg runs:
 #
 #   device state          getSaveLocation   reveal   outcome
 #   first picker on boot        708ms        381ms   the ROOT, every time
 #   any picker after that       160ms        297ms   the asked-for directory
 #
-# The reveal arrives ~300-450ms after the service starts resolving, so a
-# resolution slower than that overwrites it. The first one on a boot is
-# slow because the LocalStorage file provider populates its tree lazily
-# — Apple's own forums say as much, and the "directoryURL opens the root
-# instead" reports have no other explanation (docs/traps.md).
+# It is neither the harness nor the guest — `file_choose` then refuses a
+# row that is genuinely not there — and it is NOT Simulator.app: a cold
+# device fails identically with the app running, a warm one passes
+# headless.
 #
-# It is not the harness, and it is not the guest: a picker that opens at
-# the root lists the app's Documents directory, `file_choose` then
-# refuses a row that is genuinely not there, and the guest never gets a
-# result. It is also NOT about Simulator.app — that was the first
-# suspect and it is measured false: a cold device fails identically with
-# the app running, and a warm one passes headless.
-#
-# So WARM THE STACK before any leg, with the system's own Files app —
-# the same DocumentManager and the same file provider the picker uses.
-# The device says when it is done: `com.apple.FileProvider` carries no
-# pid until something on that boot has used the document stack, and the
-# daemon is what the tree is enumerated behind. A device that already
-# has one is already warm and costs a single query.
+# So WARM THE STACK before any leg with the system's own Files app, the
+# same DocumentManager and file provider the picker uses. The device
+# says when it is done: `com.apple.FileProvider` carries no pid until
+# something on that boot has used the document stack.
 doc_daemon_pid() { # udid -> the file provider daemon's pid, empty when down
     xcrun simctl spawn "$1" launchctl list 2>/dev/null | python3 -c '
 import sys
@@ -1038,12 +935,9 @@ picker_warm() { # udid -> 0 when this device can aim a picker
         return 1
     fi
     # The daemon answering is the edge; the local-storage tree fills in
-    # behind it, and nothing on the host can watch that happen. Measured:
-    # the resolution the picker waits on drops 708ms -> 294ms across this
-    # pause, which is what puts the reveal back in front of it. If it ever
-    # stops being enough the leg says so in one line now
-    # ("KAYA_HARNESS: step-failed file dialog showing ..."), which is the
-    # sentence this whole warm-up was bought with.
+    # behind it and nothing on the host can watch that. Measured: the
+    # resolution the picker waits on drops 708ms -> 294ms across this
+    # pause, which is what puts the reveal back in front of it.
     sleep 3
     timeout 60 xcrun simctl terminate "$udid" com.apple.DocumentsApp >/dev/null 2>&1 || true
     return 0
@@ -1065,18 +959,15 @@ clip_verb() { # udid verb args...
 
 # Answer the guest's simdrive requests for the life of one leg.
 #
-# The protocol is deliberately two files and nothing else: the guest
-# writes `kaya-simdrive-request` holding one verb, this writes
-# `kaya-simdrive-response` whose FIRST LINE is ok/err and whose trailing
-# newline is the commit — written last, so a guest that reads mid-write
-# sees an incomplete file and keeps waiting rather than acting on half
+# The protocol is two files: the guest writes `kaya-simdrive-request`
+# holding one verb, this writes `kaya-simdrive-response` whose FIRST
+# LINE is ok/err and whose TRAILING NEWLINE IS THE COMMIT, written last,
+# so a guest reading mid-write keeps waiting rather than acting on half
 # an answer.
 #
 # The app's pid is resolved per request rather than once: simdrive needs
 # it to tell the picker's process from the app's, and the app is
-# launched after this starts. The clipboard verbs need no pid — the
-# principal they drive is the spawned reader, not the app — so they
-# skip that round trip.
+# launched after this starts. The clipboard verbs need no pid.
 simdrive_watch() { # udid bundle_id documents_dir
     local udid="$1" bundle_id="$2" dir="$3"
     local request="$dir/kaya-simdrive-request" response="$dir/kaya-simdrive-response"
@@ -1087,11 +978,10 @@ simdrive_watch() { # udid bundle_id documents_dir
             local verb
             verb=$(cat "$request" 2>/dev/null)
             rm -f "$request"
-            # CAPTURED WITH `|| rc=$?`, NOT `rc=$?` ON THE NEXT LINE: this
-            # runs under `set -e`, where a failing command substitution
-            # kills the watcher before the next line runs. The err branch
-            # below was unreachable that way, and the failure it exists
-            # to report arrived as a leg timing out with nothing said.
+            # CAPTURED WITH `|| rc=$?`, NOT `rc=$?` ON THE NEXT LINE:
+            # under `set -e` a failing command substitution kills the
+            # watcher before the next line runs, which made the err
+            # branch below unreachable.
             local pid body rc=0
             case "$verb" in
                 clip_*)
@@ -1120,30 +1010,20 @@ simdrive_watch() { # udid bundle_id documents_dir
     done
 }
 
-# DROP ONE STEP, not a suffix — the cut's sibling, for a step that is out
-# of reach on this host while everything AFTER it is expressible.
+# DROP ONE STEP, not a suffix — the cut's sibling, for a step out of
+# reach on this host while everything AFTER it is expressible. Exactly
+# one `identity` step reads the declared NAME off an AUXILIARY window,
+# and this host has none (the core rejects create_window by capability
+# and the guest asks rather than testing the platform), while the icon
+# reads and the live-widget round trip below it are expressible.
 #
-# The cut in run_swiftui_on takes a tail: it exists for `dirty` and
-# `editor`, whose last stretch hangs off a chrome close this platform has
-# not got, so everything below one verb goes. `identity` is the other
-# shape. Exactly one of its steps reads the declared NAME off an
-# AUXILIARY window, and this host has none — the core rejects
-# create_window by capability, so the guest does not build one
-# (guests/rust/identity.rs's cfg, keyed on the same predicate) — while
-# the two icon reads, the toolbar assertions and the live-widget round
-# trip below it are all perfectly expressible. Cutting the tail here
-# would throw away the second `expect_app_icon`, which is the step that
-# proves nothing later disturbed the mark.
+# THE SAME TWO GUARDS THE CUT CARRIES: a drop that matches no step is
+# STALE, and the `keep` verbs name the assertions the drop may not take
+# with it. A green leg still SAYS what it declined.
 #
-# THE SAME TWO GUARDS THE CUT CARRIES, for the same reasons: a drop that
-# matches no step is STALE (the scene was reshaped and nobody re-read
-# what the phone can express), and the `keep` verbs name the assertions
-# the drop may not take with it. And a green leg still SAYS what it
-# declined.
-#
-# NAMED BY VERB AND TARGET, never by the whole line: the line carries the
-# declared NAME, and retyping a declared value in a runner is the second
-# source of truth guests/assets/identity.toml exists to prevent.
+# NAMED BY VERB AND TARGET, never by the whole line: the line carries
+# the declared NAME, and retyping a declared value in a runner is the
+# second source of truth guests/assets/identity.toml exists to prevent.
 scene_script_drop() { # scene verb target keep-verb...
     python3 - "$ROOT/tools/scenes/$1.steps" "$2" "$3" "${@:4}" <<'PY'
 import pathlib
@@ -1193,45 +1073,36 @@ PY
 run_swiftui_on() {
     local udid="$1" slot="$2" app="$3" bundle_id="$4" name="$5" selftest="$6" scene="$7"
     # Optional 8th argument: extra steps appended to the shared scene
-    # for THIS leg only. The scene file itself stays byte-frozen and
-    # shared verbatim; this is how a leg asserts something that is only
-    # true on its own device (the iPad's form factor), the way
-    # panels.steps carries desktop-only capability rejection.
+    # for THIS leg only. The scene file stays byte-frozen and shared
+    # verbatim; this is how a leg asserts something only true on its own
+    # device (the iPad's form factor).
     local extra="${8:-}"
     # Optional 9th/10th arguments: THE PHONE-EXPRESSIBLE PREFIX — the cut
     # VERB this host cannot express, and the verb whose assertions the
     # cut may not take with it.
     #
-    # This runner already declines WHOLE scenes for this reason and says
-    # so at the top of the file: `split` drives resize_window and a phone
+    # This runner declines WHOLE scenes for the same reason and says so
+    # at the top of the file: `split` drives resize_window and a phone
     # does not command its own window size, `panels` drives create_window
-    # and this host rejects it by capability. `dirty` is the first scene
-    # that is mostly runnable here and desktop-only in its TAIL: its last
-    # six steps hang off a chrome close (close_window → the veto class →
-    # the app's own dialog), and on iOS the whole close grammar is inside
-    # `#if os(macOS)` because there is no chrome close to grammar. The
-    # alternatives were an all-or-nothing carve-out — which would leave
-    # D4's iOS arm applied but asserted by nobody, and the depth arm's
-    # rule is that a read nothing runs is a claim nobody checked — or a
-    # phone-safe sibling scene, which every runner would then owe legs
-    # for (check-steps' wired()), i.e. a cross-lane obligation minted
-    # mid-fan-out. This keeps the shared file byte-frozen and shared
-    # verbatim: the prefix is its own bytes, and the steps this lane did
-    # not run are PRINTED, so a green leg still says what it declined.
+    # and this host rejects it by capability. `dirty` is desktop-only in
+    # its TAIL alone — its last six steps hang off a chrome close, and on
+    # iOS the whole close grammar is inside `#if os(macOS)`. An
+    # all-or-nothing carve-out would leave D4's iOS arm asserted by
+    # nobody, and a phone-safe sibling scene would mint a cross-lane
+    # obligation mid-fan-out (check-steps' wired()). This keeps the
+    # shared file byte-frozen, and the steps this lane did not run are
+    # PRINTED.
     #
     # THE TWO WAYS THIS COULD GO QUIET, BOTH REFUSED BELOW: the cut verb
-    # leaving the scene (then the cut is stale and the leg would silently
-    # run everything, or nothing), and the cut swallowing the very
-    # assertion the leg exists for (then it is a gate satisfiable without
-    # exercising the real thing). The second is not hypothetical — cut
-    # this scene one step earlier, at `click button#0`, and the prefix
-    # asserts `dirty false` and never `dirty true`.
+    # leaving the scene (the cut is then stale), and the cut swallowing
+    # the very assertion the leg exists for. The second is not
+    # hypothetical — cut this scene one step earlier, at `click
+    # button#0`, and the prefix asserts `dirty false` and never
+    # `dirty true`.
     local cut="${9:-}" keep="${10:-}"
     # The 11th and 12th: THE ONE STEP THIS HOST CANNOT EXPRESS while
     # everything after it can (scene_script_drop above). Mutually
-    # exclusive with the cut — a leg that both trims a tail and drops a
-    # step is two decisions wearing one name — and the same `keep` guard
-    # holds it.
+    # exclusive with the cut, and the same `keep` guard holds it.
     local drop_verb="${11:-}" drop_target="${12:-}"
     if [ -n "$cut" ] && [ -n "$drop_verb" ]; then
         echo "run-sim: $name asks for both a cut at \`$cut\` and a drop of" \
@@ -1249,15 +1120,9 @@ import pathlib
 import sys
 
 path, cut, keep = sys.argv[1], sys.argv[2], sys.argv[3]
-# A CUT WITHOUT A `keep` IS AN UNGUARDED CUT, and an optional guard is
-# the kind that is quietly not passed. Naming what the cut may not take
-# is the price of cutting at all.
-#
-# A LIST, because one scene's tail can be below more than one thing the
-# leg exists to assert: the sections leg asserts both which section is
-# showing AND what its switcher row draws, and a guard naming only the
-# first would let the second slide into the tail unnoticed. Every verb
-# named gets the same two clauses.
+# A CUT WITHOUT A `keep` IS AN UNGUARDED CUT: naming what the cut may
+# not take is the price of cutting at all. A LIST, because one scene's
+# tail can be below more than one thing the leg exists to assert.
 keeps = keep.split()
 if not keeps:
     sys.exit(f"run-sim: cutting {path} at `{cut}` with no `keep` verb — say "
@@ -1303,22 +1168,18 @@ PY
     fi
     [ -n "$extra" ] && script="$script
 $extra"
-    # THE HARNESS'S EYES AND HANDS OUTSIDE THIS APP, for the scenes that
-    # need them, for two different reasons. iOS's document picker is
-    # a remote view controller whose UI belongs to another process and
-    # which publishes nothing in-process, so its verbs are answered on
-    # the HOST by tools/ios/simdrive. The clipboard's foreign seed and
-    # foreign read cannot run in-process at all — iOS has no child
-    # processes — so they are answered on the host too, by the clip_*
-    # verbs above. Both meet the guest through files in the app's own
-    # data container (docs/traps.md). Started per leg and killed with it
-    # — a watcher outliving its leg would answer the NEXT one's requests
-    # against a dead app.
+    # THE HARNESS'S EYES AND HANDS OUTSIDE THIS APP, for two different
+    # reasons. iOS's document picker is a remote view controller whose UI
+    # belongs to another process and publishes nothing in-process, so its
+    # verbs are answered on the HOST by tools/ios/simdrive. The
+    # clipboard's foreign seed and read cannot run in-process at all, so
+    # they are answered there too. Both meet the guest through files in
+    # the app's own data container (docs/traps.md). STARTED PER LEG AND
+    # KILLED WITH IT — a watcher outliving its leg would answer the NEXT
+    # one's requests against a dead app.
     #
-    # `editor` joins the picker half: it opens BOTH pickers (Open… and
-    # Save As…), so it needs the same eyes and the same hands the save
-    # leg does — including the typing verbs, since the point of its save
-    # panel is naming a file that does not exist yet.
+    # `editor` joins the picker half: it opens BOTH pickers, so it needs
+    # the same eyes and hands the save leg does, typing verbs included.
     local watcher_pid=""
     if [ "$scene" = filedialog ] || [ "$scene" = clipboard ] || [ "$scene" = save ] \
         || [ "$scene" = editor ]; then
@@ -1327,23 +1188,17 @@ $extra"
         simdrive_watch "$udid" "$bundle_id" "$data_container/Documents" &
         watcher_pid=$!
     fi
-    # NO MARK IS STAGED FOR THE GUEST ANY MORE, and the deletion is the
-    # migration (docs/assets-plan.md): the identity guest names
-    # `asset("icons/kaya-mark.png")` and the core resolves it out of
-    # THIS BUNDLE'S OWN Resources, which `make_bundle` filled with the
-    # whole asset root. There used to be a second copy in the app's data
-    # container with an environment variable pointing at it, because the
-    # guest's default path was repo-relative and an app inside the
-    # simulator has no repo.
+    # NO MARK IS STAGED FOR THE GUEST: the identity guest names the mark
+    # as an asset and the core resolves it out of THIS BUNDLE'S OWN
+    # Resources, which `make_bundle` filled with the whole asset root
+    # (docs/assets-plan.md).
     #
-    # THE TWO INDEPENDENT COPIES SURVIVE THAT, which is what made the
-    # deletion safe rather than merely tidy. The bytes the guest declares
-    # now come from `Resources/assets/icons/kaya-mark.png` (the asset-root
-    # copy) and `expect_app_icon` decodes `Resources/$ICON_IN_BUNDLE` (the
-    # icon-keys copy make_bundle writes from the manifest). Two files,
-    # written by two steps, held equal by the interpreter — which is
-    # ruling 4's byte-equality check, still running where the lane can
-    # watch it.
+    # THE TWO INDEPENDENT COPIES SURVIVE THAT: the bytes the guest
+    # declares come from the asset-root copy, and `expect_app_icon`
+    # decodes `Resources/$ICON_IN_BUNDLE`, the icon-keys copy make_bundle
+    # writes from the manifest. Two files, two steps, held equal by the
+    # interpreter — ruling 4's byte-equality check, running where the
+    # lane can watch it.
     local out
     out=$(env SIMCTL_CHILD_KAYA_SELFTEST="$selftest" \
         SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT="$script" \
@@ -1361,16 +1216,11 @@ $extra"
     fi
     printf '%s\n' "$out"
     rec_finish "$out"
-    # (NO PER-LEG SCREENSHOT. There used to be a `simctl io screenshot`
-    # here, and 50 of its 51 outputs were the HOME SCREEN — 2.4MB of
-    # wallpaper apiece. Not a race, a certainty: `--console-pty`
-    # attaches to the guest's stdout and returns only when the guest
-    # EXITS, so any capture on this line is strictly after teardown.
-    # Arming it beforehand just moves the guess earlier, which on the
-    # Android side landed on the launch splash instead. The recording
-    # pipeline is the visual record: a still at EVERY step, anchored to
-    # the harness transcript rather than to a guessed delay.
-    # `KAYA_RECORD=1` when you want pictures.)
+    # (NO PER-LEG SCREENSHOT: `--console-pty` returns only when the
+    # guest EXITS, so any capture on this line is strictly after
+    # teardown and photographs the home screen. `KAYA_RECORD=1` is the
+    # visual record — a still at EVERY step, anchored to the harness
+    # transcript rather than to a guessed delay.)
     grep -q "KAYA_SELFTEST: OK" <<<"$out"
 }
 
@@ -1502,12 +1352,10 @@ boot_pool
 # rather than beside them because a lane that dies at leg 40 after eight
 # minutes teaches nothing a lane that dies in five seconds does not.
 clip_relay_check "${UDIDS[0]}" "$PAD_UDID" || exit 1
-# AND ON THE SAME PATH, for the same reason: the first picker a device
-# shows after a boot ignores the directory it was aimed at (see
-# picker_warm). Every phone in the pool, because which one claims the
-# filedialog leg is a race; not the pad, which runs no picker scene.
-# Concurrently, since they are separate devices and this is the only
-# thing the run is doing.
+# AND ON THE SAME PATH: the first picker a device shows after a boot
+# ignores the directory it was aimed at (see picker_warm). Every phone
+# in the pool, because which one claims the filedialog leg is a race;
+# not the pad, which runs no picker scene.
 warm_pids=()
 for udid in "${UDIDS[@]}"; do
     picker_warm "$udid" &
@@ -1535,11 +1383,9 @@ rm -rf "$BUNDLES"
 # class.
 build_swiftui_dylib() {
     mkdir -p "$BUNDLES"
-    # Same marker contract as the mac dylib (tools/swiftui/build-dylib.sh):
-    # the interpreter carries the id of the sources it was compiled
-    # from, so a bundle can be asked where its interpreter came from
-    # rather than trusted. Generated here rather than shared, so this
-    # lane does not depend on the mac lane having run.
+    # Same marker contract as the mac dylib
+    # (tools/swiftui/build-dylib.sh), generated here rather than shared
+    # so this lane does not depend on the mac lane having run.
     local marker="$BUNDLES/KayaBuildId.swift"
     cat >"$marker" <<EOF
 // Generated by tools/ios/run-sim.sh. Do not edit, do not commit.
@@ -1563,13 +1409,11 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     "$ROOT/tools/build-id.sh" --verify \
         target/aarch64-apple-ios-sim/debug/libkaya.a || exit 1
     build_swiftui_dylib
-    # With more than one input file, swiftc only allows top-level
-    # code in a file named main.swift — each scene stages its own.
-    # The per-scene compiles are INDEPENDENT, so they pool (serial,
-    # each recompiled the four binding files: ~60s of the suite,
-    # measured 2026-07-22); legs queue only after every binary
-    # exists. The list is explicit: window/panels are desktop-only
-    # by design and must not ride $SCENES here.
+    # With more than one input file, swiftc only allows top-level code
+    # in a file named main.swift — each scene stages its own. The
+    # per-scene compiles are INDEPENDENT so they pool; legs queue only
+    # after every binary exists. The list is explicit: window/panels are
+    # desktop-only by design and must not ride $SCENES here.
     # Entries are `scene` or `scene:guest` — the guest defaults to the
     # scene's own name, and names a different one where two scenes
     # share an app. `listdetail:split` is the only such pair today: a
@@ -1628,17 +1472,13 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
         if [ "$guest" = milestone2 ]; then
             queue_leg run_swiftui_on swift "$APP" dev.kaya.milestone2swift swift 1 milestone2
         elif [ "$guest" = identity ]; then
-            # ONE STEP IS NOT RUN HERE and the leg prints it: `expect_title
-            # window#1` reads the declared NAME off an auxiliary window,
-            # and this host has none — the core rejects create_window by
-            # capability, so the guest builds no such window. THE NAME IS
-            # STILL DECLARED AND STILL READ on this platform; what changes
-            # is where it is read FROM, and here that is the bundle's own
-            # CFBundleDisplayName, written by make_bundle from the same
-            # manifest (docs/app-identity-plan.md ruling 3). The keep
-            # guard names `expect_app_icon`: the drop may not take either
-            # icon read with it, which is what makes this a trim rather
-            # than a way to pass.
+            # ONE STEP IS NOT RUN HERE and the leg prints it:
+            # `expect_title window#1` reads the declared NAME off an
+            # auxiliary window and this host has none. THE NAME IS STILL
+            # DECLARED AND STILL READ here, off the bundle's own
+            # CFBundleDisplayName (docs/app-identity-plan.md ruling 3).
+            # The keep guard names `expect_app_icon`, so the drop may not
+            # take either icon read with it.
             queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" \
                 "$guest-swift" "$guest" "$guest" "" "" expect_app_icon \
                 expect_title "window#1"
@@ -1657,48 +1497,33 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     timing swift-build+legs
 fi
 
-# The Go guest suite: the same C ABI floor the swift suite reaches, from
-# a language that brings its own runtime and its own scheduler. The
-# composition is identical to Swift's and that is the point — Go owns
-# `main` (`-buildmode=exe`), pins it to thread 0 with
+# The Go guest suite: the same C ABI floor the swift suite reaches. Go
+# owns `main` (`-buildmode=exe`), pins it to thread 0 with
 # runtime.LockOSThread in the guest's init, and hands that thread to
-# kaya_run, which never returns (guests/go/cmd/main_desktop.go — `!android`
-# reaches iOS, which is the point of that tag; the host contract's
-# C1). No gomobile is involved anywhere: `go build` reaches ios/arm64
-# directly, with no extra tool and no extra pin (docs/go-mobile-plan.md
-# D1). The only thing the binding needed was its #cgo lines, because
-# GOOS=ios also satisfies the `darwin` tag and was silently answering
-# with the macOS link (bindings/go/runtime.go).
+# kaya_run (guests/go/cmd/main_desktop.go — `!android` reaches iOS,
+# which is the point of that tag). No gomobile: `go build` reaches
+# ios/arm64 directly (docs/go-mobile-plan.md D1). The binding needed
+# only its #cgo lines, because GOOS=ios also satisfies the `darwin` tag
+# and was silently answering with the macOS link.
 #
-# THE SCENE LIST IS THE SWIFT SUITE'S, ENTRY FOR ENTRY, and the reason is
-# the whole justification for the set. Swift is the reference
-# guest-language suite on this host: same hand-assembled bundle, same
-# embedded interpreter, same SIMCTL_CHILD_ transport, same verdict grep.
-# Running the same scenes is what makes the two comparable leg for leg,
-# and comparing them is how uniform semantics is checked at all
-# (CLAUDE.md invariant 1).
+# THE SCENE LIST IS THE SWIFT SUITE'S, ENTRY FOR ENTRY: same bundle,
+# same embedded interpreter, same transport, same verdict grep, so the
+# two are comparable leg for leg — which is how uniform semantics gets
+# checked at all (invariant 1).
 #
-# NOT WIDER: filedialog, ranges, undo and dirty run on this runner from
-# the rust example only — the blocks below say "rust only until the
-# sweep" — and window/panels/split are desktop-only by design (the note
-# at the top of this file). A Go leg on any of those would make Go the
-# first NON-RUST guest there, which is a sweep, not this depth slice.
+# NOT WIDER: filedialog, ranges, undo and dirty run here from the rust
+# example only, and window/panels/split are desktop-only by design. A Go
+# leg on any of those would be a sweep, not this depth slice.
 #
-# AND `editor` IS THE ONE DIVERGENCE FROM THE SWIFT LIST, which the
-# paragraph above requires be written down right here. It is a Go app and
-# there is no Swift guest to mirror — the plan chose Go so a BINDING's
-# awkward corners would show, and an editor in Rust would be kaya testing
-# itself (docs/editor-plan.md), so no `editor.swift` is coming. It rides
-# its own leg block below rather than $IOS_GO_SCENES because it needs two
-# things the loop cannot pass: the simdrive watcher (it opens both
-# pickers) and the phone-expressible cut.
+# AND `editor` IS THE ONE DIVERGENCE: it is a Go app with no Swift guest
+# to mirror (docs/editor-plan.md). It rides its own leg block rather
+# than $IOS_GO_SCENES because it needs two things the loop cannot pass —
+# the simdrive watcher and the phone-expressible cut.
 #
-# NOT NARROWER, and this is the half that has to be said out loud
-# because nothing enforces it: check-steps' wired() keys on scene x
-# runner and never on language, so a Go suite that stalled at six scenes
-# would leave every gate green. Mirroring a sibling list is what keeps
-# the choice auditable — the subset is the swift list's, already argued
-# there — and any future divergence has to be written down right here.
+# NOT NARROWER, and nothing enforces this: check-steps' wired() keys on
+# scene x runner and never on language, so a Go suite that stalled at
+# six scenes would leave every gate green. Any future divergence has to
+# be written down right here.
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --lib
     # Every bundle below links this archive; verify it once, here, rather
@@ -1706,36 +1531,27 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     "$ROOT/tools/build-id.sh" --verify \
         target/aarch64-apple-ios-sim/debug/libkaya.a || exit 1
     build_swiftui_dylib
-    # cgo needs a cross compiler. The #cgo ios line in
-    # bindings/go/runtime.go carries the archive and the frameworks; this
-    # carries the triple and the sysroot. Both ride CC rather than
-    # CGO_CFLAGS/CGO_LDFLAGS because cgo uses CC to LINK as well as to
-    # compile, and -isysroot has to reach both halves.
+    # cgo needs a cross compiler. bindings/go/runtime.go's #cgo ios line
+    # carries the archive and frameworks; this carries the triple and
+    # sysroot. Both ride CC rather than CGO_CFLAGS/CGO_LDFLAGS, because
+    # cgo uses CC to LINK as well as compile and -isysroot needs both.
     IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
     IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar identity assets"
     # ONE CROSS-BUILD FOR THE WHOLE SUITE. guests/go/cmd is the guest
     # tree's only main package: it imports every scene library and picks
-    # one from KAYA_SELFTEST, which each leg below already passes as its
-    # own name. The bundles still differ — one per scene, each with its
-    # own bundle id, because a leg is launched by bundle id — but they
-    # all carry a copy of this executable, so `listdetail` needs no
-    # `listdetail:split` source mapping any more: the name goes in the
-    # environment and the guest's table answers it.
-    #
-    # It used to be 24 pooled cross-links, the pool worth writing down
-    # because serial they were this suite's critical path.
+    # one from KAYA_SELFTEST. The bundles still differ — one per scene,
+    # each with its own bundle id, because a leg is launched by bundle id
+    # — but they all carry a copy of this executable.
     CGO_ENABLED=1 GOOS=ios GOARCH=arm64 CC="$IOS_GO_CC" \
         go build -o "$BUNDLES/go-bin" dev.kaya/guests/go/cmd || exit 1
-    # AND THE BINARY MUST CARRY THE MARKER ITSELF, which is this lane's
-    # cheapest test that the bundles are SELF-CONTAINED. The id lives in
+    # AND THE BINARY MUST CARRY THE MARKER ITSELF, this lane's cheapest
+    # test that the bundles are SELF-CONTAINED: the id lives in
     # libkaya.a, so it is in this executable only if the archive really
-    # was linked into it. Point the #cgo line back at `-L… -lkaya` and
-    # ld64 prefers the .dylib sitting in the same directory
-    # (mobilepkg-contract.md §1.2, the defect the swift leg still has):
-    # the guest then names an absolute build-machine path to a library
-    # outside its own bundle, runs anyway because the Simulator shares
-    # the host filesystem, and tells nobody. This is the line that
-    # notices, at build time, before a single bundle is assembled.
+    # was linked in. Point the #cgo line back at `-L… -lkaya` and ld64
+    # prefers the .dylib in the same directory — the guest then names an
+    # absolute build-machine path to a library outside its bundle, runs
+    # anyway because the Simulator shares the host filesystem, and tells
+    # nobody.
     "$ROOT/tools/build-id.sh" --verify "$BUNDLES/go-bin" || exit 1
     for guest in $IOS_GO_SCENES; do
         ident=""
@@ -1756,35 +1572,23 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
             queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest"
         fi
     done
-    # THE TEXT EDITOR — kaya's forcing artifact (docs/editor-plan.md), and
+    # THE TEXT EDITOR — kaya's forcing artifact (docs/editor-plan.md),
     # the only script on this lane that drives an APP rather than a
-    # feature: launch to an empty buffer, type, save-as, open, edit, undo,
-    # save, and find with a regex.
+    # feature.
     #
-    # OFF THE LOOP ABOVE, for two things the loop cannot pass. First, the
-    # simdrive watcher: this scene opens BOTH pickers, so run_swiftui_on
-    # has to give it the same eyes and hands the save leg gets (the arm at
-    # the top of that function names `editor` for exactly this). Second,
-    # THE PHONE-EXPRESSIBLE CUT — the ninth and tenth arguments — because
-    # the scene's last stretch hangs off a CHROME CLOSE:
+    # OFF THE LOOP ABOVE, for two things the loop cannot pass: the
+    # simdrive watcher (this scene opens BOTH pickers) and THE
+    # PHONE-EXPRESSIBLE CUT, because the scene's last stretch hangs off a
+    # CHROME CLOSE and iOS has none — which is why the whole close
+    # grammar in the interpreter sits inside `#if os(macOS)`. The guard
+    # in run_swiftui_on holds the cut honest both ways: a verb the scene
+    # no longer has is a stale cut, and the cut may not take an
+    # `expect_dirty` with it.
     #
-    #   close_window window#0 → the app's veto → its own alert
-    #
-    # and iOS has no chrome close to drive, which is why the whole close
-    # grammar in the interpreter sits inside `#if os(macOS)`. Same cut and
-    # same reason as the `dirty` leg below, and the guard in
-    # run_swiftui_on holds it honest in both directions: cutting at a verb
-    # the scene no longer has is a stale cut and fails, and the cut may
-    # not take an `expect_dirty` with it. It does not: the editor asserts
-    # BOTH `expect_dirty false` and `expect_dirty true` before the close,
-    # eight times between them, so the prefix still watches the mark go up
-    # on a keystroke, come down on a save, come down on an UNDO, and go up
-    # again on a programmatic write.
-    #
-    # WHAT THE CUT DOES TAKE, said out loud: the two unsaved-work refusals
-    # and the closing `expect_ax`. The first door (File>New) is inside the
-    # prefix, so the alert composition itself is still exercised here —
-    # what this lane does not run is the SECOND door, the window's own.
+    # WHAT THE CUT DOES TAKE: the two unsaved-work refusals and the
+    # closing `expect_ax`. The first door (File>New) is inside the
+    # prefix, so the alert composition is still exercised; what this lane
+    # does not run is the SECOND door, the window's own.
     APP=$(make_bundle editorgo dev.kaya.editorgo "$BUNDLES/go-bin")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on editor-go "$APP" dev.kaya.editorgo editor-go editor editor \
@@ -1851,11 +1655,8 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on layout-swiftui "$APP" dev.kaya.layoutswiftui layout-swiftui layout layout
 
-    # The stall diagnostic (crates/kaya/src/stall.rs): an app thread
-    # that stops taking its occurrences is REPORTED. The watchdog is
-    # CORE-SIDE, so this host needs no arm of its own — the leg is here
-    # because a phone is exactly where an app that looks alive and
-    # ignores you is hardest to tell from a slow one.
+    # The stall diagnostic (crates/kaya/src/stall.rs). The watchdog is
+    # CORE-SIDE, so this host needs no arm of its own.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example stall
     APP=$(make_bundle stallrs-swiftui dev.kaya.stallswiftui "$TARGET_DIR/examples/stall")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
@@ -1882,8 +1683,7 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # The filedialog scene. THE ONE LEG WITH EYES ON THE HOST: iOS's
     # picker is a remote view controller, so expect_file_dialog and
     # file_choose are answered by tools/ios/simdrive over the container
-    # bridge rather than in-process (run_swiftui_on starts the watcher
-    # for this scene, docs/traps.md).
+    # bridge rather than in-process (docs/traps.md).
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example filedialog
     APP=$(make_bundle filedialogrs-swiftui dev.kaya.filedialogswiftui "$TARGET_DIR/examples/filedialog")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
@@ -1891,40 +1691,31 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
         filedialog-swiftui filedialog filedialog
 
     # The save scene: the ROUND TRIP an editor walks (docs/save-plan.md
-    # D5) — open, save back through the picked handle, save AS a new
-    # destination, reopen both. THE SECOND LEG WITH EYES ON THE HOST, and
-    # the one that made the driver grow HANDS. iOS's save dialog is
-    # `UIDocumentPickerViewController(forExporting:)`, another remote view
-    # controller, and the point of a save dialog is TYPING A NAME — which
-    # simdrive could not do at all (D4). It has four verbs for it now
-    # (savestate/savename/savepress/savecancel), and `savepress` exists
-    # rather than reusing `press` because `press Save` FALSELY SUCCEEDS on
-    # this sheet: it matches the static text "Save as" by containment,
-    # reports a press, and the sheet stays up.
+    # D5). iOS's save dialog is
+    # `UIDocumentPickerViewController(forExporting:)`, another remote
+    # view controller, and simdrive has four verbs for it
+    # (savestate/savename/savepress/savecancel). `savepress` exists
+    # rather than reusing `press` because `press Save` FALSELY SUCCEEDS
+    # on this sheet: it matches the static text "Save as" by
+    # containment, reports a press, and the sheet stays up.
     #
     # THE PLATFORM ANSWERS WITH A DOCUMENT THAT EXISTS here, unlike the
     # three desktops — the export copies a ZERO-BYTE file the backend
-    # stages for the name — so this leg is the one that watches D1's
-    # "opening a destination yields an empty file" hold on the side the
-    # core does NOT create.
+    # stages for the name — so this leg watches D1's "opening a
+    # destination yields an empty file" on the side the core does NOT
+    # create.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example save
     APP=$(make_bundle savers-swiftui dev.kaya.saveswiftui "$TARGET_DIR/examples/save")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on save-swiftui "$APP" dev.kaya.saveswiftui \
         save-swiftui save save
 
-    # The clipboard scene. THE SECOND LEG WITH HELP FROM THE HOST, for a
-    # different reason than the picker's: iOS cannot spawn a child
-    # process, so the foreign seed and the foreign read — the crossings
-    # that make this scene a check rather than kaya parsing its own
-    # writes — are answered by run_swiftui_on's watcher over the same
-    # container bridge (the clip_* verbs above, docs/clipboard-plan.md
-    # §8). NO DRAIN BRACKET, unlike every desktop lane: the simulator
-    # pasteboard is strictly PER-DEVICE (measured — two sims held two
-    # different clips at once, the host's untouched), so the slot
-    # queue_leg already holds IS this lane's clipboard exclusion, and a
-    # bracket on top would be a barrier that cannot fail for the reason
-    # it exists.
+    # The clipboard scene. THE SECOND LEG WITH HELP FROM THE HOST: iOS
+    # cannot spawn a child process, so the foreign seed and read are
+    # answered by run_swiftui_on's watcher over the container bridge
+    # (docs/clipboard-plan.md §8). NO DRAIN BRACKET, unlike every desktop
+    # lane: the simulator pasteboard is strictly PER-DEVICE, so the slot
+    # queue_leg holds IS this lane's clipboard exclusion.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example clipboard
     APP=$(make_bundle clipboardrs-swiftui dev.kaya.clipboardswiftui "$TARGET_DIR/examples/clipboard")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
@@ -1933,30 +1724,24 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
 
     # The a11y scene: every widget kind's role and name read back out of
     # UIKit's OWN accessibility tree. iOS is the one platform where that
-    # read is in-process — UIKit publishes identifiers and elements to
-    # the app itself, unlike macOS, where the server side returns nil
-    # and only the AXUIElement client API sees the real thing.
+    # read is IN-PROCESS — unlike macOS, where the server side returns
+    # nil and only the AXUIElement client API sees the real thing.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example a11y
     APP=$(make_bundle a11yrs-swiftui dev.kaya.a11yswiftui "$TARGET_DIR/examples/a11y")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on a11y-swiftui "$APP" dev.kaya.a11yswiftui a11y-swiftui a11y a11y
 
-    # The stamped-accessibility scene (docs/tpl-props-plan.md P3): two
-    # entries stamped from one template, each named by its own row, read
-    # from the real tree — the a11y scene's sibling, split out because a
-    # For's column shifts ordinal container targets per language.
-    # Graduated 2026-08-11: swift and go ride the rosters above; this
-    # bundle is the rust leg.
+    # The stamped-accessibility scene (docs/tpl-props-plan.md P3): the
+    # a11y scene's sibling, split out because a For's column shifts
+    # ordinal container targets per language. swift and go ride the
+    # rosters above; this bundle is the rust leg.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example a11yrows
     APP=$(make_bundle a11yrowsrs-swiftui dev.kaya.a11yrowsswiftui "$TARGET_DIR/examples/a11yrows")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on a11yrows-swiftui "$APP" dev.kaya.a11yrowsswiftui a11yrows-swiftui a11yrows a11yrows
 
     # The styling scene (docs/styling-plan.md slice 1): brand + roles +
-    # inset. Rode this lane rust-only through the depth slice (the
-    # SwiftUI interpreter carried the first real brand lowering);
-    # graduated 2026-08-12 with the fan-out — the swift and go legs ride
-    # the scene lists above.
+    # inset. The swift and go legs ride the scene lists above.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example styling
     APP=$(make_bundle stylingrs-swiftui dev.kaya.stylingswiftui "$TARGET_DIR/examples/styling")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
@@ -1967,14 +1752,12 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     # keystroke DROPS a declared set (D2), and a select_range arriving
     # mid-composition is REFUSED (D4).
     #
-    # THE OFFSETS ARE THIS LANE'S UNIT TEST. The scene's document opens
+    # THE OFFSETS ARE THIS LANE'S UNIT TEST: the scene's document opens
     # with a CJK word, so every match sits SIX BYTES further along than
-    # it sits in UTF-16 — the unit this backend counts — and a lowering
-    # that forwarded kaya's byte offsets unconverted would decorate six
-    # characters early on all three. The assertions carry the covered
-    # TEXT beside the offsets for the same reason: the core converts
-    # bytes to UTF-16 to lower a range and this backend converts back to
-    # read one, so offsets alone would let two symmetric mistakes cancel.
+    # in UTF-16, the unit this backend counts. The assertions carry the
+    # covered TEXT beside the offsets, because the core converts bytes to
+    # UTF-16 to lower a range and this backend converts back to read one
+    # — offsets alone would let two symmetric mistakes cancel.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example ranges
     APP=$(make_bundle rangesrs-swiftui dev.kaya.rangesswiftui "$TARGET_DIR/examples/ranges")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
@@ -1986,67 +1769,55 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on progress-swiftui "$APP" dev.kaya.progressswiftui progress-swiftui progress progress
 
-    # The menus scene (the depth annotation above): the phone half of
-    # the command vocabulary — promoted primaries as trailing bar
-    # actions, the rest in the More menu, the shortcut through the
-    # interpreter's one dispatch table, long-press context menus with
-    # stamped keys as the noun, and the late rebuild's promotion
-    # recompute (Publish resolves with no More-open step).
+    # The menus scene: the phone half of the command vocabulary —
+    # promoted primaries as trailing bar actions, the rest in the More
+    # menu, the shortcut through the interpreter's one dispatch table,
+    # long-press context menus, and the late rebuild's promotion
+    # recompute.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example menus
     APP=$(make_bundle menusrs-swiftui dev.kaya.menusswiftui "$TARGET_DIR/examples/menus")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on menus-swiftui "$APP" dev.kaya.menusswiftui menus-swiftui menus menus
     # The same bundle and the same scene on the iPad. The phone leg
-    # above proves the compact lowering; this one is the only thing in
-    # any lane that observes the REGULAR one, which is where the
-    # iPadOS 26 menu-bar defect lived. One device, one scene: if this
-    # ever needs a second, reconsider whether the lane wants a real
-    # form-factor dimension instead of a bolted-on device.
-    # The assertion is the whole point of this leg, and it guards two
-    # regressions at once. If the bundle ever loses UIDeviceFamily=2 it
-    # runs in iPhone COMPATIBILITY mode and reports compact/overflow —
-    # which is exactly how this leg silently degraded into a second
-    # phone leg once already. And if the regular arm stops selecting
-    # the menu bar (the original iPadOS 26 defect) it reports
-    # regular/overflow. Either way this fails loudly.
+    # above proves the compact lowering; this is the only thing in any
+    # lane that observes the REGULAR one, where the iPadOS 26 menu-bar
+    # defect lived.
+    # The assertion guards two regressions at once: a bundle that loses
+    # UIDeviceFamily=2 runs in iPhone COMPATIBILITY mode and reports
+    # compact/overflow, and a regular arm that stops selecting the menu
+    # bar reports regular/overflow.
     queue_pad_leg run_swiftui_on menus-swiftui-pad "$APP" dev.kaya.menusswiftui \
         menus-swiftui-pad menus menus 'expect_menu_presentation "regular/bar"'
 
-    # The toolbar scene (docs/chrome-plan.md C2): the same `primary` bit
-    # the menus legs above promote into the top bar, now ASSERTED there
-    # — the promoted set really among the bar buttons UIKit built, in
-    # catalog preorder, the More menu really beside them, and one
-    # button's glyph and enablement read off the element rather than the
-    # model. Until this leg the iOS half of both verbs was a depth stub.
+    # The toolbar scene (docs/chrome-plan.md C2): the `primary` bit
+    # ASSERTED in the bar — the promoted set really among the buttons
+    # UIKit built, in catalog preorder, the More menu beside them, and
+    # one button's glyph and enablement read off the element.
     #
     # PHONE ONLY, and that is the lowering rather than an omission: a
-    # regular-width window promotes nothing at all — the catalog goes to
-    # the system menu bar instead (KayaMenuFormFactorChrome) — so there
-    # is no promoted bar on the iPad for expect_toolbar to read. The
-    # menus pad leg above is what observes that arm.
+    # regular-width window promotes nothing at all (the catalog goes to
+    # the system menu bar, KayaMenuFormFactorChrome), so there is no
+    # promoted bar on the iPad for expect_toolbar to read.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example toolbar
     APP=$(make_bundle toolbarrs-swiftui dev.kaya.toolbarswiftui "$TARGET_DIR/examples/toolbar")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on toolbar-swiftui "$APP" dev.kaya.toolbarswiftui toolbar-swiftui toolbar toolbar
 
-    # The identity scene (docs/app-identity-plan.md). THE ONLY LEG ON THIS
-    # LANE THAT ASSERTS ON THE BUNDLE IT WAS BUILT INTO, and that is the
-    # platform rather than a shortcut: iOS has NO runtime route to the
-    # Home Screen icon — the SDK's whole app-icon surface is
-    # supportsAlternateIcons, setAlternateIconName and alternateIconName,
-    # typed BOOL and NSString, none of which takes bytes — so the artifact
-    # an iOS app's identity lives in is its bundle, and make_bundle above
-    # is the reader ruling 3 puts there.
+    # The identity scene (docs/app-identity-plan.md). THE ONLY LEG ON
+    # THIS LANE THAT ASSERTS ON THE BUNDLE IT WAS BUILT INTO, and that is
+    # the platform: iOS has NO runtime route to the Home Screen icon
+    # (the SDK's whole surface is supportsAlternateIcons,
+    # setAlternateIconName and alternateIconName, typed BOOL and
+    # NSString), so the artifact an iOS app's identity lives in is its
+    # bundle.
     #
-    # `expect_app_icon` therefore decodes the icon file inside THIS app's
-    # bundle with UIKit's own decoder and samples its four quadrant
-    # centres, exactly as the mac leg samples AppKit's Dock copy and the
-    # Windows leg samples the HICON behind WM_GETICON — one frozen string,
-    # three artifacts. It cannot pass vacuously: an app that declared no
-    # identity over the wire, a bundle with no icon keys, a bundle naming
-    # a file it does not hold, and a bundle whose icon differs from the
-    # declared bytes each go RED naming which (docs/app-identity-plan.md
-    # I8, and ruling 4's byte-equality check is that last one).
+    # `expect_app_icon` decodes the icon inside THIS app's bundle with
+    # UIKit's decoder and samples its four quadrant centres, as the mac
+    # leg samples AppKit's Dock copy and the Windows leg the HICON behind
+    # WM_GETICON — one frozen string, three artifacts. It cannot pass
+    # vacuously: no identity over the wire, no icon keys, a named file
+    # the bundle lacks, and an icon differing from the declared bytes
+    # each go RED naming which.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example identity
     APP=$(make_bundle identityrs-swiftui dev.kaya.identityswiftui "$TARGET_DIR/examples/identity" identity)
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
@@ -2055,41 +1826,36 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
         expect_title "window#1"
 
     # The assets conformance scene (docs/assets-plan.md). THIS LANE'S
-    # ASSET DELIVERY IS THE SHIPPED MECHANISM, which is what makes the
-    # leg worth more here than anywhere else: make_bundle copies the
-    # asset root into the app's Resources exactly as a real iOS app
-    # packages one, no KAYA_ASSET_DIR is set anywhere on this lane, and
-    # the core asks `Bundle.main` for its resource directory
-    # (crates/kaya/src/assets.rs, route 2). So the scene's frozen census
-    # is an assertion about the BUNDLE, and it fails if the copy staged
-    # one file instead of the root.
+    # ASSET DELIVERY IS THE SHIPPED MECHANISM: make_bundle copies the
+    # asset root into Resources exactly as a real iOS app packages one,
+    # no KAYA_ASSET_DIR is set anywhere here, and the core asks
+    # `Bundle.main` (crates/kaya/src/assets.rs, route 2). So the scene's
+    # frozen census is an assertion about the BUNDLE and fails if the
+    # copy staged one file instead of the root.
     #
-    # It is also the only asset observation this lane can make at all:
-    # `expect_typeface` is depth-stubbed here, which is precisely why the
-    # conformance scene reads an IMAGE instead — the platform's own
-    # decoder answers, and every backend has one.
+    # It is also the only asset observation this lane can make:
+    # `expect_typeface` is depth-stubbed here, which is why the
+    # conformance scene reads an IMAGE instead.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example assets
     APP=$(make_bundle assetsrs-swiftui dev.kaya.assetsswiftui "$TARGET_DIR/examples/assets")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on assets-swiftui "$APP" dev.kaya.assetsswiftui assets-swiftui assets assets
 
-    # The listdetail scene, the DEPTH slice: list-detail's bare
-    # invariant, which is the only form of it this host can run — the
-    # `split` scene drives resize_window, and a phone or tablet does
-    # not command its own window size (DESIGN.md, Windows). Until this
-    # leg the SwiftUI list-detail arm was exercised on macOS only.
+    # The listdetail scene: list-detail's bare invariant, the only form
+    # of it this host can run — the `split` scene drives resize_window,
+    # and a phone or tablet does not command its own window size
+    # (DESIGN.md, Windows).
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example split
     APP=$(make_bundle listdetailrs-swiftui dev.kaya.listdetailswiftui "$TARGET_DIR/examples/split")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on listdetail-swiftui "$APP" dev.kaya.listdetailswiftui \
         listdetail-swiftui listdetail listdetail
-    # The same bundle and the same scene on the iPad, and the reason
-    # this scene exists. The phone above is ALWAYS compact, so its
-    # invariant is vacuous there — it can only report that the stacked
-    # arm ran. This device is regular, so the invariant bites: with the
-    # detail pushed, one pane on screen is a failure. The extra step
-    # appends the literal the shared file may not carry, which is what
-    # turns "did not violate the invariant" into "the split arm ran".
+    # The same bundle and scene on the iPad, and the reason this scene
+    # exists: the phone above is ALWAYS compact, so its invariant is
+    # vacuous there. This device is regular, so the invariant bites —
+    # with the detail pushed, one pane on screen is a failure. The extra
+    # step appends the literal the shared file may not carry, which turns
+    # "did not violate the invariant" into "the split arm ran".
     queue_pad_leg run_swiftui_on listdetail-swiftui-pad "$APP" dev.kaya.listdetailswiftui \
         listdetail-swiftui-pad listdetail listdetail 'expect_split "regular/split"'
 
@@ -2103,40 +1869,29 @@ if [ "$SUITE" = rust-swiftui ] || [ "$SUITE" = all ]; then
     queue_leg run_swiftui_on commands-swiftui "$APP" dev.kaya.commandsswiftui commands-swiftui \
         commands commands
 
-    # The undo scene, the DEPTH slice's fan-out (rust only until the
-    # sweep): ONE history walked newest-first over two tiers — the
-    # field's own _UITextUndoManager and the core's ledger — through the
-    # Edit>Undo role. This is the one leg in any lane that types with
-    # REAL text input (the `type` verb) rather than set_text, because a
-    # programmatic write clears the very history the first tier is made
-    # of (D7), and on this platform the input path is UIKeyInput's
-    # insertText — the method the system keyboard itself calls, iOS
-    # having no way to post a key event in process (docs/undo-plan.md
-    # §1.3, and swift/KayaSwiftUI.swift's kayaTypeAtFocus).
+    # The undo scene (rust only until the sweep): ONE history walked
+    # newest-first over two tiers — the field's own _UITextUndoManager
+    # and the core's ledger — through the Edit>Undo role. The one leg in
+    # any lane that types with REAL text input rather than set_text,
+    # because a programmatic write clears the very history the first tier
+    # is made of (D7). On this platform the input path is UIKeyInput's
+    # insertText, iOS having no way to post a key event in process
+    # (docs/undo-plan.md §1.3).
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example undo
     APP=$(make_bundle undors-swiftui dev.kaya.undoswiftui "$TARGET_DIR/examples/undo")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"
     queue_leg run_swiftui_on undo-swiftui "$APP" dev.kaya.undoswiftui undo-swiftui undo undo
 
     # The dirty scene, the DEPTH slice's mobile arm (rust only until the
-    # sweep). THE PROP APPLIES HERE AND LOWERS TO NOTHING, which is the
-    # one stated exception in this design (docs/dirty-plan.md D4): a
-    # phone has no window chrome to carry an unsaved-work mark, and the
-    # affordances it does have for unsaved work are FLOW ones — the
-    # pull-down-dismiss confirmation, the predictive-back dialog — which
-    # kaya already spells with veto_close and navigation. Synthesizing a
-    # marker no native app shows would express what the platform does
-    # not, so the lowering is deliberately empty and this leg is what
-    # keeps "empty" from meaning "absent": expect_dirty reads the
-    # APPLIED PROP back through the interpreter (D5's iOS row), which
-    # fails the moment the prop stops arriving.
+    # sweep). THE PROP APPLIES HERE AND LOWERS TO NOTHING, the one
+    # stated exception in this design (docs/dirty-plan.md D4): a phone
+    # has no window chrome to carry an unsaved-work mark. This leg is
+    # what keeps "empty" from meaning "absent" — expect_dirty reads the
+    # APPLIED PROP back through the interpreter (D5's iOS row) and fails
+    # the moment the prop stops arriving.
     #
-    # The cut is the chrome close (see run_swiftui_on's 9th/10th
-    # arguments): everything below `close_window` in the shared scene is
-    # D3's veto demonstration, which needs a close this platform has
-    # not got. `expect_dirty` is named as the assertion the cut may not
-    # take with it — the prefix still watches the mark go up, come down
-    # on save, and go up again.
+    # The cut is the chrome close; `expect_dirty` is named as the
+    # assertion the cut may not take with it.
     SDKROOT="$SDKROOT_SIM" cargo build --locked --target aarch64-apple-ios-sim --example dirty
     APP=$(make_bundle dirtyrs-swiftui dev.kaya.dirtyswiftui "$TARGET_DIR/examples/dirty")
     cp "$BUNDLES/libkaya_swiftui_ios.dylib" "$APP/libkaya_swiftui.dylib"

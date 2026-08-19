@@ -53,7 +53,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.window(kaya::DEFAULT_WINDOW).dirty(false);
             }),
             Msg::CloseAsked => {
-                // Nothing has closed yet: the veto class says so.
                 let alert = ctx.apply(|tx| {
                     tx.show_alert()
                         .title("unsaved changes")

@@ -7,10 +7,6 @@
 // handles the central registration needs are assigned to the scene's
 // own locals from inside the template bodies that build them.
 //
-// The app names every key here because it still knows them — the driver
-// renames g1 and the verdict says "removed g2/a". InsertFresh answers
-// the other case (docs/fresh-key-plan.md).
-//
 // Build the library first (cargo build / cargo xwin build --release),
 // keep kaya.dll on PATH or set KAYA_LIB, then: dotnet run
 
@@ -28,8 +24,6 @@ static class Milestone2Scene
         app.Build(tx =>
         {
             status = tx.Signal("step 0");
-            // A signal, so the banner's condition below (`stepCount == 1`)
-            // is a derived signal recomputed on every write.
             var stepCount = tx.Signal(0);
 
             var groups = tx.Collection();
@@ -82,10 +76,6 @@ static class Milestone2Scene
         {
             string group = (string)keys[0];
             string item = (string)keys[1];
-            // The instance handle names the target once; mutation and
-            // read hang off the same value. The collection is the
-            // model: the count read is the fold of the patches, this
-            // one included.
             var todos = items.At(group);
             tx.Remove(todos, item);
             int left = tx.Count(todos);

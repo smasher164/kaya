@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -17,85 +11,41 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
 fi
 # A FILE MODE IS A NUMBER THAT CROSSES THREE ABIs, AND THE SPEC OWNS IT.
 #
-# `kaya_open_picked(handle, mode, …)` takes an integer. The spec declares
-# what the integers mean — `EnumSpec { name: "file_mode", variants:
-# &[("read", 0), ("write", 1), ("read_write", 2)] }` in
-# crates/kaya/src/spec.rs — and from there the number travels:
-#
-#   the guest        -> the generated wire constant  (gen-bindings holds it)
-#   crates/kaya/src/wire.rs      the C ABI's names
-#   crates/kaya/src/protocol.rs  picked_mode_code, which SENDS the number
-#                                on to an interpreter backend
-#   swift/KayaSwiftUI.swift      kayaSwiftUIOpenPicked, which RECEIVES it
-#                                and picks POSIX open flags from bare
-#                                literals: `case 0: flags = O_RDONLY`
-#   bindings/csharp/Kaya.cs      picks a FileAccess from bare literals
-#   bindings/python/kaya/runtime.py  picks an fdopen mode string likewise
-#
-# NOTHING HELD THOSE TOGETHER. Renumber the enum — swap read and write,
-# insert a mode in the middle — and every generated surface moves in
-# lockstep while the five hand-written sites keep their old literals. The
-# guest asks to READ and the backend opens O_WRONLY|O_TRUNC: the file the
-# user picked is emptied, no error is raised anywhere, and the read comes
-# back blank. That is docs/save-plan.md D3's second defect, found while
-# probing the save milestone (scratchpad/save-probe-{mac,windows}.md).
-#
-# WHY NOT THE CLAUSE THAT ALREADY EXISTED. tools/check-steps.sh grew a
-# three-line version of this (its clause 3, now deleted in favour of
-# this file), and it was weak in four ways that are worth recording
-# because they are the ways this kind of gate is usually weak:
-#
-#   1. its window was `swift[swift.index("kaya_swiftui_open_picked"):]`
-#      — the whole REST of a ten-thousand-line file, so "case 0" and
-#      "O_RDONLY" satisfied it from anywhere below;
-#   2. it tested EXISTENCE, not PAIRING: swapping case 1's flags with
-#      case 2's kept every string present and passed;
-#   3. it hard-coded 0/1/2 IN THE GATE, so renumbering the spec — the
-#      one edit the clause names in its own comment — left it green;
-#   4. it knew one site. Not picked_mode_code, which produces the very
-#      number Swift consumes, and not the two bindings that switch on it.
+# `kaya_open_picked(handle, mode, …)` takes an integer whose meaning
+# crates/kaya/src/spec.rs declares. Every GENERATED surface moves when
+# that numbering moves; five HAND-WRITTEN sites do not — protocol.rs's
+# picked_mode_code, the SwiftUI interpreter's POSIX flags, the C# and
+# python bindings' FileAccess and fdopen spellings. Renumber and the
+# guest asks to READ while the backend opens O_WRONLY|O_TRUNC, with no
+# error anywhere (docs/save-plan.md D3).
 #
 # So this gate reads the numbers OUT OF THE SPEC and carries only the
-# SEMANTICS: what each named mode must mean at each site. The numbers are
-# never written down here.
-#
-# WHAT "MEANS" MEANS, per site, and why it is stated this loosely:
+# SEMANTICS; the numbers are never written down here:
 #
 #   read        opens for reading and MUST NOT truncate
 #   write       opens for writing and MUST truncate
 #   read_write  opens for both and MUST NOT truncate
 #
-# Creation is deliberately NOT pinned. D1 puts creation in the CORE (a
-# save destination creates; a picked file does not), so an interpreter is
-# free to pass O_CREAT or not as its platform requires — but no mode may
-# ever swap its ACCESS or its TRUNCATION, which is exactly what a
-# renumbering does silently.
+# Creation is deliberately NOT pinned (D1 puts it in the core), but no
+# mode may swap its ACCESS or its TRUNCATION.
 #
-# THE CENSUS is the half that survives someone adding a site. Every file
-# under the source roots that names a redemption entry point must be in
-# one of two tables here: SITES (it interprets the number, and its arms
-# are checked) or PASSTHROUGH (it hands the number on untouched, WITH A
-# REASON — and that claim is checked too, by refusing any comparison,
-# subscript or switch on `mode` in it). A file in neither fails. The
-# generated surfaces are excluded by name: gen-bindings.sh and
-# gen-header.sh regenerate and diff them, so they cannot drift.
+# THE CENSUS is the half that survives someone adding a site: every file
+# naming a redemption entry point is in SITES (its arms are checked) or
+# in PASSTHROUGH (it hands the number on, WITH A REASON — and that claim
+# is checked, by refusing any branch on `mode` in it). Generated
+# surfaces are excluded: gen-bindings/gen-header diff them already.
 #
-# NOT IN SCOPE, on purpose: guests/. Every guest names the constant
-# (`kaya::FileMode::Read`, `FILE_MODE_READ`, `file_mode_read` — checked
-# by hand when this gate was written, 2026-08-09), so there is nothing
-# there to pin yet; a guest that ever writes a bare integer is a rule
-# this gate can grow.
+# NOT IN SCOPE: guests/, which all name the constant rather than a
+# digit. A guest that writes a bare integer is a rule this can grow.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-# The checker takes ONE argument: a root to read the tree out of. That is
-# what makes every clause below testable — a self-test builds a shadow
-# root of symlinks, swaps one file for a doctored copy, and runs the real
-# checker over it. A fixture would only ever prove the patterns match the
-# fixture, which is how the wayland seat guard passed vacuously twice
-# (docs/traps.md).
+# The checker takes ONE argument, a root to read the tree out of: that
+# is what makes every clause testable against a shadow root holding one
+# doctored real file rather than against a fixture (docs/traps.md, the
+# wayland seat guard).
 check() {
     python3 - "$1" <<'PY'
 import pathlib
@@ -226,10 +176,9 @@ for name in declared:
                    f"the C ABI would carry a number nothing else knows")
 
 # --- 2. protocol.rs: the number the core SENDS. ----------------------
-# picked_mode_code is what crosses to an interpreter backend, and its
-# arms are bare literals pinned by a unit test that hard-codes the same
-# literals — so the pair agrees with itself while both disagree with the
-# spec. This is the one clause a `cargo test` could never make.
+# picked_mode_code's arms are bare literals pinned by a unit test that
+# hard-codes the same literals — the pair agrees with itself while both
+# disagree with the spec, which is why a `cargo test` cannot do this.
 text = read(PROTOCOL)
 fn = body(text, r"\bfn +picked_mode_code\b")
 if fn is None:
@@ -355,16 +304,12 @@ GENERATED = {
 }
 SITES = {SPEC, WIRE, PROTOCOL, SWIFTUI, CSHARP, PYRUNTIME}
 # Files that redeem a handle WITHOUT writing a mode number down: they
-# hand the number on, or they branch on it through the NAMED constants,
-# which is the form that cannot drift. The reason is required and the
-# claim is CHECKED below.
+# hand it on, or branch on it through the NAMED constants. The reason is
+# required and the claim is CHECKED below.
 #
-# That is the rule underneath this whole gate, stated once: a numeric
-# mode literal belongs only where a number arrives over an ABI and there
-# is no name to use — the four SITES above. Everywhere else there IS a
-# name (KayaWire.FILE_MODE_READ, wire::FILE_MODE_READ, fileModeRead …)
-# and it must be used. bindings/java/dev/kaya/KayaApp.java is the model:
-# it switches on the mode and never writes a digit.
+# The rule underneath the whole gate: a numeric mode literal belongs
+# only where a number arrives over an ABI and there is no name to use —
+# the four SITES above. Everywhere else the name must be used.
 PASSTHROUGH = {
     "bindings/go/runtime.go": "os.NewFile over the raw handle; the number goes to C",
     "bindings/java/dev/kaya/KayaApp.java":
@@ -459,10 +404,8 @@ for r in ROOTS:
             raw = f.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        # The cheap test first, on the raw bytes: blanking comments in
-        # all 13 MB of these roots costs 5s a pass and this gate runs its
-        # own census twelve times (once per self-test). Only a file that
-        # names the redemption AT ALL is worth stripping.
+        # The cheap test first, on raw bytes: blanking comments across
+        # these roots costs 5s a pass and the census runs twelve times.
         if not REDEEMS.search(raw):
             continue
         text = code(raw)
@@ -501,9 +444,7 @@ PY
 
 # THE GUARD GUARDS ITSELF, on DOCTORED COPIES OF THE REAL FILES. Each
 # perturbation prints its substitution count and is REFUSED if it did not
-# apply — an unchanged copy is a failed self-test, not a passed one — and
-# every refusal is checked for its REASON, because an exit code alone is
-# satisfied by any unrelated finding.
+# apply, and every refusal is checked for its REASON.
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
@@ -584,9 +525,8 @@ fresh() { # <name> -> path to a new shadow root
 }
 
 # N0 — the shadow root itself must pass, or every refusal below could be
-# an artifact of the copy rather than of the perturbation. It is a mirror
-# of the live tree, so a refusal HERE is a real finding and says so: the
-# reader must not have to decide whether the gate or the tree is broken.
+# an artifact of the copy. It mirrors the live tree, so a refusal HERE
+# is a real finding and says so.
 base="$(fresh base)"
 if ! out="$(check "$base")"; then
     echo "$out"

@@ -5,10 +5,6 @@ union's order — and for_each yields the eliminator, one
 declaration. A patch witnesses the entry's current constructor, and a
 kwarg the constructor lacks raises at the call site.
 
-The backend selftest (KAYA_SELFTEST=feed) reads the note labels,
-toggles the todo, promotes the first note into a finished todo (same
-key, restamped in place), and watches the done-count label move.
-
 Build the library first (cargo build), then:
     KAYA_SELFTEST=feed python3 guests/python/feed.py
 """

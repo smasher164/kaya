@@ -1,20 +1,15 @@
 #!/usr/bin/env bash
 # One recorded Linux leg, run INSIDE xvfb-run (DISPLAY is this leg's
-# private Xvfb): film the whole display with x11grab while the guest
-# runs, then derive per-step stills. One window per private display
-# means the film IS the leg — no crops, no tiling, no fiducials.
+# private Xvfb): x11grab films the whole display, then per-step stills
+# are derived. One window per private display means the film IS the leg.
 #
 #   record-leg.sh <proto> <dir> <cmd...>
 #
-# For wayland, a nested Weston (X11 backend) runs inside this same
-# Xvfb: the compositor's output is an X11 window, so one x11grab films
-# wayland rendering too — and each recorded wayland leg gets its own
-# compositor instead of sharing one.
+# For wayland a nested Weston (X11 backend) runs inside this same Xvfb,
+# so one x11grab films wayland rendering too, one compositor per leg.
 #
-# Anchor: the container clock stamps both the harness epoch (in the
-# transcript) and the recorder stop; ffmpeg finalizes on SIGINT, so
-# video-end == stop time and anchor = stop − duration (the same scheme
-# the Android runner uses).
+# Anchor: ffmpeg finalizes on SIGINT, so video-end == stop time and
+# anchor = stop − duration (the scheme the Android runner uses).
 set -uo pipefail
 
 proto="$1"
@@ -59,8 +54,6 @@ if [ "$proto" = wayland ]; then
     kill "$weston_pid" 2>/dev/null
 fi
 
-# The pooled caller shows this log on failure; the transcript and
-# verdict must flow through.
 cat "$dir/leg.log"
 
 dur_ms=$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 \

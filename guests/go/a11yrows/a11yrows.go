@@ -2,10 +2,9 @@
 // template, each carrying its OWN ROW's accessibility identity, read back
 // out of the platform's real tree.
 //
-// SEPARATE FROM THE a11y SCENE ON PURPOSE: a For materializes a column,
-// container registries are creation-order, and that order differs by
-// language — so a For inside a11y would make `column#0` name different
-// widgets per lane. This scene asserts no container at all.
+// SEPARATE FROM THE a11y SCENE ON PURPOSE: a For materializes a column
+// and container registries are creation-order, which differs by language.
+// This scene asserts no container at all.
 //
 // See guests/rust/a11yrows.rs and tools/scenes/a11yrows.steps.
 package a11yrows
@@ -23,20 +22,17 @@ func App() *kaya.App {
 			for row := range notes.Rows(tx) {
 				field := row.Entry()
 				// BOTH PROPS ELEMENT-SOURCED. The ID is forced: expect_ax
-				// resolves its target to the authored identifier and then
-				// searches the REAL tree by it, so copies sharing one
-				// const id are an ambiguity that verb refuses.
+				// searches the REAL tree by the authored identifier, so copies
+				// sharing one const id are an ambiguity that verb refuses.
 				row.BindA11yID(field, row.Value())
 				row.BindA11yLabel(field, row.Value())
 			}
 			tx.InsertFresh(notes, "First note")  // entry#0
 			tx.InsertFresh(notes, "Second note") // entry#last
 
-			// A SECOND COLLECTION rather than two more widgets in the
-			// first: a scalar row has exactly one field to spend on an
-			// id, and expect_ax refuses an ambiguous one. Both props are
-			// CONST — what a copy MEANS is a fact about the prototype,
-			// not about the row's data.
+			// A SECOND COLLECTION rather than two more widgets in the first:
+			// a scalar row has exactly one field to spend on an id. Both
+			// props are CONST — facts about the prototype, not the row.
 			heads := tx.Collection()
 			for head := range heads.Rows(tx) {
 				var title kaya.Node

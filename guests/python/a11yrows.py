@@ -1,17 +1,12 @@
 """The stamped-accessibility scene from Python: two entries stamped
 from ONE template, each carrying its OWN ROW's accessibility identity,
-read back out of the PLATFORM'S accessibility tree rather than kaya's
-model.
-
-The a11y scene proves the wrap-native bet for LIVE widgets; this one
-proves it for COPIES (docs/tpl-props-plan.md P1).
+read back out of the PLATFORM'S accessibility tree
+(docs/tpl-props-plan.md P1).
 
 A SEPARATE SCENE BY DESIGN: a For materializes as a column, harness
 registries are creation-order, and container creation order differs by
 language — so the a11y scene, which asserts every container kind
-ordinally, cannot host a For. This scene asserts no container, so the
-For's column may land at either end of the registry
-(guests/haskell/reorder.hs documents the ordering rule).
+ordinally, cannot host a For. This scene asserts no container.
 
 Canonical note in guests/rust/a11yrows.rs; the byte-frozen contract is
 tools/scenes/a11yrows.steps.
@@ -36,7 +31,6 @@ with app.window():
             # tree by the AUTHORED identifier and refuses an ambiguous
             # one (docs/deferred.md), so copies cannot share a const id.
             kaya.entry().a11y_id(note).a11y_label(note)
-        # The two copies the steps address as entry#0 and entry#last.
         notes.insert_fresh("First note")
         notes.insert_fresh("Second note")
 

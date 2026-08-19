@@ -1,9 +1,8 @@
 //! The occurrence ring: byte records in shared memory, written by the core
 //! on the main thread, readable lock-free by any consumer with atomics.
 //!
-//! This is the first piece of the real transport. Records follow the
-//! design document's header layout (u32 size, u16 kind, u16 flags, 8-byte
-//! aligned, payload inline). The consumer contract, io_uring style:
+//! Header layout is DESIGN.md's: u32 size, u16 kind, u16 flags, 8-byte
+//! aligned, payload inline. The consumer contract, io_uring style:
 //!
 //! 1. Load `tail` with acquire ordering. If `head == tail`, the ring is
 //!    empty; call `kaya_wait_occurrences` to block (function calls are
@@ -11,8 +10,7 @@
 //! 2. Read the record at `head & (capacity - 1)`. Skip PAD records.
 //! 3. Advance `head` by the record size with a release store.
 //!
-//! Capacity is fixed for now; a full ring is a loud failure. Chained
-//! segment growth arrives with the full protocol.
+//! Capacity is fixed; a full ring is a loud failure.
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
@@ -30,11 +28,10 @@ pub const REC_ENTRY_POPPED: u16 = 8;
 pub const REC_BACK_REQUESTED: u16 = 9;
 pub const REC_SECTION_SELECTED: u16 = 10;
 // Menu occurrences. Each carries the button_clicked body shape — u64
-// item id, u32 path_len, u32 reserved, then path_len key values (the
-// on_click_node encoding: empty for a bar/live-widget activation, the
-// anchor copy's key path for a node-anchored context item) — then the
-// payload for the stateful pair (a Bool for toggled, an F64 index for
-// value_changed).
+// item id, u32 path_len, u32 reserved, then path_len key values (empty
+// for a bar activation, the anchor copy's key path for a node-anchored
+// context item) — then the payload for the stateful pair (a Bool for
+// toggled, an F64 index for value_changed).
 pub const REC_MENU_ACTIVATED: u16 = 11;
 pub const REC_MENU_TOGGLED: u16 = 12;
 pub const REC_MENU_VALUE_CHANGED: u16 = 13;
@@ -51,9 +48,9 @@ pub const REC_UNDONE: u16 = 17;
 pub const REC_REDONE: u16 = 18;
 
 /// Wire framing of every record, exported through the C header so direct
-/// consumers cast a pointer instead of bit-twiddling. Little-endian
-/// layout; records are 8-byte aligned, so the payload follows the header
-/// at natural alignment.
+/// consumers cast a pointer instead of bit-twiddling. Little-endian;
+/// records are 8-byte aligned, so the payload follows at natural
+/// alignment.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct KayaRecordHeader {
@@ -63,11 +60,10 @@ pub struct KayaRecordHeader {
 }
 
 /// The button-clicked record as it appears on the wire. `id` is a widget
-/// id when `path_len` is 0 (a click on a guest-created widget) and a
-/// template node id otherwise, with `path_len` key values — the copy's
-/// key path, outermost first, each encoded as { u32 type; u32 len;
-/// payload padded to 8 } — following the fixed part. Constructed by
-/// direct consumers casting into the ring, not by Rust code.
+/// id when `path_len` is 0 and a template node id otherwise, with
+/// `path_len` key values — the copy's key path, outermost first, each
+/// encoded as { u32 type; u32 len; payload padded to 8 } — following the
+/// fixed part.
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -99,15 +95,13 @@ pub struct OccRing {
     head: Cursor,
     tail: Cursor,
     shutdown: AtomicBool,
-    // A wake pending for the consumer: the app thread parks here for
-    // occurrences, and a guest's background thread may have work for it
-    // that is NOT an occurrence — a posted closure. One-shot, consumed
-    // by whichever waiter sees it.
+    // A wake pending for the consumer, for work that is NOT an
+    // occurrence (a posted closure). One-shot, consumed by whichever
+    // waiter sees it.
     woken: AtomicBool,
-    // Consumers inside `cond.wait` right now. This exists so a test can
-    // KNOW the consumer is parked before waking it; without it the wake
-    // test races and passes whenever the flag happens to be set before
-    // the waiter arrives, which proves nothing about the notify.
+    // Consumers inside `cond.wait` right now. Exists so a test can KNOW
+    // the consumer is parked before waking it; without it the wake test
+    // races and proves nothing about the notify.
     parked: AtomicUsize,
     buf: Box<[UnsafeCell<u64>]>,
     waiter: Mutex<()>,
@@ -169,11 +163,8 @@ impl OccRing {
     /// length (record bodies always are). Panics when full; the design
     /// says never block and never drop, and growth is not built yet.
     pub fn push_record(&self, kind: u16, body: &[u8]) {
-        // One occurrence bound for the app thread (crate::stall). No
-        // counter on this transport: the cursors below already say what
-        // is pending and whether the consumer is moving, and unlike a
-        // counter they cannot be forgotten by a binding — a consumer
-        // that does not advance `head` wedges itself.
+        // Starts the watchdog; no counter on this transport, the cursors
+        // are what crate::stall reads.
         crate::stall::ring_pushed();
         if !self.try_push_record(kind, body) {
             panic!("kaya occurrence ring full: segment growth is not implemented yet");
@@ -264,9 +255,9 @@ impl OccRing {
                 return Waited::Woken;
             }
             let guard = self.waiter.lock().unwrap();
-            // Re-check under the lock so a push between the emptiness check
-            // and the wait is not a lost wakeup. The wake flag rides the
-            // same re-check for the same reason.
+            // Re-check under the lock so a push between the emptiness
+            // check and the wait is not a lost wakeup; the wake flag
+            // rides the same re-check.
             let tail = self.tail.0.load(Ordering::Acquire);
             if tail != self.head.0.load(Ordering::Relaxed)
                 || self.shutdown.load(Ordering::Acquire)
@@ -293,11 +284,9 @@ impl OccRing {
             if self.shutdown.load(Ordering::Acquire) {
                 return false;
             }
-            // A wake returns TRUE with the ring still empty. That is not a
-            // lie the consumer has to detect: its loop drains its own queue
-            // and re-checks, so "there may be something for you" is the
-            // whole contract. One extra spin, never a spin loop — the flag
-            // is consumed here.
+            // A wake returns TRUE with the ring still empty: the
+            // consumer's loop drains its own queue and re-checks, so
+            // "there may be something for you" is the whole contract.
             if self.woken.swap(false, Ordering::AcqRel) {
                 return true;
             }
@@ -325,59 +314,47 @@ impl OccRing {
         self.cond.notify_all();
     }
 
-    /// Wake the parked consumer WITHOUT pushing anything. The app thread
-    /// blocks on this ring waiting for occurrences; a guest's background
-    /// thread has work for it that is not an occurrence — a closure
-    /// posted with App.Post — and this is how that thread says so. Safe
-    /// from any thread, unlike the producer side.
+    /// Wake the parked consumer WITHOUT pushing anything — how a
+    /// background thread says it posted a closure. Safe from any
+    /// thread, unlike the producer side.
     ///
-    /// One-shot: whichever waiter sees the flag consumes it and reports
-    /// `Woken` (or `true`, on the direct path). Setting it while nobody
-    /// is parked is not lost — the next waiter takes it before parking,
-    /// which is the same lost-wakeup re-check the push side does.
+    /// One-shot: whichever waiter sees the flag consumes it. Setting it
+    /// while nobody is parked is not lost; the next waiter takes it
+    /// before parking.
     pub fn wake(&self) {
         self.woken.store(true, Ordering::Release);
         let _guard = self.waiter.lock().unwrap();
         self.cond.notify_all();
     }
 
-    /// Consumers inside `cond.wait` right now. This is observability for
-    /// ONE purpose: a wake test that does not first know the consumer is
-    /// parked proves nothing, because the flag is also honored on the way
-    /// in. The shutdown test above had exactly that weakness (it slept 50ms)
-    /// and now spins on this instead.
+    /// Consumers inside `cond.wait` right now: a wake test that does not
+    /// first know the consumer is parked proves nothing, because the
+    /// flag is also honored on the way in.
     ///
-    /// Test-only, and cfg'd rather than allow'd so it says which: a shipped
-    /// build has no reason to ask, and a silenced dead-code warning is how
-    /// dead machinery survives (the lesson check-detekt exists for).
+    /// Test-only, and `cfg`'d rather than `allow`'d so it says which.
     #[cfg(test)]
     pub fn parked(&self) -> usize {
         self.parked.load(Ordering::Acquire)
     }
 
     /// The two cursors, for the stall watchdog: `(head, tail)`. Equal is
-    /// an empty ring; unequal with `head` standing still is the stall
-    /// (crate::stall). This is DESIGN's "the core reads the app's
-    /// consumer cursor directly" — and it works for the direct tier as
-    /// well as the function floor, because both advance `head` and only
-    /// one of them ever enters this file.
+    /// an empty ring; unequal with `head` standing still is the stall.
+    /// Works for the direct tier as well as the function floor, because
+    /// both advance `head`.
     pub(crate) fn cursors(&self) -> (u32, u32) {
         let head = self.head.0.load(Ordering::Acquire);
         let tail = self.tail.0.load(Ordering::Acquire);
         (head, tail)
     }
 
-    /// How many records are waiting, for the watchdog's message — the
-    /// count a person recognizes ("I clicked three times"), where the
-    /// byte distance between the cursors is not.
+    /// How many records are waiting, for the watchdog's message.
     ///
     /// Walks the published region, which is safe to READ from another
-    /// thread: those bytes were written before `tail` was released, and
+    /// thread: those bytes were written before `tail` was released and
     /// nothing reuses them until the consumer advances `head` past them.
-    /// It is a DIAGNOSTIC count and says so: a consumer draining
-    /// concurrently can leave this walk following a header the producer
-    /// has since overwritten, so the walk is bounded by the ring itself
-    /// and stops at anything that cannot be a record.
+    /// A DIAGNOSTIC count: a consumer draining concurrently can leave
+    /// this walk on a header the producer has overwritten, so the walk
+    /// is bounded and stops at anything that cannot be a record.
     pub(crate) fn pending_records(&self) -> u64 {
         let (mut at, tail) = self.cursors();
         let mut records = 0;
@@ -487,19 +464,14 @@ mod tests {
         assert_eq!(consumer.join().unwrap(), Waited::Shutdown);
     }
 
-    // THE WAKE, and the reason `parked` exists. A background thread rings
-    // the doorbell for work that is NOT an occurrence — a posted closure
-    // — and the app thread must come back from `cond.wait` for it.
+    // Spinning on `parked` first is what makes the wake tests a test of
+    // the NOTIFY rather than of the flag: the wake is also honored on
+    // the way in, so a version that slept and lost the race would pass
+    // while proving nothing (docs/background-work-plan.md §5).
     //
-    // Spinning on `parked` first is what makes this a test of the NOTIFY
-    // rather than of the flag: the wake is also honored on the way in, so
-    // a version that slept and lost the race would pass while proving
-    // nothing. The scene cannot make this observation at all, which is
-    // why it lives here (docs/background-work-plan.md §5).
-    // Wait for a woken consumer WITHOUT joining. A missing notify leaves
-    // the consumer parked forever, and `join` would turn that into a hung
-    // matrix lane instead of a failure — the worst way for a gate to
-    // report. Verified by deleting the notify: this says so in seconds.
+    // And the wait is timed rather than joined: a missing notify leaves
+    // the consumer parked forever, and `join` would turn that into a
+    // hung matrix lane instead of a failure.
     fn woke_within<T: Send + 'static>(
         ring: &Arc<OccRing>,
         wait: impl FnOnce(Arc<OccRing>) -> T + Send + 'static,
@@ -528,10 +500,9 @@ mod tests {
         }
     }
 
-    // The same for the direct path, whose consumers (Go, C#, Haskell,
-    // OCaml) never call wait_pop. A wake there returns TRUE with the ring
-    // still empty — deliberately indistinguishable from data, because the
-    // consumer's loop drains its own queue and re-checks either way.
+    // The direct path, whose consumers (Go, C#, Haskell, OCaml) never
+    // call wait_pop: a wake there returns TRUE with the ring still
+    // empty, deliberately indistinguishable from data.
     #[test]
     fn wake_returns_a_parked_direct_consumer() {
         for _ in 0..200 {
@@ -541,8 +512,7 @@ mod tests {
     }
 
     // A wake set while NOBODY is parked is not lost: the next waiter
-    // takes it before parking. Same lost-wakeup re-check the push side
-    // does, and the case a naive implementation drops.
+    // takes it before parking.
     #[test]
     fn wake_before_the_consumer_arrives_is_not_lost() {
         let ring = OccRing::new(64);

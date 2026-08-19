@@ -41,7 +41,6 @@ def start():
 
 
 def ping():
-    # Proof the app thread still serves input while the worker is parked.
     alive.set("alive")
 
 

@@ -1,11 +1,10 @@
 """The accessibility conformance scene from Python: the two universal
-props (a11y_id, a11y_label) and the verb that reads them back out of
-the PLATFORM'S OWN accessibility tree rather than kaya's model.
+props (a11y_id, a11y_label), read back out of the PLATFORM'S OWN
+accessibility tree rather than kaya's model.
 
 Every widget kind appears, and exactly one container of each container
-kind — the props are universal, and container targets are stable only
-while a scene keeps one of each. See guests/rust/a11y.rs for the full
-note; the byte-frozen contract is tools/scenes/a11y.steps.
+kind — container targets are ordinal. See guests/rust/a11y.rs; the
+byte-frozen contract is tools/scenes/a11y.steps.
 
 Build the library first (cargo build), then:
     KAYA_SELFTEST=a11y python3 guests/python/a11y.py
@@ -41,12 +40,8 @@ with app.window():
         kaya.slider(min=0.0, max=1.0, value=0.5).a11y_id("volume").a11y_label("Volume")
         kaya.progress(value=0.25).a11y_id("loading").a11y_label("Loading")
         kaya.image(TEST_PNG).a11y_id("logo").a11y_label("Logo")
-        # The two CHOICE kinds: their options carry captions, the choice
-        # itself does not.
         kaya.select(["Red", "Green"]).a11y_id("color").a11y_label("Color")
         kaya.radio(["Small", "Large"]).a11y_id("size").a11y_label("Size")
-        # Containers are GROUPS to an assistive client; naming one is how
-        # an app declares it a group.
         with kaya.grid(2) as cells:
             kaya.label(text="Name")
             kaya.label(text="Ada")

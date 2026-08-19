@@ -1,17 +1,13 @@
-(* The styling conformance scene, OCaml port — the brand accent, the role
-   tier and the window inset, which are one design (docs/styling-plan.md
-   slice 1): brand slots fill each platform's own token system, roles say
-   what a widget MEANS, and the inset is the one layout knob the pass
-   admitted.
+(* The styling conformance scene, OCaml port — the brand accent, the
+   role tier and the window inset, which are one design
+   (docs/styling-plan.md slice 1).
 
    [brand_accent 0x3584E4] is Adwaita blue, the derivation's empirical
-   anchor; one hex is the whole call, and the core derives the fills and
-   foregrounds. [~light]/[~dark] are the per-appearance form for a brand
-   book that has one.
+   anchor; one hex is the whole call. [~light]/[~dark] are the
+   per-appearance form for a brand book that has one.
 
    A ROLE IS CHECKED AGAINST THE KIND at declare time — swap Destructive
-   and Heading here and the scene dies — and pressing is unchanged: a
-   destructive button presses like any other and this app's handler acts.
+   and Heading here and the scene dies — and pressing is unchanged.
 
    Canonical semantics in guests/rust/styling.rs; the byte-frozen
    contract is tools/scenes/styling.steps. *)

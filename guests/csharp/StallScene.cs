@@ -45,8 +45,8 @@ static class StallScene
             {
                 tx.SetA11yId(tx.Label(bind: status), "status");  // label#0
 
-                // Deliberately wrong. Real work belongs on a thread of
-                // its own with the result posted back through app.Post.
+                // Deliberately wrong. Real work belongs on a thread of its
+                // own with the result posted back through app.Post.
                 tx.Button("block", inner =>  // button#0
                 {
                     Thread.Sleep(BlockMs);

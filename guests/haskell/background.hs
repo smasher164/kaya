@@ -3,11 +3,9 @@
 --
 -- THE SCENE'S SHAPE IS DELIBERATE: a wrong implementation must DEADLOCK
 -- rather than disagree. The worker parks until a CLICK releases it, and
--- only a live app thread can process a click.
---
--- The accumulators are the guest's own state, because signals are
--- write-only. IORefs without locking: everything that touches them runs
--- on the app thread, inside a posted transaction.
+-- only a live app thread can process a click. The accumulators are
+-- IORefs without locking: everything that touches them runs on the app
+-- thread, inside a posted transaction.
 
 import Control.Concurrent (forkIO, newEmptyMVar, takeMVar, tryPutMVar)
 import Data.IORef (modifyIORef', newIORef, readIORef)
@@ -53,8 +51,6 @@ main = kayaMain $ \app -> do
                 buildTx app (writeSignal status (VStr "working"))
             )
             [],
-          -- Proof the app thread is still serving input while the
-          -- worker is parked and has posted nothing.
           buttonOn "ping" (buildTx app (writeSignal alive (VStr "alive"))) [], -- button#1
           -- tryPutMVar, NOT putMVar: putMVar BLOCKS when the MVar is
           -- already full, so a second release click would block the APP

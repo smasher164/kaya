@@ -37,8 +37,6 @@ def on_step():
 
 
 def on_remove(group, item_key):
-    # The collection IS the model, so the count in the status is read
-    # back from it rather than from a shadow copy.
     todos = items.at(group)
     todos.remove(item_key)
     status.set(f"removed {group}/{item_key}, {len(todos)} left")
@@ -57,7 +55,6 @@ with app.window():
         # taken.
         with kaya.when(steps == 1):
             kaya.label("extras on")
-        # Nested for statements trace to nested Fors; each body runs ONCE.
         for group in groups:
             with kaya.column():
                 kaya.label(bind=group)

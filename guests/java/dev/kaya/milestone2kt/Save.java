@@ -17,31 +17,25 @@ import java.util.function.Supplier;
  * tools/scenes/save.steps.
  *
  * <p>EVERY ASSERTION IS A READ-BACK OFF THE DISK, through the HANDLE
- * and never through {@code localPath}, which is empty on both phones: a
- * write that returned without throwing and landed nowhere is the
- * failure "save" has, and only reopening can see it.
+ * and never through {@code localPath}, which is empty on both phones.
  *
  * <p>THE WORK RUNS OFF THE APP THREAD — open blocks. The workers MUST
  * be daemon threads: a parked non-daemon thread keeps the JVM alive,
- * which never shows on a passing run and turns a FAILING one into a
- * timeout instead of a report.
+ * which turns a FAILING run into a timeout instead of a report.
  *
- * <p>NO EXTENSIONS ON ANY NAME and NO FILTER ON EITHER REQUEST, both
- * deliberately: a save panel hides a known extension per the user's
- * Finder preference, and with {@code allowedContentTypes} set it
- * APPENDS the first allowed extension to an extension-less name —
- * either way the harness would read a name this guest did not ask for,
- * on some machines only.
+ * <p>NO EXTENSIONS ON ANY NAME and NO FILTER ON EITHER REQUEST: a save
+ * panel hides a known extension per the user's Finder preference, and
+ * with {@code allowedContentTypes} set it APPENDS the first allowed
+ * extension to an extension-less name.
  */
 final class Save {
     private Save() {}
 
-    /**
-     * The file the user OPENED and the destination they later NAMED,
-     * held as HANDLES: the phones have no re-openable path at all. In
-     * an object rather than two locals because a lambda captures
-     * values; every access is on the app thread.
-     */
+        /**
+         * The file the user OPENED and the destination they later NAMED,
+         * held as HANDLES: the phones have no re-openable path at all. In
+         * an object rather than two locals because a lambda captures values.
+         */
     private static final class Handles {
         KayaApp.PickedFile source;
         KayaApp.PickedFile destination;
@@ -159,17 +153,17 @@ final class Save {
         return readBack(file);
     }
 
-    /**
-     * Where the scene's files live: {@code <temp>/kaya-save-<pid>}, the
-     * same directory the interpreter expands
-     * {@code $TMP/kaya-save-$PID} to.
-     *
-     * <p>TMPDIR FIRST, java.io.tmpdir only as the Windows fallback:
-     * Java's java.io.tmpdir ignores TMPDIR on macOS (docs/traps.md,
-     * "java.io.tmpdir"). THE PHONES USE THE SHARED COLLECTION — a
-     * document provider cannot see an app's private storage — and a JVM
-     * guest has no cfg(), so Android is detected by the vendor string.
-     */
+        /**
+         * Where the scene's files live: {@code <temp>/kaya-save-<pid>}, the
+         * same directory the interpreter expands {@code $TMP/kaya-save-$PID}
+         * to.
+         *
+         * <p>TMPDIR FIRST, java.io.tmpdir only as the Windows fallback:
+         * Java's java.io.tmpdir ignores TMPDIR on macOS (docs/traps.md,
+         * "java.io.tmpdir"). THE PHONES USE THE SHARED COLLECTION — a
+         * document provider cannot see an app's private storage — and a JVM
+         * guest has no cfg(), so Android is detected by the vendor string.
+         */
     private static Path sceneDir() {
         String tmp = System.getenv("TMPDIR");
         if (tmp == null || tmp.isEmpty()) {

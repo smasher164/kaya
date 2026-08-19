@@ -6,12 +6,11 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 
-// The BACKGROUND read — which the platform normally refuses (reads
-// are focus-gated since 10). THE CELL UNDER TEST: when this package
-// is the DEFAULT IME (`adb shell ime enable/set`), ClipboardService's
-// isDefaultIme branch admits the read with no focus and no window —
-// the Appium pattern, and the shape the helper APK will take if it
-// measures true. Results ride the ordered broadcast's result data.
+// The BACKGROUND read, which the platform normally refuses (reads are
+// focus-gated since API 29). THE CELL UNDER TEST: as the DEFAULT IME
+// (`adb shell ime enable/set`) the read is admitted with no focus and
+// no window (docs/clipboard-plan.md §7). Results ride the ordered
+// broadcast's result data.
 class ReadReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE)
@@ -60,10 +59,7 @@ class ReadReceiver : BroadcastReceiver() {
                 }
                 "reopen" -> {
                     // The revocation cell: re-open a URI captured from
-                    // an EARLIER clip, after the clip has changed. The
-                    // grant is revoked on every clip change (measured
-                    // in ClipboardService.revokeUris) — this proves it
-                    // from the outside.
+                    // an EARLIER clip, after the clip has changed.
                     val uri = Uri.parse(intent.getStringExtra("uri") ?: "")
                     val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     "reopened $uri -> ${bytes?.size} bytes"

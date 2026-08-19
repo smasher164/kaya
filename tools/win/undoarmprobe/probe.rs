@@ -4,12 +4,8 @@
 //! nothing.
 //!
 //! A MODULE OF THE BACKEND, driving the REAL `undo` example guest
-//! (guests/rust/undo.rs), for the reason the first probe gives: the
-//! questions are about the TextBox kaya itself creates, with kaya's
-//! minimal template, under kaya's own chord hook. Using the real guest
-//! also means NO Cargo.toml edit — the `undo` example is already
-//! registered — so the only tracked file this probe touches is the one
-//! this session owns.
+//! (guests/rust/undo.rs) for the reason the first probe gives, and
+//! needing no Cargo.toml edit because that example is registered.
 //!
 //! Wiring (temporary, reverted after the run):
 //!   crates/kaya/src/winui/mod.rs
@@ -77,13 +73,10 @@ fn on_ui<T: Send + 'static>(
 
 // --- the TextChanged witness ---------------------------------------------
 //
-// The arm's emit rides the control's own TextChanged (winui/mod.rs, the
-// entry's handler -> OccSink::send_text_tag). §3a asks whether a native
-// undo reaches kaya's model HERE; on this backend that question IS "does
-// the raw control raise TextChanged for an undo", so the probe attaches
-// a SECOND handler to the same control and records every raise with a
-// stamp, plus whether the `Undo()` call that provoked it had already
-// returned (the ordering the ledger-quiet bracket depends on).
+// The arm's emit rides the control's own TextChanged, so §3a's question
+// IS "does the raw control raise TextChanged for an undo". A SECOND
+// handler on the same control records every raise with a stamp, plus
+// whether the `Undo()` that provoked it had already returned.
 
 static IN_UNDO: AtomicBool = AtomicBool::new(false);
 static EVENTS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());

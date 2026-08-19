@@ -1,35 +1,20 @@
 """A depth stub is a SANCTIONED hole only while the ledger holds it open.
 
-THE INCIDENT THIS BURIES (2026-08-05). The Compose backend carried
-`depthStub("undo")` across five entry points for a whole milestone.
-Nothing in docs/deferred.md ever named it. It was legitimate the day it
-was written — a depth slice lands one backend first, that is the
-sequencing CLAUDE.md prescribes — and then it was simply forgotten,
-because forgetting it cost nothing: `check-stubs` and `check-steps`
-between them made the stub INVISIBLE, holding the android undo legs off
-the runner so quietly that both gates read green and no list anywhere
-said work was outstanding. The reshaped `todos.steps` walked into it, and
-the only reason anybody found out is that an agent happened to read the
-backend source.
+A stub buys silence from check-stubs and check-steps; the ledger entry is
+what it costs. `git log -S 'depth_stub(' -- docs/deferred.md` was EMPTY
+before this rule — not one stub in the project's history was ever tracked
+— which is the measurement that says this is a real class and not a
+hypothetical one.
 
-So the exemption gets a price. A stub buys silence from two gates; the
-ledger entry is what it costs. `git log -S 'depth_stub(' -- docs/deferred.md`
-was EMPTY before this rule — not one stub in the project's history was
-ever tracked — which is the measurement that says this is a real class
-and not a hypothetical one.
+THE ENTRY IS A LINE, NOT A PARAGRAPH: matching on prose would repeat the
+free-form-sentence defect the CALL spelling was invented to kill
+(docs/traps.md). The marker is fixed text, and the failure message spells
+the exact line to paste.
 
-THE ENTRY IS A LINE, NOT A PARAGRAPH. Matching on prose would repeat the
-"free-form sentence" defect the CALL spelling was invented to kill
-(tools/lib/hand-rolled-stubs.py): four milestones of a convention nobody
-ever wrote, and a gate that could only ever pass. The marker is fixed
-text, and the failure message spells the exact line to paste.
-
-OPEN MEANS NOT STRUCK THROUGH. docs/deferred.md marks finished work by
-wrapping the item in `~~`, and those spans routinely run across several
-lines, so the strikethrough is stripped from the WHOLE TEXT before the
-marker is looked for. A closed entry sanctions nothing: it says the hole
-was filled, and a backend still refusing is then a contradiction, not a
-carve-out.
+OPEN MEANS NOT STRUCK THROUGH. docs/deferred.md wraps finished work in
+`~~` and those spans run across several lines, so the strikethrough is
+stripped from the WHOLE TEXT before the marker is looked for. A closed
+entry sanctions nothing.
 """
 
 import argparse
@@ -51,11 +36,9 @@ BACKENDS = [
     ("swift/KayaSwiftUI.swift", "swiftui/ios", "ios"),
 ]
 
-# The three spellings of the declaration, suffix-matched — Rust's
-# snake_case, Kotlin's bare camelCase, Swift's platform-qualified one.
-# The bare pattern cannot match the qualified call (a comma follows the
-# scene there, not a paren), so the mac roster never reads an iOS
-# declaration as its own.
+# The three spellings of the declaration, suffix-matched. The bare
+# pattern cannot match the platform-qualified Swift call, so the mac
+# roster never reads an iOS declaration as its own.
 DECL = re.compile(r'epth_?[Ss]tub\("([a-z0-9_]+)"(?:,\s*on:\s*"([a-z]+)")?\)')
 
 # `DEPTH STUB: <scene> on <backend>`, tolerant of the markdown a ledger
@@ -89,8 +72,7 @@ def declarations(text: str, platform: str):
 
 # Where a declaration could physically live. The roster above is five
 # FILES; this is the tree those files sit in, so a stub written one
-# module over cannot slip past the roster. Nothing is exempt by being
-# unlisted — being unlisted is the failure.
+# module over cannot slip past it. Being unlisted IS the failure.
 SEARCH = [("crates", (".rs",)), ("android", (".kt",)), ("swift", (".swift",))]
 SKIP_PARTS = {"build", "target", "target-linux", ".git", "__pycache__"}
 
@@ -98,12 +80,9 @@ SKIP_PARTS = {"build", "target", "target-linux", ".git", "__pycache__"}
 def unrostered(root: pathlib.Path) -> list:
     """Declarations outside the five rostered backend files.
 
-    The roster is a hand-kept list, and a hand-kept list of places to look
-    is exactly what the check-verbs and check-universal-props families
-    keep having to widen. A depth stub in `crates/kaya/src/winui/menu.rs`
-    would be invisible to every gate here — not because anyone decided it
-    should be, but because nobody added the file. So the roster stops
-    being the search space and becomes the ALLOWED space.
+    The roster is a hand-kept list, so it is the ALLOWED space and not
+    the search space: a stub in an unlisted module would otherwise be
+    invisible to every gate here.
     """
     rostered = {backend for backend, _, _ in BACKENDS}
     out = []
@@ -140,9 +119,7 @@ def audit(root: pathlib.Path) -> list:
     ledger = ledger_path.read_text()
 
     # An unbalanced `~~` would swallow the rest of the file and turn every
-    # open entry into a closed one — silently, and in the direction that
-    # FAILS a live stub rather than passing it, but wrong either way. Say
-    # so instead of guessing.
+    # open entry into a closed one. Say so instead of guessing.
     if ledger.count("~~") % 2:
         bad.append(f"{LEDGER}: an odd number of `~~` markers — the ledger's "
                    f"open/closed state is unreadable, so no depth stub can be "
@@ -181,10 +158,8 @@ def main() -> int:
     if bad:
         return 1
 
-    # THE GUARD GUARDS ITSELF, all five directions. Each is a way this
-    # rule could be true and useless, and none of them is hypothetical:
-    # the free-form-sentence defect that made the CALL spelling mandatory
-    # was exactly "a check that could only ever pass".
+    # THE GUARD GUARDS ITSELF, in every direction this rule could be true
+    # and useless.
     open_entry = "- **DEPTH STUB: scroll on gtk** — the arm ran out of week.\n"
     closed = "- ~~**DEPTH STUB: scroll on gtk**~~ — LANDED 2026-08-05.\n"
     decls = list(declarations('    crate::depth_stub("scroll")', ""))
@@ -214,12 +189,9 @@ def main() -> int:
                   file=sys.stderr)
             return 1
 
-    # ...and audit() ITSELF, against a synthetic root. The checks above
-    # exercise the primitives, and a primitive can be perfect while the
-    # loop that calls it is disabled — which is the SAME shape of false
-    # green this whole file exists to bill for. On the tree as it stands
-    # there are ZERO depth stubs, so without this the clause would report
-    # OK today whether it worked or not.
+    # ...and audit() ITSELF, against a synthetic root: a primitive can be
+    # perfect while the loop that calls it is disabled, and with ZERO
+    # depth stubs in the tree that would report OK either way.
     with tempfile.TemporaryDirectory() as tmp:
         fake = pathlib.Path(tmp)
         (fake / LEDGER).parent.mkdir(parents=True, exist_ok=True)
@@ -234,9 +206,8 @@ def main() -> int:
         tracked = audit(fake)
         (fake / LEDGER).write_text("# ledger\n\n" + closed)
         struck = audit(fake)
-        # ...and a declaration in a file the roster does not name. It
-        # gets the OPEN entry too, so the only thing left to object to is
-        # WHERE it is.
+        # ...and a declaration in a file the roster does not name. It gets
+        # the OPEN entry too, so the only objection left is WHERE it is.
         (fake / "crates/kaya/src/elsewhere.rs").write_text(
             'fn y() -> ! { crate::depth_stub("scroll") }\n')
         (fake / LEDGER).write_text("# ledger\n\n" + open_entry)

@@ -15,8 +15,6 @@ main = kayaMain $ \app -> do
       column
         []
         [ labelBound s, -- label#0
-          -- The result handler rides the request and retires with its
-          -- one answer; ids are binding-allocated.
           buttonOn "delete" $
             buildTx app $
               showAlert
@@ -51,6 +49,5 @@ main = kayaMain $ \app -> do
         ]
     mount root
     return s
-  -- `status` keeps the signal alive for the scene's lifetime.
   _ <- return status
   return ()

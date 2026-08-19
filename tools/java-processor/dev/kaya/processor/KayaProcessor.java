@@ -22,20 +22,14 @@ import dev.kaya.KayaGen;
 
 /**
  * The Java arm of the generator family. Reads a {@code @KayaGen}
- * declaration — the declaration is the schema, nothing restated — and
- * writes {@code <Type>Kaya.java} beside it ({@code -Akaya.out=<source
- * root>}). The declaration's shape decides what is generated, the one
- * KayaGen story every language tells: a sealed interface (a sum — the
- * permitted records, in permits-clause order, are the constructors)
- * gets the collection factory and the staged-builder eliminator, where
- * each stage's return type offers exactly the next constructor's arm
- * and only the final arm yields the widget — the Immutables idiom for
- * named-and-required, making template totality a compile error, with
- * the scene checking it again. A record gets the collection factory,
- * exact-index field tokens, and a named-setter patch (each set records
- * one update_field — a patch is recorded writes, never a diff).
- * Generated files are checked in; tools/gen-guests.sh regenerates and
- * diffs.
+ * declaration and writes {@code <Type>Kaya.java} beside it
+ * ({@code -Akaya.out=<source root>}); the DECLARATION'S SHAPE decides
+ * what comes out — a sealed interface is a sum (permitted records, in
+ * permits-clause order, are the constructors) and gets the STAGED
+ * BUILDER eliminator, where each stage's return type offers exactly the
+ * next constructor's arm; a record gets the collection factory, field
+ * tokens and a named-setter patch. Generated files are checked in;
+ * tools/gen-guests.sh regenerates and diffs.
  */
 @SupportedAnnotationTypes("dev.kaya.KayaGen")
 @SupportedSourceVersion(SourceVersion.RELEASE_17)
@@ -229,10 +223,9 @@ public final class KayaProcessor extends AbstractProcessor {
             case "boolean", "java.lang.Boolean" -> "Boolean";
             case "long", "java.lang.Long" -> "Long";
             case "double", "java.lang.Double" -> "Double";
-            // The blob value type: KayaRecords.Info maps byte[]
-            // components into the schema, so the generator must too —
-            // a skipped component here would shift every later
-            // exact-index token off the runtime schema.
+            // KayaRecords.Info maps byte[] components into the schema,
+            // so a component skipped HERE shifts every later exact-index
+            // token off the runtime schema.
             case "byte[]" -> "byte[]";
             default -> null;
         };

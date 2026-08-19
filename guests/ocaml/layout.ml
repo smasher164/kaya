@@ -22,23 +22,18 @@ let () =
        column
          [
            label ~bind:probe (* label#0 *);
-           (* Main-axis free space: three unequal children with leftover
-              room. *)
            row
              [
                button ~text:"A";
                button ~text:"longer";
                label ~bind:tail (* label#1 *);
              ];
-           (* Cross-axis alignment: three intrinsic heights, one grower filling
-              the leftover width. *)
            row
              [
                checkbox ~text:"check";
                label ~bind:mixed (* label#2 *);
                slider ~grow:1.0 ~min:0.0 ~max:1.0 ~value:0.5;
              ];
-           (* Proportional grow: two growers of unequal weight in one row. *)
            row
              [
                slider ~grow:1.0 ~min:0.0 ~max:1.0 ~value:0.25;

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -72,11 +67,10 @@ for f in tools/scenes/*.steps; do
     }
 done
 
-# The opening lint: a script must OPEN with an observation. Expects
-# are bounded retries (harness.rs POLL_DEADLINE), and the FIRST one
-# doubles as the scene-ready wait — a script that opens with an
-# action races the mount on every platform at once (scripted settles
-# are gone; retries replaced them, 2026-07-22).
+# The opening lint: a script must OPEN with an observation. Expects are
+# bounded retries (harness.rs POLL_DEADLINE) and the FIRST one doubles
+# as the scene-ready wait, so a script that opens with an action races
+# the mount on every platform at once.
 opening_lint() {
     python3 -c '
 import sys
@@ -112,32 +106,19 @@ for f in tools/scenes/*.steps; do
     }
 done
 
-# WHICH WIDTHS AN expect_split MAY SAMPLE. Each backend defers the
-# one-pane/two-pane decision to its platform's own component, and those
-# components disagree about where the line falls: GNOME's documented
-# breakpoint collapses below 400sp, Material's standard directive wants
-# 840dp before it shows two panes, and TwoPaneView's default sits
-# between them. A width inside that band is legitimately one pane on one
-# platform and two on another.
+# WHICH WIDTHS AN expect_split MAY SAMPLE. The backends' platform
+# components disagree about where one pane becomes two — GNOME collapses
+# below 400sp, Material wants 840dp, TwoPaneView sits between — so a
+# width inside that band is legitimately one pane on one platform and
+# two on another, and the scripts are compared byte-for-byte.
 #
-# The scripts are compared byte-for-byte on every lane, so an assertion
-# taken in the band cannot be satisfied everywhere at once. What makes
-# this worth a gate rather than a comment is how the failure READS: one
-# platform disagreeing about pane count looks exactly like a broken
-# lowering, and the width that caused it is three lines up the file.
-#
-# THE TWO FORMS ARE POLICED DIFFERENTLY, and the split is exactly the
-# claim each makes. A LITERAL (`expect_split "regular/split"`) names
-# WHICH arm ran, which is a statement about the width — so it needs a
-# width the file itself set, outside the band. The BARE form asserts
-# the invariant (a regular window must not show one pane while its
-# stack holds two) and is therefore legal at a width the file never
-# names: it is the only spelling a phone or tablet lane can run, since
-# those hosts do not command their own window size. A width the file
-# DOES name still has to clear the band in either form — the invariant
-# is not vacuous in there, it is WRONG in there (kaya calls a window
-# regular at 600 while Material waits for 840, so an 800dp Compose
-# window honestly reports regular/stacked).
+# THE TWO FORMS ARE POLICED DIFFERENTLY, by the claim each makes. A
+# LITERAL (`expect_split "regular/split"`) names WHICH arm ran, so it
+# needs a width the file itself set, outside the band. The BARE form
+# asserts the invariant and is legal at a width the file never names —
+# the only spelling a phone or tablet lane can run. A width the file
+# DOES name must clear the band in either form: in there the invariant
+# is not vacuous, it is WRONG.
 split_width_lint() {
     python3 -c '
 import re
@@ -290,26 +271,16 @@ for f in tools/scenes/*.steps; do
     }
 done
 
-# THE TYPING VERB'S TWO RULES, both of them about the fact that `type`
-# is REAL KEYSTROKES at the FOCUSED widget (harness.rs Step::Type,
-# docs/undo-plan.md A8) rather than a write at a named target.
+# THE TYPING VERB'S TWO RULES, both about `type` being REAL KEYSTROKES
+# at the FOCUSED widget (harness.rs Step::Type, docs/undo-plan.md A8).
 #
-# 1. THE PAYLOAD IS PRINTABLE ASCII. A keystroke needs one keycode per
-#    character and that mapping is only platform-independent inside
-#    0x20..0x7e; a line break is worse than unmappable, because Return
-#    is a COMMAND whose meaning depends on the widget it lands in (a
-#    newline in a textarea, activation in an entry). harness.rs refuses
-#    it at parse — that is the wall — and this is the two-second answer
-#    with a file and a line, rather than a leg that boots a window to
-#    tell you the script was bad.
+# 1. THE PAYLOAD IS PRINTABLE ASCII: the keycode mapping is only
+#    platform-independent inside 0x20..0x7e, and Return is a COMMAND
+#    whose meaning depends on the widget it lands in. harness.rs refuses
+#    it at parse; this is the two-second answer with a file and a line.
 # 2. A SCRIPT THAT TYPES MUST HAVE ASSERTED FOCUS FIRST. The verb takes
-#    no target: whoever holds focus receives the keys, which is the
-#    routing question the undo tier turns on. A script that types
-#    without an `expect_focused` above it has no idea where its
-#    keystrokes went — and because expects are bounded retries and
-#    actions are not, that assertion is also the WAIT for focus to land.
-#    Without it the keys race the focus command and the failure surfaces
-#    three steps later as a field that never got the text.
+#    no target, and because expects are bounded retries while actions
+#    are not, that assertion is also the WAIT for focus to land.
 typing_lint() {
     python3 -c '
 import re
@@ -336,20 +307,12 @@ for lineno, line in enumerate(text.splitlines(), 1):
         m = re.match(r"type\s+\"(.*)\"\s*$", s)
         if not m:
             # HOW MUCH OF A TYPED RUN ONE UNDO SPENDS IS FRONTIER
-            # GRANULARITY, and a shared scene may not assert it:
-            # "the only platform-flavored part" of the undo design,
-            # which invariant 6 forbids asserting "across five lanes
-            # with five keystroke cadences" (docs/undo-plan.md §2,
-            # §5.2). One character is the floor every platform agrees
-            # on; more than one is a coin toss dressed as an assertion.
-            #
-            # MEASURED, NOT FEARED (2026-08-10, editor.steps): a five
-            # character run undone in one step passed on mac, where
-            # AppKit coalesces a burst whole, and failed on linux/x11
-            # where the same characters arrive through
-            # `xdotool --delay 0` and GtkTextHistory spends one per
-            # undo. Wayland `wtype -d 1` coalesced and passed. One
-            # scene, one backend, two cadences, two answers.
+            # GRANULARITY, which a shared scene may not assert
+            # (docs/undo-plan.md §2, §5.2). One character is the floor
+            # every platform agrees on; more than one is a coin toss.
+            # Measured: a five-character run undone in one step passed
+            # on mac, where AppKit coalesces a burst whole, and failed
+            # on linux/x11 where GtkTextHistory spends one per undo.
             if re.match(r"menu_activate\s+\"Edit>Undo\"\s*$", s):
                 if pending is not None and len(pending[2]) > 1:
                     bad.append(f"{path}:{pending[0]}: {pending[1]} — then "
@@ -428,11 +391,9 @@ if ! printf 'expect_focused entry#0\ntype "milk"\nclick button#0\nmenu_activate 
     echo "check-steps: SELF-TEST FAIL (an app action between typing and undo was refused)" >&2
     exit 1
 fi
-# AND THE CLAUSE MUST FIRE ON THE REAL FILE THAT PROVOKED IT, not only
-# on a synthetic sample: the perturbation goes into a COPY of
-# editor.steps, the substitution count is printed and asserted, and an
-# unchanged file is a failed test rather than a passed one (the vacuous
-# negative test this project has been bitten by twice).
+# AND THE CLAUSE MUST FIRE ON THE REAL FILE THAT PROVOKED IT: the
+# perturbation goes into a COPY of editor.steps, the substitution count
+# is printed and asserted, and an unchanged file is a FAILED test.
 undo_granularity_selftest() {
     local copy applied
     copy="$(mktemp)"
@@ -467,32 +428,20 @@ undo_granularity_selftest || exit 1
 
 # ── expect_title MAY NOT SIT INSIDE A DIRTY STRETCH ──────────────────
 #
-# docs/dirty-plan.md §2 wrote this rule down and nothing enforced it.
-# The declared title is untouched by `dirty` on every backend — a marker
-# composed into the app's own title string is D1's named rejection —
-# but the WinUI arm composes its asterisk into the RENDERED CAPTION,
-# and the rendered caption is exactly what expect_title reads there
-# (crates/kaya/src/winui/mod.rs, window_caption + Stage::window_title).
-# So a title assertion made while the window is dirty is a byte
-# comparison that reads "notes" on four lanes and "*notes" on the fifth.
-#
-# WHERE THE WALL IS, and why here rather than in a list somebody has to
-# remember: this gate runs in the fast set, which validate-mac and
-# gates.sh both run before any lane starts. The failure it prevents is
-# otherwise discovered on WINDOWS — the slowest lane to reach, the one
-# needing a VM, and the last one a session with no context will run.
+# docs/dirty-plan.md §2. The declared title is untouched by `dirty` on
+# every backend, but the WinUI arm composes its asterisk into the
+# RENDERED CAPTION, which is exactly what expect_title reads there. So a
+# title assertion made while the window is dirty reads "notes" on four
+# lanes and "*notes" on the fifth.
 #
 # THE DIRTY STRETCH IS THE SCENE'S OWN CLAIM about itself: from an
-# `expect_dirty true` up to the next `expect_dirty false`. That is the
-# only mechanical record of the state, and it is the same record the
-# rule is written against. A scene that never asserts `dirty` at all
-# (window, nav, panels, split) is untouched — there is no stretch.
+# `expect_dirty true` up to the next `expect_dirty false`. A scene that
+# never asserts `dirty` has no stretch and is untouched.
 #
-# `python3 -c` AND NOT A HEREDOC, which is not a style choice: a
-# heredoc IS this process's stdin, so the `-` spelling the self-tests
-# below pipe into would read the program instead of the script and
-# every negative test would pass vacuously. It did, once, for the ten
-# minutes between writing this guard and watching it fail.
+# `python3 -c` AND NOT A HEREDOC, which is not a style choice: a heredoc
+# IS this process's stdin, so the `-` spelling the self-tests pipe into
+# would read the program instead of the script and every negative test
+# would pass vacuously.
 title_dirty_lint() {
     python3 -c '
 import re, sys
@@ -542,11 +491,10 @@ if ! printf 'expect_title "window probe"\n' | title_dirty_lint - >/dev/null; the
     echo "check-steps: SELF-TEST FAIL (a scene with no dirty claim at all was refused)" >&2
     exit 1
 fi
-# AND ON THE REAL FILE THAT NEEDS IT, not only on synthetic samples: the
-# perturbation moves editor.steps' own launch title read to just after an
-# `expect_dirty true`, the substitution count is printed and asserted,
-# and an unchanged file is a FAILED test rather than a passed one — the
-# vacuous negative test this project has been bitten by twice.
+# AND ON THE REAL FILE THAT NEEDS IT: the perturbation moves
+# editor.steps' own launch title read to just after an `expect_dirty
+# true`, the substitution count is printed and asserted, and an
+# unchanged file is a FAILED test.
 title_dirty_selftest() {
     local copy applied
     copy="$(mktemp)"
@@ -589,9 +537,9 @@ title_dirty_selftest || exit 1
 # ── TWO ALERTS WITH THE SAME TITLE NEED `expect_alerts 0` BETWEEN ────
 #
 # MEASURED 2026-08-10 on the iOS lane, with editor.steps. The app guards
-# unsaved work at three doors and every door's alert carries the same
-# title, so `expect_alert "unsaved changes"` cannot tell a NEW dialog
-# from the one still on screen. The stretch that failed:
+# unsaved work at three doors under one alert title, so
+# `expect_alert "unsaved changes"` cannot tell a NEW dialog from the one
+# still on screen. The stretch that failed:
 #
 #   alert_choose cancel
 #   expect textarea#0 "scratch"   <- already true; passes instantly
@@ -599,32 +547,22 @@ title_dirty_selftest || exit 1
 #   menu_activate "File>New"
 #   expect_alert "unsaved changes" <- matched the OLD alert, +0ms
 #
-# and the app's second show then hit the core's one-alert-per-process
-# assertion and ABORTED the guest. A CANCEL is the sharp case because
-# its continuation changes nothing, so no state assertion can serve as
-# the wait — but the shape is what is wrong, not the luck.
+# and the app's second show hit the core's one-alert-per-process
+# assertion and ABORTED the guest.
 #
-# WHAT THIS CLAUSE DELIBERATELY DOES NOT CATCH, said plainly, because a
-# guard that fires on correct scripts gets deleted rather than obeyed.
-# Two conditions have to meet for the race to exist:
+# WHAT THIS CLAUSE DELIBERATELY DOES NOT CATCH, because a guard that
+# fires on correct scripts gets deleted rather than obeyed. Two
+# conditions have to meet for the race to exist:
 #
-#  1. THE TITLES REPEAT. confirm.steps answers one dialog and opens
-#     another with no count assertion between, correctly, wherever the
-#     second title differs: a stale "delete item?" can never satisfy
+#  1. THE TITLES REPEAT. A stale "delete item?" can never satisfy
 #     `expect_alert "eject disk?"`.
 #  2. THE ANSWER WAS `cancel`. An ACTION's continuation does something
-#     the script can wait on — confirm.steps' `expect label#0 "deleted"`
-#     is written BY the handler, so reaching it proves the dialog was
-#     answered, and that is real synchronization. A CANCEL's
-#     continuation is by construction "leave everything as it was", so
-#     every assertion after it was already true before the dialog
-#     opened. There is nothing to wait on but the dialog itself.
+#     the script can wait on; a CANCEL's continuation is by construction
+#     "leave everything as it was", so every assertion after it was
+#     already true before the dialog opened.
 #
 # So the clause fires on a cancel answered into a repeat of its own
-# title, which is the measured case and nothing wider. An action-side
-# repeat with no waitable effect would race too; no gate can see the
-# difference, and the narrow rule that never cries wolf beats the broad
-# one that gets switched off.
+# title, the measured case and nothing wider.
 alert_wait_lint() {
     python3 -c '
 import re, sys
@@ -740,57 +678,32 @@ for f in tools/scenes/*.steps; do
     }
 done
 
-# Every scene script must be reachable by name from harness::script.
-# That match ends in a catch-all returning the milestone2 script, so an
-# unregistered scene does not fail — it silently runs a DIFFERENT
-# script, and a leg that passes then proves nothing about the scene it
-# claims to be. Registration is easy to forget precisely because
+# Every scene script must be reachable by name. An unregistered scene
+# does not fail — it silently runs a DIFFERENT script, and a leg that
+# passes then proves nothing about the scene it claims to be.
 
-# (The former `registered` check lived here: it asserted every scene had
-# an arm in harness::script's include_str! match. That match is gone —
-# the Rust backends now resolve a scene NAME to
-# <KAYA_SCENES_DIR>/<name>.steps, and a missing scene makes spawn fail
-# loudly instead of falling through to a catch-all that silently ran
-# the milestone2 script. The gate policed a registry that no longer
-# exists; the failure it guarded is now structural.)
 
 # Every scene must be WIRED into every platform runner, not merely
-# registered: a scene can exist, parse, and be registered, yet run
-# nowhere on a platform — the layout scene shipped exactly that way
-# (functionally green on mac, absent from every suite), and the iOS
-# SwiftUI suite later missed the grow/layout legs the same silent way.
-# The grep demands each runner's LEG SIGNATURE, not the bare name: a
-# scene listed in SCENES whose leg block is dead (cloned below the
-# script's exit, commented out, mangled) satisfies a name check while
-# running nowhere — the sections regex-clone near-miss, 2026-07-22.
-# (iOS and Android stay name-level: their legs derive mechanically
-# from the scene list, so the name IS the wiring — except the scenes
-# each platform deliberately skips, carved out below.)
+# registered: a scene can exist, parse and be registered yet run
+# nowhere. The grep demands each runner's LEG SIGNATURE, not the bare
+# name — a leg block that is dead (cloned below the script's exit,
+# commented out, mangled) satisfies a name check while running nowhere.
+# (iOS and Android stay name-level: their legs derive mechanically from
+# the scene list, so the name IS the wiring, except for the scenes each
+# platform deliberately skips, carved out below.)
 #
-# EXCEPT where the backend says it has not got there yet. A depth slice
-# lands protocol + one backend + one binding first (CLAUDE.md's
-# sequencing), and the backends left behind declare it with
-# `depth_stub("<scene>")` — the same call check-stubs reads from the
-# other side. The two gates then state one rule between them: a scene's
-# legs are wired on a runner IF AND ONLY IF that runner's backend has
-# the feature. Neither half can be skipped, and the interim state of a
-# depth slice is expressible without turning either off. The exemption
-# costs a DECLARATION in the backend source, so the layout class this
-# gate was written for — green on mac, absent from every suite, nobody
-# having declared anything — is untouched.
+# EXCEPT where the backend says it has not got there yet: a backend left
+# behind by a depth slice declares `depth_stub("<scene>")`, the same
+# call check-stubs reads from the other side. Between them the two gates
+# state one rule: a scene's legs are wired on a runner IF AND ONLY IF
+# that runner's backend has the feature.
 #
-# THE EXEMPTION IS KEYED ON THE SCENE'S FEATURES, NOT ITS NAME, and it
-# has to be, or the two gates contradict each other. tools/scenes are
-# shared verbatim, so a scene can demand a feature it is not named after:
-# `todos.steps` activates Edit>Undo. If a stub on `undo` held only the
-# `undo` legs off a runner, the cross-check below would fail that same
-# runner for its `todos` legs while this half demanded them — no tree
-# could satisfy both, and the next agent would delete a clause to get
-# green. Keyed on features, the interim state stays expressible: a
-# Compose stub on `undo` holds `todos` AND `undo` off the android runner,
-# and the JNI landing hands both back the same day.
-# tools/lib/scene-features.py derives the pairs; it is the SAME predicate
-# the cross-check uses, computed once so the two cannot drift.
+# THE EXEMPTION IS KEYED ON THE SCENE'S FEATURES, NOT ITS NAME, or the
+# two gates contradict each other. A scene can demand a feature it is
+# not named after — `todos.steps` activates Edit>Undo — so a stub on
+# `undo` that held only the `undo` legs off a runner would leave no tree
+# able to satisfy both gates. tools/lib/scene-features.py derives the
+# pairs and is the SAME predicate the cross-check uses.
 wired() {
     local runner scene sig status=0 exempt
     exempt="$(python3 tools/lib/scene-features.py --mode exempt)"
@@ -800,20 +713,12 @@ wired() {
         return 1
     fi
     # Padded and delimited, so a scene name that is a prefix of another
-    # cannot borrow its exemption. (The runner -> backend roster and the
-    # three declaration spellings moved into the helper with the
-    # predicate; they used to be inlined here, in the third of four
-    # copies.)
+    # cannot borrow its exemption.
     #
-    # NOT THROUGH A COMMAND SUBSTITUTION, and that is the whole bug this
-    # line used to have: `$(printf '\n%s\n' ...)` STRIPS the trailing
-    # newline it just added, so the pattern below — which requires one
-    # after the pair — could never match the LAST derived exemption.
-    # Measured 2026-08-06 on the dirty slice, the first tree in this
-    # project's history with any depth stub at all: four pairs derived,
-    # three honored, and the android one silently demanded legs its
-    # backend had just declared it could not run. An empty exemption
-    # list is why nobody saw it sooner.
+    # NOT THROUGH A COMMAND SUBSTITUTION: `$(printf '\n%s\n' ...)`
+    # STRIPS the trailing newline it just added, so the pattern below —
+    # which requires one after the pair — could never match the LAST
+    # derived exemption.
     exempt=$'\n'"$exempt"$'\n'
     for scene in tools/scenes/*.steps; do
         scene="$(basename "${scene%.steps}")"
@@ -841,34 +746,24 @@ wired() {
 }
 wired || status=1
 
-# THE VERB-FEATURE CROSS-CHECK — the other half of the same predicate,
-# and the wall the derive-pin slice walked through
-# (scratchpad/derive-pin-depth.md §8, 2026-08-05).
-#
-# wired() above says when a stub HOLDS legs off a runner. This says when
-# a runner runs legs it must not: a scene whose verbs demand a feature
-# its backend still refuses. Keyed on the scene NAME — which is how both
-# gates read for four milestones — that question could not be asked at
-# all, because a scene's name is not what a backend has to implement. The
-# reshaped `todos.steps` grew `menu_activate "Edit>Undo"` while Compose
-# still declared `depthStub("undo")`; the android runner wired no `undo`
-# legs so check-stubs was green, and `todos` is not a stubbed name so
-# check-steps was green. Both gates passed on a tree whose android lane
-# was one Edit>Undo away from `error("...not yet materialized...")`.
+# THE VERB-FEATURE CROSS-CHECK — the other half of the same predicate.
+# wired() above says when a stub HOLDS legs off a runner; this says when
+# a runner runs legs it must not, i.e. a scene whose verbs demand a
+# feature its backend still refuses. Keyed on the scene NAME that
+# question cannot be asked at all: a scene's name is not what a backend
+# has to implement.
 #
 # tools/lib/scene-features.py holds the derivation (verbs and menu ROLES
-# to features, with the role table pinned against MENU_ROLES so a seventh
-# role cannot ship without an answer) and every rule about it.
+# to features, with the role table pinned against MENU_ROLES so a
+# seventh role cannot ship without an answer).
 if ! python3 tools/lib/scene-features.py --mode check; then
     status=1
 fi
 
-# The guard guards itself, and against a REAL scene corpus rather than a
-# toy one: the synthetic root borrows tools/scenes, crates/kaya/src/scene.rs
-# and tools/lib/hand-rolled-stubs.py from this tree, and synthesizes only
-# the runner and backend files — the two things the rule is about. So the
-# derivation under test is the derivation that ships, and a table that
-# stopped matching the real scripts fails here too.
+# The guard guards itself against a REAL scene corpus: the synthetic
+# root borrows tools/scenes, scene.rs and hand-rolled-stubs.py from this
+# tree and synthesizes only the runner and backend files, so the
+# derivation under test is the derivation that ships.
 feature_selftest() { # legs stub [extra-scene-body]
     local dir out rc legs stub extra
     legs="$1"; stub="$2"; extra="${3:-}"
@@ -929,11 +824,9 @@ if ! feature_selftest 'run_apk todos-compose apk act todos' '' >/dev/null; then
 fi
 # 4/5. THE CLIPBOARD ROWS FIRING CROSS-SCENE, which nothing in the tree
 #    can show: `clipboard.steps` is NAMED after the feature it needs, so
-#    a dead verb row and a live one look identical from outside — the
-#    same blindness that let the CALL spelling go unwritten for four
-#    milestones. A probe scene carries the verb under a name that implies
-#    nothing, and each of the two derivations gets its own run: the VERB
-#    row (expect_clipboard) and the ROLE row (a menu item labelled Paste).
+#    a dead verb row and a live one look identical from outside. A probe
+#    scene carries the verb under a name that implies nothing, and each
+#    derivation gets its own run — the VERB row and the ROLE row.
 for probe in 'expect_clipboard text "x"' 'menu_activate "Edit>Paste"'; do
     selftest_out="$(feature_selftest 'run_apk zzprobe-compose apk act zzprobe' \
         'internal fun x(): Nothing = depthStub("clipboard")' "$probe")"
@@ -947,33 +840,20 @@ for probe in 'expect_clipboard text "x"' 'menu_activate "Edit>Paste"'; do
 done
 unset selftest_out probe
 
-# The Android per-leg setup has an ORDER, and every step's place is
-# load-bearing — enabling the accessibility service before the
-# force-stop kills it, and before the logcat clear erases the evidence
-# it ever started. None of that is visible at the call site: each line
-# is a plausible adb command in a plausible place, and the failure
-# surfaces much later as "the picker never appeared". This gate already
-# reads every runner, so it is where the order gets stated with its
-# reasons instead of living in a comment somebody moves a line past.
+# The Android per-leg setup has an ORDER, and every step's place
+# matters — enabling the accessibility service before the force-stop
+# kills it, and before the logcat clear erases the evidence it started.
+# None of that is visible at the call site, and the failure surfaces
+# much later as "the picker never appeared".
 if ! python3 tools/lib/android-leg-order.py; then
     status=1
 fi
 
 # SCENES MEANS "THE LANGUAGE SWEEP LANDED". Each desktop runner derives
-# every mechanical per-scene surface from its SCENES variable — the go
-# guest build, the source scp, the taskkill list — so a rust-only scene
-# added there sends the runner looking for guests that do not exist.
-# DEPTH_SCENES is the variable for that case, in all three runners.
-#
-# Not hypothetical: `split` went into SCENES on two runners and the
-# matrix came back with `no required module provides package
-# dev.kaya/guests/go/split` on linux and a failed scp on windows. Loud,
-# but a whole matrix run to learn it. This makes it a two-second answer.
-#
-# The Go build no longer derives from SCENES — there is one binary for
-# every scene (guests/go/cmd) — but the taskkill list and the python
-# scp still do, and the per-language guest files below are the thing
-# this clause is really about.
+# its mechanical per-scene surfaces from SCENES — the source scp, the
+# taskkill list — so a rust-only scene added there sends the runner
+# looking for guests that do not exist. DEPTH_SCENES is the variable for
+# that case, in all three runners.
 sweep_guests() {
     python3 - <<'PY'
 import pathlib, re, sys
@@ -986,13 +866,10 @@ LANGS = [
     ("ocaml", "guests/ocaml/{s}.ml"),
     ("haskell", "guests/haskell/{s}.hs"),
 ]
-# The JVM and CLR guests are NOT one file per scene: they are one
-# package plus a selector, with irregular class names (FileDialog,
-# GridScene, Milestone2), so a path pattern cannot see them. Check the
-# thing that actually decides whether a scene is reachable — that the
-# selector dispatches it. A guest class that exists but was never wired
-# into the switch is exactly as broken as a missing file, and looks
-# fine to every other gate.
+# The JVM and CLR guests are NOT one file per scene: one package plus a
+# selector with irregular class names, so a path pattern cannot see
+# them. Check what decides reachability — that the selector dispatches
+# it. A class wired into no switch is as broken as a missing file.
 SELECTORS = [
     ("java", "guests/java-desktop/dev/kaya/milestone2kt/Main.java"),
     ("csharp", "guests/csharp/Program.cs"),
@@ -1029,17 +906,13 @@ for lang, selector in SELECTORS:
             bad.append(
                 f'{selector}: scene "{scene}" is in SCENES but the {lang} '
                 "selector never dispatches it — the guest is unreachable")
-# A GUEST THAT EXISTS BUT NO LEG RUNS IS INVISIBLE TO EVERY OTHER GATE.
+# A GUEST THAT EXISTS BUT NO LEG RUNS IS INVISIBLE TO EVERY OTHER GATE:
 # wired() above demands only that a scene has SOME leg, so one language
-# covers for all of them: clipboard shipped with working OCaml and
-# Haskell guests that validate-mac never executed, and nothing noticed
-# — the sugar gate checks bindings, the sweep above checks that guest
-# FILES exist, and `run clipboard-` matched the rust leg.
+# covers for all of them.
 #
 # mac only, deliberately: this runner names every leg
 # `<scene>-<lang>-swiftui`, so the expectation is exact. The other
-# runners have their own naming and their own backend-stub carve-outs;
-# widening this without them would be guesswork, not a guard.
+# runners have their own naming and their own backend-stub carve-outs.
 mac = pathlib.Path("tools/validate-mac.sh").read_text()
 m = re.search(r'^SCENES="([^"]+)"', mac, re.M)
 stubbed = pathlib.Path("swift/KayaSwiftUI.swift").read_text()
@@ -1065,30 +938,15 @@ PY
 }
 sweep_guests || status=1
 
-# AND THE C FLOOR IS SWEPT LIKE EVERY OTHER LANGUAGE — it was not, for
-# as long as it has existed. The sweep above is keyed on `guests/<lang>/`
-# path patterns and the C guests are not in it, so the floor's legs were
-# demanded by NO gate: `undo-c-swiftui` is the floor's first mac-lane leg
-# ever, and if it silently fell out of validate-mac nothing would have
-# gone red. Recorded as a gate gap out of the undo fan-out
-# (docs/deferred.md), closed here.
+# AND THE C FLOOR IS SWEPT LIKE EVERY OTHER LANGUAGE, but on its own
+# terms. It cannot be a row in the sweep above: that sweep demands a mac
+# leg for every scene whose guest file exists, and the C floor
+# deliberately does not carry every scene on every lane — it is the
+# explicit-tier demonstration, not a breadth guest.
 #
-# IT CANNOT BE A ROW IN THE SWEEP ABOVE, and the reason is the floor's
-# shape rather than an exception made for it: that sweep demands a leg on
-# the MAC runner for every scene in mac's SCENES whose guest file exists,
-# and the C floor deliberately does not carry every scene on every lane —
-# it is the documented explicit-tier demonstration, not a breadth guest.
-# Adding `("c", "guests/c/{s}.c")` there would demand ten mac legs nobody
-# ever intended and turn a gap into a red gate. So the C floor is swept
-# on its own terms, from the two declarations it actually has.
-#
-# THE BINARY PATH IS THE LEG SIGNATURE, because the three runners spell a
-# C leg three ways — `run undo-c-swiftui ... target/c-guests/undo` on mac,
-# `run "$proto" todos-c ... /tmp/c-guests/todos` on linux, and the a11y
-# legs through a helper script with no leg name at all
-# (`tools/linux/a11y-leg.sh /tmp/c-guests/a11y`). What all three share is
-# the binary they execute, and that is the thing that cannot be present
-# while the leg is dead.
+# THE BINARY PATH IS THE LEG SIGNATURE, because the three runners spell
+# a C leg three ways and the binary they execute is what all three
+# share — the thing that cannot be present while the leg is dead.
 sweep_c_floor() {
     python3 - <<'PY'
 import pathlib, re, sys
@@ -1159,22 +1017,15 @@ PY
 }
 sweep_c_floor || status=1
 
-# EVERY WINDOWS LEG NEEDS ITS LAUNCHER. deploy-win runs a leg by
-# scheduling C:\kaya\run_<scene>_<lang>.cmd on the VM, and those .cmd
-# files are CHECKED IN under tools/guest. A leg whose launcher does not
-# exist does not fail — schtasks starts nothing, no output ever appears,
-# and the runner waits out its full 300s timeout before calling it a
-# hang. Measured 2026-07-25: a scene joined SCENES with four of its five
-# launchers missing and cost four silent 300s timeouts, diagnosed as
-# load because the lane's duration anomaly fired first.
+# EVERY WINDOWS LEG NEEDS ITS LAUNCHER. deploy-win schedules
+# C:\kaya\run_<scene>_<lang>.cmd on the VM and those .cmd files are
+# CHECKED IN under tools/guest. A leg whose launcher does not exist does
+# not fail: schtasks starts nothing, no output appears, and the runner
+# waits out its full 300s timeout before calling it a hang.
 # NO LEG RUNS TWICE. deploy-win submits by name, and a name submitted
 # twice runs the scene twice against the same output file — the second
-# run's verdict silently replaces the first's, so a whole extra leg of
-# the slowest lane's wall time buys nothing and reads as normal.
-# Measured 2026-07-27: `run_suite split_rust` sat in the pooled block
-# AND in the depth block's generated-launcher loop, and had run twice
-# per full matrix since the day it was wired. Nothing noticed, because
-# a duplicate looks exactly like a leg.
+# verdict silently replaces the first, and a duplicate looks exactly
+# like a leg.
 duplicate_legs() {
     python3 -c '
 import collections
@@ -1218,14 +1069,9 @@ out="$(duplicate_legs tools/deploy-win.sh)" || {
 }
 
 # The legs a runner SUBMITS, which is not the same as the legs its text
-# mentions. This used to be `grep -oE 'run_suite [a-z0-9_]+'` over the
-# whole file, and prose was code to it: deploy-win.sh's own usage comment
-# gained the sentence "the `all` case's run_suite calls" and this gate
-# demanded tools/guest/run_calls_calls.cmd. Same shape as check-go-env's
-# reason for parsing rather than grepping — every file these rules
-# protect DOCUMENTS the rule, so the words appear in prose. The sibling
-# clause above (duplicate_legs) already skipped comments; this one did
-# not, and the two read the same lines.
+# MENTIONS: every file these rules protect DOCUMENTS the rule, so the
+# words appear in prose and a grep over the whole file reads a usage
+# comment as a call. Comments are skipped here, as in duplicate_legs.
 suite_legs() {
     python3 -c '
 import re
@@ -1277,32 +1123,22 @@ launchers() {
 }
 launchers || status=1
 
-# The staged WinUI ruling (docs/traps.md), now covering THREE scene
-# families that share one cause: the leg needs the DESKTOP to itself.
+# The staged WinUI ruling (docs/traps.md), covering THREE scene families
+# that share one cause: the leg needs the DESKTOP to itself.
 #
-#   menus_*      shortcut injection is OS-global — the harness
-#                foregrounds the guest and puts the real chord on the
-#                system input queue.
+#   menus_*      shortcut injection is OS-global — the harness puts the
+#                real chord on the system input queue.
 #   filedialog_* a file dialog is modal, must hold the FOREGROUND to be
 #                driven, and the harness finds it by searching the
-#                desktop. Two up at once means one sits in the
-#                background with its presses swallowed, and BOTH legs
-#                fail. Measured 2026-07-31: the rust leg had been green
-#                for weeks and broke the moment a python leg joined it
-#                in the pool.
-#   save_*       the Shell's save dialog is that same OS-global modal
-#                chrome, found the same way — `live_dialog` walks the
-#                DESKTOP for a visible `#32770` and takes the first, so
-#                a picker up beside it eats the typing. It needs no
-#                measurement of its own; it is the same window class on
-#                the same desktop as the line above
-#                (tools/deploy-win.sh's save block says so).
+#                desktop. Two up at once means BOTH legs fail.
+#   save_*       the same OS-global modal chrome: `live_dialog` walks
+#                the DESKTOP for a visible `#32770` and takes the first,
+#                so a picker up beside it eats the typing.
 #
 # So deploy-win must run each of these ALONE, between drains. Pinned
 # structurally: every such `run_suite` call must have `drain_suites` as
 # its nearest significant neighbor on BOTH sides, so a parallelizing
-# refactor — or a sweep adding one more language beside it — cannot
-# silently re-pool them.
+# refactor cannot silently re-pool them.
 menu_serial() {
     python3 -c '
 import re
@@ -1358,21 +1194,15 @@ out="$(menu_serial tools/deploy-win.sh)" || {
 }
 
 # THE CLIPBOARD LEGS ARE MUTUALLY EXCLUSIVE ON EVERY LANE
-# (docs/clipboard-plan.md §0d, the 2026-08-02 correction): there is one
-# system clipboard per session, and legs writing it concurrently are
-# processes assigning one variable — measured, six of eight failed
-# concurrently and the same eight passed serially. On wayland the
-# serial primer's F24 tap additionally needs the pool EMPTY so it
-# lands on the leg's own window (§5b finding 3). Pinned structurally,
-# the menus/filedialog precedent: every clipboard leg must have
-# `drain` as its nearest significant neighbor on BOTH sides, so a
-# parallelizing refactor — or a sweep adding one more language beside
-# it — cannot silently re-pool them. Continuation lines are joined
-# first, because a leg's command usually wraps.
-# The family NAME is a parameter because this helper now serves two
-# families with two different reasons (clipboard below, save after it),
-# and a barrier gate whose "nothing matched" message names the wrong
-# scene is a diagnostic that cannot have measured what it prints.
+# (docs/clipboard-plan.md §0d): one system clipboard per session, and
+# concurrent legs are processes assigning one variable. On wayland the
+# serial primer's F24 tap additionally needs the pool EMPTY (§5b finding
+# 3). Pinned structurally: every clipboard leg must have `drain` as its
+# nearest significant neighbor on BOTH sides. Continuation lines are
+# joined first, because a leg's command usually wraps.
+# The family NAME is a parameter because this helper serves two families
+# with two different reasons, and a barrier gate whose "nothing matched"
+# message names the wrong scene cannot have measured what it prints.
 family_serial() { # path leg_regex barrier_word family
     python3 -c '
 import re
@@ -1431,11 +1261,9 @@ if printf 'run layout-java env X\nrun clipboard-rust env X\ndrain\n' \
     echo "check-steps: SELF-TEST FAIL (undrained-before clipboard leg passed)" >&2
     exit 1
 fi
-# ...and the deploy-win spelling, which the first cut of this gate
-# missed in FOUR independent ways (run_suite vs run, underscore vs
-# dash, drain_suites vs drain, and the file not being in the loop) —
-# a barrier that exists in one runner's vocabulary silently exempts
-# every other runner.
+# ...and the deploy-win spelling (run_suite vs run, underscore vs dash,
+# drain_suites vs drain): a barrier that exists in one runner's
+# vocabulary silently exempts every other runner.
 if printf 'run_suite clipboard_rust\nrun_suite clipboard_python\ndrain_suites\n' \
     | family_serial - "$WIN_LEG" drain_suites clipboard >/dev/null; then
     echo "check-steps: SELF-TEST FAIL (pooled deploy-win clipboard legs passed)" >&2
@@ -1459,31 +1287,21 @@ done
 # THE SAVE LEGS ARE MUTUALLY EXCLUSIVE ON THE MAC LANE, and the shared
 # thing is the PANEL rather than the scene: macOS remembers a save
 # panel's last directory as a USER PREFERENCE shared by every process,
-# so nine guests opening panels in one pool trample it. Measured
-# 2026-08-10 — a leg asserting its own kaya-save-<pid> directory was
-# shown a SIBLING leg's, and putting the nine legs alone between drains
-# is what raised the mac lane's ceiling to 560s. tools/validate-mac.sh
-# has imposed the rule by hand since that day; this is the wall, which
-# it went without while three older families had one.
+# so guests opening panels in one pool trample it (measured 2026-08-10 —
+# a leg asserting its own kaya-save-<pid> directory was shown a
+# SIBLING's, and serialising them raised the mac ceiling to 560s).
 #
 # THE OTHER TWO DESKTOP RUNNERS ARE NOT IN THIS LOOP, and the omission
 # is the rule rather than a gap:
 #
-#   deploy-win  IS covered, one clause up — its save legs ride the
-#               menus/filedialog barrier, because on that lane the
-#               shared thing is the desktop's one modal `#32770`, not a
-#               remembered directory. Adding a second clause here would
-#               state the same requirement twice in two vocabularies.
-#   linux       is DELIBERATELY pooled (tools/linux/run-suites.sh's save
-#               block says why): GTK's save panel is driven over the
-#               PER-LEG accessibility bus, it remembers no cross-process
-#               directory, and each leg's files live under
-#               $TMPDIR/kaya-save-<pid>. A barrier there would be one
-#               that cannot fail for the reason it exists, which is a
-#               bug in the gate (CLAUDE.md invariant 4).
-#
-# So the rule is spelled where the platform imposes it, and the two
-# exclusions are on the record instead of merely absent.
+#   deploy-win  IS covered one clause up: its save legs ride the
+#               menus/filedialog barrier, because there the shared thing
+#               is the desktop's one modal `#32770`.
+#   linux       is DELIBERATELY pooled: GTK's save panel is driven over
+#               the PER-LEG accessibility bus, remembers no
+#               cross-process directory, and each leg's files live under
+#               $TMPDIR/kaya-save-<pid>. A barrier there could not fail
+#               for the reason it exists (CLAUDE.md invariant 4).
 MAC_SAVE_LEG='run save-[a-z]'
 
 # The guard guards itself: two save legs sharing the pool must fail...
@@ -1507,25 +1325,17 @@ out="$(family_serial tools/validate-mac.sh "$MAC_SAVE_LEG" drain save)" || {
     status=1
 }
 
-# THE ANDROID LANE IS NOT IN THAT LOOP, AND THE OMISSION IS THE RULE,
-# not a gap somebody should close by reflex. What §0d's correction
-# actually requires is that a leg read the clipboard THAT LEG WROTE; the
-# desktop lanes get there by emptying the pool, because their legs share
-# one session. This lane's pool is separate emulators, each with its own
-# ClipboardService, and §7 finding 4 measured the emulator-host clipboard
-# bridge severed in both directions — so a session here is a DEVICE, and
-# run_apk's slot lock, which holds one emulator for a leg's whole
-# duration, is this runner's spelling of the same exclusion.
+# THE ANDROID LANE IS NOT IN THAT LOOP, AND THE OMISSION IS THE RULE.
+# §0d requires that a leg read the clipboard THAT LEG WROTE; this lane's
+# pool is separate emulators, each with its own ClipboardService and the
+# host bridge severed both ways (§7 finding 4), so a session here is a
+# DEVICE and run_apk's slot lock IS this runner's exclusion.
 #
-# A drain bracket on top of that would be a barrier that CANNOT FAIL for
-# the reason it exists — there is one clipboard leg per suite block, so
-# it would exclude nothing, and a gate satisfiable without exercising
-# the real thing is a bug in the gate (CLAUDE.md invariant 4). So this
-# checks the two things that CAN go wrong instead: a clipboard leg that
+# A drain bracket on top would exclude nothing, and a gate satisfiable
+# without exercising the real thing is a bug in the gate (invariant 4).
+# So this checks the two things that CAN go wrong: a clipboard leg that
 # stops riding run_apk (the tablet is the live temptation — one device,
-# no lock, and legs on it would share its clipboard), and a run_apk that
-# stops claiming a device, which would silently turn the first clause
-# into a rule about a word.
+# no lock), and a run_apk that stops claiming a device.
 clipboard_device() { # path
     python3 -c '
 import re
@@ -1567,10 +1377,8 @@ sys.exit(1 if bad else 0)
 }
 
 # The guard guards itself in the ANDROID spelling, and on the REASON
-# rather than the exit code: this gate family has twice passed a
-# perturbation vacuously (docs/traps.md), and a negative test whose
-# failure comes from somewhere else proves nothing about the clause it
-# claims to cover.
+# rather than the exit code: a negative test whose failure comes from
+# somewhere else proves nothing about the clause it covers.
 android_device_selftest() { # sample want-fragment label
     local out
     out="$(printf '%b' "$1" | clipboard_device -)" && {
@@ -1608,25 +1416,20 @@ out="$(clipboard_device tools/android/run-emulator.sh)" || {
     status=1
 }
 
-# THE iOS LANE IS THE ANDROID SHAPE, FOR THE ANDROID REASON, and it was
-# measured rather than argued: two simulators held two different clips at
-# the same time while the host's stayed untouched
-# (docs/clipboard-plan.md §8 finding 5). A session here is a DEVICE, the
-# slot queue_leg claims for a leg's whole duration IS this lane's
-# clipboard exclusion, and a drain bracket on top would exclude nothing.
+# THE iOS LANE IS THE ANDROID SHAPE, FOR THE ANDROID REASON: two
+# simulators held two different clips at once while the host's stayed
+# untouched (docs/clipboard-plan.md §8 finding 5). A session is a
+# DEVICE, and the slot queue_leg claims IS this lane's exclusion.
 #
-# So this checks what CAN go wrong. A clipboard leg must ride queue_leg
-# AND run_swiftui_on: the first claims the simulator, the second starts
-# the host-side watcher that answers clipboard_seed and expect_clipboard
-# — on this platform the guest cannot spawn a child process, so a leg
-# without that watcher has neither the exclusion nor a foreign side at
-# all. It must not ride kaya-sim-pad, which is ONE lockless device (the
-# same live temptation the android tablet is). And queue_leg must still
-# claim a device, or the first clause is a rule about a word.
+# A clipboard leg must ride queue_leg AND run_swiftui_on: the first
+# claims the simulator, the second starts the host-side watcher that
+# answers clipboard_seed and expect_clipboard — the guest cannot spawn a
+# child process here. It must not ride kaya-sim-pad, ONE lockless
+# device. And queue_leg must still claim a device, or the first clause
+# is a rule about a word.
 #
-# The swift flavor never spells its own leg name — it is queued in a loop
-# over IOS_SWIFT_SCENES — so that list is read as a leg too, and the
-# block that turns it into legs has to dispatch through queue_leg.
+# The swift flavor never spells its own leg name — it is queued in a
+# loop over IOS_SWIFT_SCENES — so that list is read as a leg too.
 clipboard_ios() { # path
     python3 -c '
 import re
@@ -1675,11 +1478,9 @@ for n, line in joined:
                    f"and iOS cannot answer either verb in the guest process")
 
 # The guest-language suites are legs too, spelled as a list rather than
-# as calls. EVERY such list is read, not the swift one by name: the go
-# suite arrived as a second IOS_<LANG>_SCENES list driving its legs
-# through the same loop, and a gate that knew only the first name would
-# have gone half-vacuous the moment it landed — green, while the
-# clipboard leg of a whole suite answered to nobody.
+# as calls. EVERY such list is read, never one by name: a gate that knew
+# only the first IOS_<LANG>_SCENES would go half-vacuous the moment a
+# second suite landed.
 lists = list(re.finditer("IOS_([A-Z0-9]+)_SCENES=\"([^\"]*)\"", text))
 if not lists:
     bad.append(f"{path}: no IOS_<LANG>_SCENES list is where this gate looks — the runner "
@@ -1705,14 +1506,11 @@ if seen == 0:
 
 # AND THE BOARD MUST BELONG TO THE DEVICE BEFORE ANY LEG RUNS.
 # Simulator.app relays the macOS pasteboard into and out of every booted
-# simulator while its Edit > Automatically Sync Pasteboard is on, which
-# is the default, so the slot lock above excludes other LEGS and
-# excludes nothing else (docs/clipboard-plan.md section 8, finding 7).
-# That cost three matrix runs of a different clipboard step reading
-# empty each time while the lane passed solo, so the runner MEASURES the
-# isolation and refuses. The call is matched with an argument after it:
-# a bare name would match the definition too, which is how three clauses
-# of check-tx-liveness once passed with the guard deleted.
+# simulator while Edit > Automatically Sync Pasteboard is on, which is
+# the default, so the slot lock excludes other LEGS and nothing else
+# (docs/clipboard-plan.md §8 finding 7). The runner MEASURES the
+# isolation and refuses. Matched with an argument after the name: a bare
+# name would match the definition too.
 relay_call = None
 first_leg = None
 for n, raw in enumerate(text.splitlines(), 1):
@@ -1747,11 +1545,10 @@ else:
                    f"holds its simulator alone — on this lane that lock IS the clipboard "
                    f"exclusion (docs/clipboard-plan.md §8 finding 5)")
 
-# NO LIVE LINE TOUCHES A HOST OR SHARED PASTEBOARD PATH. The seed once
-# transited the macOS pasteboard (pbcopy + pbsync host-><device>), which
-# delivers asynchronously — the guest read raced the window and answered
-# empty — and which validate-all would race against the mac lane and its
-# clipboard legs. The ratified shape is a spawned on-device write
+# NO LIVE LINE TOUCHES A HOST OR SHARED PASTEBOARD PATH: transiting the
+# macOS pasteboard delivers asynchronously, so the guest read races the
+# window, and under validate-all it would race the clipboard legs of the
+# mac lane. The ratified shape is a spawned on-device write
 # (tools/ios/clipctl), so the pasteboard tools may appear here only in
 # comments explaining exactly this (docs/clipboard-plan.md §8 finding 6).
 for n, raw in enumerate(text.splitlines(), 1):
@@ -1768,23 +1565,13 @@ sys.exit(1 if bad else 0)
 ' "$1"
 }
 
-# AND THE PICKER MUST BE AIMABLE BEFORE ANY LEG RUNS, which on this
-# platform is not a property of the code under test.
-#
-# The FIRST document picker a simulator shows after a boot opens at the
-# app's container root instead of the directory it was aimed at: the
-# app's reveal and DocumentManager's own default-location strategy race,
-# and on a cold boot the strategy's file-provider resolution takes 708ms
-# against a reveal that arrives at ~380ms (measured six ways,
-# docs/traps.md). The scene then fails three steps deep, at file_choose,
-# on a row that genuinely is not in the list — a failure that reads like
-# a harness or guest defect and is neither.
-#
-# So run-sim.sh warms the document stack per device before the legs, and
-# this keeps it there. Matched with an argument after the name so the
-# definition line cannot satisfy the clause on its own — a bare name
-# matching its own definition is how three clauses of check-tx-liveness
-# once passed with the guard deleted.
+# AND THE PICKER MUST BE AIMABLE BEFORE ANY LEG RUNS: the FIRST document
+# picker a simulator shows after a boot opens at the app's container
+# root instead of the directory it was aimed at (docs/traps.md), and the
+# scene then fails three steps deep at file_choose on a row that
+# genuinely is not in the list. So run-sim.sh warms the document stack
+# per device and this keeps it there. Matched with an argument after the
+# name, so the definition line cannot satisfy the clause.
 picker_ios() { # path
     python3 -c '
 import re
@@ -1817,13 +1604,10 @@ sys.exit(1 if bad else 0)
 ' "$1"
 }
 
-# THE GUARD GUARDS ITSELF, on the REAL runner rather than on a fixture: a
-# fixture only ever proves the pattern matches the fixture, which is how
-# the wayland seat guard passed VACUOUSLY TWICE (docs/traps.md). Each
+# THE GUARD GUARDS ITSELF, on the REAL runner rather than a fixture
+# (docs/traps.md: the wayland seat guard passed VACUOUSLY TWICE). Each
 # perturbation prints its substitution count and the copy is refused if
-# it did not apply — an unchanged file is a FAILED self-test, not a
-# passed one — and each refusal is checked for its REASON, since an exit
-# code alone is satisfied by any unrelated finding.
+# it did not apply, and each refusal is checked for its REASON.
 IOS_T="$(mktemp -d)"
 
 # <source> <regex> <replacement> <destination> -> substitution count
@@ -1884,23 +1668,17 @@ hits="$(ios_perturb tools/ios/run-sim.sh \
 ios_applied "$hits" "the slot-lock perturbation"
 ios_selftest "$IOS_T/unlocked.sh" "holds its simulator alone" "an unlocked queue_leg"
 
-# ...and an unwired scene must fail, which takes EVERY leg away: the
-# rust example names itself, and each guest-language suite spells its
-# leg as a word in an IOS_<LANG>_SCENES list. The expected count is the
-# number of those lists — 2 today, swift and go — and it is stated
-# rather than derived on purpose: a third guest suite lands here as a
-# loud "applied 3 times, want 2" rather than as a self-test that quietly
-# proves less than it used to.
+# ...and an unwired scene must fail, which takes EVERY leg away. The
+# expected count is the number of IOS_<LANG>_SCENES lists — 2 today —
+# and it is STATED rather than derived, so a third guest suite lands as
+# a loud "applied 3 times, want 2".
 hits="$(ios_perturb tools/ios/run-sim.sh \
     'queue_leg run_swiftui_on clipboard-swiftui[\s\S]*?clipboard clipboard\n' '' \
     "$IOS_T/half.sh")"
 ios_applied "$hits" "the rust-leg removal"
-# The word is deleted FROM THE TWO LIST ASSIGNMENTS BY NAME, not "the
-# word before the closing quote": clipboard sat last in both lists when
-# this was written, and the styling graduation appending one more word
-# turned the tail-anchored pattern into 0 substitutions — a failed
-# self-test, exactly as ios_applied is built to report, but for a
-# reason that was this pattern's fragility rather than a rotted rule.
+# The word is deleted FROM THE TWO LIST ASSIGNMENTS BY NAME, never "the
+# word before the closing quote": one more word appended to a list turns
+# a tail-anchored pattern into 0 substitutions.
 hits="$(ios_perturb "$IOS_T/half.sh" '(IOS_[A-Z]+_SCENES="[^"]*) clipboard' '\1' "$IOS_T/unwired.sh")"
 ios_applied "$hits" "the guest-list removal" 2
 ios_selftest "$IOS_T/unwired.sh" "no clipboard leg found" "a runner with no clipboard leg"
@@ -1987,31 +1765,19 @@ out="$(picker_ios tools/ios/run-sim.sh)" || {
 }
 
 # EVERY ANDROID SCENE SELECTOR NEEDS AN ARM IN THE GUEST. One APK hosts
-# every scene there, so the leg selects one by name through
-# `--es KAYA_SELFTEST <scene>` and the guest matches it. A name the
-# match does not carry used to fall through to the milestone-2 scene:
-# the leg launched, a scene ran, it drew, and every step of the script
-# the runner asked for failed against labels from a scene nobody
-# selected. Measured 2026-07-31, wiring the filedialog leg — the verdict
-# named eight unrelated widgets and read like a broken interpreter.
+# every scene, so the leg selects one through `--es KAYA_SELFTEST
+# <scene>` and the guest matches it. A name the match does not carry
+# used to fall through to the default scene: the leg launched, a scene
+# ran, and every step failed against labels from a scene nobody
+# selected. The guest now panics on an unknown name; this makes it a
+# two-second answer instead of an emulator boot.
 #
-# The guest now panics on an unknown name, which turns a silent wrong
-# scene into a loud one; this makes it a two-second answer instead of an
-# emulator boot.
-# THREE APKs NOW, EACH WITH ITS OWN SELECTOR, so the pair is an
-# argument rather than a constant. The rust APK was the only one this
-# clause could see until the Go scene-library split
-# (docs/go-mobile-plan.md D3 step 3) turned the Go guest's one arm into
-# a table of every scene: from then on a Go leg can name a scene the
-# table lacks, which is exactly the failure above, and it would cost an
-# emulator boot to learn it.
+# THREE APKs, EACH WITH ITS OWN SELECTOR, so the pair is an argument
+# rather than a constant.
 #
-# THE EMPTY-SELECTION ARM IS THE ANTI-VACUITY CLAUSE, and it is the
-# reason this is not three copies of a pattern nobody checks: if the
-# activity regex stops matching the runner — a module renamed, a launch
-# line respelled — `selected` is empty, `missing` is empty, and the
-# clause PASSES having compared nothing. That is the shape of every
-# gate that quietly stopped working.
+# THE EMPTY-SELECTION ARM IS THE ANTI-VACUITY CLAUSE: if the activity
+# regex stops matching the runner, `selected` is empty, `missing` is
+# empty, and the clause PASSES having compared nothing.
 android_scenes() { # runner guest activity-regex arm-regex [exempt...]
     local runner="$1" guest="$2" activity="$3" arm="$4"
     shift 4
@@ -2034,12 +1800,10 @@ sys.exit(1 if missing else 0)
 ' "$runner" "$guest" "$activity" "$arm" "$@"
 }
 
-# The guard guards itself, in every direction that can go wrong: an
-# unarmed selector must fail, an activity pattern that matches nothing
-# must fail, and each ARM SHAPE gets its own negative — a `match` arm
-# and a map key are different text, and a negative test written against
-# one proves nothing about the other. The accept direction is the three
-# real pairs below.
+# The guard guards itself in every direction: an unarmed selector must
+# fail, an activity pattern matching nothing must fail, and each ARM
+# SHAPE gets its own negative — a `match` arm and a map key are
+# different text.
 sample="$(mktemp -d)"
 echo 'dev.kaya.milestone2/.MainActivity ghostscene' >"$sample/runner.sh"
 echo 'Ok("entry") => entry::app(ctx),' >"$sample/guest.rs"
@@ -2075,12 +1839,9 @@ out="$(android_scenes tools/android/run-emulator.sh guests/rust/milestone2_andro
     status=1
 }
 
-# The JVM APK, whose blind spot is older than the Go one and worse in
-# kind: its selector ends in `else -> Milestone2::app`, so an unarmed
-# name does not die, it SILENTLY RUNS MILESTONE2 — the defect this whole
-# clause is named for. "1" is exempt because it IS that default arm,
-# reached deliberately and verified rather than assumed (the same
-# carve-out sweep_guests states above).
+# The JVM APK's selector ends in `else -> Milestone2::app`, so an
+# unarmed name does not die — it SILENTLY RUNS MILESTONE2. "1" is exempt
+# because it IS that default arm, reached deliberately.
 out="$(android_scenes tools/android/run-emulator.sh \
     android/milestone2kt/src/main/kotlin/dev/kaya/milestone2kt/MainActivity.kt \
     'dev\.kaya\.milestone2kt/\.MainActivity' '"([a-z0-9]+)" ->' 1)" || {
@@ -2102,30 +1863,21 @@ out="$(android_scenes tools/android/run-emulator.sh guests/go/cmd/scenes.go \
     status=1
 }
 
-# AND EVERY DESKTOP GO LEG, against the same table, for a failure that
-# only became possible when the guests collapsed into one binary. Each
-# scene used to own a `main` that ran that scene and ignored
-# KAYA_SELFTEST, so the leg's PATH decided what ran and a wrong name in
-# the environment changed nothing. Now the name is the only thing that
-# decides, on mac, linux and windows alike: a name the table lacks
-# panics — after a build, a launch and a window, on three lanes instead
-# of one emulator.
+# AND EVERY DESKTOP GO LEG, against the same table: the Go guests are
+# one binary now, so the NAME is the only thing that decides what runs,
+# and a name the table lacks panics after a build, a launch and a
+# window, on three lanes.
 #
 # THE THREE RUNNERS SPELL THE SELECTION DIFFERENTLY, so each gets its
-# own pattern rather than a shared one that would quietly fit none of
-# them: mac and linux put `KAYA_SELFTEST=<scene>` on the leg line (which
-# is often continued, so continuations are joined first) beside
-# go-guests/kaya-go; windows sets it in tools/guest/run_<leg>_go.cmd,
-# beside the build of dev.kaya/guests/go/cmd.
+# own pattern: mac and linux put `KAYA_SELFTEST=<scene>` on the leg line
+# (often continued, so continuations are joined first) beside
+# go-guests/kaya-go; windows sets it in tools/guest/run_<leg>_go.cmd.
 #
-# AND THE DEFAULT IS A NAME LIKE ANY OTHER. The bare `run go-swiftui …`
-# leg passes nothing of its own, so main_desktop.go falls back to
-# `defaultScene` — which has to be a key in this table, or the one leg
-# with no name in it dies where nothing else can.
+# AND THE DEFAULT IS A NAME LIKE ANY OTHER: the bare `run go-swiftui …`
+# leg passes nothing, so main_desktop.go falls back to `defaultScene`,
+# which has to be a key in this table.
 #
-# THE EMPTY-SELECTION ARM IS THE ANTI-VACUITY CLAUSE, the android
-# clause's rule and for the same reason: a pattern that stops matching
-# its runner compares nothing and PASSES.
+# THE EMPTY-SELECTION ARM IS THE ANTI-VACUITY CLAUSE, as above.
 go_desktop_scenes() { # table runner-or-cmd-dir...
     python3 -c '
 import pathlib
@@ -2236,18 +1988,9 @@ out="$(go_desktop_scenes guests/go/cmd/scenes.go \
 }
 
 # THE iOS PICKER'S SILENT WIRINGS. Each of these fails in a way that
-# looks like a backend bug rather than a harness one, which is what
-# earns them a gate rather than a comment.
-#
-# A THIRD CLAUSE LIVED HERE and moved to tools/check-file-modes.sh
-# (2026-08-09, docs/save-plan.md D3). It asked whether
-# kaya_swiftui_open_picked maps case 0/1/2 to O_RDONLY/O_WRONLY/O_RDWR,
-# and it could not have caught the thing its own comment named: its
-# window ran to the end of a ten-thousand-line file, it tested that the
-# strings EXISTED rather than that they were PAIRED, and it hard-coded
-# 0/1/2 in the gate — so renumbering the spec's file_mode enum, the one
-# edit it was written for, left it green. The replacement reads the
-# numbers out of crates/kaya/src/spec.rs and pins five sites.
+# looks like a backend bug rather than a harness one. (The file_mode
+# clause lives in tools/check-file-modes.sh, which reads the numbers out
+# of crates/kaya/src/spec.rs rather than hard-coding them.)
 ios_picker() {
     python3 -c '
 import pathlib
@@ -2290,17 +2033,12 @@ out="$(ios_picker)" || {
     status=1
 }
 
-# THE GENERATOR MUST NOT OUTRUN WHAT IT GENERATED. tools/gen-bindings.sh
+# THE GENERATOR MUST NOT OUTRUN WHAT IT GENERATED. gen-bindings.sh
 # stamps a hash of tools/kaya-bindgen/src/*.rs beside the bindings it
-# wrote; if the generator has moved since, the checked-in bindings are
-# stale and everything downstream is a lie that COMPILES: the guest
-# builds, the scene runs, and the decoder arm you just added is simply
-# not there. Measured twice in one afternoon (docs/traps.md) — an OCaml
-# and then a Haskell picker decoded every result as cancel, because the
-# generator was edited and never rerun.
-#
+# wrote; if the generator moved since, the checked-in bindings are stale
+# and everything downstream is a lie that COMPILES (docs/traps.md).
 # `gen-bindings.sh --check` is the authoritative answer and regenerates
-# to get it. This is the cheap one, so it can be asked constantly.
+# to get it; this is the cheap one, so it can be asked constantly.
 generator_stamp() {
     local root="${1:-.}"
     local want have

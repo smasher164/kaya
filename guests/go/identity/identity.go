@@ -7,18 +7,6 @@
 // platform's own default icon can land on four declared colours, so a
 // lowering that never applied can never read as a pass.
 //
-// THE MARK IS AN ASSET NOW (docs/assets-plan.md, ratified 2026-08-18).
-// This scene used to resolve the file itself — kaya.Env("KAYA_ICON_FILE")
-// with a repo-relative default, os.ReadFile, and a panic in its own
-// words — as its seven siblings each did in their own language.
-// tx.Asset(name) is the whole thing now: WHERE the file lives is the
-// core's knowledge (a repo checkout, a bundle's Resources, an APK's
-// packaged assets/ with no path at all), and the four quadrants the
-// scene reads back are the same four wherever it was found. The
-// kaya.Env-not-os.Getenv rule this file used to carry is not merely
-// obeyed here any more, it is unreachable: the scene reads no
-// environment at all.
-//
 // THE SECOND WINDOW HAS NO TITLE OF ITS OWN, deliberately: that is the
 // blank an app's NAME fills on every platform.
 package identity
@@ -44,8 +32,7 @@ func App() *kaya.App {
 		// ONE PROMOTED COMMAND, AND IT IS NOT ABOUT COMMANDS. Windows
 		// mints its custom caption from the first promotion and from
 		// nothing else, and a custom caption REPLACES the system one —
-		// taking the system-drawn app icon with it. That is why the
-		// identity has a second Windows sink at all, and a scene with no
+		// taking the system-drawn app icon with it. A scene with no
 		// promotion anywhere would leave that sink's arm unreached.
 		tx.Window(0).Menu("File").Item("Save").
 			Symbol(kaya.SymbolDone).Primary(true)
@@ -64,9 +51,36 @@ func App() *kaya.App {
 			})
 		}))
 
-		// THE UNTITLED WINDOW, and it is DESKTOP-ONLY: see the build-tag
-		// pair beside this file (untitled_desktop.go / untitled_phone.go).
-		mountUntitled(tx)
+		// THE UNTITLED WINDOW. It declares no title at all rather than
+		// an empty one: an empty string is a title an app WROTE, and
+		// the rule under test is what a window with nothing written
+		// shows.
+		//
+		// THE HOST IS ASKED, not the platform: kaya.Capabilities() reads
+		// the core's own word (crates/kaya/src/scene.rs's CAPABILITIES,
+		// which is also what the wall below tests), so the two cannot
+		// disagree.
+		//
+		// THE ANSWER IS FALSE ON THE PHONES, and the core would refuse
+		// this call there AT THE ROOT — "this host has no auxiliary
+		// windows (KAYA_CAP_AUX_WINDOWS is unset)" then SIGABRT, after
+		// one harness step, with the identity already declared.
+		//
+		// THE NAME IS STILL DECLARED AND STILL READ on those hosts; on a
+		// phone the reader is the installed package's own label
+		// (docs/app-identity-plan.md ruling 3), so the runner drops the
+		// one step that reads the window instead
+		// (tools/android/run-emulator.sh's scene_script_drop).
+		// tools/scenes/identity.steps is byte-frozen and shared verbatim
+		// — the cut belongs to the runner, never to the scene.
+		if kaya.Capabilities().AuxWindows {
+			untitled := tx.CreateWindow(1).Size(360, 240)
+			aux := tx.Column(func() {
+				caption := tx.Signal("no title of its own")
+				tx.Label(caption) // label#2
+			})
+			tx.MountIn(untitled.Id(), aux)
+		}
 	})
 
 	return app

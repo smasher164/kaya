@@ -1,36 +1,15 @@
 """The per-leg Android setup has an ORDER, and every step's place is load-
 bearing. This asserts it.
 
-Each constraint below was paid for. `am force-stop` kills every component
-of the package — including the harness accessibility service, because the
-validation app is what declares it — so enabling the service before the
-force-stop silently kills it. `logcat -c` wipes everything logged so far,
-including the service's own connection message, so enabling before the
-clear erases the one piece of evidence that it came up. Between them
-those two produced a service that was configured, dead, and undetectable,
-which reads exactly like a service that never started.
-
-None of that is visible at the call site. Each line is a plausible adb
-command in a plausible place, the lane stays green because the legs that
-do not need the service do not care, and the failure surfaces much later
-as "the picker never appeared". So the ordering is stated here, with its
-reasons, instead of living in a comment somebody moves a line past.
-
-Two more constraints joined them when the picker arm landed, and both
-have the same signature — a rerun that silently measures the run before
-it. DocumentsUI is a DIFFERENT PACKAGE, so the app's force-stop does not
-touch it, and a leg that failed with the picker still up leaves it on top
-of the app's task; the next leg's `am start` then brings that task
-forward and onCreate never runs, which reads as a clean run of nothing.
-And `am start -S` looks like the fix for exactly that and is not: it
-force-stops the package first, and the accessibility service lives in the
-app's process, so `-S` kills the service `dumpsys` just confirmed bound
-and starts the activity in a fresh process where `live` is null.
+Each constraint, and what it cost, is in docs/traps.md; the STEPS table
+below carries the reason for every pair, in the words the failure prints.
+None of it is visible at the call site — each line is a plausible adb
+command in a plausible place, and the failure surfaces much later as "the
+picker never appeared".
 
 Text, not execution: this reads the shell rather than running it, so it
 cannot see an order produced dynamically. That is the honest limit, and
-it still catches the thing that actually happened — a line moved to a
-reasonable-looking wrong place.
+it still catches a line moved to a reasonable-looking wrong place.
 """
 
 import pathlib
@@ -40,9 +19,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "tools" / "android" / "run-emulator.sh"
 # The probe keeps the same order for the same reasons, and is where two of
-# these constraints were MEASURED. It is not a lane, but it is the thing
-# someone reaches for the next time this platform needs a question
-# answered, and an hour lost there is the same hour.
+# these constraints were MEASURED.
 PROBE = ROOT / "tools" / "android" / "pickerprobe" / "run.sh"
 
 # (label, pattern, why it must follow the step before it)
@@ -80,11 +57,9 @@ STEPS = [
     ),
 ]
 
-# `am start -S` force-stops the package before starting it, which takes
-# the accessibility service down with it — the service lives in the app's
-# process. Measured: the probe reported "NO SERVICE" immediately after
-# dumpsys confirmed the bind. It is a plausible-looking way to solve the
-# stale-task problem above, which is exactly why it needs saying.
+# `am start -S` force-stops the package before starting it, taking the
+# accessibility service down with it (docs/traps.md). It looks like the
+# fix for the stale-task problem above, which is why it needs saying.
 FORBIDDEN_START_FLAG = re.compile(r"am start\b[^\n]*\s-S\b")
 
 
@@ -150,10 +125,9 @@ def main() -> int:
 
     status |= no_restart_flag("run_apk_on", body)
 
-    # The probe is policed for the flag too, but not for the order: its
-    # reset is a loop over variants rather than run_apk_on's shape, and a
-    # gate that pretended otherwise would be matching text it does not
-    # understand. Absent is fine — it is a probe, and may be deleted.
+    # The probe is policed for the flag but not for the order: its reset
+    # is a loop over variants rather than run_apk_on's shape. Absent is
+    # fine — it is a probe, and may be deleted.
     if PROBE.exists():
         status |= no_restart_flag(str(PROBE.relative_to(ROOT)), PROBE.read_text())
 
@@ -174,9 +148,7 @@ def main() -> int:
         print("android-leg-order: SELF-TEST FAIL (bad order read as good)", file=sys.stderr)
         return 1
 
-    # And the flag rule guards itself, both directions — the negative
-    # matters most, because a pattern that never fires is a gate that
-    # cannot fail.
+    # And the flag rule guards itself, both directions.
     if no_restart_flag("self-test", 'adb -s "$s" shell am start -S -W -n "$c"', True) == 0:
         print("android-leg-order: SELF-TEST FAIL (`am start -S` read as good)", file=sys.stderr)
         return 1

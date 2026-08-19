@@ -21,7 +21,6 @@ func App() *kaya.App {
 
 	var status kaya.Signal[string]
 	app.Build(func(tx *kaya.Tx) {
-		// The one adaptive declaration in the whole guest.
 		tx.Window(0).Title("split").ListDetail(true)
 		status = tx.Signal("list pane")
 
@@ -34,8 +33,6 @@ func App() *kaya.App {
 				entry := tx.PushEntry(detail).
 					Title("detail").
 					OnPopped(func(tx *kaya.Tx) {
-						// Retention: the base root took this write
-						// while the detail was up.
 						tx.Write(status, "popped detail")
 					}).
 					Id()

@@ -1,43 +1,14 @@
 #!/usr/bin/env bash
 # THE WAYLAND HALF OF THE IDENTITY SCENE, ASSERTED AS THE GAP IT IS.
 #
-# WHY THIS EXISTS AT ALL. The identity scene demands `expect_app_icon`
-# twice, tools/scenes/*.steps are shared verbatim by every platform, and
-# on this lane's wayland ring that demand cannot be met: GTK 4.18.6's
-# wayland backend drops a toplevel's icon list, sway 1.10.1 advertises no
-# xdg_toplevel_icon_manager_v1, and no wayland protocol reads an icon
-# back to a client even where one is set (docs/app-identity-plan.md
-# ruling 5 and I4a — the runtime blob route is what an UNINSTALLED binary
-# has, and an installed app's identity comes from a `.desktop` file on
-# both protocols instead). The alternative was to run the identity legs
-# on the X11 ring alone and leave the wayland ring silent. A silent skip
-# asserts nothing, and a gap nobody measures is a gap nobody notices
-# changing.
-#
-# WHAT THIS ASSERTS, and each clause is a claim a skip cannot make:
-#
-#   1. the leg FAILS under wayland — if it starts passing, the platform
-#      moved and the honest response is to run the scene here, not to
-#      keep witnessing a gap that has closed;
-#   2. it fails on the icon steps AND ONLY on the icon steps, so the
-#      rest of the identity scene — including the NAME half, which IS
-#      observable on wayland — is under test on this ring;
-#   3. the number of icon failures equals the number of `expect_app_icon`
-#      lines in the scene, READ FROM THE SCENE rather than typed here;
-#   4. the failing sentence is the backend's measured one, naming the
-#      GDK display object it actually found;
-#   5. the LOWERING STILL RAN — the backend decoded the blob and called
-#      `gdk_toplevel_set_icon_list` on wayland too. This is the clause
-#      that makes the arm's protocol-agnostic construction a tested
-#      claim rather than a comment: the day GTK and the compositor
-#      support the protocol, the same code path already feeds it.
-#
-# IT REFUSES A VERDICT RATHER THAN GUESSING. A leg that produced no
-# harness output at all, or that never reached the harness's own verdict
-# line, fails HERE with what it saw — an inverted assertion that cannot
-# tell "the gap is exactly as documented" from "the guest died at
-# startup" would be worse than no assertion, since it would go green on
-# a lane where nothing ran.
+# identity.steps demands `expect_app_icon` twice and the scene files are
+# shared verbatim, but this lane's wayland ring cannot meet that demand
+# (docs/app-identity-plan.md ruling 5 and I4a). Rather than skip
+# silently, this witness asserts the gap's exact shape: the leg fails,
+# on the icon steps only, as many times as the SCENE reads an icon, with
+# the backend's measured sentence naming the GDK display object, and
+# with the lowering having run anyway. It refuses a verdict rather than
+# guessing — each clause below prints what it saw.
 set -uo pipefail
 
 if [ "$#" -lt 1 ]; then
@@ -45,10 +16,8 @@ if [ "$#" -lt 1 ]; then
     exit 1
 fi
 
-# THE EXPECTED COUNT COMES FROM THE SCENE, never from a number in this
-# file: tools/scenes/identity.steps is byte-frozen and shared, and a
-# count typed here would silently stop matching it the day a third
-# `expect_app_icon` joins.
+# THE EXPECTED COUNT COMES FROM THE SCENE, never from a number typed
+# here: a typed count stops matching the day a third read joins.
 SCENE="${KAYA_SCENES_DIR:-/work/tools/scenes}/identity.steps"
 if [ ! -f "$SCENE" ]; then
     echo "identity-wayland-witness: cannot read $SCENE, so it cannot know how" \
@@ -65,14 +34,11 @@ fi
 log="$(mktemp)"
 "$@" >"$log" 2>&1
 rc=$?
-# The leg's own output first, always: a witness that hid it would make
-# every failure below unreadable.
+# The leg's own output first, always: every failure below refers to it.
 cat "$log"
 
 verdict="$(grep -c '^KAYA_SELFTEST: ' "$log")"
 failed="$(grep -c 'KAYA_HARNESS: step-failed' "$log")"
-# The two halves of the backend's sentence: the measured display object,
-# and the record that the lowering ran anyway.
 icons="$(grep -c "KAYA_HARNESS: step-failed app icon <no icon read on this display" "$log")"
 wayland="$(grep -c "GDK's display object here is GdkWayland" "$log")"
 lowered="$(grep -c 'gdk_toplevel_set_icon_list with it on window' "$log")"

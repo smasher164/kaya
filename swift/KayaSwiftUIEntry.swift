@@ -1,31 +1,27 @@
-// C entry point for the SwiftUI backend, for guest-hosted compositions:
-// a process owned by any language calls kaya_swiftui_run(api) on its main
-// thread, exactly like kaya_run. @main is compiler sugar over App.main();
-// nothing about SwiftUI requires Swift to own the process entry point.
-// The host passes its presentation-side functions explicitly (see
-// KayaHost) instead of relying on dynamic-linker symbol resolution.
+// C entry point for the SwiftUI backend: a process owned by any language calls
+// kaya_swiftui_run(api) on its main thread, exactly like kaya_run. The host
+// passes its presentation-side functions explicitly (see KayaHost) instead of
+// relying on dynamic-linker symbol resolution.
 
 import SwiftUI
 
 struct KayaApp: App {
     #if os(macOS)
-    // Selftest runs drive widgets by direct calls, never real input:
-    // staying an accessory (no Dock icon, no activation) keeps a
-    // suite's windows from stealing the human's keyboard.
+    // Selftest runs drive widgets by direct calls, never real input: staying an
+    // accessory keeps a suite's windows from stealing the human's keyboard.
     @NSApplicationDelegateAdaptor(KayaAppDelegate.self) var delegate
     #else
-    // The catalog's regular-width home: the system menu bar, which
-    // only a UIResponder in the chain can populate.
+    // The catalog's regular-width home: the system menu bar, which only a
+    // UIResponder in the chain can populate.
     @UIApplicationDelegateAdaptor(KayaUIAppDelegate.self) var delegate
     #endif
     var body: some Scene {
         WindowGroup {
             KayaRoot()
         }
-        // Auxiliary surfaces: data-driven windows keyed by the kaya
-        // window id. Never opened by the system — only the mount arm
-        // presents one (openWindow(value:)); phones never get here
-        // (the core rejects create_window without the capability).
+        // Auxiliary surfaces: data-driven windows keyed by the kaya window id.
+        // Never opened by the system — only the mount arm presents one; phones
+        // never get here (the core rejects create_window without the capability).
         WindowGroup(for: UInt64.self) { $windowId in
             if let windowId {
                 KayaAuxRoot(windowId: windowId)
@@ -37,15 +33,12 @@ struct KayaApp: App {
 #if os(macOS)
 final class KayaAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // KAYA_ACTIVATE=1 makes the app REGULAR — EXPLICITLY, because
-        // an unbundled binary with no policy set defaults to PROHIBITED
-        // (measured: policy=2 in the diag line, no activation, and a
-        // partially unpublished AX tree — merely skipping the accessory
-        // call left the app LOWER, not higher). A pixel-proof capture
-        // needs active-window chrome, macOS 14's cooperative activation
-        // refuses an accessory app's self-activation, and System Events
-        // cannot even see one to front it. The lanes never set it, so
-        // suite runs stay accessory and steal nobody's keyboard.
+        // KAYA_ACTIVATE=1 makes the app REGULAR — EXPLICITLY, because an
+        // unbundled binary with no policy set defaults to PROHIBITED (measured:
+        // policy=2, no activation, and a partially unpublished AX tree — merely
+        // skipping the accessory call left the app LOWER, not higher). A
+        // pixel-proof capture needs active-window chrome. The lanes never set
+        // it, so suite runs stay accessory and steal nobody's keyboard.
         if ProcessInfo.processInfo.environment["KAYA_ACTIVATE"] != nil {
             NSApplication.shared.setActivationPolicy(.regular)
         } else if ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
@@ -54,27 +47,24 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // PIXEL-PROOF RUNS ONLY (KAYA_ACTIVATE=1): AppKit renders an
-        // inactive app's chrome grey, so a capture that needs to see a
-        // control's real fill needs the app active — and macOS 14's
-        // cooperative activation ignores another process's activate
-        // call, so the app must ask for itself. Never set by the
-        // lanes: a suite's windows must not steal the human's
-        // keyboard, which is the accessory rule above.
+        // PIXEL-PROOF RUNS ONLY (KAYA_ACTIVATE=1): AppKit renders an inactive
+        // app's chrome grey, and macOS 14's cooperative activation ignores
+        // another process's activate call, so the app must ask for itself.
+        // Never set by the lanes — that is the accessory rule above.
         if ProcessInfo.processInfo.environment["KAYA_ACTIVATE"] != nil {
             NSApplication.shared.activate()
         }
     }
 }
 #else
-/// Subclasses UIResponder, NOT NSObject: `buildMenu(with:)` is a
-/// UIResponder method, and a delegate that only conforms to
-/// UIApplicationDelegate is never asked to build menus.
+/// Subclasses UIResponder, NOT NSObject: `buildMenu(with:)` is a UIResponder
+/// method, and a delegate that only conforms to UIApplicationDelegate is never
+/// asked to build menus.
 final class KayaUIAppDelegate: UIResponder, UIApplicationDelegate {
     override func buildMenu(with builder: UIMenuBuilder) {
         super.buildMenu(with: builder)
-        // Only the main system carries a bar; context menu systems
-        // reach this same responder and must be left alone.
+        // Only the main system carries a bar; context menu systems reach this
+        // same responder and must be left alone.
         guard builder.system == .main else { return }
         kayaBuildCatalogMenus(builder)
     }

@@ -10,8 +10,7 @@ static class SectionsScene
     const ulong Archive = 8;
     // The SIDEBAR half, in an AUX WINDOW so one shared scene covers both
     // arms. It opens from a handler only the desktop tail's click
-    // reaches, so CreateWindow never runs where the capability is
-    // absent: reachability is the gate, no capability read needed.
+    // reaches, so CreateWindow never runs where the capability is absent.
     const ulong Library = 1;
     const ulong Shelves = 2;
     const ulong Loans = 3;
@@ -24,7 +23,6 @@ static class SectionsScene
         Signal visits = default;
         app.Build(tx =>
         {
-            // The presentation is ADVISORY: no observable rides on it.
             tx.Window(title: "sections",
                 sectionsPresentation: KayaWire.SectionsPresentationBar);
             visits = tx.Signal("archive: 0 visits");
@@ -52,8 +50,6 @@ static class SectionsScene
                 {
                     inner.CreateWindow(Library, title: "library",
                         sectionsPresentation: KayaWire.SectionsPresentationSidebar);
-                    // window: is the add-into-a-window spelling; the
-                    // default 0 above is the primary.
                     inner.AddSection(Shelves, title: "Shelves",
                         symbol: Symbol.Search, window: Library);
                     inner.AddSection(Loans, title: "Loans",

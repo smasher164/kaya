@@ -23,19 +23,11 @@ let () =
   let draft = ref "" in
 
   build app (fun () ->
-     (* The typeface is set BEFORE THE FIRST MOUNT, per the set-once wall:
-        brand is identity, not state. The blob registers with the
-        platform's app-font machinery and the "Sora" request then resolves
-        to it.
-
-        ONE CALL, AND NO FILE I/O IN THE GUEST. The path, the environment
-        override and the sentence for a miss were all hand-written here
-        (and in seven sibling scenes) until [asset] arrived; they live in
-        the core now (crates/kaya/src/assets.rs), which is also why the
-        bytes never enter this guest's heap — the handle goes straight to
-        the blob channel. The close is explicit and the redemption has
-        already happened by then: [brand_typeface] registered the bytes
-        into the pending blob table, which keeps its own reference. *)
+      (* The typeface is set BEFORE THE FIRST MOUNT, per the set-once
+         wall. The blob registers with the platform's app-font machinery
+         and the [Sora] request then resolves to it; the bytes never
+         enter this guest's heap. The close is explicit and the
+         redemption has already happened by then. *)
      let font = asset "fonts/sora-wght.ttf" in
      brand_typeface ~font_asset:font "Sora";
      asset_close font;

@@ -1,14 +1,10 @@
 (* The background conformance scene, OCaml port — work off the app
    thread, posted back (docs/background-work-plan.md).
 
-   THE ODD SHAPE IS SO THAT A WRONG IMPLEMENTATION DEADLOCKS RATHER THAN
-   DISAGREES: the worker parks until a CLICK releases it, and only a live
-   app thread can process a click.
-
-   The parking is a plain Mutex + Condition and the worker a plain
-   Thread; kaya supplies no waiting primitive and should not. The
-   accumulators are the guest's own state, signals being write-only, and
-   need no lock — everything touching them runs on the app thread. *)
+   THE ODD SHAPE IS SO THAT A WRONG IMPLEMENTATION DEADLOCKS RATHER
+   THAN DISAGREES: the worker parks until a CLICK releases it, and only
+   a live app thread can process a click. The accumulators need no lock
+   — everything touching them runs on the app thread. *)
 
 open Kaya_wire
 open Kaya_app
@@ -49,7 +45,6 @@ let () =
         ignore (Thread.create worker ());
         write status (Str "working")
       in
-      (* Proof the app thread still serves input while the worker is parked. *)
       let ping () = write alive (Str "alive") in
       (* THIS RELEASE TAKES A LOCK ON THE APP THREAD, unlike every other
          guest's: OCaml's stdlib has no lock-free latch the way the

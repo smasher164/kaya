@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,57 +10,26 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# THE TWO NATIVE-TIER GUARDS NO SCENE CAN FAIL.
+# THE TWO NATIVE-TIER GUARDS NO SCENE CAN FAIL (CLAUDE.md's gate list).
 #
-# The undo milestone put two guards in every backend, and the Compose arm
-# then proved — by breaking each one and watching the lane stay green —
-# that NO shared scene can observe either (scratchpad/compose-undo-arm.md
-# §3.3/§3.4, 2026-08-05). The reasoning is core-side and therefore true of
-# all five arms, not a Compose accident:
+# Observing either one needs TWO CONSECUTIVE NATIVE WALKS: the first walk
+# spends the frontier episode (`note_native_undo`, crates/kaya/src/
+# scene.rs) and the next Edit>Undo routes CORE by construction. The scene
+# cannot be reshaped to reach it either — that would assert FRONTIER
+# GRANULARITY, which tools/scenes/undo.steps refuses because keystroke
+# coalescing differs per platform. So static pairing is the only wall:
 #
-#   Observing either guard needs TWO CONSECUTIVE NATIVE WALKS. The first
-#   walk reaches the frontier episode's before-image, `note_native_undo`
-#   spends the episode (crates/kaya/src/scene.rs), and the frontier
-#   becomes the GROUP underneath — so the next Edit>Undo routes CORE by
-#   construction. Everything A1's clear protects (a native stack reaching
-#   back past the episode's start) and everything the ledger-quiet
-#   bracket protects (a second report of a walk the core already banked)
-#   lives strictly inside that second walk.
+#   1. A backend that takes the core's native-undo SAMPLE must mark the
+#      emission its own walk provokes LEDGER-QUIET, or the same walk is
+#      banked twice and the redo side loses the run.
+#   2. That mark must be CONSUMED where the edit is reported: the read
+#      and the report are one block.
+#   3. A backend handling the ClearUndo apply op must call the platform's
+#      clear in that arm (A1's keystone).
 #
-# And the scene cannot be reshaped to reach it: doing so would assert
-# FRONTIER GRANULARITY — how many keystrokes one native undo takes back —
-# which tools/scenes/undo.steps refuses in its own header because
-# keystroke coalescing differs per platform, and which invariant 6 (one
-# script, byte-compared on five lanes) makes decisive.
-#
-# So this is the only wall available, and it is a static one. It reads
-# the two-line pairing out of each backend file:
-#
-#   1. A backend that takes the core's native-undo SAMPLE must also mark
-#      the emission its own walk provokes LEDGER-QUIET — otherwise the
-#      same walk is banked twice, the second report restates the walk's
-#      position as a new high-water, and the redo side loses the run.
-#   2. That mark must be CONSUMED where the edit is reported, not merely
-#      written: the read and the report are one block.
-#   3. A backend that handles the ClearUndo apply op must call the
-#      platform's clear in that arm — A1's keystone, which is what makes
-#      "ask the focused text first" the same question as "ask the most
-#      recent first".
-#
-# WHAT IT DOES NOT PIN, said plainly: a call that is present but disabled
-# (`if (false)`) satisfies clause 3, and no text gate can do better. What
-# it pins is that the arm and the clear are ONE UNIT — which is the shape
-# a new backend arm, or a refactor, actually breaks.
-#
-# THE ORDERING ARGUMENT THAT MAKES CLAUSE 1 LOOK OPTIONAL, and why it is
-# not: the core's `note_text_changed` opens with a no-change return, so on
-# a backend whose sample lands BEFORE the echo (Compose, mac) the core
-# already knows the field's text and drops the unbracketed echo on the
-# floor. That is the core's guard, not this one, and it holds only while
-# the core's record of the field is current — the bracket is the guard
-# for the ordering where the echo LEADS. Uniform semantics (invariant 1)
-# decides the rest: mac and iOS carry it, the plan specifies it as the
-# mechanism, and its cost is one map entry per routed undo.
+# WHAT IT DOES NOT PIN: a call that is present but disabled satisfies
+# clause 3, and no text gate can do better. What it pins is that the arm
+# and the clear are ONE UNIT.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -87,17 +51,13 @@ gtk, winui, swiftui, compose = sys.argv[1:5]
 read = lambda p: open(p, encoding="utf-8").read()
 bad = []
 
-# Each backend's pairing, in its own vocabulary. Five backends, four
-# files: KayaSwiftUI.swift serves mac AND iOS, whose brackets differ in
-# spelling (a text match on the sampled text there, a scope counter here)
-# and not in rule — so the mark is a LIST, and any one of them satisfies
-# the file.
+# Five backends, four files: KayaSwiftUI.swift serves mac AND iOS, whose
+# brackets differ in spelling and not in rule — so `mark` is a LIST and
+# any one entry satisfies the file.
 #
 # ANCHORS ARE CALL SHAPES, not bare names: a bare `note_native_undo`
-# matches gtk.rs's own local helper DEFINITION as well as the core call,
-# and a gate that matches a definition is a gate that passes when the
-# call is deleted. That failure class has already cost this repo three
-# vacuous clauses (CLAUDE.md, invariant 3).
+# matches gtk.rs's own helper DEFINITION as well as the core call, and a
+# gate that matches a definition passes when the call is deleted.
 BACKENDS = [
     dict(
         path=gtk, name="gtk",
@@ -279,9 +239,8 @@ for be in BACKENDS:
                    "every clause below would be guesswork")
         continue
 
-    # 0. VACUITY. Every anchor must still match. A clause whose anchor
-    #    stopped matching reports a clean bill about nothing, which is
-    #    the failure mode this repo has hit twice.
+    # 0. VACUITY. Every anchor must still match: a clause whose anchor
+    #    stopped matching reports a clean bill about nothing.
     missing = [what for what in ("sample", "readback", "bank", "arm", "clear")
                if not hits(text, be[what])]
     if not any(hits(text, m) for m in be["mark"]):
@@ -294,9 +253,7 @@ for be in BACKENDS:
             "spelling moved and the clause went vacuous")
         continue
 
-    # 1. SAMPLE ⇒ MARK. A backend that reports a walk to the core must
-    #    also mark the emission that walk provokes, or the core banks the
-    #    same change twice.
+    # 1. SAMPLE ⇒ MARK.
     if not any(hits(text, m) for m in be["mark"]):
         bad.append(
             f"{path}: the {name} arm calls the core's native-undo sample but marks "
@@ -304,10 +261,9 @@ for be in BACKENDS:
             "provokes is banked a second time, which restates the walk's position "
             "as a new high-water and loses the run the redo side needs")
 
-    # 2. THE MARK IS CONSUMED WHERE THE EDIT IS REPORTED. Not "the token
-    #    appears somewhere": the read and the report are ONE BLOCK, which
-    #    is the two-line pairing this gate is named for. A read that
-    #    drifts away from the report is a bracket that decides nothing.
+    # 2. THE MARK IS CONSUMED WHERE THE EDIT IS REPORTED — not "the token
+    #    appears somewhere": a read that drifts away from the report is a
+    #    bracket that decides nothing.
     for m in hits(text, be["readback"]):
         span = innermost(spans, m.start())
         where = text[span[0]:span[1]] if span else ""
@@ -317,17 +273,15 @@ for be in BACKENDS:
                 f"block that reports the edit ({be['bank']}) — a bracket read away "
                 "from the report suppresses nothing, and the walk is banked twice")
 
-    # 3. THE CLEAR ARM CLEARS. A1's keystone: the core drives the clear
-    #    as an apply op because only the backend knows what is focused.
+    # 3. THE CLEAR ARM CLEARS. The core drives the clear as an apply op
+    #    because only the backend knows what is focused.
     #
-    #    THE ARM'S BODY IS A WINDOW, not a block, and deliberately: the
-    #    three languages spell an arm three ways — Rust's `=> { … }` (whose
-    #    first brace after the head is the PATTERN's, `{ window }`, not the
-    #    body's), Kotlin's `-> { … }`, and Swift's `case x:` with no braces
-    #    at all. A window bounded by the enclosing block and by ARM_LINES
-    #    is the one reading all three, and the bound is the rule this gate
-    #    is named for: a clear that has drifted twenty-five lines from the
-    #    arm it belongs to is no longer a pairing anybody can read.
+    #    THE ARM'S BODY IS A WINDOW, not a block, deliberately: the three
+    #    languages spell an arm three ways — Rust's `=> { … }` (whose
+    #    first brace after the head is the PATTERN's, `{ window }`, not
+    #    the body's), Kotlin's `-> { … }`, and Swift's `case x:` with no
+    #    braces at all. A window bounded by the enclosing block and by
+    #    ARM_LINES reads all three.
     for m in hits(text, be["arm"]):
         span = innermost(spans, m.start())
         stop = len(text) if span is None else span[1]
@@ -353,13 +307,10 @@ PY
 }
 
 # THE GUARD GUARDS ITSELF, on DOCTORED COPIES OF THE REAL FILES rather
-# than on synthetic samples: a fixture only ever proves the pattern
-# matches the fixture, which is how the wayland seat guard passed
-# VACUOUSLY TWICE (docs/traps.md). Every perturbation prints its
-# substitution count and is refused if it did not apply — an unchanged
-# copy is a FAILED self-test, not a passed one — and every refusal is
-# checked for its REASON, since an exit code alone is satisfied by any
-# unrelated finding.
+# than synthetic samples (docs/traps.md: the wayland seat guard passed
+# VACUOUSLY TWICE). Every perturbation prints its substitution count and
+# is refused if it did not apply, and every refusal is checked for its
+# REASON — an exit code alone is satisfied by any unrelated finding.
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
@@ -399,25 +350,20 @@ refuses() {
             exit 1
             ;;
     esac
-    # SAID OUT LOUD ON EVERY RUN, not just in the session that wrote it:
-    # these four lines are this gate watching its own clauses fail, which
-    # is the difference between a guard and a decoration.
+    # Said out loud on every run: the gate watching its own clauses fail.
     echo "check-native-undo: watched failing: $6" >&2
 }
 
-# 1. THE BRACKET DELETED — the Compose arm's N1 perturbation, which its
-#    whole lane could not fail (§3.3). Here it is a two-second red.
+# 1. THE BRACKET DELETED — the perturbation no lane can fail.
 hits="$(perturb "$COMPOSE" 'val quiet = kayaTakeNativeUndoEcho\([^)]*\)' \
     'val quiet = false' "$T/compose-no-bracket.kt")"
 applied "$hits" "the compose bracket-deletion perturbation"
 refuses "$GTK" "$WINUI" "$SWIFTUI" "$T/compose-no-bracket.kt" \
     "no longer finds" "a Compose arm whose ledger-quiet read is gone"
 
-# 2. THE BRACKET DRIFTED AWAY FROM THE REPORT — present, and deciding
-#    nothing. This is the shape a refactor produces, and the one a
-#    presence check would pass. Two substitutions, because the read has
-#    to LEAVE the emission and land somewhere real: an "unused" read
-#    left in place would still sit in the block it belongs to.
+# 2. THE BRACKET DRIFTED AWAY FROM THE REPORT — present, deciding
+#    nothing, the shape a presence check would pass. Two substitutions,
+#    because the read has to LEAVE the emission and land somewhere real.
 hits="$(perturb "$SWIFTUI" \
     'let quiet = kayaTakeNativeUndoEcho\(node\.id, text\)' \
     'let quiet = false' "$T/swiftui-quiet-false.swift")"
@@ -431,8 +377,8 @@ refuses "$GTK" "$WINUI" "$T/swiftui-stranded.swift" "$COMPOSE" \
     "is not in the block that reports the edit" \
     "a SwiftUI arm whose bracket read drifted off the emission"
 
-# 3. A1'S CLEAR DROPPED FROM THE APPLY ARM — the Compose arm's F2
-#    perturbation, the other guard no lane can fail (§3.4).
+# 3. THE CLEAR DROPPED FROM THE APPLY ARM — the other guard no lane can
+#    fail.
 hits="$(perturb "$GTK" \
     'ApplyOp::ClearUndo \{ window \} => \{\n            if let Some\(id\) = focused_text_in\(core, window\) \{\n                core\.clear_native_undo\(id\);\n            \}' \
     'ApplyOp::ClearUndo { window } => {\n            let _ = window;' \
@@ -441,9 +387,8 @@ applied "$hits" "the gtk clear-arm perturbation"
 refuses "$T/gtk-no-clear.rs" "$WINUI" "$SWIFTUI" "$COMPOSE" \
     "does not call the platform's clear" "a GTK ClearUndo arm that clears nothing"
 
-# 4. THE SAMPLE'S OWN ANCHOR MOVED — the vacuity direction, which is what
-#    turns a gate into a decoration. A backend that stops calling the
-#    core seam must SAY so here rather than quietly satisfy every clause.
+# 4. THE SAMPLE'S OWN ANCHOR MOVED — the vacuity direction. A backend
+#    that stops calling the core seam must SAY so here.
 hits="$(perturb "$WINUI" 'core\.scene\.note_native_undo\(' \
     'core.scene.note_native_undo_renamed(' "$T/winui-moved.rs")"
 applied "$hits" "the winui anchor-rename perturbation"

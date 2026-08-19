@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,10 +10,9 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# Lint every tools/ shell script with shellcheck at warning level. The
-# suites' orchestration is shell, and shell's silent failure modes
-# (unquoted words, unchecked cd, masked exit codes) have each cost a
-# debugging round — catch them at the gate instead.
+# Lint every tools/ shell script with shellcheck at warning level, plus
+# the repo's own shell rules (--locked, $?, no sed/awk, ffmpeg -nostdin,
+# no exec out of a build directory).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,9 +21,7 @@ cd "$ROOT" || exit 1
 command -v shellcheck >/dev/null \
     || { echo "check-shell: shellcheck not found — run inside nix develop"; exit 1; }
 
-# Self-test: a script with a known warning-level defect must produce
-# findings, or the shellcheck invocation itself is broken and the
-# green gate below would be a lie.
+# Self-test: a script with a known defect must produce findings.
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 printf '#!/bin/sh\ncd /nowhere\necho $undefined_word_splits\n' >"$T/bad.sh"
@@ -38,15 +30,8 @@ if shellcheck -S warning "$T/bad.sh" >/dev/null 2>&1; then
     exit 1
 fi
 
-# EVERY .sh under tools/, found rather than enumerated. This loop used
-# to list the directories it knew about, so a script in a NEW
-# subdirectory was linted by nothing and the gate stayed green. The four
-# python rules below already walk the tree with rglob, so this was the
-# only rule here a new directory could slip past. Found 2026-07-27 while
-# adding tools/ios/scopeprobe/, and it had already cost something:
-# widening it surfaced tools/lib/swift-toolchain.sh, a sourced library
-# in a directory the old list never named, unlinted since the day it was
-# written.
+# EVERY .sh under tools/, found rather than enumerated: a script in a
+# new subdirectory must not be linted by nothing.
 status=0
 while IFS= read -r f; do
     if ! shellcheck -S warning "$f"; then
@@ -54,11 +39,8 @@ while IFS= read -r f; do
     fi
 done < <(find tools -name '*.sh' -type f | sort)
 
-# javac takes the PLATFORM charset, and the hosts disagree: UTF-8 on
-# mac and linux, a legacy code page on the Windows VM. A scene label
-# with a non-ASCII character therefore reached the wire as mojibake
-# from one host only, and no gate could see it (docs/traps.md). Every
-# invocation must pin the encoding rather than inherit a default.
+# javac takes the PLATFORM charset and the hosts disagree, so every
+# invocation pins it (docs/traps.md).
 unpinned=$(grep -rnE "(javac|run_javac) .*(-d |-proc:only)" tools/ --include="*.sh" \
     | grep -v "encoding UTF-8") || true
 if [ -n "$unpinned" ]; then
@@ -67,17 +49,9 @@ if [ -n "$unpinned" ]; then
     status=1
 fi
 
-# Cargo.lock is the record of WHICH dependency graph a lane validated.
-# A bare `cargo build` is allowed to rewrite it — a drifted Cargo.toml,
-# a yanked crate, a `version = "0.62"` that now means something newer —
-# and the run goes green against a graph nobody chose, silently, with
-# the change landing in a file the run was not supposed to touch.
-# `--locked` turns that into a loud failure: resolve or refuse.
-#
-# The flag is per-invocation (cargo has no config key for it), so a new
-# callsite starts out unguarded. That is what this clause is for. The
-# scan is python3 rather than grep -E because the word-boundary syntax
-# differs between BSD and GNU grep — the same portability trap as sed.
+# Every cargo invocation carries --locked (CLAUDE.md). The flag is
+# per-invocation, so a new callsite starts out unguarded. python3
+# rather than grep -E: word-boundary syntax differs BSD vs GNU.
 unlocked=$(python3 - <<'PY'
 import pathlib, re
 # cargo, an optional wrapper (ndk/xwin) with its own flags, then the
@@ -113,8 +87,7 @@ for f in sorted(pathlib.Path("tools").rglob("*")):
             print(f"{f}:{n}:{line.strip()[:110]}")
 PY
 ) || true
-# Self-test: the scan must see an unlocked invocation, or its silence
-# below means nothing.
+# Self-test: the scan must see an unlocked invocation.
 probe=$(printf 'cargo build --lib\ncargo ndk -t arm64-v8a build --locked --lib\n' \
     | python3 -c '
 import re, sys
@@ -130,44 +103,20 @@ if [ -n "$unlocked" ]; then
     status=1
 fi
 
-# `$?` is readable exactly once, on the line right after the command,
-# into a named variable. Everything downstream tests the VARIABLE.
-#
-# It is not a value you can come back for. Three ways that bites, all
-# silent, none of them caught by shellcheck 0.11 at any severity:
-#
-#   if cmd; then …; fi      an `if` whose condition was false and which
-#   status=$?               has no else branch exits 0 ITSELF, so this
-#                           reads the `if`, not cmd. Shipped in
-#                           tools/keyed.sh; every failing gate passed.
-#
-#   cmd                     SC2181 knows this one, but only at STYLE
-#   if [ $? -ne 0 ]         severity, which -S warning above never sees.
-#
-#   cmd                     `local rc` is a COMMAND and resets $?, so
-#   local rc                the capture reads the declaration. Measured:
-#   rc=$?                   rc=0. Note `local rc=$?` on ONE line is
-#                           FINE — $? expands before local runs — and
-#                           `local rc=$(cmd)` is SC2155 at warning,
-#                           already caught above. Only the separated
-#                           form is both broken and unreported.
-#
-# So the rule is spelled here rather than delegated. Allowed: a bare
-# `name=$?` on the line after a command, or `cmd || name=$?` on one
-# line. Anything else is a finding — including a read that follows the
-# end of a compound (fi/done/esac/}), which is the first case above.
+# The `$?` rule and the three shapes it forbids are in CLAUDE.md; none
+# of them is reported at -S warning. Allowed: a bare `name=$?` on the
+# line after a command, or `cmd || name=$?` on one line. Anything else
+# is a finding, including a read after the end of a compound
+# (fi/done/esac/}).
 badstatus=$(python3 - <<'PY'
 import pathlib, re
 
-# `name=$?`, optionally with a declaration prefix — `local rc=$?` is a
-# capture too: the expansion happens before `local` runs (measured).
+# `local rc=$?` is a capture too: $? expands before `local` runs.
 CAPTURE = re.compile(r'^(?:(?:local|declare|typeset|export|readonly)\s+)?[A-Za-z_]\w*=\$\?$')             # name=$? , alone
 SAMELINE = re.compile(r'\|\|\s*[A-Za-z_]\w*=\$\?\s*$')   # cmd || name=$?
-# A BARE declaration — `local rc` with no `=` — is the last command
-# before a capture on the next line, so the capture reads IT.
+# A bare `local rc` is a command, so a capture below it reads IT.
 BARE_DECL = re.compile(r'^(?:local|declare|typeset)\s+[A-Za-z_]\w*$')
-# A BACKSLASH-escaped $? in a double-quoted string is literal text: the
-# message this gate PRINTS about $? is not itself a read of one.
+# A backslash-escaped $? in a double-quoted string is literal text.
 READ = re.compile(r'(?<!\\)\$\?')
 ENDS_COMPOUND = {"fi", "done", "esac", "}", ";;", "else", "then", "do"}
 
@@ -242,20 +191,15 @@ for f in sorted(pathlib.Path("tools").rglob("*.sh")):
 print("\n".join(out))
 PY
 ) || true
-# Self-test: all three shapes above must be seen, and the correct one
-# must not be. A clause about a silent failure mode is worth exactly
-# what its negative test proves.
+# Self-test: all three bad shapes must be seen, the good ones not.
 probe=$(python3 - <<'PY'
 import re
-# `name=$?`, optionally with a declaration prefix — `local rc=$?` is a
-# capture too: the expansion happens before `local` runs (measured).
+# `local rc=$?` is a capture too: $? expands before `local` runs.
 CAPTURE = re.compile(r'^(?:(?:local|declare|typeset|export|readonly)\s+)?[A-Za-z_]\w*=\$\?$')
 SAMELINE = re.compile(r'\|\|\s*[A-Za-z_]\w*=\$\?\s*$')
-# A BARE declaration — `local rc` with no `=` — is the last command
-# before a capture on the next line, so the capture reads IT.
+# A bare `local rc` is a command, so a capture below it reads IT.
 BARE_DECL = re.compile(r'^(?:local|declare|typeset)\s+[A-Za-z_]\w*$')
-# A BACKSLASH-escaped $? in a double-quoted string is literal text: the
-# message this gate PRINTS about $? is not itself a read of one.
+# A backslash-escaped $? in a double-quoted string is literal text.
 READ = re.compile(r'(?<!\\)\$\?')
 ENDS_COMPOUND = {"fi", "done", "esac", "}", ";;", "else", "then", "do"}
 
@@ -291,18 +235,8 @@ if [ -n "$badstatus" ]; then
     status=1
 fi
 
-# NO sed, NO awk. Repo policy, and not a style preference: BSD and GNU
-# differ in ways that bite silently and per-platform — this tree runs
-# the same scripts on macOS, inside a Debian container, and against a
-# Windows VM. python3 is available everywhere the scripts are, so the
-# rule has no "trivial enough" exception and this clause is what makes
-# that true rather than remembered. 27 invocations were converted at
-# once when it landed; the point of the gate is the 28th.
-#
-# Matched in COMMAND POSITION only — start of line, or after a pipe,
-# semicolon, ampersand or command substitution. A substring match
-# flags the word "used" inside a comment, which is how the first draft
-# of this scan reported a false positive on build-id.sh.
+# No sed, no awk (CLAUDE.md). Matched in COMMAND POSITION only — a
+# substring match flags the word "used" inside a comment.
 badtool=$(python3 - <<'PY'
 import pathlib
 import re
@@ -334,8 +268,7 @@ for f in sorted(pathlib.Path("tools").rglob("*.sh")):
             print(f"{f}:{n}: {m.group(1)} is banned — use python3 instead")
 PY
 ) || true
-# Self-test: the scan must see a real invocation and must NOT see the
-# word inside another word.
+# Self-test: a real invocation seen, the word inside another word not.
 probe=$(python3 - <<'PY'
 import re
 CMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*(sed|awk)\b")
@@ -344,7 +277,6 @@ CMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*(sed|awk)\b")
 # real one.
 S, A = "s" + "ed", "a" + "wk"
 bad = [f"{S} -n p file", "cat x | " + A + " '{print $1}'", f"x=$({S} s/a/b/ f)"]
-# The word inside another word must NOT match.
 good = ["# u" + "sed by the thing", "echo unu" + "sed", "grep -o par" + "sed file"]
 print(f"{sum(1 for c in bad if CMD.search(c))}/{sum(1 for c in good if CMD.search(c))}")
 PY
@@ -359,19 +291,8 @@ if [ -n "$badtool" ]; then
     status=1
 fi
 
-# ffmpeg READS STDIN when it has one, and it does not ask whose it is.
-# Inside `grep … | while read line; do … ffmpeg …; done` the stdin it
-# inherits IS the loop's input, so it ate transcript lines and the
-# leading bytes of the next one: a step arrived as "AYA_HARNESS: +107ms"
-# instead of "KAYA_HARNESS: …", its offset parsed as 0, and the still
-# was cut from the wrong moment in the film. Load-dependent — 908 of
-# 1790 stills in one 185-leg recording run, none at low concurrency —
-# and it survived because a corrupt line still yields A still: the
-# gate counted files, and the files were there.
-#
-# -nostdin is the fix ffmpeg ships for exactly this. The recording path
-# also reads its loop from fd 3 so the next stdin-reader is harmless,
-# but that is one loop remembering; this is the rule.
+# ffmpeg reads stdin when it has one, so inside a `while read` loop it
+# eats the loop's input (docs/traps.md). -nostdin is the rule.
 badffmpeg=$(python3 - <<'PY'
 import pathlib
 import re
@@ -411,8 +332,8 @@ for f in sorted(pathlib.Path("tools").rglob("*.sh")):
             print(f"{f}:{n}: ffmpeg without -nostdin — it will eat a read loop's input")
 PY
 ) || true
-# Self-test: a bare invocation must be seen; -nostdin, a mention inside
-# a `command -v` probe, and the word in a list must not be.
+# Self-test: a bare invocation seen; -nostdin, `command -v` and the
+# word in a list not.
 probe=$(python3 - <<'PY'
 import re
 CMD = re.compile(r"(?:^|[|;&(]|\$\()\s*(?:[A-Za-z_]+=\S+\s+)*ffmpeg\b")
@@ -441,24 +362,10 @@ if [ -n "$badffmpeg" ]; then
     status=1
 fi
 
-# A LEG MAY NOT EXEC OUT OF A BUILD DIRECTORY.
-#
-# macOS registers every unbundled executable with LaunchServices at
-# launch, and `_LSApplicationCheckIn` enumerates the executable's
-# CONTAINING DIRECTORY as if it were a bundle. Point a leg at
-# `target/debug/examples` — a build directory that accumulates a
-# hashed binary, a .d and a .dSYM per example per build — and every
-# launch walks the lot. Measured 2026-08-10: 776,613 entries, 3.8 GB,
-# and the same binary took 7.7s from there against 0.13s from a
-# two-entry directory. Fifty-nine times, on 32 legs, for 48% of the mac
-# lane's leg time — and it was what made the five-lane matrix a coin
-# flip, because contention pushed those legs past the 120s timeout.
-#
-# So the lanes stage guests into a small directory and run them from
-# there (validate-mac's $RUST_GUESTS; the swift lane's target/swift-guests
-# already did). This clause is the wall: a `run` line naming a build
-# directory fails here rather than costing another six months of "the
-# machine must be busy".
+# A LEG MAY NOT EXEC OUT OF A BUILD DIRECTORY: macOS walks the
+# executable's containing directory on every launch, and a build
+# directory is huge (docs/deferred.md). Lanes stage guests into a small
+# directory and run them from there.
 badexec=$(grep -nE '^[[:space:]]*run[[:space:]].*target/(debug|release)/(examples|deps)/' \
     tools/*.sh tools/*/*.sh 2>/dev/null) || true
 if [ -n "$badexec" ]; then
@@ -468,8 +375,7 @@ if [ -n "$badexec" ]; then
     echo "$badexec" >&2
     status=1
 fi
-# Its self-test: the pattern must fire on the shape it forbids and stay
-# quiet on the staging copy that legitimately names the build path.
+# Self-test: fires on the forbidden shape, quiet on the staging copy.
 probe_exec=$(printf '%s\n' \
     '    run split-rust-swiftui env KAYA_SELFTEST=split target/debug/examples/split' \
     '    cp "$ROOT/target/debug/examples/$s" "$RUST_GUESTS/$s" || exit 1' \

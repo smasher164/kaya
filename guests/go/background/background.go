@@ -43,8 +43,6 @@ func App() *kaya.App {
 				}()
 				tx.Write(status, "working")
 			})
-			// Proof the app goroutine still serves input while the
-			// worker parks.
 			tx.Button("ping", func(tx *kaya.Tx) { // button#1
 				tx.Write(alive, "alive")
 			})

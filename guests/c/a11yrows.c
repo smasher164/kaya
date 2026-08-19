@@ -1,24 +1,14 @@
-/* The stamped-accessibility scene from C, on the function floor: one
- * template entry whose a11y id AND a11y label come from the row's own
- * value, read back out of the PLATFORM'S OWN accessibility tree — and
- * beside it a second collection whose prototype carries a stamped row's
- * inset and a stamped label's role (docs/tpl-props-plan.md).
+/* The stamped-accessibility scene from C, on the function floor: a11y
+ * id and label sourced from the row's own value, plus a second
+ * collection whose prototype carries a stamped inset and role
+ * (docs/tpl-props-plan.md).
  *
- * BOTH A11Y PROPS ARE ELEMENT-SOURCED AND THE ID IS FORCED: expect_ax
- * resolves its target by the authored identifier and REFUSES an
- * ambiguous one, so copies sharing a constant id cannot be read back
- * (swift/KayaSwiftUI.swift's expect_ax). A shared constant id stays
- * legal; it is simply unreadable. The same limit is why the styling
- * half needs a SECOND collection: a scalar row has one field to spend
- * on an id.
+ * expect_ax resolves its target by the authored identifier and REFUSES
+ * an ambiguous one, so copies may not share a constant id. That is why
+ * the styling half needs a SECOND collection: a scalar row has one
+ * field to spend on an id.
  *
- * A SEPARATE SCENE FROM a11y.c BY SHAPE: a For materializes as a column
- * and harness registries are creation-order, so a scene that asserts
- * container kinds ordinally cannot host one. This scene asserts no
- * container ordinally except the stamped row.
- *
- * The byte-frozen contract is tools/scenes/a11yrows.steps.
- * Run with KAYA_SELFTEST=a11yrows. */
+ * Contract: tools/scenes/a11yrows.steps. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -54,16 +44,14 @@ static void build_scene(void) {
                               (KayaVariantSchema[]){{(uint32_t[]){KAYA_VALUE_STR}, 1}}, 1);
     kaya_tx_create_for(&tx, W_FOR_NOTES, C_NOTES);
     kaya_tx_create_widget(&tx, N_FIELD, KAYA_KIND_ENTRY);
-    /* `level` is 0: the element of the For this node sits directly
-     * inside. */
+    /* `level` 0: the element of the For this node sits directly inside. */
     kaya_tx_bind_a11y_id_element(&tx, N_FIELD, 0, F_NOTE);
     kaya_tx_bind_a11y_label_element(&tx, N_FIELD, 0, F_NOTE);
     kaya_tx_template_end(&tx);
 
-    /* The styling half. `heading` is the one role with a real-tree
-     * observable on every platform, which is why the script reads it and
-     * not the other two. The role and inset are CONSTANTS: there is no
-     * element-sourced spelling of either, in any binding. */
+    /* `heading` is the one role with a real-tree observable on every
+     * platform. The role and inset are CONSTANTS: no binding has an
+     * element-sourced spelling of either. */
     kaya_tx_create_collection(&tx, C_HEADS,
                               (KayaVariantSchema[]){{(uint32_t[]){KAYA_VALUE_STR}, 1}}, 1);
     kaya_tx_create_for(&tx, W_FOR_HEADS, C_HEADS);
@@ -96,7 +84,6 @@ static void build_scene(void) {
 static void *app(void *arg) {
     (void)arg;
     build_scene();
-    /* No handler: the loop blocks until shutdown. */
     const uint8_t *rec;
     while (kaya_next_occurrence(&rec) != 0) {
     }

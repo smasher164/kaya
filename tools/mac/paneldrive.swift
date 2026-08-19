@@ -5,22 +5,17 @@
 //
 // Built by hand with kaya_swiftc; not part of any lane.
 //
-// IT READS ALL THREE VIEW MODES, for the same reason the shipped reader
-// does. The browser's identifier, the element a selection goes through
-// and the attribute that sets it all change with the machine-wide
+// IT READS ALL THREE VIEW MODES, like the shipped reader: the browser's
+// identifier, the element a selection goes through and the attribute
+// that sets it all change with the machine-wide
 // `NSGlobalDomain NSNavPanelFileListModeForOpenMode2` (1 columns,
-// 2 list, 3 icons) — see docs/traps.md. This probe knew only `ListView`
-// for two milestones after the shipped reader was fixed, which made it a
-// trap of its own: a measurement tool is reached for by someone who does
-// not yet know what is wrong, and "NO ListView" on a perfectly good panel
-// is the same wrong answer that cost 2026-08-06. validate-mac now
-// ROTATES that preference across the filedialog legs and restores it, so
-// the mode this runs in is genuinely whatever the last run left mid-flight.
+// 2 list, 3 icons) — see docs/traps.md. validate-mac ROTATES that
+// preference across the filedialog legs, so the mode this runs in is
+// whatever the last run left mid-flight.
 //
-// The three shapes are an enum with exhaustive switches and no `default`,
-// again like the shipped reader: a fourth mode is added by adding a case,
-// and the build then refuses until someone has written both how to read
-// it and how to select in it.
+// The three shapes are an enum with exhaustive switches and no
+// `default`, so a fourth mode fails the build until someone has written
+// both how to read it and how to select in it.
 import AppKit
 import ApplicationServices
 
@@ -31,12 +26,10 @@ enum PanelShape: String, CaseIterable {
 }
 
 // Roles that carry CONTENT rather than structure. No lookup descends
-// into one, and that is a correctness rule, not a tidiness one: in
-// columns mode the panel publishes a column per path component, one of
-// which has held 8362 items, and every attribute read is a mach round
-// trip. The unpruned walk this file used to do did not finish in 45
-// seconds there. It matters for the OK button too, which sorts AFTER the
-// browser in the walk.
+// into one, and that is a correctness rule: in columns mode the panel
+// publishes a column per path component, one of which has held 8362
+// items, and every attribute read is a mach round trip — an unpruned
+// walk did not finish in 45 seconds there.
 let opaqueRoles: Set<String> = [
     "AXRow", "AXCell", "AXStaticText", "AXImage", "AXTextField", "AXGroup",
     "AXColumn", "AXMenuButton", "AXButton", "AXPopUpButton", "AXScrollBar",
@@ -131,11 +124,10 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
     AXUIElementSetAttributeValue(
         axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 
-    // Search from the panel's own subtree when it publishes one, so the
-    // walk matches the shipped reader's proven path; from the
-    // application otherwise, since a free-standing panel is a window and
-    // not a sheet. Printed, because which one it was is the first thing
-    // anyone debugging this needs to know.
+    // From the panel's own subtree when it publishes one, matching the
+    // shipped reader's path; from the application otherwise, since a
+    // free-standing panel is a window and not a sheet. Printed, because
+    // which one it was is the first thing a reader needs.
     let sheet = findBy(axApp, ids: ["open-panel"])
     let root = sheet ?? axApp
     print("ROOT = \(sheet == nil ? "<application>" : "open-panel")")
@@ -173,16 +165,14 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
     switch shape {
     case .list:
         // AXRows FIRST, children only as the fallback: an AXOutline's
-        // children are its COLUMNS as well as its rows, and printing
-        // "name / size / kind / dateAdded" beside the files is exactly
-        // the misleading answer a measurement tool must not give.
+        // children are its COLUMNS as well as its rows, so a child walk
+        // prints "name / size / kind / dateAdded" beside the files.
         //
         // The COLUMN HEADER IS A ROW TOO, and an identical one — role
         // AXRow, subrole AXOutlineRow — so it comes back beside the
-        // files and its texts are column titles. AXDisclosureLevel is
-        // what separates them: 0 on the header, 1 on the files. A row
-        // publishing no level at all is kept, since an empty list would
-        // be a confusing way to say "Apple changed this".
+        // files with column titles for texts. AXDisclosureLevel separates
+        // them: 0 on the header, 1 on the files. A row publishing no
+        // level at all is kept.
         rows = ((copyAttr(browser, kAXRowsAttribute as String) as? [AXUIElement])
             ?? children(browser))
             .filter { (copyAttr($0, "AXDisclosureLevel") as? Int) != 0 }

@@ -1,15 +1,10 @@
-"""The gallery scene: the conformance pass for the widget vocabulary as
-it grows — a row with a checkbox and its status label, and a row with a
-slider and its volume label. Both controls own their state and report
-each change; the app answers by writing the paired signal — the entry's
-uncontrolled contract, with a bool and a float.
-
-The backend selftest (KAYA_SELFTEST=gallery) clicks the checkbox, sets
-the slider to 0.75 through the control's own event path, and expects
-the labels to read exactly "urgent: true" and "volume: 75%".
+"""The gallery scene: a row with a checkbox and its status label, and a
+row with a slider and its volume label. Both controls own their state
+and report each change; the app answers by writing the paired signal —
+the entry scene's uncontrolled contract, with a bool and a float.
 
 Build the library first (cargo build), then:
-    KAYA_SELFTEST=gallery python3 crates/kaya/examples/gallery.py
+    KAYA_SELFTEST=gallery python3 guests/python/gallery.py
 """
 
 import sys
@@ -18,8 +13,7 @@ import kaya
 
 app = kaya.App()
 
-# A 2x2 RGB PNG, 75 bytes, embedded as source: scenes carry their inputs
-# and do no runtime file I/O.
+# A 2x2 RGB PNG, 75 bytes, embedded as source.
 TEST_PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68,
                   82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154,
                   115, 0, 0, 0, 18, 73, 68, 65, 84, 120, 156, 99, 248, 207,

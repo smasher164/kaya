@@ -2,14 +2,8 @@
 
 # P3-compose (docs/undo-plan.md §0, D7) — the whole campaign in one
 # transcript. Throwaway; nothing in the validation ladder calls this.
-#
-#  A  the LEGACY path kaya ships today (M3 TextField(value:, onValueChange:)):
-#     is there an undo stack at all, does Ctrl+Z drive it, does a
-#     programmatic write enter it, does an undo echo to the app?
-#  B  the TextFieldState path (foundation 1.7.5): does a programmatic
-#     write enter undoState history, does clearHistory() give D7
-#     semantics, and what does the observation channel report?
-#  C  the touch-only affordance: does the text toolbar offer Undo?
+# Scenario A is the legacy TextField path, B the TextFieldState path,
+# C the touch-only affordance; findings in docs/undo-plan.md §1.4.
 #
 # Results on stdout — the receiver answers through ORDERED broadcast
 # result data, which `am broadcast` prints directly (no logcat race).
@@ -32,8 +26,7 @@ ctrl_shift_z() { adb -s "$SER" shell input keycombination $CTRL $SHIFT $Z; sleep
 type_text() { adb -s "$SER" shell input text "$1"; sleep 1; }
 # A FRESH PROCESS between scenarios: the legacy field's undo stack is
 # unreachable from the app, so it survives every "reset" the probe can
-# perform — measured in A7, where a third Ctrl+Z resurrected text from a
-# scenario two minutes earlier.
+# perform, and a later Ctrl+Z resurrects an earlier scenario's text.
 restart() {
     adb -s "$SER" shell am force-stop $PKG
     adb -s "$SER" shell am start -W -n $PKG/.ProbeActivity >/dev/null

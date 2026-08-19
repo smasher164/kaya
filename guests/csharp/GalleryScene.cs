@@ -2,7 +2,6 @@
 // valid PNG and deliberately invalid bytes), on the uncontrolled
 // contract with a bool and a double.
 //
-// Build the library first (cargo build), then:
 //     KAYA_SELFTEST=gallery KAYA_LIB=target/debug/libkaya.dylib \
 //         dotnet run --project guests/csharp
 
@@ -33,8 +32,6 @@ static class GalleryScene
                     tx.Slider(0.0, 1.0, bind: pos, onChange: (t, value) =>
                         t.Write(volume, $"volume: {(int)System.Math.Round(value * 100)}%"));
                     tx.Label(bind: volume);
-                    // The programmatic write: fans out to the control
-                    // and must NOT come back as a volume occurrence.
                     tx.Button("quarter", onClick: t => t.Write(pos, 0.25));
                 });
                 tx.Row(() =>
@@ -50,8 +47,7 @@ static class GalleryScene
         System.Environment.Exit(app.Run());
     }
 
-    // A 2x2 RGB PNG, 75 bytes, embedded as source: a scene carries its
-    // inputs and does no runtime file I/O.
+    // A 2x2 RGB PNG, 75 bytes, embedded as source.
     static readonly byte[] TestPng =
     {
         137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,

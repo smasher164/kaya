@@ -1,63 +1,11 @@
-// GdkClipProbe — what does GDK4 actually charge for the five
-// representations, and does a FOREIGN reader see what it wrote?
-//
-// THE PREVIOUS PROBE ANSWERED A DIFFERENT QUESTION. tools/linux/clipprobe
-// asked which compositor lets the harness read the clipboard from
-// outside (answer: sway, via data-control). It never touched the
-// BACKEND's side. These are the unknowns the GTK arm turns on, and every
-// platform so far has overturned an assumption here.
-//
-// RUN 1 (2026-08-02) answered Q1 and Q6 and found the blocker: a union
-// provider advertises all four representations, an unsatisfiable read
-// fails in 0ms, and every foreign read saw NOTHING while GDK reported
-// the content set. sway's debug log named the mechanism:
-//
-//   [wlr_data_device.c] Rejecting set_selection request,
-//                       serial 0 was never given to client
-//
-// Wayland lets a client take the selection only with a serial from an
-// input event it was sent, and the lane's seat has NO capabilities
-// (headless backend, no input devices), so no client can ever hold
-// one. The compositor drops the write and tells the client nothing;
-// GDK's own formats() still reports everything.
-//
-// RUN 2 ruled out candidate 3 and the modifier tap: a mapped, settled
-// window's set was still rejected, and `wtype -M shift -m shift`
-// changed nothing (a modifier change is not a key event).
-//
-// RUN 3 settled the mechanism: with a virtual keyboard held open from
-// before the window mapped (seat gains the keyboard capability, the
-// focused window gets wl_keyboard.enter), the ENTER serial alone was
-// still not enough — but ONE REAL KEY EVENT (`wtype -k F24`) was.
-// After the tap, the foreign reader listed every representation. Run 3
-// then hung, which is its own finding: --list-types is answered by the
-// compositor from the offer, but reading DATA needs the owner's main
-// loop to serve bytes, and the probe's synchronous wl-paste wait had
-// blocked that loop. (The lane never has this shape — the foreign
-// reader lives in the runner's process — but the probe reads in
-// threads from here on, and carries a safety exit.)
-//
-// THIS RUN decides the lane recipe's shape and finishes the battery:
-//
-// QA ONE-SHOT PRIMER, no session holder. `wtype -P F24 -s 800 -p F24`:
-//    the virtual keyboard is created on the spot, F24 held 800ms, then
-//    released, keyboard destroyed. The press may race GDK's late
-//    wl_keyboard bind; the release at +800ms should not. If the
-//    foreign reader sees content after this, one self-contained wtype
-//    call per leg is the whole recipe.
-//
-// QB HOLDER + TAP (run 3's proven configuration), as the control and
-//    fallback: hold a keyboard open, tap F24, set again.
-//
-// Q2 HTML's mime type: raw UTF-8 under `text/html`, or does a consumer
-//    need the ;charset=utf-8 alias?
-// Q3 image: do raw PNG bytes round-trip byte-identical?
-// Q4 files: text/uri-list, CRLF-separated, foreign read intact?
-// Q5 custom: do the bytes survive under `dev.kaya.note`?
+// GdkClipProbe — what GDK4 charges for the five clipboard
+// representations, and whether a FOREIGN reader sees what it wrote.
 //
 // Throwaway; nothing builds or runs this but a human. Answers land on
-// stdout under "PROBE". Run via run.sh, which greps sway's debug log
-// for set_selection rejections afterwards.
+// stdout under "PROBE". Run via run.sh, which greps sway's debug log for
+// set_selection rejections afterwards. Everything it measured — the
+// missing input serial, the F24 primer, the slashless custom mime type —
+// is in docs/clipboard-plan.md.
 
 use gtk4::gdk;
 use gtk4::glib;
@@ -80,11 +28,9 @@ fn say(line: &str) {
     println!("PROBE {line}");
 }
 
-/// What a FOREIGN process sees — the whole point. wl-paste is the
-/// lane's reader and is not ours, so anything it cannot see is not
-/// really on the clipboard. MUST NOT be called on the main thread once
-/// this process owns the selection: serving the data needs the main
-/// loop (run 3's deadlock).
+/// What a FOREIGN process sees. MUST NOT be called on the main thread
+/// once this process owns the selection: serving the data needs the main
+/// loop, and a synchronous wait there deadlocks.
 fn foreign(args: &[&str]) -> String {
     match std::process::Command::new("wl-paste").args(args).output() {
         Ok(out) => {
@@ -93,8 +39,8 @@ fn foreign(args: &[&str]) -> String {
                 text = format!("<none: {}>", String::from_utf8_lossy(&out.stderr).trim_end());
             }
             // An empty success and a failed transfer must read
-            // differently: run 4's custom read printed '' and the exit
-            // status was the only place the truth could have lived.
+            // differently: a custom read printing '' leaves the exit
+            // status as the only place the truth lives.
             if !out.status.success() {
                 text.push_str(&format!(" [exit {}]", out.status.code().unwrap_or(-1)));
             }
@@ -186,9 +132,8 @@ fn main() {
             .title("gdkclipprobe")
             .build();
 
-        // Instrumentation: does ANY key event reach this window? A key
-        // that arrives and does not help reads differently from a key
-        // that never arrives.
+        // Instrumentation: a key that arrives and does not help reads
+        // differently from a key that never arrives.
         let keys = gtk4::EventControllerKey::new();
         keys.connect_key_pressed(|_, keyval, keycode, _| {
             say(&format!(
@@ -206,10 +151,9 @@ fn main() {
         window.add_controller(keys);
         window.present();
 
-        // The one-shot primer, proven by run 4: the press races GDK's
-        // late wl_keyboard bind and is lost; the release at +800ms
-        // arrives after it and its serial is what GDK spends. The
-        // serial stayed valid even after wtype's device was removed.
+        // The one-shot primer: the press races GDK's late wl_keyboard
+        // bind and is lost; the release at +800ms arrives after it and
+        // its serial is what GDK spends (docs/clipboard-plan.md).
         at(1, || {
             std::thread::spawn(|| {
                 wtype(
@@ -219,21 +163,9 @@ fn main() {
             });
         });
 
-        // --- Q5, isolated: why does the custom type serve EMPTY? -----
-        // Run 4: dev.kaya.note ADVERTISED in the union, read returned
-        // zero bytes, no error — while image/png through the same
-        // union served byte-identical. Run 5's 2x2 ({union, sole} x
-        // {slashless, slashed}) pinned it: the union is innocent, and
-        // a for_bytes type WITHOUT A SLASH is advertised but never
-        // served. GDK's serving path interns the requested type as a
-        // mime type, and a string with no slash fails the interning
-        // and is dropped with the fd closed — zero bytes, exit 0.
-        //
-        // THIS RUN: does the MINIMAL slash satisfy it — `dev.kaya/note`,
-        // the scene's id with one slash added, no other respelling?
-        // The subtype-first spelling matters because the scene id is
-        // byte-compared on every platform, so the cheapest respelling
-        // that GDK serves is the one worth knowing about.
+        // Q5: a for_bytes type WITHOUT A SLASH is advertised but never
+        // served (docs/clipboard-plan.md). Does the minimal slash satisfy
+        // it — `dev.kaya/note`, no other respelling?
         case(3, "C5 sole dev.kaya/note", || {
             gdk::ContentProvider::for_bytes(
                 "dev.kaya/note",
@@ -254,8 +186,7 @@ fn main() {
             std::process::exit(0);
         });
 
-        // A probe that can wedge measures nothing twice. Run 3 hung on
-        // its own deadlock; whatever goes wrong above, this run ends.
+        // A probe that can wedge measures nothing twice.
         at(30, || {
             say("SAFETY: 30s elapsed without the battery finishing — something wedged");
             say("==== end");

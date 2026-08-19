@@ -1,13 +1,10 @@
 /* The reorder scene from C, on the function floor: order as collection
- * data, with each handler repositioning an entry BY KEY and the
- * selftest's expect_order reading the toolkit's actual child order back.
+ * data, each handler repositioning an entry BY KEY.
  *
  * THE ROOT IS A ROW so the For's container is the scene's only
  * column-kind widget: languages disagree on whether containers are
  * created before or after their children, and column#0 must name the
- * same widget everywhere.
- *
- * Built and run by the Linux container suite with KAYA_SELFTEST=reorder. */
+ * same widget everywhere. */
 
 #include <kaya.h>
 #include <kaya_wire.h>

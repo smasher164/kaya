@@ -5,27 +5,15 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
- * The harness's eyes and hands OUTSIDE this app.
+ * The harness's eyes and hands OUTSIDE this app. Android's picker is
+ * DocumentsUI, a separate APK, so nothing in-process can read it. UI
+ * Automator could, but it is instrumentation and this lane launches
+ * with `am start` and reads logcat; an accessibility service crosses
+ * the same line without restructuring the lane.
  *
- * Every other platform's file picker is reachable from inside the
- * process: GTK's chooser is our own widget, the Shell's dialog is COM in
- * our address space, and NSOpenPanel is XPC but still our application to
- * the accessibility API. Android's is not. `ACTION_OPEN_DOCUMENT` hands
- * off to DocumentsUI, a separate APK, and the platform deliberately
- * stops one app from reading or touching another's UI.
- *
- * UI Automator can cross that line, but it is instrumentation — it runs
- * under AndroidJUnitRunner, and this lane launches the app with
- * `am start` and reads verdicts from logcat. An accessibility service
- * crosses the same line without restructuring the lane: it sees every
- * window on the device and can act on them, which is exactly what a
- * screen reader does.
- *
- * NOT IN THE LIBRARY'S MANIFEST, deliberately. The class lives here
- * because KayaCompose is what calls it, but only the validation apps
- * declare the service, so a user's app never carries an accessibility
- * service it did not ask for. The runner enables it over adb; nothing
- * about it starts on its own.
+ * NOT IN THE LIBRARY'S MANIFEST: only the validation apps declare the
+ * service, so a user's app never carries one it did not ask for. The
+ * runner enables it over adb; nothing here starts on its own.
  */
 class KayaHarnessAccessibility : AccessibilityService() {
     override fun onServiceConnected() {
@@ -49,23 +37,18 @@ class KayaHarnessAccessibility : AccessibilityService() {
     companion object {
         /**
          * The connected service, or null when the runner has not enabled
-         * it. Null is an answer the caller must handle rather than a
-         * state to assert away — a leg running without the service
-         * should say so, not crash.
+         * it. Null is an answer the caller handles — a leg running
+         * without the service says so rather than crashing.
          */
         @Volatile
         var live: KayaHarnessAccessibility? = null
             private set
 
         /**
-         * DocumentsUI's package — BOTH SPELLINGS, because there are two
-         * builds of it and the lane meets one of them by accident of
-         * which system image the AVD was created from. AOSP images carry
-         * `com.android.documentsui`; google_apis images, which is what
-         * run-emulator.sh creates, carry
-         * `com.google.android.documentsui`. Measured: the constant used
-         * to be the AOSP one alone, and it named a package that is not
-         * on the device the lane runs.
+         * DocumentsUI's package, BOTH SPELLINGS: AOSP images carry
+         * `com.android.documentsui`, google_apis images (what
+         * run-emulator.sh creates) carry the google one
+         * (docs/traps.md).
          */
         val PICKER_PACKAGES = listOf(
             "com.google.android.documentsui",
@@ -123,10 +106,9 @@ class KayaHarnessAccessibility : AccessibilityService() {
         private const val SAVE_BUTTON_ID = "/button1"
 
         /**
-         * How many backs a dismissal may take, and how long each one is
-         * given to land. Three sufficed from the depth the scene aims
-         * at; the ceiling is the trail's length plus room, not a guess
-         * at a race.
+         * How many backs a dismissal may take, and how long each is
+         * given to land. The ceiling is the directory trail's length
+         * plus room, not a guess at a race (docs/traps.md).
          */
         private const val MAX_BACKS = 8
         private const val BACK_SETTLE_MS = 400L
@@ -146,10 +128,6 @@ class KayaHarnessAccessibility : AccessibilityService() {
     /**
      * What the picker is REALLY showing: the directory it is in, and the
      * names its list holds. Null when no picker is up.
-     *
-     * The directory comes off the LAST breadcrumb, which is the deepest
-     * one — DocumentsUI shows the whole trail (volume / Documents /
-     * <dir>) and only the tail names where the list actually is.
      */
     fun pickerState(): Pair<String, List<String>>? {
         val nodes = dialogNodes(save = false) ?: return null
@@ -160,17 +138,14 @@ class KayaHarnessAccessibility : AccessibilityService() {
      * What the live SAVE panel is REALLY showing: the directory it is
      * in, and the name in its name field. Null when no save panel is up.
      *
-     * THE NAME HALF IS THE WHOLE POINT. A backend that ignored the name
+     * THE NAME HALF IS THE WHOLE POINT: a backend that ignored the name
      * it was told saves under the SUGGESTED name, and every assertion
-     * downstream — the bytes, the reopen, the round trip — passes on the
-     * wrong file. Nothing else in the scene can see that.
+     * downstream passes on the wrong file.
      *
-     * THE ROWS ARE NOT READ HERE, and the reason is the mac arm's rather
-     * than this platform's: a save dialog need not publish a file
-     * browser at all, so a reader that required rows would be writing a
-     * cross-platform verb against one platform's chrome. DocumentsUI
-     * happens to list files in CREATE mode (measured), and this reader
-     * still does not look.
+     * THE ROWS ARE NOT READ HERE, for the mac arm's reason rather than
+     * this platform's: a save dialog need not publish a file browser at
+     * all. DocumentsUI happens to list files in CREATE mode (measured),
+     * and this reader still does not look.
      */
     fun saveState(): Pair<String, String>? {
         val nodes = dialogNodes(save = true) ?: return null
@@ -201,10 +176,9 @@ class KayaHarnessAccessibility : AccessibilityService() {
     }
 
     /**
-     * Press the live save panel's own SAVE button — the same control a
-     * user works, so DocumentsUI's own create-and-answer runs and
-     * nothing is synthesized. False when no save panel is up or the
-     * button refused.
+     * Press the live save panel's own SAVE button, so DocumentsUI's own
+     * create-and-answer runs and nothing is synthesized. False when no
+     * save panel is up or the button refused.
      */
     fun confirmSave(): Boolean {
         val nodes = dialogNodes(save = true) ?: return false
@@ -216,14 +190,9 @@ class KayaHarnessAccessibility : AccessibilityService() {
 
     /**
      * WHAT DOCUMENTSUI IS SHOWING, for a failure to say out loud: the
-     * distinct view ids in its tree, shortest form, sorted.
-     *
-     * A read that finds no save panel is otherwise indistinguishable
-     * from a save panel that never presented, and the two want opposite
-     * fixes. This arm cost a build cycle to exactly that: the reader
-     * was keyed on the wrong package's `container_save` and reported
-     * "no save dialog live" about a panel that was up, on screen and
-     * correct.
+     * distinct view ids in its tree, shortest form, sorted. A read that
+     * finds no save panel is otherwise indistinguishable from a save
+     * panel that never presented, and the two want opposite fixes.
      */
     fun dialogShape(): List<String> {
         val pkg = pickerPackage() ?: return emptyList()
@@ -252,11 +221,8 @@ class KayaHarnessAccessibility : AccessibilityService() {
     }
 
     /**
-     * The save panel's name box: the one EDITABLE `title` in the tree.
-     * Every row's basename carries the same id (measured), and only
-     * this one takes text — so the editable flag is what names it, and
-     * it is the same property that makes it the field a user types the
-     * file's name into.
+     * The save panel's name box: the one EDITABLE `title` in the tree
+     * — see [SAVE_NAME_ID] for why the id alone cannot name it.
      */
     private fun nameField(nodes: List<AccessibilityNodeInfo>): AccessibilityNodeInfo? =
         nodes.firstOrNull {
@@ -264,9 +230,10 @@ class KayaHarnessAccessibility : AccessibilityService() {
         }
 
     /**
-     * The directory this tree is in, off the LAST breadcrumb: DocumentsUI
-     * shows the whole trail (volume / Documents / <dir>) and only the
-     * tail names where the list actually is. Both dialogs publish it.
+     * The directory this tree is in, off the LAST breadcrumb:
+     * DocumentsUI shows the whole trail (volume / Documents / <dir>)
+     * and only the tail names where the list is. Both dialogs publish
+     * it.
      */
     private fun breadcrumb(nodes: List<AccessibilityNodeInfo>): String =
         nodes.filter { it.viewIdResourceName?.endsWith(BREADCRUMB_ID) == true }
@@ -275,14 +242,10 @@ class KayaHarnessAccessibility : AccessibilityService() {
             ?: ""
 
     /**
-     * Choose the named row, for real: the platform's own click on the
-     * platform's own list item. THE CLICK IS THE ANSWER here — this
-     * picker has no Open button to press afterwards, so a click that
-     * lands is a completed pick (measured).
-     *
-     * False when no picker is up or nothing carries that name; the
-     * caller reports what the list DID hold, because pressing on
-     * anyway is how a scene silently picks the wrong file.
+     * Choose the named row. THE CLICK IS THE ANSWER — this picker has
+     * no Open button (docs/traps.md). False when no picker is up or
+     * nothing carries that name; the caller reports what the list DID
+     * hold rather than pressing on.
      */
     fun choose(name: String): Boolean {
         // THE OPEN PICKER'S ROWS ONLY. The save panel lists files too
@@ -298,27 +261,20 @@ class KayaHarnessAccessibility : AccessibilityService() {
     }
 
     /**
-     * Dismiss the picker, which is the system back gesture — there is no
-     * Cancel button in it at all.
-     *
-     * ONE BACK IS NOT ENOUGH and that is not a race: the first backs
-     * walk UP the directory tree the picker was aimed into, and only the
-     * one taken at the root dismisses. Measured at three from the depth
-     * the scene aims at. So this is bounded and its proof is the picker
-     * being GONE, never the action's return value.
+     * Dismiss the picker with the system back gesture — there is no
+     * Cancel button. ONE BACK IS NOT ENOUGH: the first backs walk UP
+     * the directory tree, and only the one taken at the root dismisses
+     * (docs/traps.md). Bounded, with the picker being GONE as the
+     * proof, never the action's return value.
      *
      * KIND-AGNOSTIC ON PURPOSE, unlike [choose] and [saveState]: back is
      * the cancel affordance of BOTH dialogs (measured at three backs and
      * a null result Intent for the save panel too), and "gone" is the
-     * same proof either way. A second copy of this keyed on the kind
-     * would be two answers to one question.
+     * same proof either way.
      *
-     * MUST NOT RUN ON THE MAIN THREAD. getWindows() is refreshed on this
-     * service's main looper, which is the app's, so a caller that blocks
-     * main watches a frozen window list and concludes the picker is
-     * still up forever. Measured, and asserted below rather than
-     * commented, because the symptom is a timeout nobody would trace
-     * here.
+     * MUST NOT RUN ON THE MAIN THREAD — getWindows() is refreshed on
+     * this service's main looper, which is the app's (docs/traps.md).
+     * Asserted below rather than commented.
      */
     fun dismiss(): Boolean {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
@@ -336,10 +292,9 @@ class KayaHarnessAccessibility : AccessibilityService() {
     }
 
     /**
-     * The picker is gone, waited for. The press-landed proof on every
-     * other backend is the dialog's disappearance and it is here too: a
-     * click that arrives before the list is interactive is swallowed
-     * with no error anywhere.
+     * The picker is gone, waited for — the press-landed proof on every
+     * backend. A click that arrives before the list is interactive is
+     * swallowed with no error anywhere.
      */
     fun waitForPickerGone(): Boolean {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {

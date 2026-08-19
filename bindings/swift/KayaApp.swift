@@ -1,34 +1,15 @@
-// kaya's idiomatic surface for Swift: the structural core.
-//
-// Three jobs, layered over the generated wire vocabulary
-// (KayaWire.swift) and the kaya C declarations (kaya.h via the bridging
-// header):
-//
-//   - id allocation: signals, widgets, collections, and template nodes
-//     come from per-space counters behind distinct types, so no app
-//     hand-numbers the id spaces — and the compiler keeps blueprint
-//     nodes (KayaNodeHandle) from being used where live widgets
-//     (KayaWidget) belong;
-//   - template scoping: forEach and when take trailing closures whose
-//     bodies declare the blueprint, bracketing the records;
-//   - occurrence dispatch: handlers register per button; the app loop
-//     routes each click, handing template-node handlers the stamped
-//     copy's key path. Handlers receive their transaction explicitly;
-//     it submits when the handler returns.
-//
-// (KayaWidget/KayaNodeHandle rather than Widget/Node: the function-
-// floor guests share a namespace with whatever UI framework the host
-// links, where bare Widget/Node invite collisions.)
+// kaya's idiomatic surface for Swift: the structural core, over the generated
+// wire vocabulary (KayaWire.swift) and the kaya C declarations (kaya.h via
+// the bridging header).
 
 import Foundation
 
 struct KayaSignal {
     let id: UInt64
 
-    /// Mint a derived signal: recomputed when the source is written,
-    /// the write batched into the same transaction; the core sees an
-    /// ordinary signal. Reaches the open transaction ambiently — the
-    /// comparison operators are static, and a signal is only an id.
+    /// Mint a derived signal: recomputed when the source is written, the
+    /// write batched into the same transaction; the core sees an ordinary
+    /// signal.
     func derive(_ compute: @escaping (KayaValue) -> KayaValue) -> KayaSignal {
         guard let app = KayaApp.ambient, let tx = app.currentTx else {
             preconditionFailure(
@@ -134,20 +115,18 @@ func kayaOrder(_ a: KayaValue, _ b: KayaValue) -> Int {
     }
 }
 
-/// Register bulk payload bytes (an encoded image) with the core: one
-/// copy into core-owned memory, returning the u64 handle the next
-/// submit from this guest consumes, referenced or not. The caller's
-/// bytes are free to drop the moment this returns.
+/// Register bulk payload bytes (an encoded image) with the core: one copy
+/// into core-owned memory, returning the u64 handle the next submit from this
+/// guest consumes, referenced or not.
 func kayaRegisterBlob(_ data: Data) -> UInt64 {
     data.withUnsafeBytes { raw in
         kaya_blob_register(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
     }
 }
 
-/// A live widget: exactly one thing on screen.
-/// A container's cross-axis child placement (the align spec enum;
-/// wire values pinned by the generated constants). Baseline is
-/// rows-only — the scene rejects it on columns at the root.
+/// A live widget: exactly one thing on screen. A container's cross-axis child
+/// placement (the align spec enum; wire values pinned by the generated
+/// constants).
 enum KayaAlign: Int64 {
     case start = 0
     case center = 1
@@ -179,16 +158,11 @@ enum KayaRole: Int64 {
 /// row, closed.
 ///
 /// AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
-/// `KayaPlatform.current` and there will not be: a binding cannot answer
-/// that question, and it does not have to — every row travels to every
-/// backend on the wire, and each backend picks its own. Swift is where
-/// the temptation is sharpest, because ONE guest source compiles for
-/// macOS and for iOS: `#if os(macOS)` in a guest would ship different
-/// code per platform, which is the thing kaya exists to not do. Name the
-/// rows instead and let both lowerings read the same transaction.
-///
-/// THE RAW VALUES ARE WIRE VALUES (`PLATFORM_MAC` … `PLATFORM_ANDROID`
-/// in crates/kaya/include/kaya.h) and are append-only.
+/// `KayaPlatform.current`: every row travels to every backend and each
+/// backend picks its own. Swift is where the temptation is sharpest,
+/// because ONE guest source compiles for macOS and for iOS — a
+/// `#if os(macOS)` in a guest ships different code per platform, which
+/// is the thing kaya exists to not do.
 enum KayaPlatform: Int64 {
     case mac = 1
     case ios = 2
@@ -199,21 +173,10 @@ enum KayaPlatform: Int64 {
 
 /// THE SEMANTIC ICON VOCABULARY (the `symbol` spec enum;
 /// docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
-///
 /// An app names a CONCEPT and each backend draws its own platform's
-/// glyph for it: `copy` is `doc.on.doc` on Apple, `content_copy` on
-/// Material, `edit-copy-symbolic` on Adwaita, and no single asset is
-/// right on all three — SF Symbols are license-locked to Apple
-/// platforms, so a shared one is not even legal. The platform sets also
-/// metric-match the text beside them (weight, baseline) while a blob
-/// cannot. The `icon:` blob slot stays for genuinely app-specific art.
-///
-/// Closed, and small on purpose — the `KayaRole` trick one tier over.
-/// Apple keeps its own semantic set to fifteen entries. Growing it is a
-/// spec change with its gates, never a per-app escape hatch.
-///
-/// THE RAW VALUES ARE WIRE VALUES AND ARE APPEND-ONLY. A new concept
-/// takes 21; renumbering silently redraws every shipped app's menus.
+/// glyph; the `icon:` blob slot stays for app-specific art. THE RAW
+/// VALUES ARE WIRE VALUES AND ARE APPEND-ONLY — renumbering silently
+/// redraws every shipped app's menus.
 enum KayaSymbol: Int64 {
     case add = 1
     case remove = 2
@@ -252,17 +215,12 @@ struct KayaWidget {
 }
 
 /// A template node: a blueprint entry, stamped per collection entry.
-/// Never on screen by itself; clicks on its copies arrive with the
-/// copy's key path.
 struct KayaNodeHandle {
     let id: UInt64
 }
 
-/// A collection instance handle: the collection plus the key path
-/// selecting one stamped copy's table. tx.collection() returns the
-/// root (empty-path, live-zone) handle; at(_:) steps into a copy, one
-/// key per enclosing For. Mutations and reads take the handle, so the
-/// target is spelled once.
+/// A collection instance handle: the collection plus the key path selecting
+/// one stamped copy's table.
 struct KayaCollection {
     let id: UInt64
     let path: [KayaValue]
@@ -283,9 +241,8 @@ struct KayaCollection {
     }
 }
 
-/// One instance of a collection: the table inside the stamped copy
-/// selected by `path` (the empty path for a live-zone collection).
-/// Entries keep insertion order, matching the core's rendering.
+/// One instance of a collection: the table inside the stamped copy selected
+/// by `path` (the empty path for a live-zone collection).
 private struct KayaInstance {
     let path: [KayaValue]
     // Any: a KayaValue for scalar collections, the record struct itself
@@ -294,21 +251,16 @@ private struct KayaInstance {
     var entries: [(key: KayaValue, value: Any)]
 }
 
-/// A live menu item: its OWN id space (the c_menu_item counter)
-/// behind its own type, so cross-use with widget or node handles is a
-/// compile error. One command identity: exactly one parent or anchor,
-/// forever (append-only; nothing is removed in v1). The id alone is
-/// the durable name — reopen a retained item with tx.menu(item, ...).
+/// A live menu item: its OWN id space (the c_menu_item counter) behind its
+/// own type, so cross-use with widget or node handles is a compile error.
 struct KayaMenuItem {
     let id: UInt64
 }
 
-/// A context catalog built UNANCHORED (tx.contextCatalog) for a
-/// template node: menu items are live and shared across stamped
-/// copies, so the catalog is built in the live zone and
-/// KayaTpl.contextMenu attaches it inside the template, where each
-/// activation carries the copy's key path. An item takes exactly one
-/// anchor — a second attach traps.
+/// A context catalog built UNANCHORED (tx.contextCatalog) for a template
+/// node: menu items are live and shared across stamped copies, so the catalog
+/// is built in the live zone and KayaTpl.contextMenu attaches it inside the
+/// template, where each activation carries the copy's key path.
 final class KayaContextCatalog {
     let roots: [KayaMenuItem]
     var attached = false
@@ -319,10 +271,8 @@ final class KayaContextCatalog {
 }
 
 /// One of the TWO addressable sources a menu text property binds to —
-/// constant text or a Str signal (menu items are not collection
-/// elements, so there is no element arm). Conformance is the sealed
-/// union: only String and KayaSignal conform, so a Bool label is a
-/// compile error — one parameter name per property, compile-checked.
+/// constant text or a Str signal (menu items are not collection elements, so
+/// there is no element arm).
 protocol KayaMenuText {}
 
 extension String: KayaMenuText {}
@@ -346,17 +296,10 @@ extension Double: KayaMenuIndex {}
 
 extension KayaSignal: KayaMenuIndex {}
 
-/// One file the picker answered with: a handle to redeem, a display
-/// name, and `localPath` — a RE-OPENABLE NAME, empty unless re-opening
-/// it actually works, which measurement puts at the three desktops and
-/// neither phone (DESIGN.md, File dialogs).
-/// One representation, arriving — the sum a copy is the record of.
-/// Swift has a real sum, so this is an enum with associated values and
-/// a `switch` is the elimination.
-///
-/// YOU OFFER MANY AND YOU RECEIVE ONE, and the two shapes say so: a
-/// record here would invite a guest to check five fields where four
-/// are structurally always empty.
+/// One file the picker answered with: a handle to redeem, a display name, and
+/// `localPath` — a RE-OPENABLE NAME, empty unless re-opening it actually
+/// works, which measurement puts at the three desktops and neither phone
+/// (DESIGN.md, File dialogs).
 enum KayaRepresentation {
     case text(String)
     case html(String)
@@ -365,20 +308,13 @@ enum KayaRepresentation {
     /// image IS, never the bytes it arrived in.
     case image([UInt8])
     /// Files, plural INSIDE one representation — the same nesting
-    /// text/uri-list and CF_HDROP already have. A pasted file is the
-    /// picker's own capability arriving through a second door, so it
-    /// opens with the call that already exists.
+    /// text/uri-list and CF_HDROP already have.
     case files([KayaPickedFile])
     /// An app-defined format, round-tripped verbatim.
     case custom(id: String, bytes: [UInt8])
 }
 
 /// Turn the decoder's kind-and-parts into the sum, or nil.
-///
-/// EMPTY IS THE UNIVERSAL NO: nil covers a denied prompt on iOS, an
-/// unfocused reader on Android or Wayland, an empty clipboard, and
-/// content in no representation this read accepted. The guest is not
-/// told which, because the platforms deliberately do not say.
 func kayaRepresentation(_ clip: KayaClipValues?) -> KayaRepresentation? {
     guard let clip else { return nil }
     func str(_ i: Int) -> String {
@@ -412,17 +348,6 @@ func kayaRepresentation(_ clip: KayaClipValues?) -> KayaRepresentation? {
 
 /// What an undo (or a redo) PUT BACK — the core-authoritative statement
 /// of the restored state, never a replay of ops (docs/undo-plan.md D5).
-///
-/// APPLYING AN INVERSE EMITS NOTHING ELSE: it is programmatic by
-/// construction, so the echo doctrine covers it — no text_changed for
-/// the text this restored, no value_changed for the signals. That is
-/// why the payload is fat. This binding folds the two runs it MIRRORS
-/// (signals, collection entries and orders) before the handler runs, so
-/// a read-back inside the handler answers about the restored state; the
-/// runs it does not mirror pass through for the app to fold.
-///
-/// Every group says what a thing now IS, so applying this twice is the
-/// same as applying it once.
 struct KayaUndoDelta {
     /// Signal id -> its restored value.
     let signals: [(signal: UInt64, value: KayaValue)]
@@ -440,15 +365,6 @@ struct KayaUndoDelta {
 
 /// One text field's restored text, and the identity that says WHICH
 /// field.
-///
-/// THE SAME TWO NAMES A CHANGE OCCURRENCE ALREADY ARRIVES UNDER, which
-/// is the whole reason this run became an arity-first group like its
-/// entries and orders siblings: an empty `path` means `id` is a live
-/// widget's id, and a non-empty `path` means `id` is a TEMPLATE NODE and
-/// the path is the stamped copy's key path, outermost first — the pair
-/// `onChange(_ n: KayaNodeHandle, …)` hands a row's edit under. A fixed
-/// (widget id, text) pair had nowhere to put the path, so a row's typing
-/// could not be named to the app at all.
 struct KayaUndoText {
     let id: UInt64
     /// The instance path: one key per enclosing For, EMPTY for a live
@@ -477,12 +393,6 @@ struct KayaUndoOrder {
 
 /// Decode an undone/redone record body (kind 17/18, one layout for
 /// both — one encoder writes them, so one reader reads them).
-///
-/// HAND-WRITTEN AND NOT GENERATED, deliberately: the generated
-/// kayaParseOccurrence reads the widget/keys/payload shape every other
-/// record has, and this record's head is four counts followed by one
-/// flat Values block read as four RUNS. The dispatch loop branches on
-/// the kind BEFORE that parser sees the bytes.
 func kayaParseUndo(_ rec: [UInt8]) -> (window: UInt64, label: String, delta: KayaUndoDelta)? {
     rec.withUnsafeBytes { raw -> (UInt64, String, KayaUndoDelta)? in
         guard raw.count >= 32 else { return nil }
@@ -545,14 +455,10 @@ func kayaParseUndo(_ rec: [UInt8]) -> (window: UInt64, label: String, delta: Kay
             guard let pair = take(2), let id = int(pair[0]) else { return nil }
             signals.append((signal: UInt64(id), value: pair[1]))
         }
-        // ARITY FIRST, so a reader needs no schema: size counts itself.
-        // THREE RUNS SHARE THAT SHAPE, and this one joined the other two
-        // when a row's field needed a path — the group is
-        // `size, id, path_len, path values…, text`, pinned value by
-        // value in crates/kaya/src/wire.rs `undo_bodies_round_trip`.
-        // A reader that kept the old fixed pair takes the SIZE for the
-        // id and the id for the text, which is why the pin table is
-        // where this is agreed rather than in a round trip.
+        // ARITY FIRST, so a reader needs no schema: `size` counts
+        // itself. The group is `size, id, path_len, path values…, text`,
+        // pinned value by value in crates/kaya/src/wire.rs
+        // `undo_bodies_round_trip`.
         var texts: [KayaUndoText] = []
         for _ in 0..<nTexts {
             guard let head = take(1), let size = int(head[0]), size >= 4,
@@ -601,13 +507,6 @@ func kayaParseUndo(_ rec: [UInt8]) -> (window: UInt64, label: String, delta: Kay
 
 /// Join an accept list: the closed kinds by name plus any custom ids,
 /// space separated.
-///
-/// A LIST AND NOT A MASK, because half the set is open-ended. A custom
-/// format that could be written and never accepted would be an escape
-/// hatch that only opens outward, and round-tripping an app's own data
-/// is the whole reason to have one. Ids reach every platform's registry
-/// verbatim, so they carry no spaces — which is what makes the join
-/// unambiguous, and what this refuses to let you break.
 func kayaAcceptList(_ kinds: [String]) -> String {
     for kind in kinds where kind.isEmpty || kind.contains(" ") {
         fatalError("""
@@ -622,12 +521,6 @@ func kayaAcceptList(_ kinds: [String]) -> String {
 /// Flatten a dialog's ADVISORY filters into the wire's alternating
 /// label/extensions run — a label, then its space-separated extensions,
 /// per pair.
-///
-/// ONE ENCODER FOR BOTH DIALOGS, deliberately. The picker and the save
-/// request carry the identical filter block, and the core validates it
-/// through one shared helper for the same reason: two copies of an
-/// alternating layout are two chances for one of them to write the pairs
-/// in the other order, which no type here would catch.
 func kayaFilterValues(_ filters: [(String, String)]) -> [KayaValue] {
     var values: [KayaValue] = []
     for (label, extensions) in filters {
@@ -637,28 +530,12 @@ func kayaFilterValues(_ filters: [(String, String)]) -> [KayaValue] {
     return values
 }
 
-/// The UTF-8 BYTE OFFSET of a position in `text` — kaya's unit for
-/// every text range, and the one number Swift's `String.Index` will not
-/// hand you.
-///
-/// WHY THIS EXISTS RATHER THAN A LINE IN EACH APP. Swift is the only
-/// guest language whose string is indexed by neither bytes nor an
-/// integer, and its two reachable substitutes are both wrong and both
-/// silent. Measured on a string whose first line is `日本語`:
-///
-///     text.utf8.distance(from: text.startIndex, to: i)  // 57  <- kaya's
-///     text.distance(from: text.startIndex, to: i)       // 51  (Characters)
-///     i.utf16Offset(in: text)                           // 51  (UTF-16)
-///
-/// The last two are what an author reaches for; each would decorate six
-/// characters early on this milestone's own document, with nothing to
-/// blame. `String.Index(utf16Offset:in:)` is worse still — it ROUNDS a
-/// split offset and then reports the offset it was given
-/// (scratchpad/ranges-units.md §5).
-///
-/// The result is a code-point boundary by construction: a `String.Index`
-/// is one, so the core's boundary clause cannot fire on anything this
-/// produced.
+/// The UTF-8 BYTE OFFSET of a position in `text` — kaya's unit for every text
+/// range, and the one number Swift's `String.Index` will not hand you. NEVER
+/// CONVERT BY HAND: both spellings a Swift author reaches for first
+/// (`distance(from:to:)` counts Characters, `utf16Offset(in:)` counts UTF-16)
+/// are silently short on non-ASCII text — docs/traps.md, "what each
+/// language's own unit is".
 func kayaByteOffset(_ i: String.Index, in text: String) -> Int {
     text.utf8.distance(from: text.startIndex, to: i)
 }
@@ -672,10 +549,6 @@ func kayaByteRange(_ r: Range<String.Index>, in text: String) -> Range<Int> {
 
 /// The copy chain: a clip record under construction. Each method fills
 /// one representation, and send() puts it on the clipboard.
-///
-/// A RECORD AND NOT A LIST is the whole shape — at most one per kind is
-/// structural, since a second text() replaces the field rather than
-/// needing a duplicate check the root has to run.
 struct KayaCopyRef {
     let tx: KayaAppTx
     private var text: String?
@@ -705,8 +578,8 @@ struct KayaCopyRef {
         return next
     }
 
-    /// Offer a picked file, the picker's own capability put straight on
-    /// the clipboard. The bytes never move through kaya.
+    /// Offer a picked file, the picker's own capability put straight on the
+    /// clipboard.
     func file(_ f: KayaPickedFile) -> KayaCopyRef {
         var next = self
         next.files.append(f.handle)
@@ -804,112 +677,80 @@ struct KayaClipReadRef {
     }
 }
 
+/// WHAT `KayaAsset(_:)` THROWS: a name the package does not carry, or
+/// carries unreadably (docs/assets-plan.md).
+///
+/// THE SENTENCE IS THE ERROR: `description` and `errorDescription` are
+/// both `sentence`, so every way Swift has of printing an error says the
+/// bytes the core wrote. Without `LocalizedError`,
+/// `localizedDescription` would answer Foundation's boilerplate instead.
+/// This type writes NO prose — `sentence` is `asset_why_not`'s, verbatim
+/// (crates/kaya/src/assets.rs) — and `name` is carried separately so a
+/// guest can branch without reading the prose back out.
+struct KayaAssetMiss: Error, CustomStringConvertible, LocalizedError {
+    /// The name that was asked for.
+    let name: String
+    /// The core's sentence, verbatim. Two lines: the first names the
+    /// name, the rule it broke and the census, and is the same on every
+    /// platform; the second names the resolved place and the route that
+    /// chose it.
+    let sentence: String
+
+    var description: String { sentence }
+    var errorDescription: String? { sentence }
+}
+
 /// AN ASSET — a file this app's own BUILD put where the running program
-/// can find it (docs/assets-plan.md, ratified 2026-08-18): the vendored
-/// typeface, the app's mark, a licence text.
+/// can find it (docs/assets-plan.md). `try KayaAsset("fonts/x.ttf")`
+/// opens one; the name is a relative path under a root the CORE
+/// resolves, and no guest reads an asset environment variable or carries
+/// a repo-relative default (tools/check-assets.sh).
 ///
-/// `KayaAsset("fonts/sora-wght.ttf")` opens one. The name is a relative
-/// path under the asset root, spelled with `/`, and THE ROOT IS KAYA'S
-/// PROBLEM AND NOT AN APP'S: a directory beside the program on the
-/// desktops, the bundle's own resources on iOS, and one environment
-/// variable (`KAYA_ASSET_DIR`) overrides the whole root for a lane that
-/// staged it elsewhere. No guest reads an environment variable and no
-/// guest carries a repo-relative default; both used to be hand-written
-/// once per language, and one of those eight copies had a
-/// language-specific trap severe enough to have earned its own gate.
+/// A MISS THROWS `KayaAssetMiss` carrying the core's sentence and
+/// nothing added — `tools/scenes/assets.steps` freezes it THROUGH THE
+/// CAUGHT ERROR, so a byte this file prefixed would redden two lanes.
+/// Unhandled it is still fatal.
 ///
-/// A MISS IS FATAL, with the core's sentence and nothing added. There is
-/// one author for that sentence (crates/kaya/src/assets.rs) so a Swift
-/// guest and a Haskell guest name the same fault in the same words, and
-/// a scene can freeze them once. `fatalError` rather than a `throws` is
-/// this file's idiom for a DECLARATION bug — `kayaAcceptList`'s spelling,
-/// one function up — and a name the build did not ship is exactly that:
-/// the same class of mistake as a wrong scene name, with an answer that
-/// never changes on a retry. THE CONSEQUENCE, STATED PLAINLY: a Swift
-/// guest cannot catch a miss. `KayaPickedFile.open` throws because a
-/// provider can fail transiently; this cannot.
-///
-/// TWO REDEMPTIONS, and the whole point of there being two.
-/// `brandTypeface(_:platforms:font:)` and `appIdentity(_:icon:)` take
-/// the asset itself, and the bytes never enter the guest's heap — the
-/// core hands its own buffer to the blob table. `bytes` is for a guest
-/// that is ITSELF the consumer, and copies once.
-///
-/// FILE-LIKE READING IS BINDING-SIDE SUGAR OVER THESE BYTES and never a
-/// core surface. Six of the eight bindings wrap them in the language's
-/// own standard in-memory reader — std::io::Cursor, io.BytesIO,
-/// bytes.NewReader, MemoryStream, java.io.ByteArrayInputStream,
-/// Foundation's InputStream(data:) — and OCaml and Haskell wrap them in
-/// nothing, because neither language's dependency set carries one
-/// (OCaml's In_channel only wraps a real channel; base has no in-memory
-/// Handle) and kaya will not add a package to a guest's build to invent
-/// one. In those two the byte value IS the reader — Bytes.t and
-/// Data.ByteString.ByteString — and every reading idiom the language has
-/// applies to it directly. That is the whole of the carve-out (DESIGN.md,
-/// Binding conventions): the idiom decides the spelling, and here two
-/// idioms have no second spelling to decide on.
-///
-/// READ-ONLY, STRUCTURALLY: no mode argument anywhere on this surface,
-/// and no file descriptor either. A descriptor was `KayaPickedFile`'s
-/// necessity — a provider-opened file with no path behind it — and it is
-/// not ours: kaya resolved the name and produced the bytes itself.
-///
-/// EACH CALL READS. No cache, no watch, no reload.
-///
-/// A CLASS RATHER THAN A STRUCT, for the one reason a class earns here:
-/// `deinit`. Release is explicit (`close()`) AND automatic, so a guest
-/// that forgets leaks nothing.
+/// EACH CALL READS: no cache, no watch, no reload. A CLASS RATHER THAN A
+/// STRUCT for the one reason a class earns here — `deinit`, so release
+/// is explicit (`close()`) AND automatic.
 final class KayaAsset {
     private var handle: UInt64
 
-    init(_ name: String) {
+    init(_ name: String) throws {
+        // Set before anything can throw: a class must be whole before a
+        // designated initializer leaves, and `deinit` runs on the way out.
+        handle = 0
         let utf8 = Array(name.utf8)
         let opened = utf8.withUnsafeBufferPointer { raw in
             kaya_asset_open(raw.baseAddress, UInt(raw.count))
         }
         guard opened != 0 else {
             // ONE COPY OF THE FFI DANCE, and it is `missSentence` below:
-            // the trap and the query hand back the same bytes because
+            // the throw and the query hand back the same bytes because
             // they are the same call.
-            fatalError(KayaAsset.missSentence(name))
+            throw KayaAssetMiss(name: name, sentence: KayaAsset.missSentence(name))
         }
         handle = opened
     }
 
-    /// Why `KayaAsset(name)` would trap — the sentence it would carry,
-    /// handed over without trapping. `""` means the name resolves.
+    /// Why `KayaAsset(name)` would throw — the sentence it would carry,
+    /// handed over without throwing. `""` means the name resolves.
     ///
-    /// THIS BINDING IS WHY THE QUERY EXISTS AT ALL. Unwinding is not one
-    /// semantics in nine languages, and a conformance scene has to observe
-    /// this sentence on five platforms: seven bindings raise something a
-    /// guest can catch, and Swift's is `fatalError`, which TRAPS rather
-    /// than unwinding — so a Swift guest cannot catch a miss. A total
-    /// query has no such split, and the scene can freeze it here too.
+    /// It answers what the throw cannot: for a name that RESOLVES it
+    /// hands back `""`, having opened nothing. Line 1 (name, rule,
+    /// census) is the same on every platform and is the line a scene
+    /// freezes; line 2 names the resolved place, which three platforms
+    /// spell three ways. It measures rather than predicts: each call
+    /// reads, so `""` is a fact about the moment it was asked.
     ///
-    /// THE SAME SENTENCE, NOT A SECOND ONE: `init` traps with exactly this
-    /// string, so what a scene freezes is what an app's user would have
-    /// been shown.
+    /// Why a query when `init` throws: docs/deferred.md, the assets
+    /// entry. The sentence has one author, `asset_why_not` in
+    /// crates/kaya/src/assets.rs.
     ///
-    /// NAMED FOR THE CARRYING and not for the diagnosing. The sentence has
-    /// exactly one author — `asset_why_not` in crates/kaya/src/assets.rs,
-    /// which is where tools/check-diagnostics.sh's rule belongs — and a
-    /// Swift helper called `…WhyNot` would claim to compose a diagnosis it
-    /// only carries.
-    ///
-    /// SIZED, THEN READ: the C entry writes into the caller's buffer and
-    /// returns the sentence's TRUE length, so the first call asks how long
-    /// it is and the second fills it. A guessed buffer would cut the half
-    /// that names the root and the route, which is the half a reader is
-    /// chasing.
-    ///
-    /// TWO LINES. Line 1 — the name, the rule it broke, and the census of
-    /// what the package carries — is the same on every platform and is the
-    /// line a scene freezes. Line 2 names the resolved place and the route
-    /// that chose it, which a bundle, a device directory and a repo
-    /// checkout spell three different ways.
-    ///
-    /// It measures rather than predicts: each call reads, so `""` is a
-    /// fact about the moment it was asked.
+    /// SIZED, THEN READ: the C entry returns the sentence's TRUE length
+    /// and fills the caller's buffer, so it takes two calls. A guessed
+    /// buffer cuts the half that names the root and the route.
     static func missSentence(_ name: String) -> String {
         let utf8 = Array(name.utf8)
         let len = utf8.withUnsafeBufferPointer { raw in
@@ -925,13 +766,7 @@ final class KayaAsset {
         return String(decoding: sentence, as: UTF8.self)
     }
 
-    /// THE BYTES REDEMPTION: this asset's bytes, copied out of core
-    /// memory. For a guest that is itself the consumer — a licence text,
-    /// a JSON table, a shader.
-    ///
-    /// The pointer the core hands back borrows its buffer and stays
-    /// valid until release, so the copy happens here and the `Data` that
-    /// comes out is yours.
+    /// THE BYTES REDEMPTION: this asset's bytes, copied out of core memory.
     var bytes: Data {
         alive()
         var len = UInt(0)
@@ -939,21 +774,16 @@ final class KayaAsset {
         return Data(bytes: p, count: Int(len))
     }
 
-    /// The same bytes as a stream, for the Foundation consumers that
-    /// want one.
-    ///
-    /// IN-MEMORY AND NOT A FILE: `InputStream(data:)` over `bytes`,
-    /// binding-side sugar with no core surface behind it and no
-    /// descriptor anywhere. Nothing here blocks and nothing here fails.
+    /// The same bytes as a stream, for the Foundation consumers that want
+    /// one. IN-MEMORY AND NOT A FILE: `InputStream(data:)` over `bytes`,
+    /// with no core surface behind it and no descriptor anywhere.
     func stream() -> InputStream {
         InputStream(data: bytes)
     }
 
-    /// THE BLOB REDEMPTION, for the consumers inside this binding:
-    /// register these bytes into the pending table and answer with the
-    /// handle the record carries. The bytes never enter the guest's
-    /// heap. `fileprivate` on purpose — a guest names the asset at
-    /// `brandTypeface`/`appIdentity` and never handles a blob id.
+    /// THE BLOB REDEMPTION, for the consumers inside this binding: register
+    /// these bytes into the pending table and answer with the handle the
+    /// record carries.
     fileprivate func blob() -> UInt64 {
         alive()
         return kaya_asset_blob(handle)
@@ -985,18 +815,10 @@ struct KayaPickedFile {
     let localPath: String
 
     /// Redeem the handle for a real FileHandle, plus whether it seeks.
-    ///
-    /// BLOCKS, and may block for a long time — a cloud provider can
-    /// download the file before it answers — so call it from a thread
-    /// you chose and post the result back. kaya is not in the data
-    /// path: what comes back is an ordinary FileHandle.
-    ///
-    /// THE DESCRIPTOR BECOMES SWIFT'S: closeOnDealloc is true, so it
-    /// closes exactly once and the core keeps no claim.
-    ///
-    /// `seekable` RIDES THE OPEN rather than the pick because that is
-    /// the only place the answer exists — an Android provider may hand
-    /// back a pipe, and nothing short of opening reveals it.
+    /// BLOCKS, possibly for a long time, so call it from a thread you
+    /// chose and post the result back. THE DESCRIPTOR BECOMES SWIFT'S:
+    /// `closeOnDealloc` is true, so it closes exactly once and the core
+    /// keeps no claim.
     func open(_ mode: UInt32 = UInt32(FILE_MODE_READ))
         throws -> (file: FileHandle, seekable: Bool)
     {
@@ -1013,7 +835,31 @@ struct KayaPickedFile {
     }
 }
 
+/// WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the canonical
+/// note, which every binding's copy of this surface shortens.
+struct KayaCapabilities {
+    /// The host can materialize a surface beside the primary one
+    /// (`tx.createWindow`, `tx.mountIn`). False on iOS, whose system owns
+    /// surface geometry; there `createWindow` aborts at the root.
+    ///
+    /// ONE SOURCE SERVES MAC AND iOS, so this is the only spelling that
+    /// can answer for both: a `#if !os(iOS)` around the CALL is a second
+    /// copy of the core's rule, keyed on the platform rather than on the
+    /// capability. (A `#if` around an IMPORT or an unavailable API is a
+    /// different thing and stays.)
+    let auxWindows: Bool
+}
+
 final class KayaApp {
+    /// This host's capabilities. Constant for the life of the process, so
+    /// asking once and remembering is fine. `KAYA_CAP_AUX_WINDOWS` is the
+    /// CORE'S OWN `#define`, imported through the bridging header, so a
+    /// renumbering reaches Swift with no edit in this tree.
+    static func capabilities() -> KayaCapabilities {
+        let bits = kaya_capabilities()
+        return KayaCapabilities(auxWindows: bits & UInt64(KAYA_CAP_AUX_WINDOWS) != 0)
+    }
+
     // Work handed over by other threads, waiting to run as transactions
     // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER
     // THREAD, and the only reason this class carries a lock at all —
@@ -1073,27 +919,18 @@ final class KayaApp {
     var menuSelected: [UInt64: (KayaAppTx, Int) throws -> Void] = [:]
     var menuSelectedNode: [UInt64: (KayaAppTx, [KayaValue], Int) throws -> Void] = [:]
 
-    // The collection is the model — the only copy: every mutation op
-    // edits it and queues the wire delta in the same call, so reads
-    // (items, count) are exactly the writes. childCollections records
-    // the declared-inside-a-For edges the model purges along when a
-    // parent entry's copy is torn down.
-    // Ambient state for the operator/derive and for-in sugar: one app
-    // per guest process (the Python binding's own assumption), and the
-    // operators/tracers are static code — a signal or collection is
-    // only an id, so the sugar reaches the open transaction here.
+    // The collection is the model — the only copy: every mutation op edits it
+    // and queues the wire delta in the same call, so reads (items, count) are
+    // exactly the writes.
     static var ambient: KayaApp?
     var currentTx: KayaAppTx?
     var signalMirrors: [UInt64: KayaValue] = [:]
     var signalDeps: [UInt64: [(KayaAppTx) -> Void]] = [:]
-    // Container builders collect children ambiently, in evaluation
-    // order (a frame per open container); a for-in row trace appends
-    // its For widget to the top frame at close. Frames are
-    // zone-tagged: constructors parent AT CREATION (the ambient-stack
-    // semantics every other binding has — parenting at expression
-    // position silently dropped any let-bound child, the unparented-
-    // entry focus bug), and the tag makes a cross-zone child loud
-    // instead of silently absent.
+    // Container builders collect children ambiently, in evaluation order
+    // (a frame per open container). Frames are ZONE-TAGGED and
+    // constructors parent AT CREATION, never at expression position —
+    // that silently drops any let-bound child — and the tag makes a
+    // cross-zone child loud instead of silently absent.
     struct KayaFrame {
         let template: Bool
         var ids: [UInt64] = []
@@ -1121,21 +958,10 @@ final class KayaApp {
         }
     }
 
-    /// Run a For's or a When's body behind a PARENT BARRIER: a node
-    /// created directly in that body is a ROOT of the template it
-    /// declares — the core derives the roots itself — and never a child
-    /// of whatever container encloses the combinator. The frame is
-    /// pushed only to be dropped; its ids are the roots, and roots take
-    /// no add_child.
-    ///
-    /// Java's binding has always spelled this (`parents.add(0L)` around
-    /// the body); Swift's omission survived because no Swift guest had
-    /// ever declared a For inside a TEMPLATE container. milestone2's
-    /// graduation is the first, and without the barrier its item column
-    /// parented into the enclosing group column across the inner For's
-    /// scope — which the core refuses outright ("add_child across
-    /// template cases"). That refusal is the wall; this is the fix it
-    /// named.
+    /// Run a For's or a When's body behind a PARENT BARRIER: a node created
+    /// directly in that body is a ROOT of the template it declares — the core
+    /// derives the roots itself — and never a child of whatever container
+    /// encloses the combinator.
     fileprivate func inTemplateBody<R>(_ body: () -> R) -> R {
         childFrames.append(KayaFrame(template: true))
         defer { childFrames.removeLast() }
@@ -1143,9 +969,8 @@ final class KayaApp {
     }
     var openTraces = 0
     // The record-time mirror-read guard's arming counter: >0 while any
-    // template body (a For body, a When body, or a row-trace body) is
-    // being DECLARED. Distinct from openFors (For-only, and keyed by
-    // collection): every template scope bumps this, When included.
+    // template body (a For body, a When body, or a row-trace body) is being
+    // DECLARED.
     var tplDepth = 0
 
     init() {
@@ -1174,10 +999,9 @@ final class KayaApp {
         }
     }
 
-    /// Journal one collection's instances into the open transaction the
-    /// first time it mutates them (value semantics make the snapshot a
-    /// cheap copy-on-write). nil records that the collection had no
-    /// model entry before this transaction.
+    /// Journal one collection's instances into the open transaction the first
+    /// time it mutates them (value semantics make the snapshot a cheap copy-
+    /// on-write).
     fileprivate func touchModel(_ coll: UInt64) {
         guard let tx = currentTx else { return }
         if tx.journal.index(forKey: coll) == nil {
@@ -1225,9 +1049,7 @@ final class KayaApp {
         model[coll]?.first { $0.path == path }?.entries.map { $0.key } ?? []
     }
 
-    /// One instance's counter, made if this is the first anyone has
-    /// asked. Split out because both the mint and the absorb want the
-    /// same lookup.
+    /// One instance's counter, made if this is the first anyone has asked.
     private func withCounter<R>(
         _ coll: UInt64, _ path: [KayaValue], _ body: (inout Int64) -> R
     ) -> R {
@@ -1241,9 +1063,8 @@ final class KayaApp {
         return out
     }
 
-    /// The next fresh key for one instance: counter+1, and the counter
-    /// keeps it. Monotonic by construction — nothing else writes it
-    /// downwards (see `KayaAppTx.insertFresh`).
+    /// The next fresh key for one instance: counter+1, and the counter keeps
+    /// it.
     fileprivate func mintKey(_ coll: UInt64, _ path: [KayaValue]) -> Int64 {
         withCounter(coll, path) { counter in
             counter += 1
@@ -1252,9 +1073,6 @@ final class KayaApp {
     }
 
     /// An explicit key, shown to the minter on its way into the table.
-    /// A numeric key at or above the counter carries it up so the next
-    /// mint clears it; anything else moves nothing, having no way to
-    /// collide with an I64.
     fileprivate func absorbKey(_ coll: UInt64, _ path: [KayaValue], _ key: KayaValue) {
         guard case .i64(let n) = key else { return }
         withCounter(coll, path) { counter in counter = max(counter, n) }
@@ -1264,9 +1082,8 @@ final class KayaApp {
         _ coll: UInt64, _ path: [KayaValue], _ key: KayaValue, _ before: [KayaValue]
     ) {
         touchModel(coll)
-        // The same checks the scene makes, made where the guest can
-        // see the stack: a missing key or anchor is a guest bug, never
-        // a fallback. Both validated before anything mutates.
+        // The same checks the scene makes, made where the guest can see the
+        // stack: a missing key or anchor is a guest bug, never a fallback.
         guard var instances = model[coll], let at = instances.firstIndex(where: { $0.path == path }),
             let pos = instances[at].entries.firstIndex(where: { $0.key == key })
         else { preconditionFailure("kaya: move of missing key \(key)") }
@@ -1306,22 +1123,14 @@ final class KayaApp {
         elementDecoders[coll] = decode
     }
 
-    /// Fold an undo's payload into the mirrors this binding keeps.
-    ///
-    /// THE ROLLBACK JOURNAL IN REVERSE: a rolled-back transaction
-    /// restores a snapshot because nothing was shipped; an undo
-    /// restores a delta because everything WAS — the core has already
-    /// moved, and the mirror is what would otherwise be left behind.
-    /// Same machinery, opposite case, and the payload is
-    /// core-authoritative so nothing here re-derives anything.
+    /// Fold an undo's payload into the mirrors this binding keeps. The
+    /// payload is core-authoritative, so nothing here re-derives anything.
     ///
     /// NOT INSIDE A TRANSACTION, and it must not be: the core moved
-    /// without one, so these writes describe state that is already
-    /// true. Sending records would apply the undo a second time.
-    /// Signals are mirrored here for the same reason (a derived signal
-    /// reads its source's mirror), and the derived recompute does NOT
-    /// re-run: whatever the group wrote to a derived signal is in this
-    /// same payload, restored by the core that owns it.
+    /// without one, so these writes describe state that is already true
+    /// and sending records would apply the undo a second time. The
+    /// derived recompute does NOT re-run — whatever the group wrote to a
+    /// derived signal is in this same payload.
     fileprivate func absorbUndo(_ delta: KayaUndoDelta) {
         for (signal, value) in delta.signals {
             signalMirrors[signal] = value
@@ -1389,13 +1198,6 @@ final class KayaApp {
     }
 
     /// Run `build` with a fresh transaction and submit it atomically.
-    /// The body's result comes back out — the way a scene's handles
-    /// reach the handlers. A throw out of the body abandons the
-    /// transaction: the records never ship and the journal restores
-    /// the model and signal mirrors to exactly what was shipped — then
-    /// the error continues to the caller. The tx boundary rolls back
-    /// and propagates; whether the app survives is the caller's
-    /// decision (the dispatch loop survives).
     func build<R>(_ build: (KayaAppTx) throws -> R) rethrows -> R {
         let tx = KayaAppTx(app: self)
         do {
@@ -1453,17 +1255,6 @@ final class KayaApp {
     /// A template slider's or choice widget's change handler; it also
     /// receives the stamped copy's keys, outermost first — the
     /// `onToggle(_ n:_:)` shape, one payload over.
-    ///
-    /// This registrar and its dispatch arm arrived together with the
-    /// template `slider`/`select`/`radio` constructors, and the reason
-    /// is worth keeping: the core has ALWAYS emitted
-    /// `Occurrence::InstanceValueChanged` for a stamped copy, and until
-    /// now nothing here read it. The dispatch switch had a keyed arm for
-    /// clicks, for text edits, for toggles and for pastes, and only the
-    /// keyless one for value changes, so a stamped slider's move matched
-    /// no case and fell out of `default: break` — dropped in silence,
-    /// which is the failure class no scene can see. Nothing had reached
-    /// it only because there was no constructor to build such a slider.
     func onValueChanged(
         _ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue], Double) throws -> Void
     ) {
@@ -1485,21 +1276,6 @@ final class KayaApp {
     /// Run `body` as a transaction on the app thread, soon. THE ONE
     /// method safe to call from another thread, and the answer to "how
     /// does background work reach the UI".
-    ///
-    /// `build` is a transaction NOW on the calling thread; `post` is the
-    /// same transaction SOON on the app thread — so a background thread
-    /// writes ordinary blocking Swift and hands back only the result:
-    ///
-    ///     Thread.detachNewThread {
-    ///         let data = try! Data(contentsOf: url)   // blocks this thread
-    ///         app.post { tx in try tx.write(content, String(decoding: data, as: UTF8.self)) }
-    ///     }
-    ///
-    /// The `KayaAppTx` is made where it is used and never crosses a
-    /// thread; ids are values and are meant to be captured. A posted
-    /// body runs in its OWN transaction, after whatever is running now,
-    /// so posting from inside a handler queues for after and never
-    /// nests.
     func post(_ body: @escaping (KayaAppTx) throws -> Void) {
         postLock.lock()
         posted.append(body)
@@ -1511,11 +1287,6 @@ final class KayaApp {
     }
 
     /// Run everything posted, each as its own transaction, in order.
-    ///
-    /// The batch is taken and the lock released BEFORE any of it runs,
-    /// so a body that posts again lands in the NEXT batch. Holding the
-    /// lock across the calls would let a self-posting body drain forever
-    /// and starve the occurrence loop.
     private func drainPosted() {
         postLock.lock()
         let batch = posted
@@ -1621,11 +1392,6 @@ final class KayaApp {
     /// put back (internal: the window construct registers at
     /// declaration — handlers scope to the thing that creates them, and
     /// the ledger is per window).
-    ///
-    /// PER WINDOW AND PERSISTENT, never one-shot: a history is walked
-    /// as often as the user likes. The label is the group's authored
-    /// name, or EMPTY for a typing episode — kaya invents no
-    /// user-facing strings, so the word for that is the app's to spell.
     func onUndone(
         _ window: UInt64, _ handler: @escaping (KayaAppTx, String, KayaUndoDelta) throws -> Void
     ) {
@@ -1657,18 +1423,14 @@ final class KayaApp {
                 // this branch prevents.
                 continue
             }
-            // The core owns the bytes until the next call, so they are
-            // copied out here. There is no cap: an html clip is
-            // routinely kilobytes.
+            // The core owns the bytes until the next call, so they are copied
+            // out here.
             guard let start = record else { continue }
             let buf = [UInt8](UnsafeBufferPointer(start: start, count: Int(size)))
-            // THE TWO HISTORY RECORDS ARE READ FIRST, and by their own
+            // THE TWO HISTORY RECORDS ARE READ FIRST, by their own
             // parser: their head is four counts and one flat Values
-            // block, not the widget/keys/payload shape every other
-            // record has, so the general parser must never see these
-            // bytes. An undo moved core state without a transaction, so
-            // the mirrors are folded HERE, before the handler — a
-            // read-back inside it answers about the restored state.
+            // block, so the general parser must never see these bytes.
+            // The mirrors are folded HERE, before the handler.
             let recKind = buf.withUnsafeBytes {
                 $0.loadUnaligned(fromByteOffset: 4, as: UInt16.self)
             }
@@ -1774,9 +1536,8 @@ final class KayaApp {
                     dispatch { try build { tx in try handler(tx, answer) } }
                 }
             // A paste rides a click tag verbatim, so it arrives on the
-            // ordinary widget/node split — one record kind, the key
-            // path deciding. Never empty: a paste that delivered
-            // nothing is not an occurrence.
+            // ordinary widget/node split — one record kind, the key path
+            // deciding.
             case (UInt16(KAYA_OCCURRENCE_PASTED), true):
                 if let handler = widgetPastes[id], let answer = kayaRepresentation(clip) {
                     dispatch { try build { tx in try handler(tx, answer) } }
@@ -1828,8 +1589,7 @@ final class KayaApp {
     }
 
     /// Enter the core on the calling thread (must be the process main
-    /// thread), dispatching occurrences on the app thread. Never
-    /// returns on iOS; the exit code path is the self-test's.
+    /// thread), dispatching occurrences on the app thread.
     func run() -> Never {
         // The stale-artifact guard: this binding was generated from one
         // spec revision; the loaded library must speak the same one.
@@ -1844,13 +1604,8 @@ final class KayaApp {
     }
 }
 
-/// One transaction: everything queued inside build (or a handler)
-/// applies atomically when it returns.
-/// The container builder: each expression appends its handle to the
-/// enclosing container's ambient frame, in evaluation order — which
-/// lets a `for row in todos.rows { … }` statement stand between
-/// siblings (the tracer appends the For widget itself at close; the
-/// loop contributes nothing through the builder).
+/// One transaction: everything queued inside build (or a handler) applies
+/// atomically when it returns.
 @resultBuilder
 enum KayaChildren {
     // Parenting happens at creation (the constructors append to the
@@ -1887,13 +1642,11 @@ enum KayaNodeChildren {
     static func buildArray(_: [Void]) {}
 }
 
-/// The for-statement tracer over a record collection's rows (the
-/// generated `todos.rows` returns one): the loop body runs once,
-/// authoring the For's template; the tracer opens the template on the
-/// first element and closes it — appending the For widget to the
-/// enclosing container's ambient frame — when the loop asks for a
-/// second. Statement-position iteration needs a container builder
-/// around it; stamping is the core's replay, never Swift iteration.
+/// The for-statement tracer over a record collection's rows (the generated
+/// `todos.rows` returns one): the loop body runs once, authoring the For's
+/// template; the tracer opens the template on the first element and closes it
+/// — appending the For widget to the enclosing container's ambient frame —
+/// when the loop asks for a second.
 struct KayaRowTrace<Row>: Sequence, IteratorProtocol {
     let collection: KayaCollection
     let makeRow: (KayaTpl) -> Row
@@ -1942,19 +1695,13 @@ struct KayaRowTrace<Row>: Sequence, IteratorProtocol {
 final class KayaAppTx {
     let app: KayaApp
 
-    // THE ONE CHOKEPOINT. Every write in this file is `tx.<verb>(...)`
-    // — a mutating method on the struct — so a computed property that
-    // checks liveness on the way in guards all ninety of them without
-    // touching a callsite, and guards the next one too. That is the
-    // part that matters: a check spread over callsites is a check that
-    // gets forgotten. Go's lived on two chains only, and a write
-    // through a Tx that had outlived its build appended into a buffer
-    // already submitted and never submitted again — no error, the
-    // write simply vanished.
-    //
-    // Nothing invited that mistake until post arrived. Posting is
-    // exactly the reason a guest now holds a tx near a background
-    // thread, so the guard has to be total.
+    // THE ONE CHOKEPOINT. Every write in this file is `tx.<verb>(...)`,
+    // so a computed property that checks liveness on the way in guards
+    // all of them without touching a callsite, and guards the next one
+    // too. A check spread over callsites is a check that gets forgotten,
+    // and the failure it guards is SILENT: a write through a Tx that
+    // outlived its build vanishes with no error
+    // (tools/check-tx-liveness.sh).
     private var storage = KayaTx()
     private var closed = false
     /// Whether undoable() has already named this batch — one name per
@@ -1971,8 +1718,8 @@ final class KayaAppTx {
         }
     }
 
-    /// A KayaAppTx is valid ONLY inside the build or handler that made
-    /// it, on the app thread. To mutate from anywhere else, post.
+    /// A KayaAppTx is valid ONLY inside the build or handler that made it, on
+    /// the app thread.
     func alive() {
         precondition(
             !closed,
@@ -1984,11 +1731,9 @@ final class KayaAppTx {
     func close() {
         closed = true
     }
-    // How to undo this transaction's mirror edits: a snapshot per
-    // touched collection / signal, taken on first touch (nil = it did
-    // not exist before this transaction). Derived registrations are
-    // pure data until the commit promotes them — an abandoned
-    // transaction abandons its registrations with its records.
+    // How to undo this transaction's mirror edits: a snapshot per touched
+    // collection / signal, taken on first touch (nil = it did not exist
+    // before this transaction).
     fileprivate var journal: [UInt64: [KayaInstance]?] = [:]
     var signalJournal: [UInt64: KayaValue?] = [:]
     var pendingSignalDeps: [(UInt64, (KayaAppTx) -> Void)] = []
@@ -2018,9 +1763,8 @@ final class KayaAppTx {
         }
     }
 
-    /// The commit's mirror image: restore every touched mirror entry
-    /// and drop the records with the pending registrations. Reads
-    /// after an abandoned transaction show exactly what was shipped.
+    /// The commit's mirror image: restore every touched mirror entry and drop
+    /// the records with the pending registrations.
     func rollback() {
         app.currentTx = nil
         app.restoreModel(journal)
@@ -2040,31 +1784,13 @@ final class KayaAppTx {
     }
 
     /// Make this transaction ONE undoable step, under `label`, in
-    /// `window`'s ledger (docs/undo-plan.md D2).
-    ///
-    /// The unit of undo is a NAMED GROUP declared at the opener, not
-    /// every transaction: handlers fire per-gesture transactions
-    /// constantly and most of them are consequences rather than
-    /// intents, and a per-keystroke editor would earn one step per
-    /// character — the exact problem grouping exists to solve. So a
-    /// group is opt-in, which is also what keeps a collaborative app
-    /// free to own its own history.
-    ///
-    /// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at
-    /// the head: a handler naturally builds first and names the step
-    /// when it knows what the step was, and the wire's head-of-batch
-    /// rule should not turn that into a footgun.
+    /// `window`'s ledger (docs/undo-plan.md D2). CALLABLE ANYWHERE IN THE
+    /// CHAIN and the marker still rides at the HEAD of the batch.
     ///
     /// WHAT A GROUP MAY HOLD is the reactive half — signal writes and
-    /// collection deltas, whose inverse the core derives from state it
-    /// already keeps. Focus is permitted and not restored. Anything
-    /// else (a const property write, creating a widget, clear, showing
-    /// a dialog) fails at apply, naming the op: undo restores state,
-    /// and state is signals plus collections. The app hears the result
-    /// through the window construct's onUndone.
-    ///
-    /// Each window has its own history, because Undo in one window has
-    /// never meant "revert what happened in another"; 0 is the primary.
+    /// collection deltas. Anything else (a const property write, creating
+    /// a widget, clear, showing a dialog) fails at apply, naming the op.
+    /// Each window has its own history; 0 is the primary.
     func undoable(_ label: String, window: UInt64 = 0) {
         precondition(
             !named,
@@ -2118,46 +1844,31 @@ final class KayaAppTx {
         tx.setChecked(w.id, checked)
     }
 
-    /// Set a widget's flex weight within its row/column: 0 is natural
-    /// size, positive weights divide the container's leftover
-    /// main-axis space in proportion (see Prop::Grow in the core). The
-    /// declarative spelling is the `grow:` argument at construction;
-    /// this is the dynamic path.
-    /// A container's inter-child gap (main axis, DIP; the normalized
-    /// default is 8). Containers only — the scene rejects it anywhere
-    /// else. The declarative spelling is the `spacing:` argument at
-    /// construction; this is the dynamic path.
+    /// Set a widget's flex weight within its row/column: 0 is natural size,
+    /// positive weights divide the container's leftover main-axis space in
+    /// proportion (see Prop::Grow in the core). The declarative spelling is
+    /// the `grow:` argument at construction; this is the dynamic path. A
+    /// container's inter-child gap (main axis, DIP; the normalized default is
+    /// 8).
     func setSpacing(_ w: KayaWidget, _ gap: Double) {
         tx.setSpacing(w.id, gap)
     }
 
-    /// A container's OWN padding: DIP between its bounds and its
-    /// children, uniform on all four sides — the window inset one level
-    /// down (docs/styling-plan.md D3). Containers only — the scene
-    /// rejects it anywhere else. The declarative spelling is the
-    /// `inset:` argument at construction; this is the dynamic path.
-    ///
-    /// The window's own inset is the `inset:` argument on `window(...)`;
-    /// this is the same number one level down, so a full-bleed window
-    /// can still hold an inset status row — the app that forced the
-    /// prop into existence (the editor).
+    /// A container's OWN padding: DIP between its bounds and its children,
+    /// uniform on all four sides — the window inset one level down
+    /// (docs/styling-plan.md D3).
     func setInset(_ w: KayaWidget, _ pad: Double) {
         tx.setInset(w.id, pad)
     }
 
-    /// A container's cross-axis child placement. Containers only;
-    /// baseline is rows-only — the scene rejects misuse at the root.
-    /// The declarative spelling is the `align:` argument at
-    /// construction; this is the dynamic path.
+    /// A container's cross-axis child placement. Containers only; baseline is
+    /// rows-only — the scene rejects misuse at the root.
     func setAlign(_ w: KayaWidget, _ align: KayaAlign) {
         tx.setAlign(w.id, align.rawValue)
     }
 
     /// A widget's SEMANTIC EMPHASIS: destructive/prominent on buttons,
-    /// heading on labels — what it means, never how it looks. The
-    /// declarative spelling is the `role:` argument at construction;
-    /// this is the dynamic path. A role on a kind it does not fit dies
-    /// at the root, at declare time.
+    /// heading on labels — what it means, never how it looks.
     func setRole(_ w: KayaWidget, _ role: KayaRole) {
         tx.setRole(w.id, role.rawValue)
     }
@@ -2167,8 +1878,8 @@ final class KayaAppTx {
     }
 
     /// A widget's accessibility IDENTIFIER: a stable authored key that
-    /// assistive tooling and UI automation address it by, and which is
-    /// NEVER spoken. Universal — every kind carries one.
+    /// assistive tooling and UI automation address it by, and which is NEVER
+    /// spoken.
     func setA11yId(_ w: KayaWidget, _ id: String) {
         tx.setA11yId(w.id, id)
     }
@@ -2183,10 +1894,9 @@ final class KayaAppTx {
         tx.setA11yLabel(w.id, label)
     }
 
-    /// What ACTIVATING this widget does — the platforms' hint (Apple
-    /// defines it as the result of performing an action; Android
-    /// carries it as the click action's label). Write a VERB PHRASE.
-    /// Activation kinds only; the root rejects it elsewhere.
+    /// What ACTIVATING this widget does — the platforms' hint (Apple defines
+    /// it as the result of performing an action; Android carries it as the
+    /// click action's label). Write a VERB PHRASE.
     func setA11yHint(_ w: KayaWidget, _ hint: String) {
         tx.setA11yHint(w.id, hint)
     }
@@ -2207,15 +1917,9 @@ final class KayaAppTx {
         tx.bindSource(w.id, s.id)
     }
 
-    // One-shot commands: momentary verbs into widget-owned state,
-    // riding the open transaction like any record — the insert and the
-    // clear beside it commit together or not at all. Fire-and-forget:
-    // no mirror state, nothing to journal; the widget answers through
-    // its normal occurrence path (a clear arrives back as
-    // text_changed("") and the app's draft fold empties itself).
-    // Commands take a KayaWidget only — a KayaNodeHandle is a
-    // blueprint, and a blueprint has nothing to clear (the type-level
-    // arm of the scene's own template rejection).
+    // One-shot commands: momentary verbs into widget-owned state, riding the
+    // open transaction like any record — the insert and the clear beside it
+    // commit together or not at all.
 
     /// Drop an entry's content now (the field stays authoritative).
     func clear(_ w: KayaWidget) {
@@ -2230,42 +1934,25 @@ final class KayaAppTx {
     // --- Text ranges: decorate a set, select one, reveal one ----------
     //
     // The three primitives an editor cannot write for itself
-    // (docs/ranges-plan.md D1). kaya ships no search: WHAT to decorate
-    // is the app's question and every editor answers it differently.
+    // (docs/ranges-plan.md D1). kaya ships no search.
     //
     // EVERY OFFSET HERE IS A UTF-8 BYTE OFFSET into the widget's current
-    // text — kaya's unit on the wire, in all nine languages. Swift is
-    // the one guest language whose strings are indexed by NEITHER bytes
-    // nor an integer, so it is the one where "hand kaya the ranges you
-    // already have" needs the binding to mean it. Hence two spellings
-    // per verb:
+    // text. Swift is the one guest language whose strings are indexed by
+    // NEITHER bytes nor an integer, hence two spellings per verb:
     //
     //   * `Range<String.Index>` + the string they index — what Swift's
     //     own search returns, converted here. REACH FOR THIS ONE.
-    //   * `Range<Int>` — the byte-offset floor, for an app that already
-    //     holds offsets in kaya's unit.
+    //   * `Range<Int>` — the byte-offset floor.
     //
-    // The conversion is not a formality, it is the trap. Measured on
-    // this milestone's own document (a CJK word on line 0, ASCII after):
-    // for the first match of "alpha" the byte offset is 57, while
-    // `doc.distance(from:to:)` (Characters) says 51 and
-    // `String.Index.utf16Offset(in:)` says 51 — the two spellings a
-    // Swift author reaches for first, both six early, both silent. An
-    // app that hand-rolled either would decorate six characters off and
-    // find nothing in kaya to blame.
+    // The conversion is the trap, not a formality (docs/traps.md).
 
-    /// DECLARE the decorated ranges of a textarea, replacing whatever
-    /// was declared before; an empty set is the clear.
+    /// DECLARE the decorated ranges of a textarea, replacing whatever was
+    /// declared before; an empty set is the clear. The ranges are Swift's
+    /// own and `text` is the string they index.
     ///
-    /// The ranges are Swift's own — `String.range(of:)` and friends
-    /// return exactly this — and `text` is the string they index, which
-    /// is what makes a `String.Index` mean anything at all.
-    ///
-    /// APP-OWNED AND NEVER TRACKED. A declared set is bound to the text
-    /// it was declared against: the first edit of any kind drops it, and
-    /// the app re-declares from the fold `onChange` already drives — the
-    /// same uncontrolled contract the text itself has. Nothing in kaya
-    /// adjusts a range across an edit.
+    /// APP-OWNED AND NEVER TRACKED: the first edit of any kind drops the
+    /// set, and the app re-declares from the fold `onChange` already
+    /// drives. Nothing in kaya adjusts a range across an edit.
     func highlightRanges(
         _ w: KayaWidget, _ ranges: [Range<String.Index>], in text: String
     ) {
@@ -2273,12 +1960,9 @@ final class KayaAppTx {
     }
 
     /// The byte-offset floor of `highlightRanges(_:_:in:)`: offsets are
-    /// UTF-8 byte offsets into the widget's current text.
-    ///
-    /// An offset past the end of the text, or one that splits a
-    /// character, fails loudly in the core rather than in a backend: the
-    /// five platforms answer a malformed offset five different ways and
-    /// one of them aborts the process.
+    /// UTF-8 byte offsets into the widget's current text. An offset past
+    /// the end, or one that splits a character, fails loudly in the CORE
+    /// rather than in a backend — one platform aborts the process.
     func highlightRanges(_ w: KayaWidget, _ ranges: [Range<Int>]) {
         var flat: [KayaValue] = []
         flat.reserveCapacity(ranges.count * 2)
@@ -2290,17 +1974,11 @@ final class KayaAppTx {
         tx.highlightRanges(w.id, UInt32(ranges.count), flat)
     }
 
-    /// Put the textarea's selection at one range (an empty range is a
-    /// caret). Same offsets, same validation as `highlightRanges`.
-    ///
-    /// REFUSED WHILE THE USER IS COMPOSING through an input method, in
-    /// every backend, because honouring it commits the composition
-    /// mid-word — measured on macOS, where the half-typed kana land in
-    /// the document and in the app's own model. The refusal is a no-op,
-    /// not an error: composition state is on no kaya channel, so an app
-    /// cannot avoid the race and is not blamed for it. The selection the
-    /// app wanted is still worth asking for after the next `onChange`,
-    /// which is what ends a composition.
+    /// Put the textarea's selection at one range (an empty range is a caret).
+    /// Same offsets, same validation as `highlightRanges`. REFUSED WHILE THE
+    /// USER IS COMPOSING through an input method, in every backend, and the
+    /// refusal is a no-op rather than an error: composition state is on no
+    /// kaya channel, so an app cannot avoid the race (docs/deferred.md).
     func selectRange(_ w: KayaWidget, _ range: Range<String.Index>, in text: String) {
         selectRange(w, kayaByteRange(range, in: text))
     }
@@ -2340,13 +2018,6 @@ final class KayaAppTx {
     }
 
     // --- Construction sugar: the tree reads as a tree ----------------
-    //
-    // Co-located constructors (props and handlers at the declaration
-    // site) and result-builder containers, so the build closure is the
-    // scene's shape. Everything lowers eagerly to the same records —
-    // the builder block runs like any closure, children first, then
-    // the container and its addChilds. Sugar over the record calls,
-    // never a scene value interpreted later.
 
     /// `role:` is this button's semantic emphasis — `.destructive` or
     /// `.prominent`, the two that fit an action. It changes what the
@@ -2415,12 +2086,7 @@ final class KayaAppTx {
         return w
     }
 
-    /// A slider over min...max at value, with its change handler
-    /// co-located. `bind` takes a float signal for the position
-    /// instead of a constant — the programmatic write path (write
-    /// fans out to the control; property writes never echo an
-    /// occurrence, so a handler's own writes cannot loop back at
-    /// it).
+    /// A slider over min...max at value, with its change handler co-located.
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double = 0.0,
         bind: KayaSignal? = nil,
@@ -2505,11 +2171,8 @@ final class KayaAppTx {
     }
 
     /// An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
-    /// decodes natively, and decode failure renders the placeholder,
-    /// never a crash. `source` is the encoded bytes — one registration
-    /// copy into core memory; the handle is consumed by the next
-    /// submit, and the guest's bytes are free to drop the moment the
-    /// call returns. `bind` is a Signal carrying a blob handle.
+    /// decodes natively, and decode failure renders the placeholder, never a
+    /// crash.
     func image(
         _ source: Data? = nil, bind: KayaSignal? = nil, grow: Double? = nil
     ) -> KayaWidget {
@@ -2658,9 +2321,8 @@ final class KayaAppTx {
         return (w, out)
     }
 
-    // Every derived signal rooted at this collection, recomputed and
-    // written into this transaction. Deriveds hang off root handles,
-    // so nested-instance mutations cannot change their input.
+    // Every derived signal rooted at this collection, recomputed and written
+    // into this transaction.
     func recomputeDerived(_ c: KayaCollection) {
         guard c.path.isEmpty else { return }
         for recompute in app.derived[c.id, default: []] {
@@ -2677,40 +2339,12 @@ final class KayaAppTx {
     }
 
     /// Insert a scalar under a key the binding authors, and hand the key
-    /// back.
-    ///
-    /// FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
-    /// identity and guest-chosen (DESIGN.md, the update algebra), so
-    /// anything that already HAS a name passes it to `insert` — today
-    /// and always. This is the other case, and it is the common one in a
-    /// form: the app has a title and nothing else, and the alternative
-    /// is a hand-spelled counter beside the collection, which is mutable
-    /// global state in most languages and whose safety rests on a
-    /// never-rewind rule nobody wrote down.
-    ///
-    /// ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted
-    /// key is `.i64` and is counter+1. An instance is a table — the
-    /// live-zone collection, or one stamped copy selected by `at(...)`
-    /// — and keys are unique within one, so that is what the counter is
-    /// per.
-    ///
-    /// MIXING IS SAFE BY ABSORPTION: an explicit `insert` whose key is
-    /// an I64 at or above the counter carries it up, so a later mint
-    /// clears every hand-chosen numeric key already in the table. A
-    /// non-numeric key cannot collide with an I64 at all and moves
-    /// nothing.
-    ///
-    /// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
-    /// argument. Undo and redo replay captured keys inside the core and
-    /// never re-enter this path, so a history walk never moves the
-    /// counter; an abandoned transaction does not move it back either
-    /// (the rollback journal restores the model, not the counter, so a
-    /// key can never be handed out twice). A fresh key is fresh forever.
-    ///
-    /// The key IS the return value — an app that selects the row it just
-    /// made takes it from here rather than inventing a second name for
-    /// the same datum — and `@discardableResult` is Swift's spelling of
-    /// "and an app that has no use for it simply does not read it".
+    /// back. ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the
+    /// minted key is `.i64` and is counter+1. MIXING IS SAFE BY
+    /// ABSORPTION — an explicit `insert` whose key is an I64 at or above
+    /// the counter carries it up — and NO DECREMENT IS EXPRESSIBLE, so a
+    /// history walk never moves the counter and an abandoned transaction
+    /// does not move it back.
     @discardableResult
     func insertFresh(_ c: KayaCollection, _ value: KayaValue) -> Int64 {
         insertRecordFresh(c, value, 0, [value])
@@ -2728,11 +2362,8 @@ final class KayaAppTx {
         recomputeDerived(c)
     }
 
-    /// Repositions an entry before another's: order is collection
-    /// data, so the model reorders and the wire carries the same
-    /// keys-only delta. Keys, never indices. A missing key or anchor
-    /// traps here, at the call site — the same check the scene makes;
-    /// moving an entry before itself is a no-op, and nothing travels.
+    /// Repositions an entry before another's: order is collection data, so
+    /// the model reorders and the wire carries the same keys-only delta.
     func moveBefore(_ c: KayaCollection, _ key: KayaValue, _ anchor: KayaValue) {
         moveEntry(c, key, [anchor])
     }
@@ -2784,10 +2415,9 @@ final class KayaAppTx {
         recomputeDerived(c)
     }
 
-    /// The record-time mirror-read guard: a template body records once
-    /// and the core replays it — a model read inside one bakes this
-    /// moment's data into every future stamp, silently dead. Live-zone,
-    /// handler-tx, and build-tx reads stay legal.
+    /// The record-time mirror-read guard: a template body records once and
+    /// the core replays it — a model read inside one bakes this moment's data
+    /// into every future stamp, silently dead.
     private func guardMirrorRead() {
         precondition(
             app.tplDepth == 0,
@@ -2836,9 +2466,8 @@ final class KayaAppTx {
         recomputeDerived(c)
     }
 
-    /// The minting insert every typed surface's `insertFresh` lowers to:
-    /// take the instance's next key, insert under it, hand it back. The
-    /// contract lives on `insertFresh` above.
+    /// The minting insert every typed surface's `insertFresh` lowers to: take
+    /// the instance's next key, insert under it, hand it back.
     @discardableResult
     func insertRecordFresh(
         _ c: KayaCollection, _ model: Any, _ variant: UInt32, _ fields: [KayaValue]
@@ -2878,19 +2507,12 @@ final class KayaAppTx {
         return app.instanceEntries(c.id, c.path).count
     }
 
-    /// Request a modal alert (the request/result grammar), named
-    /// arguments as the Swift spelling:
-    /// `tx.showAlert(title: "delete item?", message: "…",
-    ///     actions: ["Delete", "Archive"], cancel: "Keep") { tx, choice in … }`.
-    /// The result handler rides the REQUEST (the widget-handler
-    /// precedent) and retires with its one answer — choice is an
-    /// action index (0 or 1) or KAYA_ALERT_CHOICE_CANCEL, every
-    /// platform-native dismissal. Ids are binding-allocated; the
-    /// call returns the id for the floor-minded. Up to two actions
-    /// (the platform floor — a third traps at construction, matching
-    /// the scene gate); `cancel` is required by the signature, and
-    /// no binding invents a default label. One alert may be live per
-    /// process; show the next from the handler.
+    /// Request a modal alert (the request/result grammar), named arguments as
+    /// the Swift spelling: `tx.showAlert(title: "delete item?", message: "…",
+    /// actions: ["Delete", "Archive"], cancel: "Keep") { tx, choice in … }`.
+    /// The result handler rides the REQUEST (the widget-handler precedent)
+    /// and retires with its one answer — choice is an action index (0 or 1)
+    /// or KAYA_ALERT_CHOICE_CANCEL, every platform-native dismissal.
     @discardableResult
     func showAlert(
         title: String = "", message: String = "",
@@ -2913,17 +2535,9 @@ final class KayaAppTx {
     }
 
     /// Ask the platform for files. THE PICK, NOT THE OPEN — the result
-    /// carries handles you redeem later, so the name says `pick`
-    /// (DESIGN.md, File dialogs).
-    ///
-    /// `filters` is advisory on every platform: a default view rather
-    /// than a guarantee, so the guest still validates what it got. Each
-    /// pair is (label, space-separated extensions).
-    ///
-    /// `onResult` fires exactly once and retires with its answer.
-    /// CANCEL IS THE EMPTY LIST, faithfully: no platform can confirm an
-    /// empty selection. One dialog may be live per process; show the
-    /// next from the handler.
+    /// carries handles you redeem later (DESIGN.md, File dialogs). `filters`
+    /// is advisory on every platform. `onResult` fires exactly once and
+    /// retires with its answer; CANCEL IS THE EMPTY LIST.
     @discardableResult
     func pickFiles(
         filters: [(String, String)] = [], window: UInt64 = 0,
@@ -2953,26 +2567,15 @@ final class KayaAppTx {
         return id
     }
 
-    /// Ask the platform WHERE TO SAVE. The picker's twin: a request that
-    /// answers once with a capability, on the same grammar, out of the
-    /// same one-live-dialog slot — one dialog of either kind may be live
-    /// per process, and the next is shown from this one's handler.
+    /// Ask the platform WHERE TO SAVE. The picker's twin, on the same
+    /// grammar and out of the same one-live-dialog slot. CANCEL IS `nil`.
     ///
-    /// `suggestedName` is the name the dialog OPENS with, and every
-    /// platform treats it the way it treats a filter: it takes it, and
-    /// guarantees nothing. The user renames it; Android may append an
-    /// extension matching the mime type. READ THE NAME YOU GOT.
+    /// `suggestedName` is the name the dialog OPENS with and every
+    /// platform guarantees nothing about it: READ THE NAME YOU GOT.
     ///
-    /// WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist
-    /// yet (macOS, GTK and Windows answer with a name for a file nobody
-    /// has made — measured), so the handle's open CREATES: opening it
-    /// for `FILE_MODE_WRITE` succeeds and yields an empty file on every
-    /// platform, which is the one behaviour a guest writes against
-    /// (docs/save-plan.md D1).
-    ///
-    /// CANCEL IS `nil`. The narrowing from the wire's list is the
-    /// BINDING's, not the guest's: "one locator or none" is a fact of
-    /// the request, and no app should re-derive it from a length.
+    /// WHAT YOU GET BACK OPENS EMPTY: a save destination may not exist
+    /// yet, so the handle's open CREATES — `FILE_MODE_WRITE` succeeds and
+    /// yields an empty file on every platform (docs/save-plan.md D1).
     @discardableResult
     func saveFile(
         suggestedName: String, filters: [(String, String)] = [], window: UInt64 = 0,
@@ -2990,15 +2593,6 @@ final class KayaAppTx {
     }
 
     // --- The clipboard (DESIGN.md, Clipboard) ----------------------
-    //
-    // A clip is not a string: every host models it as ONE item
-    // available in several types, with the consumer taking the richest
-    // it understands. So COPY TAKES A RECORD — spelled as a chain here,
-    // where a second text() simply replaces the field rather than
-    // needing a duplicate check — and the two answers are a SUM.
-    //
-    // kaya DERIVES NOTHING between representations. Whether list
-    // bullets survive html-to-text is the app's decision.
 
     /// Begin a clip: fill in as many representations as the app wants
     /// to offer, and send() puts it on the system clipboard.
@@ -3007,46 +2601,28 @@ final class KayaAppTx {
     }
 
     /// Begin the privileged read — THE ONE NAMED FOR WHAT IT IS rather
-    /// than for pasting.
-    ///
-    /// A user's paste arrives at the widget's hook and costs nothing;
-    /// this asks without a gesture, which the platforms have
-    /// deliberately made expensive: iOS 16 PROMPTS when the content
-    /// came from another app and blocks until the user answers, Android
-    /// returns nothing unless the app has focus, and Wayland delivers
-    /// no offer to an unfocused client. Reach for this to detect a URL
-    /// or import from the clipboard, never to implement Paste — that is
-    /// the Paste command, and it is free.
+    /// than for pasting. The platforms have deliberately made it
+    /// expensive (DESIGN.md, and docs/clipboard-plan.md): reach for it to
+    /// detect a URL or import, never to implement Paste — that is the
+    /// Paste command, and it is free.
     func readClipboard() -> KayaClipReadRef {
         KayaClipReadRef(tx: self, id: app.allocClipboardRead())
     }
 
     /// Declare what a widget takes from a paste — the closed kinds by
     /// name ("text", "html", "image", "files") plus any custom format
-    /// ids.
-    ///
-    /// ONE DECLARATION, THREE JOBS: it drives whether the Paste command
-    /// is live while this widget is focused, it filters what can reach
-    /// the paste hook, and on Android it IS the native registration
-    /// (setOnReceiveContentListener takes the mime types on the view).
-    /// Per-widget because whether Paste should be enabled is the
-    /// INTERSECTION of what the clipboard offers and what the FOCUSED
-    /// target takes.
-    ///
-    /// DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
-    /// declares nothing gets the platform's own insertion and reports
-    /// it through the ordinary change path, which is why a plain text
-    /// editor writes none of this and has working cut, copy and paste.
+    /// ids. It drives whether Paste is live while this widget is focused,
+    /// filters what reaches the paste hook, and on Android IS the native
+    /// registration. A widget that declares NOTHING gets the platform's
+    /// own insertion, which is why a plain text editor writes none of
+    /// this and has working cut, copy and paste.
     func setAccepts(_ w: KayaWidget, _ kinds: [String]) {
         tx.setAccepts(w.id, kayaAcceptList(kinds))
     }
 
-    /// Take pasted content at a live widget.
-    ///
-    /// COSTS NOTHING ON ANY PLATFORM, unlike readClipboard: a paste is
-    /// a user gesture, so it is its own authorisation — iOS raises no
-    /// prompt and the focus rules are satisfied by construction. Only
-    /// fires for a widget that declared what it accepts.
+    /// Take pasted content at a live widget. COSTS NOTHING ON ANY PLATFORM,
+    /// unlike readClipboard: a paste is a user gesture, so it is its own
+    /// authorisation.
     func onPaste(
         _ w: KayaWidget,
         _ handler: @escaping (KayaAppTx, KayaRepresentation) throws -> Void
@@ -3054,17 +2630,11 @@ final class KayaAppTx {
         app.onPaste(w, handler)
     }
 
-    /// A paste onto a stamped copy: the handler also receives the
-    /// copy's key path, outermost first. One record kind, the path
-    /// deciding — exactly as a click on a stamped row is one record
-    /// with a click on a live widget.
-    ///
-    /// AND ONLY FIRES FOR A COPY WHOSE TEMPLATE DECLARED WHAT IT TAKES
-    /// (`KayaTpl.setAccepts`), which is the same rule the live overload
-    /// above states and was the reason this one was dead: until that
-    /// setter existed, registering here compiled and waited forever,
-    /// because every backend hands a paste to the platform's own
-    /// insertion when the target's accept list is empty.
+    /// A paste onto a stamped copy: the handler also receives the copy's
+    /// key path, outermost first. AND ONLY FIRES FOR A COPY WHOSE
+    /// TEMPLATE DECLARED WHAT IT TAKES (`KayaTpl.setAccepts`) — every
+    /// backend hands a paste to the platform's own insertion when the
+    /// target's accept list is empty.
     func onPaste(
         _ n: KayaNodeHandle,
         _ handler: @escaping (KayaAppTx, [KayaValue], KayaRepresentation) throws -> Void
@@ -3072,36 +2642,14 @@ final class KayaAppTx {
         app.onPaste(n, handler)
     }
 
-    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2):
-    /// one packed sRGB hex (0xRRGGBB) is the whole call for most apps.
-    /// `light:`/`dark:` are the per-appearance overrides a brand book
-    /// with a stated dark variant needs; whichever you leave out is
-    /// filled from `seed`. One name for both forms is the Swift
-    /// spelling — the same defaulted-argument shape the window
-    /// construct uses.
+    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2): one
+    /// packed sRGB hex (0xRRGGBB) is the whole call for most apps.
+    /// `light:`/`dark:` are the per-appearance overrides; whichever you
+    /// leave out is filled from `seed`. You never write a foreground and
+    /// never write contrast variants — the core derives them.
     ///
-    /// SET ONCE, BEFORE THE FIRST MOUNT: brand is identity, not state,
-    /// and the root refuses a second write and a late one.
-    ///
-    /// You never write a foreground and never write contrast variants.
-    /// The core derives fill, on-fill, standalone and the hover/pressed
-    /// ramp per appearance and hands every backend values — a pair an
-    /// app supplied could be illegible with nothing to catch it, and
-    /// three of the four platforms hard-code or compute the foreground
-    /// anyway.
-    ///
-    /// AND IT IS A REQUEST: a platform may let its user override the
-    /// app's accent. macOS does today — an app accent applies only
-    /// while the system accent is multicolor — and the semantics does
-    /// not change if another platform grows the preference.
-    ///
-    /// NO PER-PLATFORM VALUE MAP HERE, and the same absence in every
-    /// binding: D1's grammar allows one, the reference sugar does not
-    /// spell it, and a surface one language has is the divergence
-    /// invariant 1 refuses. Swift is the tempting place — one source
-    /// serves macOS and iOS — which is exactly why the answer is a
-    /// `perPlatform:` label resolved inside THIS function if it is ever
-    /// admitted, never `#if os(...)` in a guest.
+    /// SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write
+    /// and a late one.
     func brandAccent(_ seed: UInt32, light: UInt32? = nil, dark: UInt32? = nil) {
         // The mask is what tells the core "unstated" from "0x000000":
         // black is a legal accent, so absence cannot be encoded as a
@@ -3113,47 +2661,22 @@ final class KayaAppTx {
     }
 
     /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
-    /// one family name is the whole call, and every platform that has
-    /// that family installed uses it. One name covers the plain and the
-    /// per-platform forms, the defaulted-argument shape `brandAccent`
-    /// and the window construct already use.
+    /// one family name is the whole call. THE FAMILY, NEVER THE SCALE.
     ///
-    /// THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights,
-    /// metrics and the whole type ramp stay the platform's. There is
-    /// nowhere here to put a size, deliberately — emphasis is the role
-    /// tier's job (`role: .heading`), and that is what makes a family
-    /// swap safe.
+    /// SET ONCE, BEFORE THE FIRST MOUNT, like `brandAccent`.
     ///
-    /// SET ONCE, BEFORE THE FIRST MOUNT: the accent's wall verbatim, and
-    /// for its reason — a slot that could flip at runtime would promise
-    /// the theme-switching surface the vocabulary deliberately lacks.
-    ///
-    /// `platforms:` overrides that default for the platforms that name
-    /// themselves — `[.mac: "Georgia", .linux: "DejaVu Serif"]` — and
-    /// THE PAIRS TRAVEL UNRESOLVED, unlike the accent's per-appearance
-    /// values. That asymmetry is the design: this binding cannot know
-    /// which platform it is running on, but every LOWERING is one, so
-    /// each backend picks its own row out of the list. It is
-    /// `KeyValuePairs` rather than a `Dictionary` for two measured
+    /// `platforms:` rows TRAVEL UNRESOLVED, so each backend picks its
+    /// own. It is `KeyValuePairs` and not a `Dictionary` for two measured
     /// reasons: a Dictionary is unordered, so the same guest would write
-    /// different bytes on different runs, and it would swallow a
-    /// repeated platform in Swift's own words, where the root refuses it
-    /// in kaya's — the sentence the other seven bindings print.
-    ///
-    /// `font:` ships a FONT FILE's bytes on the blob channel,
-    /// register-then-resolve: the backend hands them to its platform's
-    /// app-font API, reads back the family that registration named, and
-    /// prefers it to any name above. The bytes are copied out at the
-    /// call, so the `Data` is yours again the moment this returns.
+    /// different bytes on different runs, and it would swallow a repeated
+    /// platform in Swift's own words where the root refuses it in kaya's.
     ///
     /// A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own
     /// typeface in place, deliberately and silently: every font API
     /// renders SOMETHING for a name it cannot match (Apple's falls
     /// through to Helvetica — measured), so each lowering gates on the
-    /// family being installed rather than letting the platform pick a
-    /// stranger. An app that wants the system typeface declares none at
-    /// all, which is also the only way to ask for it: `SF Pro` and `New
-    /// York` are not reachable by family name.
+    /// family being installed. `SF Pro` and `New York` are not reachable
+    /// by family name — declare none to get the system typeface.
     func brandTypeface(
         _ family: String,
         platforms: KeyValuePairs<KayaPlatform, String> = [:],
@@ -3177,24 +2700,10 @@ final class KayaAppTx {
             font.map { .blob(kayaRegisterBlob($0)) } ?? .str(""))
     }
 
-    /// The ASSET form of the font slot: the same call, with the font
-    /// NAMED rather than read — `tx.brandTypeface("Sora", font:
-    /// KayaAsset("fonts/sora-wght.ttf"))`.
-    ///
-    /// THE BYTES NEVER ENTER THE GUEST'S HEAP. The core already holds
-    /// them; this hands the same buffer to the blob table, so a font file
-    /// costs one refcount here and no `Data`. That is the whole reason an
-    /// asset is a handle rather than a bytes factory — `font:
-    /// asset.bytes` would work and would copy a megabyte through Swift
-    /// for nothing.
-    ///
-    /// `font:` has no default here, which is what keeps the two overloads
-    /// apart: `brandTypeface("Georgia")` is unambiguously the `Data?`
-    /// one.
-    ///
-    /// Everything else — the family, the per-platform rows, the set-once
-    /// wall, register-then-resolve — is
-    /// `brandTypeface(_:platforms:font:)`'s, verbatim.
+    /// The ASSET form of the font slot: the same call, with the font NAMED
+    /// rather than read — `tx.brandTypeface("Sora", font: try
+    /// KayaAsset("fonts/sora-wght.ttf"))`. THE BYTES NEVER ENTER THE GUEST'S
+    /// HEAP.
     func brandTypeface(
         _ family: String,
         platforms: KeyValuePairs<KayaPlatform, String> = [:],
@@ -3209,38 +2718,14 @@ final class KayaAppTx {
     }
 
     /// DECLARE the app's identity (docs/app-identity-plan.md): the name
-    /// it goes by and the picture that stands for it, as the bytes of
-    /// one image file. One name covers both forms, the
-    /// defaulted-argument shape `brandTypeface` and the window construct
-    /// already use — `icon:` left out is the name-only declaration.
+    /// it goes by and the picture that stands for it, as the bytes of one
+    /// image file. `icon:` left out is the name-only declaration. Send a
+    /// PNG; each lowering converts, and no platform-specific artwork
+    /// rides the wire.
     ///
-    /// ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
-    /// tile, the Windows taskbar/alt-tab icon and the caption's mark,
-    /// and an X11 window's icon; the same FILE, read at build time,
-    /// becomes the Android launcher icon and the iOS Home Screen icon.
-    /// Send a PNG: each lowering converts, and no platform-specific
-    /// artwork rides the wire.
-    ///
-    /// SET ONCE, BEFORE THE FIRST MOUNT: the brand's wall verbatim, and
-    /// for its reason — identity is not state, and a slot that could
-    /// flip at runtime would promise the identity-switching surface the
-    /// vocabulary deliberately lacks. The root refuses a second write, a
-    /// late one and an empty name; an app that wants the platform's own
-    /// identity declares none at all.
-    ///
-    /// THE BYTES ARE NEVER INSPECTED between here and the platform's own
-    /// decoder. Whether a blob is an image is a question only that
-    /// decoder can answer, so bytes that are not one leave every
-    /// platform's default in place, which is why the conformance scene
-    /// reads what the DECODER produced rather than echoing this request
-    /// back. The bytes are copied out at the call, so the `Data` is
-    /// yours again the moment this returns.
-    ///
-    /// A NAMED APP WITH NO MARK still reaches the surfaces a name
-    /// reaches — the Windows caption and taskbar tooltip, the macOS menu
-    /// bar, the Linux app_id, and both phones' packaging — and every
-    /// icon surface keeps the platform's own default, honestly and
-    /// visibly.
+    /// SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write,
+    /// a late one and an empty name. THE BYTES ARE NEVER INSPECTED
+    /// between here and the platform's own decoder.
     func appIdentity(_ name: String, icon: Data? = nil) {
         // The icon SLOT rides either way and the mask is what says
         // whether it means anything — the brand mask's discipline, and
@@ -3251,28 +2736,14 @@ final class KayaAppTx {
             icon.map { .blob(kayaRegisterBlob($0)) } ?? .str(""))
     }
 
-    /// The ASSET form of the icon slot: the same declaration, with the
-    /// mark NAMED rather than read — `tx.appIdentity("Aurora Notes",
-    /// icon: KayaAsset("icons/kaya-mark.png"))`.
-    ///
-    /// THE BYTES NEVER ENTER THE GUEST'S HEAP: the core hands its own
-    /// buffer to the blob table, so a picture costs one refcount here and
-    /// no `Data`. `icon:` has no default, which is what keeps this apart
-    /// from the `Data?` overload. Everything else is
-    /// `appIdentity(_:icon:)`'s, verbatim.
+    /// The ASSET form of the icon slot: the same declaration, with the mark
+    /// NAMED rather than read. THE BYTES NEVER ENTER THE GUEST'S HEAP.
     func appIdentity(_ name: String, icon: KayaAsset) {
         tx.setAppIdentity(1, .str(name), .blob(icon.blob()))
     }
 
-    /// Create an auxiliary window (capability-gated: phone hosts
-    /// reject at the root); materializes hidden, mountIn presents.
-    /// Named arguments are the Swift spelling.
-    /// The handlers ride the declaration (per-window — handlers
-    /// scope to the thing that creates them): onCloseRequested fires
-    /// per chrome close while vetoClose is armed — nothing has
-    /// closed; answer with tx.destroyWindow to agree. onClosed fires
-    /// when the non-veto auxiliary is chrome-closed (informational;
-    /// destroyWindow reconciles) and retires with it.
+    /// Create an auxiliary window (capability-gated: phone hosts reject at
+    /// the root); materializes hidden, mountIn presents.
     func createWindow(
         _ id: UInt64, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
@@ -3294,34 +2765,20 @@ final class KayaAppTx {
             menus: menus)
     }
 
-    /// Set a window's attributes in one construct — the attribute set
-    /// is EXACTLY createWindow's (a window's attributes ride its
-    /// window construct; the primary differs only in having no
-    /// creation moment — the process owns it):
-    /// tx.window(title: "sections", sectionsPresentation:
-    /// Int64(KAYA_SECTIONS_PRESENTATION_BAR)).
+    /// Set a window's attributes in one construct — the attribute set is
+    /// EXACTLY createWindow's (a window's attributes ride its window
+    /// construct; the primary differs only in having no creation moment).
     ///
-    /// `dirty:` says this surface holds UNSAVED WORK, and the backend
-    /// shows its platform's own affordance — the dot in the close
-    /// button on macOS, a leading `*` in the rendered caption on
-    /// Windows, a bullet beside the header-bar title on GTK, nothing on
-    /// the phones, which have none (docs/dirty-plan.md D2/D4).
-    ///
-    /// STATE, NOT CHROME, and the `title:` you declared is left alone:
-    /// there is no marker to compose into it and no placeholder to
-    /// leave room for (the rejected Qt design). It ARMS NOTHING either
-    /// — "unsaved changes, close anyway?" is `vetoClose:` plus a
-    /// dialog, which is yours to compose, because apps legitimately
-    /// differ on what it should do.
+    /// `dirty:` says this surface holds UNSAVED WORK and each backend
+    /// shows its platform's own affordance (docs/dirty-plan.md D2/D4).
+    /// STATE, NOT CHROME: the `title:` you declared is LEFT ALONE, and it
+    /// ARMS NOTHING — the close confirmation is `vetoClose:` plus a
+    /// dialog, yours to compose.
     ///
     /// `inset:` is this window's CONTENT INSET in layout units — LAYOUT,
-    /// not appearance (docs/styling-plan.md D3): the space kaya's own
-    /// interpreter puts around the mounted root. 16 unless you say
-    /// otherwise; 0 is full bleed (an editor, a canvas), honored
-    /// unconditionally because the inset is kaya's own padding and
-    /// nothing platform-side defends it. A platform's SAFE AREA is a
-    /// separate fact and is not removed by it: on iPhone the content
-    /// reaches the safe-area edge, not past it.
+    /// not appearance (docs/styling-plan.md D3). 16 unless you say
+    /// otherwise; 0 is full bleed. A platform's SAFE AREA is a separate
+    /// fact and is not removed by it.
     func window(
         _ id: UInt64 = 0, title: String? = nil, width: Double? = nil,
         height: Double? = nil, vetoClose: Bool? = nil, dirty: Bool? = nil,
@@ -3345,10 +2802,9 @@ final class KayaAppTx {
         if let inset { tx.setWindowInset(id, inset) }
         if let onCloseRequested { app.onCloseRequested(id, onCloseRequested) }
         if let onClosed { app.onWindowClosed(id, onClosed) }
-        // The history handlers ride the window construct because the
-        // LEDGER is per window: one ordered history per surface, so the
-        // registration scopes to the thing that owns it. Persistent —
-        // a history is walked as often as the user likes.
+        // The history handlers ride the window construct because the LEDGER
+        // is per window: one ordered history per surface, so the registration
+        // scopes to the thing that owns it.
         if let onUndone { app.onUndone(id, onUndone) }
         if let onRedone { app.onRedone(id, onRedone) }
         // The menubar rides the window construct (the window-attribute
@@ -3361,12 +2817,6 @@ final class KayaAppTx {
     }
 
     // --- Menus: the command vocabulary (DESIGN.md, Menus) ------------
-    //
-    // Named-args constructors nested by argument lists: children are
-    // arguments (evaluated first, unanchored), the grouping construct
-    // appends them, and the window construct's menus: parameter is the
-    // bar anchor. Items are live-zone only; a retained item reopens
-    // through tx.menu(item, ...) — the append-at-any-time discipline.
 
     private func newMenuItem(_ kind: Int32, _ label: KayaMenuText?) -> KayaMenuItem {
         precondition(
@@ -3414,17 +2864,11 @@ final class KayaAppTx {
         }
     }
 
-    /// The tail every menu-item CONSTRUCTOR shares. The symbol arrives
-    /// here rather than in each constructor's own body ON PURPOSE: it is
-    /// a REQUIRED positional, so a constructor added later cannot reach
-    /// the tail without deciding about the slot — the same reason
-    /// `enabled` and `icon` already sit here.
-    ///
-    /// Two kinds are deliberately outside it, exactly as they are for
-    /// `icon`: `separator()`, which takes no props at all (the root
-    /// refuses a symbol on a separator), and the REOPENING
-    /// `menu(_ item:…)`, which mutates each prop it was handed and has
-    /// no create to share.
+    /// The tail every menu-item CONSTRUCTOR shares. The symbol is a
+    /// REQUIRED positional, so a constructor added later cannot reach the
+    /// tail without deciding about the slot. Two kinds are deliberately
+    /// outside it: `separator()`, which takes no props at all, and the
+    /// REOPENING `menu(_ item:…)`, which has no create to share.
     private func menuTail(
         _ m: KayaMenuItem, _ enabled: KayaMenuBool?, _ icon: Data?, _ symbol: KayaSymbol?
     ) {
@@ -3454,13 +2898,6 @@ final class KayaAppTx {
     /// The three clipboard commands. They lower to the platform's own,
     /// act on the FOCUSED widget, and work out their own enablement
     /// from what the clipboard offers and what that widget accepts.
-    ///
-    /// GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only
-    /// the widget knows what is selected, so an app cannot assemble the
-    /// payload for "copy the selected text" out of the data layer. Copy
-    /// of a selection is therefore necessarily a command, and Paste is
-    /// its mirror. copy() and readClipboard() are for overriding that
-    /// default and for targets with no native behaviour.
     static let roleCut = "cut"
     static let roleCopy = "copy"
     static let rolePaste = "paste"
@@ -3472,26 +2909,12 @@ final class KayaAppTx {
     /// editor user expects: mid-typing, Undo means the typing; after a
     /// structural action, Undo means the action. Enablement is that
     /// same question, computed live at activation.
-    ///
-    /// AN APP OPTS IN TO THE OTHER TIER BY NAMING ITS STEPS
-    /// (tx.undoable) and hears the result as the window construct's
-    /// onUndone. An app that names none still gets working text undo
-    /// from these items, because the first tier is the platform's.
     static let roleUndo = "undo"
     static let roleRedo = "redo"
 
     /// An action — a leaf command firing exactly one menu_activated
-    /// occurrence (menu click OR its shortcut: ONE occurrence, one
-    /// dispatch path; the handler rides the declaration and covers
-    /// both). The shortcut is canonicalized by the binding's one
-    /// parser; the root judges its anchor (window catalogs only).
-    ///
-    /// `symbol:` is the item's SEMANTIC ICON — a concept from the closed
-    /// [KayaSymbol] vocabulary that each backend draws in its own
-    /// platform's symbol set. It sits BESIDE `icon:`, not instead of it:
-    /// a name for the standard concepts, a blob for app-specific art.
-    /// Both are const-only. Every item constructor below takes it on the
-    /// same terms.
+    /// occurrence (menu click OR its shortcut: ONE occurrence, one dispatch
+    /// path; the handler rides the declaration and covers both).
     func item(
         _ label: KayaMenuText, shortcut: String? = nil,
         enabled: KayaMenuBool? = nil, icon: Data? = nil,
@@ -3509,9 +2932,8 @@ final class KayaAppTx {
     }
 
     /// The template-node flavor: an item attached to a stamped copy
-    /// (tx.contextCatalog + KayaTpl.contextMenu) reports the copy's
-    /// key path, outermost first — the keys ARE the noun the command
-    /// acts on. Context items take no shortcuts (root-checked).
+    /// (tx.contextCatalog + KayaTpl.contextMenu) reports the copy's key path,
+    /// outermost first — the keys ARE the noun the command acts on.
     func item(
         _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
         symbol: KayaSymbol? = nil,
@@ -3574,9 +2996,7 @@ final class KayaAppTx {
 
     /// A menu grouping node — at bar level (seat it through the window
     /// construct's menus: parameter) or nested (pass it in a parent's
-    /// items:). Children arrive as arguments, already created; the
-    /// menu appends them in order. Disabling a menu disables its
-    /// subtree (the inherited-disabled contract).
+    /// items:).
     func menu(
         _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
         symbol: KayaSymbol? = nil, items: [KayaMenuItem] = []
@@ -3648,11 +3068,8 @@ final class KayaAppTx {
         return m
     }
 
-    /// A context menu on a LIVE widget: the same item vocabulary
-    /// scoped to a NOUN, with the platform's own gesture (right-click,
-    /// long-press). Calling it again appends more roots. The editable
-    /// text controls (entry, textarea) reject attachment at the root;
-    /// context items take no shortcuts.
+    /// A context menu on a LIVE widget: the same item vocabulary scoped to a
+    /// NOUN, with the platform's own gesture (right-click, long-press).
     func contextMenu(_ target: KayaWidget, items: [KayaMenuItem]) {
         for item in items { tx.contextAttach(target.id, item.id) }
     }
@@ -3696,9 +3113,8 @@ final class KayaAppTx {
         if let onBackRequested { app.onBackRequested(id, onBackRequested) }
     }
 
-    /// Pop the window's top navigation entry and forget its tree —
-    /// also the back-veto grammar's confirmation after
-    /// onBackRequested. Popping an empty stack is a scene error.
+    /// Pop the window's top navigation entry and forget its tree — also the
+    /// back-veto grammar's confirmation after onBackRequested.
     func popEntry(window: UInt64 = 0) {
         tx.popEntry(window)
     }
@@ -3714,15 +3130,6 @@ final class KayaAppTx {
     /// USER switches to it — post-fact and NOT one-shot; a
     /// programmatic selectSection does not fire it (the echo
     /// doctrine).
-    ///
-    /// `symbol:` is the switcher item's SEMANTIC ICON — a concept from
-    /// the closed [KayaSymbol] vocabulary each backend draws in its own
-    /// platform's symbol set. A tab bar without icons is not the
-    /// platform's real thing, and a blob is the wrong primitive for a
-    /// STANDARD one. It sits beside the section's blob `icon` slot, for
-    /// app-specific art — which this construct has never spelled in any
-    /// binding but Rust's; `KayaWire.setSectionIcon` is the floor until
-    /// one of them grows the sugar.
     func addSection(
         _ id: UInt64, title: String? = nil, symbol: KayaSymbol? = nil,
         onSelected: ((KayaAppTx) throws -> Void)? = nil,
@@ -3767,19 +3174,12 @@ final class KayaTpl {
         return n
     }
 
-    /// The raw Text write on a node — PRIVATE, and that is the point.
-    ///
-    /// The live zone's `setText` is a WIDGET VERB the sugar sweep
-    /// requires of every binding (tools/check-sugar-surface.sh's
-    /// check_range_verb); this one is the floor spelling of a prop, and
-    /// the only thing telling the two apart is the receiver's type,
-    /// which no floor sweep can see. Rust never had the problem — it
-    /// spells the floor `Tpl::set` and the verb `set_text`. Hiding is
-    /// the sharper half of that split here: every caller is a
-    /// constructor in this same class, no guest and no generated file
-    /// has ever named it, so the floor spelling simply stops existing
-    /// rather than moving to a name someone could still reach for
-    /// (docs/tpl-props-plan.md F3).
+    /// The raw Text write on a node — PRIVATE, and that is the point. The
+    /// live zone's `setText` is a WIDGET VERB the sugar sweep requires of
+    /// every binding (tools/check-sugar-surface.sh's check_range_verb);
+    /// this one is the floor spelling of a prop, and only the receiver's
+    /// type tells them apart, which no sweep can see. Hiding it means the
+    /// floor spelling stops existing (docs/tpl-props-plan.md F3).
     private func setText(_ n: KayaNodeHandle, _ text: String) {
         tx.tx.setText(n.id, text)
     }
@@ -3791,35 +3191,20 @@ final class KayaTpl {
     }
 
     /// Weight a template node within its stamped row or column — the
-    /// template twin of `KayaAppTx.setGrow`.
-    ///
-    /// It arrived a pass ahead of the a11y props below because `scroll`
-    /// needs it: an unconstrained viewport hugs its content and nothing
-    /// overflows, so a template scroll without a grow weight is a scroll
-    /// that cannot scroll. Rust's `Tpl` has always been able to spell
-    /// this through its generic `set(node, prop, value)`, so shipping
-    /// the scroll constructor without it would have opened a divergence
-    /// in the same pass that closed one (invariant 1).
-    ///
-    /// Spacing and align are what a node still cannot carry here. They
-    /// are the container props, they have no Swift spelling in this zone
-    /// at all — not even on `row`/`column`/`grid` — and they stay
-    /// ledgered (docs/deferred.md).
+    /// template twin of `KayaAppTx.setGrow`. A template `scroll` needs
+    /// it: an unconstrained viewport hugs its content. Spacing and align
+    /// have no Swift spelling in this zone at all and stay ledgered
+    /// (docs/deferred.md).
     func setGrow(_ n: KayaNodeHandle, _ weight: Double) {
         tx.tx.setGrow(n.id, weight)
     }
 
     /// A stamped copy's accessibility IDENTIFIER — the template twin of
-    /// `KayaAppTx.setA11yId`, and universal in this zone exactly as it
-    /// is in that one: the template declare arm runs the same
-    /// `check_prop` the live path does, and A11yId is admitted on every
-    /// kind (crates/kaya/src/scene.rs).
-    ///
-    /// The argument's type picks the source, as it does for `label`. A
-    /// String gives EVERY copy the same key, which is legal and often
-    /// right — nothing in the core deduplicates ids and the harness
-    /// addresses by kind#index, never by id — while the row's own field
-    /// is the spelling when automation has to tell two copies apart.
+    /// `KayaAppTx.setA11yId`, universal in this zone as in that one. The
+    /// argument's type picks the source: a String gives EVERY copy the
+    /// same key, which is legal (nothing deduplicates ids and the harness
+    /// addresses by kind#index), while the row's own field is the
+    /// spelling when automation must tell two copies apart.
     func setA11yId(_ n: KayaNodeHandle, _ id: String) {
         tx.tx.setA11yId(n.id, id)
     }
@@ -3834,14 +3219,9 @@ final class KayaTpl {
 
     /// What an assistive client SPEAKS for a stamped copy — the template
     /// twin of `KayaAppTx.setA11yLabel`. Leave it unset to keep whatever
-    /// the platform derives from the copy's own content.
-    ///
-    /// THE ROW'S OWN FIELD IS THE CASE THIS EXISTS FOR: it is the only
-    /// one of the three sources that makes two copies say different
-    /// things, so a list whose rows each announce their own name is one
-    /// line. A String is right for a per-cell role ("delete") and wrong
-    /// for a per-row identity; a signal makes every copy say the same
-    /// changing thing.
+    /// the platform derives from the copy's own content. THE ROW'S OWN
+    /// FIELD IS THE CASE THIS EXISTS FOR: it is the only source that
+    /// makes two copies say different things.
     func setA11yLabel(_ n: KayaNodeHandle, _ label: String) {
         tx.tx.setA11yLabel(n.id, label)
     }
@@ -3855,15 +3235,9 @@ final class KayaTpl {
     }
 
     /// What ACTIVATING a stamped copy does — the template twin of
-    /// `KayaAppTx.setA11yHint`. Write a VERB PHRASE.
-    ///
-    /// Activation kinds only (button, checkbox, select, radio), and the
-    /// restriction is the ROOT'S rather than this type's: a hint on a
-    /// template label dies in `check_prop` at DECLARE time, before a
-    /// single row stamps, in the same sentence the live zone gets.
-    /// Walling it off in the type here — a kind parameter on
-    /// `KayaNodeHandle` — would be the two zones diverging on one prop,
-    /// which is the thing invariant 1 forbids.
+    /// `KayaAppTx.setA11yHint`. Write a VERB PHRASE. Activation kinds
+    /// only, and the restriction is the ROOT'S rather than this type's: a
+    /// hint on a template label dies in `check_prop` at DECLARE time.
     func setA11yHint(_ n: KayaNodeHandle, _ hint: String) {
         tx.tx.setA11yHint(n.id, hint)
     }
@@ -3876,62 +3250,30 @@ final class KayaTpl {
         tx.tx.bindA11yHintElement(n.id, level: level, field: f.index)
     }
 
-    /// Declare what a stamped copy takes from a paste — the template
-    /// twin of `KayaAppTx.setAccepts`. Entry and textarea only; the root
+    /// Declare what a stamped copy takes from a paste — the template twin
+    /// of `KayaAppTx.setAccepts`. Entry and textarea only; the root
     /// rejects it elsewhere, at declaration rather than per stamp.
     ///
-    /// THIS IS WHAT MAKES A STAMPED PASTE HAPPEN AT ALL. Every backend
-    /// gates the paste occurrence on the focused widget's accept list
-    /// and falls back to the platform's own insertion when it is empty
-    /// (swift/KayaSwiftUI.swift, `node.accepts.isEmpty`), so until this
-    /// existed `onPaste(_ n: KayaNodeHandle, …)` registered a handler
-    /// that compiled, registered and could never fire — silently, and in
-    /// seven of the eight bindings (docs/tpl-props-plan.md §1).
-    ///
-    /// CONST ONLY, and that is parity rather than a cut: an accept list
-    /// says what the PROTOTYPE can take, which is structure, and
-    /// structure belongs to the blueprint — the rule the slider's
-    /// min/max and the select's options already follow. No zone in any
-    /// binding offers a dynamic spelling; on Android the list IS the
-    /// native registration, so a per-row one would be a per-copy native
-    /// registration.
+    /// THIS IS WHAT MAKES A STAMPED PASTE HAPPEN AT ALL: every backend
+    /// gates the paste occurrence on the focused widget's accept list and
+    /// falls back to the platform's own insertion when it is empty
+    /// (swift/KayaSwiftUI.swift, `node.accepts.isEmpty`). CONST ONLY — on
+    /// Android the list IS the native registration.
     func setAccepts(_ n: KayaNodeHandle, _ kinds: [String]) {
         tx.tx.setAccepts(n.id, kayaAcceptList(kinds))
     }
 
     /// What a stamped copy MEANS — the template twin of
-    /// `KayaAppTx.setRole`. Semantic emphasis, never appearance, so a
-    /// stamped "Delete" button inside a For can finally be declared
-    /// destructive; until this existed it could be declared so in no
-    /// language.
-    ///
-    /// CONST ONLY, `setAccepts`'s rule and its reason: what a copy means
-    /// is a fact about the PROTOTYPE, not about the row's data. There is
-    /// no signal overload and no `KayaField` one, and that is parity
-    /// rather than a cut — no zone in any binding offers a dynamic
-    /// spelling.
-    ///
-    /// The kind restriction is the ROOT'S, not this type's: a role on a
-    /// kind it does not fit dies in `check_prop` at DECLARE time, before
-    /// a single row stamps, in the same sentence naming both the role and
-    /// the kind that the live zone gets (crates/kaya/src/scene.rs).
+    /// `KayaAppTx.setRole`. Semantic emphasis, never appearance. CONST
+    /// ONLY, `setAccepts`'s rule: what a copy means is a fact about the
+    /// PROTOTYPE. The kind restriction is the ROOT'S, refused in
+    /// `check_prop` at DECLARE time.
     func setRole(_ n: KayaNodeHandle, _ role: KayaRole) {
         tx.tx.setRole(n.id, role.rawValue)
     }
 
-    /// A stamped CONTAINER's own padding, in DIP between its bounds and
-    /// its children — the template twin of `KayaAppTx.setInset`, and the
-    /// same number the window's `inset:` spells two levels up.
-    ///
-    /// THE FORCING CASE IS A STAMPED ROW. The editor's status row is live
-    /// and insets; its find bar is a copy stamped from a template and sat
-    /// flush against a full-bleed window's edge, because this zone
-    /// carried exactly one layout prop (`setGrow`) and nothing could give
-    /// a stamped row its margin back.
-    ///
-    /// Const for `setRole`'s reason: how far a prototype holds its
-    /// children off its edge describes the prototype. Containers only,
-    /// and the root says so at declare time.
+    /// A stamped CONTAINER's own padding, in DIP between its bounds and its
+    /// children — the template twin of `KayaAppTx.setInset`.
     func setInset(_ n: KayaNodeHandle, _ pad: Double) {
         tx.tx.setInset(n.id, pad)
     }
@@ -3985,18 +3327,8 @@ final class KayaTpl {
         return n
     }
 
-    /// A button with its caption, in the blueprint: the template twin
-    /// of `KayaAppTx.button(_:onClick:grow:)`. The argument's type picks
-    /// the caption's source, as it does for `label` — a constant, a
-    /// signal, or the row's own field.
-    ///
-    /// It takes NO handler argument, and the omission is the design:
-    /// a stamped copy's click names the copy, so the handler is
-    /// registered against the template node
-    /// (`app.onClick(node) { tx, keys in … }`) and receives that copy's
-    /// keys. The live zone's `(KayaAppTx) -> Void` shape has nowhere to
-    /// put them, so an `onClick:` overload here could only be the wrong
-    /// one.
+    /// A button with its caption, in the blueprint: the template twin of
+    /// `KayaAppTx.button(_:onClick:grow:)`.
     func button(_ text: String) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_BUTTON))
         setText(n, text)
@@ -4009,9 +3341,8 @@ final class KayaTpl {
         return n
     }
 
-    /// A button captioned from the row's OWN field — the "Delete <that
-    /// row's title>" shape, which only this zone can spell. The live
-    /// zone has no twin: a live button has no row to read.
+    /// A button captioned from the row's OWN field — the "Delete <that row's
+    /// title>" shape, which only this zone can spell.
     func button(_ f: KayaField<String>) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_BUTTON))
         bindTextField(n, f)
@@ -4028,13 +3359,10 @@ final class KayaTpl {
         return n
     }
 
-    /// A single-line text field per stamped copy. UNCONTROLLED, which
-    /// is why the primary form takes no source at all: the copy owns
-    /// its text, each edit arrives naming this node AND the copy's key
-    /// path, and the app folds it into its own state. That is the live
-    /// zone's `entry(onChange:)` with the keys threaded through, and it
-    /// is what a per-row note field or a one-row find bar actually
-    /// wants — the reason this constructor exists.
+    /// A single-line text field per stamped copy. UNCONTROLLED, which is why
+    /// the primary form takes no source at all: the copy owns its text, each
+    /// edit arrives naming this node AND the copy's key path, and the app
+    /// folds it into its own state.
     func entry(
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
     ) -> KayaNodeHandle {
@@ -4044,16 +3372,12 @@ final class KayaTpl {
     /// An entry seeded from an addressable source: the argument's type
     /// picks it, as it does for `label`.
     ///
-    /// HOW LONG THE SOURCE LASTS DIFFERS BY SOURCE, and the difference
-    /// is the protocol's rather than this binding's. A String is one
-    /// write at declaration, so every copy starts there and the user
-    /// owns it from the first keystroke. A signal or a field stays
-    /// LIVE: the stamper records the binding, so a later write to that
-    /// signal — or to that field of that row — replaces whatever the
-    /// user has typed into the copy. There is no "seed once from the
-    /// row and then let go" arm on the wire (PropValue is Const,
-    /// Signal or Element and nothing else), so binding a row's field
-    /// here means the row keeps writing.
+    /// HOW LONG THE SOURCE LASTS DIFFERS BY SOURCE, and the difference is
+    /// the protocol's. A String is ONE write at declaration, so the user
+    /// owns the field from the first keystroke. A signal or a field stays
+    /// LIVE: a later write to that signal — or to that field of that row
+    /// — REPLACES whatever the user has typed. There is no "seed once and
+    /// let go" arm on the wire.
     func entry(
         _ text: String,
         onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)? = nil
@@ -4117,10 +3441,7 @@ final class KayaTpl {
         return n
     }
 
-    /// The unsourced half of both text kinds: the widget and its
-    /// handler. Registering the handler emits no wire op, so the source
-    /// each caller applies afterwards still lands immediately after the
-    /// create — the live zone's op order, unchanged.
+    /// The unsourced half of both text kinds: the widget and its handler.
     private func textFieldOf(
         _ kind: UInt32, _ onChange: ((KayaAppTx, [KayaValue], String) throws -> Void)?
     ) -> KayaNodeHandle {
@@ -4131,8 +3452,6 @@ final class KayaTpl {
 
     /// A progress bar whose fraction comes from an addressable source —
     /// `t.progress(row.done)` is the per-row case this zone exists for.
-    /// Display-only, like label and image; the root re-checks the 0...1
-    /// domain for every stamped copy.
     func progress(_ value: Double) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_PROGRESS))
         tx.tx.setValue(n.id, value)
@@ -4162,15 +3481,9 @@ final class KayaTpl {
     }
 
     /// A slider over min...max in the blueprint, its change handler
-    /// co-located.
-    ///
-    /// THE RANGE DESCRIBES THE PROTOTYPE and so stays a pair of plain
-    /// constants — every stamped copy runs between the same two ends.
-    /// The POSITION is the part that varies per row, so it takes a
-    /// source. The bar owns that position and reports each move with
-    /// the copy's key path and the new value: the entry's uncontrolled
-    /// contract, one identity deeper. A move where the position came
-    /// from the row's own field does NOT write the field back — the
+    /// co-located. THE RANGE DESCRIBES THE PROTOTYPE and stays a pair of
+    /// constants; the POSITION takes a source. A move where the position
+    /// came from the row's own field does NOT write the field back — the
     /// handler decides whether the model follows.
     func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double,
@@ -4210,14 +3523,10 @@ final class KayaTpl {
         return n
     }
 
-    /// A dropdown in the blueprint: the option list is the
-    /// BLUEPRINT'S, the choice is the row's.
-    ///
-    /// `selected` is the 0-based index and takes a source, so each copy
-    /// can open on its own row's choice; `onSelect` receives the copy's
-    /// key path and each USER pick's new index (programmatic writes
-    /// never echo). The options cannot vary per row and that is
-    /// deliberate rather than missing — see `choiceOf` below.
+    /// A dropdown in the blueprint: the option list is the BLUEPRINT'S, the
+    /// choice is the row's. `selected` is the 0-based index and takes a
+    /// source; `onSelect` receives the copy's key path and each USER pick's
+    /// new index.
     func select(
         _ options: [String], selected: Int = 0,
         onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)? = nil
@@ -4276,20 +3585,10 @@ final class KayaTpl {
     }
 
     /// Both choice kinds, minus the index: the widget, its options and
-    /// its handler.
-    ///
-    /// The options are LABEL CHILDREN of the prototype, exactly as in
-    /// the live zone, so they are declared into their own template
-    /// frame and parented here. That is also why every stamped copy
-    /// offers the same list: children are structure, and structure
-    /// belongs to the blueprint. A per-row option list would need a
-    /// collection inside the choice widget, and the scene rejects that
-    /// (labels only, deliberately — docs/sugar-pass-plan.md §2). Only
-    /// the selected index can be the row's.
-    ///
-    /// The pick arrives as a Double because the index rides Prop::Value
-    /// like every other number; the wrapper narrows it once, here,
-    /// rather than in three handlers.
+    /// its handler. The options are LABEL CHILDREN of the prototype, so
+    /// every stamped copy offers the same list: children are structure,
+    /// and structure belongs to the blueprint. Only the selected index
+    /// can be the row's (docs/sugar-pass-plan.md §2).
     private func choiceOf(
         _ kind: UInt32, _ options: [String],
         _ onSelect: ((KayaAppTx, [KayaValue], Int) throws -> Void)?
@@ -4344,15 +3643,9 @@ final class KayaTpl {
     }
 
     /// A grid laying each copy's children out row-major into `columns`
-    /// columns — each column takes its NATURAL width, aligned across
-    /// rows (the thing nested rows cannot express).
-    ///
+    /// columns — each column takes its NATURAL width, aligned across rows.
     /// The column count describes the PROTOTYPE, so it is a plain
-    /// constant rather than a source: every stamped copy has the same
-    /// shape and only the values inside it vary. The count is written
-    /// after the children rather than before, which the tree cannot
-    /// see — the parent is created first either way, and creation order
-    /// is what the observation names.
+    /// constant rather than a source.
     func grid(columns: Int, @KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         let n = nodeContainerOf(UInt32(KAYA_KIND_GRID), children)
         tx.tx.setColumns(n.id, Double(columns))
@@ -4360,9 +3653,7 @@ final class KayaTpl {
     }
 
     /// A spacer: PURE SUGAR for an empty grown column — it consumes the
-    /// leftover main-axis space between its siblings in every stamped
-    /// copy. No new vocabulary reaches a backend: it writes the Grow a
-    /// caller could write itself with `setGrow`.
+    /// leftover main-axis space between its siblings in every stamped copy.
     func spacer() -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_COLUMN))
         tx.tx.setGrow(n.id, 1.0)
@@ -4382,12 +3673,10 @@ final class KayaTpl {
         tx.tx.addChild(parent.id, child.id)
     }
 
-    /// Attach a live-built context catalog (tx.contextCatalog) to a
-    /// template node: every stamped copy shows the same catalog, and
-    /// each activation carries that copy's key path — the keys ARE
-    /// the noun (received by the node-flavor handlers). An item takes
-    /// exactly one anchor, so a second attach of the same catalog
-    /// traps here.
+    /// Attach a live-built context catalog (tx.contextCatalog) to a template
+    /// node: every stamped copy shows the same catalog, and each activation
+    /// carries that copy's key path — the keys ARE the noun (received by the
+    /// node-flavor handlers).
     func contextMenu(_ node: KayaNodeHandle, _ catalog: KayaContextCatalog) {
         precondition(
             !catalog.attached, "kaya: a context catalog takes exactly one anchor")

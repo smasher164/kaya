@@ -1,17 +1,14 @@
 //! The app thread's view of the world: occurrences in, transactions out.
 //!
 //! Collections here follow the patch-producing doctrine: the collection
-//! is the model — the only copy. Every mutation op edits the model and
-//! queues the wire delta in the same call, so reads (`tx.items`,
-//! `tx.len`) are exactly the writes, never a second bookkeeping copy.
-//! A transaction dropped without commit abandons its records, and the
-//! model abandons the same writes.
+//! IS the model, the only copy. Every mutation op edits the model and
+//! queues the wire delta in the same call, so reads are exactly the
+//! writes. A transaction dropped without commit abandons its records,
+//! and the model abandons the same writes.
 //!
-//! A [`Collection`] handle names one instance: the root handle (what
-//! `tx.collection()` returns) is the live-zone table, and `at(key)`
-//! selects the instance inside a stamped copy, one key per enclosing
-//! For. Mutations and reads take the same handle, so a handler binds
-//! the instance once and uses it throughout.
+//! A [`Collection`] handle names one instance: the root handle is the
+//! live-zone table, and `at(key)` selects the instance inside a stamped
+//! copy, one key per enclosing For.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -31,13 +28,10 @@ use crate::protocol::{
 // --- Records: the app type is the schema --------------------------------
 //
 // The guest's own struct declaration is the single source of truth: the
-// record! macro derives the wire schema, the conversions, and one field
-// token per field, so schema, insert order, and indexes cannot drift.
-// Field tokens are typed projections — Field<K> carries the field's
-// value kind — and the typed prop tokens (props::TEXT, props::CHECKED)
-// carry theirs, so binding a Bool field to a Str property is a compile
-// error, the earliest of the three agreeing layers (token unification,
-// the scene's declaration-time check, the setters' signatures).
+// derive writes the wire schema, the conversions, and one field token per
+// field, so schema, insert order and indexes cannot drift. Field tokens
+// are typed projections, so binding a Bool field to a Str property is a
+// compile error.
 
 /// A value-kind marker, unifying field tokens with prop tokens at
 /// compile time.
@@ -50,12 +44,10 @@ pub struct I64Kind;
 pub struct F64Kind;
 /// The blob marker, so a record field of encoded bytes can address a
 /// template image the way a Str field addresses a label. Added late:
-/// Swift, C# and Java all shipped a per-row image
-/// (`image(_ f: KayaField<Data>)`, bindings/swift/KayaApp.swift:3278)
-/// while Rust could not spell one, because this marker was the only
-/// piece missing — `ValueType::Blob` has always existed. A capability
-/// three bindings have and a fourth cannot express is divergence, not a
-/// carve-out (invariant 1).
+/// Swift, C# and Java all shipped a per-row image (see
+/// bindings/swift/KayaApp.swift) while Rust could not spell one — a
+/// capability three bindings have and a fourth cannot express is
+/// divergence, not a carve-out (invariant 1).
 pub struct BlobKind;
 impl ValueKind for StrKind {
     const TYPE: ValueType = ValueType::Str;
@@ -83,15 +75,11 @@ pub struct Field<K> {
 }
 
 // A field token is a u32 and a marker, so it copies. Written by hand
-// rather than derived because `#[derive(Copy)]` would demand `K: Copy`
-// of the marker types, which are unit structs with no derives of their
-// own — the standard PhantomData workaround.
+// because `#[derive(Copy)]` would demand `K: Copy` of the marker types
+// (the standard PhantomData workaround).
 //
-// IT IS NOT A NICETY. Without it, binding one row field to two widgets
-// in the same template — `let name = row.name(); t.label(name);
-// t.entry_bound(name);` — fails to compile with a moved-value error,
-// which is a plain thing for an example to want and would have read as
-// "the template sugar cannot do that".
+// IT IS NOT A NICETY: without it, binding one row field to two widgets in
+// the same template fails to compile with a moved-value error.
 impl<K> Clone for Field<K> {
     fn clone(&self) -> Self {
         *self
@@ -101,11 +89,10 @@ impl<K> Clone for Field<K> {
 impl<K> Copy for Field<K> {}
 
 /// One of the addressable sources a template property binds to: a
-/// constant, a signal, or a field of the enclosing For's element —
-/// the protocol's whole binding universe, as one argument. The kind
-/// parameter keeps constants and fields honest at compile time;
-/// signals stay runtime-checked (Rust signals carry no value type
-/// yet).
+/// constant, a signal, or a field of the enclosing For's element — the
+/// protocol's whole binding universe, as one argument. The kind parameter
+/// keeps constants and fields honest at compile time; signals stay
+/// runtime-checked.
 pub struct TplSource<K> {
     inner: SourceInner,
     _kind: PhantomData<K>,
@@ -177,19 +164,14 @@ impl<K> Field<K> {
 impl Field<StrKind> {
     /// THE WHOLE ELEMENT OF A SCALAR COLLECTION, as a source.
     ///
-    /// A template constructor's element source is a FIELD, addressed by
-    /// index off a record — `t.label(Todo::title())`. A scalar
-    /// collection has no record: its element IS the value, and binding
-    /// it was spelled `bind_element` at the floor, which is why three
-    /// example scenes built a template label with `widget(kind_label)`
-    /// and a bare bind rather than with the sugar. Nothing was missing
-    /// but a NAME for field 0 — `PropValue::Element { level, field: 0 }`
-    /// is exactly what a `Field` at index 0 produces, so the floor call
-    /// and this put the same bytes on the wire.
+    /// A template constructor's element source is a FIELD addressed by
+    /// index off a record; a scalar collection has no record — its
+    /// element IS the value. `PropValue::Element { level, field: 0 }` is
+    /// exactly what a `Field` at index 0 produces, so this and the floor
+    /// call put the same bytes on the wire.
     ///
     /// `StrKind` only, and that is a fact rather than a restriction:
-    /// `String` is the sole non-derived `KayaSum` implementor, so a
-    /// scalar collection is always a collection of strings.
+    /// `String` is the sole non-derived `KayaSum` implementor.
     pub const fn element() -> Self {
         Field::new(0)
     }
@@ -291,10 +273,8 @@ pub trait KayaSum: Clone {
 }
 
 /// The one-constructor refinement: a record type, whose fields have
-/// stable indexes and whose eliminations are trivial. The typed
-/// product surfaces (field tokens, update_field, patch builders) hang
-/// off this; sums reach the same wire through their match-refined
-/// per-variant handles instead.
+/// stable indexes. The typed product surfaces hang off this; sums reach
+/// the same wire through their match-refined per-variant handles.
 pub trait KayaRecord: KayaSum {
     const SCHEMA: &'static [ValueType];
     fn from_values(values: &[Value]) -> Self {
@@ -303,13 +283,11 @@ pub trait KayaRecord: KayaSum {
 }
 
 /// The template eliminator for a sum `T`: a record of arms, one per
-/// constructor, generated by the derive (`PostCases { note: ..,
-/// todo: .. }`). The struct literal is the totality check — a missing
-/// arm is a missing field, at compile time — and each arm's returned
-/// handles ride out in the matching field of `Out`. Declaring an arm
-/// as `|_| {}` is the explicit way to render a constructor as
-/// nothing. (The scene re-checks totality at declaration for the
-/// bindings whose languages cannot.)
+/// constructor, generated by the derive. The struct literal is the
+/// totality check — a missing arm is a missing field, at compile time —
+/// and each arm's returned handles ride out in the matching field of
+/// `Out`. An arm spelled `|_| {}` renders that constructor as nothing.
+/// (The scene re-checks totality for the languages that cannot.)
 pub trait KayaCases<T: KayaSum> {
     type Out;
     #[doc(hidden)]
@@ -360,9 +338,8 @@ impl<T: KayaPatch> Collection<T> {
 }
 
 /// One instance of a collection: the table inside the stamped copy
-/// selected by `path` (the empty path for a live-zone collection).
-/// Entries keep insertion order, matching the core's rendering; values
-/// are wire-shaped records, parsed to the element type on read.
+/// selected by `path` (empty for a live-zone collection). Entries keep
+/// insertion order, matching the core's rendering.
 #[derive(Clone, Debug)]
 struct Instance {
     path: Vec<Value>,
@@ -376,8 +353,6 @@ struct Instance {
 /// plus the key path selecting one stamped copy's table.
 /// `tx.collection::<T>()` returns the root (empty-path, live-zone)
 /// handle; `at(key)` steps into a copy, one key per enclosing For.
-/// Mutations and reads take the handle, so the target is spelled once
-/// and record/handle agreement is a type, not a convention.
 #[derive(Debug)]
 pub struct Collection<T: KayaSum = String> {
     id: CollectionId,
@@ -398,14 +373,12 @@ impl<T: KayaSum> Clone for Collection<T> {
 }
 
 impl<T: KayaSum> Collection<T> {
-    /// The for-statement form: `for mut row in todos.rows(&mut tx)`
-    /// traces the record template — the body runs once, and the row's
-    /// Drop closes the template (break- and panic-safe).
+    /// The for-statement form: `for mut row in todos.rows(&mut tx)` traces
+    /// the record template — the body runs once, and the row's Drop closes
+    /// the template (break- and panic-safe).
     ///
-    /// The argument is the zone the For is declared in ([`ForScope`]),
-    /// so a nested For is the same statement one level in:
-    /// `groups.rows(tx)` in the live tree, `items.rows(t)` inside
-    /// another template's body.
+    /// The argument is the zone the For is declared in ([`ForScope`]), so
+    /// a nested For is the same statement one level in.
     pub fn rows<'t, 'b, S: ForScope<'b>>(&self, scope: &'t mut S) -> Rows<'t, 'b> {
         assert_root(self);
         Rows {
@@ -416,10 +389,8 @@ impl<T: KayaSum> Collection<T> {
     }
 
     /// A signal the binding recomputes from this collection's entries
-    /// after every mutation, written into the same transaction — the
-    /// items-left label without any handler remembering to update it.
-    /// The closure is pure presentation: entries in, one value out;
-    /// the core sees an ordinary signal.
+    /// after every mutation, written into the same transaction. The
+    /// closure is pure presentation; the core sees an ordinary signal.
     pub fn derive<V: Into<Value>>(
         &self,
         tx: &mut Tx<'_>,
@@ -482,19 +453,15 @@ struct Derived {
     compute: std::sync::Arc<dyn Fn(&[(Value, u32, Record)]) -> Value + Send + Sync>,
 }
 
-/// One unit of posted work: a closure that will be handed a fresh
-/// transaction on the app thread. `Send` because it crosses a thread
-/// boundary to get here; the `Tx` it receives is made where it is used
-/// and never crosses anything.
+/// One unit of posted work. `Send` because it crosses a thread boundary
+/// to get here; the `Tx` it receives is made where it is used.
 type PostedFn = Box<dyn for<'a, 'b> FnOnce(&'a mut Tx<'b>) -> () + Send>;
 
 /// A handle for running work on the app thread from anywhere else.
 ///
 /// Obtained with [`AppCtx::poster`], cheap to clone, and safe to send
-/// wherever the work is: a spawned thread, a rayon job, a task inside
-/// whatever async runtime the guest chose. kaya has no runtime of its
-/// own and does not need one — a plain `Send + Sync` handle is callable
-/// from all of them.
+/// wherever the work is. kaya has no runtime of its own and does not need
+/// one — a plain `Send + Sync` handle is callable from all of them.
 ///
 /// ```no_run
 /// # fn slow_read() -> String { String::new() }
@@ -519,15 +486,50 @@ impl Poster {
     ///
     /// The app thread runs it after whatever it is doing now, so posting
     /// from inside a handler queues for after and never nests. Posts run
-    /// in the order they were made.
-    ///
-    /// After the app thread has shut down this is a no-op: the queue
-    /// still accepts the closure, and nothing is left to run it.
+    /// in the order they were made. After shutdown this is a no-op.
     pub fn post(&self, body: impl for<'a, 'b> FnOnce(&'a mut Tx<'b>) + Send + 'static) {
         self.queue.lock().unwrap().push(Box::new(body));
         // The app thread is parked in recv(); posted work is not an
         // occurrence, so this is the only way it hears about it.
         let _ = self.wake.send(Inbox::Woken);
+    }
+}
+
+/// WHAT THIS HOST CAN DO — the canonical note for all eight bindings.
+///
+/// A handful of things in kaya's one surface are not everywhere: a
+/// phone's system owns surface geometry, so there is no second window to
+/// open there. A guest that needs to know asks HERE rather than reading
+/// its own platform predicate — a guest's `#[cfg(target_os)]` is a SECOND
+/// copy of a rule the core already holds, keyed on the platform rather
+/// than on the capability, and the two drift in silence.
+///
+/// NAMED BOOLEANS, NEVER THE BITS. A bit test spelled by hand is the same
+/// number written twice, in eight languages, against a core that is free
+/// to renumber.
+///
+/// CAPABILITIES INFORM; WALLS REFUSE. Reading `false` here is not what
+/// makes a call illegal — the core's wall does that
+/// (crates/kaya/src/scene.rs's `CreateWindow` arm). This lets a guest ask
+/// BEFORE it walks into it.
+///
+/// Constant for the life of the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Capabilities {
+    /// The host can materialize a surface beside the primary one:
+    /// [`Tx::create_window`] and mounting a root into it. Clear on iOS
+    /// and Android, where `create_window` aborts at the root.
+    pub aux_windows: bool,
+}
+
+/// This host's capabilities. See [`Capabilities`].
+pub fn capabilities() -> Capabilities {
+    // Through the C export the other seven bindings call, deliberately:
+    // one door, so a break in it is a break for everyone rather than for
+    // everyone else.
+    let bits = crate::capi::kaya_capabilities();
+    Capabilities {
+        aux_windows: bits & crate::capi::KAYA_CAP_AUX_WINDOWS != 0,
     }
 }
 
@@ -556,12 +558,10 @@ pub struct AppCtx {
     children: RefCell<HashMap<CollectionId, Vec<CollectionId>>>,
     open_fors: RefCell<Vec<CollectionId>>,
     derived: RefCell<HashMap<CollectionId, Vec<Derived>>>,
-    // The minter's counters: the highest I64 key each collection
-    // INSTANCE has minted or absorbed. Keyed by path the way the model
-    // is (a Vec<Value> is not hashable — Value carries an f64), and
-    // NOT part of the transaction journal: a minted key is spent even
-    // if the transaction that spent it is abandoned, so an id can
-    // never be handed out twice.
+    // The minter's counters: the highest I64 key each collection INSTANCE
+    // has minted or absorbed. NOT part of the transaction journal — a
+    // minted key is spent even if the transaction that spent it is
+    // abandoned, so an id can never be handed out twice.
     fresh: RefCell<HashMap<CollectionId, Vec<(Vec<Value>, i64)>>>,
 }
 
@@ -605,16 +605,14 @@ impl AppCtx {
                 Ok(Inbox::Woken) => continue,
                 Ok(Inbox::Occ(occ)) => {
                     // Taken off the transport (crate::stall). HERE and
-                    // not after the handler: a long handler is work, a
+                    // not after the handler: a long handler is work, and a
                     // handler that never returns shows up as the NEXT
                     // occurrence going unclaimed.
                     crate::stall::taken();
                     // An undo moved core state without a transaction, so
-                    // the model mirror has to follow or every read-back
-                    // is stale. HERE, at the ONE place both the raw loop
-                    // and Messages::next take their occurrences from —
-                    // doing it in Messages alone would leave the floor
-                    // wrong, and the floor is the documented fallback.
+                    // the model mirror has to follow. HERE, at the ONE
+                    // place both the raw loop and Messages::next take
+                    // their occurrences from.
                     match &occ {
                         Occurrence::Undone { delta, .. } | Occurrence::Redone { delta, .. } => {
                             self.absorb_undo(delta)
@@ -631,35 +629,20 @@ impl AppCtx {
     /// Fold an undo's payload into the collection mirror.
     ///
     /// The rollback journal in reverse: `Tx`'s Drop restores a snapshot
-    /// because nothing was shipped, while an undo restores a delta
-    /// because everything WAS — the core already moved, and the mirror
-    /// is what would otherwise be left behind. Same machinery, opposite
-    /// case, and the payload is core-authoritative so nothing here
+    /// because nothing was shipped, while an undo restores a delta because
+    /// everything WAS. The payload is core-authoritative, so nothing here
     /// re-derives anything.
     ///
-    /// Signals and text are not mirrored by this binding (there is no
-    /// read-back for either, by doctrine), so the two runs that carry
-    /// them pass straight to the app's own handler.
+    /// Signals and text are not mirrored by this binding (no read-back for
+    /// either, by doctrine), so those two runs pass straight to the app.
     ///
-    /// NO DERIVED RECOMPUTE HERE, DELIBERATELY — and the absence is the
-    /// design, not an omission. A derived signal's write rode the SAME
-    /// transaction as the mutation that caused it (`Tx::recompute_derived`
-    /// pushes an ordinary `WriteSignal` after each of the six mutation
-    /// paths), so when that transaction was a named step the group
-    /// banked the derived value in both of its directions and the core
-    /// has already restored it by the time this runs. The type system
-    /// says the same thing: recomputing is a `Tx` method and there is no
-    /// `Tx` here.
-    ///
-    /// A recompute added here would write a value the ledger never
-    /// banked, in a transaction the app never asked for, arriving
-    /// between the core's restore and the app's own `on_undone`. When it
-    /// agreed with the banked value it would be dead code hiding the
-    /// mechanism; when it disagreed — a compute that reads anything
-    /// beyond the entries, or a derive declared after that step was
-    /// banked (docs/deferred.md's one residual) — the screen and the
-    /// ledger's record of the step would drift apart, and the next walk
-    /// through the history would jump back to the banked value.
+    /// NO DERIVED RECOMPUTE HERE, DELIBERATELY. A derived signal's write
+    /// rode the SAME transaction as the mutation that caused it, so a
+    /// named step banked the derived value in both directions and the core
+    /// has already restored it. A recompute added here would write a value
+    /// the ledger never banked, arriving between the core's restore and
+    /// the app's own `on_undone`; where it disagreed, the screen and the
+    /// ledger would drift apart (docs/deferred.md's one residual).
     fn absorb_undo(&self, delta: &crate::protocol::UndoDelta) {
         let mut model = self.model.borrow_mut();
         for entry in &delta.entries {
@@ -696,9 +679,8 @@ impl AppCtx {
                 continue;
             };
             // Position by the payload's list, keeping anything the
-            // payload does not name at the end: the delta describes one
-            // instance's whole order, and an entry it never mentions is
-            // one this undo did not touch.
+            // payload does not name at the end: an entry it never mentions
+            // is one this undo did not touch.
             let mut sorted: Vec<(Value, u32, Record)> = Vec::with_capacity(instance.entries.len());
             for key in &order.keys {
                 if let Some(at) = instance.entries.iter().position(|(k, _, _)| k == key) {
@@ -710,8 +692,7 @@ impl AppCtx {
         }
     }
 
-    /// Run everything posted, each in its own transaction, in the order
-    /// it was posted.
+    /// Run everything posted, each in its own transaction, in order.
     ///
     /// The batch is taken and the lock released BEFORE any of it runs, so
     /// a closure that posts again lands in the NEXT batch. Holding the
@@ -727,12 +708,9 @@ impl AppCtx {
     /// A handle for reaching this app thread from another thread.
     ///
     /// `AppCtx` itself cannot travel: it holds `Cell`s and `RefCell`s, so
-    /// it is `!Sync`, so `&AppCtx` is not `Send`. That is deliberate and
-    /// worth keeping — making it shareable would not fix the danger, it
-    /// would legalize it, letting another thread mutate the model while a
-    /// transaction is open here. So the one safe operation gets its own
-    /// type instead, and the compiler checks the whole rule: `Tx` stays,
-    /// `AppCtx` stays, `Poster` travels.
+    /// it is `!Sync`. That is deliberate — making it shareable would not
+    /// fix the danger, it would legalize it, letting another thread mutate
+    /// the model while a transaction is open here.
     pub fn poster(&self) -> Poster {
         Poster {
             queue: Arc::clone(&self.posted),
@@ -741,14 +719,11 @@ impl AppCtx {
     }
 
     /// Start a transaction: a batch of records applied atomically when
-    /// committed. Ids are allocated here — a monotonic counter per space,
-    /// unique by construction.
-    /// Run `body` in a fresh transaction and commit it on return —
-    /// the closure-scoped form of begin/commit, and the body's result
-    /// comes back out (the way a build's handles reach the occurrence
-    /// loop). A panic inside the body abandons the transaction before
-    /// the unwind continues: commit is never reached, and Tx's Drop
-    /// rolls the model mirrors back.
+    /// committed. Ids are allocated here, a monotonic counter per space.
+    /// Run `body` in a fresh transaction and commit it on return; the
+    /// body's result comes back out. A panic inside the body abandons the
+    /// transaction before the unwind continues — commit is never reached,
+    /// and Tx's Drop rolls the model mirrors back.
     pub fn apply<R>(&self, body: impl FnOnce(&mut Tx<'_>) -> R) -> R {
         let mut tx = self.begin();
         let out = body(&mut tx);
@@ -779,10 +754,9 @@ impl AppCtx {
         AlertId(id)
     }
 
-    /// File dialogs share the alert counter: both are one-live-per-
-    /// process request ids that retire with their result, so a single
-    /// monotonic space keeps a stray id from ever naming the wrong kind
-    /// of request.
+    /// File dialogs share the alert counter: both are
+    /// one-live-per-process request ids that retire with their result, so
+    /// one monotonic space keeps a stray id from naming the wrong kind.
     fn alloc_file_dialog(&self) -> crate::protocol::FileDialogId {
         let id = self.next_alert.get();
         self.next_alert.set(id + 1);
@@ -852,10 +826,9 @@ impl AppCtx {
         })
     }
 
-    /// An explicit key, shown to the minter on its way into the table.
-    /// A numeric key at or above the counter carries it up so the next
-    /// mint clears it; anything else moves nothing, having no way to
-    /// collide with an I64.
+    /// An explicit key, shown to the minter on its way into the table. A
+    /// numeric key at or above the counter carries it up; anything else
+    /// moves nothing, having no way to collide with an I64.
     fn absorb_key(&self, collection: CollectionId, path: &[Value], key: &Value) {
         let Value::I64(n) = *key else { return };
         self.with_counter(collection, path, |counter| *counter = (*counter).max(n));
@@ -895,13 +868,11 @@ impl Align {
 }
 
 /// A just-built widget: the chain handle every live-zone constructor
-/// returns. It reborrows the transaction, so it lives at most to the
-/// end of its statement — chain construction props on it
-/// (`tx.row(|tx| ...).grow(2.0).spacing(12.0)`) and end with
-/// [`Widget::id`] where the handle must outlive the chain (the borrow
-/// ends there; the compiler teaches the pattern — where Go and Java
-/// police a chain outside its build with a runtime panic, here it
-/// cannot compile). A container's body result rides along as `out`.
+/// returns. It reborrows the transaction, so it lives at most to the end
+/// of its statement — chain construction props on it and end with
+/// [`Widget::id`] where the handle must outlive the chain. Where Go and
+/// Java police a chain outside its build with a runtime panic, here it
+/// cannot compile. A container's body result rides along as `out`.
 pub struct Widget<'t, 'b, R = ()> {
     /// The container body's own result, threaded out unchanged.
     pub out: R,
@@ -925,10 +896,8 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     }
 
     /// This container's own padding — the chained spelling of
-    /// [`Tx::inset`], which remains the dynamic path. The window's
-    /// inset is [`WindowRef::inset`]; this is the same number one
-    /// level down, so a full-bleed window can still hold an inset
-    /// status row (the app that forced it: the editor).
+    /// [`Tx::inset`]. The window's inset is [`WindowRef::inset`]; this is
+    /// the same number one level down.
     pub fn inset(self, pad: f64) -> Self {
         self.tx.inset(self.id, pad);
         self
@@ -948,11 +917,9 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
-    /// What this widget accepts from a paste — the chained spelling of
-    /// [`Tx::accepts`], which remains the dynamic path.
-    ///
-    /// A SET, so a kind cannot be named twice: the root refuses a
-    /// duplicate rather than letting one silently win.
+    /// What this widget accepts from a paste. A SET, so a kind cannot be
+    /// named twice: the root refuses a duplicate rather than letting one
+    /// silently win.
     pub fn accepts(self, kinds: &[Accepts<'_>]) -> Self {
         let list: Vec<&str> = kinds.iter().map(|k| k.token()).collect();
         self.tx.accepts(self.id, &list.join(" "));
@@ -974,10 +941,8 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     }
 
     /// SEMANTIC EMPHASIS (docs/styling-plan.md D4): what this widget
-    /// MEANS — never how it looks. Destructive and prominent are button
-    /// emphasis, heading is label hierarchy, and the root refuses a
-    /// role on a kind it does not fit, at declare time, in one
-    /// sentence naming both sides.
+    /// MEANS, never how it looks. The root refuses a role on a kind it
+    /// does not fit, at declare time, naming both sides.
     pub fn role(self, role: crate::Role) -> Self {
         self.tx.set(self.id, Prop::Role, role as i64);
         self
@@ -1005,45 +970,29 @@ impl<R> From<Widget<'_, '_, R>> for WidgetId {
 
 /// An open asset: the bytes of one file the app's build put where the
 /// running program can find it, asked for by the same name on five
-/// platforms (docs/assets-plan.md, ratified 2026-08-18).
+/// platforms (docs/assets-plan.md).
 ///
 /// `tx.asset("fonts/sora-wght.ttf")` is the whole call. WHERE that name
-/// resolves is the core's knowledge and never the app's — a directory in
-/// a repo checkout, a `.app` bundle's Resources, an APK's packaged
-/// `assets/`, which is not a directory and has no path at all — and the
-/// rule plus its failure sentence live once, in
-/// [`crate::assets`](../assets/index.html). Before that module the same
-/// rule was hand-written eight times, once per guest language, each copy
-/// with its own environment variable and its own prose; one of the eight
-/// read `os.Getenv` from a c-shared library, where the environment is
-/// empty forever.
+/// resolves is the core's knowledge and never the app's, and the rule
+/// plus its failure sentence live once, in [`crate::assets`].
 ///
 /// # Why Rust's asset is not a handle
 ///
 /// The other seven bindings hold a `u64` from `kaya_asset_open` and have
-/// to release it, because their bytes live on the far side of a C ABI
-/// and nothing over there knows when a guest is done. Rust IS the core:
-/// this type holds the `Arc<[u8]>` itself, so the release is the `Arc`'s
-/// and a `Drop` impl would have nothing to do that dropping the field
-/// does not already do. The observable semantics are the ones every
-/// binding has — the bytes stay readable for exactly as long as the
-/// guest holds the asset — and per invariant 1 that, not the spelling,
-/// is what has to match.
+/// to release it. Rust IS the core: this type holds the `Arc<[u8]>`, so
+/// the release is the `Arc`'s. The observable semantics are the ones
+/// every binding has — the bytes stay readable for exactly as long as the
+/// guest holds the asset — and per invariant 1 that is what has to match.
 ///
-/// # Two redemptions, and the first is the interesting one
+/// # Two redemptions
 ///
 /// - **Hand it to kaya.** [`Tx::brand_typeface_with`] and
 ///   [`Tx::app_identity`] take a [`BlobSource`], and an `Asset`'s impl
-///   clones the `Arc`: a refcount bump, and not one copy of a hundred
-///   kilobytes of font between the file and the platform's font API.
-/// - **Read it yourself.** [`Asset::bytes`] and [`Asset::reader`], for
-///   an asset the app is itself the consumer of — a licence text, a seed
-///   document, anything kaya has no opinion about.
+///   clones the `Arc`: a refcount bump, not a copy.
+/// - **Read it yourself.** [`Asset::bytes`] and [`Asset::reader`].
 ///
-/// Reading is READ-ONLY structurally: there is no mode argument
-/// anywhere on this surface, so the bug class `tools/check-file-modes.sh`
-/// exists to police — five hand-written sites decoding one integer
-/// differently — cannot occur here at all.
+/// Reading is READ-ONLY structurally: no mode argument anywhere on this
+/// surface, so `tools/check-file-modes.sh`'s bug class cannot occur.
 pub struct Asset {
     bytes: Arc<[u8]>,
 }
@@ -1051,27 +1000,23 @@ pub struct Asset {
 impl Asset {
     /// The asset's bytes.
     ///
-    /// A BORROW RATHER THAN A COPY, which is where Rust's spelling
-    /// parts company with the other seven: they copy out of core memory
-    /// because their bytes are behind a C pointer that a release
-    /// invalidates, and this one is the core's own allocation with the
-    /// borrow checker keeping it alive. Same bytes, no copy, and
-    /// [`Asset::reader`] is there for the caller who wants an owned one.
+    /// A BORROW RATHER THAN A COPY, which is where Rust's spelling parts
+    /// company with the other seven: theirs are behind a C pointer that a
+    /// release invalidates, this one is the core's own allocation with the
+    /// borrow checker keeping it alive. [`Asset::reader`] is there for the
+    /// caller who wants an owned one.
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
 
-    /// The asset as something `std::io::Read` + `Seek`, for a parser
-    /// that wants a stream rather than a slice.
+    /// The asset as something `std::io::Read` + `Seek`, for a parser that
+    /// wants a stream rather than a slice.
     ///
     /// FILE-LIKE READING IS BINDING-SIDE SUGAR, with zero core surface
-    /// (docs/assets-plan.md, "The ruling, plainly"): each language wraps
-    /// the bytes in its own standard in-memory reader — `BytesIO`,
-    /// `bytes.NewReader`, `MemoryStream`, and here `io::Cursor`. There
-    /// is no file descriptor anywhere in the asset surface. A descriptor
-    /// was `PickedFile`'s necessity, because a provider-opened file has
-    /// no path behind it; kaya resolved this name and produced these
-    /// bytes itself, so nothing here needs one.
+    /// (docs/assets-plan.md): each language wraps the bytes in its own
+    /// standard in-memory reader. There is no file descriptor anywhere in
+    /// the asset surface — that was `PickedFile`'s necessity, and kaya
+    /// produced these bytes itself.
     pub fn reader(&self) -> std::io::Cursor<Vec<u8>> {
         std::io::Cursor::new(self.bytes.to_vec())
     }
@@ -1081,12 +1026,10 @@ impl Asset {
         self.bytes.len()
     }
 
-    /// Whether the asset has no bytes — which it never does. The core
-    /// refuses a zero-byte asset at the open (assets.rs's wall 2: an
-    /// empty blob sails through every lowering and is indistinguishable
-    /// from a default), so this answers `false` for every asset that
-    /// exists. It is here because it MEASURES that rather than asserting
-    /// it, and because a `len` without an `is_empty` is a lint.
+    /// Whether the asset has no bytes — which it never does: the core
+    /// refuses a zero-byte asset at the open (assets.rs's wall 2). It is
+    /// here because it MEASURES that rather than asserting it, and because
+    /// a `len` without an `is_empty` is a lint.
     pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
@@ -1101,10 +1044,8 @@ impl std::ops::Deref for Asset {
 }
 
 impl std::fmt::Debug for Asset {
-    /// The byte count, never the bytes: an asset is a font or a picture,
-    /// and a `{:?}` that dumped one would turn a one-line assertion
-    /// failure into a hundred-kilobyte diff. The `Blob` type upstream
-    /// makes the same choice for the same reason.
+    /// The byte count, never the bytes: a `{:?}` that dumped a font would
+    /// turn a one-line assertion failure into a hundred-kilobyte diff.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Asset({} bytes)", self.bytes.len())
     }
@@ -1113,25 +1054,19 @@ impl std::fmt::Debug for Asset {
 /// What can become a blob on the wire: bytes the app computed, or an
 /// [`Asset`] the core read.
 ///
-/// ONE ARGUMENT TYPE RATHER THAN TWO FUNCTIONS. Every binding has to
-/// admit both spellings — invariant 1 says the semantics are one and the
-/// spelling is the language's — and each language pays for it in its own
-/// coin: C# overloads `BrandTypeface`, Go names a sibling `FontAsset`
-/// beside `FontBytes`, and Rust, which has neither overloading nor a
-/// second name it would want, takes the trait object. `Some(&font)`
+/// ONE ARGUMENT TYPE RATHER THAN TWO FUNCTIONS. Every binding admits both
+/// spellings and each pays for it in its own coin — C# overloads, Go
+/// names a sibling — while Rust takes the trait object, so `Some(&font)`
 /// reads identically whether `font` is a `Vec<u8>` or an `Asset`.
 ///
-/// The impls differ in exactly one way, and that difference is the whole
-/// point of the asset route: the byte spellings COPY into a fresh `Arc`
-/// (they must — the caller owns those bytes and may edit them after this
-/// call returns), while `Asset` CLONES the `Arc` it is already holding.
-/// A font read by the core reaches the platform's font API without being
-/// copied a second time.
+/// The impls differ in exactly one way, and that difference is the point
+/// of the asset route: the byte spellings COPY into a fresh `Arc` (they
+/// must — the caller owns those bytes and may edit them after this call
+/// returns), while `Asset` CLONES the `Arc` it already holds.
 pub trait BlobSource {
-    /// The bytes this source contributes to the transaction's blob
-    /// table. `Arc<[u8]>` rather than the protocol's own `Blob` because
-    /// that type is crate-private and this trait is not; the wire's
-    /// wrapper is one `From` away on the other side of the call.
+    /// The bytes this source contributes to the transaction's blob table.
+    /// `Arc<[u8]>` rather than the protocol's `Blob` because that type is
+    /// crate-private and this trait is not.
     fn blob_bytes(&self) -> Arc<[u8]>;
 }
 
@@ -1142,10 +1077,8 @@ impl BlobSource for [u8] {
 }
 
 /// The owned byte spelling, alongside `[u8]`'s, because `&some_vec` does
-/// NOT reach `&dyn BlobSource` on its own: Rust will deref-coerce a
-/// `&Vec<u8>` to a `&[u8]` and it will unsize a `&[u8]` to a trait
-/// object, but it does not chain the two, and every guest that computes
-/// bytes is holding a `Vec`.
+/// NOT reach `&dyn BlobSource` on its own: Rust will deref-coerce and it
+/// will unsize, but it does not chain the two.
 impl BlobSource for Vec<u8> {
     fn blob_bytes(&self) -> Arc<[u8]> {
         Arc::from(&self[..])
@@ -1160,23 +1093,20 @@ impl BlobSource for Asset {
 
 /// A transaction under construction. Everything queues locally; commit
 /// sends the batch and rings the doorbell once. Dropping a Tx without
-/// committing abandons its records — and rolls the model back with
-/// them, so reads never show writes that were never sent.
+/// committing abandons its records — and rolls the model back with them,
+/// so reads never show writes that were never sent.
 ///
 /// # A `Tx` never leaves the app thread
 ///
-/// It borrows [`AppCtx`], which holds `Cell`s and `RefCell`s and is
-/// therefore `!Sync`, so `Tx` is `!Send` and the compiler refuses to
-/// move one onto another thread. That is the whole rule for background
-/// work: a guest may post a closure to the app thread and mutate from
-/// inside it, and may capture ids on the way, but the transaction
-/// itself stays put.
+/// It borrows [`AppCtx`], which is `!Sync`, so `Tx` is `!Send` and the
+/// compiler refuses to move one onto another thread. A guest may post a
+/// closure to the app thread and capture ids on the way, but the
+/// transaction itself stays put.
 ///
 /// NOBODY DESIGNED THIS — it fell out of the interior mutability above,
-/// and an innocent refactor (swapping a `Cell` for an atomic, say)
-/// would delete the guard in silence. So it is pinned here. Go and
-/// Java police the same rule with a runtime panic because they cannot
-/// do this; the semantics are one, the spelling is per language.
+/// and an innocent refactor (swapping a `Cell` for an atomic, say) would
+/// delete the guard in silence. So it is pinned here. Go and Java police
+/// the same rule with a runtime panic.
 ///
 /// ```compile_fail
 /// fn assert_send<T: Send>() {}
@@ -1194,8 +1124,8 @@ impl BlobSource for Asset {
 /// ```
 ///
 /// Note the failing case says `Tx<'static>`: with a shorter lifetime it
-/// would also fail the `'static` bound of anything like
-/// `thread::spawn`, and then the test would pass for the wrong reason.
+/// would also fail the `'static` bound of anything like `thread::spawn`,
+/// and the test would pass for the wrong reason.
 pub struct Tx<'a> {
     ctx: &'a AppCtx,
     ops: Vec<TxOp>,
@@ -1208,9 +1138,8 @@ pub struct Tx<'a> {
     pending_derived: Vec<(CollectionId, Derived)>,
     // The ambient parent stack: containers push their id around their
     // body, constructors parent to the top, and 0 is the template-root
-    // sentinel (template bodies root themselves; a cross-zone
-    // add_child is structurally impossible). No ambient statics — the
-    // &mut Tx threading is the ambience, the egui shape.
+    // sentinel. No ambient statics — the &mut Tx threading is the
+    // ambience.
     parents: Vec<u64>,
     committed: bool,
 }
@@ -1289,10 +1218,10 @@ impl<'a> Tx<'a> {
         record[field as usize] = value.clone();
     }
 
-    /// Recompute every derived signal rooted at this collection and
-    /// write each into this transaction. Runs after each mutation of
-    /// the live-zone instance (deriveds are declared on root handles,
-    /// so nested-instance mutations cannot change their input).
+    /// Recompute every derived signal rooted at this collection. Runs
+    /// after each mutation of the LIVE-ZONE instance: deriveds are
+    /// declared on root handles, so nested-instance mutations cannot
+    /// change their input.
     fn recompute_derived(&mut self, collection: CollectionId) {
         let entries: Vec<(Value, u32, Record)> = self
             .ctx
@@ -1359,16 +1288,13 @@ impl<'a> Tx<'a> {
     }
 
     /// The model: what this guest wrote, exactly — the fold of every
-    /// committed patch plus this transaction's own, in insertion order,
-    /// parsed to the element type on the way out.
+    /// committed patch plus this transaction's own, in insertion order.
     ///
     /// Reads are transaction-scoped, and the borrow checker is the
     /// record-time mirror-read guard: a template body cannot read the
-    /// model, because `for_each` holds the transaction exclusively for
-    /// the body's extent — the template records once and replays, so a
-    /// read would bake today's value into the blueprint as silently
-    /// dead data. Bind a signal, use the element's field, or `derive`
-    /// for computed values. This is a compile error, pinned here:
+    /// model, because the template records once and replays, so a read
+    /// would bake today's value into the blueprint as silently dead data.
+    /// Bind a signal, use the element's field, or `derive`. Pinned here:
     ///
     /// ```compile_fail
     /// fn zone_rule(tx: &mut kaya::Tx<'_>, todos: &kaya::Collection<String>) {
@@ -1378,8 +1304,8 @@ impl<'a> Tx<'a> {
     /// }
     /// ```
     ///
-    /// The for-statement tracer holds the same wall — a `Row` borrows
-    /// the transaction for as long as it lives:
+    /// The for-statement tracer holds the same wall — a `Row` borrows the
+    /// transaction for as long as it lives:
     ///
     /// ```compile_fail
     /// fn zone_rule(tx: &mut kaya::Tx<'_>, todos: &kaya::Collection<String>) {
@@ -1415,25 +1341,19 @@ impl<'a> Tx<'a> {
 
     /// Make this transaction ONE undoable step, under `label`.
     ///
-    /// The unit of undo is a NAMED GROUP declared at the opener, not
-    /// every transaction: handlers fire per-gesture transactions
-    /// constantly and most of them are consequences rather than intents,
-    /// and a per-keystroke editor would earn one step per character —
-    /// the exact problem grouping exists to solve. So a group is opt-in,
-    /// which is also what keeps a collaborative app free to own its own
-    /// history (docs/undo-plan.md D2, D8).
+    /// The unit of undo is a NAMED GROUP declared at the opener, not every
+    /// transaction: handlers fire per-gesture transactions constantly and
+    /// most of them are consequences rather than intents, and a
+    /// per-keystroke editor would earn one step per character
+    /// (docs/undo-plan.md D2, D8).
     ///
     /// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at the
     /// head: a handler naturally builds first and names the step when it
-    /// knows what the step was, and the wire's head-of-batch rule should
-    /// not turn that into a footgun.
+    /// knows what the step was.
     ///
     /// WHAT A GROUP MAY HOLD is the reactive half — signal writes and
-    /// collection deltas, whose inverse the core derives from state it
-    /// already keeps. Focus is permitted and not restored. Anything else
-    /// (a const property write, creating a widget, showing a dialog)
-    /// fails at apply, naming the op: undo restores state, and state is
-    /// signals plus collections. The app hears the result as
+    /// collection deltas. Focus is permitted and not restored. Anything
+    /// else fails at apply, naming the op. The app hears the result as
     /// [`Messages::on_undone`].
     pub fn undoable(&mut self, label: impl Into<String>) {
         self.undoable_in(crate::protocol::DEFAULT_WINDOW, label);
@@ -1517,25 +1437,21 @@ impl<'a> Tx<'a> {
         });
     }
 
-    /// The primary surface's title. Uniform semantics, per-platform
-    /// materialization: the title bar on the desktops, the app
-    /// Create an auxiliary window (capability-gated: a phone host
-    /// rejects it at the root). Materializes hidden; mounting a root
-    /// presents it. Returns a proxy for its props:
+    /// Create an auxiliary window (capability-gated: a phone host rejects
+    /// it at the root). Materializes hidden; mounting a root presents it.
+    /// Returns a proxy for its props:
     /// `tx.create_window(WindowId(1)).title("inspector").size(480.0, 320.0)`.
     pub fn create_window(&mut self, window: WindowId) -> WindowRef<'_, 'a> {
         self.ops.push(TxOp::CreateWindow { window });
         WindowRef { tx: self, window }
     }
 
-    /// The prop proxy for an existing window (0 = the primary).
-    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2):
-    /// one hex is the whole call for most apps; the per-appearance
-    /// overrides exist for a brand book that specifies a dark variant.
-    /// Set ONCE, before the first mount — the root refuses a second or
-    /// late write. The app never writes a foreground and never writes
-    /// contrast variants: the core derives both, and a platform may
-    /// let its user override the accent (macOS does).
+    /// REQUEST the app's brand accent (docs/styling-plan.md D1/D2): one
+    /// hex is the whole call; the per-appearance overrides exist for a
+    /// brand book that specifies a dark variant. Set ONCE, before the
+    /// first mount — the root refuses a second or late write. The app
+    /// never writes a foreground and never writes contrast variants: the
+    /// core derives both.
     pub fn brand_accent(&mut self, seed: u32) {
         self.ops.push(TxOp::SetBrandAccent { seed, light: None, dark: None });
     }
@@ -1547,37 +1463,22 @@ impl<'a> Tx<'a> {
     }
 
     /// Open an [`Asset`] — a file the app's own BUILD shipped beside it,
-    /// named by a relative path under the asset root
-    /// (`tx.asset("fonts/sora-wght.ttf")`).
+    /// named by a relative path under the asset root.
     ///
-    /// TAKES `&self` DELIBERATELY. Opening an asset queues no op and
-    /// touches no model, so it does not need the exclusive borrow, and
-    /// with a shared one `tx.brand_typeface_with("Sora", &[],
-    /// Some(&tx.asset(name)))` compiles. That the reservation borrow
-    /// makes it legal is a nicety; the honest reason is that a method
-    /// which mutates nothing should not say it does.
+    /// TAKES `&self` DELIBERATELY: opening an asset queues no op and
+    /// touches no model, so `tx.brand_typeface_with("Sora", &[],
+    /// Some(&tx.asset(name)))` compiles.
     ///
     /// # A miss panics, with the core's sentence and nothing added
     ///
     /// A missing, unreadable, empty or malformed-name asset is a scene
-    /// error in every binding — the wall an app hits at startup, before
-    /// it can have drawn anything — and each raises in its own idiom:
-    /// `RuntimeError` in Python, `InvalidOperationException` in C#, a
-    /// panic here. What every one of them carries is
-    /// [`crate::assets::asset_why_not`]'s sentence VERBATIM. THE
-    /// BINDING WRITES NO PROSE OF ITS OWN, and that is a rule rather
-    /// than a habit: there is one author for that diagnostic, so the
-    /// words a Haskell guest is handed and the words a Rust guest is
-    /// handed are the same bytes and one scene can freeze them.
+    /// error in every binding, and each raises in its own idiom carrying
+    /// [`crate::assets::asset_why_not`]'s sentence VERBATIM. THE BINDING
+    /// WRITES NO PROSE OF ITS OWN: one author for that diagnostic, so one
+    /// scene can freeze the words every guest is handed.
     ///
-    /// The sentence names what the process measured — the name asked
-    /// for, the census of what the package actually carries, the place
-    /// that census came from and the route that chose it — because a
-    /// why-not may only print what it went and got (invariant 3).
-    ///
-    /// This is the one call in the Rust surface that reads the
-    /// filesystem, and it reads on EVERY call: no cache, no watch, no
-    /// reload (assets.rs's wall 4).
+    /// This is the one call in the Rust surface that reads the filesystem,
+    /// and it reads on EVERY call: no cache, no watch, no reload.
     pub fn asset(&self, name: &str) -> Asset {
         match crate::assets::read(name) {
             Ok(bytes) => Asset { bytes: Arc::from(bytes) },
@@ -1589,48 +1490,26 @@ impl<'a> Tx<'a> {
 
     /// Why [`Tx::asset`] would fail for this name — the sentence it
     /// would raise, handed over without raising. `""` means it resolves.
+    /// Two lines: line 1 (name, rule, census) is the same on every
+    /// platform and is the one a scene freezes; line 2 names the
+    /// resolved place, which three platforms spell three ways.
     ///
-    /// # Why this exists at all, when the raise already carries it
-    ///
-    /// Because UNWINDING IS NOT ONE SEMANTICS IN NINE LANGUAGES and a
-    /// scene has to observe the sentence on five platforms. Seven
-    /// bindings raise something a guest can catch; Swift's is
-    /// `fatalError`, which traps rather than unwinding, so a Swift guest
-    /// cannot recover from a miss (docs/deferred.md carries that as a
-    /// maintainer question about invariant 1). A total query has no such
-    /// split: every binding answers the same string in the same way, and
-    /// `tools/scenes/assets.steps` freezes it.
-    ///
-    /// It is the SAME sentence, not a second one — this call and the
-    /// raise both return
-    /// [`crate::assets::asset_why_not`]'s bytes, so what a scene freezes
-    /// is what an app's user would have been shown.
-    ///
-    /// TWO LINES: the first is the name, the rule it broke and the
-    /// census of what the package carries, and it is the same on every
-    /// platform. The second names the resolved place and the route that
-    /// chose it, which a bundle, a device directory and a repo checkout
-    /// spell three different ways — a cross-platform expectation freezes
-    /// the first line and prints the second when it fails.
-    ///
-    /// This measures; it does not predict. `asset` reads on every call
-    /// (assets.rs's wall 4), so an answer of `""` here is a fact about
-    /// the moment it was asked.
+    /// Why a query and not just the raise: docs/deferred.md, the assets
+    /// entry. It measures rather than predicts — `asset` reads on every
+    /// call — so `""` is a fact about the moment it was asked.
     pub fn asset_miss_sentence(&self, name: &str) -> String {
         crate::assets::asset_why_not(name)
     }
 
     /// REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b):
-    /// one family name is the whole call, and every platform that has
-    /// that family installed uses it. THE FAMILY, NEVER THE SCALE —
-    /// sizes, weights and the whole type ramp stay the platform's.
-    /// Set ONCE, before the first mount, the accent's wall verbatim.
+    /// one family name is the whole call. THE FAMILY, NEVER THE SCALE —
+    /// sizes, weights and the whole type ramp stay the platform's. Set
+    /// ONCE, before the first mount, the accent's wall verbatim.
     ///
     /// A family a platform does not have leaves that platform's own
-    /// typeface in place, deliberately and silently: every font API
-    /// renders SOMETHING for a name it cannot match, so the lowerings
-    /// gate on the family being installed rather than letting the
-    /// platform pick a stranger.
+    /// typeface in place, deliberately: every font API renders SOMETHING
+    /// for a name it cannot match, so the lowerings gate on the family
+    /// being installed rather than letting the platform pick a stranger.
     pub fn brand_typeface(&mut self, family: &str) {
         self.ops.push(TxOp::SetBrandTypeface(TypefaceRequest {
             family: family.to_string(),
@@ -1641,17 +1520,15 @@ impl<'a> Tx<'a> {
 
     /// The per-platform form, plus the font-FILE form: `family` is the
     /// default and `platforms` overrides it for the platforms that name
-    /// themselves — `&[(Platform::Linux, "DejaVu Serif")]` — while
-    /// `font` ships a font file whose bytes the backend registers with
-    /// its platform's app-font API, taking the family that registration
-    /// names in preference to any name above.
+    /// themselves, while `font` ships a font file whose bytes the backend
+    /// registers with its platform's app-font API, taking the family that
+    /// registration names in preference to any name above.
     ///
     /// THE PAIRS TRAVEL UNRESOLVED, unlike the accent's per-platform
-    /// values, and that asymmetry is the design: this binding cannot
-    /// know its platform, but every lowering IS one.
+    /// values: this binding cannot know its platform, but every lowering
+    /// IS one.
     ///
-    /// `font` is a [`BlobSource`], so both spellings fit and the second
-    /// is the one an app should reach for:
+    /// `font` is a [`BlobSource`], so both spellings fit:
     ///
     /// ```ignore
     /// let font = tx.asset("fonts/sora-wght.ttf");
@@ -1677,29 +1554,22 @@ impl<'a> Tx<'a> {
         }));
     }
 
-    /// DECLARE the app's identity (docs/app-identity-plan.md): the name
-    /// it goes by and the picture that stands for it, as the bytes of
-    /// one image file. Set ONCE, before the first mount — the brand's
-    /// wall verbatim, and for the brand's reason: identity is not state,
-    /// and a slot that could flip at runtime would promise a surface the
-    /// vocabulary deliberately does not have.
+    /// DECLARE the app's identity (docs/app-identity-plan.md): the name it
+    /// goes by and the picture that stands for it, as the bytes of one
+    /// image file. Set ONCE, before the first mount — the brand's wall
+    /// verbatim, and for the brand's reason: identity is not state.
     ///
     /// ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
-    /// tile, the Windows taskbar/alt-tab icon and the caption's mark, and
-    /// an X11 window's icon; the same FILE, read at build time, becomes
-    /// the Android launcher icon and the iOS Home Screen icon. Send a
-    /// PNG: each lowering converts, and no platform-specific artwork
-    /// rides the wire.
+    /// tile, the Windows taskbar icon and the caption's mark, and an X11
+    /// window's icon; the same FILE, read at build time, becomes the
+    /// Android launcher and iOS Home Screen icons. Send a PNG.
     ///
     /// THE BYTES ARE NEVER INSPECTED between here and the platform's own
-    /// decoder. Bytes that are not an image leave every platform's
-    /// default in place — which is why the identity scene reads what the
-    /// DECODER produced rather than echoing what was sent.
+    /// decoder — which is why the identity scene reads what the DECODER
+    /// produced rather than echoing what was sent.
     ///
-    /// `icon` is a [`BlobSource`]: `&tx.asset("icons/kaya-mark.png")`
-    /// for the mark the app's build shipped (no copy — the core read
-    /// those bytes and the same allocation reaches the platform), or a
-    /// `&Vec<u8>`/`&[u8]` for an app that computed its own.
+    /// `icon` is a [`BlobSource`]: `&tx.asset("icons/kaya-mark.png")` for
+    /// the mark the app's build shipped (no copy), or a `&Vec<u8>`.
     pub fn app_identity(&mut self, name: &str, icon: &dyn BlobSource) {
         self.ops.push(TxOp::SetAppIdentity(crate::protocol::AppIdentity {
             name: name.to_string(),
@@ -1707,11 +1577,8 @@ impl<'a> Tx<'a> {
         }));
     }
 
-    /// The NAME-ONLY form, for an app that has a name and no mark yet.
-    /// Its identity still reaches the surfaces a name reaches — the
-    /// Windows caption and taskbar tooltip, the macOS menu bar, the
-    /// Linux `app_id`, and the two phones' packaging — and every icon
-    /// surface keeps the platform's own default, honestly and visibly.
+    /// The NAME-ONLY form. Its identity still reaches the surfaces a name
+    /// reaches, and every icon surface keeps the platform's own default.
     pub fn app_identity_named(&mut self, name: &str) {
         self.ops.push(TxOp::SetAppIdentity(crate::protocol::AppIdentity {
             name: name.to_string(),
@@ -1730,12 +1597,10 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::DestroyWindow { window });
     }
 
-    /// Push a navigation entry onto the primary surface's stack
-    /// (entry ids are guest-allocated in the shared surface
-    /// namespace, the create_window discipline). Materializes
+    /// Push a navigation entry onto the primary surface's stack (entry ids
+    /// are guest-allocated in the shared surface namespace). Materializes
     /// covered/incoming; mounting a root into it presents it:
-    /// `let e = tx.push_entry(WindowId(7)).title("detail").id();
-    ///  tx.mount_in(e, root);`
+    /// `let e = tx.push_entry(WindowId(7)).title("detail").id();`
     pub fn push_entry(&mut self, entry: WindowId) -> EntryRef<'_, 'a> {
         self.push_entry_in(DEFAULT_WINDOW, entry)
     }
@@ -1768,13 +1633,10 @@ impl<'a> Tx<'a> {
         });
     }
 
-    /// Append a section to the primary surface's section set (section
-    /// ids are guest-allocated in the shared surface namespace). The
-    /// first added becomes selected; the set is append-only — this
-    /// grammar has no destruction verbs. Mounting a root into it
-    /// fills its pane:
-    /// `let s = tx.add_section(WindowId(7)).title("Feed").id();
-    ///  tx.mount_in(s, root);`
+    /// Append a section to the primary surface's section set (ids are
+    /// guest-allocated in the shared surface namespace). The first added
+    /// becomes selected; the set is append-only — this grammar has no
+    /// destruction verbs. Mounting a root into it fills its pane.
     pub fn add_section(&mut self, section: WindowId) -> SectionRef<'_, 'a> {
         self.add_section_in(DEFAULT_WINDOW, section)
     }
@@ -1810,19 +1672,15 @@ impl<'a> Tx<'a> {
         });
     }
 
-    /// Request a modal alert (the request/result grammar): a chain
-    /// that ends in [`AlertRef::show`], which sends the one atomic
-    /// record and returns the request's id —
-    /// `let a = tx.show_alert().title("delete item?").message("…")
-    ///     .action("Delete").action("Archive").cancel("Keep").show();
-    ///  msgs.on_alert(a, Msg::Answered);`
-    /// The id is binding-allocated (like widget ids): the result
-    /// handler is bound to the REQUEST, never to the app, so the
-    /// guest carries no correlation plumbing. Up to two actions (the
-    /// platform floor); the cancel label is required and explicit —
-    /// the slot every platform-native dismissal (Esc, back, outside
-    /// tap) resolves to. One alert may be live per process; show the
-    /// next from the first's result handler.
+    /// Request a modal alert (the request/result grammar): a chain ending
+    /// in [`AlertRef::show`], which sends the one atomic record and
+    /// returns the request's id.
+    ///
+    /// The id is binding-allocated: the result handler is bound to the
+    /// REQUEST, never to the app, so the guest carries no correlation
+    /// plumbing. Up to two actions (the platform floor); the cancel label
+    /// is required and explicit — the slot every platform-native
+    /// dismissal resolves to. One alert may be live per process.
     pub fn show_alert(&mut self) -> AlertRef<'_, 'a> {
         let alert = self.ctx.alloc_alert();
         AlertRef {
@@ -1839,11 +1697,9 @@ impl<'a> Tx<'a> {
     }
 
     /// Ask the platform for files. THE PICK, not the open — the result
-    /// carries handles you redeem later, so the name says `pick`
-    /// (DESIGN.md, File dialogs).
-    ///
-    /// One dialog may be live per process; show the next from the
-    /// first's result handler. Cancel arrives as an EMPTY list.
+    /// carries handles you redeem later (DESIGN.md, File dialogs). One
+    /// dialog may be live per process; show the next from the first's
+    /// result handler. Cancel arrives as an EMPTY list.
     pub fn pick_files(&mut self) -> FileDialogRef<'_, 'a> {
         let dialog = self.ctx.alloc_file_dialog();
         FileDialogRef {
@@ -1861,24 +1717,18 @@ impl<'a> Tx<'a> {
     /// representations as the app fills in.
     ///
     /// kaya DERIVES NOTHING between them: whether list bullets survive
-    /// html-to-text and where the line breaks go are rendering
-    /// decisions this app owns, and a bad auto-derivation degrades
-    /// every paste into a plain field silently. Offer both if both are
-    /// wanted. The one exception is a file list, which also gets the
-    /// platform's own text rendition of the paths — universal
-    /// convention, and no judgment in it.
+    /// html-to-text is a rendering decision this app owns, and a bad
+    /// auto-derivation degrades every paste silently. The one exception is
+    /// a file list, which also gets the platform's text rendition.
     pub fn copy(&mut self) -> CopyRef<'_, 'a> {
         CopyRef { tx: self, clip: crate::protocol::Clip::default() }
     }
 
-    /// Read the clipboard OUTSIDE any paste gesture — the privileged
-    /// one. A user's paste arrives at the widget's hook and costs
-    /// nothing; this asks without a gesture, which the platforms have
-    /// deliberately made expensive: iOS prompts for another app's
-    /// content, Android answers nothing without focus, Wayland delivers
-    /// no offer to an unfocused client. Reach for it when there IS no
-    /// paste — detect a URL, import from the clipboard — and not to
-    /// implement Paste.
+    /// Read the clipboard OUTSIDE any paste gesture — the privileged one.
+    /// The platforms have deliberately made it expensive: iOS prompts for
+    /// another app's content, Android answers nothing without focus,
+    /// Wayland delivers no offer to an unfocused client. Reach for it when
+    /// there IS no paste, not to implement Paste.
     pub fn read_clipboard(&mut self) -> ClipReadRef<'_, 'a> {
         let request = self.ctx.alloc_clip_read();
         ClipReadRef { tx: self, request, accepting: Vec::new() }
@@ -1893,22 +1743,17 @@ impl<'a> Tx<'a> {
         r
     }
 
-    /// Ask the platform WHERE TO SAVE. The picker's twin: a request that
-    /// answers once with a capability, on the same grammar, out of the
-    /// same one-live-dialog slot — [`Messages::on_saved`] binds the
-    /// handler, and cancel arrives as `None`.
+    /// Ask the platform WHERE TO SAVE. The picker's twin: one answer, one
+    /// grammar, the same one-live-dialog slot — [`Messages::on_saved`]
+    /// binds the handler and cancel arrives as `None`.
     ///
     /// `suggested_name` is the name the dialog OPENS with, and every
     /// platform treats it the way it treats a filter: it takes it, and
-    /// guarantees nothing. The user renames it; Android may append an
-    /// extension matching the mime type. Read the name you GOT.
+    /// guarantees nothing. Read the name you GOT.
     ///
-    /// WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist
-    /// yet (macOS, GTK and Windows answer with a name for a file nobody
-    /// has made — measured), so the handle's open CREATES: opening it for
-    /// [`FileMode::Write`] succeeds and yields an empty file on every
-    /// platform, which is the one behaviour a guest writes against
-    /// (docs/save-plan.md D1).
+    /// WHAT YOU GET BACK OPENS EMPTY: a save destination may not exist yet,
+    /// so the handle's open CREATES and [`FileMode::Write`] yields an empty
+    /// file on every platform (docs/save-plan.md D1).
     pub fn save_file(&mut self, suggested_name: impl Into<String>) -> SaveDialogRef<'_, 'a> {
         let dialog = self.ctx.alloc_file_dialog();
         SaveDialogRef {
@@ -1933,9 +1778,8 @@ impl<'a> Tx<'a> {
     }
 
     /// The primary surface's ADVISORY content-size request, in DIP:
-    /// honored where the window manager permits (the desktops,
-    /// outside tiling WMs), recorded only where the system owns
-    /// geometry (the phones). A request, never a guarantee — see
+    /// honored where the window manager permits, recorded only where the
+    /// system owns geometry. A request, never a guarantee — see
     pub fn bind(&mut self, widget: WidgetId, prop: Prop, signal: SignalId) {
         self.ops.push(TxOp::SetProperty {
             widget,
@@ -1948,27 +1792,21 @@ impl<'a> Tx<'a> {
         self.ops.push(TxOp::AddChild { parent, child });
     }
 
-    /// A child's flex-grow weight within its enclosing row/column: 0
-    /// (the default) is natural size; the positive-weight children
-    /// divide the leftover main-axis space in proportion to their
-    /// weights, ignoring their own natural sizes. Kind-agnostic — any
-    /// child may grow. See [`Prop::Grow`] for the full contract.
+    /// A child's flex-grow weight within its enclosing row/column: 0 (the
+    /// default) is natural size. Kind-agnostic. See [`Prop::Grow`] for the
+    /// full contract.
     pub fn grow(&mut self, widget: WidgetId, weight: f64) {
         self.set(widget, Prop::Grow, weight);
     }
 
-    /// A container's inter-child gap on its main axis, in
-    /// device-independent units (the normalized default is 8).
-    /// Containers only — the scene rejects it anywhere else. See
-    /// [`Prop::Spacing`].
+    /// A container's inter-child gap on its main axis, in DIP (default 8).
+    /// Containers only. See [`Prop::Spacing`].
     pub fn spacing(&mut self, widget: WidgetId, gap: f64) {
         self.set(widget, Prop::Spacing, gap);
     }
 
-    /// A container's own padding: DIP between its bounds and its
-    /// children, uniform on all four sides — the window inset one
-    /// level down (docs/styling-plan.md D3). Containers only. See
-    /// [`Prop::Inset`].
+    /// A container's own padding, uniform on all four sides. Containers
+    /// only. See [`Prop::Inset`].
     pub fn inset(&mut self, widget: WidgetId, pad: f64) {
         self.set(widget, Prop::Inset, pad);
     }
@@ -1980,66 +1818,54 @@ impl<'a> Tx<'a> {
         self.set(widget, Prop::Align, align.wire());
     }
 
-    /// This widget's accessibility IDENTIFIER: a stable authored key
-    /// that assistive tooling and UI automation both address it by, and
-    /// which is NEVER spoken. Universal — every kind carries one. See
+    /// This widget's accessibility IDENTIFIER: a stable authored key,
+    /// NEVER spoken. Universal — every kind carries one. See
     /// [`Prop::A11yId`].
     pub fn a11y_id(&mut self, widget: WidgetId, id: &str) {
         self.set(widget, Prop::A11yId, id);
     }
 
     /// WHAT THIS WIDGET ACCEPTS FROM A PASTE: the closed kinds by name
-    /// (`text`, `html`, `image`, `files`) and any custom format ids,
-    /// space separated. [`Widget::accepts`] is the chained spelling
-    /// and takes the kinds as values.
+    /// (`text`, `html`, `image`, `files`) and any custom format ids, space
+    /// separated. [`Widget::accepts`] is the chained spelling.
     ///
-    /// ONE DECLARATION, THREE JOBS. It drives whether the standard
-    /// Paste command is live while this widget is focused, it filters
-    /// what can reach the widget's paste hook, and on Android it IS the
-    /// native registration. Per-widget and not app-global, because
-    /// whether Paste should be enabled is the INTERSECTION of what the
-    /// clipboard offers and what the focused target takes — a search
-    /// field wants plain text, a rich editor also wants images.
+    /// ONE DECLARATION, THREE JOBS. It drives whether the standard Paste
+    /// command is live while this widget is focused, it filters what can
+    /// reach the widget's paste hook, and on Android it IS the native
+    /// registration. Per-widget because whether Paste should be enabled is
+    /// the INTERSECTION of what the clipboard offers and what the focused
+    /// target takes.
     ///
-    /// A TEXT WIDGET THAT DECLARES NOTHING still pastes: the platform's
-    /// own insertion happens and the existing change handler reports
-    /// the result. Declaring is how an app OVERRIDES that default and
-    /// takes the content itself.
+    /// A TEXT WIDGET THAT DECLARES NOTHING still pastes: the platform's own
+    /// insertion happens and the existing change handler reports it.
     pub fn accepts(&mut self, widget: WidgetId, list: &str) {
         self.set(widget, Prop::Accepts, list);
     }
 
-    /// This widget's accessibility LABEL: what an assistive client
-    /// speaks for it. Universal, and deliberately separate from
-    /// [`Tx::a11y_id`] — an automation key is not a spoken name. Leave
-    /// it unset to keep whatever the platform derives from the
-    /// control's own content; setting it OVERRIDES that, so a button
-    /// whose caption already reads well needs nothing here. See
-    /// [`Prop::A11yLabel`].
+    /// This widget's accessibility LABEL: what an assistive client speaks
+    /// for it. Deliberately separate from [`Tx::a11y_id`] — an automation
+    /// key is not a spoken name. Leave it unset to keep whatever the
+    /// platform derives from the control's own content; setting it
+    /// OVERRIDES that.
     pub fn a11y_label(&mut self, widget: WidgetId, label: &str) {
         self.set(widget, Prop::A11yLabel, label);
     }
 
-    /// This widget's accessibility HINT: what ACTIVATING it does, which
-    /// is what every platform's hint means (Apple defines it as the
-    /// result of performing an action; Android carries it as the click
-    /// action's label). Write it as a VERB PHRASE — "save the draft" —
-    /// because VoiceOver speaks it as written while TalkBack prefixes
-    /// "double tap to". Activation kinds only (button, checkbox,
-    /// select, radio); the root rejects it elsewhere, since a hint with
-    /// nothing to activate has no target on Android. See
-    /// [`Prop::A11yHint`].
+    /// This widget's accessibility HINT: what ACTIVATING it does, which is
+    /// what every platform's hint means. Write it as a VERB PHRASE — "save
+    /// the draft" — because VoiceOver speaks it as written while TalkBack
+    /// prefixes "double tap to". Activation kinds only; the root rejects it
+    /// elsewhere, since a hint with nothing to activate has no target on
+    /// Android.
     pub fn a11y_hint(&mut self, widget: WidgetId, hint: &str) {
         self.set(widget, Prop::A11yHint, hint);
     }
 
-    /// One-shot commands: momentary verbs into widget-owned state,
-    /// riding this transaction like any write — the insert and the
-    /// clear beside it commit together or not at all. Fire-and-forget:
-    /// no state at rest, nothing to journal, and the widget answers
-    /// through its normal occurrence path (a clear arrives back as
-    /// TextChanged with empty text, so the app's draft fold empties
-    /// itself — never a side assignment).
+    /// One-shot commands: momentary verbs into widget-owned state, riding
+    /// this transaction like any write. Fire-and-forget — no state at
+    /// rest, nothing to journal, and the widget answers through its normal
+    /// occurrence path (a clear arrives back as TextChanged with empty
+    /// text, so the app's draft fold empties itself).
     pub fn clear(&mut self, widget: WidgetId) {
         self.ops.push(TxOp::WidgetCommand {
             widget,
@@ -2056,28 +1882,24 @@ impl<'a> Tx<'a> {
         });
     }
 
-    /// Put text into a text widget programmatically — the "open a
-    /// document into the editor" write.
+    /// Put text into a text widget programmatically — the "open a document
+    /// into the editor" write.
     ///
-    /// SUGAR OVER THE GENERIC SETTER, and it earns its name here
-    /// because the widget is UNCONTROLLED: the app is not binding the
-    /// field to a value it will keep pushing, it is performing one
-    /// write and handing the text back to the user, who owns it from
-    /// that moment. The field answers with its ordinary `text_changed`
-    /// and the app's fold takes it from there — the same round trip a
-    /// keystroke makes.
+    /// SUGAR OVER THE GENERIC SETTER, and it earns its name because the
+    /// widget is UNCONTROLLED: this is one write, handing the text back to
+    /// the user who owns it from that moment. The field answers with its
+    /// ordinary `text_changed` and the app's fold takes it from there.
     ///
     /// A write that CHANGES the text also drops whatever the app had
-    /// declared over it: ranges are bound to the text they were
-    /// declared against (see [`Tx::highlight_ranges`]), and it spends
-    /// the field's native undo history, which is why undo's D7 treats
-    /// it as an episode boundary.
+    /// declared over it: ranges are bound to the text they were declared
+    /// against, and it spends the field's native undo history, which is why
+    /// undo's D7 treats it as an episode boundary.
     pub fn set_text(&mut self, widget: WidgetId, text: &str) {
         self.set(widget, Prop::Text, text);
     }
 
-    /// DECLARE the decorated ranges of a textarea, replacing whatever
-    /// was declared before; an empty set is the clear.
+    /// DECLARE the decorated ranges of a textarea, replacing whatever was
+    /// declared before; an empty set is the clear.
     ///
     /// THE OFFSETS ARE RUST STRING INDICES — UTF-8 byte offsets into the
     /// widget's current text — so the ranges an app already has are the
@@ -2090,21 +1912,16 @@ impl<'a> Tx<'a> {
     /// tx.highlight_ranges(editor, hits);
     /// ```
     ///
-    /// kaya ships no search: what to highlight is the app's question,
-    /// and a find engine, a find bar and a regex dialect belong to the
-    /// text editor (docs/ranges-plan.md §3). What kaya ships is the
-    /// primitive underneath, which no app can write for itself.
+    /// kaya ships no search: what to highlight is the app's question, and
+    /// a find engine belongs to the text editor (docs/ranges-plan.md §3).
     ///
-    /// APP-OWNED AND NEVER TRACKED. A declared set is bound to the text
-    /// it was declared against: the first edit of any kind drops it, and
-    /// the app re-declares from the fold `text_changed` already drives —
-    /// the same uncontrolled contract the text itself has. Nothing in
-    /// kaya adjusts a range across an edit.
+    /// APP-OWNED AND NEVER TRACKED. A declared set is bound to the text it
+    /// was declared against: the first edit of any kind drops it, and the
+    /// app re-declares from the fold `text_changed` already drives.
     ///
-    /// An offset that is past the end of the text, or that splits a
-    /// character, fails loudly here rather than in a backend: the five
-    /// platforms answer a malformed offset five different ways and one
-    /// of them aborts the process.
+    /// An offset past the end of the text, or one that splits a character,
+    /// fails loudly here rather than in a backend: the five platforms
+    /// answer a malformed offset five different ways and one aborts.
     pub fn highlight_ranges(
         &mut self,
         widget: WidgetId,
@@ -2126,11 +1943,9 @@ impl<'a> Tx<'a> {
     /// REFUSED WHILE THE USER IS COMPOSING through an input method, in
     /// every backend, because honouring it commits the composition
     /// mid-word — measured on macOS, where the half-typed kana land in
-    /// the document and in the app's own model. The refusal is a no-op,
-    /// not an error: composition state is on no kaya channel, so an app
-    /// cannot avoid the race and is not blamed for it. The selection the
-    /// app wanted is still worth asking for after the next
-    /// `text_changed`, which is what ends a composition.
+    /// the document and in the app's own model (docs/ranges-plan.md D4).
+    /// The refusal is a no-op, not an error: composition state is on no
+    /// kaya channel, so an app cannot avoid the race.
     pub fn select_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>) {
         self.ops.push(TxOp::SelectRange {
             widget,
@@ -2139,9 +1954,7 @@ impl<'a> Tx<'a> {
     }
 
     /// Scroll the textarea so a range is inside the viewport. A pure
-    /// effect: it moves no state, leaves the selection alone, and undo
-    /// does not put the scroll position back (undo restores state, not
-    /// where you were looking).
+    /// effect: undo does not put the scroll position back.
     pub fn reveal_range(&mut self, widget: WidgetId, range: std::ops::Range<usize>) {
         self.ops.push(TxOp::RevealRange {
             widget,
@@ -2149,14 +1962,9 @@ impl<'a> Tx<'a> {
         });
     }
 
-    /// Construction sugar: a container takes its body as a closure
-    /// (the egui shape — the &mut Tx is passed back in) and parents
-    /// everything declared inside it through the ambient stack, so the
-    /// build body reads as the tree and a for statement over a row
-    /// trace stands between siblings. The body's result rides the
-    /// returned [`Widget`] as `.out` — the way handles reach the
-    /// occurrence loop. Handlers stay in that loop, the Rust idiom;
-    /// the C guests keep the fully explicit floor.
+    /// Construction sugar: a container takes its body as a closure and
+    /// parents everything declared inside it through the ambient stack.
+    /// The body's result rides the returned [`Widget`] as `.out`.
     pub fn column<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> Widget<'_, 'a, R> {
         self.container_of(WidgetKind::Column, body)
     }
@@ -2172,10 +1980,9 @@ impl<'a> Tx<'a> {
         self.container_of(WidgetKind::Scroll, body)
     }
 
-    /// A grid laying its children out row-major into `columns`
-    /// columns — each column takes its NATURAL width, aligned across
-    /// rows (the thing nested rows cannot express); `spacing` is the
-    /// inter-cell gap on both axes.
+    /// A grid laying its children out row-major into `columns` columns —
+    /// each column takes its NATURAL width, aligned across rows;
+    /// `spacing` is the inter-cell gap on both axes.
     pub fn grid<R>(
         &mut self,
         columns: usize,
@@ -2187,10 +1994,8 @@ impl<'a> Tx<'a> {
         Widget { id, out: w.out, tx: w.tx }
     }
 
-    /// A spacer: PURE SUGAR for an empty grown column — it consumes
-    /// the leftover main-axis space between its siblings (weight 1;
-    /// the grow contract). No new vocabulary: it lowers to what every
-    /// backend already proves.
+    /// A spacer: PURE SUGAR for an empty grown column (weight 1). No new
+    /// vocabulary — it lowers to what every backend already proves.
     pub fn spacer(&mut self) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Column);
         self.set(w, Prop::Grow, 1.0);
@@ -2270,10 +2075,8 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
-    /// A slider whose position binds a float signal — the
-    /// programmatic write path (`tx.write` fans out to the control;
-    /// property writes never echo an occurrence, so a handler's own
-    /// writes cannot loop back at it).
+    /// A slider whose position binds a float signal. Property writes never
+    /// echo an occurrence, so a handler's own writes cannot loop back.
     pub fn slider_bound(&mut self, min: f64, max: f64, value: SignalId) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Slider);
         self.set(w, Prop::Min, min);
@@ -2282,11 +2085,9 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
-    /// A dropdown select over its options — each option becomes a
-    /// label child (labels only, scene-checked), `selected` the
-    /// initial 0-based index (domain-checked at the root against the
-    /// option count). Picks arrive in the occurrence loop as the
-    /// new index ([`Messages::on_select`]).
+    /// A dropdown select over its options — each option becomes a label
+    /// child (labels only, scene-checked), `selected` the initial 0-based
+    /// index (domain-checked at the root against the option count).
     pub fn select(&mut self, options: &[&str], selected: usize) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Select);
         self.parents.push(w.0);
@@ -2314,22 +2115,19 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
-    /// An image displaying encoded bytes (PNG, JPEG, ...): the toolkit
-    /// decodes natively. The bytes ride the blob channel — one Arc'd
-    /// copy in core memory, an 8-byte handle everywhere else — so a
-    /// large image costs one registration copy and a decode, never a
-    /// per-widget or per-update re-copy. Display-only, like a label.
+    /// An image displaying encoded bytes: the toolkit decodes natively.
+    /// The bytes ride the blob channel — one Arc'd copy in core memory, an
+    /// 8-byte handle everywhere else — so a large image costs one
+    /// registration copy and a decode, never a per-update re-copy.
     pub fn image(&mut self, bytes: impl Into<crate::protocol::Blob>) -> Widget<'_, 'a> {
         let w = self.widget(WidgetKind::Image);
         self.set(w, Prop::Source, Value::Blob(bytes.into()));
         Widget { id: w, out: (), tx: self }
     }
 
-    /// Declare a collection of `T` records: a core-side keyed table a
-    /// For renders. The element type is the schema — `T::VARIANTS`
-    /// goes on the wire here (one field-type list per constructor; a
-    /// record is the one-variant case), and every field access derives
-    /// from the same declaration. Returns the root instance handle.
+    /// Declare a collection of `T` records: a core-side keyed table a For
+    /// renders. The element type IS the schema — `T::VARIANTS` goes on the
+    /// wire here, one field-type list per constructor.
     pub fn collection<T: KayaSum>(&mut self) -> Collection<T> {
         let id = self.ctx.alloc_collection();
         self.ctx.register_collection(id);
@@ -2354,8 +2152,7 @@ impl<'a> Tx<'a> {
         let (key, variant, record) = (key.into(), value.variant(), value.to_values());
         // ABSORPTION, on the one path every explicit key travels: a
         // numeric key at or above the minter's counter carries it up, so
-        // hand-chosen and minted keys share one space safely and in
-        // either order (insert_fresh's contract).
+        // hand-chosen and minted keys share one space safely.
         self.ctx.absorb_key(instance.id, &instance.path, &key);
         self.model_set(instance.id, &instance.path, &key, variant, &record);
         self.ops.push(TxOp::CollectionInsert {
@@ -2373,34 +2170,24 @@ impl<'a> Tx<'a> {
     /// Insert a record under a key the binding authors, and hand the key
     /// back.
     ///
-    /// FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
-    /// identity and guest-chosen (DESIGN.md, the update algebra), so
-    /// anything that already HAS a name passes it to [`insert`](Tx::insert)
-    /// — today and always. This is the other case, and it is the common
-    /// one in a form: the app has a title and nothing else, and the
-    /// alternative is a hand-spelled counter beside the collection,
-    /// which is mutable global state in most languages and whose safety
-    /// rests on a never-rewind rule nobody wrote down.
+    /// FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain identity
+    /// and guest-chosen (DESIGN.md, the update algebra), so anything that
+    /// already HAS a name passes it to [`insert`](Tx::insert). This is the
+    /// other case, and the alternative is a hand-spelled counter beside
+    /// the collection whose safety rests on a rule nobody wrote down.
     ///
-    /// ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted
-    /// key is `I64` and is counter+1. An instance is a table — the
-    /// live-zone collection, or one stamped copy selected by `at(...)`
-    /// — and keys are unique within one, so that is what the counter is
-    /// per.
+    /// ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted key
+    /// is `I64` and is counter+1. An instance is a table — the live-zone
+    /// collection, or one stamped copy — and keys are unique within one.
     ///
-    /// MIXING IS SAFE BY ABSORPTION: an explicit `insert` whose key is
-    /// an I64 at or above the counter carries it up, so a later mint
-    /// clears every hand-chosen numeric key already in the table. A
-    /// non-numeric key cannot collide with an I64 at all and moves
-    /// nothing.
+    /// MIXING IS SAFE BY ABSORPTION: an explicit `insert` whose key is an
+    /// I64 at or above the counter carries it up. A non-numeric key cannot
+    /// collide with an I64 at all.
     ///
-    /// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
-    /// argument. Undo and redo replay captured keys inside the core and
-    /// never re-enter this path, so a history walk never moves the
-    /// counter; an abandoned transaction does not move it back either
-    /// (a minted key is spent, the sequence rule — the rollback journal
-    /// restores the model, not the counter, so a key can never be
-    /// handed out twice). A fresh key is fresh forever.
+    /// NO DECREMENT IS EXPRESSIBLE. Undo and redo replay captured keys
+    /// inside the core and never re-enter this path; an abandoned
+    /// transaction does not move it back either (the rollback journal
+    /// restores the model, not the counter). A fresh key is fresh forever.
     pub fn insert_fresh<T: KayaSum>(
         &mut self,
         instance: &Collection<T>,
@@ -2479,11 +2266,10 @@ impl<'a> Tx<'a> {
             .map(|(_, variant, _)| *variant)
     }
 
-    /// One field's delta on one constructor: the update_field the
-    /// derive's refined patch handles lower to, carrying the
-    /// discriminant they witnessed in the match that produced them.
-    /// Hidden because reaching it without that match would be exactly
-    /// the unwitnessed write the surface exists to prevent.
+    /// One field's delta on one constructor, carrying the discriminant the
+    /// caller witnessed in the match. Hidden because reaching it without
+    /// that match would be exactly the unwitnessed write the surface
+    /// exists to prevent.
     #[doc(hidden)]
     pub fn update_field_witnessed<T: KayaSum>(
         &mut self,
@@ -2512,12 +2298,10 @@ impl<'a> Tx<'a> {
         }
     }
 
-    /// Reposition an entry before another's: order is collection data,
-    /// so the model reorders and the wire carries the same keys-only
-    /// delta. Anchor semantics match the protocol: keys, never indices.
-    /// A missing key or anchor fails here, at the call site — the same
-    /// check the scene applies; moving an entry before itself is a
-    /// no-op, and nothing travels.
+    /// Reposition an entry before another's: order is collection data, so
+    /// the model reorders and the wire carries the same keys-only delta.
+    /// Keys, never indices. A missing key or anchor fails here, at the call
+    /// site; moving an entry before itself is a no-op.
     pub fn move_before<T: KayaSum>(
         &mut self,
         instance: &Collection<T>,
@@ -2671,11 +2455,10 @@ impl<'a> Tx<'a> {
         }
     }
 
-    /// A For over `collection`: the closure declares the template — a
-    /// blueprint stamped once per entry, rendering nothing by itself.
-    /// Returns the For's widget id (a container in the live tree)
-    /// alongside the body's result — the way handles declared inside
-    /// the template (nested collections, buttons) reach the handlers.
+    /// A For over `collection`: the closure declares the template, a
+    /// blueprint stamped once per entry. Returns the For's widget id
+    /// alongside the body's result, which is how handles declared inside
+    /// the template reach the handlers.
     pub fn for_each<T: KayaSum, R>(
         &mut self,
         collection: &Collection<T>,
@@ -2708,8 +2491,7 @@ impl<'a> Tx<'a> {
 
     /// A For over a sum eliminates it: the cases record declares one
     /// blueprint per constructor, and the compiler holds the record to
-    /// totality the way a match holds its arms. Each arm's handles come
-    /// back in the Out record's matching field.
+    /// totality the way a match holds its arms.
     pub fn for_each_sum<T: KayaSum, C: KayaCases<T>>(
         &mut self,
         collection: &Collection<T>,
@@ -2756,14 +2538,12 @@ impl<'a> Tx<'a> {
 
     // --- Menus: the dynamic floor and the transaction-level sugar ------
     //
-    // Menu items live in their OWN guest-allocated id space (the
-    // c_menu_item counter): a [`MenuItemId`] is not a widget, node, or
-    // surface id, so cross-use is a compile error. Items never host
+    // Menu items live in their OWN guest-allocated id space, so cross-use
+    // with a widget or surface id is a compile error. Items never host
     // content and never participate in layout — declaring one inside a
-    // container body parents NOTHING through the ambient stack.
-    // Topology is append-only and live: items may be created and
-    // appended at any time, all applicable props stay mutable, and
-    // nothing is ever removed in v1 (DESIGN.md, Menus).
+    // container body parents NOTHING through the ambient stack. Topology
+    // is append-only and live; nothing is removed in v1 (DESIGN.md,
+    // Menus).
 
     /// The floor: create a menu item of `kind` in the menu-item id
     /// space. The chains above ([`WindowRef::menu`],
@@ -2775,27 +2555,23 @@ impl<'a> Tx<'a> {
     }
 
     /// The floor: append `child` under grouping node `parent`
-    /// (single-parent — an item acquires exactly one parent or anchor).
-    /// The closed parent/child grammar and the depth cap are root
+    /// (single-parent). The closed grammar and the depth cap are root
     /// errors.
     pub fn append_menu_item(&mut self, parent: MenuItemId, child: MenuItemId) {
         self.ops.push(TxOp::MenuItemAppend { parent, child });
     }
 
-    /// The floor: append a top-level grouping node (`menu` or
-    /// `radio_group`) to `window`'s command catalog — the window
-    /// anchor. The sugar spelling is [`WindowRef::menu`] /
-    /// [`WindowRef::radio_group`]: menu bars ride the window construct.
+    /// The floor: append a top-level grouping node to `window`'s command
+    /// catalog. The sugar spelling is [`WindowRef::menu`] /
+    /// [`WindowRef::radio_group`].
     pub fn menubar_append(&mut self, window: WindowId, item: MenuItemId) {
         self.ops.push(TxOp::MenubarAppend { window, item });
     }
 
-    /// Set a menu property to a constant ([`MenuProp`]; the floor the
-    /// menu chains ride). A `shortcut` set through the floor must
-    /// already be the CANONICAL wire spelling — the core validates and
-    /// rejects a non-canonical spelling, it never rewrites guest data
-    /// (the C-floor contract). The chains normalize case and modifier
-    /// order before emitting.
+    /// Set a menu property to a constant ([`MenuProp`]; the floor the menu
+    /// chains ride). A `shortcut` set through the floor must already be the
+    /// CANONICAL wire spelling — the core validates and rejects, it never
+    /// rewrites guest data. The chains normalize before emitting.
     pub fn set_menu_prop(&mut self, item: MenuItemId, prop: MenuProp, value: impl Into<Value>) {
         self.ops.push(TxOp::SetMenuProp {
             item,
@@ -2805,9 +2581,8 @@ impl<'a> Tx<'a> {
     }
 
     /// Bind a signal-bindable menu property (`label`, `enabled`,
-    /// `checked`, `value`) to a signal. `icon`, `primary`, and
-    /// `shortcut` are const-only — the root rejects a signal source on
-    /// them, and the chains do not even spell it.
+    /// `checked`, `value`). `icon`, `primary` and `shortcut` are
+    /// const-only — the root rejects a signal source on them.
     pub fn bind_menu_prop(&mut self, item: MenuItemId, prop: MenuProp, signal: SignalId) {
         self.ops.push(TxOp::SetMenuProp {
             item,
@@ -2824,21 +2599,16 @@ impl<'a> Tx<'a> {
     }
 
     /// A context menu on a LIVE widget: the body declares the catalog's
-    /// root items — the same item vocabulary as the bar (the anchor
-    /// decides the spelling, never the kinds) — each created and
-    /// attached eagerly. Returns the body's result, the way container
-    /// bodies hand their handles out:
-    /// `let rename = tx.context_menu(target, |m| m.item("Rename").id());`
-    /// Calling it again on the same widget appends more roots — the
-    /// append-at-any-time discipline.
+    /// root items, each created and attached eagerly, and returns the
+    /// body's result. Calling it again on the same widget appends more
+    /// roots.
     ///
-    /// Zone rules: this is the live-widget anchor. A template node
-    /// takes [`Tx::context_catalog`] + [`Tpl::context_menu`] instead —
-    /// items are live and shared across stamped copies, so the catalog
-    /// is built before the template and only the attachment happens
-    /// inside it. Context items take no shortcuts (a shortcut needs a
-    /// window catalog home) — spelled one is a compile error here, not
-    /// a runtime one.
+    /// Zone rules: this is the live-widget anchor. A template node takes
+    /// [`Tx::context_catalog`] + [`Tpl::context_menu`] instead — items are
+    /// live and shared across stamped copies, so the catalog is built
+    /// before the template and only the attachment happens inside it.
+    /// Context items take no shortcuts: spelled one is a compile error
+    /// here, not a runtime one.
     pub fn context_menu<R>(
         &mut self,
         widget: WidgetId,
@@ -2854,14 +2624,12 @@ impl<'a> Tx<'a> {
     }
 
     /// Build a context catalog UNANCHORED — free root items for a
-    /// template-node anchor. Menu items are live and shared across
-    /// stamped copies (v1 does not stamp items), and the protocol
-    /// forbids creating them inside a template scope: the catalog is
-    /// built here, in the live zone, and [`Tpl::context_menu`] attaches
-    /// it inside the template, where activations carry the stamped
-    /// copy's key path (the `on_click_node` encoding — the keys ARE the
-    /// noun). The borrow checker already holds the zone wall — a
-    /// template body cannot reach the transaction to build items:
+    /// template-node anchor. Menu items are live and shared across stamped
+    /// copies, and the protocol forbids creating them inside a template
+    /// scope: the catalog is built here, in the live zone, and
+    /// [`Tpl::context_menu`] attaches it inside the template, where
+    /// activations carry the copy's key path. The borrow checker already
+    /// holds the zone wall:
     ///
     /// ```compile_fail
     /// fn zone_rule(tx: &mut kaya::Tx<'_>, groups: &kaya::Collection<String>) {
@@ -2885,14 +2653,11 @@ impl<'a> Tx<'a> {
         ContextCatalog { out, roots }
     }
 
-    /// The prop/append proxy for a RETAINED menu item — the
-    /// [`Tx::window`] precedent, and the append-at-any-time spelling:
-    /// `tx.menu(file).label("Document").append(|m| m.item("Publish").primary(true).id());`
-    /// Props mutate freely on every kind the prop applies to; the root
-    /// rejects a misapplied prop (kind and anchor rules), exactly as it
-    /// does for the floor. Programmatic `checked`/`value` writes are
-    /// configuration and stay QUIET — no occurrence echoes back (the
-    /// echo doctrine).
+    /// The prop/append proxy for a RETAINED menu item — the [`Tx::window`]
+    /// precedent, and the append-at-any-time spelling. Props mutate freely
+    /// on every kind the prop applies to; the root rejects a misapplied
+    /// prop. Programmatic `checked`/`value` writes are configuration and
+    /// stay QUIET (the echo doctrine).
     pub fn menu(&mut self, item: MenuItemId) -> MenuItemRef<'_, 'a> {
         MenuItemRef { tx: self, item }
     }
@@ -2922,14 +2687,11 @@ impl<'a> Tx<'a> {
 /// ids come from the template-node space and nothing renders until data
 /// stamps the blueprint. Occurrences from stamped copies name these node
 /// ids plus the copy's key path.
-/// The for-statement tracer over a collection's rows: `for mut row in
-/// todos.rows(&mut tx)` opens the For template on the single yielded
-/// element — the loop body runs once, authoring the blueprint — and
-/// the row's Drop closes the template and parents the For into the
-/// enclosing container scope. RAII makes the close structural: break-
-/// and panic-safe, and while the row lives the transaction is
-/// statically unreachable except through it — the template-zone
-/// discipline enforced by the borrow checker.
+/// The for-statement tracer over a collection's rows: the loop body runs
+/// once, authoring the blueprint, and the row's Drop closes the template
+/// and parents the For into the enclosing container scope. RAII makes the
+/// close structural: break- and panic-safe, and while the row lives the
+/// transaction is statically unreachable except through it.
 pub struct Rows<'t, 'b> {
     tx: Option<&'t mut Tx<'b>>,
     collection: CollectionId,
@@ -2963,13 +2725,11 @@ impl<'t, 'b> Iterator for Rows<'t, 'b> {
     }
 }
 
-/// SEALED, AND SEALED FOR A REASON, not for taste: the whole mechanism
-/// is `zone_tx`, which hands out the transaction from inside a template
-/// body — precisely what the template-zone discipline forbids a guest
-/// to have (the compile_fail doctest on [`Tx::items`] is that wall). A
-/// `#[doc(hidden)]` method would still be callable; a trait living in a
-/// private module cannot even be brought into scope outside this crate,
-/// so the mechanism is unreachable rather than merely undocumented.
+/// SEALED, AND SEALED FOR A REASON: the whole mechanism is `zone_tx`,
+/// which hands out the transaction from inside a template body —
+/// precisely what the template-zone discipline forbids. A
+/// `#[doc(hidden)]` method would still be callable; a trait in a private
+/// module cannot even be brought into scope outside this crate.
 mod for_scope {
     use super::Tx;
 
@@ -2982,19 +2742,17 @@ mod for_scope {
     }
 }
 
-/// The zone a For is being traced in: the live tree (a [`Tx`]) or
-/// another template's body (a [`Tpl`], or a [`Row`] directly).
+/// The zone a For is being traced in: the live tree (a [`Tx`]) or another
+/// template's body (a [`Tpl`], or a [`Row`] directly).
 /// [`Collection::rows`] takes either, so a nested For is the same for
-/// statement one level in — `groups.rows(tx)` outside, `items.rows(t)`
-/// inside — which is how every other binding spells the nesting too.
+/// statement one level in.
 ///
-/// The zones differ in exactly one thing: a For declared inside a
-/// template is itself a template node, and template nodes are a
-/// separate id space from live widgets.
+/// The zones differ in exactly one thing: a For declared inside a template
+/// is itself a template node, and template nodes are a separate id space
+/// from live widgets.
 ///
-/// Taking a scope does NOT hand the transaction back to the guest —
-/// the one method that could is sealed away, so the template-zone wall
-/// still stands. Pinned here rather than trusted:
+/// Taking a scope does NOT hand the transaction back to the guest — the
+/// one method that could is sealed away. Pinned here rather than trusted:
 ///
 /// ```compile_fail
 /// fn zone_rule(t: &mut kaya::Tpl<'_, '_>, todos: &kaya::Collection<String>) {
@@ -3066,13 +2824,10 @@ impl<'b> Row<'_, 'b> {
     }
 
     // THE REST OF THE ZONE, forwarded. Row is the for-STATEMENT façade
-    // over the same template — a second surface onto one zone — so a
-    // constructor that exists on Tpl and not here is reachable through
-    // `for row in rows` and not through `for_each`, or the other way
-    // about, which is a difference no guest should have to know. The
-    // pair is held level by check-sugar-surface's Row clause rather than
-    // by whoever remembers this block exists; six of these were already
-    // the whole surface when ten kinds were missing from it.
+    // over the same template, so a constructor that exists on Tpl and not
+    // here is reachable through `for row in rows` and not through
+    // `for_each` — a difference no guest should have to know. The pair is
+    // held level by check-sugar-surface's Row clause.
 
     pub fn entry(&mut self) -> TemplateNodeId {
         self.tpl().entry()
@@ -3167,13 +2922,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().inset(node, pad)
     }
 
-    // Forwarded because a ROW TRACE legitimately anchors context menus:
-    // the menus scene's item rows carry one, and before this forward the
-    // guest was forced back to the for_each combinator for the whole
-    // nesting just to reach it. context_menu left tpl-surfaces.py's
-    // NOT_FORWARDED set in the same change, so the pair is now HELD
-    // level rather than merely level; context_attach (the raw
-    // item-id/node floor) stays excluded.
+    // Forwarded because a ROW TRACE legitimately anchors context menus.
+    // context_menu left tpl-surfaces.py's NOT_FORWARDED set in the same
+    // change, so the pair is HELD level rather than merely level;
+    // context_attach (the raw item-id/node floor) stays excluded.
     pub fn context_menu<R>(&mut self, node: TemplateNodeId, catalog: ContextCatalog<R>) -> R {
         self.tpl().context_menu(node, catalog)
     }
@@ -3196,16 +2948,12 @@ impl Drop for Row<'_, '_> {
 }
 
 /// The Msg tier: a compile-total eliminator over the app's event
-/// vocabulary — the occurrence-side twin of the sum eliminators. The
-/// guest declares its meaning enum, registers each widget's mapping
-/// beside the widget (an enum tuple constructor is already a mapper:
-/// `msgs.on_change(field, Msg::Draft)`), and folds one exhaustive
-/// match. The registry converts runtime identity into the enum's tag —
-/// `match` dispatches on tags — so the loop needs no guards; and a
-/// declared variant no widget produces trips rustc's dead_code lint
-/// ("variant is never constructed"). Unmapped occurrences fold into
-/// nothing; Shutdown ends the stream. The raw loop over
-/// `ctx.next()` stays the floor.
+/// vocabulary. The guest declares its meaning enum, registers each
+/// widget's mapping beside the widget, and folds one exhaustive match.
+/// The registry converts runtime identity into the enum's tag, so the loop
+/// needs no guards; a declared variant no widget produces trips rustc's
+/// dead_code lint. Unmapped occurrences fold into nothing; Shutdown ends
+/// the stream. The raw loop over `ctx.next()` stays the floor.
 pub struct Messages<M> {
     // Widget ids and template-node ids collide numerically — two id
     // spaces, two tables.
@@ -3366,20 +3114,15 @@ impl<M> Messages<M> {
         );
     }
 
-    /// A stamped copy's paste, with the copy's key path — the node
-    /// flavor of [`Self::on_paste`], and the LAST of the instance
-    /// registrars to exist. The dispatch arm was always there
-    /// (`InstancePasted` reaches the node table like every other
-    /// Instance* occurrence), but no method could put a handler in it:
-    /// Rust was the one binding of eight without this registrar, while
-    /// the other seven had the registrar and no way to spell `accepts`
-    /// on a template node — so the hook was dead in all eight, each
-    /// half-built from the opposite end (docs/tpl-props-plan.md §1).
+    /// A stamped copy's paste, with the copy's key path — the node flavor
+    /// of [`Self::on_paste`]. Rust was the one binding of eight without
+    /// this registrar while the other seven had the registrar and no way
+    /// to spell `accepts` on a template node, so the hook was dead in all
+    /// eight (docs/tpl-props-plan.md §1).
     ///
     /// Fires only for copies whose TEMPLATE declared what it accepts
     /// (`Tpl::accepts`) — without a declaration the platform's own
-    /// insertion happens and the instance change handler reports it,
-    /// exactly as live.
+    /// insertion happens and the instance change handler reports it.
     pub fn on_paste_node(
         &self,
         n: TemplateNodeId,
@@ -3396,12 +3139,9 @@ impl<M> Messages<M> {
         );
     }
 
-    /// A menu action's activation means this message (cloned per
-    /// fire). Handlers scope to their creator: the handle comes from
-    /// the action's own chain (`m.item("Save").id()`), never from
-    /// inspecting ids — no app-global menu dispatcher exists. The
-    /// action's click and its shortcut are ONE occurrence on one
-    /// dispatch path, so this handler covers both.
+    /// A menu action's activation means this message. The action's click
+    /// and its shortcut are ONE occurrence on one dispatch path, so this
+    /// handler covers both.
     pub fn on_menu_item(&self, item: MenuItemId, msg: M)
     where
         M: Clone + 'static,
@@ -3415,10 +3155,8 @@ impl<M> Messages<M> {
         );
     }
 
-    /// A menu toggle's user flips map through `f` with the new state —
-    /// `msgs.on_menu_toggle(details, Msg::Details)`. Programmatic
-    /// `checked` writes are quiet (the Checkbox contract), so a
-    /// handler's own writes cannot loop back at it.
+    /// A menu toggle's user flips map through `f` with the new state.
+    /// Programmatic `checked` writes are quiet (the Checkbox contract).
     pub fn on_menu_toggle(&self, item: MenuItemId, f: impl Fn(bool) -> M + 'static) {
         self.menu_items.borrow_mut().insert(
             item.0,
@@ -3429,10 +3167,9 @@ impl<M> Messages<M> {
         );
     }
 
-    /// A menu radio group's user picks: the new 0-based option index
-    /// (the Choice contract — [`Messages::on_select`] for menus,
-    /// registered on the GROUP handle). Programmatic `value` writes
-    /// are quiet.
+    /// A menu radio group's user picks: the new 0-based option index,
+    /// registered on the GROUP handle. Programmatic `value` writes are
+    /// quiet.
     pub fn on_menu_select(&self, group: MenuItemId, f: impl Fn(usize) -> M + 'static) {
         self.menu_items.borrow_mut().insert(
             group.0,
@@ -3443,11 +3180,9 @@ impl<M> Messages<M> {
         );
     }
 
-    /// The Tpl-zone flavor of [`Messages::on_menu_item`], for items
-    /// attached to a template node ([`Tpl::context_menu`]): the
-    /// occurrence carries the stamped copy's key path, outermost first
-    /// — the `on_click_node` pattern; the keys ARE the noun the
-    /// command acts on.
+    /// The Tpl-zone flavor of [`Messages::on_menu_item`]: the occurrence
+    /// carries the stamped copy's key path, outermost first — the keys ARE
+    /// the noun the command acts on.
     pub fn on_menu_item_node(&self, item: MenuItemId, f: impl Fn(Path) -> M + 'static) {
         self.menu_items.borrow_mut().insert(
             item.0,
@@ -3486,12 +3221,9 @@ impl<M> Messages<M> {
         );
     }
 
-    /// Bind the close-veto handler to ONE window (the veto class:
-    /// nothing has closed; answer with destroy_window to agree).
-    /// Per-window, never app-global — the declaration site knows what
-    /// closing ITS window means (the request-bound alert precedent;
-    /// handlers scope to the thing that creates them). Fires per
-    /// chrome close while veto_close is armed.
+    /// Bind the close-veto handler to ONE window (the veto class: nothing
+    /// has closed; answer with destroy_window to agree). Fires per chrome
+    /// close while veto_close is armed.
     pub fn on_close_requested(&self, window: WindowId, msg: M)
     where
         M: Clone + 'static,
@@ -3502,9 +3234,8 @@ impl<M> Messages<M> {
     }
 
     /// Bind the closed handler to ONE window: fires when the non-veto
-    /// auxiliary is chrome-closed (informational; destroy_window
-    /// reconciles), and the registration retires with it — a window
-    /// closes at most once (ids never reused).
+    /// auxiliary is chrome-closed, and the registration retires with it —
+    /// a window closes at most once (ids never reused).
     pub fn on_window_closed(&self, window: WindowId, msg: M)
     where
         M: Clone + 'static,
@@ -3514,12 +3245,9 @@ impl<M> Messages<M> {
             .insert(window.0, Box::new(move || msg.clone()));
     }
 
-    /// Bind the back-veto handler to ONE entry (the id
-    /// [`EntryRef::id`] returned): fires each time the user drives
-    /// back on it while intercept_back is armed — nothing has popped;
-    /// answer with pop_entry to agree. Per-entry, never app-global:
-    /// the push site knows what backing out of ITS screen means (the
-    /// request-bound alert precedent — no id inspection anywhere).
+    /// Bind the back-veto handler to ONE entry: fires each time the user
+    /// drives back on it while intercept_back is armed — nothing has
+    /// popped; answer with pop_entry to agree.
     pub fn on_back_requested(&self, entry: WindowId, msg: M)
     where
         M: Clone + 'static,
@@ -3529,11 +3257,9 @@ impl<M> Messages<M> {
             .insert(entry.0, Box::new(move || msg.clone()));
     }
 
-    /// Bind the popped handler to ONE entry: fires when the user's
-    /// back affordance pops it natively (post-fact; the core's stack
-    /// has already reconciled), and the registration retires with it
-    /// — an entry pops at most once. A programmatic pop_entry does
-    /// not fire it: its caller already knows.
+    /// Bind the popped handler to ONE entry: fires when the user's back
+    /// affordance pops it natively (post-fact), and the registration
+    /// retires with it. A programmatic pop_entry does not fire it.
     pub fn on_entry_popped(&self, entry: WindowId, msg: M)
     where
         M: Clone + 'static,
@@ -3543,12 +3269,9 @@ impl<M> Messages<M> {
             .insert(entry.0, Box::new(move || msg.clone()));
     }
 
-    /// Bind the selected handler to ONE section: fires each time the
-    /// user switches TO it through the platform's switcher (post-fact;
-    /// the selection has already changed on screen). Not one-shot —
-    /// sections never die, and the user can return any number of
-    /// times. A programmatic select_section does not fire it: its
-    /// caller already knows (the echo doctrine).
+    /// Bind the selected handler to ONE section: fires each time the user
+    /// switches TO it through the platform's switcher (post-fact). Not
+    /// one-shot — sections never die.
     pub fn on_section_selected(&self, section: WindowId, msg: M)
     where
         M: Clone + 'static,
@@ -3559,10 +3282,9 @@ impl<M> Messages<M> {
     }
 
     /// Bind the one-shot result handler to a REQUEST (the id
-    /// [`AlertRef::show`] returned): an action index or Cancel (every
-    /// platform-native dismissal). The registration retires with the
-    /// result — correlation is the library's, never the guest's, and
-    /// per-request binding is exactly the widget-handler precedent.
+    /// [`AlertRef::show`] returned): an action index or Cancel. The
+    /// registration retires with the result — correlation is the
+    /// library's, never the guest's.
     pub fn on_alert(&self, alert: AlertId, f: impl Fn(AlertChoice) -> M + 'static) {
         self.alerts.borrow_mut().insert(alert.0, Box::new(f));
     }
@@ -3579,10 +3301,8 @@ impl<M> Messages<M> {
     }
 
     /// Bind the one-shot result handler to a save-dialog request. CANCEL
-    /// IS `None`, and a destination is `Some` — the list the picker
-    /// returns is narrowed here rather than in the guest, because the
-    /// wire's "one locator or none" is a fact of the request and not
-    /// something every app should re-derive from a length.
+    /// IS `None`: the wire's "one locator or none" is a fact of the
+    /// request, not something every app should re-derive from a length.
     pub fn on_saved(
         &self,
         dialog: crate::protocol::FileDialogId,
@@ -3593,18 +3313,16 @@ impl<M> Messages<M> {
             .insert(dialog.0, Box::new(move |files| f(files.into_iter().next())));
     }
 
-    /// Content arriving at this widget because the USER pasted — the
-    /// path an editor actually takes, and the one that costs nothing.
+    /// Content arriving at this widget because the USER pasted — the path
+    /// an editor actually takes, and the one that costs nothing.
     ///
     /// A GESTURE IS ITS OWN AUTHORISATION: iOS raises no prompt for a
-    /// paste, and the focus rules Android and Wayland impose are
-    /// satisfied by construction. An editor that reaches for
-    /// [`Tx::read_clipboard`] instead pays a permission prompt for
+    /// paste, and the focus rules Android and Wayland impose are satisfied
+    /// by construction. [`Tx::read_clipboard`] pays a permission prompt for
     /// content this delivers free.
     ///
     /// Fires only for widgets that DECLARED what they accept
-    /// ([`Tx::accepts`]) — without a declaration the platform's own
-    /// insertion happens and the change handler reports it.
+    /// ([`Tx::accepts`]).
     pub fn on_paste(
         &self,
         w: WidgetId,
@@ -3619,22 +3337,18 @@ impl<M> Messages<M> {
         );
     }
 
-    /// Bind the undone handler to ONE window: fires each time kaya
-    /// routes an undo there, with the group's label (EMPTY for a typing
-    /// episode) and what the core put back.
+    /// Bind the undone handler to ONE window: fires each time kaya routes
+    /// an undo there, with the group's label (EMPTY for a typing episode)
+    /// and what the core put back.
     ///
-    /// NOT ONE-SHOT — the on_section_selected stance rather than the
-    /// alert's. A history is walked as often as the user likes, and the
-    /// registration outlives every step. Per window because the ledger
-    /// is: Undo in one window has never meant "revert what happened in
-    /// another".
+    /// NOT ONE-SHOT — a history is walked as often as the user likes. Per
+    /// window because the ledger is: Undo in one window has never meant
+    /// "revert what happened in another".
     ///
     /// THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
-    /// programmatic write, so the echo doctrine silences every
-    /// occurrence it would otherwise cause — no TextChanged for the text
-    /// it restored, no ValueChanged for the signals. The binding has
-    /// already folded this payload into its own collection mirror before
-    /// the handler runs; this is where an app folds it into ITS model.
+    /// programmatic write, so the echo doctrine silences every occurrence
+    /// it would otherwise cause. The binding has already folded this
+    /// payload into its own collection mirror before the handler runs.
     pub fn on_undone(
         &self,
         window: WindowId,
@@ -3727,19 +3441,15 @@ impl<M> Messages<M> {
                     self.entry_popped.borrow_mut().remove(&entry.0).map(|f| f())
                 }
                 Occurrence::SectionSelected { section, .. } => {
-                    // NOT one-shot: sections never die (the grammar
-                    // has no destruction verbs), and the user can
+                    // NOT one-shot: sections never die and the user can
                     // return any number of times. Keyed by section —
-                    // the handler is the section's own "I came on
-                    // screen", registered at add_section (handlers
-                    // scope to their creator).
+                    // handlers scope to their creator.
                     self.section_selected.borrow().get(&section.0).map(|f| f())
                 }
-                // Menu occurrences key the menu-item table — their own
-                // id space, their own table. Direct and node-anchored
-                // variants share the table: an item has exactly one
-                // anchor, so its registered mapper matches the one
-                // variant its anchor can emit.
+                // Menu occurrences key the menu-item table — their own id
+                // space. Direct and node-anchored variants share it: an
+                // item has exactly one anchor, so its registered mapper
+                // matches the one variant that anchor can emit.
                 Occurrence::MenuActivated { item }
                 | Occurrence::InstanceMenuActivated { item, .. }
                 | Occurrence::MenuToggled { item, .. }
@@ -3750,9 +3460,8 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceMenuValueChanged { group, .. } => {
                     self.menu_items.borrow().get(&group.0).and_then(|f| f(&occ))
                 }
-                // NOT one-shot, and keyed by window: a history is walked
-                // as often as the user likes. The collection mirror was
-                // already reconciled in AppCtx::next, so a handler that
+                // NOT one-shot, and keyed by window. The collection mirror
+                // was already reconciled in AppCtx::next, so a handler that
                 // reads back sees the restored state.
                 Occurrence::Undone { window, label, delta } => self
                     .undone
@@ -3846,12 +3555,10 @@ impl SaveDialogRef<'_, '_> {
     }
 }
 
-/// The copy chain: a clip record under construction. Each method fills
-/// one representation, and the terminal puts it on the clipboard.
-///
-/// A RECORD AND NOT A LIST is the whole shape — at most one per kind is
-/// structural here, since a second `text` call simply replaces the
-/// field rather than needing a duplicate check the root has to run.
+/// The copy chain: a clip record under construction. Each method fills one
+/// representation, and the terminal puts it on the clipboard. A RECORD AND
+/// NOT A LIST: a second `text` call replaces the field rather than needing
+/// a duplicate check.
 #[must_use = "a copy chain puts nothing on the clipboard until .send()"]
 pub struct CopyRef<'t, 'a> {
     tx: &'t mut Tx<'a>,
@@ -4012,23 +3719,17 @@ pub struct WindowRef<'t, 'a> {
 }
 
 impl<'t, 'a> WindowRef<'t, 'a> {
-    /// Append a top-level menu to this window's command catalog — menu
-    /// bars ride the window construct like every window attribute (the
-    /// window-attribute unification rule; DESIGN.md, Menus). `label` is
-    /// constant text or a bound Str signal, like every menu label. The
-    /// body declares the children through the [`MenuItems`] proxy; the
-    /// returned chain carries the grouping node's own props and ends
-    /// with [`MenuRef::id`] (or [`MenuRef::into_parts`] to keep the
-    /// body's handles):
-    /// `let (file, save) = tx.window(0)
-    ///      .menu("File", |m| m.item("Save").shortcut("primary+s").id())
-    ///      .into_parts();`
+    /// Append a top-level menu to this window's command catalog — menu bars
+    /// ride the window construct like every window attribute (DESIGN.md,
+    /// Menus). `label` is constant text or a bound Str signal. The body
+    /// declares the children through the [`MenuItems`] proxy; the returned
+    /// chain carries the grouping node's own props and ends with
+    /// [`MenuRef::id`] (or [`MenuRef::into_parts`] to keep the body's
+    /// handles).
     ///
-    /// Append-only and live: call this again for another top-level
-    /// menu, and reopen a retained grouping item with [`Tx::menu`] to
-    /// rename it or append children — every catalog mutation recomputes
-    /// the phones' promoted set. The bar accepts only grouping nodes;
-    /// leaf items hang off a menu (or use [`WindowRef::radio_group`]).
+    /// Append-only and live: call this again for another top-level menu,
+    /// and reopen a retained grouping item with [`Tx::menu`]. The bar
+    /// accepts only grouping nodes.
     pub fn menu<R>(
         self,
         label: impl Into<MenuSource<StrKind>>,
@@ -4050,17 +3751,12 @@ impl<'t, 'a> WindowRef<'t, 'a> {
         MenuRef { out, item, tx }
     }
 
-    /// Append a top-level radio group to this window's command catalog
-    /// — a `radio_group` is admissible wherever a `menu` grouping node
-    /// is, including at bar level, where it materializes as a top-level
-    /// menu with the platform's checkmark idiom. The body declares only
-    /// options (the closed grammar, held by the [`RadioOptions`] type);
-    /// chain [`RadioGroupRef::value`] AFTER the body so the selected
-    /// index has options to address:
-    /// `let sort = tx.window(0)
-    ///      .radio_group("Sort", |o| { o.option("Name"); o.option("Date"); })
-    ///      .value(0)
-    ///      .id();`
+    /// Append a top-level radio group to this window's command catalog — a
+    /// `radio_group` is admissible wherever a `menu` grouping node is,
+    /// including at bar level. The body declares only options (the closed
+    /// grammar, held by the [`RadioOptions`] type); chain
+    /// [`RadioGroupRef::value`] AFTER the body so the selected index has
+    /// options to address.
     pub fn radio_group<R>(
         self,
         label: impl Into<MenuSource<StrKind>>,
@@ -4109,13 +3805,10 @@ impl WindowRef<'_, '_> {
     }
 
     /// Ask this window to present its ENTRY STACK as list-detail
-    /// (DESIGN.md, Adaptive list-detail): on a REGULAR window the base
-    /// root takes the leading pane and the top of the stack the
-    /// trailing one; on a COMPACT one nothing changes, because the
-    /// compact case is what navigation already does.
-    ///
-    /// There is deliberately no argument for WHICH way it presents —
-    /// that is the size class's answer, not the app's.
+    /// (DESIGN.md, Adaptive list-detail): on a REGULAR window the base root
+    /// takes the leading pane and the top of the stack the trailing one; on
+    /// a COMPACT one nothing changes. There is deliberately no argument for
+    /// WHICH way it presents — that is the size class's answer.
     pub fn list_detail(self, on: bool) -> Self {
         self.tx
             .set_window_prop(self.window, WindowProp::ListDetail, on);
@@ -4123,29 +3816,22 @@ impl WindowRef<'_, '_> {
     }
 
     /// Say this surface holds UNSAVED WORK: the backend shows its
-    /// platform's own affordance — the dot in the close button on
-    /// macOS, a leading `*` in the rendered caption on Windows, a
-    /// bullet beside the header-bar title on GTK, nothing on the
-    /// phones, which have none (docs/dirty-plan.md D2/D4).
+    /// platform's own affordance, and nothing on the phones, which have
+    /// none (docs/dirty-plan.md D2/D4).
     ///
-    /// STATE, NOT CHROME, and the title you declared is left alone:
-    /// there is no marker to compose into it and no placeholder to
-    /// leave room for (the rejected Qt design). It ARMS NOTHING either
-    /// — "unsaved changes, close anyway?" is `veto_close` plus a
-    /// dialog, which is yours to compose, because apps legitimately
-    /// differ on what it should do.
+    /// STATE, NOT CHROME, and the title you declared is left alone: no
+    /// marker composed into it, no placeholder (the rejected Qt design). It
+    /// ARMS NOTHING either — "unsaved changes, close anyway?" is
+    /// `veto_close` plus a dialog, which is yours to compose.
     pub fn dirty(self, on: bool) -> Self {
         self.tx.set_window_prop(self.window, WindowProp::Dirty, on);
         self
     }
 
-    /// The window CONTENT INSET, in layout units — LAYOUT, not
-    /// appearance (docs/styling-plan.md D3): the space kaya's own
-    /// interpreters put around the mounted root. 16 unless you say
-    /// otherwise; 0 is full bleed (a Sublime-shaped editor, a canvas),
-    /// honored unconditionally because the inset is kaya's own padding.
-    /// A platform's safe area is a separate fact and is not removed by
-    /// it: content extends to the safe-area edge, not past it.
+    /// The window CONTENT INSET, in layout units — LAYOUT, not appearance
+    /// (docs/styling-plan.md D3). 16 unless you say otherwise; 0 is full
+    /// bleed, honored unconditionally. A platform's safe area is a separate
+    /// fact and is not removed by it.
     pub fn inset(self, units: f64) -> Self {
         self.tx.set_window_prop(self.window, WindowProp::Inset, units);
         self
@@ -4238,28 +3924,19 @@ impl SectionRef<'_, '_> {
 
 // --- Menus: the command vocabulary's construction sugar ------------------
 //
-// One item vocabulary, two anchors (DESIGN.md, Menus): the window bar
-// and a widget/node context menu. The anchor decides the SPELLING —
-// [`WindowRef::menu`]/[`WindowRef::radio_group`] for the bar,
-// [`Tx::context_menu`] for a live widget, [`Tx::context_catalog`] +
-// [`Tpl::context_menu`] for a template node — never the item kinds.
-// Chains are ephemeral borrow-checked proxies: they reborrow the
-// transaction, die with their statement, and end with `.id()` where the
-// durable handle must outlive them. Handlers scope to their creator:
-// bind the returned item handles with [`Messages::on_menu_item`],
-// [`Messages::on_menu_toggle`], and [`Messages::on_menu_select`] — no
-// app-global menu dispatcher exists.
+// One item vocabulary, two anchors (DESIGN.md, Menus): the anchor decides
+// the SPELLING, never the item kinds. Chains are ephemeral borrow-checked
+// proxies: they reborrow the transaction, die with their statement, and
+// end with `.id()` where the durable handle must outlive them. Handlers
+// scope to their creator — no app-global menu dispatcher exists.
 
 /// The one shortcut-spelling parser in the Rust binding (layer 1: the
 /// parser lives in ONE place per binding, never at call sites). Accepts
-/// ASCII case variants and any ordering of the modifiers before the
-/// final key, and canonicalizes to the wire spelling — lowercase, in
-/// `primary`, `shift`, `alt`, key order (`primary+shift+s`). Rejects
-/// whitespace, repeated modifiers, the platform aliases (`ctrl`, `cmd`,
-/// `option`, ...), and multiple or missing keys. POLICY stays at the
-/// root: the key floor, the shift/alphanumeric modifier rules,
-/// `escape`, and the reserved union are the scene's deterministic
-/// errors — the binding spells, the root judges.
+/// ASCII case variants and any modifier ordering, and canonicalizes to the
+/// wire spelling — lowercase, in `primary`, `shift`, `alt`, key order.
+/// Rejects whitespace, repeated modifiers, the platform aliases, and
+/// multiple or missing keys. POLICY stays at the root: the binding spells,
+/// the root judges.
 fn normalize_shortcut(spelling: &str) -> String {
     assert!(!spelling.is_empty(), "kaya: shortcut spelling is empty");
     assert!(
@@ -4311,10 +3988,11 @@ fn normalize_shortcut(spelling: &str) -> String {
     canonical
 }
 
-/// One of the TWO addressable sources a menu property binds to: a
-/// constant or a signal — the [`TplSource`] shape minus the element
-/// arm, because menu items are not collection elements. The missing
-/// `Field` conversion IS the rule, at compile time:
+/// One of the TWO addressable sources a menu property binds to: a constant
+/// or a signal — the [`TplSource`] shape minus the element arm, because
+/// menu items are not collection elements. The missing `Field` conversion
+/// IS the rule, at compile time:
+///
 ///
 /// ```compile_fail
 /// fn zone_rule(title: kaya::Field<<String as kaya::KayaField>::Kind>) {
@@ -4322,9 +4000,8 @@ fn normalize_shortcut(spelling: &str) -> String {
 /// }
 /// ```
 ///
-/// Everywhere a label (or other bindable prop) appears in the menu
-/// chains, both spellings work: `m.item("Save")` and
-/// `m.item(title_signal)`.
+/// Everywhere a bindable menu prop appears, both spellings work:
+/// `m.item("Save")` and `m.item(title_signal)`.
 pub struct MenuSource<K> {
     inner: MenuSourceInner,
     _kind: PhantomData<K>,
@@ -4402,10 +4079,10 @@ mod menu_sealed {
 /// at build time. Sealed: the three anchors below are the vocabulary.
 pub trait MenuAnchor: menu_sealed::Sealed {}
 
-/// The anchors where a shortcut may be spelled: a shortcut needs a
-/// window catalog as its native dispatch home, so [`ContextAnchor`]
-/// deliberately lacks this — a shortcut on a context item is a COMPILE
-/// error where the anchor is known:
+/// The anchors where a shortcut may be spelled: a shortcut needs a window
+/// catalog as its native dispatch home, so [`ContextAnchor`] deliberately
+/// lacks this — a shortcut on a context item is a COMPILE error where the
+/// anchor is known:
 ///
 /// ```compile_fail
 /// fn zone_rule(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
@@ -4413,8 +4090,8 @@ pub trait MenuAnchor: menu_sealed::Sealed {}
 /// }
 /// ```
 ///
-/// The rule covers every leaf kind — a checkable item and one option of
-/// a group take chords in a catalog and nowhere else:
+/// The rule covers every leaf kind — a checkable item and one option of a
+/// group take chords in a catalog and nowhere else:
 ///
 /// ```compile_fail
 /// fn toggle_rule(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
@@ -4431,9 +4108,8 @@ pub trait MenuAnchor: menu_sealed::Sealed {}
 /// ```
 ///
 /// Those four are honest only if the same code MINUS the gated call
-/// compiles — a compile_fail test that dies on an unrelated error
-/// pins nothing (this crate has shipped that mistake before). The
-/// base forms:
+/// compiles — a compile_fail test that dies on an unrelated error pins
+/// nothing (this crate has shipped that mistake). The base forms:
 ///
 /// ```
 /// fn legal_context_forms(m: &mut kaya::MenuItems<'_, '_, kaya::ContextAnchor>) {
@@ -4495,13 +4171,11 @@ enum ItemSlot {
     Free,
 }
 
-/// The menu-children builder: the body-closure proxy every grouping
-/// slot hands out ([`WindowRef::menu`], [`Tx::context_menu`],
-/// [`Tx::context_catalog`], nested [`MenuItems::menu`],
-/// [`MenuItemRef::append`]). Its creators are the closed child grammar
-/// for a `menu`/anchor slot — `item` (action), `toggle`, `menu`,
-/// `radio_group`, `separator`; a radio option is NOT in this
-/// vocabulary, so a loose option is a compile error:
+/// The menu-children builder: the body-closure proxy every grouping slot
+/// hands out. Its creators are the closed child grammar for a `menu`/anchor
+/// slot — `item` (action), `toggle`, `menu`, `radio_group`, `separator`; a
+/// radio option is NOT in this vocabulary, so a loose option is a compile
+/// error:
 ///
 /// ```compile_fail
 /// fn zone_rule(m: &mut kaya::MenuItems<'_, '_, kaya::BarAnchor>) {
@@ -4509,9 +4183,9 @@ enum ItemSlot {
 /// }
 /// ```
 ///
-/// Every creator emits the item, its label, and its seating record
-/// eagerly, then returns the kind's chain proxy for the remaining
-/// props. Labels take constant text or a Str signal ([`MenuSource`]).
+/// Every creator emits the item, its label and its seating record eagerly,
+/// then returns the kind's chain proxy. Labels take constant text or a Str
+/// signal ([`MenuSource`]).
 pub struct MenuItems<'t, 'b, A: MenuAnchor> {
     tx: &'t mut Tx<'b>,
     slot: ItemSlot,
@@ -4655,8 +4329,7 @@ impl<'t, 'b, A: MenuAnchor> RadioOptions<'t, 'b, A> {
 ///
 /// A SUM AND NOT A MASK, because half the set is open-ended. A custom
 /// format that could be written and never accepted would be an escape
-/// hatch that only opens outward, and the whole reason to have one is
-/// an app round-tripping its own data.
+/// hatch that only opens outward.
 /// The role vocabulary (spec enum "role"): semantic emphasis, closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -4672,17 +4345,15 @@ pub enum Role {
     Heading = 3,
 }
 
-/// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
-/// "platform"; docs/styling-plan.md Slice 2b): one entry per backend
-/// roster row, closed.
+/// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum "platform";
+/// docs/styling-plan.md Slice 2b): one entry per backend roster row,
+/// closed.
 ///
 /// AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
 /// `Platform::current()` and there will not be: a binding cannot answer
 /// that question (the JVM says "Linux" on Android), and it does not have
 /// to — every row travels to every backend, and each backend picks its
-/// own. A guest that branched on its platform would also be a guest that
-/// ships different code per platform, which is the thing kaya exists to
-/// not do.
+/// own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Mac = 1,
@@ -4695,17 +4366,16 @@ pub enum Platform {
 /// THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
 /// docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
 ///
-/// An app names a CONCEPT and each backend draws its own platform's
-/// glyph for it: `Copy` is `doc.on.doc` on Apple, `content_copy` on
-/// Material, `edit-copy-symbolic` on Adwaita, and no single asset is
-/// right on all three — SF Symbols are license-locked to Apple
-/// platforms, so a shared one is not even legal. The platform sets also
-/// metric-match the text beside them (weight, baseline) while a blob
-/// cannot. The Blob `icon` slot stays for genuinely app-specific art.
+/// An app names a CONCEPT and each backend draws its own platform's glyph:
+/// `Copy` is `doc.on.doc` on Apple, `content_copy` on Material,
+/// `edit-copy-symbolic` on Adwaita, and no single asset is right on all
+/// three — SF Symbols are license-locked to Apple platforms, so a shared
+/// one is not even legal. The platform sets also metric-match the text
+/// beside them while a blob cannot. The Blob `icon` slot stays for
+/// genuinely app-specific art.
 ///
-/// Closed, and small on purpose — the `Role` trick one tier over. Apple
-/// keeps its own semantic set to fifteen entries. Growing it is a spec
-/// change with its gates, never a per-app escape hatch (D5).
+/// Closed, and small on purpose. Growing it is a spec change with its
+/// gates, never a per-app escape hatch (D5).
 ///
 /// THE DISCRIMINANTS ARE WIRE VALUES AND ARE APPEND-ONLY. A new concept
 /// takes 21; renumbering silently redraws every shipped app's menus.
@@ -4766,44 +4436,37 @@ impl Accepts<'_> {
     }
 }
 
-/// A standard-command role (DESIGN.md, Menus): a uniform declaration
-/// whose PLACEMENT is each platform's business. `Settings` tells macOS
-/// to show the command in the application menu, where users press
-/// Command-comma to look for it; every other host leaves the item where
-/// the app declared it. The vocabulary is closed — one role names one
-/// command per app, and a role is the only thing that can move an
-/// authored item into dress-owned chrome.
+/// A standard-command role (DESIGN.md, Menus): a uniform declaration whose
+/// PLACEMENT is each platform's business. `Settings` tells macOS to show
+/// the command in the application menu; every other host leaves the item
+/// where the app declared it. The vocabulary is closed — one role names one
+/// command per app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MenuRole {
     /// The app's settings command.
     Settings,
     /// The three standard clipboard commands. They act on the FOCUSED
-    /// widget, lower to the platform's own command, and configure their
-    /// own enablement — an app writes none of that.
+    /// widget, lower to the platform's own command, and configure their own
+    /// enablement.
     ///
-    /// THEY ARE NOT SUGAR OVER `copy`, and the reason is that kaya has
-    /// no selection API: only the widget knows what is selected, so an
-    /// app cannot assemble the payload for "copy the selection" itself.
-    /// Copy of a selection is therefore necessarily a command, and
-    /// Paste is its mirror. The data layer is for overriding that
-    /// default and for targets with no native behaviour.
+    /// THEY ARE NOT SUGAR OVER `copy`: kaya has no selection API, so only
+    /// the widget knows what is selected and an app cannot assemble the
+    /// payload for "copy the selection" itself. The data layer is for
+    /// overriding that default and for targets with no native behaviour.
     Cut,
     Copy,
     Paste,
-    /// The two history commands, and the same gesture layer one tier
-    /// deeper (docs/undo-plan.md D6). They ask the FOCUSED widget
-    /// first — a text field whose own edit history has something to
-    /// give answers before the app's ledger does, which is what an
-    /// editor user expects: mid-typing, Undo means the typing; after a
-    /// structural action, Undo means the action. Enablement is that
-    /// same question, and kaya computes it.
+    /// The two history commands, and the same gesture layer one tier deeper
+    /// (docs/undo-plan.md D6). They ask the FOCUSED widget first — a text
+    /// field whose own edit history has something to give answers before
+    /// the app's ledger does, which is what an editor user expects.
+    /// Enablement is that same question, and kaya computes it.
     ///
     /// AN APP OPTS IN TO THE OTHER TIER BY NAMING ITS STEPS
-    /// ([`Tx::undoable`]) and hears the result as
-    /// [`Messages::on_undone`]. An app that names none still gets
-    /// working text undo from these items, because the first tier is
-    /// the platform's.
+    /// ([`Tx::undoable`]) and hears the result as [`Messages::on_undone`].
+    /// An app that names none still gets working text undo from these
+    /// items, because the first tier is the platform's.
     Undo,
     Redo,
 }
@@ -4878,13 +4541,11 @@ impl<A: MenuAnchor> ActionRef<'_, '_, A> {
 }
 
 impl<A: CatalogHome> ActionRef<'_, '_, A> {
-    /// The action's shortcut. Any ASCII case and modifier order is
-    /// accepted and canonicalized here (the binding's ONE parser);
-    /// policy — the key floor, shift rules, `escape`, the reserved
-    /// union, duplicates within the window catalog — is judged at the
-    /// root. The shortcut is another affordance of the same item: it
-    /// fires the SAME `menu_activated` occurrence as a click.
-    /// Const-only, window-anchored actions only.
+    /// The action's shortcut. Any ASCII case and modifier order is accepted
+    /// and canonicalized here (the binding's ONE parser); policy is judged
+    /// at the root. The shortcut is another affordance of the same item: it
+    /// fires the SAME `menu_activated` occurrence as a click. Const-only,
+    /// window-anchored actions only.
     pub fn shortcut(self, spelling: &str) -> Self {
         let canonical = normalize_shortcut(spelling);
         self.tx
@@ -4893,11 +4554,9 @@ impl<A: CatalogHome> ActionRef<'_, '_, A> {
     }
 
     /// Declare this action a standard command ([`MenuRole`]). The
-    /// declaration is uniform; where it lands is the host's business —
-    /// macOS moves `Settings` into the application menu, everyone else
-    /// leaves it here. One item per role, judged at the root. The role
-    /// never invents a chord: an app that wants Command-comma spells
-    /// `.shortcut("primary+comma")` and every host then agrees.
+    /// declaration is uniform; where it lands is the host's business. One
+    /// item per role, judged at the root. The role never invents a chord:
+    /// an app that wants Command-comma spells `.shortcut("primary+comma")`.
     /// Const-only, window-anchored actions only.
     pub fn role(self, role: MenuRole) -> Self {
         self.tx
@@ -5200,12 +4859,10 @@ impl<'t, 'b> MenuItemRef<'t, 'b> {
         self
     }
 
-    /// Reopen a retained `menu` grouping node and append more children
-    /// — the terminal of the chain, returning the body's result:
-    /// `let publish = tx.menu(file).label("Document")
-    ///      .append(|m| m.item("Publish").primary(true).id());`
-    /// The root re-validates each appended subtree in the retained
-    /// item's real anchor context (depth, shortcuts, duplicates).
+    /// Reopen a retained `menu` grouping node and append more children —
+    /// the terminal of the chain, returning the body's result. The root
+    /// re-validates each appended subtree in the retained item's real
+    /// anchor context (depth, shortcuts, duplicates).
     pub fn append<R>(self, body: impl FnOnce(&mut MenuItems<'_, 'b, AnyAnchor>) -> R) -> R {
         let mut children = MenuItems {
             tx: self.tx,
@@ -5229,9 +4886,9 @@ impl<'t, 'b> MenuItemRef<'t, 'b> {
 }
 
 /// A context catalog built free of any anchor ([`Tx::context_catalog`])
-/// for a template node: the body's result rides as `out`, and the
-/// catalog moves INTO [`Tpl::context_menu`] — an item takes exactly one
-/// anchor, so attaching the same catalog twice is a compile error:
+/// for a template node: the body's result rides as `out`, and the catalog
+/// moves INTO [`Tpl::context_menu`] — an item takes exactly one anchor, so
+/// attaching the same catalog twice is a compile error:
 ///
 /// ```compile_fail
 /// fn zone_rule(
@@ -5379,12 +5036,11 @@ impl Tpl<'_, '_> {
         n
     }
 
-    /// A single-line text field per stamped copy. UNCONTROLLED, which
-    /// is why this takes nothing: the copy owns its text, edits arrive
-    /// as `InstanceTextChanged` naming this node and the copy's key
-    /// path, and the app folds them into its own state. Use
-    /// [`Self::entry_bound`] when each copy should START from its row's
-    /// own data.
+    /// A single-line text field per stamped copy. UNCONTROLLED, which is
+    /// why this takes nothing: the copy owns its text, edits arrive as
+    /// `InstanceTextChanged` naming this node and the copy's key path. Use
+    /// [`Self::entry_bound`] when each copy should START from its row's own
+    /// data.
     pub fn entry(&mut self) -> TemplateNodeId {
         self.widget(WidgetKind::Entry)
     }
@@ -5474,12 +5130,11 @@ impl Tpl<'_, '_> {
         n
     }
 
-    /// A dropdown over its options, with the SELECTED INDEX from a
-    /// source. The options are label children of the prototype, so
-    /// every copy offers the same list and only the choice varies —
-    /// a per-row option list would need a collection inside the choice
-    /// widget, which the scene rejects (labels only, deliberately;
-    /// docs/sugar-pass-plan.md §2).
+    /// A dropdown over its options, with the SELECTED INDEX from a source.
+    /// The options are label children of the prototype, so every copy
+    /// offers the same list and only the choice varies — a per-row option
+    /// list would need a collection inside the choice widget, which the
+    /// scene rejects (labels only; docs/sugar-pass-plan.md §2).
     pub fn select(
         &mut self,
         options: &[&str],
@@ -5557,34 +5212,29 @@ impl Tpl<'_, '_> {
         self.apply_source(node, Prop::A11yHint, src.into().inner);
     }
 
-    /// What every stamped copy accepts from a paste. CONST ONLY, unlike
-    /// the sourced props above, because an accept list describes the
-    /// PROTOTYPE: what a control can take is a fact about the control,
-    /// not about the row's data.
+    /// What every stamped copy accepts from a paste. CONST ONLY, unlike the
+    /// sourced props above, because an accept list describes the PROTOTYPE:
+    /// what a control can take is a fact about the control, not about the
+    /// row's data.
     ///
-    /// THIS SETTER IS THE PASTE HOOK'S KEYSTONE. Every backend gates
-    /// the paste occurrence on the focused widget's accept list and
-    /// falls back to the platform's own insertion when it is empty —
-    /// so before this existed, `on_paste_node` registered a handler
-    /// that could never fire, in every binding, silently
-    /// (docs/tpl-props-plan.md §1).
+    /// THIS SETTER IS THE PASTE HOOK'S KEYSTONE. Every backend gates the
+    /// paste occurrence on the focused widget's accept list, so before this
+    /// existed `on_paste_node` registered a handler that could never fire,
+    /// in every binding, silently (docs/tpl-props-plan.md §1).
     pub fn accepts(&mut self, node: TemplateNodeId, kinds: &[crate::Accepts<'_>]) {
         let list: Vec<&str> = kinds.iter().map(|k| k.token()).collect();
         self.set(node, Prop::Accepts, list.join(" ").as_str());
     }
 
     /// What a stamped copy MEANS — semantic emphasis, never appearance
-    /// (docs/styling-plan.md D4). The live zone has carried this since
-    /// the styling pass and the template zone could not spell it at
-    /// all, so a stamped "Delete" button inside a For was declarable as
-    /// destructive in no language.
+    /// (docs/styling-plan.md D4). The template zone could not spell it at
+    /// all until this, so a stamped "Delete" button inside a For was
+    /// declarable as destructive in no language.
     ///
-    /// CONST, like [`Self::accepts`] and for its reason: what a copy
-    /// means is a fact about the PROTOTYPE, not about the row's data.
-    /// The root refuses a role on a kind it does not fit at DECLARE
-    /// time — before a single row stamps, naming both the role and the
-    /// kind (crates/kaya/src/scene.rs, check_prop's Role arm), which is
-    /// why there is no type-level wall here either.
+    /// CONST, like [`Self::accepts`] and for its reason. The root refuses a
+    /// role on a kind it does not fit at DECLARE time — before a single row
+    /// stamps, naming both the role and the kind — which is why there is no
+    /// type-level wall here either.
     pub fn role(&mut self, node: TemplateNodeId, role: crate::Role) {
         self.set(node, Prop::Role, role as i64);
     }
@@ -5593,14 +5243,11 @@ impl Tpl<'_, '_> {
     /// inset one level down (docs/styling-plan.md D3), the same number
     /// [`Widget::inset`] spells in the live zone.
     ///
-    /// THE FORCING CASE IS A STAMPED ROW. The editor's status row is
-    /// live and insets; its find bar is a copy stamped from a template
-    /// and sat flush against a full-bleed window's edge, because the
-    /// template zone carried exactly one layout prop (grow) and no
-    /// prop could give a stamped row its margin back. Const for
-    /// [`Self::role`]'s reason: a prototype's margin describes the
-    /// prototype. Container kinds only, and the root says so at
-    /// declare time.
+    /// THE FORCING CASE IS A STAMPED ROW: the editor's find bar is a copy
+    /// stamped from a template and sat flush against a full-bleed window's
+    /// edge, because the template zone carried exactly one layout prop
+    /// (grow). Const for [`Self::role`]'s reason. Container kinds only, and
+    /// the root says so at declare time.
     pub fn inset(&mut self, node: TemplateNodeId, pad: f64) {
         self.set(node, Prop::Inset, pad);
     }
@@ -5696,16 +5343,12 @@ impl Tpl<'_, '_> {
     }
 
     /// Attach a live-built context catalog to a template node — the
-    /// Tpl-zone anchor. Zone rules: menu items are LIVE and shared
-    /// across stamped copies (v1 does not stamp items), so the catalog
-    /// is built BEFORE the template with [`Tx::context_catalog`] and
-    /// only the attachment is declared here; the node must belong to
-    /// this template case (root-checked). Every stamped copy shows the
-    /// same catalog, and an activation carries the copy's key path —
-    /// the `on_click_node` encoding, received by the `_node` handler
-    /// flavors ([`Messages::on_menu_item_node`] and siblings): the keys
-    /// ARE the noun. The catalog moves in (one catalog, one anchor) and
-    /// its body result comes back out.
+    /// Tpl-zone anchor. Zone rules: menu items are LIVE and shared across
+    /// stamped copies, so the catalog is built BEFORE the template with
+    /// [`Tx::context_catalog`] and only the attachment is declared here;
+    /// the node must belong to this template case (root-checked). An
+    /// activation carries the copy's key path, received by the `_node`
+    /// handler flavors. The catalog moves in (one catalog, one anchor).
     pub fn context_menu<R>(&mut self, node: TemplateNodeId, catalog: ContextCatalog<R>) -> R {
         let ContextCatalog { out, roots } = catalog;
         for item in roots {
@@ -5926,14 +5569,11 @@ mod tests {
         assert_eq!(format!("{font:?}"), "Asset(111400 bytes)");
     }
 
-    /// THE PROPERTY THE ASSET ROUTE EXISTS FOR: an asset handed to a
-    /// blob consumer is not copied. The op carries the SAME allocation
-    /// the core read into, and a byte spelling in the same position
-    /// necessarily carries a different one — those bytes belong to the
-    /// caller, who may edit them the line after this call.
-    ///
-    /// Asserted on the POINTER rather than on the contents, because
-    /// equal contents is exactly what a copy would also produce.
+    /// THE PROPERTY THE ASSET ROUTE EXISTS FOR: an asset handed to a blob
+    /// consumer is not copied. The op carries the SAME allocation the core
+    /// read into, and a byte spelling necessarily carries a different one.
+    /// Asserted on the POINTER rather than the contents, because equal
+    /// contents is exactly what a copy would also produce.
     #[test]
     fn an_asset_reaches_a_blob_consumer_without_a_copy() {
         use crate::protocol::TxOp;
@@ -6254,15 +5894,13 @@ mod tests {
         );
     }
 
-    /// THE NESTED TRACE AND THE TEMPLATE-ZONE BUTTON ARE SPELLING.
-    /// milestone2's shape — a For over groups, a For over items inside
-    /// it, a label bound to the element and a constant-captioned button
-    /// per stamped item — built at the explicit floor and built in the
-    /// sugar, emits the same records in the same order. IDS INCLUDED,
-    /// which is the clause that can actually break: the two zones
-    /// allocate from separate counters, so a nested For that took a
-    /// widget id instead of a template-node id would renumber
-    /// everything after it while still rendering something plausible.
+    /// THE NESTED TRACE AND THE TEMPLATE-ZONE BUTTON ARE SPELLING:
+    /// milestone2's shape built at the explicit floor and built in the
+    /// sugar emits the same records in the same order. IDS INCLUDED, which
+    /// is the clause that can actually break — the two zones allocate from
+    /// separate counters, so a nested For that took a widget id instead of
+    /// a template-node id would renumber everything after it while still
+    /// rendering something plausible.
     #[test]
     fn nested_row_trace_matches_the_floor_records() {
         use crate::protocol::{Prop, WidgetKind};
@@ -6624,21 +6262,17 @@ mod tests {
         let _ = tx.for_each(&c.at("g1"), |_| ());
     }
 
-    /// EVERY TEMPLATE CONSTRUCTOR'S ELEMENT-SOURCE ARM IS REACHABLE —
-    /// not merely declared.
+    /// EVERY TEMPLATE CONSTRUCTOR'S ELEMENT-SOURCE ARM IS REACHABLE — not
+    /// merely declared.
     ///
-    /// The distinction is the whole lesson of the sugar pass. Python
-    /// shipped `progress(value=<element field>)` for months with the
-    /// FieldRef accessors misspelled (`._field` where the type has
-    /// `._index`), so the constructor existed, every "does it exist"
-    /// check passed, and calling it raised AttributeError. Nothing
-    /// noticed because no guest bound a progress bar to a row
+    /// Python shipped `progress(value=<element field>)` for months with the
+    /// FieldRef accessors misspelled, so the constructor existed, every
+    /// "does it exist" check passed, and calling it raised AttributeError
     /// (docs/sugar-pass-plan.md D3).
     ///
-    /// So this walks the value-bearing constructors, hands each one a
-    /// FIELD of the row's element, and requires the op that comes out to
-    /// be `PropValue::Element` naming that field — the arm a constant or
-    /// a signal would never reach.
+    /// So this walks the value-bearing constructors, hands each one a FIELD
+    /// of the row's element, and requires the op that comes out to be
+    /// `PropValue::Element` naming that field.
     #[test]
     fn every_template_source_arm_binds_the_row_s_own_field() {
         use crate::protocol::{PropValue, TxOp};
@@ -6658,12 +6292,10 @@ mod tests {
         // predate this pass and ride along, so the sweep is every
         // value-bearing constructor in the zone rather than the new ones.
         let (_list, nodes) = tx.for_each(&rows, |t| {
-            // The PROP setters join the sweep the same way (the props
-            // slice, docs/tpl-props-plan.md P1): each is handed the
-            // row's own field and must emit the Element binding. A
-            // setter that took the argument and dropped it is exactly
-            // Python's D3, and "the constructor exists" checks cannot
-            // see it.
+            // The PROP setters join the sweep the same way
+            // (docs/tpl-props-plan.md P1): each is handed the row's own
+            // field and must emit the Element binding. A setter that took
+            // the argument and dropped it is exactly Python's D3.
             let e = t.entry();
             t.a11y_id(e, text);
             t.a11y_label(e, text);
@@ -7291,12 +6923,11 @@ mod tests {
                 delta: UndoDelta::default(),
             })
         };
-        // EVERYTHING QUEUED, THEN THE CHANNEL CLOSED, and only then
-        // read. `next` blocks until something maps, so a version of this
-        // test that sent one at a time would HANG rather than fail if
-        // the registration turned out to be one-shot — and a negative
-        // test that hangs is not a test. Closing the channel first turns
-        // "nothing maps" into Shutdown, which is None.
+        // EVERYTHING QUEUED, THEN THE CHANNEL CLOSED, and only then read.
+        // `next` blocks until something maps, so a version of this test
+        // that sent one at a time would HANG rather than fail if the
+        // registration turned out to be one-shot — and a negative test that
+        // hangs is not a test.
         for occ in [
             undone(DEFAULT_WINDOW),
             undone(DEFAULT_WINDOW),

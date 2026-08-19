@@ -1,15 +1,11 @@
 // The save conformance scene, Go port — the ROUND TRIP an editor actually
 // walks (docs/save-plan.md D5): open a file, save back to it, save AS a
 // new destination, then reopen BOTH and prove the bytes are where they
-// belong. A save-as that quietly wrote back into the original passes
-// every earlier step and fails at that reopen; a cancel that leaked the
-// live dialog slot panics on the second show.
+// belong.
 //
 // EVERY STATUS IS A READ-BACK OFF THE DISK, never what the guest hoped it
-// wrote — a write that returned nil and landed nowhere is exactly the
-// failure "save" has. THE BYTES ARE THE ASSERTION AND THE NAME NEVER IS,
-// because Android's SAF appends an extension matching the mime type at
-// creation.
+// wrote. THE BYTES ARE THE ASSERTION AND THE NAME NEVER IS, because
+// Android's SAF appends an extension matching the mime type at creation.
 //
 // NO EXTENSIONS ON THE NAMES AND NO FILTER ON THE SAVE REQUEST, both
 // deliberate: a save panel hides a known extension when the user's Finder
@@ -51,8 +47,7 @@ func sceneRoot() string {
 		return filepath.Join(kaya.Env("HOME"), "Documents")
 	}
 	// Desktop-only by construction: the two arms above return first, so
-	// Go's empty Android environment never decides where this scene's
-	// files go.
+	// Go's empty Android environment never decides where these files go.
 	return os.TempDir()
 }
 
@@ -145,7 +140,6 @@ func App() *kaya.App {
 				// this scene deliberately uses.
 				tx.PickFile().OnResult(func(tx *kaya.Tx, files []kaya.PickedFile) {
 					if len(files) == 0 {
-						// The empty list IS cancel.
 						tx.Write(status, "open cancelled")
 						return
 					}
@@ -170,8 +164,6 @@ func App() *kaya.App {
 				// types over it the way a user would.
 				tx.SaveFile("copy").OnResult(func(tx *kaya.Tx, file *kaya.PickedFile) {
 					if file == nil {
-						// CANCEL IS NIL: nothing was named, so nothing is
-						// written.
 						tx.Write(status, "save cancelled")
 						return
 					}

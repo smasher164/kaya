@@ -17,27 +17,23 @@ app.build { tx in
     let root = tx.column {
         tx.label(bind: probe)  // label#0
 
-        // Main-axis free space: three unequal children, room left over.
         tx.row {
             tx.button("A")
             tx.button("longer")
             tx.label(bind: tail)  // label#1
         }
 
-        // Cross-axis alignment: three intrinsic heights, one grower.
         tx.row {
             tx.checkbox("check")
             tx.label(bind: mixed)  // label#2
             tx.slider(min: 0.0, max: 1.0, value: 0.5, grow: 1)
         }
 
-        // Proportional grow: two growers of unequal weight in one row.
         tx.row {
             tx.slider(min: 0.0, max: 1.0, value: 0.25, grow: 1)
             tx.slider(min: 0.0, max: 1.0, value: 0.75, grow: 3)
         }
 
-        // Nesting: a column inside the root column, a row inside that.
         tx.column {
             tx.label(bind: nested)  // label#3
             tx.row {

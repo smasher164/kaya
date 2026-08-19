@@ -1,17 +1,14 @@
 // The milestone-2 scene from Go, on the construction sugar.
 //
 // WHAT THIS SCENE DOCUMENTS IS HOW OCCURRENCES REACH AN APP, and only
-// that (DESIGN.md, scope ratified 2026-08-05). The remove button is a
-// STAMPED copy, so its handler is registered CENTRALLY against the
-// template node and receives that copy's key path; the live step button
-// rides its constructor. Both put the same closure in the same table.
+// that. The remove button is a STAMPED copy, so its handler is
+// registered CENTRALLY against the template node and receives that
+// copy's key path; the live step button rides its constructor.
 //
 // AND THE APP NAMES EVERY KEY HERE, on purpose: "g1" and "a" are this
 // app's own identity for a group and an item, re-addressed later by
 // name. That is exactly what InsertFresh is NOT for
 // (docs/fresh-key-plan.md).
-//
-// From the repo root:
 //
 //	KAYA_SELFTEST=1 go run dev.kaya/guests/go/cmd
 package milestone2
@@ -62,9 +59,6 @@ func App() *kaya.App {
 			tx.When(extras, func(t *kaya.Tpl) {
 				t.LabelText("extras on")
 			})
-			// The tracing tier, nested the way the data nests: each for
-			// statement IS a For — the body runs once, and
-			// range-over-func makes the close structural, even on break.
 			for group := range groups.Rows(tx) {
 				group.Column(func() {
 					group.Label(group.Value())

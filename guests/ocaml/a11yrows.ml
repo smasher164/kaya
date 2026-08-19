@@ -34,11 +34,8 @@ let () =
               Tpl.(entry ~a11y_id_field:element ~a11y_label_field:element ()));
            (* A SECOND collection rather than two more widgets in the
               first, because a scalar row has exactly one field to spend
-              on an id and [expect_ax] needs a distinct one per element.
-              [~role] and [~inset] take no [_field] flavor: what a copy
-              MEANS, and how far its prototype holds children off its
-              edge, are facts about the PROTOTYPE and not about the
-              row's data. *)
+              on an id. [~role] and [~inset] take no [_field] flavor:
+              they are facts about the PROTOTYPE, not the row. *)
            each heads (fun () ->
               Tpl.(
                 row ~inset:8.0
@@ -48,8 +45,6 @@ let () =
          ()
      in
      mount root;
-     (* Seeded once the template is declared. Nothing here names a note,
-        so the key comes from [insert_fresh]. *)
      ignore (insert_fresh notes (Str "First note"));
      ignore (insert_fresh notes (Str "Second note"));
      ignore (insert_fresh heads (Str "Heading one"));

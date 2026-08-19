@@ -133,8 +133,6 @@ let () =
         write notes (Str (note_list !row_notes))
       in
 
-      (* The history handlers ride the WINDOW because the ledger is per
-         window. *)
       window ~title:"undo"
         ~menus:
           [

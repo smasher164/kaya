@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,16 +11,11 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# The gate for the stale-artifact guard (tools/build-id.sh). It answers
-# the two questions that make that guard real rather than decorative:
-#
-#   1. Does a BUILT library actually carry the current id, and does the
-#      verifier reject one that carries a different id? A verifier that
-#      passes everything is worse than none — it converts "I did not
-#      check" into "I checked and it was fine".
-#   2. Does every lane verify what it is about to run or ship? The check
-#      is a call somebody has to write, so a new lane starts out
-#      unguarded; that is exactly the failure this clause holds open.
+# The gate for the stale-artifact guard (tools/build-id.sh). Two
+# questions: does a BUILT artifact carry the current id and does the
+# verifier reject one that does not, and does every lane verify what it
+# runs or ships? The verify call is one somebody has to write, so a new
+# lane starts out unguarded.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -49,10 +39,9 @@ if ! tools/build-id.sh --verify "$LIB" >/dev/null 2>"$TMP/err"; then
     cat "$TMP/err" >&2
 fi
 
-# 1b. Doctor the marker in a COPY of that same library — one hex digit,
-# nothing else — and the verifier must reject it. This is the shape a
-# stale artifact takes: a real, loadable, correct-looking library built
-# from sources that are no longer here.
+# 1b. Doctor the marker in a COPY — one hex digit — and the verifier
+# must reject it. That is the shape a stale artifact takes: real,
+# loadable, built from sources that are no longer here.
 python3 - "$LIB" "$TMP/stale.dylib" <<'PY'
 import pathlib, sys
 blob = bytearray(pathlib.Path(sys.argv[1]).read_bytes())
@@ -80,9 +69,8 @@ if tools/build-id.sh --verify "$TMP/does-not-exist" >/dev/null 2>&1; then
     fail "self-test failed: a missing artifact verified clean"
 fi
 
-# 2. Coverage. Each lane builds the core and then runs or ships it; the
-# list is explicit because a runner that silently stopped verifying
-# would otherwise look exactly like one that never needed to.
+# 2. Coverage. The list is explicit: a runner that silently stopped
+# verifying looks exactly like one that never needed to.
 for lane in \
     tools/validate-mac.sh \
     tools/linux/run-suites.sh \
@@ -95,11 +83,10 @@ for lane in \
     fi
 done
 
-# 2b. The SwiftUI interpreter is a SECOND artifact with its own id, and
-# both places that compile one must bake it in and check it. It is the
-# artifact the two Apple lanes actually execute — 222 of the matrix's
-# legs — and swiftc failing leaves the previous dylib exactly where a
-# cargo failure leaves the previous libkaya.
+# 2b. The SwiftUI interpreter is a SECOND artifact with its own id;
+# both places that compile one must bake it in and check it. swiftc
+# failing leaves the previous dylib where a cargo failure leaves the
+# previous libkaya.
 for site in tools/swiftui/build-dylib.sh tools/ios/run-sim.sh; do
     if ! grep -q "component swiftui" "$site"; then
         fail "$site compiles the SwiftUI interpreter but never verifies it (--component swiftui)"
@@ -109,10 +96,8 @@ for site in tools/swiftui/build-dylib.sh tools/ios/run-sim.sh; do
     fi
 done
 
-# 2b-android. The Compose interpreter, same contract. The apk is built
-# from android/kaya/generated, so the lane must WRITE the marker before
-# gradle and ASK the apk afterwards — one without the other is either a
-# marker nobody checks or a check with nothing to find.
+# 2b-android. The Compose interpreter, same contract: the lane must
+# WRITE the marker before gradle and ASK the apk afterwards.
 if ! grep -q "kaya_write_compose_marker" tools/android/run-emulator.sh; then
     fail "run-emulator.sh does not bake a build id into the Compose interpreter"
 fi
@@ -120,8 +105,7 @@ if ! grep -q "component compose" tools/android/run-emulator.sh; then
     fail "run-emulator.sh never verifies the apk it installs (--component compose)"
 fi
 
-# 2c. The built interpreter itself, when one is present: same two
-# questions the core gets.
+# 2c. The built interpreter itself, when one is present.
 DYLIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
 if [ -f "$DYLIB" ]; then
     if ! tools/build-id.sh --verify --component swiftui "$DYLIB" >/dev/null 2>"$TMP/sw"; then

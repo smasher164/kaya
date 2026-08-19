@@ -243,9 +243,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    return record(TX_SET_SECTION_PROP, struct.pack(\"<QIIQ\", section, SPROP_{up}, SOURCE_SIGNAL, signal_id))"));
     }
 
-    // The one binding-tier shortcut parser (DESIGN.md, Menus): spelling
-    // only — policy (escape, shift-only/bare alphanumerics, the
-    // reserved floor) is the core's, validated on the canonical form.
+    // The one binding-tier shortcut parser (DESIGN.md, Menus): SPELLING
+    // only, policy being the core's and validated on the canonical form.
     // tx_set_menu_shortcut routes through it, so no call site can
     // bypass canonicalization.
     let named_keys = crate::SHORTCUT_NAMED_KEYS
@@ -292,9 +291,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            \"(one of a-z, 0-9, or the closed named set)\")");
     c.line("    return \"+\".join([m for m in (\"primary\", \"shift\", \"alt\") if m in seen] + [key])");
 
-    // The menu-prop setters (const for every prop; signal binders only
-    // for the bindable ones — icon/primary/shortcut are const-only and
-    // SOURCE_SIGNAL on them dies at the root).
+    // The menu-prop setters: a const setter for every prop, signal
+    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
+    // dies at the root).
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let up = prop.to_uppercase();
         let (param, ty, expr) = match kind {
@@ -418,10 +417,9 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            local_path, at = parse_value(buf, at)");
     c.line("            files.append((handle, name, local_path))");
     c.line("        return kind, dialog, [], files");
-    // The privileged read's one answer: a request id, then the clip.
-    // Its own arm for the file_dialog_result reason and then some — the
-    // generic tail would take the CLIP KIND for a path length, so a
-    // text answer (clip 1) would read the values header as a key.
+    // The privileged read's one answer, in its own arm: the generic
+    // tail would take the CLIP KIND for a path length, so a text answer
+    // would read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!("    if kind == OCC_{}:", name.to_uppercase()));
         c.line("        (request,) = struct.unpack_from(\"<Q\", buf, 8)");
@@ -535,9 +533,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line(&format!("    if kind in ({with_payload},):"));
     c.line("        payload, at = parse_value(buf, at)");
     // A paste rides a click tag VERBATIM, so the key path above is
-    // already read and the clip sits after it — the way text_changed's
-    // payload does. One record kind, path_len deciding, exactly as a
-    // click on a stamped row is the same record as one on a live widget.
+    // already read and the clip sits after it. One record kind, path_len
+    // deciding.
     let pasted = crate::pasted_occurrence_names(spec)
         .iter()
         .map(|n| format!("OCC_{}", n.to_uppercase()))

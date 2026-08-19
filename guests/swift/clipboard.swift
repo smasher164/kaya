@@ -162,7 +162,6 @@ app.build { tx in
             "focus plain",
             onClick: { inner in inner.focus(plain) })  // button#6
 
-        // Declares what it takes, so a paste lands in the hook.
         rich = tx.entry()  // entry#0
         tx.setAccepts(rich, [KayaAppTx.acceptText])
         tx.setA11yId(rich, "rich")
@@ -174,8 +173,6 @@ app.build { tx in
             inner.write(status, .str("pasted \(clip)"))
         }
 
-        // Declares nothing, so the platform's own insertion happens and
-        // the field's ordinary change path reports it.
         plain = tx.entry()  // entry#1
         tx.setA11yId(plain, "plain")
 

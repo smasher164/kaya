@@ -1,12 +1,7 @@
 // The accessibility conformance scene from C#: the two universal props
-// (SetA11yId, SetA11yLabel) and the verb that reads them back out of
-// the PLATFORM'S OWN accessibility tree rather than kaya's model.
-//
-// Every widget kind appears, and exactly one container of each
-// container kind — the props are universal, and container targets are
-// stable only while a scene keeps one of each. See guests/rust/a11y.rs
-// for the full note; the byte-frozen contract is
-// tools/scenes/a11y.steps.
+// (SetA11yId, SetA11yLabel), read back out of the PLATFORM'S OWN
+// accessibility tree. EXACTLY ONE CONTAINER OF EACH KIND — container
+// targets are ordinal. See guests/rust/a11y.rs, tools/scenes/a11y.steps.
 
 static class A11yScene
 {
@@ -45,16 +40,12 @@ static class A11yScene
                 var logo = tx.Image(TestPng);
                 tx.SetA11yId(logo, "logo");
                 tx.SetA11yLabel(logo, "Logo");
-                // The two CHOICE kinds: their options carry captions,
-                // the choice itself does not.
                 var color = tx.Select(new[] { "Red", "Green" });
                 tx.SetA11yId(color, "color");
                 tx.SetA11yLabel(color, "Color");
                 var size = tx.Radio(new[] { "Small", "Large" });
                 tx.SetA11yId(size, "size");
                 tx.SetA11yLabel(size, "Size");
-                // Containers are GROUPS to an assistive client; naming
-                // one is how an app declares it a group.
                 var cells = tx.Grid(2, () =>
                 {
                     tx.Label("Name");
@@ -81,8 +72,7 @@ static class A11yScene
         System.Environment.Exit(app.Run());
     }
 
-    // A 2x2 RGB PNG, 75 bytes, embedded as source: a scene carries its
-    // inputs and does no runtime file I/O.
+    // A 2x2 RGB PNG, 75 bytes, embedded as source.
     static readonly byte[] TestPng =
     {
         137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,

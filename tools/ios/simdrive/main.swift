@@ -1,61 +1,9 @@
-// simdrive — the harness's eyes and hands OUTSIDE the app, on iOS.
-//
-// Android needed an accessibility service to reach DocumentsUI because
-// the picker is a separate APK. iOS needs the same thing for the same
-// reason and cannot have it: `UIDocumentPickerViewController` is a
-// REMOTE view controller, its content lives in another process, and an
-// app has no way to become an assistive client. Measured
-// (docs/traps.md): in-process the picker publishes zero accessibility
-// elements, and its one in-process affordance — the Cancel tracking
-// view — refuses `accessibilityActivate()`.
-//
-// So the eyes go on the HOST, where the simulator's own frameworks
-// expose both halves. Everything below is private framework shipped
-// inside Xcode, and it is the same surface `simctl` itself talks to.
-//
-//   READING   SimServiceContext -> SimDevice for the UDID
-//             device.accessibilityPlatformTranslationToken
-//             AXPTranslator, whose bridgeTokenDelegate fulfils each
-//             AXPTranslatorRequest through
-//             -[SimDevice sendAccessibilityRequestAsync:...]
-//             objectAtPoint: to learn the picker's pid, then
-//             translationApplicationObjectForPid: for its root, then
-//             AXPMacPlatformElement to read the tree.
-//
-//   DRIVING   IndigoHIDMessageForMouseNSEvent sources a digitizer
-//             payload; it is re-enveloped as a single-touch message and
-//             sent to SimulatorKit.SimDeviceLegacyHIDClient.
-//
-// FOUR THINGS THAT LOOK LIKE FAILURE AND ARE NOT, all measured, all
-// costly to rediscover:
-//
-//  1. `frontmostApplication` returns THE APP, and its AXChildren are
-//     empty — because the picker is a different process sitting on top
-//     of it. The app is not the thing to read.
-//  2. Translated elements expose NO AXParent, so you cannot climb out
-//     of a hit test. The only way in is by pid.
-//  3. AXPMacPlatformElement is a LEGACY accessibility element. It
-//     answers -accessibilityAttributeValue:; the modern
-//     accessibilityLabel/accessibilityChildren properties return
-//     nothing and look exactly like an empty tree.
-//  4. The bridge delegate must go on EVERY AXPTranslator singleton.
-//     With it on only one, the first fetch works and every attribute
-//     read afterwards silently returns nothing.
-// And one that is not a failure at all: the row's accessibility
-// description omits the file extension ("picked, Text file, 12 bytes")
-// while the PICKED URL carries it in full ("picked.txt"). Rows are
-// therefore matched on the stem — see `rowName`.
-//
-// AND ONE THAT LOOKS LIKE SUCCESS AND IS NOT, which is why the save
-// sheet has verbs of its own rather than riding `press`: the sheet's
-// real Save button is not in the tree at all — only `navigationStrip`
-// finds it — while the tree carries a decoy AXStaticText "Save as" one
-// line above the filename field. Measured 2026-08-09, against a live
-// export sheet: `press Save` matched that label by containment, printed
-// `pressed AXStaticText Save as … in overlay`, exited 0, and left the
-// sheet up with the delegate never firing. `savepress` takes the strip
-// and an EXACT match instead; `press` still has this hazard for any
-// label a static text merely contains.
+// simdrive — the harness's eyes and hands OUTSIDE the app, on iOS: it
+// reads the simulator's accessibility tree and delivers HID taps from
+// the HOST, through private frameworks shipped inside Xcode. Why an
+// in-process driver is impossible, and the things on this path that look
+// like failure and are not, are in docs/traps.md ("The iOS picker is
+// another app too" and the three sections after it).
 import CoreGraphics
 import Foundation
 import ObjectiveC
@@ -67,10 +15,6 @@ func fail(_ s: String) -> Never {
     exit(1)
 }
 
-// Either name: the runner already exports DEVELOPER_DIR to reach simctl,
-// and a caller outside it can say KAYA_SIMDRIVE_DEVELOPER_DIR instead.
-// Both resolve to the same Xcode; requiring the private one would make
-// this fail inside the lane for no reason.
 let environment = ProcessInfo.processInfo.environment
 let developerDir = environment["KAYA_SIMDRIVE_DEVELOPER_DIR"]
     ?? environment["DEVELOPER_DIR"] ?? ""
@@ -120,7 +64,6 @@ func lookUpDevice(_ udid: String) -> NSObject {
 /// SYNCHRONOUS by contract, so it blocks on the async send.
 final class Bridge: NSObject {
     let device: NSObject
-    /// Set once the translator exists; the reset below needs it.
     weak var translator: NSObject?
     init(device: NSObject) { self.device = device }
 
@@ -134,12 +77,8 @@ final class Bridge: NSObject {
                     request, completionQueue: DispatchQueue.global(),
                     completionHandler: { out = $0; sema.signal() })
             _ = sema.wait(timeout: .now() + 20)
-            // EVERY RESPONSE MUST BE RETIRED, and forgetting costs
-            // something that looks nothing like a leak: the reads keep
-            // working, and the next TAP is ignored. Measured — a tap
-            // with no reads before it lands, the same tap after a tree
-            // walk does not. idb pops each request's token for the same
-            // reason; this is that pop.
+            // Every response must be retired or the next TAP is silently
+            // ignored while the reads keep working (docs/traps.md).
             if let out, let translator = self?.translator {
                 let reset = NSSelectorFromString("_resetBridgeTokensForResponse:bridgeDelegateToken:")
                 if translator.responds(to: reset) {
@@ -185,7 +124,8 @@ final class Simulator {
         guard let translatorClass = NSClassFromString("AXPTranslator") else {
             fail("no AXPTranslator")
         }
-        // EVERY singleton, see note 4 in the header.
+        // EVERY singleton: with the delegate on one, the first fetch
+        // works and every read after it returns nothing (docs/traps.md).
         var concrete: NSObject?
         for getter in ["sharedInstance", "sharediOSInstance", "sharedmacOSInstance"] {
             let sel = NSSelectorFromString(getter)
@@ -232,7 +172,7 @@ final class Simulator {
     }
 }
 
-// MARK: - reading elements (the LEGACY api, see note 3)
+// MARK: - reading elements (the LEGACY api; docs/traps.md)
 
 func attribute(_ element: NSObject, _ name: String) -> Any? {
     let sel = NSSelectorFromString("accessibilityAttributeValue:")
@@ -244,11 +184,9 @@ func text(_ element: NSObject, _ name: String) -> String {
     (attribute(element, name) as? String) ?? ""
 }
 
-/// Write an attribute back, through the same legacy api the reads use
-/// (note 3 in the header: the modern properties are not there). False
-/// when the element does not answer the setter at all, which is a
-/// different failure from a set that routes nowhere — and neither one
-/// reports itself, so every caller reads the value back.
+/// Write an attribute back through the same legacy api the reads use.
+/// A set that routes nowhere reports nothing, so every caller reads the
+/// value back.
 func setAttribute(_ element: NSObject, _ name: String, _ value: Any) -> Bool {
     let sel = NSSelectorFromString("accessibilitySetValue:forAttribute:")
     guard element.responds(to: sel) else { return false }
@@ -267,12 +205,9 @@ func frame(_ element: NSObject) -> CGRect {
 }
 
 struct Node {
-    /// THE ELEMENT ITSELF, carried so a node can be read further or
-    /// written to without walking the tree again. Values are NOT snapped
-    /// here: every attribute is a synchronous round trip to the device,
-    /// and only the save sheet's one text field is ever asked for its
-    /// value — paying for that on all two thousand nodes of every walk
-    /// would slow every other verb to buy one.
+    /// Carried so a node can be read further or written to without
+    /// walking again. Attributes are NOT snapped here: each one is a
+    /// synchronous round trip to the device.
     let element: NSObject
     let role: String
     let description: String
@@ -293,8 +228,7 @@ func flatten(_ element: NSObject, _ depth: Int = 0, into out: inout [Node]) {
 
 /// The picker's process, found by hit-testing the middle of the screen:
 /// anything there belonging to a pid OTHER than the app under test is
-/// the picker sitting on top of it. Nil when the app itself answers,
-/// which is how "no picker is up" reads.
+/// the picker on top of it. Nil reads as "no picker is up".
 func pickerRoot(_ sim: Simulator, appPid: Int32, screen: CGSize) -> NSObject? {
     let probes = [
         CGPoint(x: screen.width / 2, y: screen.height / 2),
@@ -313,8 +247,7 @@ func pickerRoot(_ sim: Simulator, appPid: Int32, screen: CGSize) -> NSObject? {
     return nil
 }
 
-/// The app's own screen size in POINTS, read off its application element
-/// rather than assumed, because the tap wants a ratio of it.
+/// The app's own screen size in POINTS; the tap wants a ratio of it.
 func screenSize(_ sim: Simulator) -> CGSize {
     guard let app = sim.frontmostApplication(), let element = sim.element(for: app) else {
         fail("no frontmost application to size the screen from")
@@ -325,19 +258,13 @@ func screenSize(_ sim: Simulator) -> CGSize {
 }
 
 /// A row's file name, from an accessibility description shaped
-/// "<name>, <kind>, <time>, <size>".
-///
-/// THE EXTENSION IS ABSENT from that name — the picker publishes
-/// "picked", never "picked.txt", though the URL it finally answers with
-/// carries the extension in full (measured). So this returns the STEM,
-/// and callers compare stems. The scene still proves it picked the right
-/// file, because it reads the file's BYTES and the decoy's differ.
+/// "<name>, <kind>, <time>, <size>". Returns the STEM: that name omits
+/// the extension the picked URL carries (docs/traps.md), so callers
+/// compare stems.
 func rowName(_ node: Node) -> String? {
     guard node.role == "AXStaticText" else { return nil }
     let parts = node.description.split(separator: ",", omittingEmptySubsequences: false)
         .map { $0.trimmingCharacters(in: .whitespaces) }
-    // A row carries name/kind/time/size; the list's own "2 items"
-    // footer, and every label like it, has no commas at all.
     guard parts.count >= 3, !parts[0].isEmpty else { return nil }
     return parts[0]
 }
@@ -346,27 +273,18 @@ func stem(_ name: String) -> String {
     (name as NSString).deletingPathExtension
 }
 
-/// The directory the picker is showing, off the actions button that
-/// names it ("kaya-picked-123, Actions Menu").
-///
-/// BY HIT TEST, not by walking the tree: the tree hanging off the
-/// picker's application object is SHALLOW — it carries the file rows and
-/// the tab bar and stops. The navigation bar that names the directory is
-/// not a child of anything reachable from there, but it answers a hit
-/// test perfectly well (measured). So the title strip is probed
-/// directly.
-/// Every element the navigation strip answers a hit test with, as
-/// (description, centre). The strip is swept rather than walked for the
-/// reason above, and across x as well as y because its controls sit at
-/// both edges.
+/// Every element the navigation strip answers a HIT TEST with, as
+/// (description, centre). Swept rather than walked because the picker's
+/// element tree is shallow and the strip is not reachable from its root
+/// (docs/traps.md), and across x as well as y because its controls sit
+/// at both edges.
 func navigationStrip(_ sim: Simulator, screen: CGSize) -> [(String, CGPoint)] {
     var found: [(String, CGPoint)] = []
     var seen = Set<String>()
     let xs = stride(from: 12.0, through: screen.width - 12, by: 20.0)
-    // 40..170: the whole chrome band. The strip's controls sit at ~92,
-    // but a single-select picker lays its dismissal out differently from
-    // a multi-select one, and a sweep pinned to one row finds only the
-    // shape it was written against.
+    // 40..170 covers the whole chrome band: the controls sit at ~92, but
+    // a single-select picker lays its dismissal out differently from a
+    // multi-select one.
     for x in xs {
         for y in stride(from: 40.0, through: 170.0, by: 14.0) {
             let point = CGPoint(x: x, y: y)
@@ -383,6 +301,8 @@ func navigationStrip(_ sim: Simulator, screen: CGSize) -> [(String, CGPoint)] {
     return found
 }
 
+/// The directory the picker is showing, off the actions button that
+/// names it ("kaya-picked-123, Actions Menu").
 func currentDirectory(_ sim: Simulator, screen: CGSize) -> String {
     for (description, _) in navigationStrip(sim, screen: screen) {
         let parts = description.split(separator: ",").map {
@@ -395,12 +315,10 @@ func currentDirectory(_ sim: Simulator, screen: CGSize) -> String {
 
 // MARK: - driving
 
-/// A single tap, built the way SimulatorKit builds one and delivered
-/// through the legacy HID client.
-///
-/// RAW BYTES, not mirrored Swift structs: the wire layout is
-/// `#pragma pack(4)` and Swift has no packed layout, so a struct mirror
-/// would mis-encode silently. Offsets are from idb's Indigo.h.
+/// A single tap, delivered through the legacy HID client. RAW BYTES, not
+/// mirrored Swift structs: the wire layout is `#pragma pack(4)` and Swift
+/// has no packed layout, so a struct mirror would mis-encode silently.
+/// Offsets are from idb's Indigo.h.
 final class Tapper {
     private let client: AnyObject
     private let messageForMouse: @convention(c) (
@@ -418,10 +336,8 @@ final class Tapper {
     }
 
     init(device: NSObject) {
-        // Looked up by NAME and never referenced as a type: idb records
-        // that this class has RELOCATED between Xcode versions
-        // (SimulatorKit -> CoreDeviceIO), and a link-time reference
-        // would pin it to whichever framework held it that year.
+        // By NAME and never as a type: this class has RELOCATED between
+        // Xcode versions (docs/file-dialogs-plan.md §6e).
         guard let clientClass = objc_lookUpClass("SimulatorKit.SimDeviceLegacyHIDClient") else {
             fail("no SimDeviceLegacyHIDClient — it may have moved again in this Xcode")
         }
@@ -439,9 +355,8 @@ final class Tapper {
 
     private func message(ratio: CGPoint, down: Bool) -> UnsafeMutableRawPointer {
         var point = ratio
-        // SimulatorKit has no single-touch builder — its mouse builder
-        // always emits multi-touch — so a valid digitizer payload is
-        // sourced from it and re-enveloped as a single-touch message.
+        // SimulatorKit has no single-touch builder, so a valid digitizer
+        // payload is sourced from the mouse one and re-enveloped.
         let source = messageForMouse(&point, nil, 0x32, down ? 1 : 2, ObjCBool(false))
         var x = ratio.x, y = ratio.y
         memcpy(source.advanced(by: 0x3c), &x, 8)  // xRatio, unaligned by packing
@@ -506,8 +421,8 @@ func pickerNodes() -> [Node]? {
     return nodes
 }
 
-/// Bounded: the picker takes a moment to come up, and a read that
-/// arrives early reports "no dialog" for a dialog that is on its way.
+/// Bounded: a read that arrives early reports "no dialog" for a dialog
+/// that is on its way.
 func waitForPicker(_ tries: Int = 20) -> [Node]? {
     for _ in 0..<tries {
         if let nodes = pickerNodes(), nodes.count > 1 { return nodes }
@@ -558,23 +473,13 @@ func waitForPickerGone(_ tries: Int = 20) -> Bool {
 /// description of its own — the words "Save as" belong to a static text
 /// beside it (measured, scratchpad/save-probe-ios.md B.4) — so there is
 /// no label to match on, and role is what is left.
-///
-/// The callers all require exactly ONE and say what they saw otherwise,
-/// rather than taking the first: a sheet with two text fields is not the
-/// shape this was written against, and guessing which one holds the name
-/// is how a driver types into a search box and reports success.
 func nameFields(_ nodes: [Node]) -> [Node] {
     nodes.filter { $0.role == "AXTextField" && !$0.frame.isEmpty }
 }
 
-/// The export sheet, waited for BY ITS FIELD.
-///
-/// Same race as waitForRows and the same cost if it is skipped: the sheet
-/// is a remote view controller that publishes its chrome as soon as it
-/// presents and fills the content in a moment later, so `waitForPicker`'s
-/// `count > 1` is satisfied by the chrome alone and a read landing in that
-/// window reports a sheet with no name field — which reads as "no save
-/// dialog live" for a dialog that is on the screen.
+/// The export sheet, waited for BY ITS FIELD — the same
+/// chrome-before-content race waitForRows spells out, and the same cost
+/// if it is skipped.
 func waitForSaveSheet(_ tries: Int = 20) -> [Node]? {
     var last: [Node]? = nil
     for _ in 0..<tries {
@@ -598,20 +503,10 @@ func theNameField(_ nodes: [Node], _ doing: String) -> Node {
     return fields[0]
 }
 
-/// Press the sheet's own dismissal and require it to be gone.
-///
-/// NO CANCEL BUTTON WHEN THE SHEET IS AIMED INTO A SUBDIRECTORY.
-/// Measured on the open picker: a single-selection picker opened at a
-/// directory shows a BACK chevron where a Cancel would be, and only the
-/// provider's root carries Cancel. (A multi-selection picker carries it
-/// throughout, which is why this looked like it worked.) The export sheet
-/// is the same browser and inherits it. So walk back until the dismissal
-/// exists, the way a person would, and press it.
-///
-/// The back control's accessibility label is the PRESENTING APP'S NAME,
-/// not "Back" — so it is identified by position, as the leftmost thing in
-/// the strip, rather than by a word that changes with whatever bundle is
-/// under test.
+/// Press the sheet's own dismissal and require it to be gone. There is
+/// NO Cancel when the browser is aimed into a subdirectory, so this walks
+/// back until one exists; the back control is identified by POSITION,
+/// because its label is the presenting app's name (docs/traps.md).
 func cancelSheet(_ what: String) {
     let tapper = Tapper(device: sim.device)
     var cancelled = false
@@ -636,9 +531,7 @@ func cancelSheet(_ what: String) {
 
 switch verb {
 case "navstrip":
-    // Diagnosis: what the navigation strip offers right now. The strip
-    // is where Cancel and the multi-select confirm live, and neither is
-    // reachable by walking the tree.
+    // Diagnosis: what the navigation strip offers right now.
     guard waitForPicker() != nil else { print("no picker"); exit(0) }
     for (description, centre) in navigationStrip(sim, screen: screen) {
         print("\(description)\t\(NSStringFromPoint(centre))")
@@ -651,9 +544,8 @@ case "describe":
     }
 
 case "state":
-    // `<directory>` then one row name per line — what expect_file_dialog
-    // reads. Empty output means no picker is up, which must FAIL that
-    // verb rather than pass it quietly.
+    // `<directory>` then one row name per line, for expect_file_dialog.
+    // Empty output means no picker is up, which must FAIL that verb.
     guard let nodes = waitForRows() else { exit(0) }
     print(currentDirectory(sim, screen: screen))
     for node in nodes { if let name = rowName(node) { print(name) } }
@@ -661,9 +553,6 @@ case "state":
 case "choose":
     guard arguments.count >= 5 else { fail("choose needs a name") }
     let wanted = stem(arguments[4])
-    // waitForRows and not waitForPicker, for the reason spelled out
-    // there: the chrome arrives before the rows, and looking for a
-    // named row in that window fails with "the picker lists []".
     guard let nodes = waitForRows() else { fail("no picker is up to choose \(wanted) from") }
     guard let row = nodes.first(where: { rowName($0).map { stem($0) == wanted } ?? false }) else {
         let listed = nodes.compactMap { rowName($0) }
@@ -673,13 +562,9 @@ case "choose":
     let tapper = Tapper(device: sim.device)
     tapper.tap(at: centre, screen: screen)
 
-    // TWO INTERACTIONS, not one, and the scene needs both: with
-    // `pick_file()` the tap IS the answer and the picker leaves; with
-    // `pick_files()` the tap SELECTS and a confirm appears in the
-    // navigation strip (measured: "Open" replaces "Cancel", and a
-    // Select All / Deselect All bar appears at the foot). So the picker
-    // going away is what tells the two apart, rather than a flag this
-    // side would have to be told.
+    // Single-selection answers on the tap; multi-selection selects and
+    // needs the strip's confirm (docs/traps.md). The picker going away
+    // is what tells the two apart.
     if !waitForPickerGone(6) {
         let strip = navigationStrip(sim, screen: screen)
         if let (_, confirm) = strip.first(where: {
@@ -689,14 +574,10 @@ case "choose":
         }
     }
 
-    // THE PICKER BEING GONE IS THE PROOF the tap landed. A tap that
-    // arrives before the list is interactive is swallowed with no error
-    // anywhere — the same rule every other backend needed.
-    //
-    // SELF-DIAGNOSING when it does not: a miss and a swallowed press
-    // look identical from here, and the numbers are the only way to
-    // tell them apart — so they go in the message rather than into a
-    // debugging session.
+    // The picker being gone is the proof the tap landed: a tap arriving
+    // before the list is interactive is swallowed with no error. The
+    // failure carries the numbers because a miss and a swallowed press
+    // look identical from here.
     if !waitForPickerGone() {
         let after = pickerNodes()?.compactMap { rowName($0) } ?? []
         let strip = navigationStrip(sim, screen: screen).map { $0.0 }
@@ -711,29 +592,17 @@ case "cancel":
     cancelSheet("picker")
 
 case "savestate":
-    // `<directory>` then the name in the "Save as" field — what
-    // expect_save_dialog reads. Empty output means no save sheet is up,
-    // which must FAIL that verb rather than pass it quietly.
-    //
-    // BOTH HALVES MATTER. The directory alone would pass for a sheet
-    // that ignored the name it was told, which then saves under the
-    // SUGGESTED name with every byte assertion downstream still green
-    // and pointing at the wrong file.
+    // `<directory>` then the name in the "Save as" field, for
+    // expect_save_dialog. Empty output means no save sheet is up, which
+    // must FAIL that verb. Both halves matter: the directory alone would
+    // pass for a sheet that ignored the name it was told.
     guard let nodes = waitForSaveSheet(), !nameFields(nodes).isEmpty else { exit(0) }
     print(currentDirectory(sim, screen: screen))
     print(text(theNameField(nodes, "savestate").element, "AXValue"))
 
 case "savename":
-    // TYPE INTO THE FIELD — the verb docs/save-plan.md D4 says this
-    // driver must gain, because a save dialog whose name nobody can
-    // change is a dialog the scene would have to assert around.
-    //
-    // Through the accessibility VALUE, which is what a keyboard reaches
-    // and what the macOS arm sets on NSSavePanel's name field. A set has
-    // no return worth trusting — the legacy setter answers nothing, and
-    // a set that routes nowhere looks identical from here — so the field
-    // is READ BACK, and a field that did not take the name is a failure
-    // with what it says instead.
+    // Sets the accessibility VALUE and READS IT BACK: a set that routes
+    // nowhere looks identical from here (docs/save-plan.md D4).
     //
     // AND THE SET IS RETRIED, NOT ONLY THE READ. Measured 2026-08-09
     // against a live export sheet: twenty-three drives took the name
@@ -773,26 +642,17 @@ case "savename":
     }
 
 case "savepress":
-    // THE REAL SAVE BUTTON IS IN THE NAVIGATION STRIP AND NOWHERE ELSE:
-    // `describe` does not list it, so the flattened overlay tree cannot
-    // reach it — the same split `cancel` documents.
-    //
-    // AND THE MATCH IS EXACT, which is the whole reason this is not
-    // `press Save`. Measured: `press Save` FALSELY SUCCEEDS on this
-    // sheet — it matches the STATIC TEXT "Save as" by containment,
-    // reports a press, and the sheet stays up with the delegate never
-    // firing. A save leg written on that verb would go green having
-    // pressed nothing. A prefix match is no better: it lands on
-    // "<App>, Actions Menu" and opens a context menu (measured).
+    // The real Save button is in the navigation strip and nowhere else,
+    // and the match is EXACT: `press Save` falsely succeeds here on the
+    // static text "Save as" (docs/deferred.md), and a prefix match lands
+    // on "<App>, Actions Menu" and opens a context menu (measured).
     guard waitForSaveSheet() != nil else { fail("no save dialog is up to save") }
     let strip = navigationStrip(sim, screen: screen)
     guard let (_, saveCentre) = strip.first(where: { $0.0 == "Save" }) else {
         fail("no Save in the navigation strip; it offers \(strip.map { $0.0 })")
     }
     Tapper(device: sim.device).tap(at: saveCentre, screen: screen)
-    // THE SHEET BEING GONE IS THE PROOF the tap landed, the same
-    // postcondition `choose` carries, and self-diagnosing for the same
-    // reason: a miss and a swallowed press look identical from here.
+    // The sheet being gone is the proof, as in `choose`.
     if !waitForPickerGone() {
         let after = navigationStrip(sim, screen: screen).map { $0.0 }
         fail(
@@ -805,28 +665,15 @@ case "savecancel":
     cancelSheet("save dialog")
 
 case "press":
-    // Tap a control by its accessibility description, wherever it
-    // lives. The paste-permission alert is the customer: unlike the
-    // picker it is not a remote view controller with rows, so `choose`
-    // (which parses "<name>, <kind>, <time>, <size>" rows) cannot reach
-    // it. The overlay tree (a pid other than the app's) is searched
-    // first; when no overlay is up the app's OWN tree is searched, so
-    // the verb serves both homes a system alert can have — measured to
-    // matter, since which process presents the paste alert is exactly
-    // what the probe asks.
+    // Tap a control by its accessibility description, wherever it lives:
+    // the hit-test overlay first, then the invoked pid's own tree. The
+    // paste-permission alert is the customer (docs/clipboard-plan.md).
     guard arguments.count >= 5 else { fail("press needs a label") }
     let label = arguments[4...].joined(separator: " ")
     var pressed = false
     for _ in 0..<20 {
-        // BOTH TREES, EVERY TIME, because each one goes blind in a
-        // different state. The hit-test overlay finds an alert while
-        // the foreground app's accessibility answers — but a paste
-        // alert raised by the APP'S OWN blocked read takes the
-        // hit-test down with it (measured: `describe` answered "no
-        // picker" for six straight seconds with the alert filling the
-        // screen). The explicit tree walk of the pid this was invoked
-        // with — SpringBoard, for the paste alert it hosts — answers
-        // in exactly that state, and needs no hit-test at all.
+        // BOTH TREES, EVERY TIME: each goes blind in a state the other
+        // answers in (docs/clipboard-plan.md §2).
         var nodes: [Node] = []
         var home = "overlay"
         if let root = pickerRoot(sim, appPid: appPid, screen: screen) {
@@ -841,20 +688,15 @@ case "press":
             flatten(root, 0, into: &nodes)
         }
         let exact = nodes.first { $0.description == label && !$0.frame.isEmpty }
-        // Shortest match, not first match: on the paste alert BOTH
-        // buttons contain "Allow Paste", and tree order puts the
-        // denial first. The shortest containing description is the
-        // one closest to what was asked for.
+        // Shortest match, not first: on the paste alert both buttons
+        // contain "Allow Paste" and tree order puts the denial first.
         let loose = nodes.filter { $0.description.contains(label) && !$0.frame.isEmpty }
             .min { $0.description.count < $1.description.count }
         if let hit = exact ?? loose {
-            // NEVER TAP A MOVING TARGET. The paste alert reports its
-            // buttons' FINAL frames while it is still animating in, so
-            // a tap at the reported centre lands wherever the alert
-            // currently is — measured to hit the button ABOVE the one
-            // asked for, and on this alert the button above "Allow
-            // Paste" is the denial. Two identical reads 300ms apart
-            // are the proof the animation is over; until then, loop.
+            // NEVER TAP A MOVING TARGET: an alert reports its buttons'
+            // FINAL frames while still animating in. Two identical reads
+            // 300ms apart are the proof it has settled
+            // (docs/clipboard-plan.md §2).
             usleep(300_000)
             var settledNodes: [Node] = []
             if let root = pickerRoot(sim, appPid: appPid, screen: screen) {

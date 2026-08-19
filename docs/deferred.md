@@ -368,7 +368,7 @@ own the state (see the undo note in this file).
     source, which every language's compiler guarantees is UTF-8, so
     every match sits six bytes further along than it sits in UTF-16.
     Proving the `.steps` path end to end is its own piece of work
-    (scratchpad/ranges-units.md §8.7 asked for it) and belongs where it
+    (docs/ranges-units.md §8.7 asked for it) and belongs where it
     can be proven on all five lanes.
 
 - **Text ranges are deferred on the ENTRY widget** (deferred by
@@ -2714,8 +2714,49 @@ not better: every kaya app on a real Wayland desktop advertised kaya's own
 milestone-2 id. tools/linux/run-suites.sh's comment carries the
 measurement.
 
-## `kaya_capabilities()` has no binding surface in any of the eight languages (found 2026-08-18)
+## ~~`kaya_capabilities()` has no binding surface in any of the eight languages (found 2026-08-18)~~
 KEY: kaya_capabilities, KAYA_CAP_AUX_WINDOWS, capability query, create_window, aux window, eight-language sugar
+
+CLOSED 2026-08-19. The maintainer ruled the wrap in, now, because it
+cleans up existing code rather than only anticipating a handshake. All
+eight bindings have it: the query is `capabilities` in each language's
+casing and it answers with NAMED BOOLEANS — `aux_windows` / `AuxWindows`
+/ `auxWindows` on a record, struct, dataclass or newtype — never the raw
+u64. tools/check-sugar-surface.sh holds the eight level in three clauses
+(the query, the named flag, and the bit NUMBER against the core's), each
+with a watched negative; 21 perturbations were driven and every one went
+red.
+
+THE CORE GOT ONE PREDICATE OUT OF IT, which is the part that matters
+more than the sugar. `kaya_capabilities()` and the `create_window` wall
+were each their OWN `#[cfg]` in their own file, free to drift in silence
+— a distinction of no consequence while every guest derived the answer
+from its own platform predicate, and the whole contract the moment eight
+bindings hand that answer out. Both now read
+`crates/kaya/src/scene.rs`'s `CAPABILITIES`, a `cfg!`-folded const in an
+always-compiled module, so what a guest is TOLD and what it would WALK
+INTO are the same bit by construction. The wall's sentence did not
+change, and neither did its behavior.
+
+AND THE FOUR PLATFORM PREDICATES IN THE GUESTS ARE GONE, which was the
+condition of the ruling. Go's `untitled_desktop.go`/`untitled_phone.go`
+build-tag pair is one file with an `if`; Rust's three `#[cfg]` attributes
+(on an import, a const and the behavior) are none; Java's
+`Class.forName("android.os.Build")` probe is deleted; Swift's
+`#if !os(iOS)` around the CALLS is a runtime `if`. The other four ports
+of the scene ask too, though none of them ever runs where the answer is
+false: eight ports of one scene should read the same, and a binding
+surface no guest calls is a binding surface no lane exercises.
+
+The rule the sweep used, for the next reader: a conditional that exists
+to avoid CALLING something becomes a capability query; one that exists to
+avoid COMPILING something stays. The `scene_root()` splits in
+guests/rust's filedialog/save/clipboard and guests/swift's
+save/clipboard pick a DIRECTORY per platform — no capability bit answers
+"where do documents live" — and guests/go/cmd's main pair is a program
+entry point that must differ. All kept.
+
+The original entry is kept below for the record.
 
 `kaya_capabilities()` is a real C export (crates/kaya/src/capi.rs, and
 crates/kaya/include/kaya.h) that answers exactly the question the
@@ -2940,8 +2981,21 @@ WHAT STAYS OPEN, both small:
   reproduces it, and the +4's shape (two inside `becomeFirstResponder`,
   two ~10ms after) says two consultations, twice.
 
-## Comments are drowning the code (maintainer, 2026-08-17)
+## ~~Comments are drowning the code~~ (maintainer, 2026-08-17)
 KEY: comment verbosity, examples readability, war stories, traps pointers
+
+CLOSED 2026-08-19: sweep 2 covered the rest of the tree — thirteen lanes
+over crates/, bindings/, tools/, swift/, android/ plus a second guest
+pass. ~21,000 comment lines removed (71,253 → ~50,250 by the lanes' own
+measured counts), every lane skeleton-proven comment-only against a base
+snapshot, every lane's compile and gate battery green. Measured findings
+were kept byte-for-byte where they are the only copy; the lanes' reports
+itemise them. Two citation families that pointed into a dead session
+scratchpad were recovered and landed (docs/ranges-units.md,
+docs/styling/) with every citation repointed. What remains above the
+target ratio is deliberate: dated measurements, wire-vocabulary docs and
+per-clause constraint text. The sweep's own tooling traps are in
+docs/traps.md under "Cutting comments is its own trap family".
 
 STATUS 2026-08-18: the EXAMPLES are done — (1) and (2) both. The rule is
 in CLAUDE.md/AGENTS.md's environment section, rewritten to the
@@ -2967,9 +3021,8 @@ affirmative for `veto_close` (live in nine dirty guests), the stall
 scene's day-not-forever wedge, and each language's own string-offset
 unit. What is left in the guests is a pointer.
 
-WHAT IS NOT DONE: the rest of the tree. crates/, bindings/, tools/,
-swift/ and android/ have had no pass — the ruling asked for examples
-first, as their own commit, and this is that commit.
+WHAT WAS NOT DONE THEN — the rest of the tree — is what the 2026-08-19
+sweep above did.
 
 The ruling: a comment describes what the code does or states a constraint
 the code cannot show — in a line or two. It never explains something the
@@ -2987,6 +3040,27 @@ MOVES: a comment whose content is a measured finding gets that finding
 into docs/traps.md (if it is not already there) and shrinks to a
 one-line pointer at the trap's name. The walls stay; the war stories
 relocate.
+
+## GAP — the symbol-floor gate was drafted and never landed (found 2026-08-19)
+KEY: symbol-floor gate, check-symbols, name_availability.plist, kayaSymbolTable
+
+The styling milestone measured (2026-08-16) that NO SCENE can guard the
+SF Symbols floor column in swift/KayaSwiftUI.swift's `kayaSymbolTable`:
+a resolution check only fails on a machine old enough to BE the floor,
+so the scene-level assertion is vacuous on every machine the project
+runs on. The only real guard is a static gate reading Apple's
+`name_availability.plist` — every name's introduction year against the
+declared floor. That gate WAS DRAFTED (`check-symbols.sh`, ~6KB, written
+2026-08-16 in that session's scratchpad) and never landed; the
+kayaSymbolTable header cited it at a path that stopped existing when the
+session ended. Landing it is a registration decision, not just a copy:
+it must join tools/, gates.sh's sweep (or its EXCLUDED table with a
+reason), the check-gates census, and the CLAUDE.md/AGENTS.md gate list —
+which is the maintainer's review. RECOVERY: the draft's bytes are in
+this project's session transcripts under
+~/.claude/projects/-Users-akhilindurti-Projects-kaya/ — search the
+subagent .jsonl files for `check-symbols.sh` and replay the Write
+payload (the styling-doc recovery of 2026-08-19 proved this route).
 
 ## ~~The template button's caption is not uniform~~ (found 2026-08-17)
 KEY: template zone, button caption, bound source, tpl-surfaces takes-a-source
@@ -3195,7 +3269,7 @@ standing pattern):
   `expect_ax`. No `KAYA_FONT_FILE` is set there: the guests' default path
   is repo-relative and the container runs from `/work`, the mount. See
   the styling plan's Slice 2b and
-  scratchpad/styling/typeface-gtk-arm.md §"the one blocker".
+  docs/styling/typeface-gtk-arm.md §"the one blocker".
 - ~~**DEPTH STUB: typeface on winui**~~ — LANDED 2026-08-16, green on the
   Windows VM. TWO writes, because the platform has two kinds of text: an
   app-level dictionary redefining `ContentControlThemeFontFamily` (+ the
@@ -3223,7 +3297,7 @@ standing pattern):
   path** — an absolute filesystem path, a `file://` URI and
   `AddFontResourceExW` (private AND session-wide, return value 1) all
   render the fallback with no error, while a file under the app root
-  works. scratchpad/styling/typeface-winui-arm.md.
+  works. docs/styling/typeface-winui-arm.md.
   The LEG WIRING this arm was scoped out of touching CLOSED 2026-08-16
   (`31ace6b`): `typeface` is in deploy-win's SCENES, `run_suite
   typeface_rust` runs, and `tools/guest/run_typeface_*.cmd` are checked
@@ -3248,7 +3322,7 @@ standing pattern):
   composition for a bad blob), and a family this device lacks leaves the
   platform ramp standing and says so, detected at apply time with a
   two-sentinel probe. Both directions of the two-write trap watched going
-  red on the lane; scratchpad/styling/typeface-compose-arm.md.
+  red on the lane; docs/styling/typeface-compose-arm.md.
   THE LEG CLOSED 2026-08-16 (`31ace6b`) THE SAME WAY THE GTK ONE DID —
   by the shared blob, which this bullet already named as the only exit
   that keeps the expected family one byte-frozen string on every lane.
@@ -3774,7 +3848,7 @@ keep before the scene ran: the frozen census must equal the root's
 listing, so adding an asset is one gate red naming the .steps file
 rather than five red lanes.
 
-## An image widget whose bytes half-decode CRASHES the SwiftUI backend
+## ~~An image widget whose bytes half-decode CRASHES the SwiftUI backend~~ — CLOSED 2026-08-19
 KEY: swiftui, KayaCell, Layout, subviews, image, decode failure, gallery
 
 FOUND 2026-08-18 by a watched negative for the assets scene, not by a
@@ -3785,30 +3859,192 @@ with SIGTRAP before any expectation could be read.
     KayaCell.sizeThatFits(proposal:subviews:cache:)
       <- LayoutSubviews.subscript.getter   (EXC_BREAKPOINT)
 
-swift/KayaSwiftUI.swift's `KayaCell` indexes `subviews[0]`
-unconditionally in BOTH `sizeThatFits` and `placeSubviews`. A cell whose
-child produced no subview — which is what a SwiftUI `if let img =
-NSImage(data:)` with no `else` yields — traps on the subscript.
+REPRODUCED 2026-08-19 with that exact stack, from a scratch guest that
+mounts an undecodable image as a DIRECT CHILD OF THE ROOT, and fixed the
+same day. What the entry asked for first — why the gallery's 12 bytes
+survive — has an answer, and it is not the one the title assumed.
 
-THIS CONTRADICTS A CONTRACT THE TREE ALREADY STATES.
-tools/scenes/gallery.steps: "deliberately invalid bytes read 0x0 — decode
-failure is the placeholder class, never a crash", and that scene passes
-on this backend every run with 12 bytes of `not an image`. So SOME
-undecodable input reaches the placeholder and some does not, and which is
-which has never been characterised. That is the part worth doing first:
-the fix is probably three lines (`subviews.first` with a zero fallback),
-but a fix without knowing why the 12-byte case survives is a guess.
+### IT WAS NEVER THE BYTES. IT WAS THE POSITION.
 
-NOT THIS SLICE'S BUG and not on any lane's path: no scene hands an image
-widget bytes that half-decode. It is reachable by an APP, which is what
-makes it worth a line here rather than a shrug — and the same audit is
-owed to the other three backends, because nothing holds their
-empty-child layout level with this one.
+The column and row render arms take the KayaFlex/KayaCell path only when
+`isRoot || node.children.contains(where: { $0.grow > 0 })`; everything
+else is a stock VStack/HStack, and a nothing-child in a stock stack is
+harmless. gallery.rs puts both its images in a growerless nested row. The
+same 12 bytes one level up — a direct child of the root — trap. Sweeping
+(4 byte shapes x 2 positions) on this backend before the fix:
 
-## A Swift guest cannot catch an asset miss
-KEY: assets, Swift, fatalError, uniform semantics, invariant 1
+    flex   junk     KILLED by signal 5      <- the crash
+    stack  junk     OK (imageSize 0x0)      <- what the gallery has
+    (good/truncated/corrupt read 2x2 in both positions)
 
-`asset(name)` raises on a miss in every binding, carrying the core's
+So "which undecodable input reaches the placeholder" was the wrong
+question: EVERY nil decode reaches it from a stock stack and NONE does
+from a flex cell. No scene has the second position, which is why no lane
+could have caught this.
+
+### AND THE TITLE'S "HALF-DECODE" NAMES BYTES THAT DO NOT CRASH THIS
+### BACKEND AT ALL
+
+Probed directly (NSImage(data:) on macOS 26):
+
+    good      NON-NIL 2x2, cgImage 2x2, tiff 3362 bytes
+    truncated NON-NIL 2x2, cgImage 2x2, tiff NIL   (sig + whole IHDR,
+                                                    IDAT cut, no IEND)
+    corrupt   NON-NIL 2x2, cgImage 2x2, tiff 3362  (IDAT payload
+                                                    clobbered)
+    junk      NIL                                  (`not an image`)
+
+ImageIO is LENIENT: a half-valid PNG decodes to a real image here and
+never reaches the placeholder. The crashing input is a decode that
+returns NIL — which the original watched negative's 111400 font bytes
+are. WIC on Windows is lenient in exactly the same way (both half-valid
+shapes read 2x2 on the VM); gdk-pixbuf is STRICT and reads 0x0 for both.
+That divergence is why no scene can freeze an expectation on a half-valid
+image, and it is the reason the gallery keeps `not an image`, whose
+answer is 0x0 on all four backends. See the wall section below.
+
+### THE FIX, TWO PARTS
+
+1. SEMANTIC (swift/KayaSwiftUI.swift kindImage arm, and its Compose
+   twin): a failed decode is PRESENT AND EMPTY — `Color.clear.frame(width:
+   0, height: 0)` / `Box(modifier = a11yTag)` — not `EmptyView()` / a
+   bare `?.let`. That is what the two WIDGET backends have by
+   construction, and the declarative pair had to say it out loud.
+2. STRUCTURAL (KayaCell): `subviews.first` with a zero fallback in
+   sizeThatFits, `guard let child = subviews.first else { return }` in
+   placeSubviews. Kept even though (1) means no image reaches it, because
+   "every kind produces one view" is a convention nothing enforces — this
+   file's own `default:` arm for an unknown kind produces none.
+
+The decode itself moved into `kayaDecodeImage`, so the negative test
+drives the platform's real decoder rather than a copy of the arm.
+
+### THE AUDIT THE ENTRY OWED THE OTHER THREE BACKENDS
+
+Same four byte shapes, same two positions, run for real:
+
+- **GTK** — HONEST, 8/8 cells, in the container under Xvfb. Every
+  undecodable shape reads 0x0; no crash, no hang, no diagnostic. Its
+  decoder is the STRICT one (truncated and corrupt both refused). Safe by
+  construction: `Err(_) => picture.set_paintable(NONE)` keeps the
+  GtkPicture, and a widget tree cannot lose a widget by failing to draw
+  into it. No fix.
+- **WinUI** — HONEST, 8/8 cells, on the VM through the shipped probe.cmd.
+  `junk` reads 0x0 in both positions (SELFTEST-OK); the half-valid shapes
+  decode to 2x2 (verified by re-running them against a `2x2` expectation,
+  SELFTEST-OK). No crash, no hang. Safe for GTK's reason: the Image
+  element stays, Source is simply never set. No fix.
+- **Compose** — no crash available to it: Row and Column tolerate zero
+  children and its ONE custom Layout (the grid) is bounds-safe. But the
+  bare `?.let` was a real defect one step down from the crash — the grid
+  arm pairs `placeables[i]` with `node.children[i]`, so an undecodable
+  image shifted every later cell up a slot and recorded every later
+  cell's origin against its neighbour. FIXED with the present-and-empty
+  Box. NOT RUN AS A RUNTIME CELL: the APK's scene selector lives in
+  guests/rust/milestone2_android.rs, which a concurrent agent owned for
+  the whole of this session, so no scratch scene could be added there.
+  BitmapFactory's leniency on the two half-valid shapes is therefore
+  still unmeasured — the one open thread this entry leaves, and it is a
+  question about the DECODER, not about the crash.
+
+### THE WALL
+
+`tools/check-empty-child.sh` (gates.sh, CLAUDE.md rung 2). Clause A is a
+RUNTIME negative on macOS: tools/checks/swiftui-empty-child.swift is
+compiled into the interpreter's own module and run, driving four byte
+shapes through the real `kayaDecodeImage`, `KayaRender` and
+`KayaFlex`/`KayaCell` in an NSHostingView. It asserts a nil decode reads
+0x0, that the image kind hands its layout EXACTLY ONE subview, and — via
+a kind number the interpreter does not know, the one remaining way to
+render nothing — that a childless cell measures instead of trapping. Both
+fixes were watched failing it INDEPENDENTLY: the image arm reverted gives
+`subviews=0` and exit 1, KayaCell reverted gives SIGTRAP at the
+unknown-kind case. Clauses B and C are static and run anywhere: all four
+backends' image arms are present-and-empty and panic-free, and KayaCell
+subscripts nothing it has not checked. Six self-test perturbations, each
+printing its substitution count.
+
+THE SCENE DOES NOT GAIN THE ASSERTION, and the decision is the leniency
+above. A byte-frozen step CAN express the nil-decode case honestly —
+`not an image` reads 0x0 on all four backends, which is what the gallery
+already asserts — but expressing it in the CRASHING position means moving
+the image out of the growerless row in nine guests, and the guests were
+another agent's for this session. A half-valid image cannot be frozen at
+all: it reads 2x2 on mac and Windows and 0x0 on Linux. So the unit test
+is the wall and the scene stays as it is. The scene-side upgrade —
+`tx.image(&BAD[..]).grow(1.0)` in all nine gallery guests, which would
+put the crash on every lane's path — is worth doing the next time the
+gallery is open for other reasons.
+
+## ~~A Swift guest cannot catch an asset miss~~ — RESOLVED 2026-08-19
+KEY: assets, Swift, fatalError, uniform semantics, invariant 1, throws
+
+DIVERGENCE, AND IT IS FIXED. The maintainer ruled that Swift's asset
+miss becomes a throw: `init(_ name: String) throws` on `KayaAsset`,
+carrying a `KayaAssetMiss` whose `description` and `errorDescription`
+are the core's sentence and nothing else. Ruled over a `Result` and over
+a failable `init?`, with the reasoning on record: `throws` IS Swift's
+Result at the call site, `try?` hands back the optional for free, and
+the miss's rich sentence — the census of what the package does carry —
+rides the error where an optional would have discarded it. Unhandled it
+is still fatal, so the "wall at startup" reading the `fatalError`
+carried survives for an app that does not catch; what changed is that
+the guest now gets to.
+
+THE CASE FOR IDIOM WAS FALSE ON ITS FACTS, which is worth writing down.
+"kaya's Swift surface has no `throws` anywhere" was wrong when it was
+written: `KayaPickedFile.open` throws, every handler the binding stores
+is a `(KayaAppTx …) throws -> Void`, and `KayaAppTx.build` is `rethrows`
+over a throwing body — so `try` was already the shape a Swift guest
+writes, and the tx boundary already rolled back on one. Nothing had to
+be invented for this ruling; the throw walks a path that was there.
+
+The eight now stand uniform on ONE semantics — the guest may observe a
+miss, and the sentence it observes is the core's — in eight spellings:
+Rust panics, Python raises RuntimeError, Go panics, C# throws
+InvalidOperationException, Java throws IllegalStateException, Swift
+throws KayaAssetMiss, OCaml raises Failure, Haskell raises ErrorCall.
+
+WHAT DID NOT CHANGE, AND WHY: `asset_miss_sentence` stays in all eight.
+Its stated reason had been Swift, and that reason is spent — but the
+assets scene has NINE guests and the C floor catches nothing at all, so
+a caught sentence still is not one shape everywhere. It also answers
+what no raise can: for a name that RESOLVES it says so, having opened
+nothing, which is the second half of what tools/scenes/assets.steps
+freezes. The Swift guest now reads the census through the CATCH (which
+makes label#1's frozen bytes the wall on the error's payload) and the
+resolving-name answer through the query, so both surfaces stay
+exercised on mac and iOS.
+
+THE GATE MOVED WITH THE SIGNATURE. check-sugar-surface's Swift asset
+pattern was `final class KayaAsset` and would have passed with the
+`throws` deleted. It is `init\(_ name: String\) throws` now, because the
+CLASS is already held by a compiler (three guests name it) while the
+keyword is held by nothing: reverting the initializer to its
+pre-ruling `fatalError` shape produces ZERO compiler errors — Swift
+answers a `try` with nothing to throw, and a `catch` with nothing to
+catch, with a warning, and the guest pass does not compile
+-warnings-as-errors. Watched: that perturbation reds the row and passes
+the compiler.
+
+STILL OPEN, AND IT IS PROSE ONLY: fifteen files argue for the query by
+naming SWIFT as the language that cannot catch, and that clause is now
+false everywhere it appears. No behavior depends on it and no gate reads
+it; the argument itself survives with the C floor in Swift's place (the
+paragraph above is the replacement text). The Swift-side copies are
+already fixed. The rest, measured 2026-08-19:
+crates/kaya/src/app.rs:1642, bindings/go/app.go:1672,
+bindings/python/kaya/__init__.py:2663,
+bindings/java/dev/kaya/KayaApp.java:998, bindings/csharp/KayaApp.cs:2204,
+bindings/haskell/KayaApp.hs:533, bindings/ocaml/kaya_app.ml:165,
+tools/scenes/assets.steps:22, and the assets-guest headers in
+guests/{rust,python,go,csharp,java,haskell,ocaml}. Left for one sweep
+rather than done here because every one of those files is in another
+slice's uncommitted diff.
+
+The original entry is kept below for the record.
+
+~~`asset(name)` raises on a miss in every binding, carrying the core's
 sentence verbatim. Seven of the eight raise something the guest could
 catch — a Python RuntimeError, a Go panic, a JVM IllegalStateException,
 an OCaml Failure, a Haskell exception, a C# InvalidOperationException, a
@@ -3824,4 +4060,4 @@ divergence: "the guest may observe the failure" is a semantics, and on
 one platform it is not available. Nothing in the tree depends on the
 answer today, because no scene catches a miss — which is the assets
 conformance scene's job above, and the reason that scene reads the
-sentence through a query rather than through a catch.
+sentence through a query rather than through a catch.~~

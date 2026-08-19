@@ -6,9 +6,7 @@
  *
  * THE WORKER PARKS SO A WRONG IMPLEMENTATION DEADLOCKS rather than
  * disagreeing: only a live app thread can deliver the click that
- * releases it.
- *
- * Built and run by the Linux container suite with KAYA_SELFTEST=background. */
+ * releases it. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -31,16 +29,13 @@
 #define W_NEST 8
 
 /* The release latch: the app thread sets it, the worker waits on it.
- * The release must NEVER BLOCK the app thread — a handler that waited
- * here would fail the claim the scene tests. */
+ * The release must NEVER BLOCK the app thread. */
 static pthread_mutex_t release_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t release_cond = PTHREAD_COND_INITIALIZER;
 static int released = 0;
 
 /* THE POST QUEUE, and the only state two threads touch. Closures do not
- * cross the C ABI, so each entry spells its own destination — the signal
- * it appends to and the buffer it accumulates into — where a binding's
- * queued closure would carry that for free. */
+ * cross the C ABI, so each entry spells its own destination. */
 #define MAX_POSTED 16
 typedef struct {
     uint64_t signal;
@@ -52,8 +47,7 @@ static pthread_mutex_t post_lock = PTHREAD_MUTEX_INITIALIZER;
 static PostedWrite posted_steps[MAX_POSTED];
 static unsigned posted_count = 0;
 
-/* Accumulators. Only the app thread touches these, inside a drained
- * post, so they need no lock. */
+/* Accumulators: app thread only, inside a drained post, so no lock. */
 static char landed[32] = "";
 static char nested[8] = "";
 
@@ -69,9 +63,8 @@ static void post_step(uint64_t signal, char *acc, size_t acc_cap, const char *st
         snprintf(w->step, sizeof w->step, "%s", step);
     }
     pthread_mutex_unlock(&post_lock);
-    /* The app thread is parked in kaya_next_occurrence. Posted work is
-     * not an occurrence and never enters the ring, so this is the only
-     * way it hears about it. */
+    /* Posted work is not an occurrence and never enters the ring, so a
+     * wake is the only way the parked app thread hears about it. */
     kaya_wake();
 }
 
@@ -99,7 +92,6 @@ static void drain_posted(void) {
 
 static void *worker(void *arg) {
     (void)arg;
-    /* Parks until the scene clicks release. */
     pthread_mutex_lock(&release_lock);
     while (!released)
         pthread_cond_wait(&release_cond, &release_lock);
@@ -116,7 +108,6 @@ static void build_scene(void) {
     uint8_t buf[1024];
     KayaTx tx = {buf, 0};
 
-    /* No window title: this scene asserts none. */
     kaya_tx_create_signal(&tx, SIG_STATUS, kaya_str("idle"));
     kaya_tx_create_signal(&tx, SIG_ALIVE, kaya_str("-"));
     kaya_tx_create_signal(&tx, SIG_NESTED, kaya_str("-"));
@@ -161,9 +152,8 @@ static void *app(void *arg) {
     int started = 0;
     const uint8_t *rec;
     for (;;) {
-        /* Posted work first, then the ring, then park. Draining at the
-         * TOP is what makes a wake sufficient: whatever brought this
-         * thread back, it looks here before anywhere else. */
+            /* Posted work first, then the ring, then park. Draining at
+             * the TOP is what makes a wake sufficient. */
         drain_posted();
         size_t size = kaya_next_occurrence(&rec);
         if (size == KAYA_OCCURRENCE_SHUTDOWN)
@@ -196,9 +186,8 @@ static void *app(void *arg) {
             pthread_mutex_unlock(&release_lock);
         } else if (id == W_NEST) {
             /* A post from INSIDE a handler QUEUES for after; it never
-             * nests. This handler appends a, queues b, appends c — so it
-             * commits "ac" and the next drain commits "acb". A binding
-             * that ran the post inline could only ever produce "abc". */
+             * nests. This handler appends a, queues b, appends c — so
+             * it commits "ac" and the next drain commits "acb". */
             strncat(nested, "a", sizeof nested - strlen(nested) - 1);
             post_step(SIG_NESTED, nested, sizeof nested, "b");
             strncat(nested, "c", sizeof nested - strlen(nested) - 1);

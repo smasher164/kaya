@@ -11,10 +11,6 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// Item is the record type and, by reflection, the schema. kaya-gen
-// reads this declaration and emits item_kaya.go.
-//
-//go:generate go run dev.kaya/cmd/kaya-gen -type Item -key string
 type Item struct {
 	Title string
 }
@@ -34,8 +30,7 @@ func App() *kaya.App {
 			})
 			tx.Button("lift", func(tx *kaya.Tx) {
 				// Last entry to the front: MoveToFront is sugar for
-				// MoveBefore the current first key — keys, never
-				// indices.
+				// MoveBefore the current first key — keys, never indices.
 				entries := items.Items(tx)
 				items.MoveToFront(tx, entries[len(entries)-1].Key)
 			})

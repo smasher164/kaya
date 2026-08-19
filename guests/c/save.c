@@ -1,21 +1,16 @@
-/* The save scene from C, at the explicit wire floor: the save request is
- * kaya_tx_show_save_dialog, and BOTH dialogs answer with the one
+/* The save scene from C, at the explicit wire floor: the save request
+ * is kaya_tx_show_save_dialog, and BOTH dialogs answer with the one
  * occurrence the guest tells apart by the dialog id it chose itself
- * (docs/save-plan.md D1-D5). Annotated semantics in guests/rust/save.rs;
- * the byte-frozen contract in tools/scenes/save.steps.
+ * (docs/save-plan.md D1-D5). Semantics: guests/rust/save.rs. Contract:
+ * tools/scenes/save.steps.
  *
- * NO NAME IN THIS SCENE CARRIES AN EXTENSION, and that is a constraint
- * rather than taste: a save panel may publish its name field with the
- * extension hidden, so `expect_save_dialog` would read the stem on one
- * machine and the whole name on another (docs/deferred.md).
+ * NO NAME IN THIS SCENE CARRIES AN EXTENSION: a save panel may publish
+ * its name field with the extension hidden, so `expect_save_dialog`
+ * would read the stem on one machine and the whole name on another
+ * (docs/deferred.md).
  *
  * THE WORK RUNS OFF THE APP THREAD, because `kaya_open_picked` blocks
- * and a cloud provider may download the whole file first. The
- * queue-plus-wake a binding's `post` hides is written out in
- * guests/c/background.c; this file uses the same three pieces.
- *
- * Built and run by the mac lane and the Linux container suite with
- * KAYA_SELFTEST=save. */
+ * and a cloud provider may download the whole file first. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -65,9 +60,9 @@ static void make_scene_files(void) {
     const char *tmp = getenv("TMPDIR");
     if (tmp == NULL || tmp[0] == '\0')
         tmp = "/tmp";
-    /* Trailing separators trimmed, as the harness's expander trims
-     * them: "…//kaya-save-N" is fine to POSIX and not to a reader that
-     * parses the name. */
+    /* Trailing separators trimmed, as the harness's expander trims them:
+     * "…//kaya-save-N" is fine to POSIX and not to a reader that parses
+     * the name. */
     size_t len = strlen(tmp);
     while (len > 1 && tmp[len - 1] == '/')
         len--;
@@ -77,19 +72,15 @@ static void make_scene_files(void) {
         fprintf(stderr, "save: cannot make %s: %s\n", scene_dir, strerror(errno));
         exit(1);
     }
-    /* The file the scene opens, plus the DECOY the picker needs: with
-     * one file in the directory a dialog completes with it even when
-     * nothing was selected. "decoy" sorts FIRST, so a backend that
-     * selects nothing fails the byte assertion (tools/scenes/save.steps).
-     */
+    /* The file the scene opens, plus the DECOY the picker needs: with one
+     * file in the directory a dialog completes with it even when nothing
+     * was selected. "decoy" sorts FIRST, so a backend that selects
+     * nothing fails the byte assertion. */
     write_scene_file("draft", "first draft");
     write_scene_file("decoy", "decoy");
 }
 
-/* Read a handle back through kaya, with the guest's own file API: every
- * status this scene reports is a read-back off the disk.
- *
- * `kaya_open_picked` is one of the two entries in the whole C API that
+/* `kaya_open_picked` is one of the two entries in the whole C API that
  * is SAFE FROM ANY THREAD (kaya_wake is the other), which is what lets
  * the worker below call it. It answers 0 or a POSITIVE errno. */
 static void read_back(uint64_t handle, char *out, size_t cap) {
@@ -119,11 +110,9 @@ static void read_back(uint64_t handle, char *out, size_t cap) {
     close(fd);
 }
 
-/* Write `bytes` through a handle and report what the file says
- * afterwards. FILE_MODE_WRITE truncates, on a picked file and on a save
- * destination alike; the destination only adds the create, which is the
- * CORE's (there is no FILE_MODE_CREATE to ask for — docs/save-plan.md
- * D1). */
+/* FILE_MODE_WRITE truncates, on a picked file and on a save destination
+ * alike; the destination only adds the create, which is the CORE's
+ * (there is no FILE_MODE_CREATE to ask for — docs/save-plan.md D1). */
 static void write_back(uint64_t handle, const char *bytes, char *out, size_t cap) {
     int64_t raw;
     uint32_t seekable;
@@ -154,8 +143,7 @@ static void write_back(uint64_t handle, const char *bytes, char *out, size_t cap
 }
 
 /* The post queue, one status write wide (guests/c/background.c has the
- * long version): a mutex-guarded list, kaya_wake, and a drain at the
- * TOP of the occurrence loop. */
+ * long version). */
 #define MAX_POSTED 4
 #define STATUS_CAP 600
 static pthread_mutex_t post_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -167,9 +155,8 @@ static void post_status(const char *text) {
     if (posted_count < MAX_POSTED)
         snprintf(posted[posted_count++], STATUS_CAP, "%s", text);
     pthread_mutex_unlock(&post_lock);
-    /* The app thread is parked in kaya_next_occurrence. Posted work is
-     * not an occurrence and never enters the ring, so this is the only
-     * way it hears about it. */
+    /* Posted work is not an occurrence and never enters the ring, so a
+     * wake is the only way the parked app thread hears about it. */
     kaya_wake();
 }
 
@@ -191,8 +178,7 @@ static void drain_posted(void) {
 }
 
 /* One file operation as DATA rather than a closure — closures do not
- * cross the C ABI. `bytes` NULL is a pure read; `second` non-zero adds a
- * second handle to read after the first. */
+ * cross the C ABI. */
 typedef struct {
     char prefix[16];
     uint64_t first;
@@ -244,8 +230,7 @@ static void work(const char *prefix, uint64_t first, uint64_t second,
  * reserved, then ONE counted value list holding three values per file —
  * I64 handle, Str name, Str local_path. Cancel is count zero. The
  * generator emits no parser for this record, so the floor reads the
- * body. Only the first file is kept: this picker is single-select and a
- * save dialog answers with one locator or none. */
+ * body. Only the first file is kept. */
 typedef struct {
     uint64_t dialog;
     uint32_t count;
@@ -264,8 +249,7 @@ static int parse_file_dialog_result(const uint8_t *rec, KayaFileResult *out) {
     memcpy(&out->count, rec + at, 4);
     at += 4;
     at += 4; /* reserved */
-    /* Skips the value list's own head, {u32 count, u32 reserved}:
-     * `count` above already says how many files there are. */
+    /* Skips the value list's own head, {u32 count, u32 reserved}. */
     at += 8;
     out->handle = 0;
     out->name = kaya_str("");
@@ -325,15 +309,14 @@ static void *app(void *arg) {
     (void)arg;
     build_scene();
 
-    /* The file the user OPENED and the destination the user later
-     * NAMED, held as HANDLES and never as paths — the phones have no
+    /* The file the user OPENED and the destination the user later NAMED,
+     * held as HANDLES and never as paths — the phones have no
      * re-openable path. Zero is "none": the core mints handles from 1. */
     uint64_t source = 0, destination = 0;
 
     /* Both requests answer with the SAME occurrence, so the id is the
      * only thing saying which question was asked. One live dialog per
-     * process; an id RETIRES when its result fires, which is what makes
-     * the second save-as legal after the first was cancelled. */
+     * process; an id RETIRES when its result fires. */
     uint64_t next_dialog = 1, open_dialog = 0, save_dialog = 0;
 
     const uint8_t *rec;
@@ -383,8 +366,7 @@ static void *app(void *arg) {
             }
         } else if (parse_file_dialog_result(rec, &result)) {
             /* `local_path` is touched exactly once, here: it is EMPTY ON
-             * BOTH PHONES, so everything below goes through the handle
-             * instead. */
+             * BOTH PHONES, so everything below goes through the handle. */
             (void)result.local_path;
             if (result.dialog == open_dialog) {
                 if (result.count == 0) {
@@ -410,8 +392,7 @@ static void *app(void *arg) {
                 }
                 /* `result.name` is asserted NOWHERE: it is the name the
                  * dialog got, not the one this guest suggested (Android's
-                 * SAF appends an extension at creation). The BYTES are
-                 * what the scene checks. */
+                 * SAF appends an extension at creation). */
                 destination = result.handle;
                 work("saved", destination, 0, "third draft");
             }

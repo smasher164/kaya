@@ -18,8 +18,6 @@ SETTINGS = 8
 
 
 def popped_detail():
-    # Bound to the detail entry at push, so it can only ever mean the
-    # detail screen popped.
     status.set("popped detail")
 
 

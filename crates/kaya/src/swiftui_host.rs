@@ -1,14 +1,12 @@
-//! Runtime dispatch to the SwiftUI backend. The Swift half lives in a
-//! dylib (built by tools/swiftui/build-dylib.sh) exporting
-//! kaya_swiftui_run, which is App.main() behind a C symbol.
+//! Runtime dispatch to the SwiftUI backend, the one backend on macOS and
+//! iOS. The Swift half is a dylib (tools/swiftui/build-dylib.sh) exporting
+//! kaya_swiftui_run, found via KAYA_SWIFTUI_LIB or the default dyld search.
 //!
 //! The host hands the backend an explicit table of function pointers
 //! (KayaHostApi) rather than letting the dylib bind kaya symbols through
-//! the dynamic linker: hosts may carry kaya statically (a Rust
-//! executable) or load it RTLD_LOCAL (ctypes), so symbol-space coupling
-//! is unreliable, and the vtable pins the one live kaya instance by
-//! construction. The one backend on macOS and iOS; the dylib is found
-//! via KAYA_SWIFTUI_LIB or the default dyld search.
+//! the dynamic linker: a host may carry kaya statically (a Rust
+//! executable) or load it RTLD_LOCAL (ctypes), so the vtable is what pins
+//! the one live kaya instance.
 
 use std::ffi::{CString, c_char, c_int, c_void};
 
@@ -17,16 +15,14 @@ use crate::capi::{
     kaya_emit_value_changed, kaya_next_commands,
 };
 
-/// Redeem a picked file: the locator the backend answered the pick
-/// with, the mode, and out-parameters for seekability. Returns the
-/// descriptor the guest now owns, or -1 with `out_error` filled.
+/// Redeem a picked file: the locator the backend answered the pick with,
+/// the mode, and out-parameters for seekability. Returns the descriptor
+/// the guest now owns, or -1 with `out_error` filled.
 ///
-/// The backend keeps the platform object the locator names — on iOS a
-/// security-scoped URL, which is the only durable capability there —
-/// and starts the scope, opens, and stops it INSIDE this call. That is
-/// not a workaround: the scope is a kernel-tracked resource with a
-/// concurrency limit that leaks if held, and the descriptor outlives it
-/// (DESIGN.md, measurements 2 and 3).
+/// The backend starts the security scope, opens, and stops it INSIDE this
+/// call: the scope is a kernel-tracked resource with a concurrency limit
+/// that leaks if held, and the descriptor outlives it (DESIGN.md,
+/// measurements 2 and 3).
 pub type PickedOpener = unsafe extern "C" fn(
     locator: *const c_char,
     mode: u32,
@@ -38,16 +34,14 @@ pub type PickedOpener = unsafe extern "C" fn(
 /// `PickedSource` when a guest redeems a handle.
 pub(crate) static PICKED_OPENER: std::sync::OnceLock<PickedOpener> = std::sync::OnceLock::new();
 
-/// A picked file on iOS: the locator the backend answered with, which it
-/// can still redeem, opened through the backend on every redemption.
-///
-/// THE SAME SHAPE AS ANDROID'S `UriSource`, and for the same reason. iOS
-/// has a perfectly good-looking POSIX path for a picked file and it is a
-/// TRAP: re-opening it once the security scope drops fails with EPERM
+/// A picked file on iOS: the locator the backend answered with, opened
+/// through the backend on every redemption — the same shape as Android's
+/// `UriSource`. iOS has a good-looking POSIX path for a picked file and it
+/// is a TRAP: re-opening it once the security scope drops fails with EPERM
 /// (DESIGN.md, measurement 4), so a `PathSource` here would work in the
-/// simulator — which enforces no sandbox at all — and fail on a device.
-/// What survives is the URL OBJECT, which re-acquires its scope
-/// (measurement 5), and only the backend can hold one.
+/// simulator, which enforces no sandbox, and fail on a device. What
+/// survives is the URL OBJECT, which re-acquires its scope (measurement
+/// 5), and only the backend can hold one.
 #[cfg(target_os = "ios")]
 pub(crate) struct UrlSource {
     pub name: String,
@@ -75,10 +69,10 @@ impl crate::protocol::PickedSource for UrlSource {
             )
         };
         if handle < 0 {
-            // The backend's own sentence, which names the platform's
-            // reason (a dropped scope, a file that moved, a mode the
-            // document does not allow); a bare code would send the
-            // guest looking in the wrong place.
+            // The backend's own sentence names the platform's reason (a
+            // dropped scope, a file that moved, a mode the document does
+            // not allow); a bare code would send the guest looking in the
+            // wrong place.
             let why = if error.is_null() {
                 "the backend refused the open and gave no reason".to_owned()
             } else {
@@ -95,17 +89,15 @@ impl crate::protocol::PickedSource for UrlSource {
         &self.name
     }
 
-    /// EMPTY, and measured rather than assumed: iOS HAS a path for the
-    /// picked file and re-opening it after the scope drops is DENIED, so
-    /// publishing it would hand the guest something that looks usable
-    /// and is not — the one thing `local_path` exists to refuse.
+    /// EMPTY, and measured: iOS HAS a path for the picked file and
+    /// re-opening it after the scope drops is DENIED, so publishing it
+    /// would hand the guest something that looks usable and is not.
     fn local_path(&self) -> &str {
         ""
     }
 
-    /// The backend's own name for the URL it is holding — unusable as
-    /// a path (that is what local_path's emptiness says), and exactly
-    /// what the backend needs handed back to put the file on a
+    /// The backend's own name for the URL it holds — unusable as a path,
+    /// and what the backend needs handed back to put the file on a
     /// pasteboard.
     fn locator(&self) -> &str {
         &self.locator
@@ -113,45 +105,39 @@ impl crate::protocol::PickedSource for UrlSource {
 }
 
 /// The presentation-side functions handed to a guest-language backend.
-/// emit_clicked takes the click-tag bytes delivered with a widget's
-/// CREATE record, verbatim. next_commands blocks until a transaction is
-/// resolved and fills the buffer with apply-op records (KAYA_APPLY_*);
-/// returns the byte length, 0 on shutdown. blob_data resolves a blob
-/// value's u64 handle to (pointer, length) — handles are batch-local
-/// and the pointer is valid until the next next_commands call, so fetch
-/// and decode within the batch; NULL for a dead handle.
+/// next_commands blocks until a transaction resolves and fills the buffer
+/// with apply-op records (KAYA_APPLY_*), returning the byte length, 0 on
+/// shutdown. blob_data resolves a blob value's u64 handle to (pointer,
+/// length): handles are batch-local and the pointer dies at the next
+/// next_commands call, so fetch and decode within the batch; NULL for a
+/// dead handle.
 #[repr(C)]
 pub struct KayaHostApi {
     pub emit_clicked: unsafe extern "C" fn(*const u8, usize),
     pub next_commands: unsafe extern "C" fn(*mut u8, usize) -> usize,
-    /// An entry edit: the widget's tag and its new text, plus the three
-    /// facts the undo ledger needs and only the backend holds — the
-    /// window whose ledger this run of typing belongs to, whether the
-    /// field is focused, and whether the edit is LEDGER-QUIET (the
-    /// backend routed a native undo and is reporting it through
-    /// note_native_undo instead). See kaya_emit_text_changed.
+    /// An entry edit: the tag and the new text, plus the three facts only
+    /// the backend holds — the window whose undo ledger this run of typing
+    /// belongs to, whether the field is focused, and whether the edit is
+    /// LEDGER-QUIET (a native undo the backend routed and reports through
+    /// note_native_undo instead).
     pub emit_text_changed: unsafe extern "C" fn(*const u8, usize, *const u8, usize, u64, u8, u8),
     pub emit_toggled: unsafe extern "C" fn(*const u8, usize, u8),
     pub emit_value_changed: unsafe extern "C" fn(*const u8, usize, f64),
     pub blob_data: unsafe extern "C" fn(u64, *mut usize) -> *const u8,
-    /// The protocol fingerprint (capi::kaya_spec_hash). The dylib
-    /// asserts it against its own baked copy before pumping — the
-    /// stale-artifact guard for the presentation side, which check-verbs
-    /// can only hold at SOURCE level (a stale compiled dylib bypasses
-    /// source gates and would decode wire records with old constants).
+    /// The protocol fingerprint (capi::kaya_spec_hash), asserted by the
+    /// dylib against its own baked copy before pumping: a stale compiled
+    /// dylib bypasses every source gate and would decode wire records with
+    /// old constants.
     pub spec_hash: extern "C" fn() -> u64,
-    /// Window lifecycle emits (slice 2): close_requested for a
-    /// veto_close window's chrome close, window_closed after a
-    /// non-veto auxiliary closed natively.
+    /// close_requested for a veto_close window's chrome close;
+    /// window_closed after a non-veto auxiliary closed natively.
     pub emit_close_requested: extern "C" fn(u64),
     pub emit_window_closed: extern "C" fn(u64),
     /// The alert's one answer (an ALERT_CHOICE value: an action index
     /// or the cancel sentinel). Retires the live alert id.
     pub emit_alert_result: extern "C" fn(u64, u32),
     /// The picker's answer: parallel arrays of `count` NUL-terminated
-    /// paths and names, or count 0 for cancel. Through the vtable like
-    /// every other emission — a direct symbol dies on static-Rust and
-    /// RTLD_LOCAL-Python hosts.
+    /// paths and names, or count 0 for cancel.
     pub emit_file_dialog_result: unsafe extern "C" fn(
         u64,
         *const *const std::os::raw::c_char,
@@ -159,75 +145,62 @@ pub struct KayaHostApi {
         usize,
     ),
     /// The save dialog's answer: ONE locator and its name, or NULL for
-    /// cancel. Its own entry rather than the picker's with a count of
-    /// one, because it is what makes the destination CREATABLE — the core
-    /// registers a source whose open creates, and that decision must not
-    /// be reachable from the picker's entry by accident.
+    /// cancel. Its own entry rather than the picker's with a count of one,
+    /// because it is what makes the destination CREATABLE — the core
+    /// registers a source whose open creates.
     pub emit_save_dialog_result: unsafe extern "C" fn(
         u64,
         *const std::os::raw::c_char,
         *const std::os::raw::c_char,
     ),
-    /// Navigation lifecycle emits: entry_popped after the user's back
-    /// affordance popped natively (the core's stack reconciles inside
-    /// this call), back_requested when the top entry's intercept_back
-    /// is armed and nothing popped.
+    /// entry_popped after the user's back affordance popped natively (the
+    /// core's stack reconciles inside this call); back_requested when the
+    /// top entry's intercept_back is armed and nothing popped.
     pub emit_entry_popped: extern "C" fn(u64),
     pub emit_back_requested: extern "C" fn(u64),
     /// The user switched sections through the platform switcher
-    /// (post-fact; the core's selection mirror reconciles inside this
-    /// call). A programmatic select_section never arrives here — the
-    /// echo doctrine.
+    /// (post-fact). A programmatic select_section never arrives here.
     pub emit_section_selected: extern "C" fn(u64, u64),
-    /// Menu occurrence emits — ONE dispatch path for chrome clicks,
-    /// shortcuts, and harness activation (DESIGN.md, Menus). The
-    /// pointer/length pair is the noun: the wire path
-    /// CONTEXT_ATTACH_NODE handed the backend for a node-anchored
-    /// context item, or NULL/0 for a bar or live-widget item.
-    /// Programmatic checked/value writes never arrive here — the echo
-    /// doctrine.
+    /// Menu occurrences — ONE dispatch path for chrome clicks, shortcuts
+    /// and harness activation (DESIGN.md, Menus). The pointer/length pair
+    /// is the noun: the wire path CONTEXT_ATTACH_NODE handed the backend
+    /// for a node-anchored context item, or NULL/0 for a bar or
+    /// live-widget item. Programmatic writes never arrive here.
     pub emit_menu_activated: unsafe extern "C" fn(u64, *const u8, usize),
     pub emit_menu_toggled: unsafe extern "C" fn(u64, *const u8, usize, u8),
     pub emit_menu_value_changed: unsafe extern "C" fn(u64, *const u8, usize, f64),
     /// The clipboard's two answers. `emit_clipboard_result` takes the
-    /// request id and a KayaRepresentation, NULL being the universal
-    /// no; `emit_pasted` takes the widget's click tag verbatim and the
-    /// representation that arrived, which is never absent — a paste
-    /// that delivered nothing is not an occurrence.
+    /// request id and a KayaRepresentation, NULL being the universal no;
+    /// `emit_pasted` takes the widget's click tag verbatim and the
+    /// representation that arrived, which is never absent.
     pub emit_clipboard_result:
         unsafe extern "C" fn(u64, *const crate::capi::KayaRepresentation),
     pub emit_pasted:
         unsafe extern "C" fn(*const u8, usize, *const crate::capi::KayaRepresentation),
-    /// THE UNDO TIER (docs/undo-plan.md §3). The routing question is
-    /// asked once and used twice — enablement and activation are the
-    /// same call, so a greyed Edit>Undo and an inert one cannot drift:
-    /// `undo_route`/`redo_route` take the window, the focused widget (0
-    /// for none) and A4's one named query (the focused field's own
-    /// CanUndo), and answer 0 nothing / 1 the field's native stack / 2
-    /// the core's ledger.
+    /// THE UNDO TIER (docs/undo-plan.md §3). `undo_route`/`redo_route`
+    /// take the window, the focused widget (0 for none) and A4's one named
+    /// query (the focused field's own CanUndo), and answer 0 nothing / 1
+    /// the field's native stack / 2 the core's ledger. Asked once and used
+    /// twice — enablement and activation are the same call — so a greyed
+    /// Edit>Undo and an inert one cannot drift.
     ///
-    /// `undo`/`redo` are the core tier: they apply the newest entry's
-    /// inverse and emit `undone`/`redone` with the whole restored state.
-    /// They return nothing because both halves are core-side — the ops
-    /// go to the backend through next_commands like every other apply,
-    /// and the occurrence goes to the app through the sink.
+    /// `undo`/`redo` return nothing: the inverse's ops reach the backend
+    /// through next_commands like any other apply, and the occurrence
+    /// reaches the app through the sink.
     ///
-    /// `note_native_undo` is the reconciliation sample after a NATIVE
-    /// undo the backend routed: the field, the text the walk landed on,
-    /// and whether it can still undo. The ordinary text_changed the same
-    /// undo provokes carries emit_text_changed's ledger-quiet flag, so
-    /// one change is reported once.
+    /// `note_native_undo` is the reconciliation sample after a NATIVE undo
+    /// the backend routed — the field, the text the walk landed on, and
+    /// whether it can still undo. The text_changed the same undo provokes
+    /// carries the ledger-quiet flag, so one change is reported once.
     pub undo_route: extern "C" fn(u64, u64, u8) -> u32,
     pub redo_route: extern "C" fn(u64, u64, u8) -> u32,
     pub undo: extern "C" fn(u64),
     pub redo: extern "C" fn(u64),
     pub note_native_undo: unsafe extern "C" fn(u64, u64, *const u8, usize, u8),
     /// The stall watchdog's reading, for `expect_stall`. A READ rather
-    /// than an emit, and it rides the vtable for the same reason every
-    /// emit does: a direct symbol binds whichever kaya the loader
-    /// happens to resolve, which is the wrong one on a static-Rust or
-    /// RTLD_LOCAL-Python host. The interpreter must ask the ONE live
-    /// instance, or it reads a watchdog watching nothing.
+    /// than an emit, riding the vtable for the reason every emit does: a
+    /// direct symbol binds whichever kaya the loader resolves, which is
+    /// the wrong one on a static-Rust or RTLD_LOCAL-Python host.
     pub stalled_ms: extern "C" fn() -> u64,
 }
 
@@ -274,8 +247,7 @@ pub(crate) fn run() -> i32 {
         // this process actually looked at — whether it is there and how
         // big it is. Between them they separate "never built" from
         // "half-written by a concurrent build" from "wrong architecture"
-        // from "the process is out of descriptors", which the single
-        // sentence this replaced could not.
+        // from "the process is out of descriptors".
         let said = loader_said();
         let seen = match std::fs::metadata(&path) {
             Ok(m) => format!("it is on disk, {} bytes", m.len()),
@@ -294,18 +266,16 @@ pub(crate) fn run() -> i32 {
         "kaya_swiftui_run not exported by {path:?}: {}",
         loader_said()
     );
-    // THE ONE CALL THAT RUNS THE OTHER WAY, and it is resolved the same
-    // way `run` is rather than through the vtable: the vtable carries
-    // functions the BACKEND calls on the core, and this is the core
-    // calling the backend. A picked file on the phones is a
-    // security-scoped URL the backend has to keep — the path EPERMs the
-    // moment the scope drops (DESIGN.md, measurement 4) — so redeeming
-    // a handle means asking the backend, exactly as Android's source
-    // asks the JVM.
+    // THE ONE CALL THAT RUNS THE OTHER WAY: the vtable carries functions
+    // the BACKEND calls on the core, and this is the core calling the
+    // backend, so it is resolved by symbol exactly as `run` is. Redeeming
+    // a picked handle on the phones means asking the backend, which holds
+    // the security-scoped URL — the path EPERMs the moment the scope drops
+    // (DESIGN.md, measurement 4).
     //
-    // OPTIONAL BY DESIGN: a backend built before this existed still
-    // runs, and only a guest that opens a picked file meets the
-    // absence, which then says so.
+    // OPTIONAL BY DESIGN: a backend built before this existed still runs,
+    // and only a guest that opens a picked file meets the absence, which
+    // then says so.
     let opener = unsafe { dlsym(handle, c"kaya_swiftui_open_picked".as_ptr()) };
     if !opener.is_null() {
         let opener: PickedOpener = unsafe { std::mem::transmute(opener) };

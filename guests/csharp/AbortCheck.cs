@@ -4,9 +4,8 @@
 // tools/check-abort.sh.
 //
 // Runs headless: the library loads (KAYA_LIB) and records submit, but
-// Run() is never entered. The bindings compile into this assembly (the
-// csproj globs bindings/csharp), so the internal mirrors (SignalMirrors,
-// SignalDeps) are in reach.
+// Run() is never entered. The bindings compile into this assembly, so
+// the internal mirrors are in reach.
 
 using System;
 using System.Collections.Generic;
@@ -159,7 +158,6 @@ static class AbortCheck
             tx.Window(menus: new[] { file, sort });
             var noun = tx.Label("noun");
             tx.ContextMenu(noun, tx.Item("Rename"));
-            // Save, File, Name, Date, Sort, Rename.
             Check(CountKind(tx.Records, before, KayaWire.TxKindMenuItemCreate) == 6,
                 "menu constructors queued the wrong create count");
             Check(CountKind(tx.Records, before, KayaWire.TxKindMenubarAppend) == 2,

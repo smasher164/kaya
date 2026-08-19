@@ -46,8 +46,7 @@ final class Gallery {
         app.dispatchLoop();
     }
 
-    /** A 2x2 RGB PNG: scenes carry their inputs as source, never as
-     * runtime file I/O. */
+        /** A 2x2 RGB PNG, embedded as source. */
     private static final byte[] TEST_PNG = {
         (byte) 137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
         0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, (byte) 253, (byte) 212, (byte) 154,

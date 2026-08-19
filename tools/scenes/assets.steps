@@ -19,8 +19,9 @@
 # THE CENSUS IS THE FORCING FUNCTION, and it is why the third line is so
 # long. `asset_miss_sentence` answers the sentence a miss WOULD raise,
 # totally, without unwinding — because unwinding is not one semantics in
-# nine languages, and a Swift guest cannot catch its own fatalError at
-# all. Line 1 of that sentence names what the package CARRIES, so this
+# nine languages and the C floor catches nothing at all (docs/deferred.md,
+# the assets entry). Line 1 of that sentence names what the package
+# CARRIES, so this
 # expectation can only pass on a lane that stages the WHOLE asset root
 # rather than the one file it happens to need (docs/assets-plan.md A5.1,
 # "the root moves as a unit"). Nothing else in the tree observes that

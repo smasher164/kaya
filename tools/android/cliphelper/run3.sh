@@ -1,22 +1,9 @@
 #!/usr/bin/env bash
 
-# ClipHelper campaign — the CROSS-PACKAGE cells the second clipprobe
-# run could not measure (its reader owned the provider, and
-# same-package access needs no grant, so the grant/revocation/clear
-# traps were vacuously green):
-#
-#  C1 helper reads while NOT the default IME — expect null (control).
-#  C2 helper as default IME reads a probe-seeded text — expect content.
-#  C3 probe seeds its five-representation clip; the HELPER reads the
-#     custom and image bytes across packages — THE PASTE-GRANT CELL
-#     (ClipboardService grants the reading package at getPrimaryClip).
-#  C4 the C3 URI, re-opened by the helper AFTER the clip changes —
-#     the revocation is real only cross-package.
-#  C5 the ungrantable URI, read cross-package — the documented-nowhere
-#     clear-the-clipboard trap, provoked for real this time.
-#  C6 the reverse direction: helper SEEDS image bytes through ITS
-#     provider; the probe package (granted the IME role for the cell)
-#     reads them across packages and decodes 4x4.
+# ClipHelper campaign — the CROSS-PACKAGE clipboard cells (C1..C6 below).
+# The same-package clipprobe run could not measure them: its reader owned
+# the provider, so the grant/revocation/clear traps were vacuously green.
+# Results: docs/clipboard-plan.md:1223.
 #
 # Throwaway; results on stdout via ordered-broadcast result data.
 set -uo pipefail
@@ -72,8 +59,7 @@ helper_read --es kind dump
 helper_read --es kind text
 
 echo "== C6: helper seeds image; probe reads cross-package =="
-# The pixel rides base64 from the host — the same courier the guest
-# will use app-to-app. 77 bytes:
+# The pixel rides base64 from the host, 77 bytes:
 PIXEL_B64="iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAFElEQVR42mP4z8AAR0hMdN5/JAAA0m8X6VG7Iy0AAAAASUVORK5CYII="
 helper_seed --es kind image --es b64 "$PIXEL_B64"
 A shell ime enable "$PROBE/.ProbeIme" >/dev/null

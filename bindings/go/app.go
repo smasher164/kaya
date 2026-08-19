@@ -1,21 +1,8 @@
-// kaya's idiomatic surface for Go: the structural core.
-//
-// Three jobs, layered over the runtime (runtime.go) and the generated
-// wire vocabulary (kaya_wire.go):
-//
-//   - id allocation: signals, widgets, collections, and template nodes
-//     come from per-space counters behind distinct types, so no app
-//     hand-numbers the id spaces — and the compiler keeps blueprint
-//     nodes (Node) from being used where live widgets (Widget) belong;
-//   - template scoping: ForEach and When take a func(*Tpl) whose body
-//     declares the blueprint, bracketing the records — declaring and
-//     instantiating stay visibly different things;
-//   - occurrence dispatch: handlers register per button; the app loop
-//     routes each click, handing template-node handlers the stamped
-//     copy's key path. Handlers receive their transaction explicitly
-//     (func(*Tx)), per the binding conventions; it submits when the
-//     handler returns. The core never calls into the guest — dispatch
-//     runs on the app goroutine after it pulls from the ring.
+// kaya's idiomatic surface for Go: the structural core, over the
+// runtime (runtime.go) and the generated wire vocabulary
+// (kaya_wire.go). Id allocation, template scoping and occurrence
+// dispatch. The core never calls into the guest — dispatch runs on the
+// app goroutine after it pulls from the ring.
 package kaya
 
 import (
@@ -26,26 +13,21 @@ import (
 	"sync/atomic"
 )
 
-// Typed handles over the id spaces.
 // Scalar is the signal-value constraint: the wire's value types.
-// []byte is the blob channel — encoded image bytes; each create or
-// write registers the bytes with the core at encode time (handles are
-// single-submit), and the guest keeps its own copy.
+// []byte is the blob channel — each write registers the bytes with the
+// core at encode time (handles are single-submit).
 type Scalar interface {
 	~string | ~bool | ~int64 | ~float64 | ~[]byte
 }
 
 // Signal carries its value type: writes are checked at compile time,
 // and When demands a Signal[bool] instead of panicking in the scene.
-// (Generic methods — Go 1.27 — are what let Tx.Signal and Tx.Write
-// mint and consume these without free-function detours.)
 type Signal[V Scalar] struct{ id uint64 }
 
-// Widget is a live widget: exactly one thing on screen. It carries
-// the transaction that minted it so construction chains read
-// declaratively (tx.Label(s).Grow(1)); the id alone is the widget's
-// name, and a Widget stored past its build transaction keeps naming
-// the same widget — only the chain methods die with it.
+// Widget is a live widget: exactly one thing on screen. It carries the
+// transaction that minted it so construction chains read declaratively;
+// a Widget stored past its build transaction still names the same
+// widget — only the chain methods die with it.
 type Widget struct {
 	id uint64
 	tx *Tx
@@ -57,10 +39,8 @@ type Widget struct {
 type Node struct{ id uint64 }
 
 // Collection is a collection instance handle: the collection plus the
-// key path selecting one stamped copy's table. Tx.Collection returns
-// the root (empty-path, live-zone) handle; At steps into a copy, one
-// key per enclosing For. Mutations and reads take the handle, so the
-// target is spelled once.
+// key path selecting one stamped copy's table. Tx.Collection returns the
+// root handle; At steps into a copy, one key per enclosing For.
 type Collection struct {
 	id   uint64
 	path []any
@@ -101,23 +81,37 @@ type instance struct {
 	entries []Entry
 }
 
-// minter is one collection INSTANCE's fresh-key counter (Tx.InsertFresh,
-// docs/fresh-key-plan.md): the highest I64 key that table has minted or
-// been handed, so the next mint is one past it. Its own state rather
-// than a field on instance, for two reasons that are the whole safety
-// argument: a counter outlives the entries — every key it handed out
-// stays spent whether or not the entry is still there — and instance is
-// what the rollback journal restores, so an abandoned transaction would
-// carry the counter backwards with it.
+// minter is one collection INSTANCE's fresh-key counter (docs/
+// fresh-key-plan.md): the highest I64 key that table has minted or been
+// handed. NOT a field on instance, and that is the safety argument: a
+// counter outlives the entries, and instance is what the rollback
+// journal restores — an abandoned transaction would carry the counter
+// backwards with it.
 type minter struct {
 	path    []any
 	counter int64
 }
 
-// App owns the id counters (which outlive any one transaction), the
-// dispatch tables, and the collection model. The collection is the
-// model — the only copy: every mutation op edits it and queues the wire
-// delta in the same call, so reads (Items, Len) are exactly the writes.
+// Caps is WHAT THIS HOST CAN DO (crates/kaya/src/app.rs carries the
+// canonical note). Named booleans, never the bits: the core is free to
+// renumber. CAPABILITIES INFORM; WALLS REFUSE — a false here does not
+// make a call illegal, the root does, but it lets a guest ask first.
+type Caps struct {
+	// The host can materialize a surface beside the primary one. False
+	// on iOS and Android, where CreateWindow aborts at the root.
+	AuxWindows bool
+}
+
+// Capabilities answers what this host can do. Constant for the life of
+// the process, so asking once and remembering is fine.
+func Capabilities() Caps {
+	bits := capabilityBits()
+	return Caps{AuxWindows: bits&capAuxWindows != 0}
+}
+
+// App owns the id counters, the dispatch tables and the collection
+// model. The collection IS the model, the only copy: every mutation
+// edits it and queues the wire delta in the same call.
 type App struct {
 	c              counters
 	widgetHandlers map[uint64]func(*Tx)
@@ -139,30 +133,27 @@ type App struct {
 	widgetPastes   map[uint64]func(*Tx, Representation)
 	nodePastes     map[uint64]func(*Tx, []any, Representation)
 	nodeToggles    map[uint64]func(*Tx, []any, bool)
-	// Menu dispatch tables, keyed by MENU ITEM id — their own id
-	// space, separate from every widget/node table ("two tables,
-	// always" — now N tables, still always). The node flavors receive
-	// the stamped copy's key path (the keys ARE the noun).
+	// Menu dispatch tables, keyed by MENU ITEM id — their own id space,
+	// separate from every widget/node table. The node flavors receive
+	// the stamped copy's key path.
 	menuActivated     map[uint64]func(*Tx)
 	menuActivatedNode map[uint64]func(*Tx, []any)
 	menuToggled       map[uint64]func(*Tx, bool)
 	menuToggledNode   map[uint64]func(*Tx, []any, bool)
 	menuSelected      map[uint64]func(*Tx, int)
 	menuSelectedNode  map[uint64]func(*Tx, []any, int)
-	// The undo tables, keyed by WINDOW and never one-shot: a history is
-	// walked as often as the user likes, and each window has its own
-	// ledger (docs/undo-plan.md §3).
+	// Keyed by WINDOW and never one-shot: a history is walked as often
+	// as the user likes, and each window has its own ledger
+	// (docs/undo-plan.md §3).
 	undone         map[uint64]func(*Tx, string, UndoDelta)
 	redone         map[uint64]func(*Tx, string, UndoDelta)
-	// How each collection's entries come BACK from an undo: the payload
-	// is wire values and the mirror holds guest values, so the shape is
-	// recorded where the type is known (declaration) and used where it
-	// is not (the occurrence loop).
+	// How each collection's entries come BACK from an undo: recorded
+	// where the type is known (declaration), used where it is not (the
+	// occurrence loop).
 	shapes         map[uint64]undoShape
 	model          map[uint64][]*instance
-	// The fresh-key counters, in the model's own (collection, path)
-	// shape: one per collection INSTANCE, because an instance is a table
-	// and keys are unique within one.
+	// One per collection INSTANCE, because an instance is a table and
+	// keys are unique within one.
 	fresh          map[uint64][]*minter
 	// Collections declared inside a For's template: removing a parent
 	// entry tears down the copy and every instance inside it, so the
@@ -171,28 +162,23 @@ type App struct {
 	openFors []uint64
 	// The ambient parent stack: containers push their id around their
 	// body, constructors parent to the top, and 0 is the template-root
-	// sentinel (template bodies root themselves; a cross-zone
-	// add_child is structurally impossible).
+	// sentinel.
 	parents []uint64
 	// Signals recomputed from a collection after each of its
 	// mutations, written into the same transaction.
 	derived map[uint64][]func(*Tx)
-	// Non-zero exactly while a template body (For, When, or a row
-	// trace) is being declared: the record-time mirror-read guard's
-	// arm. openFors is For-only by design (it carries collection ids
-	// for nesting), so the guard has its own depth, bumped by every
-	// scope opener in both zones.
+	// Non-zero exactly while a template body is being declared: the
+	// record-time mirror-read guard's arm. openFors is For-only (it
+	// carries collection ids for nesting), so the guard has its own
+	// depth, bumped by every scope opener in both zones.
 	tplDepth int
 	// How to undo the open transaction's model edits: a deep snapshot
 	// per touched collection, taken on first touch. Non-nil exactly
-	// while a Build is running; the model methods journal through it
-	// so an abandoned transaction restores the mirror to what was
-	// actually shipped (the same discipline as every other binding).
+	// while a Build is running.
 	journal map[uint64][]*instance
-	// Closures handed to Post from other goroutines, waiting to run as
-	// transactions on the app goroutine. THE ONLY FIELD HERE TOUCHED
-	// FROM ANOTHER THREAD, and the only reason App carries a mutex at
-	// all — everything above is app-goroutine-only by construction.
+	// THE ONLY FIELD HERE TOUCHED FROM ANOTHER THREAD, and the only
+	// reason App carries a mutex — everything above is
+	// app-goroutine-only by construction.
 	postMu sync.Mutex
 	posted []func(*Tx)
 }
@@ -278,10 +264,9 @@ func (a *App) mintKey(coll uint64, path []any) int64 {
 }
 
 // absorbKey shows the minter an explicit key on its way into the table.
-// A numeric key at or above the counter carries it up so the next mint
-// clears it; anything else moves nothing, having no way to collide with
-// an I64. int and int64 are exactly what encodeValue writes as ValueI64,
-// so what absorbs here is what the core will see as a number.
+// A numeric key at or above the counter carries it up; anything else
+// moves nothing. int and int64 are exactly what encodeValue writes as
+// ValueI64, so what absorbs here is what the core sees as a number.
 func (a *App) absorbKey(coll uint64, path []any, key any) {
 	var n int64
 	switch k := key.(type) {
@@ -298,7 +283,7 @@ func (a *App) absorbKey(coll uint64, path []any, key any) {
 }
 
 // touch journals a deep snapshot of one collection's instances the
-// first time the open transaction mutates it. Deep because instances
+// first time the open transaction mutates it. DEEP because instances
 // are pointers and their entry slices mutate in place.
 func (a *App) touch(coll uint64) {
 	if a.journal == nil {
@@ -374,8 +359,7 @@ func (a *App) modelMove(coll uint64, path []any, key any, before []any) {
 		}
 	}
 	// The same checks the scene makes, made where the guest can see
-	// the stack: a missing key or anchor is a guest bug, never a
-	// fallback. Both validated before anything mutates.
+	// the stack. Both validated before anything mutates.
 	if pos < 0 {
 		panic(fmt.Sprintf("kaya: move of missing key %v", key))
 	}
@@ -422,12 +406,9 @@ func (a *App) purgeChildren(coll uint64, prefix []any) {
 }
 
 // A collection declared inside a For's template is torn down with its
-// copies: record the edge so the model purges along it.
-//
-// Every collection also records HOW ITS ENTRIES COME BACK from an undo
-// (App.shapes). The scalar shape is the default because the untyped
-// handle IS a one-field collection; the typed constructors overwrite it
-// with their own (CollectionOf, SumOf) the moment they know T.
+// copies: record the edge so the model purges along it. Also records
+// HOW ITS ENTRIES COME BACK from an undo — the scalar shape by default,
+// overwritten by CollectionOf/SumOf the moment they know T.
 func (a *App) registerCollection(id uint64) {
 	if len(a.openFors) > 0 {
 		parent := a.openFors[len(a.openFors)-1]
@@ -445,13 +426,12 @@ type Tx struct {
 	// the app registry only on commit — an abandoned transaction
 	// abandons its registrations with its records.
 	pendingDerived []pendingDerived
-	// Set when Build finishes with this transaction, committed or not:
-	// a construction chain (Widget.Grow) on a widget that outlived its
-	// build must die loudly, not append into an orphaned record list.
+	// Set when Build finishes with this transaction, committed or not: a
+	// late construction chain must die loudly, not append into an
+	// orphaned record list.
 	closed bool
-	// Set by Undoable: this transaction already names an undo step, and
-	// a second name is a guest bug rather than a second group (the wire
-	// admits one head-of-batch marker per batch).
+	// Set by Undoable: the wire admits one head-of-batch marker per
+	// batch, so a second name is a guest bug.
 	undoGroup bool
 }
 
@@ -462,13 +442,8 @@ type pendingDerived struct {
 
 // emit queues one record, and is the ONE place that appends to a
 // transaction. Every constructor, setter and chain method goes through
-// it so the closed check above cannot be forgotten at a new callsite —
-// the check lived only on the Widget and MenuItem chains, so a write
-// through a Tx that had outlived its Build appended into a slice
-// already submitted and never submitted again. No panic, no error, the
-// write simply vanished. Nothing invited that mistake until App.Post
-// arrived; posting is exactly the reason a guest now holds a Tx near a
-// background thread, so the guard has to be total.
+// it so the closed check cannot be forgotten at a new callsite; a write
+// through a Tx that outlived its Build vanishes silently otherwise.
 //
 // A Tx is valid ONLY inside the Build or handler that made it, on the
 // app thread. To mutate from anywhere else, post.
@@ -487,20 +462,17 @@ func (tx *Tx) alive() {
 
 // mirror is emit's read-side sibling: the same liveness check plus the
 // template-body rule. A read through a transaction that outlived its
-// Build is worse than a lost write — it races the app thread's own
-// model instead of failing — so it dies here for the same reason.
+// Build RACES the app thread's own model instead of failing.
 func (tx *Tx) mirror(c Collection) *instance {
 	tx.alive()
 	tx.app.guardMirrorRead()
 	return tx.app.instanceOf(c.id, c.path)
 }
 
-// Build runs fn with a fresh transaction and submits it. A panic out
-// of fn abandons the transaction: the records never ship, and the
-// journal restores the model mirror to exactly what was shipped —
-// then the panic continues to the caller. The tx boundary rolls back
-// and propagates; whether the app survives is the caller's decision
-// (the dispatch loop survives; see dispatch).
+// Build runs fn with a fresh transaction and submits it. A panic out of
+// fn abandons the transaction — the records never ship and the journal
+// restores the mirror — then the panic continues to the caller. The tx
+// boundary rolls back and propagates; surviving is dispatch's job.
 func (a *App) Build(fn func(*Tx)) {
 	if a.journal != nil {
 		panic("kaya: Build inside Build — one transaction at a time")
@@ -513,10 +485,8 @@ func (a *App) Build(fn func(*Tx)) {
 			for id, saved := range a.journal {
 				a.model[id] = saved
 			}
-			// A panic mid-declaration leaves the ambient stacks and
-			// the template depth dirty; the app survives the abort,
-			// so reset them or every later transaction inherits a
-			// poisoned zone state.
+			// A panic mid-declaration leaves the ambient stacks and the
+			// template depth dirty, and the app survives the abort.
 			a.parents = a.parents[:0]
 			a.openFors = a.openFors[:0]
 			a.tplDepth = 0
@@ -537,10 +507,9 @@ func (a *App) Build(fn func(*Tx)) {
 }
 
 // dispatch runs one handler inside its own Build and survives a panic
-// out of it: by the time the panic crosses the Build boundary the
-// model is restored and the records are dropped, so the loop logs and
-// moves to the next occurrence. Aborts the runtime cannot recover
-// still die — uniformly with every other binding's fatal floor.
+// out of it: by the time the panic crosses the boundary the model is
+// restored and the records dropped. Aborts the runtime cannot recover
+// still die, uniformly with every other binding's fatal floor.
 
 
 
@@ -556,33 +525,22 @@ func (a *App) dispatch(fn func(*Tx)) {
 }
 
 // Post runs fn as a transaction on the app goroutine, soon. It is the
-// ONE method safe to call from another goroutine, and the answer to
-// "how does background work reach the UI".
-//
-// Build is a transaction NOW on the calling goroutine; Post is the same
-// transaction SOON on the app goroutine. Same shape, same *Tx, and the
-// *Tx is made where it is used — so a background goroutine writes
-// ordinary blocking Go and hands back only the result:
+// ONE method safe to call from another goroutine.
 //
 //	go func() {
 //		data, err := os.ReadFile(name)      // blocks this goroutine
 //		app.Post(func(tx *kaya.Tx) {        // back on the app goroutine
-//			if err != nil {
-//				tx.Write(status, err.Error())
-//				return
-//			}
 //			tx.Write(content, string(data))
 //		})
 //	}()
 //
 // What must NOT cross is a *Tx: it belongs to the Build or handler that
-// made it, and capturing one is refused (see Tx.emit). Ids — signals,
-// widgets — are values and are meant to be captured; that is how the
-// posted closure names what to write.
+// made it, and capturing one is refused (Tx.emit). Ids are values and
+// are meant to be captured.
 //
 // A posted closure runs in its OWN transaction, after whatever is
-// running now. Posting from inside a handler therefore queues for
-// after; it never nests.
+// running now: posting from inside a handler queues for AFTER, never
+// nests.
 func (a *App) Post(fn func(*Tx)) {
 	if fn == nil {
 		return
@@ -590,20 +548,15 @@ func (a *App) Post(fn func(*Tx)) {
 	a.postMu.Lock()
 	a.posted = append(a.posted, fn)
 	a.postMu.Unlock()
-	// The app goroutine may be parked in C waiting on the ring. Posted
-	// work is not an occurrence and never enters that ring, so this is
-	// the only way it hears about it.
+	// The app goroutine may be parked in C waiting on the ring, and
+	// posted work never enters that ring.
 	Wake()
 }
 
 // drainPosted runs everything queued, each as its own transaction, in
-// the order it was posted.
-//
-// It takes the batch and releases the lock BEFORE running any of it, so
-// a closure that posts again lands in the NEXT batch rather than this
-// one. That is what stops a self-posting closure from starving the
-// occurrence loop — hold the batch open and Post becomes an infinite
-// drain that never returns to the ring.
+// the order it was posted. It takes the batch and releases the lock
+// BEFORE running any of it, so a closure that posts again lands in the
+// NEXT batch and cannot starve the occurrence loop.
 func (a *App) drainPosted() {
 	a.postMu.Lock()
 	batch := a.posted
@@ -655,15 +608,9 @@ func (tx *Tx) autoParent(id uint64) {
 // field or textarea the "open a document into the editor" write.
 //
 // THE TEXT WIDGETS ARE UNCONTROLLED: this is one write, not a binding
-// the app keeps pushing. The user owns the text from the moment it
-// lands, the field answers with its ordinary change handler, and the
-// app's fold takes it from there — the same round trip a keystroke
-// makes.
-//
-// A write that CHANGES the text also drops whatever the app had
-// declared over it (see Tx.HighlightRanges: ranges are bound to the
-// text they were declared against), and it spends the field's native
-// undo history.
+// the app keeps pushing. A write that CHANGES the text drops whatever
+// the app declared over it (Tx.HighlightRanges) and spends the field's
+// native undo history.
 func (tx *Tx) SetText(w Widget, text string) {
 	tx.emit(TxSetText(w.id, text))
 }
@@ -677,27 +624,21 @@ func (tx *Tx) SetChecked(w Widget, checked bool) {
 }
 
 // SetGrow sets a widget's flex weight within its row/column: 0 is
-// natural size, positive weights divide the container's leftover
-// main-axis space in proportion (see Prop::Grow in the core). The
-// dynamic path — collapsing a pane is SetGrow(w, 0) and back; the
-// declarative spelling is the Grow chain at construction.
+// natural size, positive weights divide the leftover main-axis space.
+// The dynamic path; the declarative spelling is the Grow chain.
 func (tx *Tx) SetGrow(w Widget, weight float64) {
 	tx.emit(TxSetGrow(w.id, weight))
 }
 
-// SetInset sets a container's own padding — DIP between its bounds
-// and its children, uniform on all four sides, the window inset one
-// level down (docs/styling-plan.md D3). Containers only; the scene
-// rejects it anywhere else. The dynamic path; the declarative
-// spelling is the Inset chain at construction.
+// SetInset sets a container's own padding — DIP between its bounds and
+// its children, uniform on all four sides (docs/styling-plan.md D3).
+// Containers only. The dynamic path; the chain is the declarative one.
 func (tx *Tx) SetInset(w Widget, pad float64) {
 	tx.emit(TxSetInset(w.id, pad))
 }
 
 // Inset pads this container at construction — the declarative chain:
-// tx.Row(...).Inset(8). Same transaction discipline as Grow; born
-// from the first full-bleed app, whose Inset(0) window put the status
-// row on the window edge along with the buffer it was for.
+// tx.Row(...).Inset(8). Same transaction discipline as Grow.
 func (w Widget) Inset(pad float64) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Inset on a widget outside its build transaction — use Tx.SetInset inside a live transaction")
@@ -706,11 +647,10 @@ func (w Widget) Inset(pad float64) Widget {
 	return w
 }
 
-// Grow weights this widget within its row/column at construction —
-// the declarative chain: tx.Label(s).Grow(1). It appends to the
-// transaction that minted the widget, so it belongs in the build
-// expression; on a Widget that outlived its build, it fails loudly —
-// use Tx.SetGrow inside a live transaction for dynamic changes.
+// Grow weights this widget within its row/column at construction — the
+// declarative chain: tx.Label(s).Grow(1). It appends to the transaction
+// that minted the widget, so it belongs in the build expression and
+// fails loudly on a Widget that outlived its build.
 func (w Widget) Grow(weight float64) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Grow on a widget outside its build transaction — use Tx.SetGrow inside a live transaction")
@@ -720,18 +660,14 @@ func (w Widget) Grow(weight float64) Widget {
 }
 
 // SetAlign sets a container's cross-axis child placement — one of the
-// generated align constants (AlignStart..AlignBaseline), Go's enum
-// idiom. Containers only; baseline is rows-only — the scene rejects
-// misuse at the root. The dynamic path; the declarative spelling is
-// the Align chain at construction.
+// generated align constants. Containers only; baseline is rows-only,
+// and the root rejects misuse. The chain is the declarative spelling.
 func (tx *Tx) SetAlign(w Widget, mode int64) {
 	tx.emit(TxSetAlign(w.id, mode))
 }
 
 // Align sets this container's cross-axis child placement at
-// construction — the declarative chain:
-// tx.Row(...).Align(AlignBaseline). Same transaction discipline as
-// Grow.
+// construction. Same transaction discipline as Grow.
 func (w Widget) Align(mode int64) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Align on a widget outside its build transaction — use Tx.SetAlign inside a live transaction")
@@ -740,17 +676,15 @@ func (w Widget) Align(mode int64) Widget {
 	return w
 }
 
-// SetSpacing sets a container's inter-child gap (main axis, DIP; the
-// normalized default is 8). Containers only — the scene rejects it
-// anywhere else. The dynamic path; the declarative spelling is the
-// Spacing chain at construction.
+// SetSpacing sets a container's inter-child gap (main axis, DIP;
+// normalized default 8). Containers only. The chain is the declarative
+// spelling.
 func (tx *Tx) SetSpacing(w Widget, gap float64) {
 	tx.emit(TxSetSpacing(w.id, gap))
 }
 
-// Spacing sets this container's inter-child gap at construction — the
-// declarative chain: tx.Column(...).Spacing(12). Same transaction
-// discipline as Grow.
+// Spacing sets this container's inter-child gap at construction. Same
+// transaction discipline as Grow.
 func (w Widget) Spacing(gap float64) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Spacing on a widget outside its build transaction — use Tx.SetSpacing inside a live transaction")
@@ -760,16 +694,14 @@ func (w Widget) Spacing(gap float64) Widget {
 }
 
 // SetA11yID sets a widget's accessibility IDENTIFIER: a stable authored
-// key that assistive tooling and UI automation address it by, and which
-// is NEVER spoken. Universal — every kind carries one. The dynamic
-// path; the declarative spelling is the A11yID chain at construction.
+// key that automation addresses it by, and which is NEVER spoken.
+// Universal. The chain is the declarative spelling.
 func (tx *Tx) SetA11yID(w Widget, id string) {
 	tx.emit(TxSetA11yId(w.id, id))
 }
 
-// A11yID sets this widget's accessibility identifier at construction —
-// the declarative chain: tx.Entry().A11yID("name"). Same transaction
-// discipline as Grow.
+// A11yID sets this widget's accessibility identifier at construction.
+// Same transaction discipline as Grow.
 func (w Widget) A11yID(id string) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: A11yID on a widget outside its build transaction — use Tx.SetA11yID inside a live transaction")
@@ -779,19 +711,15 @@ func (w Widget) A11yID(id string) Widget {
 }
 
 // SetA11yLabel sets what an assistive client SPEAKS for a widget.
-// Universal, and deliberately separate from the identifier — an
-// automation key is not a spoken name. Leave it unset to keep whatever
-// the platform derives from the control's own content; setting it
-// OVERRIDES that, so a button whose caption already reads well needs
-// nothing here. The dynamic path; the declarative spelling is the
-// A11yLabel chain at construction.
+// Universal, and separate from the identifier. Leave it unset to keep
+// what the platform derives from the control's own content; setting it
+// OVERRIDES that. The chain is the declarative spelling.
 func (tx *Tx) SetA11yLabel(w Widget, label string) {
 	tx.emit(TxSetA11yLabel(w.id, label))
 }
 
-// A11yLabel sets this widget's spoken label at construction — the
-// declarative chain: tx.Entry().A11yID("name").A11yLabel("Full name").
-// Same transaction discipline as Grow.
+// A11yLabel sets this widget's spoken label at construction. Same
+// transaction discipline as Grow.
 func (w Widget) A11yLabel(label string) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: A11yLabel on a widget outside its build transaction — use Tx.SetA11yLabel inside a live transaction")
@@ -800,18 +728,15 @@ func (w Widget) A11yLabel(label string) Widget {
 	return w
 }
 
-// SetA11yHint sets what ACTIVATING a widget does — the platforms'
-// hint (Apple defines it as the result of performing an action;
-// Android carries it as the click action's label). Write a VERB
-// PHRASE: VoiceOver speaks it as written, TalkBack prefixes "double
-// tap to". Activation kinds only; the root rejects it elsewhere.
+// SetA11yHint sets what ACTIVATING a widget does. Write a VERB PHRASE:
+// VoiceOver speaks it as written, TalkBack prefixes "double tap to".
+// Activation kinds only; the root rejects it elsewhere.
 func (tx *Tx) SetA11yHint(w Widget, hint string) {
 	tx.emit(TxSetA11yHint(w.id, hint))
 }
 
-// A11yHint sets this widget's hint at construction — the declarative
-// chain: tx.Button("Save", nil).A11yHint("save the draft"). Same
-// transaction discipline as Grow.
+// A11yHint sets this widget's hint at construction. Same transaction
+// discipline as Grow.
 func (w Widget) A11yHint(hint string) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: A11yHint on a widget outside its build transaction — use Tx.SetA11yHint inside a live transaction")
@@ -821,25 +746,14 @@ func (w Widget) A11yHint(hint string) Widget {
 }
 
 // SetRole sets a widget's SEMANTIC EMPHASIS — what it MEANS, never how
-// it looks (docs/styling-plan.md D4): one of the generated role
-// constants (RoleDestructive, RoleProminent, RoleHeading), Go's enum
-// idiom, the same one Align and SectionsPresentation use.
-//
-// The vocabulary is closed and each entry fits some kinds and not
-// others: destructive and prominent are BUTTON emphasis, heading is
-// LABEL hierarchy. The root refuses a misfit at declare time, naming
-// both the role and the kind, so no backend ever sees one. The dynamic
-// path; the declarative spelling is the Role chain at construction.
-//
-// (The Role* STRING constants a few hundred lines down are the menu
-// tier's standard commands — cut/copy/paste/undo/redo. Same prefix,
-// different vocabulary, and the types keep them apart.)
+// it looks (docs/styling-plan.md D4). The vocabulary is closed and the
+// root refuses a misfit at declare time. (The Role* STRING constants
+// further down are the MENU tier's; the types keep them apart.)
 func (tx *Tx) SetRole(w Widget, role int64) {
 	tx.emit(TxSetRole(w.id, role))
 }
 
-// Role sets this widget's semantic emphasis at construction — the
-// declarative chain: tx.Label(s).Role(kaya.RoleHeading). Same
+// Role sets this widget's semantic emphasis at construction. Same
 // transaction discipline as Grow.
 func (w Widget) Role(role int64) Widget {
 	if w.tx == nil || w.tx.closed {
@@ -854,10 +768,8 @@ func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 }
 
 // SetSource sets an image's encoded bytes: one registration copy into
-// core-owned memory; the returned handle is consumed by the next
-// submit from this guest, referenced or not, so the caller's bytes are
-// free to drop the moment this returns. A later SetSource registers
-// again — handles are single-submit.
+// core memory, consumed by the next submit whether referenced or not,
+// so the caller's bytes may be dropped on return.
 func (tx *Tx) SetSource(w Widget, data []byte) {
 	tx.emit(TxSetSource(w.id, RegisterBlob(data)))
 }
@@ -872,13 +784,11 @@ func (tx *Tx) AddChild(parent, child Widget) {
 	tx.emit(TxAddChild(parent.id, child.id))
 }
 
-// Clear drops the widget's owned content — a one-shot command:
-// momentary verbs into widget-owned state, riding this transaction
-// like any write, so the insert and the clear beside it commit
-// together or not at all. Fire-and-forget: no state at rest, nothing
-// to journal, and the widget answers through its normal occurrence
-// path (a clear arrives back as a text change with empty text, so the
-// app's draft fold empties itself — never a side assignment).
+// Clear drops the widget's owned content — a one-shot command riding
+// this transaction like any write, so the insert and the clear beside
+// it commit together or not at all. The widget answers through its
+// normal occurrence path (a clear arrives back as an empty text
+// change), never a side assignment.
 func (tx *Tx) Clear(w Widget) {
 	tx.emit(TxWidgetCommand(w.id, CommandClear))
 }
@@ -892,43 +802,18 @@ func (tx *Tx) Focus(w Widget) {
 
 // TextRange is a half-open span of a text widget's content: Start and
 // End are UTF-8 BYTE offsets, which is what Go's own string indexing
-// already produces. strings.Index, bytes.Index, regexp's
-// FindStringIndex and len all speak this unit, so an app hands kaya the
-// offsets it already had:
-//
-//	for at := 0; ; {
-//		i := strings.Index(doc[at:], needle)
-//		if i < 0 {
-//			break
-//		}
-//		hits = append(hits, kaya.TextRange{Start: at + i, End: at + i + len(needle)})
-//		at += i + len(needle)
-//	}
-//
-// THE UNIT IS THE WIRE'S, NEVER THE PLATFORM'S. Four of the five
-// backends count UTF-16 code units and one counts code points; the core
-// converts against its own copy of the widget's text before it lowers
-// anything, so no Go app — and no binding — ever does that arithmetic.
-// A range whose endpoints are byte offsets in the app's own string is
-// correct on every platform, and a range converted "helpfully" here
-// would be wrong on all of them.
+// already produces. THE UNIT IS THE WIRE'S, NEVER THE PLATFORM'S — four
+// backends count UTF-16 units and one counts code points, and the core
+// converts against its own copy before lowering.
 type TextRange struct{ Start, End int }
 
 // check is the ONE thing this binding checks about a range, and it is a
-// GO REPRESENTATION matter rather than a semantic one: Go's int is
-// signed and the wire's offset is not. strings.Index returns -1 when
-// there is no match, which is precisely the mistake this surface
-// invites, and select_range and reveal_range carry their offsets as
-// bare u64 record fields — so a negative would reach the core as
+// GO REPRESENTATION matter: Go's int is signed and the wire's offset is
+// not, so a strings.Index miss (-1) would reach the core as
 // 18446744073709551615 and be refused under a number the app never
-// wrote. Refusing here names what the app actually passed.
-//
-// EVERYTHING ELSE IS THE CORE'S, deliberately and not by omission:
-// start <= end, end inside the text, and both endpoints on a code-point
-// boundary are checked once, in Rust, against the text the core holds.
-// This binding has no copy of that text and so could not honestly check
-// any of the three (scratchpad/ranges-units.md §7 — one chokepoint, not
-// eight).
+// wrote. Everything else — start <= end, end inside the text,
+// code-point boundaries — is the CORE's, checked against the text it
+// holds; this binding has no copy and could not check them honestly.
 func (r TextRange) check(verb string, w Widget) {
 	if r.Start < 0 || r.End < 0 {
 		panic(fmt.Sprintf("kaya: %s on widget %d: the range %d:%d has a negative "+
@@ -941,27 +826,13 @@ func (r TextRange) check(verb string, w Widget) {
 // HighlightRanges DECLARES the decorated ranges of a textarea, replacing
 // whatever was declared before; a nil or empty slice is the clear.
 //
-// kaya ships no search. What to decorate is the app's question, and a
-// find engine, a find bar and a regex dialect belong to the text editor
-// (docs/ranges-plan.md §3); what kaya ships is the primitive
-// underneath, which no app can write for itself — colouring a run of a
-// native text view.
-//
-// APP-OWNED AND NEVER TRACKED. A declared set is bound to the text it
-// was declared against: the first edit of any kind — a keystroke, a
-// programmatic write, a native undo — drops it, and the app re-declares
-// from the fold its change handler already drives, which is the same
-// uncontrolled contract the text itself has. Nothing in kaya adjusts a
-// range across an edit.
-//
-// An offset past the end of the text, or one that splits a character,
-// fails loudly in the core rather than in a backend: the five platforms
-// answer a malformed offset five different ways and one of them aborts
-// the process.
+// APP-OWNED AND NEVER TRACKED: the first edit of any kind drops the set,
+// and the app re-declares from the fold its change handler already
+// drives. A malformed offset fails loudly in the CORE rather than in a
+// backend, where one of the five aborts the process.
 func (tx *Tx) HighlightRanges(w Widget, ranges []TextRange) {
 	// The offsets ride as one flat Values list read in pairs, so the
-	// declared count and the list length must agree — the core asserts
-	// it, and this is the only place Go could disagree.
+	// declared count and the list length must agree.
 	flat := make([]any, 0, 2*len(ranges))
 	for _, r := range ranges {
 		r.check("HighlightRanges", w)
@@ -971,39 +842,30 @@ func (tx *Tx) HighlightRanges(w Widget, ranges []TextRange) {
 }
 
 // SelectRange puts the textarea's selection at one range; an empty range
-// (Start == End) is a caret, which every platform's text object models.
-// Same offsets and same validation as HighlightRanges.
+// is a caret. Same offsets and validation as HighlightRanges.
 //
 // REFUSED WHILE THE USER IS COMPOSING through an input method, in every
-// backend, because honouring it commits the composition mid-word —
-// measured on macOS, where the half-typed kana land in the document and
-// in the app's own model. The refusal is a no-op and not an error:
-// composition state is on no kaya channel, so an app cannot avoid the
-// race and is not blamed for it. The selection is still worth asking
-// for after the next text change, which is what ends a composition.
+// backend: honouring it commits the composition mid-word — measured on
+// macOS, where the half-typed kana land in the document and in the app's
+// own model. The refusal is a no-op, not an error: composition state is
+// on no kaya channel, so an app cannot avoid the race.
 func (tx *Tx) SelectRange(w Widget, r TextRange) {
 	r.check("SelectRange", w)
 	tx.emit(TxSelectRange(w.id, uint64(r.Start), uint64(r.End)))
 }
 
 // RevealRange scrolls the textarea so a range is inside the viewport. A
-// pure effect: it moves no state, leaves the selection alone, and undo
-// does not put the scroll position back — undo restores state, not
-// where you were looking. How much context lands around the range is
-// the platform's own scroll-to-range behaviour; containment is the
-// observable kaya fixes.
+// pure effect: no state moves, the selection is untouched, and undo does
+// not put the scroll position back. Containment is the observable kaya
+// fixes; how much context lands around it is the platform's.
 func (tx *Tx) RevealRange(w Widget, r TextRange) {
 	r.check("RevealRange", w)
 	tx.emit(TxRevealRange(w.id, uint64(r.Start), uint64(r.End)))
 }
 
-// Construction sugar: containers take their body as a closure and
-// parent everything declared inside it (the ambient stack), and
-// constructors carry their props and handlers — the Fyne shape
-// (widget.NewButton("Add", tapped)); nil means no handler. Everything
-// lowers eagerly to the same records; never a scene value interpreted
-// later. Statement position is the point: a for statement over a
-// generated row trace stands between siblings.
+// Construction sugar: containers take their body as a closure and parent
+// everything declared inside it; constructors carry their props and
+// handlers, nil meaning none. Everything lowers EAGERLY.
 
 func (tx *Tx) Column(body func()) Widget {
 	return tx.containerOf(KindColumn, body)
@@ -1013,17 +875,15 @@ func (tx *Tx) Row(body func()) Widget {
 	return tx.containerOf(KindRow, body)
 }
 
-// Scroll is a vertical scroll viewport over EXACTLY ONE child
-// (declare it in the body; the scene rejects a second). Chain
-// .Grow(1) so the enclosing track CONSTRAINS it — an unconstrained
-// viewport hugs its content and nothing overflows.
+// Scroll is a vertical scroll viewport over EXACTLY ONE child (the scene
+// rejects a second). Chain .Grow(1) so the enclosing track CONSTRAINS
+// it — an unconstrained viewport hugs its content and nothing overflows.
 func (tx *Tx) Scroll(body func()) Widget {
 	return tx.containerOf(KindScroll, body)
 }
 
-// Grid creates a grid laying its children out row-major into columns
-// columns — each column takes its NATURAL width, aligned across rows
-// (the thing nested rows cannot express).
+// Grid lays its children out row-major into columns columns — each
+// column takes its NATURAL width, aligned across rows.
 func (tx *Tx) Grid(columns int, body func()) Widget {
 	parent := tx.Widget(KindGrid)
 	tx.emit(TxSetColumns(parent.id, float64(columns)))
@@ -1035,9 +895,8 @@ func (tx *Tx) Grid(columns int, body func()) Widget {
 	return parent
 }
 
-// Spacer is PURE SUGAR for an empty grown column: it consumes the
-// leftover main-axis space between its siblings (the grow contract;
-// no new vocabulary).
+// Spacer is an empty grown column: it consumes the leftover main-axis
+// space between its siblings.
 func (tx *Tx) Spacer() Widget {
 	w := tx.Widget(KindColumn)
 	return w.Grow(1)
@@ -1065,8 +924,7 @@ func (tx *Tx) Button(text string, onClick func(*Tx)) Widget {
 }
 
 // Textarea creates a multi-line text editor with its change handler
-// (nil for none): the entry's uncontrolled contract over the
-// platform's real multi-line editor.
+// (nil for none): Entry's uncontrolled contract, one kind over.
 func (tx *Tx) Textarea(onChange func(*Tx, string)) Widget {
 	w := tx.Widget(KindTextarea)
 	if onChange != nil {
@@ -1075,9 +933,8 @@ func (tx *Tx) Textarea(onChange func(*Tx, string)) Widget {
 	return w
 }
 
-// LabelText creates a label with constant text (Label is the
-// signal-bound flavor) — the const-label sugar every other binding
-// already had.
+// LabelText creates a label with constant text; Label is the
+// signal-bound flavor.
 func (tx *Tx) LabelText(text string) Widget {
 	w := tx.Widget(KindLabel)
 	tx.SetText(w, text)
@@ -1100,9 +957,9 @@ func (tx *Tx) Entry(onChange func(*Tx, string)) Widget {
 	return w
 }
 
-// Progress is a progress bar: display-only, like Label and Image.
-// value is the determinate fraction (0..=1, domain-checked at the
-// root); chain .Indeterminate() for the platform's activity mode.
+// Progress is a progress bar: display-only. value is the determinate
+// fraction (0..=1, domain-checked at the root); chain .Indeterminate()
+// for the platform's activity mode.
 func (tx *Tx) Progress(value float64) Widget {
 	w := tx.Widget(KindProgress)
 	tx.emit(TxSetValue(w.id, value))
@@ -1117,7 +974,7 @@ func (w Widget) Indeterminate() Widget {
 }
 
 // Slider creates a slider over min..max at value, with its change
-// handler co-located (nil for none) — the Fyne shape, like Button.
+// handler co-located (nil for none).
 func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widget {
 	w := tx.Widget(KindSlider)
 	tx.emit(TxSetMin(w.id, min))
@@ -1130,9 +987,8 @@ func (tx *Tx) Slider(min, max, value float64, onChange func(*Tx, float64)) Widge
 }
 
 // SliderBound creates a slider over min..max whose position binds a
-// float signal — the programmatic write path (Tx.Write fans out to
-// the control; property writes never echo an occurrence, so a
-// handler's own writes cannot loop back at it).
+// float signal — the programmatic write path. Property writes never
+// echo an occurrence, so a handler's own writes cannot loop back at it.
 func (tx *Tx) SliderBound(min, max float64, value Signal[float64], onChange func(*Tx, float64)) Widget {
 	w := tx.Widget(KindSlider)
 	tx.emit(TxSetMin(w.id, min))
@@ -1144,12 +1000,10 @@ func (tx *Tx) SliderBound(min, max float64, value Signal[float64], onChange func
 	return w
 }
 
-// Select creates a dropdown select over fixed options — each option
-// becomes a label child (labels only, scene-checked) — at selected,
-// the initial 0-based index (domain-checked at the root against the
-// option count), with its pick handler co-located (nil for none):
-// onSelect receives each USER pick's new 0-based index (programmatic
-// writes never echo) — the slider's uncontrolled contract.
+// Select creates a dropdown over fixed options — each becomes a label
+// child — at selected, the initial 0-based index (domain-checked at the
+// root), with its pick handler co-located. onSelect receives each USER
+// pick's index; programmatic writes never echo.
 func (tx *Tx) Select(options []string, selected int, onSelect func(*Tx, int)) Widget {
 	w := tx.Widget(KindSelect)
 	tx.app.parents = append(tx.app.parents, w.id)
@@ -1165,9 +1019,8 @@ func (tx *Tx) Select(options []string, selected int, onSelect func(*Tx, int)) Wi
 	return w
 }
 
-// Radio creates a radio group over fixed options — the choice
-// contract (see Select) in its inline presentation: same option
-// children, same 0-based selected index, same pick handler.
+// Radio is Select's inline presentation: same option children, same
+// 0-based index, same pick handler.
 func (tx *Tx) Radio(options []string, selected int, onSelect func(*Tx, int)) Widget {
 	w := tx.Widget(KindRadio)
 	tx.app.parents = append(tx.app.parents, w.id)
@@ -1196,13 +1049,10 @@ func (tx *Tx) Checkbox(text string, onToggle func(*Tx, bool)) Widget {
 	return w
 }
 
-// Image creates an image displaying encoded bytes (PNG, JPEG, ...):
-// the toolkit decodes natively, and decode failure renders the
-// placeholder, never a crash. source is the encoded bytes — one
-// registration copy into core memory; the handle is consumed by the
-// next submit, and the guest's bytes are free to drop the moment this
-// returns. ImageSignal is the signal-bound flavor — separate methods,
-// like SetText/BindText, per the Tx surface's convention.
+// Image displays encoded bytes: the toolkit decodes natively, and a
+// decode failure renders the placeholder, never a crash. One
+// registration copy into core memory, consumed by the next submit.
+// ImageSignal is the signal-bound flavor.
 func (tx *Tx) Image(source []byte) Widget {
 	w := tx.Widget(KindImage)
 	tx.SetSource(w, source)
@@ -1231,9 +1081,9 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 	assertRoot(c)
 	tx.app.c.widget++
 	w := Widget{id: tx.app.c.widget, tx: tx}
-	// The For parents into the enclosing scope, but the record must
-	// land after template_end — an add_child inside the blueprint
-	// would cross zones.
+	// The For parents into the enclosing scope, but the record must land
+	// after template_end — an add_child inside the blueprint would cross
+	// zones.
 	parent := tx.currentParent()
 	tx.emit(TxCreateFor(w.id, c.id))
 	tx.app.openFors = append(tx.app.openFors, c.id)
@@ -1250,13 +1100,11 @@ func (tx *Tx) ForEach(c Collection, fn func(*Tpl)) Widget {
 	return w
 }
 
-// BeginRowTrace opens a For template for a generated row trace
-// (`for row := range TodoRows(tx, todos)`): the caller runs the loop
-// body once with the returned Tpl, then close() ends the template and
-// parents the For into the enclosing scope. Range-over-func makes the
-// close structural — the iterator regains control even on break.
-// The For rides the zone it opens in: the widget id space in the live
-// zone, the node space inside an enclosing template (a nested trace).
+// BeginRowTrace opens a For template for a generated row trace: the
+// caller runs the loop body once with the returned Tpl, then close()
+// ends the template and parents the For into the enclosing scope.
+// Range-over-func makes the close structural, even on break. The For
+// rides the zone it opens in.
 func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
 	assertRoot(c)
 	var id uint64
@@ -1285,9 +1133,7 @@ func BeginRowTrace(tx *Tx, c Collection) (*Tpl, func()) {
 
 // Row is the scalar-collection row surface a Rows trace yields: the
 // whole template vocabulary (the embedded Tpl) plus the element's own
-// token — a scalar collection has exactly one field, the element
-// itself, and Value() is that token (the generated record twin mints
-// one token per struct field).
+// token. A scalar collection has exactly one field.
 type Row struct{ *Tpl }
 
 // Value is the element's token: what a stamped copy's bindings read.
@@ -1301,10 +1147,9 @@ func (r Row) Label(f Field[string]) Node {
 }
 
 // Rows traces this scalar collection's template as a for statement:
-// `for row := range items.Rows(tx)` runs the body ONCE, authoring the
-// blueprint over the row surface, and range-over-func makes the close
-// structural — even on break. The statement IS the For in both tiers;
-// the record twin is the generated <Type>Rows surface (todos).
+// `for row := range items.Rows(tx)` runs the body ONCE, and
+// range-over-func makes the close structural even on break. The record
+// twin is the generated <Type>Rows surface.
 func (c Collection) Rows(tx *Tx) func(func(Row) bool) {
 	return func(yield func(Row) bool) {
 		t, done := BeginRowTrace(tx, c)
@@ -1337,13 +1182,9 @@ func (tx *Tx) Insert(c Collection, key, value any) {
 }
 
 // insertEntry is THE insert: the model write, the wire record, the
-// derived recompute — and the fresh-key minter shown every explicit key
-// on its way past. Go has three public inserts (this Collection's, a
-// RecordCollection's, a SumCollection's) that differ only in how a value
-// becomes wire fields, so they all land here: ABSORPTION SITS ON THE
-// PATH, not beside it, and there is one path to sit on. A numeric key at
-// or above the counter carries it up, so hand-chosen and minted keys
-// share one space safely and in either order (Tx.InsertFresh).
+// derived recompute, and the fresh-key minter shown every explicit key
+// on its way past. All three public inserts land here, so ABSORPTION
+// SITS ON THE PATH rather than beside it (Tx.InsertFresh).
 func (tx *Tx) insertEntry(c Collection, key any, variant uint32, value any, fields []any) {
 	tx.app.absorbKey(c.id, c.path, key)
 	tx.app.modelSet(c.id, c.path, key, value)
@@ -1352,36 +1193,16 @@ func (tx *Tx) insertEntry(c Collection, key any, variant uint32, value any, fiel
 }
 
 // InsertFresh inserts a value under a key the binding authors, and hands
-// the key back.
-//
-// FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain identity and
-// guest-chosen (DESIGN.md, the update algebra), so anything that already
-// HAS a name passes it to Insert — today and always. This is the other
-// case, and it is the common one in a form: the app has a title and
-// nothing else, and the alternative is a hand-spelled counter beside the
-// collection whose safety rests on a never-rewind rule nobody wrote
-// down.
+// the key back — FOR DATA THAT HAS NO IDENTITY OF ITS OWN.
 //
 // ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted key is
-// an I64 and is counter+1. An instance is a table — the live-zone
-// collection, or one stamped copy selected by At(...) — and keys are
-// unique within one, so that is what the counter is per.
+// counter+1 as an I64. MIXING IS SAFE BY ABSORPTION: an explicit Insert
+// whose key is a number at or above the counter carries it up.
 //
-// MIXING IS SAFE BY ABSORPTION: an explicit Insert whose key is a number
-// at or above the counter carries it up, so a later mint clears every
-// hand-chosen numeric key already in the table. A minted key travels the
-// ordinary insert path, so it absorbs like any other.
-//
-// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety argument.
-// Undo and redo replay captured keys inside the core and never re-enter
-// this path, so a history walk never moves the counter; an abandoned
-// transaction does not move it back either (the rollback journal
-// restores the model, not the counter, so a key can never be handed out
-// twice). A fresh key is fresh forever.
-//
-// The returned key is the app's if it wants one — the row it just added,
-// to select or scroll to. A guest with no use for a name discards it,
-// which in Go is simply a call statement.
+// NO DECREMENT IS EXPRESSIBLE, and that is the whole safety argument:
+// undo and redo replay captured keys inside the core and never re-enter
+// this path, and an abandoned transaction restores the model, not the
+// counter. A fresh key is fresh forever.
 func (tx *Tx) InsertFresh(c Collection, value any) int64 {
 	key := tx.app.mintKey(c.id, c.path)
 	tx.Insert(c, key, value)
@@ -1400,11 +1221,9 @@ func (tx *Tx) Remove(c Collection, key any) {
 	tx.recomputeDerived(c.id, c.path)
 }
 
-// MoveBefore repositions an entry before another's: order is
-// collection data, so the model reorders and the wire carries the
-// same keys-only delta. Keys, never indices. A missing key or anchor
-// panics here, at the call site — the same check the scene makes;
-// moving an entry before itself is a no-op, and nothing travels.
+// MoveBefore repositions an entry before another's. Keys, never
+// indices; a missing key or anchor panics at the call site, and moving
+// an entry before itself is a no-op.
 func (tx *Tx) MoveBefore(c Collection, key, anchor any) {
 	tx.moveEntry(c, key, []any{anchor})
 }
@@ -1414,8 +1233,7 @@ func (tx *Tx) MoveToEnd(c Collection, key any) {
 	tx.moveEntry(c, key, nil)
 }
 
-// MoveToFront repositions an entry at the front: sugar for MoveBefore
-// the current first key, lowering to the same wire op.
+// MoveToFront repositions an entry at the front.
 func (tx *Tx) MoveToFront(c Collection, key any) {
 	keys := tx.app.keysOf(c.id, c.path)
 	if len(keys) == 0 {
@@ -1424,9 +1242,7 @@ func (tx *Tx) MoveToFront(c Collection, key any) {
 	tx.moveEntry(c, key, []any{keys[0]})
 }
 
-// MoveAfter repositions an entry directly after another's: sugar for
-// MoveBefore the anchor's successor (MoveToEnd when the anchor is
-// last), lowering to the same wire op.
+// MoveAfter repositions an entry directly after another's.
 func (tx *Tx) MoveAfter(c Collection, key, anchor any) {
 	keys := tx.app.keysOf(c.id, c.path)
 	has, at := false, -1
@@ -1459,8 +1275,8 @@ func (tx *Tx) MoveAfter(c Collection, key, anchor any) {
 
 func (tx *Tx) moveEntry(c Collection, key any, before []any) {
 	if len(before) > 0 && before[0] == key {
-		// Moving before itself: order unchanged and nothing travels —
-		// but the key must exist, the check the scene would make.
+		// Moving before itself changes no order, but the key must still
+		// exist — the check the scene would make.
 		for _, k := range tx.app.keysOf(c.id, c.path) {
 			if k == key {
 				return
@@ -1474,7 +1290,7 @@ func (tx *Tx) moveEntry(c Collection, key any, before []any) {
 }
 
 // recomputeDerived runs every derived signal rooted at this collection
-// and writes each into this transaction. Deriveds hang off root
+// and writes each into this transaction. Deriveds hang off ROOT
 // handles, so nested-instance mutations cannot change their input.
 func (tx *Tx) recomputeDerived(coll uint64, path []any) {
 	if len(path) != 0 {
@@ -1486,10 +1302,9 @@ func (tx *Tx) recomputeDerived(coll uint64, path []any) {
 }
 
 // guardMirrorRead panics on a model read inside a template body: the
-// template records once and replays — the read would bake today's
-// value into the blueprint as silently dead data. Bind a signal, use
-// the element's field, or Derive for computed values. (Handler and
-// build reads stay legal; read-your-writes is the model's contract.)
+// template records once and replays, so the read would bake today's
+// value into the blueprint. Bind a signal, use the element's field, or
+// Derive. Handler and build reads stay legal.
 func (a *App) guardMirrorRead() {
 	if a.tplDepth > 0 {
 		panic("kaya: model read inside a template body — the template records " +
@@ -1498,8 +1313,8 @@ func (a *App) guardMirrorRead() {
 	}
 }
 
-// Items is the model: what this guest wrote, exactly — the fold of
-// every patch so far (this transaction's included), in insertion order.
+// Items is the model: the fold of every patch so far, this
+// transaction's included, in insertion order.
 func (tx *Tx) Items(c Collection) []Entry {
 	if in := tx.mirror(c); in != nil {
 		return append([]Entry(nil), in.entries...)
@@ -1516,17 +1331,15 @@ func (tx *Tx) Len(c Collection) int {
 
 // CreateWindow creates an auxiliary window (capability-gated: phone
 // hosts reject at the root); it materializes hidden and a MountIn
-// presents it. Returns the prop chain:
-// tx.CreateWindow(1).Title("inspector").Size(480, 320).VetoClose(true).
+// presents it. Returns the prop chain.
 func (tx *Tx) CreateWindow(id uint64) WindowRef {
 	tx.emit(TxCreateWindow(id))
 	return WindowRef{tx: tx, id: id}
 }
 
 // AccentOverride is one per-appearance brand override, made by
-// LightAccent or DarkAccent and passed to Tx.BrandAccent. The zero
-// value is "unstated", which is what most apps hand it: the seed fills
-// every appearance it does not hear about.
+// LightAccent or DarkAccent. The zero value is "unstated": the seed
+// fills every appearance it does not hear about.
 type AccentOverride struct {
 	// mask is the wire's presence bit — 1 light, 2 dark — so a
 	// hand-made zero AccentOverride carries nothing and is ignored.
@@ -1541,42 +1354,25 @@ func LightAccent(hex uint32) AccentOverride { return AccentOverride{mask: 1, hex
 func DarkAccent(hex uint32) AccentOverride { return AccentOverride{mask: 2, hex: hex} }
 
 // BrandAccent REQUESTS the app's brand accent (docs/styling-plan.md
-// D1/D2): one packed sRGB hex (0xRRGGBB) is the whole call for most
-// apps, and the per-appearance overrides exist for a brand book that
-// specifies a dark variant.
+// D1/D2): one packed sRGB hex (0xRRGGBB) is the whole call.
 //
 //	tx.BrandAccent(0x3584E4)
 //	tx.BrandAccent(0x3584E4, kaya.DarkAccent(0x62A0EA))
 //
-// NAMED OVERRIDES RATHER THAN TWO POSITIONAL ARGUMENTS, which is Go's
-// answer to Rust's brand_accent_with: light and dark are the same type,
-// so a positional pair lets a caller swap them with nothing in the
-// language or on the wire able to notice. Same semantics either way —
-// the seed fills whatever an appearance leaves unstated.
+// NAMED OVERRIDES RATHER THAN TWO POSITIONAL ARGUMENTS: light and dark
+// are the same type, so a positional pair lets a caller swap them with
+// nothing able to notice.
 //
-// SET ONCE, BEFORE THE FIRST MOUNT. Brand is identity, not state: the
-// root refuses a second write and a late one, because a slot that could
-// flip at runtime would promise a theme-switching surface the
-// vocabulary deliberately does not have.
-//
-// A REQUEST, uniformly: a platform may let its user override it. macOS
-// is the one that does today (an app accent applies only while the
-// user's system accent is multicolor), and the semantics does not
-// change if another platform grows the preference.
-//
-// The app NEVER writes a foreground and NEVER writes contrast variants
-// — the core derives fill, on-fill, standalone and a hover/pressed ramp
-// per appearance and hands every backend values. An app-supplied
-// foreground can be illegible with nothing to catch it, and three of
-// the four platforms compute or hard-code one anyway, so honoring one
-// would be divergence by construction.
+// SET ONCE, BEFORE THE FIRST MOUNT; the root refuses a second write and
+// a late one. A REQUEST, uniformly: a platform may let its user override
+// it. The app NEVER writes a foreground or contrast variants — one could
+// be illegible with nothing to catch it.
 func (tx *Tx) BrandAccent(seed uint32, overrides ...AccentOverride) {
 	var mask, light, dark uint32
 	for _, o := range overrides {
 		if o.mask&mask != 0 {
-			// Last-wins would let a brand book's real value be
-			// shadowed by a stray line with no error anywhere — the
-			// silent-write failure this whole pass is written against.
+			// Last-wins would shadow a brand book's real value with no
+			// error anywhere.
 			panic("kaya: BrandAccent got the same appearance override twice — light and dark are set at most once each")
 		}
 		mask |= o.mask
@@ -1596,28 +1392,11 @@ func (tx *Tx) BrandAccent(seed uint32, overrides ...AccentOverride) {
 //	font := tx.Asset("fonts/sora-wght.ttf")
 //	defer font.Close()
 //
-// Returns an *Asset (see runtime.go for the type and its two
-// redemptions). Queues no record: opening one is a read, and the
-// transaction is here only because every kaya call a guest makes is.
-//
-// A MISS PANICS, WITH THE CORE'S SENTENCE AND NOTHING ADDED. A missing,
-// unreadable, empty or malformed-name asset is a scene error in every
-// binding — the wall an app hits at startup, before it can have drawn
-// anything — and each raises in its own idiom: a panic here and in
-// Rust, a RuntimeError in Python, an InvalidOperationException in C#.
-// Every one of them carries kaya_asset_why_not's sentence VERBATIM.
-// THIS BINDING WRITES NO PROSE OF ITS OWN for that failure: one author
-// for the diagnostic means a Go guest and a Haskell guest are handed the
-// same bytes, and one scene can freeze them.
-//
-// That sentence names what the process measured — the name asked for,
-// the census of what the package does carry, the place it resolved and
-// the route that chose it — because a why-not may only print what it
-// went and got.
-//
-// EACH CALL READS. No cache, no watch, no reload.
+// Queues no record: opening one is a read. A MISS PANICS, WITH THE
+// CORE'S SENTENCE AND NOTHING ADDED, so a Go guest and a Haskell guest
+// are handed the same bytes. EACH CALL READS: no cache, no reload.
 func (tx *Tx) Asset(name string) *Asset {
-	// The transaction's liveness, asked because Go can: Rust gets this
+	// The transaction's liveness, asked because Go can: Rust gets it
 	// from the borrow checker, which makes a dead Tx unnameable.
 	tx.alive()
 	if asset := openAsset(name); asset != nil {
@@ -1625,10 +1404,9 @@ func (tx *Tx) Asset(name string) *Asset {
 	}
 	sentence := assetMissSentence(name)
 	if sentence == "" {
-		// Reachable only if the two calls disagree, which they can do
-		// because they are two calls: the open answered a miss and the
-		// why-not answered that it resolves. Both facts were measured;
-		// this binding has no third one and invents no cause for them.
+		// Reachable only if the two calls disagree: the open answered a
+		// miss and the why-not answered that it resolves. Both facts
+		// were measured; this binding invents no third.
 		sentence = fmt.Sprintf("kaya: asset(%q) did not open, and the core's own "+
 			"why-not answers that it resolves — those two facts were measured a "+
 			"moment apart, and this binding has nothing further to report", name)
@@ -1638,156 +1416,83 @@ func (tx *Tx) Asset(name string) *Asset {
 
 // AssetMissSentence is why Tx.Asset(name) would panic — the sentence it
 // would carry, handed over without panicking. "" means the name resolves.
+// Line 1 (name, rule, census) is the same on every platform and is the
+// line a scene freezes; line 2 names the resolved place, which three
+// platforms spell three ways.
 //
-// WHY THIS EXISTS WHEN THE PANIC ALREADY CARRIES IT. Unwinding is not one
-// semantics in nine languages, and a conformance scene has to observe this
-// sentence on five platforms. Go recovers; Swift's miss is a fatalError,
-// which traps rather than unwinding, so a Swift guest cannot catch a miss
-// at all. A total query has no such split — every binding answers the same
-// string the same way, and the scene can freeze it.
-//
-// THE SAME SENTENCE, NOT A SECOND ONE: this and Tx.Asset's panic both hand
-// back the core's bytes, so what a scene freezes is what an app's user
-// would have been shown.
-//
-// NAMED FOR THE CARRYING and not for the diagnosing — the long form of
-// that reasoning is on assetMissSentence in runtime.go. There is one
-// author for the sentence and this only ferries it across the FFI.
-//
-// TWO LINES. Line 1 — the name, the rule it broke, and the census of what
-// the package carries — is the same on every platform and is the line a
-// scene freezes. Line 2 names the resolved place and the route that chose
-// it, which a bundle, a device directory and a repo checkout spell three
-// different ways.
-//
-// It measures rather than predicts: each call reads, so "" is a fact about
-// the moment it was asked.
+// Why a query and not just the panic: docs/deferred.md, the assets entry.
 func (tx *Tx) AssetMissSentence(name string) string {
-	// The transaction's liveness, for the same reason Tx.Asset asks it:
-	// Rust's asset_miss_sentence takes &self, so a dead Tx cannot name it
-	// there, and Go reproduces that by asking rather than by diverging.
+	// The transaction's liveness, for Tx.Asset's reason.
 	tx.alive()
 	return assetMissSentence(name)
 }
 
 // TypefaceOverride is one optional part of a brand typeface request,
-// made by PlatformFamily or FontBytes and passed to Tx.BrandTypeface.
-// Most apps pass none: a family name is the whole call.
+// made by PlatformFamily or FontBytes. Most apps pass none.
 //
-// A ZERO TypefaceOverride IS NOT "UNSTATED", which is where it parts
-// company with AccentOverride. An appearance the accent does not hear
-// about has a meaning — the seed fills it — so a zero value there is
-// ignored on purpose. A platform row has no such meaning: it either
-// names a platform or it is a row the author failed to fill, so it
-// rides as it was written and the root refuses it by name ("names
-// platform 0, which is not in the vocabulary"). The wall stays in one
-// place, in one sentence, in all eight languages.
+// A ZERO TypefaceOverride IS NOT "UNSTATED", unlike AccentOverride's: a
+// platform row either names a platform or is one the author failed to
+// fill, so it rides as written and the ROOT refuses it by name.
 type TypefaceOverride struct {
-	// font is the blob form and isFont is what distinguishes it from a
-	// platform row, since nil bytes are a legal (if pointless) font and
-	// would otherwise read as "no font here".
+	// isFont distinguishes the blob form from a platform row: nil bytes
+	// are a legal (if pointless) font and would otherwise read as "no
+	// font here".
 	platform int64
 	family   string
 	font     []byte
 	isFont   bool
-	// asset is the font-FILE form: the same offer as font, redeemed
-	// without a copy. Nil means this override carries bytes (or is a
-	// platform row); the two are never both set, because the two
-	// constructors are the only things that build one.
+	// asset is the font-FILE form, redeemed without a copy. Never set
+	// together with font: the two constructors are the only builders.
 	asset *Asset
 }
 
 // PlatformFamily overrides the default family on ONE platform, named by
-// the generated platform constants:
-//
-//	tx.BrandTypeface("Georgia", kaya.PlatformFamily(kaya.PlatformLinux, "DejaVu Serif"))
-//
-// THE CONSTANT RATHER THAN FIVE NAMED CONSTRUCTORS (the accent's
-// LightAccent/DarkAccent shape), because the platform vocabulary is a
-// SPEC ENUM: it is generated into kaya_wire.go from crates/kaya/src/spec.rs,
-// so a platform kaya adds arrives in Go the moment the generators run.
-// Hand-written constructors would be a second copy of a closed set that
-// regenerates — the drift trap this tree spends gates on — and would
-// leave Go unable to name a new platform with nothing failing.
-//
-// The pairs travel UNRESOLVED, which is the asymmetry with the accent's
-// per-platform values and the whole design of this record: this binding
-// cannot know its platform (the JVM says "Linux" on Android), but every
-// lowering IS one, so each backend picks its own row.
+// the generated platform constants. THE CONSTANT RATHER THAN FIVE NAMED
+// CONSTRUCTORS, because the vocabulary is a SPEC ENUM that regenerates.
+// The pairs travel UNRESOLVED: this binding cannot know its platform
+// (the JVM says "Linux" on Android), but every lowering IS one.
 func PlatformFamily(platform int64, family string) TypefaceOverride {
 	return TypefaceOverride{platform: platform, family: family}
 }
 
 // FontBytes ships a font FILE with the app: the backend hands the bytes
-// to its platform's app-font API, reads back the family that
-// registration produced, and the name machinery takes over unchanged —
-// so a shipped font and an installed family resolve, observe and fall
-// back through one path. A registered blob's own family wins over the
+// to its platform's app-font API and reads back the family that
+// registration produced. A registered blob's own family wins over the
 // name on the backend that registered it.
-//
-// The bytes are copied into the core at encode time (the blob channel's
-// contract, RegisterBlob); the caller's slice is free to drop.
 func FontBytes(font []byte) TypefaceOverride {
 	return TypefaceOverride{font: font, isFont: true}
 }
 
-// FontAsset ships the font FILE THE APP'S OWN BUILD PUT BESIDE IT,
-// opened by name through the core:
-//
-//	font := tx.Asset("fonts/sora-wght.ttf")
-//	defer font.Close()
-//	tx.BrandTypeface("Sora", kaya.FontAsset(font))
-//
-// Same request as FontBytes and a different route to it: the bytes
-// never enter Go. The core read them, the redemption clones one
-// refcount into the blob table, and a hundred kilobytes of font reaches
-// the platform's font API without a []byte ever existing for it.
-//
-// A NAMED SIBLING WHERE C# WRITES AN OVERLOAD, which is what invariant
-// 1 asks for: every binding admits both spellings, the language decides
-// how they are spelled, and Go names the second one because it cannot
-// overload the first.
+// FontAsset ships the font FILE THE APP'S OWN BUILD PUT BESIDE IT —
+// FontBytes's request by a different route: the bytes never enter Go,
+// and the redemption clones one refcount into the blob table.
 func FontAsset(asset *Asset) TypefaceOverride {
 	if asset == nil {
-		// The nil case is caught HERE rather than at the redemption
-		// inside BrandTypeface, because here is where the caller's
-		// mistake is: an override built from nothing.
+		// Caught HERE rather than at the redemption inside
+		// BrandTypeface, because here is where the caller's mistake is.
 		panic("kaya: FontAsset got no asset — open one with tx.Asset(\"fonts/...\"), or pass a family name alone")
 	}
 	return TypefaceOverride{asset: asset, isFont: true}
 }
 
 // BrandTypeface REQUESTS the app's brand typeface (docs/styling-plan.md
-// D6, Slice 2b): one family name is the whole call, and every platform
-// that has that family installed uses it.
+// D6, Slice 2b): one family name is the whole call.
 //
 //	tx.BrandTypeface("Georgia")
 //	tx.BrandTypeface("Georgia", kaya.PlatformFamily(kaya.PlatformLinux, "DejaVu Serif"))
 //	tx.BrandTypeface("Inter", kaya.FontBytes(interRegular))
 //
-// THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights,
-// metrics and the whole type ramp stay the platform's. Substituting a
-// family into the platform's own ramp is what makes the swap safe, and
-// it is the role tier — Role(kaya.RoleHeading) — that carries emphasis,
-// not a font size.
+// THE FAMILY, NEVER THE SCALE (ratified DESIGN.md): sizes, weights and
+// the whole type ramp stay the platform's, which is what makes the swap
+// safe. Emphasis is the role tier's, never a font size.
 //
-// SET ONCE, BEFORE THE FIRST MOUNT, the accent's wall verbatim and for
-// its reason: brand is identity, not state, and a slot that could flip
-// at runtime would promise a theme-switching surface the vocabulary
-// deliberately does not have. The root refuses a second write and a
-// late one.
+// SET ONCE, BEFORE THE FIRST MOUNT, the accent's wall verbatim: the root
+// refuses a second write and a late one.
 //
 // A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own typeface
-// in place, deliberately and silently: every font API renders SOMETHING
-// for a name it cannot match, so each lowering gates on the family
-// being installed rather than letting the platform pick a stranger.
-// That is why the conformance scene reads the RESOLVED family off the
-// real text system instead of echoing this request back.
-//
-// NAMED OVERRIDES RATHER THAN A SECOND POSITIONAL METHOD, which is Go's
-// answer to Rust's brand_typeface_with: one call site spells the
-// default family, the per-platform rows and the font blob, and a caller
-// who wants none of the three writes none of them.
+// in place, deliberately and silently — every font API renders SOMETHING
+// for a name it cannot match — which is why the conformance scene reads
+// the RESOLVED family off the real text system.
 func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
 	var (
 		mask      uint32
@@ -1799,20 +1504,14 @@ func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
 	)
 	for _, o := range overrides {
 		if !o.isFont {
-			// FLAT PAIRS, tag then family, read back in twos: the file
-			// dialog's filter encoding one tier over. Duplicate rows and
-			// unknown tags are the ROOT's to refuse — it says which
-			// platform and why, once, for every language.
+			// FLAT PAIRS, tag then family, read back in twos. Duplicate
+			// rows and unknown tags are the ROOT's to refuse.
 			platforms = append(platforms, o.platform, o.family)
 			continue
 		}
 		if mask&1 != 0 {
 			// ONE BLOB SLOT ON THE WIRE, so a second font cannot ride:
-			// last-wins would ship one of the two with no error
-			// anywhere, and it would be the app's identity that vanished
-			// — the silent-write failure this whole pass is written
-			// against. The accent's duplicate-appearance refusal,
-			// exactly, and for the same reason.
+			// last-wins would drop one with no error anywhere.
 			panic("kaya: BrandTypeface got two fonts (FontBytes/FontAsset) — one font blob rides per request, so the second would silently replace the first")
 		}
 		mask |= 1
@@ -1828,35 +1527,22 @@ func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
 }
 
 // AppIdentity DECLARES the app's identity (docs/app-identity-plan.md):
-// the name it goes by and the picture that stands for it, as the bytes
-// of one image file.
+// the name it goes by and the picture that stands for it.
 //
 //	tx.AppIdentity("Aurora Notes", markPNG)
 //
 // ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
-// tile, the Windows taskbar/alt-tab icon and the caption's mark, and an
-// X11 window's icon; the same FILE, read at build time, becomes the
-// Android launcher icon and the iOS Home Screen icon. Send a PNG: each
-// lowering converts, and no platform-specific artwork rides the wire.
+// tile, the Windows taskbar icon and an X11 window's icon; the same
+// FILE, read at build time, becomes the Android launcher and iOS Home
+// Screen icons. Send a PNG: each lowering converts.
 //
-// SET ONCE, BEFORE THE FIRST MOUNT, the brand's wall verbatim and for
-// its reason: identity is not state, and a slot that could flip at
-// runtime would promise the identity-switching surface the vocabulary
-// deliberately does not have. The root refuses a second write and a late
-// one, and it refuses an empty name — an app that wants the platform's
-// own identity declares none at all.
+// SET ONCE, BEFORE THE FIRST MOUNT. The root refuses a second write, a
+// late one, and an empty name.
 //
 // THE BYTES ARE NEVER INSPECTED between here and the platform's own
-// decoder. Whether a blob is an image is a question only that decoder
-// can answer, so bytes that are not one leave every platform's default
+// decoder, so bytes that are not an image leave every platform's default
 // in place — which is why the conformance scene reads what the DECODER
-// produced rather than echoing this request back. Nil bytes reach the
-// root as the empty blob they are and die there, in the sentence every
-// language gets.
-//
-// TWO METHODS RATHER THAN A VARIADIC (BrandTypeface's shape one verb
-// over), because there is exactly one optional thing here and Go names
-// it by naming the method: see AppIdentityNamed.
+// produced. Nil bytes die at the root as the empty blob they are.
 func (tx *Tx) AppIdentity(name string, icon []byte) {
 	// The bytes go to the core ONCE, by handle, exactly as an image's
 	// do — the record carries the handle, never the picture itself.
@@ -1870,11 +1556,7 @@ func (tx *Tx) AppIdentity(name string, icon []byte) {
 //	defer mark.Close()
 //	tx.AppIdentityAsset("Aurora Notes", mark)
 //
-// Same declaration as AppIdentity and a different route to it: the
-// picture never enters Go. A THIRD NAMED METHOD rather than an
-// overload, which is this file's own precedent — AppIdentityNamed
-// exists for the same reason — and it is what invariant 1 asks of a
-// language that names its variants instead of overloading them.
+// Same declaration by a different route: the picture never enters Go.
 func (tx *Tx) AppIdentityAsset(name string, icon *Asset) {
 	if icon == nil {
 		panic("kaya: AppIdentityAsset got no asset — open one with tx.Asset(\"icons/...\"), or declare the name alone with AppIdentityNamed")
@@ -1882,11 +1564,9 @@ func (tx *Tx) AppIdentityAsset(name string, icon *Asset) {
 	tx.emit(TxSetAppIdentity(1, name, BlobHandle(icon.blobHandle())))
 }
 
-// AppIdentityNamed is the NAME-ONLY form, for an app that has a name and
-// no mark yet. Its identity still reaches the surfaces a name reaches —
-// the Windows caption and taskbar tooltip, the macOS menu bar, the Linux
-// app_id, and the two phones' packaging — and every icon surface keeps
-// the platform's own default, honestly and visibly.
+// AppIdentityNamed is the NAME-ONLY form. Its identity still reaches
+// every surface a name reaches, and every icon surface keeps the
+// platform's own default, honestly and visibly.
 func (tx *Tx) AppIdentityNamed(name string) {
 	// The icon slot is written either way — an absent icon rides as an
 	// empty Str — so the record's field count never varies with the
@@ -1912,11 +1592,10 @@ func (tx *Tx) MountIn(window uint64, root Widget) {
 	tx.emit(TxMount(window, root.id))
 }
 
-// PushEntry pushes a navigation entry onto the primary surface's
-// stack (entry ids are guest-allocated in the shared surface
-// namespace, the CreateWindow discipline); it materializes covered
-// and a MountIn presents it. Returns the prop chain:
-// tx.PushEntry(7).Title("detail").InterceptBack(true).
+// PushEntry pushes a navigation entry onto the primary surface's stack
+// (entry ids are guest-allocated in the shared surface namespace); it
+// materializes covered and a MountIn presents it. Returns the prop
+// chain.
 func (tx *Tx) PushEntry(id uint64) EntryRef {
 	tx.emit(TxPushEntry(0, id))
 	return EntryRef{tx: tx, id: id}
@@ -1940,12 +1619,9 @@ func (tx *Tx) PopEntryIn(window uint64) {
 	tx.emit(TxPopEntry(window))
 }
 
-// AddSection appends a section to the primary window's section set
-// (section ids are guest-allocated in the shared surface namespace);
-// the set is append-only — sections have no destruction grammar, and
-// every section's root is retained while covered (switching is
-// SELECTION, not lifecycle). A MountIn fills its pane. Returns the
-// prop chain: tx.AddSection(7).Title("Feed").OnSelected(fn).
+// AddSection appends a section to the primary window's section set. The
+// set is APPEND-ONLY, and every section's root is retained while covered
+// — switching is SELECTION, not lifecycle. A MountIn fills its pane.
 func (tx *Tx) AddSection(id uint64) SectionRef {
 	tx.emit(TxAddSection(0, id))
 	return SectionRef{tx: tx, id: id}
@@ -1967,16 +1643,11 @@ func (tx *Tx) SelectSectionIn(window, id uint64) {
 	tx.emit(TxSelectSection(window, id))
 }
 
-// ShowAlert requests a modal alert (the request/result grammar): a
-// chain that ends in Show, which sends the one atomic record —
-// tx.ShowAlert().Title("delete item?").Message("…").Action("Delete").
-// Action("Archive").Cancel("Keep").OnResult(func(tx *Tx, choice
-// uint32) { … }).Show(). The result handler rides the REQUEST (the
-// widget-handler precedent) and retires with its one answer; ids are
-// binding-allocated, like widget ids. Up to two actions (the
-// platform floor); the cancel label is required and explicit (no
-// binding invents a default). One alert may be live per process;
-// show the next from the handler.
+// ShowAlert requests a modal alert: a chain ending in Show, which sends
+// the one atomic record. The result handler rides the REQUEST and
+// retires with its one answer. Up to two actions (the platform floor);
+// the cancel label is REQUIRED and explicit. One alert may be live per
+// process; show the next from the handler.
 func (tx *Tx) ShowAlert() AlertRef {
 	tx.app.c.alert++
 	return AlertRef{tx: tx, id: tx.app.c.alert}
@@ -2060,13 +1731,9 @@ func (r AlertRef) Show() uint64 {
 }
 
 // PickFiles asks the platform for files. THE PICK, NOT THE OPEN — the
-// result carries handles you redeem later, so the name says Pick
-// (DESIGN.md, File dialogs).
-//
-// A chain that ends in Show, like ShowAlert:
-// tx.PickFiles().Filter("Text", "txt").OnResult(func(tx *kaya.Tx, files
-// []kaya.PickedFile) { … }).Show(). One dialog may be live per process;
-// show the next from the first's result handler.
+// result carries handles you redeem later (DESIGN.md, File dialogs). A
+// chain ending in Show, like ShowAlert. One dialog may be live per
+// process; show the next from the first's result handler.
 func (tx *Tx) PickFiles() FileDialogRef {
 	tx.app.c.fileDialog++
 	return FileDialogRef{tx: tx, id: tx.app.c.fileDialog, multiple: true}
@@ -2133,25 +1800,22 @@ func (r FileDialogRef) Show() uint64 {
 }
 
 // SaveFile asks the platform WHERE TO SAVE. The picker's twin: the same
-// chain, the same one id space, the same one-live-dialog-per-process
-// rule, and the answer arriving once at OnResult (docs/save-plan.md D2).
+// chain, the same one id space, the same one-live-dialog rule
+// (docs/save-plan.md D2).
 //
 //	tx.SaveFile("notes").OnResult(func(tx *kaya.Tx, file *kaya.PickedFile) {
 //	    if file == nil { return } // the user cancelled
 //	    …
 //	}).Show()
 //
-// suggestedName is the name the dialog OPENS with, and it rides the
-// constructor rather than the chain because a save dialog with an empty
-// name box is one no platform lets the user complete. Every platform
-// takes it and none guarantees it: the user renames it, and Android may
-// append an extension matching the mime type — so READ THE NAME YOU GOT.
+// suggestedName rides the CONSTRUCTOR rather than the chain because a
+// save dialog with an empty name box is one no platform lets the user
+// complete. Every platform takes it and none guarantees it — Android may
+// append an extension — so READ THE NAME YOU GOT.
 //
-// WHAT COMES BACK OPENS EMPTY. A save destination may not exist yet
-// (macOS, GTK and Windows answer with a name for a file nobody has made,
-// measured), so the handle's Open CREATES: FileModeWrite succeeds and
-// yields an empty file on every platform, which is the one behaviour a
-// guest writes against (docs/save-plan.md D1).
+// WHAT COMES BACK OPENS EMPTY: the handle's Open CREATES, so
+// FileModeWrite yields an empty file on every platform
+// (docs/save-plan.md D1).
 func (tx *Tx) SaveFile(suggestedName string) SaveDialogRef {
 	tx.app.c.fileDialog++
 	return SaveDialogRef{tx: tx, id: tx.app.c.fileDialog, name: suggestedName}
@@ -2190,10 +1854,9 @@ func (r SaveDialogRef) Filter(label, extensions string) SaveDialogRef {
 // OnResult binds the one-shot result handler to THIS request. The
 // registration retires with the answer; CANCEL IS A NIL FILE.
 //
-// One file or none, and the narrowing happens HERE rather than in the
-// guest: "exactly one locator or none" is a fact of the REQUEST — no
-// platform's save dialog names two destinations — and not something
-// every app should have to re-derive from the length of a list.
+// One file or none, and the narrowing happens HERE: "exactly one locator
+// or none" is a fact of the REQUEST, not something every app should
+// re-derive from the length of a list.
 func (r SaveDialogRef) OnResult(fn func(*Tx, *PickedFile)) SaveDialogRef {
 	r.onResult = fn
 	return r
@@ -2203,11 +1866,9 @@ func (r SaveDialogRef) OnResult(fn func(*Tx, *PickedFile)) SaveDialogRef {
 // the OnResult handler.
 func (r SaveDialogRef) Show() uint64 {
 	if r.onResult != nil {
-		// ONE TABLE FOR BOTH DIALOG KINDS, because there is one id space
-		// and one live slot: the result record is a file_dialog_result
-		// whichever dialog asked, so a second table would be two ways to
-		// answer the same id. The adapter is where the list becomes
-		// one-or-none.
+		// ONE TABLE FOR BOTH DIALOG KINDS: the result record is a
+		// file_dialog_result whichever dialog asked, so a second table
+		// would be two ways to answer the same id.
 		fn := r.onResult
 		r.tx.app.fileDialogs[r.id] = func(tx *Tx, files []PickedFile) {
 			if len(files) == 0 {
@@ -2229,20 +1890,14 @@ func (r SaveDialogRef) Show() uint64 {
 // --- The clipboard (DESIGN.md, Clipboard) --------------------------
 //
 // A clip is not a string: every host models it as ONE item available in
-// several types, with the consumer taking the richest it understands.
-// So COPY TAKES A RECORD — spelled as a chain here, where a second
-// Text simply replaces the field rather than needing a duplicate check
-// — and the two answers are a SUM, because you offer many and receive
-// one.
+// several types, with the consumer taking the richest it understands. So
+// COPY TAKES A RECORD and the two answers are a SUM.
 //
-// kaya DERIVES NOTHING between representations. Whether list bullets
-// survive html-to-text is the app's decision, and a bad
-// auto-derivation degrades every paste into a plain field silently.
+// kaya DERIVES NOTHING between representations: a bad auto-derivation
+// degrades every paste into a plain field silently.
 
-// Representation is one representation, arriving — the sum a copy is
-// the record of. Go has no sum type, so it is a sealed interface with
-// one struct per constructor: a type switch is the elimination, which
-// is how Go spells a match.
+// Representation is one representation, arriving — the sum a copy is the
+// record of, as a sealed interface with one struct per constructor:
 //
 //	switch clip := clip.(type) {
 //	case nil:                 // the universal empty answer
@@ -2262,10 +1917,9 @@ type HTMLClip struct{ HTML string }
 // image IS, never the bytes it arrived in.
 type ImageClip struct{ Bytes []byte }
 
-// ClipFiles is files, plural INSIDE one representation — the same
-// nesting text/uri-list and CF_HDROP already have. A pasted file is the
-// picker's own capability arriving through a second door, so it opens
-// with the call that already exists.
+// ClipFiles is files, plural INSIDE one representation — the nesting
+// text/uri-list and CF_HDROP already have. A pasted file opens with the
+// call the picker already has.
 type FilesClip struct{ Files []PickedFile }
 
 // ClipCustom is an app-defined format, round-tripped verbatim.
@@ -2281,12 +1935,9 @@ func (FilesClip) isRepresentation()  {}
 func (CustomClip) isRepresentation() {}
 
 // representation turns the decoder's kind-and-values into the sum, or
-// nil.
-//
-// EMPTY IS THE UNIVERSAL NO: nil covers a denied prompt on iOS, an
-// unfocused reader on Android or Wayland, an empty clipboard, and
-// content in no representation this read accepted. The guest is not
-// told which, because the platforms deliberately do not say.
+// nil. EMPTY IS THE UNIVERSAL NO: a denied prompt on iOS, an unfocused
+// reader on Android or Wayland, an empty clipboard, and content in no
+// representation this read accepted. The platforms do not say which.
 func representation(clip ClipValues) Representation {
 	str := func(i int) string {
 		if i < len(clip.Values) {
@@ -2326,14 +1977,9 @@ func representation(clip ClipValues) Representation {
 }
 
 // acceptList joins an accept list: the closed kinds by name plus any
-// custom ids, space separated.
-//
-// A LIST AND NOT A MASK, because half the set is open-ended. A custom
-// format that could be written and never accepted would be an escape
-// hatch that only opens outward, and round-tripping an app's own data
-// is the whole reason to have one. Ids reach every platform's registry
-// verbatim, so they carry no spaces — which is what makes the join
-// unambiguous, and what this refuses to let you break.
+// custom ids, space separated. A LIST AND NOT A MASK, because half the
+// set is open-ended. Ids reach every platform's registry verbatim, so
+// they carry NO SPACES — which is what makes the join unambiguous.
 func acceptList(kinds []string) string {
 	for _, kind := range kinds {
 		if kind == "" || strings.Contains(kind, " ") {
@@ -2348,11 +1994,8 @@ func acceptList(kinds []string) string {
 }
 
 // Copy begins a clip: fill in as many representations as the app wants
-// to offer, and Send puts it on the system clipboard.
-//
-// A RECORD AND NOT A LIST is the whole shape — at most one per kind is
-// structural, since a second Text replaces the field rather than
-// needing a duplicate check the root has to run.
+// to offer, and Send puts it on the system clipboard. A RECORD AND NOT A
+// LIST — at most one per kind is structural.
 func (tx *Tx) Copy() CopyRef {
 	return CopyRef{tx: tx}
 }
@@ -2393,10 +2036,8 @@ func (r CopyRef) File(f PickedFile) CopyRef {
 }
 
 // Custom offers an app-defined format, round-tripped verbatim. The id
-// reaches every platform's own registry unchanged — a UTI on Apple,
-// RegisterClipboardFormat on Windows, a target atom on X11 and
-// Wayland, a MIME type on Android — so it carries no spaces, and kaya
-// does nothing clever with the bytes.
+// reaches every platform's own registry unchanged, so it carries no
+// spaces, and kaya does nothing clever with the bytes.
 func (r CopyRef) Custom(id string, bytes []byte) CopyRef {
 	acceptList([]string{id})
 	r.custom = append(r.custom, [2]any{id, bytes})
@@ -2432,16 +2073,14 @@ func (r CopyRef) Send() {
 	r.tx.emit(TxCopy(present, uint32(len(r.files)), uint32(len(r.custom)), values))
 }
 
-// ReadClipboard begins the privileged read — THE ONE NAMED FOR WHAT IT
-// IS rather than for pasting.
+// ReadClipboard begins the privileged read.
 //
-// A user's paste arrives at the widget's hook and costs nothing; this
-// asks without a gesture, which the platforms have deliberately made
-// expensive: iOS 16 PROMPTS when the content came from another app and
-// blocks until the user answers, Android returns nothing unless the app
-// has focus, and Wayland delivers no offer to an unfocused client.
-// Reach for this to detect a URL or import from the clipboard, never to
-// implement Paste — that is the Paste command, and it is free.
+// A user's paste costs nothing; this asks without a gesture, which the
+// platforms have made expensive: iOS 16 PROMPTS when the content came
+// from another app and blocks until the user answers, Android returns
+// nothing unless the app has focus, and Wayland delivers no offer to an
+// unfocused client. Never to implement Paste — that is the Paste
+// command, and it is free.
 func (tx *Tx) ReadClipboard() ClipReadRef {
 	tx.app.c.clipboard++
 	return ClipReadRef{tx: tx, id: tx.app.c.clipboard}
@@ -2498,22 +2137,18 @@ func (tx *Tx) SetAccepts(w Widget, kinds ...string) {
 	tx.emit(TxSetAccepts(w.id, acceptList(kinds)))
 }
 
-// Accepts declares what this widget takes from a paste, at
-// construction: tx.Entry(nil).Accepts("text").
+// Accepts declares what this widget takes from a paste, at construction:
+// tx.Entry(nil).Accepts("text").
 //
 // ONE DECLARATION, THREE JOBS: it drives whether the Paste command is
-// live while this widget is focused, it filters what can reach the
-// paste hook, and on Android it IS the native registration
-// (setOnReceiveContentListener takes the mime types on the view).
-// Per-widget because whether Paste should be enabled is the
-// INTERSECTION of what the clipboard offers and what the FOCUSED target
-// takes — a search field wants plain text, a rich editor also wants
-// images.
+// live while this widget is focused, it filters what can reach the paste
+// hook, and on Android it IS the native registration. Per-widget because
+// Paste's enablement is the INTERSECTION of what the clipboard offers
+// and what the FOCUSED target takes.
 //
-// DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that declares
+// DECLARING IS HOW AN APP OVERRIDES THE DEFAULT: a widget that declares
 // nothing gets the platform's own insertion and reports it through the
-// ordinary change path, which is why a plain text editor writes none of
-// this and has working cut, copy and paste.
+// ordinary change path.
 func (w Widget) Accepts(kinds ...string) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Accepts on a widget outside its build transaction — use Tx.SetAccepts inside a live transaction")
@@ -2532,19 +2167,12 @@ func (a *App) OnPaste(w Widget, fn func(*Tx, Representation)) {
 	a.widgetPastes[w.id] = fn
 }
 
-// OnPasteNode registers a paste handler for a template node; the
-// handler also receives the stamped copy's keys, outermost first. A
-// paste onto a stamped row is the same event as a paste onto a live
-// one, exactly as a click is.
+// OnPasteNode registers a paste handler for a template node; the handler
+// also receives the stamped copy's keys, outermost first.
 //
 // FIRES ONLY FOR COPIES WHOSE TEMPLATE DECLARED WHAT IT ACCEPTS
-// (Tpl.SetAccepts), like the live hook — and until that setter existed
-// this registrar could never fire at all: it was written with the
-// clipboard milestone, dispatched from the day it landed, and had no
-// declaration anywhere in the template zone to switch it on
-// (docs/tpl-props-plan.md §1). A copy that declares nothing gets the
-// platform's own insertion and reports it through the ordinary change
-// path.
+// (Tpl.SetAccepts), like the live hook (docs/tpl-props-plan.md §1). A
+// copy that declares nothing gets the platform's own insertion.
 func (a *App) OnPasteNode(n Node, fn func(*Tx, []any, Representation)) {
 	a.nodePastes[n.id] = fn
 }
@@ -2582,54 +2210,42 @@ func (w WindowRef) VetoClose(on bool) WindowRef {
 	return w
 }
 
-// ListDetail asks this window to present its entry stack as
-// list-detail: on a REGULAR window the base root takes the leading
-// pane and the top of the stack the trailing one; on a COMPACT one
-// nothing changes. There is no argument for WHICH way it presents —
-// that is the size class's answer, not the app's.
+// ListDetail asks this window to present its entry stack as list-detail:
+// on a REGULAR window the base root takes the leading pane and the top
+// of the stack the trailing one; on a COMPACT one nothing changes. WHICH
+// way it presents is the size class's answer, not the app's.
 func (w WindowRef) ListDetail(on bool) WindowRef {
 	w.tx.emit(TxSetWindowListDetail(w.id, on))
 	return w
 }
 
-// Dirty says this surface holds UNSAVED WORK: the backend shows its
-// platform's own affordance — the dot in the close button on macOS, a
-// leading `*` in the rendered caption on Windows, a bullet beside the
-// header-bar title on GTK, nothing on the phones, which have none
+// Dirty says this surface holds UNSAVED WORK: each backend shows its
+// platform's own affordance, and the phones have none
 // (docs/dirty-plan.md D2/D4).
 //
-// STATE, NOT CHROME, and the title you declared is left alone: there
-// is no marker to compose into it and no placeholder to leave room for
-// (the rejected Qt design). It ARMS NOTHING either — "unsaved changes,
-// close anyway?" is VetoClose plus a dialog, which is yours to
-// compose, because apps legitimately differ on what it should do.
+// STATE, NOT CHROME: the title you declared is left alone. It ARMS
+// NOTHING either — "unsaved changes, close anyway?" is VetoClose plus a
+// dialog, which is yours to compose.
 func (w WindowRef) Dirty(on bool) WindowRef {
 	w.tx.emit(TxSetWindowDirty(w.id, on))
 	return w
 }
 
 // Inset sets the window's CONTENT INSET in layout units — LAYOUT, not
-// appearance (docs/styling-plan.md D3): the space kaya's own
-// interpreters put around the mounted root. 16 unless you say
-// otherwise; 0 is full bleed (a Sublime-shaped editor, a canvas),
-// honored unconditionally on every platform because the inset is
-// kaya's own padding and nothing platform-side defends it.
+// appearance (docs/styling-plan.md D3). 16 unless you say otherwise; 0
+// is full bleed, honored unconditionally because the inset is kaya's
+// own padding.
 //
 // A platform's SAFE AREA is a separate fact and is not removed by it:
-// content extends to the safe-area edge, not past it, so a phone keeps
-// its notch and home indicator whatever this says.
-//
-// Negative is refused by the root, which is where every language hears
-// the same sentence: an inset is space, not an offset.
+// a phone keeps its notch and home indicator whatever this says.
 func (w WindowRef) Inset(units float64) WindowRef {
 	w.tx.emit(TxSetWindowInset(w.id, units))
 	return w
 }
 
-// OnCloseRequested binds the close-veto handler to THIS window
-// (per-window — handlers scope to the thing that creates them):
-// fires per chrome close while VetoClose is armed; nothing has
-// closed — answer with tx.DestroyWindow to agree.
+// OnCloseRequested binds the close-veto handler to THIS window: fires
+// per chrome close while VetoClose is armed, and NOTHING HAS CLOSED —
+// answer with tx.DestroyWindow to agree.
 func (w WindowRef) OnCloseRequested(fn func(*Tx)) WindowRef {
 	w.tx.app.closeRequested[w.id] = fn
 	return w
@@ -2637,7 +2253,7 @@ func (w WindowRef) OnCloseRequested(fn func(*Tx)) WindowRef {
 
 // OnClosed binds the closed handler to THIS window: fires when the
 // non-veto auxiliary is chrome-closed (informational; DestroyWindow
-// reconciles), retiring with it — a window closes at most once.
+// reconciles), and retires with it.
 func (w WindowRef) OnClosed(fn func(*Tx)) WindowRef {
 	w.tx.app.windowClosed[w.id] = fn
 	return w
@@ -2646,21 +2262,13 @@ func (w WindowRef) OnClosed(fn func(*Tx)) WindowRef {
 // OnUndone binds the undone handler to THIS window: it fires each time
 // kaya routes an undo there, with the group's label (EMPTY for a typing
 // episode — kaya invents no user-facing strings) and what the core put
-// back. Per-window like the close handlers, and for the same reason the
-// ledger is: Undo in one window has never meant "revert what happened
-// in another".
-//
-// NOT ONE-SHOT, the OnSelected stance rather than the alert's. A history
-// is walked as often as the user likes, and the registration outlives
-// every step.
+// back. NOT one-shot: a history is walked as often as the user likes.
 //
 // THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
 // programmatic write, so the echo doctrine silences every occurrence it
-// would otherwise cause — no text_changed for the text it restored, no
-// value_changed for the signals. The binding has already folded this
-// payload into its own collection mirror before the handler runs (so
-// Tx.Len answers about the restored state); this is where an app folds
-// it into ITS model.
+// would cause. The binding has already folded this payload into its own
+// mirror before the handler runs; this is where an app folds it into
+// ITS model.
 func (w WindowRef) OnUndone(fn func(*Tx, string, UndoDelta)) WindowRef {
 	w.tx.app.undone[w.id] = fn
 	return w
@@ -2679,25 +2287,19 @@ func (w WindowRef) Id() uint64 {
 	return w.id
 }
 
-// Menu declares a top-level menu in this window's command catalog —
-// the menubar rides the window construct (DESIGN.md, Menus):
-// tx.Window(0).Menu("File") returns the retained grouping handle,
-// whose creators (Item/Toggle/Menu/RadioGroup/Separator) append the
-// children: file.Item("Save").Shortcut("primary+s").OnActivate(fn).
-// Append-at-any-time: reopen the retained handle in a later
-// transaction with tx.Menu(file).
+// Menu declares a top-level menu in this window's command catalog — the
+// menubar rides the window construct (DESIGN.md, Menus). Returns the
+// retained grouping handle; reopen it in a later transaction with
+// tx.Menu(file).
 func (w WindowRef) Menu(label string) MenuItem {
 	m := newMenuItem(w.tx, MenuKindMenu, label, false)
 	w.tx.emit(TxMenubarAppend(w.id, m.id))
 	return m
 }
 
-// RadioGroup declares a BAR-LEVEL radio group — admissible wherever a
-// menu grouping node is (it materializes as a top-level menu with the
-// platform's checkmark idiom). Declare only Option children; chain
-// BindValue/Value AFTER them (the Choice contract: the selected
-// 0-based index; programmatic writes are quiet) and OnSelect for each
-// USER pick's new index.
+// RadioGroup declares a BAR-LEVEL radio group. Declare only Option
+// children and chain BindValue/Value AFTER them; programmatic writes
+// are quiet, and OnSelect gets each USER pick's new index.
 func (w WindowRef) RadioGroup(label string) MenuItem {
 	m := newMenuItem(w.tx, MenuKindRadioGroup, label, false)
 	w.tx.emit(TxMenubarAppend(w.id, m.id))
@@ -2710,8 +2312,7 @@ type EntryRef struct {
 	id uint64
 }
 
-// Title names the entry — the back affordance's label source (the
-// iOS back button, the desktop headers).
+// Title names the entry — the back affordance's label source.
 func (e EntryRef) Title(title string) EntryRef {
 	e.tx.emit(TxSetEntryTitle(e.id, title))
 	return e
@@ -2724,19 +2325,17 @@ func (e EntryRef) InterceptBack(on bool) EntryRef {
 	return e
 }
 
-// OnPopped binds the popped handler to THIS entry (per-entry, the
-// request-bound alert precedent — no id inspection anywhere): fires
-// when the user's back affordance pops it natively (post-fact; a
-// programmatic PopEntry does not fire it — its caller already
-// knows), and the registration retires with the one pop.
+// OnPopped binds the popped handler to THIS entry: fires when the user's
+// back affordance pops it natively (post-fact; a programmatic PopEntry
+// does not fire it), and retires with the one pop.
 func (e EntryRef) OnPopped(fn func(*Tx)) EntryRef {
 	e.tx.app.entryPopped[e.id] = fn
 	return e
 }
 
-// OnBackRequested binds the back-veto handler to THIS entry: fires
-// each time the user drives back on it while intercept_back is armed
-// — nothing has popped; answer with tx.PopEntry to agree.
+// OnBackRequested binds the back-veto handler to THIS entry: fires each
+// time the user drives back while intercept_back is armed, and NOTHING
+// HAS POPPED — answer with tx.PopEntry to agree.
 func (e EntryRef) OnBackRequested(fn func(*Tx)) EntryRef {
 	e.tx.app.backRequested[e.id] = fn
 	return e
@@ -2759,20 +2358,15 @@ func (r SectionRef) Title(title string) SectionRef {
 	return r
 }
 
-// Symbol sets the switcher item's SEMANTIC ICON: one of the generated
-// Symbol* constants (SymbolHome, SymbolStar, …), the same closed
-// vocabulary MenuItem.Symbol takes — its doc comment carries the whole
-// story. A tab bar without icons is not the platform's real thing, and
-// a blob is the wrong primitive for a STANDARD one. Const-only, the
-// Title precedent one line up.
+// Symbol sets the switcher item's SEMANTIC ICON, the same closed
+// vocabulary MenuItem.Symbol takes. Const-only.
 func (r SectionRef) Symbol(symbol int64) SectionRef {
 	r.tx.emit(TxSetSectionSymbol(r.id, symbol))
 	return r
 }
 
-// OnSelected binds the selected handler to THIS section (per-section,
-// the entry-handler precedent): fires each time the USER switches to
-// it through the platform's switcher — post-fact and NOT one-shot. A
+// OnSelected binds the selected handler to THIS section: fires each
+// time the USER switches to it — post-fact and NOT one-shot. A
 // programmatic SelectSection does not fire it (the echo doctrine).
 func (r SectionRef) OnSelected(fn func(*Tx)) SectionRef {
 	r.tx.app.sectionSelected[r.id] = fn
@@ -2786,20 +2380,16 @@ func (r SectionRef) Id() uint64 {
 
 // --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 //
-// MenuItem is a live menu item: its OWN id space (the c_menu_item
-// counter) behind its own type, so cross-use with widget or node ids
-// is a compile error. The id alone is the item's durable name; the
-// chain methods (props, creators, handlers) ride the transaction that
-// minted the value and die with it — the Widget.Grow discipline —
-// and tx.Menu(item) reopens a retained handle in a later transaction
-// (append-at-any-time; props mutate freely; nothing is ever removed
-// in v1).
+// MenuItem is a live menu item in its OWN id space behind its own type,
+// so cross-use with widget or node ids is a compile error. The chain
+// methods ride the transaction that minted the value and die with it;
+// tx.Menu(item) reopens a retained handle in a later transaction.
 type MenuItem struct {
 	id uint64
 	tx *Tx
 	// ctx marks a context-anchored chain: a shortcut needs a window
 	// catalog as its native dispatch home, so Shortcut panics here at
-	// record time — the root remains the floor beneath.
+	// record time.
 	ctx bool
 }
 
@@ -2810,10 +2400,9 @@ func (m MenuItem) chain() *Tx {
 	return m.tx
 }
 
-// newMenuItem creates one item in the menu-item id space. Menu
-// records are live-zone only: a template body records a blueprint,
-// and items are live and shared across stamped copies — build the
-// catalog outside (Tx.ContextCatalog) and attach it inside the
+// newMenuItem creates one item in the menu-item id space. Menu records
+// are LIVE-ZONE ONLY: items are shared across stamped copies, so build
+// the catalog outside (Tx.ContextCatalog) and attach it inside the
 // template with Tpl.ContextMenu.
 func newMenuItem(tx *Tx, kind uint32, label string, ctx bool) MenuItem {
 	if tx == nil || tx.closed {
@@ -2840,15 +2429,13 @@ func (m MenuItem) child(kind uint32, label string) MenuItem {
 }
 
 // Item appends an action — a leaf command firing exactly one
-// menu_activated occurrence (menu click OR its shortcut: ONE
-// occurrence, one dispatch path). Chain OnActivate beside it.
+// menu_activated occurrence, whether from a click or its shortcut.
 func (m MenuItem) Item(label string) MenuItem {
 	return m.child(MenuKindAction, label)
 }
 
-// Toggle appends a stateful leaf reusing the Checkbox contract: user
-// flips emit menu_toggled (chain OnToggle); programmatic checked
-// writes are quiet.
+// Toggle appends a stateful leaf on the Checkbox contract: user flips
+// emit menu_toggled; programmatic checked writes are quiet.
 func (m MenuItem) Toggle(label string) MenuItem {
 	return m.child(MenuKindToggle, label)
 }
@@ -2865,9 +2452,9 @@ func (m MenuItem) RadioGroup(label string) MenuItem {
 	return m.child(MenuKindRadioGroup, label)
 }
 
-// Option appends one labeled option (radio groups only — root
-// checked), in declaration order: the order IS the index vocabulary
-// the group's value selects over.
+// Option appends one labeled option (radio groups only) in declaration
+// order: the order IS the index vocabulary the group's value selects
+// over.
 func (m MenuItem) Option(label string) MenuItem {
 	return m.child(MenuKindRadioOption, label)
 }
@@ -2879,8 +2466,7 @@ func (m MenuItem) Separator() {
 	m.tx.emit(TxMenuItemAppend(m.id, c.id))
 }
 
-// Label renames the item to constant text. Label writes never emit
-// anything.
+// Label renames the item to constant text; never emits an occurrence.
 func (m MenuItem) Label(text string) MenuItem {
 	m.chain().emit(TxSetMenuLabel(m.id, text))
 	return m
@@ -2892,9 +2478,8 @@ func (m MenuItem) BindLabel(s Signal[string]) MenuItem {
 	return m
 }
 
-// Enabled sets whether the item is enabled (default true). Enablement
-// writes never emit anything; disabling a grouping node disables its
-// subtree everywhere (the inherited-disabled contract).
+// Enabled sets whether the item is enabled (default true); never emits.
+// Disabling a grouping node disables its subtree everywhere.
 func (m MenuItem) Enabled(on bool) MenuItem {
 	m.chain().emit(TxSetMenuEnabled(m.id, on))
 	return m
@@ -2906,9 +2491,8 @@ func (m MenuItem) BindEnabled(s Signal[bool]) MenuItem {
 	return m
 }
 
-// Checked sets a toggle's state (toggle items only — root-checked):
-// the Checkbox contract. The programmatic write is configuration —
-// QUIET, no menu_toggled echo (the echo doctrine).
+// Checked sets a toggle's state (toggle items only). QUIET: no
+// menu_toggled echo.
 func (m MenuItem) Checked(on bool) MenuItem {
 	m.chain().emit(TxSetMenuChecked(m.id, on))
 	return m
@@ -2920,8 +2504,7 @@ func (m MenuItem) BindChecked(s Signal[bool]) MenuItem {
 	return m
 }
 
-// Value sets a radio group's selected option index (radio groups only
-// — root-checked): the Choice contract. QUIET, like Checked.
+// Value sets a radio group's selected option index. QUIET, like Checked.
 func (m MenuItem) Value(index int) MenuItem {
 	m.chain().emit(TxSetMenuValue(m.id, float64(index)))
 	return m
@@ -2934,51 +2517,31 @@ func (m MenuItem) BindValue(s Signal[float64]) MenuItem {
 	return m
 }
 
-// Icon sets the item's icon (the blob channel): used by phone
-// promotion, ignored where native menu dress has no icons. Const-only.
+// Icon sets the item's icon (the blob channel): used by phone promotion,
+// ignored where native menu dress has no icons. Const-only.
 func (m MenuItem) Icon(data []byte) MenuItem {
 	m.chain().emit(TxSetMenuIcon(m.id, RegisterBlob(data)))
 	return m
 }
 
-// Symbol sets the item's SEMANTIC ICON (docs/styling-plan.md D6): one
-// of the generated Symbol* constants — SymbolAdd, SymbolRemove,
-// SymbolDelete, SymbolEdit, SymbolDone, SymbolClose, SymbolSearch,
-// SymbolSettings, SymbolRefresh, SymbolInfo, SymbolWarning, SymbolBack,
-// SymbolForward, SymbolMore, SymbolCopy, SymbolPaste, SymbolStar,
-// SymbolLock, SymbolPerson, SymbolHome. Go's enum idiom, the one Role,
-// Align and SectionsPresentation already use.
+// Symbol sets the item's SEMANTIC ICON (docs/styling-plan.md D6). The app
+// names a CONCEPT and each backend draws its own platform's glyph — SF
+// Symbols are license-locked to Apple, so a shared asset is not even
+// legal. BESIDE Icon, not instead of it.
 //
-// The app names a CONCEPT and each backend draws its own platform's
-// glyph for it: SymbolCopy is doc.on.doc on Apple, content_copy on
-// Material, edit-copy-symbolic on Adwaita, and no single asset is right
-// on all three — SF Symbols are license-locked to Apple platforms, so a
-// shared one is not even legal. The platform sets also metric-match the
-// text beside them; a blob cannot. BESIDE Icon, not instead of it: the
-// blob channel one method up stays for genuinely app-specific art.
+// SymbolBack and SymbolForward mean BACKWARD and FORWARD in READING
+// ORDER, never left and right. SymbolDelete is the wastebasket,
+// SymbolRemove takes an item out of a list, SymbolClose is the ✕.
 //
-// SymbolBack and SymbolForward are the direction-relative pair: every
-// platform mirrors them under a right-to-left layout, so they mean
-// BACKWARD and FORWARD in reading order, never "left" and "right".
-// SymbolDelete is the wastebasket idiom (destroying something) while
-// SymbolRemove takes an item out of a list, and SymbolClose is the ✕
-// dismissal, not a delete.
-//
-// The vocabulary is CLOSED — the Role trick one tier over — and an
-// out-of-vocabulary number dies AT THE ROOT at declare time, naming
-// every value it would have accepted, so no backend ever improvises on
-// one. Growing it is a spec change with its gates, never a per-app
-// escape hatch. Const-only, like Icon and Primary beside it: a symbol
-// names a fixed concept, so there is no signal-bound spelling.
+// The vocabulary is CLOSED and an out-of-vocabulary number dies AT THE
+// ROOT at declare time. Const-only.
 func (m MenuItem) Symbol(symbol int64) MenuItem {
 	m.chain().emit(TxSetMenuSymbol(m.id, symbol))
 	return m
 }
 
-// Primary sets the phone-bar promotion hint (actions only —
-// root-checked). Flipping it recomputes the promoted set
-// deterministically; INERT on desktops — not a toolbar grammar.
-// Const-only.
+// Primary sets the phone-bar promotion hint (actions only). INERT on
+// desktops — not a toolbar grammar. Const-only.
 func (m MenuItem) Primary(on bool) MenuItem {
 	m.chain().emit(TxSetMenuPrimary(m.id, on))
 	return m
@@ -2986,14 +2549,10 @@ func (m MenuItem) Primary(on bool) MenuItem {
 
 // RoleSettings names the app's settings command — the closed
 // standard-command vocabulary (DESIGN.md, Menus).
-// A NAMED VOCABULARY FOR THE CLOSED HALF, exactly as the menu roles
-// are. The accept list is open-ended — a custom format id is any
-// app-chosen string — so the four closed kinds cannot be a mask; but
-// they can be spelled once here instead of quoted at every call site.
-// A MISTYPED BARE STRING IS SILENT: it becomes a custom format id no
-// clipboard will ever offer, so Paste stays dead and the paste hook
-// never fires, with nothing to see anywhere. A custom id has no
-// constant by nature — the app that defines it names it.
+//
+// A NAMED VOCABULARY FOR THE CLOSED HALF. A MISTYPED BARE STRING IS
+// SILENT: it becomes a custom format id no clipboard will ever offer,
+// so Paste stays dead and the paste hook never fires.
 const (
 	AcceptText = "text"
 	AcceptHtml = "html"
@@ -3003,39 +2562,31 @@ const (
 
 const RoleSettings = "settings"
 
-// The three clipboard commands. They lower to the platform's own, act
-// on the FOCUSED widget, and work out their own enablement from what
-// the clipboard offers and what that widget accepts.
+// The three clipboard commands. They lower to the platform's own, act on
+// the FOCUSED widget, and work out their own enablement.
 //
 // GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only the
-// widget knows what is selected, so an app cannot assemble the payload
-// for "copy the selected text" out of the data layer. Copy of a
-// selection is therefore necessarily a command, and Paste is its
-// mirror. Tx.Copy and Tx.ReadClipboard are for overriding that default
-// and for targets with no native behaviour.
+// widget knows what is selected. Tx.Copy and Tx.ReadClipboard are for
+// overriding that default and for targets with no native behaviour.
 const (
 	RoleCut   = "cut"
 	RoleCopy  = "copy"
 	RolePaste = "paste"
 )
 
-// The two history commands. Like the clipboard three they act on what is
-// focused and compute their own enablement — but one tier deeper
-// (docs/undo-plan.md D6): they ask the FOCUSED widget first, so mid-
-// typing Undo means the typing and after an app action it means the
-// action. An app that names no group still gets working text undo from
-// these items, because the first tier is the platform's own.
+// The two history commands: they ask the FOCUSED widget FIRST, so
+// mid-typing Undo means the typing and after an app action it means the
+// action (docs/undo-plan.md D6). An app that names no group still gets
+// working text undo from these items.
 const (
 	RoleUndo = "undo"
 	RoleRedo = "redo"
 )
 
-// Role declares this action a standard command (actions only —
-// root-checked). The declaration is uniform; PLACEMENT is each host's
-// business: macOS shows RoleSettings in the application menu, everyone
-// else leaves the item where it was declared. One item per role, and a
-// role never invents a chord — spell Shortcut too if the app wants one.
-// Const-only.
+// Role declares this action a standard command (actions only). The
+// declaration is uniform; PLACEMENT is each host's business. One item
+// per role, and a role NEVER invents a chord — spell Shortcut too if
+// the app wants one. Const-only.
 func (m MenuItem) Role(name string) MenuItem {
 	if m.ctx {
 		panic("kaya: a context item takes no role — a role names a standard command in the window catalog")
@@ -3044,11 +2595,9 @@ func (m MenuItem) Role(name string) MenuItem {
 	return m
 }
 
-// Shortcut sets the shortcut of any LEAF command — an action, a
-// toggle, or one option of a group (window-anchored only).
-// Canonicalized by the binding's one parser (CanonicalizeShortcut);
-// the shortcut is another affordance of the same item — it fires the
-// SAME menu_activated occurrence as a click. Const-only.
+// Shortcut sets the shortcut of any LEAF command (window-anchored only),
+// canonicalized by CanonicalizeShortcut. It fires the SAME
+// menu_activated occurrence as a click. Const-only.
 func (m MenuItem) Shortcut(spelling string) MenuItem {
 	if m.ctx {
 		panic("kaya: a context item takes no shortcut — a shortcut needs a window catalog as its native dispatch home")
@@ -3057,26 +2606,22 @@ func (m MenuItem) Shortcut(spelling string) MenuItem {
 	return m
 }
 
-// OnActivate binds this action's handler — it rides the declaration
-// (no app-global menu dispatcher exists), and the action's click and
-// its shortcut are ONE occurrence on one dispatch path, so it covers
-// both.
+// OnActivate binds this action's handler. A click and its shortcut are
+// ONE occurrence on one dispatch path, so it covers both.
 func (m MenuItem) OnActivate(fn func(*Tx)) MenuItem {
 	m.chain().app.menuActivated[m.id] = fn
 	return m
 }
 
-// OnActivateNode is the template-node flavor: an item attached to a
-// stamped copy reports the copy's key path, outermost first — the
-// keys ARE the noun the command acts on.
+// OnActivateNode is the template-node flavor: the copy's key path,
+// outermost first — the keys ARE the noun the command acts on.
 func (m MenuItem) OnActivateNode(fn func(*Tx, []any)) MenuItem {
 	m.chain().app.menuActivatedNode[m.id] = fn
 	return m
 }
 
 // OnToggle binds a toggle's handler: each USER flip's new state.
-// Programmatic Checked writes are quiet, so a handler's own writes
-// cannot loop back at it.
+// Programmatic Checked writes are quiet.
 func (m MenuItem) OnToggle(fn func(*Tx, bool)) MenuItem {
 	m.chain().app.menuToggled[m.id] = fn
 	return m
@@ -3089,9 +2634,8 @@ func (m MenuItem) OnToggleNode(fn func(*Tx, []any, bool)) MenuItem {
 	return m
 }
 
-// OnSelect binds a radio group's handler (registered on the GROUP):
-// each USER pick's new 0-based option index. Programmatic Value
-// writes are quiet.
+// OnSelect binds a radio group's handler, registered on the GROUP: each
+// USER pick's new 0-based index. Programmatic Value writes are quiet.
 func (m MenuItem) OnSelect(fn func(*Tx, int)) MenuItem {
 	m.chain().app.menuSelected[m.id] = fn
 	return m
@@ -3104,26 +2648,22 @@ func (m MenuItem) OnSelectNode(fn func(*Tx, []any, int)) MenuItem {
 	return m
 }
 
-// Menu reopens a RETAINED menu item — the append-at-any-time
-// discipline: tx.Menu(file).Label("Document").Item("Publish"). Props
-// mutate freely on every kind the prop applies to; the root judges a
-// misapplied prop (kind and anchor rules) exactly as at construction.
+// Menu reopens a RETAINED menu item — the append-at-any-time discipline:
+// tx.Menu(file).Label("Document").Item("Publish"). The root judges a
+// misapplied prop exactly as at construction.
 func (tx *Tx) Menu(item MenuItem) MenuItem {
 	return MenuItem{id: item.id, tx: tx}
 }
 
-// ContextRef is a live widget's context anchor (Tx.ContextMenu): the
-// same item vocabulary as the bar, scoped to a NOUN — each creator
-// attaches another root. No shortcuts here (record-time checked; the
-// editable text controls reject attachment at the root).
+// ContextRef is a live widget's context anchor: the same item vocabulary
+// as the bar, scoped to a NOUN. No shortcuts here (record-time checked).
 type ContextRef struct {
 	tx     *Tx
 	widget uint64
 }
 
-// ContextMenu opens the context anchor on a live widget: the
-// platform's own gesture (right-click, long-press) presents the
-// catalog. Calling it again appends more roots.
+// ContextMenu opens the context anchor on a live widget; the platform's
+// own gesture presents the catalog. Calling it again appends more roots.
 func (tx *Tx) ContextMenu(w Widget) ContextRef {
 	return ContextRef{tx: tx, widget: w.id}
 }
@@ -3151,12 +2691,10 @@ func (c ContextRef) RadioGroup(label string) MenuItem { return c.root(MenuKindRa
 // Separator attaches native grouping chrome.
 func (c ContextRef) Separator() { c.root(MenuKindSeparator, "") }
 
-// ContextCatalog is a context catalog built UNANCHORED
-// (Tx.ContextCatalog) for a template node: menu items are live and
-// shared across stamped copies, so the catalog is built in the live
-// zone and Tpl.ContextMenu attaches it inside the template, where
-// each activation carries the copy's key path. An item takes exactly
-// one anchor — a second attach panics.
+// ContextCatalog is a context catalog built UNANCHORED for a template
+// node: menu items are live and shared across stamped copies, so it is
+// built in the LIVE zone and Tpl.ContextMenu attaches it inside the
+// template. An item takes exactly one anchor — a second attach panics.
 type ContextCatalog struct {
 	tx       *Tx
 	roots    []uint64
@@ -3208,15 +2746,10 @@ func (t *Tpl) Widget(kind uint32) Node {
 	return n
 }
 
-// setText is the template zone's FLOOR prop write, and it is
-// unexported for that reason: it and the live verb Tx.SetText were both
-// spelled SetText, so no reader — and no regex, which sees no receiver
-// type — could tell the tier a call belonged to. The floor gate has to
-// tell them apart (a guest's tx.SetText puts a document in front of the
-// user; a guest's t.SetText WAS the tier the sugar replaced), and Rust
-// never had the problem because its two live under two names (`set` and
-// `set_text`). Nothing outside this package called it, so hiding it is
-// the split: a guest reaching for it now fails to compile
+// setText is the template zone's FLOOR prop write, UNEXPORTED so the
+// floor gate can tell it from the live verb Tx.SetText — the two were
+// both spelled SetText, and no line-oriented reader sees a receiver
+// type. A guest reaching for it now fails to compile
 // (docs/tpl-props-plan.md F3).
 func (t *Tpl) setText(n Node, text string) {
 	t.tx.emit(TxSetText(n.id, text))
@@ -3229,36 +2762,23 @@ func (t *Tpl) BindTextElement(n Node, level uint32) {
 }
 
 // SetGrow weights a template node within its stamped row or column —
-// the template twin of Tx.SetGrow, spelled as a method rather than a
-// chain because a Node is a plain id and has no transaction to chain
-// from. EVERY PROP BELOW FOLLOWS THAT SENTENCE: same semantics as the
-// live zone, a different spelling, which is what invariant 1 allows.
+// the template twin of Tx.SetGrow, spelled as a METHOD rather than a
+// chain because a Node is a plain id with no transaction to chain from.
+// EVERY PROP BELOW FOLLOWS THAT SENTENCE.
 //
-// It was the FIRST prop the template zone carried, and it is here
-// because Scroll needs it: an unconstrained viewport hugs its content
-// and nothing ever overflows, so a template scroll without a grow
-// weight is a scroll that cannot scroll. Rust's Tpl has always been
-// able to spell this through its generic set(node, prop, value), so
-// shipping the scroll constructor without it would have opened a
-// divergence in the same pass that closed one (invariant 1).
+// Scroll needs it: an unconstrained viewport hugs its content, so a
+// template scroll without a grow weight cannot scroll.
 //
 // Spacing and align stay unreachable on a Node and stay ledgered
-// (docs/deferred.md); Go has no generic template floor to reach them
-// through, unlike Rust.
+// (docs/deferred.md).
 func (t *Tpl) SetGrow(n Node, weight float64) {
 	t.tx.emit(TxSetGrow(n.id, weight))
 }
 
-// SetA11yID gives every stamped copy THE SAME accessibility identifier
-// — the template twin of Tx.SetA11yID, universal like it (every kind
-// carries one, containers included).
-//
-// A CONSTANT IS OFTEN THE WRONG HALF HERE, and this is the one prop
-// where that is worth saying: an identifier is an automation KEY, so N
-// copies sharing one leave a harness with N indistinguishable targets
-// and no way to name a row. Nothing in the core deduplicates them and
-// the harness addresses by kind#index rather than by id, so duplicates
-// are legal and sometimes right — a one-row collection, a When body —
+// SetA11yID gives every stamped copy THE SAME accessibility identifier.
+// A CONSTANT IS OFTEN THE WRONG HALF HERE: an identifier is an
+// automation KEY, so N copies sharing one leave a harness with N
+// indistinguishable targets. Duplicates are legal and sometimes right,
 // but BindA11yID over the row's own field is what a list wants.
 func (t *Tpl) SetA11yID(n Node, id string) {
 	t.tx.emit(TxSetA11yId(n.id, id))
@@ -3266,38 +2786,27 @@ func (t *Tpl) SetA11yID(n Node, id string) {
 
 // BindA11yID sources each stamped copy's identifier from a VARYING
 // source: a signal every copy follows, or a field of the row the copy
-// was stamped for. The field is what gives a stamped row an addressable
-// name — the thing an a11y scene could not do before this pass, since
-// its 719 legs all built their subjects live.
+// was stamped for.
 func (t *Tpl) BindA11yID[S interface {
 	Signal[string] | Field[string]
 }](n Node, src S) {
 	t.applyStrProp(n, src, TxBindA11yId, TxBindA11yIdElement)
 }
 
-// SetA11yLabel gives every stamped copy the same SPOKEN name — the
-// template twin of Tx.SetA11yLabel, and the same override contract:
-// unset keeps whatever the platform derives from the control's own
-// content, so a button whose caption already reads well needs nothing.
+// SetA11yLabel gives every stamped copy the same SPOKEN name, with
+// Tx.SetA11yLabel's override contract: unset keeps what the platform
+// derives from the control's own content.
 func (t *Tpl) SetA11yLabel(n Node, label string) {
 	t.tx.emit(TxSetA11yLabel(n.id, label))
 }
 
 // BindA11yLabel sources each stamped copy's spoken name from a varying
-// source. THE ROW'S OWN FIELD IS THE CASE THIS SLICE EXISTS FOR:
+// source — the row's own field being the case it exists for:
 //
-//	for row := range todos.Rows(tx) {
-//		row.Row(func() {
-//			row.Label(row.Value())
-//			done := row.Checkbox(false)
-//			row.BindA11yLabel(done, row.Value()) // "Milk", not "checkbox"
-//		})
-//	}
+//	row.BindA11yLabel(done, row.Value()) // "Milk", not "checkbox"
 //
-// A checkbox beside a label announces nothing an assistive client can
-// tell from its neighbours; bound to the row's own text it announces
-// the row. The binding is live rather than a one-shot seed — a later
-// UpdateField on that field re-speaks the copy.
+// The binding is LIVE rather than a one-shot seed: a later UpdateField
+// on that field re-speaks the copy.
 func (t *Tpl) BindA11yLabel[S interface {
 	Signal[string] | Field[string]
 }](n Node, src S) {
@@ -3308,14 +2817,9 @@ func (t *Tpl) BindA11yLabel[S interface {
 // phrase, spoken as written by VoiceOver and prefixed "double tap to"
 // by TalkBack.
 //
-// ACTIVATION KINDS ONLY: button, checkbox, select and radio. There is
-// no wall here and deliberately none: a Node is a bare id and carries
-// no kind, and this binding keeping its own kind table to check against
-// would be the root's list written a second time, which is the defect
-// that let the live and stamped tag lists drift for four milestones.
-// The root rejects a hint on any other kind at DECLARE time, naming the
-// kind and the prop, before a single row stamps — the same failure the
-// live path gives, in the same words.
+// ACTIVATION KINDS ONLY, and no wall here DELIBERATELY: a Node is a bare
+// id and carries no kind, so a kind table here would be the root's list
+// written a second time. The root rejects a misfit at DECLARE time.
 func (t *Tpl) SetA11yHint(n Node, hint string) {
 	t.tx.emit(TxSetA11yHint(n.id, hint))
 }
@@ -3329,94 +2833,55 @@ func (t *Tpl) BindA11yHint[S interface {
 	t.applyStrProp(n, src, TxBindA11yHint, TxBindA11yHintElement)
 }
 
-// SetAccepts declares what each stamped copy takes from a paste — the
-// closed kinds by name (AcceptText, AcceptHtml, AcceptImage,
-// AcceptFiles) plus any custom format ids. The template twin of
-// Tx.SetAccepts; entry and textarea only, checked at the root.
+// SetAccepts declares what each stamped copy takes from a paste. Entry
+// and textarea only, checked at the root.
 //
-// CONST ONLY, unlike the three props above. An accept list is the
-// CONTROL's contract with the clipboard — what this widget is, not what
-// this row holds — so it describes the prototype, and the prototype is
-// one shape for every copy. The wire could carry a sourced one and
-// nothing would want it: a list whose rows accept different things is a
-// list of two different controls, which this zone already spells as a
-// sum collection's arms or a When.
-//
-// THIS IS THE DECLARATION THAT TURNS App.OnPasteNode ON. Every backend
-// gates the paste occurrence on the focused widget's accept list and
-// hands the gesture to the platform when it is empty, so until this
-// existed the node paste handler was registered, dispatched, and unable
-// to fire — in every binding, silently (docs/tpl-props-plan.md §1).
+// CONST ONLY: an accept list describes the PROTOTYPE, not the row. THIS
+// IS THE DECLARATION THAT TURNS App.OnPasteNode ON — every backend gates
+// the paste occurrence on the focused widget's accept list
+// (docs/tpl-props-plan.md §1).
 func (t *Tpl) SetAccepts(n Node, kinds ...string) {
 	t.tx.emit(TxSetAccepts(n.id, acceptList(kinds)))
 }
 
 // SetRole declares what each stamped copy MEANS — semantic emphasis,
-// never appearance (docs/styling-plan.md D4) — from the same role
-// constants the live zone takes: RoleDestructive, RoleProminent,
-// RoleHeading. The template twin of Tx.SetRole, int64 for its reason:
-// Go's closed vocabularies are untyped integer constants in the
-// generated wire file, so a named type here would make the two tiers
-// of one binding disagree about one prop's type.
+// never appearance (docs/styling-plan.md D4). int64 because Go's closed
+// vocabularies are untyped integer constants in the generated wire
+// file, and a named type here would make the two tiers of one binding
+// disagree about one prop's type.
 //
-// The live zone has carried this since the styling pass and the
-// template zone could not spell it at all, so a stamped "Delete"
-// button inside a For was declarable as destructive in no language.
-//
-// CONST ONLY, like SetAccepts and for its reason: what a copy MEANS is
-// a fact about the PROTOTYPE, not about the row's data. A list whose
-// rows mean different things is two controls, which this zone already
-// spells as a sum collection's arms or a When.
-//
-// No kind wall here, and deliberately none — a Node is a bare id and
-// carries no kind. The root refuses a role on a kind it does not fit
-// at DECLARE time, before a single row stamps, naming both the role
-// and the kind, in the same words the live path uses.
+// CONST ONLY, like SetAccepts: what a copy MEANS is a fact about the
+// PROTOTYPE. No kind wall here deliberately — the root refuses a misfit
+// at DECLARE time, naming both the role and the kind.
 func (t *Tpl) SetRole(n Node, role int64) {
 	t.tx.emit(TxSetRole(n.id, role))
 }
 
 // SetInset pads a stamped CONTAINER — DIP between its bounds and its
-// children, uniform on all four sides, the window inset one level down
-// (docs/styling-plan.md D3). The template twin of Tx.SetInset, the same
-// number it spells.
-//
-// THE FORCING CASE IS A STAMPED ROW. The text editor's status row is
-// live and insets; its find bar is a copy stamped from a template and
-// sat flush against a full-bleed window's edge, because the template
-// zone carried exactly one layout prop (SetGrow) and no prop could give
-// a stamped row its margin back.
-//
-// Const for SetRole's reason: a prototype's margin describes the
-// prototype. Containers only, and the root says so at declare time.
+// children, uniform on all four sides (docs/styling-plan.md D3). Const
+// for SetRole's reason; containers only, and the root says so at
+// declare time.
 func (t *Tpl) SetInset(n Node, pad float64) {
 	t.tx.emit(TxSetInset(n.id, pad))
 }
 
-// LabelText creates a label with constant text in the blueprint: the
-// template twin of Tx.LabelText, and the same two records at either
-// depth. The bound flavors are the element ones — Row.Label over the
-// element's own token, RecordCollection.Label over a field's — since a
-// blueprint's variable text comes from the element it is stamped for.
+// LabelText creates a label with constant text in the blueprint. The
+// bound flavors are the ELEMENT ones — Row.Label, RecordCollection.Label
+// — since a blueprint's variable text comes from the element it is
+// stamped for.
 func (t *Tpl) LabelText(text string) Node {
 	n := t.Widget(KindLabel)
 	t.setText(n, text)
 	return n
 }
 
-// LabelBound creates a label whose text comes from a VARYING source —
-// a signal every stamped copy follows, or a field of the row the copy
-// was stamped for. The const flavor is LabelText, and the split is this
-// file's own (SetText/BindText, Tx.Image/Tx.ImageSignal,
-// Tx.Slider/Tx.SliderBound): Go has no implicit conversion, so a single
-// argument covering constants and bindings alike would have to be a
-// type parameter, and a constructor whose name says which half it
-// carries reads better than one that admits both and switches.
+// LabelBound creates a label whose text comes from a VARYING source — a
+// signal every stamped copy follows, or a field of the row the copy was
+// stamped for. The const flavor is LabelText.
 //
-// The BASE surface takes no field PROJECTION, only a resolved token:
-// a projection is func(*T) *string and *Tpl knows no T. The typed
-// surfaces do — RecordCollection.Label and the SumCase arms — and that
-// is the whole of what they add here.
+// The BASE surface takes no field PROJECTION, only a resolved token: a
+// projection is func(*T) *string and *Tpl knows no T. The typed
+// surfaces do, and that is the whole of what they add here.
 func (t *Tpl) LabelBound[S interface {
 	Signal[string] | Field[string]
 }](src S) Node {
@@ -3425,21 +2890,12 @@ func (t *Tpl) LabelBound[S interface {
 	return n
 }
 
-// Button creates a button with its caption in the blueprint: the
-// template twin of Tx.Button.
+// Button creates a button with its caption in the blueprint.
 //
-// IT TAKES NO HANDLER, and the omission is the design. A template's
-// button is stamped once per element, so a click names WHICH copy by
-// key path, and the app registers one handler centrally against the
-// template node (App.OnClickNode, which hands the handler that copy's
-// keys). The live zone's func(*Tx) has nowhere to put them, so a
-// second parameter here could only be the wrong shape — the same
-// reason java's Tpl.button, swift's KayaTpl.button and haskell's
-// template `button` take a caption and nothing else. Go's template
-// zone reached this constructor 2026-08-05, with the milestone2
-// graduation; until then a stamped button had to be spelled at the
-// floor (Widget(KindButton) + the prop write), which is what that
-// scene did.
+// IT TAKES NO HANDLER, and the omission is the design: a click names
+// WHICH copy by key path, so the app registers one handler centrally
+// against the template node (App.OnClickNode). The live zone's
+// func(*Tx) has nowhere to put the keys.
 func (t *Tpl) Button(text string) Node {
 	n := t.Widget(KindButton)
 	t.setText(n, text)
@@ -3447,10 +2903,8 @@ func (t *Tpl) Button(text string) Node {
 }
 
 // ButtonBound creates a button whose CAPTION comes from a varying
-// source — LabelBound's contract on the clickable kind, for the row
-// whose button says what it will do to that row. Clicks still register
-// centrally against the node (App.OnClickNode); see Tpl.Button for why
-// no handler belongs in a template constructor.
+// source. Clicks still register centrally against the node
+// (App.OnClickNode); see Tpl.Button.
 func (t *Tpl) ButtonBound[S interface {
 	Signal[string] | Field[string]
 }](src S) Node {
@@ -3459,41 +2913,24 @@ func (t *Tpl) ButtonBound[S interface {
 	return n
 }
 
-// Entry creates an empty text field in the blueprint: the template twin
-// of Tx.Entry, and UNCONTROLLED the same way — every stamped copy
-// starts empty and owns its own text from the first keystroke, which is
-// why this takes nothing at all. EntryBound is the flavor that seeds
-// each copy from its row.
+// Entry creates an empty text field in the blueprint, UNCONTROLLED the
+// same way Tx.Entry is: every stamped copy starts empty and owns its own
+// text from the first keystroke. EntryBound seeds each copy from its row.
 //
-// IT TAKES NO HANDLER, for Tpl.Button's reason: a stamped copy's edits
-// name WHICH copy by key path, so the app registers once against the
-// node (App.OnChangeNode, which hands the handler that copy's keys).
-//
-// THIS IS THE CONSTRUCTOR THE WHOLE PASS STARTED FROM. The undo scene's
-// per-row note and the text editor's find bar are both a text field
-// inside a collection, and both were spelled at the widget-kind floor —
-// `row.Widget(kaya.KindEntry)` — because the template zone had sugar
-// for three kinds where the live zone had fourteen. The comment beside
-// the undo scene's line explained that as a property of unbound fields
-// ("there is no source to bind"), which was the wrong lesson: it was a
-// hole in the zone (docs/sugar-pass-plan.md).
+// IT TAKES NO HANDLER, for Tpl.Button's reason: the app registers once
+// against the node (App.OnChangeNode).
 func (t *Tpl) Entry() Node {
 	return t.Widget(KindEntry)
 }
 
 // EntryBound creates a text field whose INITIAL text comes from a
-// varying source. The uncontrolled contract is unchanged — this is one
-// write per stamped copy, not a leash: the copy owns its text
-// afterwards, exactly as Tx.SetText does in the live zone. A field
-// source is what makes it worth having, an editable list pre-filled
-// from its own rows; the live zone has no twin, because a live widget
-// has no row to read.
+// varying source: one write per stamped copy, not a leash — the copy
+// owns its text afterwards.
 //
-// The copy's edits do NOT flow back to the field. A later UpdateField
-// on that row WILL overwrite what the user typed, because the seed is
-// recorded as a real element binding — the same rule in all eight
-// bindings, and the reason the unbound Entry above is the one the two
-// shipped scenes want.
+// The copy's edits do NOT flow back to the field, and a later
+// UpdateField on that row WILL overwrite what the user typed, because
+// the seed is recorded as a real element binding. Same rule in all
+// eight bindings.
 func (t *Tpl) EntryBound[S interface {
 	Signal[string] | Field[string]
 }](src S) Node {
@@ -3520,15 +2957,11 @@ func (t *Tpl) TextareaBound[S interface {
 }
 
 // Checkbox creates a checkbox at a constant checked state in the
-// blueprint. CheckboxBound is the flavor that reads the row's own bit,
-// which is what a list of anything completable wants.
+// blueprint; CheckboxBound reads the row's own bit.
 //
 // THE SOURCE IS THE CHECKED BIT, NOT THE CAPTION, where the live
-// Tx.Checkbox takes text and a handler. That is the zone's split, not
-// Go's: a prototype's caption is one string for every copy (the
-// constructor writes it) while its checked state is exactly the per-row
-// datum, and Rust's Tpl.checkbox and RecordCollection.Checkbox already
-// spelled it this way.
+// Tx.Checkbox takes text: a prototype's caption is one string for every
+// copy while its checked state is exactly the per-row datum.
 func (t *Tpl) Checkbox(checked bool) Node {
 	n := t.Widget(KindCheckbox)
 	t.tx.emit(TxSetChecked(n.id, checked))
@@ -3570,9 +3003,7 @@ func (t *Tpl) ProgressBound[S interface {
 
 // ProgressIndeterminate creates a progress bar in the platform's
 // activity mode: no fraction, so nothing to source. A statement rather
-// than the live zone's .Indeterminate() chain, because a Node carries
-// no transaction and so has no chain (template-node props are
-// ledgered, docs/sugar-pass-plan.md §2).
+// than a chain, because a Node carries no transaction.
 func (t *Tpl) ProgressIndeterminate() Node {
 	n := t.Widget(KindProgress)
 	t.tx.emit(TxSetIndeterminate(n.id, true))
@@ -3580,14 +3011,9 @@ func (t *Tpl) ProgressIndeterminate() Node {
 }
 
 // Slider creates a slider over min..max at a constant position in the
-// blueprint. THE RANGE DESCRIBES THE PROTOTYPE and stays a constant —
-// every stamped copy measures the same scale, and only the position is
-// per-row (SliderBound). The wire can bind min and max per element too;
-// nothing asks for a list whose rows are measured differently.
-//
-// IT TAKES NO HANDLER, for Tpl.Button's reason: a stamped copy's moves
-// name WHICH copy by key path, so the app registers once against the
-// node (App.OnValueChangedNode).
+// blueprint. THE RANGE DESCRIBES THE PROTOTYPE and stays constant; only
+// the position is per-row (SliderBound). No handler, for Tpl.Button's
+// reason — register against the node (App.OnValueChangedNode).
 func (t *Tpl) Slider(min, max, value float64) Node {
 	n := t.Widget(KindSlider)
 	t.tx.emit(TxSetMin(n.id, min))
@@ -3597,8 +3023,7 @@ func (t *Tpl) Slider(min, max, value float64) Node {
 }
 
 // SliderBound creates a slider over min..max whose POSITION comes from
-// a varying source — the row's own number, which is the reading a list
-// of sliders is for.
+// a varying source.
 func (t *Tpl) SliderBound[S interface {
 	Signal[float64] | Field[float64]
 }](min, max float64, src S) Node {
@@ -3609,18 +3034,14 @@ func (t *Tpl) SliderBound[S interface {
 	return n
 }
 
-// Select creates a dropdown over fixed options in the blueprint — each
-// option becomes a label child, the same construction as Tx.Select — at
+// Select creates a dropdown over fixed options in the blueprint at
 // selected, the initial 0-based index. SelectBound sources the index
 // per row; picks register against the node (App.OnValueChangedNode).
 //
-// THE OPTION LIST CANNOT VARY PER ROW, and that is the protocol's
-// limit rather than this surface's: a choice widget's options are its
-// label CHILDREN, a blueprint's children are fixed at declaration, and
-// the one construct that varies a child count per copy is a nested For
-// — whose container is a Column, which the scene's "labels only" rule
-// rejects inside a choice widget. The selected INDEX is the part that
-// varies, and it does (docs/sugar-pass-plan.md §2).
+// THE OPTION LIST CANNOT VARY PER ROW — the protocol's limit, not this
+// surface's: a choice widget's options are its label CHILDREN and a
+// blueprint's children are fixed at declaration. The selected INDEX is
+// the part that varies (docs/sugar-pass-plan.md §2).
 func (t *Tpl) Select(options []string, selected int) Node {
 	n := t.choiceOf(KindSelect, options)
 	t.tx.emit(TxSetValue(n.id, float64(selected)))
@@ -3628,13 +3049,9 @@ func (t *Tpl) Select(options []string, selected int) Node {
 }
 
 // SelectBound creates a dropdown whose selected index comes from a
-// varying source.
-//
-// THE INDEX RIDES A float64 like every numeric slot, so a record field
-// backing one is declared float64 and not int64: the scene checks the
-// field's wire type against the property's at declaration, exactly, and
-// `value` is F64 there. The constraint says so at compile time rather
-// than letting the app die at startup.
+// varying source. THE INDEX RIDES A float64, so a record field backing
+// one is declared float64: the scene checks a bound field's wire type
+// against the property's exactly, and `value` is F64 there.
 func (t *Tpl) SelectBound[S interface {
 	Signal[float64] | Field[float64]
 }](options []string, src S) Node {
@@ -3643,9 +3060,8 @@ func (t *Tpl) SelectBound[S interface {
 	return n
 }
 
-// Radio creates a radio group over fixed options in the blueprint — the
-// choice contract (see Tpl.Select) in its inline presentation: same
-// option children, same 0-based selected index.
+// Radio is Tpl.Select's inline presentation: same option children, same
+// 0-based selected index.
 func (t *Tpl) Radio(options []string, selected int) Node {
 	n := t.choiceOf(KindRadio, options)
 	t.tx.emit(TxSetValue(n.id, float64(selected)))
@@ -3662,21 +3078,18 @@ func (t *Tpl) RadioBound[S interface {
 	return n
 }
 
-// Image creates an image displaying constant encoded bytes in the
-// blueprint: one registration at declaration, and every stamped copy
-// shows it. ImageBound reads a blob signal or the row's own blob field
-// — a per-row picture, which is what a list of anything with a
-// thumbnail wants.
+// Image displays constant encoded bytes in the blueprint: ONE
+// registration at declaration, shared by every stamped copy.
+// ImageBound is the per-row flavor.
 func (t *Tpl) Image(source []byte) Node {
 	n := t.Widget(KindImage)
 	t.tx.emit(TxSetSource(n.id, uint64(blobWire(source))))
 	return n
 }
 
-// ImageBound creates an image whose bytes come from a varying source.
-// A blob signal re-registers its bytes on every write (see Tx.Write); a
-// blob FIELD is the per-row case — the record schema admits ValueBlob,
-// so a thumbnail column is an ordinary field.
+// ImageBound creates an image whose bytes come from a varying source. A
+// blob signal re-registers its bytes on every write; a blob FIELD is the
+// per-row case.
 func (t *Tpl) ImageBound[S interface {
 	Signal[[]byte] | Field[[]byte]
 }](src S) Node {
@@ -3694,31 +3107,22 @@ func (t *Tpl) Column(body func()) Node {
 	return t.containerOf(KindColumn, body)
 }
 
-// Scroll is a vertical scroll viewport over exactly one child in the
-// blueprint, per stamped copy: the template twin of Tx.Scroll.
-//
-// The live zone says to chain .Grow(1) so the enclosing track
-// constrains it; a Node has no chain, so the template spelling is
-// t.SetGrow(n, 1) beside the constructor — and a stamped viewport
-// WITHOUT one keeps its content's natural size and cannot scroll. The
-// "exactly one child" rule is still checked on the live AddChild arm
-// only, so nothing rejects a second child in a blueprint; that one is
-// not promised above.
+// Scroll is a vertical scroll viewport over exactly one child per
+// stamped copy. A Node has no chain, so the template spelling of the
+// live zone's .Grow(1) is t.SetGrow(n, 1) beside the constructor — a
+// stamped viewport WITHOUT one cannot scroll. The "exactly one child"
+// rule is checked on the live AddChild arm only, so nothing rejects a
+// second child in a blueprint.
 func (t *Tpl) Scroll(body func()) Node {
 	return t.containerOf(KindScroll, body)
 }
 
-// Grid creates a grid laying each stamped copy's children row-major
-// into columns columns — each column at its NATURAL width, aligned
-// across rows: the template twin of Tx.Grid. THE COLUMN COUNT
-// DESCRIBES THE PROTOTYPE, so it is a constant and not a source: a
-// shape that varied per copy would not be one grid.
+// Grid lays each stamped copy's children row-major into columns
+// columns. THE COLUMN COUNT DESCRIBES THE PROTOTYPE, so it is a
+// constant: a shape that varied per copy would not be one grid.
 func (t *Tpl) Grid(columns int, body func()) Node {
 	parent := t.Widget(KindGrid)
-	// The columns write lands BEFORE the body opens, as it does in the
-	// live twin: the body's constructors parent into this node, and a
-	// property of the container written after its children is a
-	// different record order for no reason.
+	// The columns write lands BEFORE the body opens, as in the live twin.
 	t.tx.emit(TxSetColumns(parent.id, float64(columns)))
 	t.tx.app.parents = append(t.tx.app.parents, parent.id)
 	if body != nil {
@@ -3728,10 +3132,8 @@ func (t *Tpl) Grid(columns int, body func()) Node {
 	return parent
 }
 
-// Spacer is PURE SUGAR for an empty grown column in the blueprint: it
-// consumes the leftover main-axis space between its siblings (the grow
-// contract; no new vocabulary reaches a backend). The template twin of
-// Tx.Spacer, which spells the same two records as a chain.
+// Spacer is an empty grown column in the blueprint, consuming the
+// leftover main-axis space between its siblings.
 func (t *Tpl) Spacer() Node {
 	n := t.Widget(KindColumn)
 	t.tx.emit(TxSetGrow(n.id, 1))
@@ -3748,10 +3150,9 @@ func (t *Tpl) containerOf(kind uint32, body func()) Node {
 	return parent
 }
 
-// choiceOf builds a choice widget's option children — the shared half
-// of Select and Radio, which differ only in kind and in where their
-// index comes from. The caller writes the index AFTER this returns, so
-// the const and sourced flavors share one construction.
+// choiceOf builds a choice widget's option children, shared by Select
+// and Radio. The caller writes the index AFTER this returns, so the
+// const and sourced flavors share one construction.
 func (t *Tpl) choiceOf(kind uint32, options []string) Node {
 	n := t.Widget(kind)
 	t.tx.app.parents = append(t.tx.app.parents, n.id)
@@ -3764,16 +3165,9 @@ func (t *Tpl) choiceOf(kind uint32, options []string) Node {
 }
 
 // The four lowerings the *Bound constructors share, one per wire value
-// type. Each is the base surface's half of the template zone's source
-// universe: a signal every copy follows, or a field of the row the copy
-// was stamped for. The third arm — a raw field PROJECTION — needs the
-// record type and so lives on RecordCollection and SumCase; the
-// constant arm is the constructor these sit beside.
-//
-// Written as generic methods (Go 1.27) so the admissible sources are
-// spelled ONCE per value type rather than once per constructor: the
-// union in each constraint is the arm list, and a caller's own type
-// parameter satisfies it by carrying the same one.
+// type: a signal every copy follows, or a field of the row the copy was
+// stamped for. The third arm — a raw field PROJECTION — needs the
+// record type and lives on RecordCollection and SumCase.
 
 func (t *Tpl) applyText[S interface {
 	Signal[string] | Field[string]
@@ -3820,11 +3214,9 @@ func (t *Tpl) applyBlob[S interface {
 }
 
 // applyStrProp is the same lowering for the STRING PROPS — the a11y
-// trio — which differ from each other in their two wire ops and in
-// nothing else, so the ops arrive as arguments and the union is spelled
-// once rather than once per prop. The four above cannot share that
-// shape: their arms end in a named BindXField whose signature carries
-// the value type, which is the type they exist to discriminate.
+// trio — which differ only in their two wire ops, so the ops arrive as
+// arguments. The four above cannot share that shape: their arms end in
+// a named BindXField whose signature carries the value type.
 func (t *Tpl) applyStrProp[S interface {
 	Signal[string] | Field[string]
 }](n Node, src S,
@@ -3867,12 +3259,10 @@ func (t *Tpl) ForEach(c Collection, fn func(*Tpl)) Node {
 	return n
 }
 
-// ContextMenu attaches a live-built context catalog (Tx.ContextCatalog)
-// to a template node: every stamped copy shows the same catalog, and
-// each activation carries that copy's key path — the keys ARE the
-// noun (the OnClickNode encoding, received by the OnActivateNode
-// handler flavors). An item takes exactly one anchor, so a second
-// attach of the same catalog panics here.
+// ContextMenu attaches a live-built context catalog to a template node:
+// every stamped copy shows the same catalog, and each activation
+// carries that copy's key path. An item takes exactly ONE anchor, so a
+// second attach of the same catalog panics here.
 func (t *Tpl) ContextMenu(n Node, c *ContextCatalog) {
 	if c.attached {
 		panic("kaya: a context catalog takes exactly one anchor")
@@ -3896,41 +3286,27 @@ func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
 
 // --- Undo: one history over two tiers (docs/undo-plan.md D1-D6, §3) ---
 
-// Undoable makes this transaction ONE undoable step, under label.
+// Undoable makes this transaction ONE undoable step, under label. The
+// unit of undo is a NAMED GROUP, so grouping is opt-in
+// (docs/undo-plan.md D2, D8).
 //
-// The unit of undo is a NAMED GROUP declared at the opener, not every
-// transaction: handlers fire per-gesture transactions constantly and
-// most of them are consequences rather than intents, and a per-keystroke
-// editor would earn one step per character — the exact problem grouping
-// exists to solve. So a group is opt-in, which is also what keeps a
-// collaborative app free to own its own history (docs/undo-plan.md D2,
-// D8).
-//
-// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at the
-// head: a handler naturally builds first and names the step when it
-// knows what the step was, and the wire's head-of-batch rule should not
-// turn that into a footgun.
+// CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides at the head.
 //
 // WHAT A GROUP MAY HOLD is the reactive half — signal writes and
-// collection deltas, whose inverse the core derives from state it
-// already keeps. Focus is permitted and not restored. Anything else (a
-// const property write, creating a widget, Clear, showing a dialog)
-// fails at apply, naming the op: undo restores state, and state is
-// signals plus collections. The app hears the result through the window
-// construct's OnUndone.
+// collection deltas. Focus rides along and is not restored. Anything
+// else fails AT APPLY, naming the op.
 func (tx *Tx) Undoable(label string) {
 	tx.UndoableIn(0, label)
 }
 
-// UndoableIn is Undoable against an auxiliary window's ledger. Each
-// window has its own history, because Undo in one window has never
-// meant "revert what happened in another".
+// UndoableIn is Undoable against an auxiliary window's ledger; each
+// window has its own history.
 func (tx *Tx) UndoableIn(window uint64, label string) {
 	if tx.undoGroup {
 		panic("kaya: this transaction is already an undo group — one name per step")
 	}
-	// Through the ONE chokepoint, so a dead transaction refuses this
-	// like every other write; the rotate below moves what emit queued.
+	// Through the ONE chokepoint, so a dead transaction refuses this like
+	// every other write; the rotate below moves what emit queued.
 	tx.emit(TxUndoGroup(window, label))
 	head := tx.records[len(tx.records)-1]
 	copy(tx.records[1:], tx.records[:len(tx.records)-1])
@@ -3941,20 +3317,18 @@ func (tx *Tx) UndoableIn(window uint64, label string) {
 // UndoDelta is what an undo or a redo PUT BACK: the core-authoritative
 // statement of the restored state (docs/undo-plan.md D5).
 //
-// A STATEMENT, NOT A REPLAY. Every member says what a thing now IS, so
-// a mirror that applies one twice is still correct and no binding
-// diffs anything of its own.
+// A STATEMENT, NOT A REPLAY: every member says what a thing now IS, so
+// a mirror that applies one twice is still correct.
 type UndoDelta struct {
-	// Signals restored to a value: the reactive half's whole vocabulary
-	// on the scalar side.
+	// Signals restored to a value.
 	Signals []UndoSignal
 	// Fields whose text the core put back. A coarse episode restore is a
-	// programmatic write, so nothing else would ever tell an app that
-	// folds text_changed into its model.
+	// programmatic write, so nothing else tells an app that folds
+	// text_changed into its model.
 	Texts []UndoText
 	// Collection entries, present or gone.
 	Entries []UndoEntry
-	// Instance orders, for the instances whose order the step changed —
+	// Instance orders, for the instances whose order the step changed:
 	// position is the one thing per-entry statements cannot carry.
 	Orders []UndoOrder
 }
@@ -3965,18 +3339,13 @@ type UndoSignal struct {
 	Value  any
 }
 
-// UndoText is one text field's restored text, named the way the edit
-// that filled it was named.
+// UndoText is one text field's restored text.
 //
-// THE IDENTITY IS THE OCCURRENCE'S, not the core's bookkeeping. An
-// empty Path means ID is a live widget's id — the one an app holds
-// from Tx.Entry, and folds through OnChange. A non-empty Path means ID
-// is a TEMPLATE NODE and Path is a stamped copy's keys, outermost
-// first: the same pair OnChangeNode hands that copy's own edits, and
-// the same pair OnClickNode hands its clicks. So an app folds this run
-// into the very model its own handlers fill, and the core's internal
-// widget id for a copy never leaves the core — an app could not
-// resolve one, and it changes every time the row is stamped again.
+// THE IDENTITY IS THE OCCURRENCE'S, not the core's bookkeeping: an empty
+// Path means ID is a live widget's id, a non-empty Path means ID is a
+// TEMPLATE NODE and Path is the stamped copy's keys — the same pair
+// OnChangeNode hands that copy's own edits. The core's internal widget
+// id for a copy never leaves the core.
 type UndoText struct {
 	ID   uint64
 	Path []any
@@ -4004,10 +3373,8 @@ type UndoOrder struct {
 }
 
 // undoShape is how one collection's entries come back from an undo: the
-// payload is wire values, the mirror holds guest values (a T for a
-// record collection, a constructor struct for a sum, the scalar itself
-// for the untyped handle), so the translation is recorded at the
-// declaration that knows the type.
+// payload is wire values and the mirror holds guest values, so the
+// translation is recorded at the declaration that knows the type.
 type undoShape struct {
 	key   func(any) any
 	value func(variant uint32, fields []any) any
@@ -4025,48 +3392,26 @@ var scalarShape = undoShape{
 	},
 }
 
-// undoReport is one decoded step: the payload the generated decoder
-// (ParseOccurrence) hands the loop for the two undo records, with the
-// window riding the tuple's id the way every other occurrence's subject
-// does. Unexported because no guest ever names it — an app hears the
-// label and the delta as OnUndone's arguments.
+// undoReport is one decoded step: what ParseOccurrence hands the loop
+// for the two undo records, with the window riding the tuple's id.
+// Unexported — an app hears the label and the delta as OnUndone's
+// arguments.
 type undoReport struct {
 	label string
 	delta UndoDelta
 }
 
-// absorbUndo folds an undo's payload into the collection mirror.
+// absorbUndo folds an undo's payload into the collection mirror — the
+// rollback journal in reverse, and the payload is core-authoritative so
+// nothing here re-derives anything. Signals and text are not mirrored
+// by this binding and pass straight to the app's handler.
 //
-// The rollback journal in reverse: Build's abort restores a snapshot
-// because nothing was shipped, while an undo restores a delta because
-// everything WAS — the core already moved, and the mirror is what would
-// otherwise be left behind. Same machinery, opposite case, and the
-// payload is core-authoritative so nothing here re-derives anything.
-//
-// Signals and text are not mirrored by this binding (there is no
-// read-back for either, by doctrine), so the two runs that carry them
-// pass straight to the app's own handler.
-//
-// NO DERIVED RECOMPUTE HERE, DELIBERATELY, and the absence is the
-// design rather than an oversight. A derived signal's write rode the
-// SAME transaction as the mutation that caused it — every collection
-// mutation calls (*Tx).recomputeDerived, which writes each compute's
-// result into the transaction in hand — so when that transaction was a
-// named step, the group banked the derived value in both of its
-// directions and the core has already restored it before this runs. The
-// signatures say the same thing: recomputing takes a *Tx and this
-// method has none. The transaction the loop makes next is the app's
-// handler's, and it comes after.
-//
-// A recompute added here would write a value the ledger never banked,
-// in a transaction the app never asked for, landing between the core's
-// restore and the app's own OnUndone. Where it agreed with the banked
-// value it would be dead code hiding the mechanism; where it disagreed
-// — a compute reading anything beyond the entries, or a derive declared
-// after that step was banked (docs/deferred.md's one residual) — the
-// screen and the ledger's record of the step would part company, and
-// the next walk through the history would jump back to the banked
-// value.
+// NO DERIVED RECOMPUTE HERE, DELIBERATELY. A derived signal's write rode
+// the SAME transaction as the mutation that caused it, so a named step
+// banked the derived value in both directions and the core has already
+// restored it. A recompute added here would write a value the ledger
+// never banked, and where it disagreed the screen and the ledger's
+// record of the step would part company (docs/deferred.md's residual).
 func (a *App) absorbUndo(delta UndoDelta) {
 	for _, e := range delta.Entries {
 		shape, known := a.shapes[e.Collection]
@@ -4114,10 +3459,9 @@ func (a *App) absorbUndo(delta UndoDelta) {
 		if in == nil {
 			continue
 		}
-		// Position by the payload's list, keeping anything the payload
-		// does not name at the end: the delta describes one instance's
-		// whole order, and an entry it never mentions is one this undo
-		// did not touch.
+		// Position by the payload's list, keeping anything it does not
+		// name at the end: an entry the delta never mentions is one this
+		// undo did not touch.
 		sorted := make([]Entry, 0, len(in.entries))
 		for _, k := range o.Keys {
 			key := shape.key(k)
@@ -4144,9 +3488,8 @@ func (a *App) OnClickNode(n Node, fn func(*Tx, []any)) {
 	a.nodeHandlers[n.id] = fn
 }
 
-// OnChange registers a handler for a live entry's edits: the widget
-// owns its text and reports each edit here; the app folds the text
-// into its own state — there is no read-back, by doctrine.
+// OnChange registers a handler for a live entry's edits: the widget owns
+// its text and reports each edit here. There is no read-back.
 func (a *App) OnChange(w Widget, fn func(*Tx, string)) {
 	a.widgetChanges[w.id] = fn
 }
@@ -4157,35 +3500,22 @@ func (a *App) OnChangeNode(n Node, fn func(*Tx, []any, string)) {
 	a.nodeChanges[n.id] = fn
 }
 
-// OnValueChanged registers a handler for a live slider's moves (or a
-// select's picks — same record, the index as a float64): the widget
-// owns its position and reports each change with the new value — the
-// entry's uncontrolled contract.
+// OnValueChanged registers a handler for a live slider's moves, or a
+// select's picks (same record, the index as a float64).
 func (a *App) OnValueChanged(w Widget, fn func(*Tx, float64)) {
 	a.widgetValues[w.id] = fn
 }
 
 // OnValueChangedNode registers a value handler for a template slider,
 // select or radio group; the handler also receives the stamped copy's
-// keys, outermost first.
-//
-// THIS WAS THE MISSING THIRD PAIR. The dispatch below splits clicks,
-// text edits and toggles into a live arm and a template-node arm, and
-// until 2026-08-10 value changes had only the live one — so a stamped
-// slider's move matched no case at all and was dropped with no error
-// anywhere, in a binding with no way to register for it either. The
-// core has always emitted it (Occurrence::InstanceValueChanged,
-// crates/kaya/src/protocol.rs) and Rust has always routed it
-// (App::on_value_node); nothing was wrong below the binding. Nobody saw
-// it because no scene puts a slider in a template — because until this
-// pass there was no template slider to put there.
+// keys, outermost first. The live/node pairing this completes is
+// docs/sugar-pass-plan.md §D2, and tplzone_test.go holds it.
 func (a *App) OnValueChangedNode(n Node, fn func(*Tx, []any, float64)) {
 	a.nodeValues[n.id] = fn
 }
 
 // OnToggle registers a handler for a live checkbox's toggles: the box
-// owns its checked bit and reports each flip here; the app folds it
-// into its own state.
+// owns its checked bit and reports each flip here.
 func (a *App) OnToggle(w Widget, fn func(*Tx, bool)) {
 	a.widgetToggles[w.id] = fn
 }
@@ -4196,38 +3526,22 @@ func (a *App) OnToggleNode(n Node, fn func(*Tx, []any, bool)) {
 	a.nodeToggles[n.id] = fn
 }
 
-// Serve dispatches occurrences ON THE CALLING GOROUTINE and returns
-// when the core has shut down. This is the app thread's whole job, and
-// it is separate from Run because WHO OWNS THE PROCESS ENTRY differs by
-// platform and nothing else does.
-//
-// On the desktops and iOS the guest owns main and LENDS it to kaya, so
-// Run spawns this loop on a second goroutine and hands the calling
-// thread to kaya_run. On Android the OS owns main (Zygote forks the
-// process, ActivityThread owns the Looper) and kaya_run is a hard panic
-// — crates/kaya/src/capi.rs:815-818 — so the shim Activity attaches and
-// the guest runs this loop on a thread the attach entry started, which
-// is what bindings/go/android.go does.
-//
-// The JVM tier already spells exactly this split, and its two launchers
-// are the shape to compare against: KayaApp.dispatchLoop() is this
-// function, guests/java-desktop/.../Main.java is Run's half, and
-// android/milestone2kt/.../MainActivity.kt:29-90 is the attach half.
+// Serve dispatches occurrences ON THE CALLING GOROUTINE and returns when
+// the core has shut down. Separate from Run because WHO OWNS THE PROCESS
+// ENTRY differs by platform and nothing else does
+// (docs/go-mobile-plan.md §D3).
 //
 // A guest never calls this directly on a platform where Run works.
 func (a *App) Serve() {
 	// The one fact Android's attach cannot learn any other way: this
-	// guest reached its dispatch loop. Nothing reads it on the desktops
-	// — bindings/go/android.go's app goroutine is the only reader, and
-	// it uses it to tell "the app ended" from "the app never started".
+	// guest reached its dispatch loop. bindings/go/android.go's app
+	// goroutine is the only reader, telling "the app ended" from "the
+	// app never started".
 	served.Store(true)
 	for {
-		// Posted work first, then the ring, then park. Draining at
-		// the TOP is what makes a wake sufficient: whatever reason
-		// the goroutine came back for, it looks here before it looks
-		// anywhere else. Posts queued after the core shuts down are
-		// dropped — the last drain before the false below is the
-		// last one there is.
+		// Posted work first, then the ring, then park. Draining at the
+		// TOP is what makes a wake sufficient. Posts queued after the
+		// core shuts down are dropped.
 		a.drainPosted()
 		kind, id, keys, payload, ready := PollOccurrence()
 		if !ready {
@@ -4297,9 +3611,7 @@ func (a *App) Serve() {
 				a.dispatch(func(tx *Tx) { fn(tx) })
 			}
 		case kind == occSectionSelected:
-			// NOT one-shot: sections never die, and the user can
-			// return any number of times (id is the section; the
-			// window rides as the payload). A programmatic
+			// NOT one-shot: sections never die. A programmatic
 			// SelectSection never lands here (the echo doctrine).
 			if fn := a.sectionSelected[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx) })
@@ -4315,8 +3627,7 @@ func (a *App) Serve() {
 				a.dispatch(func(tx *Tx) { fn(tx, choice) })
 			}
 		case kind == occClipboardResult:
-			// One-shot like the alert, and the request retires with
-			// it. EMPTY IS THE UNIVERSAL NO and arrives as a nil
+			// One-shot. EMPTY IS THE UNIVERSAL NO and arrives as a nil
 			// Representation — denied, unfocused, absent and
 			// nothing-we-accept alike, because no platform says which.
 			if fn := a.clipboardReads[id]; fn != nil {
@@ -4325,9 +3636,8 @@ func (a *App) Serve() {
 				a.dispatch(func(tx *Tx) { fn(tx, clip) })
 			}
 		// A paste rides a click tag verbatim, so it arrives on the
-		// ordinary widget/node split — one record kind, the key path
-		// deciding. Never empty: a paste that delivered nothing is
-		// not an occurrence.
+		// ordinary widget/node split. Never empty: a paste that
+		// delivered nothing is not an occurrence.
 		case kind == occPasted && len(keys) == 0:
 			if fn := a.widgetPastes[id]; fn != nil && isClip {
 				clip := representation(clipValues)
@@ -4338,11 +3648,9 @@ func (a *App) Serve() {
 				clip := representation(clipValues)
 				a.dispatch(func(tx *Tx) { fn(tx, keys, clip) })
 			}
-		// An undo moved core state without a transaction, so the
-		// model mirror follows HERE, before any handler and whether
-		// or not one is registered — an app that never asked to hear
-		// about undo still reads its own collection back correctly.
-		// The window is the id; the ledger is per window.
+		// An undo moved core state without a transaction, so the mirror
+		// follows HERE — before any handler, and whether or not one is
+		// registered. The window is the id; the ledger is per window.
 		case (kind == occUndone || kind == occRedone) && isUndo:
 			a.absorbUndo(undo.delta)
 			table := a.undone
@@ -4353,19 +3661,14 @@ func (a *App) Serve() {
 				a.dispatch(func(tx *Tx) { fn(tx, undo.label, undo.delta) })
 			}
 		case kind == occFileDialogResult:
-			// One-shot like the alert, and the id retires with it.
-			// EMPTY IS CANCEL — no platform can confirm an empty
-			// selection, so there is no sentinel to invent.
+			// One-shot. EMPTY IS CANCEL — no platform can confirm an
+			// empty selection, so there is no sentinel to invent.
 			if fn := a.fileDialogs[id]; fn != nil {
 				delete(a.fileDialogs, id)
 				a.dispatch(func(tx *Tx) { fn(tx, files) })
 			}
-		// Menu occurrences key the menu-item tables — their own
-		// id space, so neither widget nor node ids can collide
-		// with them. Node-anchored context items carry the
-		// stamped copy's keys (the keys ARE the noun); toggles
-		// carry the new state, radio groups the new 0-based
-		// index.
+		// Menu occurrences key the menu-item tables — their own id
+		// space, so neither widget nor node ids can collide with them.
 		case kind == occMenuActivated && len(keys) == 0:
 			if fn := a.menuActivated[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx) })
@@ -4394,12 +3697,10 @@ func (a *App) Serve() {
 	}
 }
 
-// served records that some App reached its dispatch loop. Package-level
-// rather than per-App because its reader is the Android attach entry,
-// which holds no App: the guest builds one on the app thread and kaya
-// never sees it. Written from Serve, read from the app goroutine after
-// the guest's entry returns — different goroutines on the desktops, so
-// atomic rather than a plain bool.
+// served records that some App reached its dispatch loop. PACKAGE-LEVEL
+// because its reader is the Android attach entry, which holds no App.
+// Written from Serve, read from the app goroutine after the guest's
+// entry returns — different goroutines, so atomic rather than a bool.
 var served atomic.Bool
 
 // Run gives kaya the calling goroutine and RETURNS WHEN THE APP IS OVER,
@@ -4408,52 +3709,25 @@ var served atomic.Bool
 //	os.Exit(build().Run())
 //
 // and that line is the same on mac, linux, windows, iOS and Android.
+// What differs per platform is WHICH THREAD kaya was given, never
+// whether this call comes back (docs/go-mobile-plan.md §D3, which also
+// carries the Gio wart this refuses).
 //
-// THE ONE CALL MEANING TWO THINGS IS THE WART THIS AVOIDS. Gio's
-// app.Main states the alternative outright — "On most platforms Main
-// blocks forever, for Android and iOS it returns immediately to give
-// control of the main thread back to the system" (gioui.org/app/app.go)
-// — so a Gio app's `main` ends after one statement on a phone and never
-// ends on a desktop, and every line an author writes after that call is
-// live on one host and dead on the other. kaya has no such line: what
-// differs per platform is WHICH THREAD kaya was given, never whether
-// this call comes back.
-//
-// WHAT DIFFERS UNDERNEATH, and it is only who owns the process entry:
-//
-//   - Desktops and iOS: the guest owns the process main thread and lends
-//     it to the core. Run dispatches on a second goroutine and hands the
-//     caller's thread to kaya_run, which is the platform event loop.
-//   - Android: the OS owns the entry (Zygote forks the process,
-//     ActivityThread owns the Looper) and kaya_run is a hard panic
-//     there (crates/kaya/src/capi.rs:815-818). The calling goroutine is
-//     already the app thread — the attach entry started it, locked, and
-//     gave the UI thread back to the Looper — so Run dispatches on it
-//     rather than making a second one, and comes back when the core
-//     shuts down. The exit code is 0: there is no process for the guest
-//     to hand a status to.
-//
-// runtime.GOOS IS A CONSTANT, so exactly one of those arms survives
-// compilation while BOTH are type-checked by every `go build` on every
-// platform — the same reason bindings/go/android.go carries no build tag.
+// runtime.GOOS IS A CONSTANT, so exactly one arm survives compilation
+// while BOTH are type-checked by every `go build` on every platform.
 func (a *App) Run() int {
 	return a.runWith(hostedEntry, a.Serve, Run)
 }
 
 // runWith is Run's body with its two blocking halves injected, so the
-// contract above can be TESTED rather than asserted in a comment: a test
-// on any host can drive the hosted arm and prove that it does not come
-// back while serve is running (app_test.go's TestRunBlocks*).
-//
-// `hosted` means the OS owns the process entry and handed kaya a thread,
-// which is Android and nothing else today.
+// contract above is TESTED rather than asserted: a test on any host can
+// drive the hosted arm (entry_test.go). `hosted` means the OS owns the
+// process entry, which is Android and nothing else today.
 func (a *App) runWith(hosted bool, serve func(), enterCore func() int) int {
 	if hosted {
-		// SERVE ON THE CALLING GOROUTINE — not `go serve()`. This is the
-		// clause that makes Run blocking here, and it is load-bearing
-		// twice over: the caller is the locked OS thread the attach
-		// entry made for exactly this, and the occurrence ring has one
-		// consumer.
+		// SERVE ON THE CALLING GOROUTINE — not `go serve()`. The caller
+		// is the locked OS thread the attach entry made for exactly
+		// this, and the occurrence ring has one consumer.
 		serve()
 		return 0
 	}

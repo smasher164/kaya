@@ -11,26 +11,13 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
- * kaya's idiomatic surface for the JVM: the structural core.
+ * kaya's idiomatic surface for the JVM: id allocation, template scoping
+ * and occurrence dispatch, layered over KayaRing (the JNI ring access)
+ * and the generated wire vocabulary (KayaWire). See DESIGN.md's binding
+ * conventions.
  *
- * Three jobs, layered over KayaRing (the JNI ring access) and the
- * generated wire vocabulary (KayaWire):
- *
- * <ul>
- *   <li>id allocation: signals, widgets, collections, and template
- *       nodes come from per-space counters behind distinct types, so no
- *       app hand-numbers the id spaces — and the compiler keeps
- *       blueprint nodes (Node) from being used where live widgets
- *       (Widget) belong;
- *   <li>template scoping: forEach and when take a Consumer&lt;Tpl&gt;
- *       whose body declares the blueprint, bracketing the records;
- *   <li>occurrence dispatch: handlers register per button; the app loop
- *       consumes the ring with the platform's hand-won recipe (Unsafe
- *       fenced access on raw addresses; see the git history for the ART
- *       findings) and routes each click, handing template-node handlers
- *       the stamped copy's key path. Handlers receive their transaction
- *       explicitly; it submits when the handler returns.
- * </ul>
+ * <p>The ring is read with Unsafe fenced access on raw addresses, which
+ * is the one formulation ART does not break (docs/traps.md).
  */
 public final class KayaApp {
     // Work handed over by other threads, waiting to run as transactions
@@ -43,14 +30,10 @@ public final class KayaApp {
     /** The closed standard-command vocabulary (DESIGN.md, Menus):
      * macOS places this one in the application menu, and every other
      * host leaves the item where the app declared it. */
-    // A NAMED VOCABULARY FOR THE CLOSED HALF, exactly as the menu roles
-    // are. The accept list is open-ended — a custom format id is any
-    // app-chosen string — so the four closed kinds cannot be a mask; but
-    // they can be spelled once here instead of quoted at every call site.
+    // A NAMED VOCABULARY FOR THE CLOSED HALF of the accept list, because
     // A MISTYPED BARE STRING IS SILENT: it becomes a custom format id no
     // clipboard will ever offer, so Paste stays dead and the paste hook
-    // never fires, with nothing to see anywhere. A custom id has no
-    // constant by nature — the app that defines it names it.
+    // never fires, with nothing to see anywhere.
     public static final String ACCEPT_TEXT = "text";
 
     public static final String ACCEPT_HTML = "html";
@@ -66,32 +49,27 @@ public final class KayaApp {
      * what the clipboard offers and what that widget accepts.
      *
      * <p>GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only
-     * the widget knows what is selected, so an app cannot assemble the
-     * payload for "copy the selected text" out of the data layer. Copy
-     * of a selection is therefore necessarily a command, and Paste is
-     * its mirror. copy() and readClipboard() are for overriding that
-     * default and for targets with no native behaviour. */
+     * the widget knows what is selected. copy() and readClipboard() are
+     * for overriding that default and for targets with no native
+     * behaviour. */
     public static final String ROLE_CUT = "cut";
 
     public static final String ROLE_COPY = "copy";
 
     public static final String ROLE_PASTE = "paste";
 
-    /** The same gesture layer one tier deeper (docs/undo-plan.md D6).
-     * Undo asks the FOCUSED widget first — a text widget whose native
+    /** Undo asks the FOCUSED widget first — a text widget whose native
      * stack has something to give answers before the core's ledger does
-     * — and works out its own enablement from that same question, which
-     * is why these are roles and not app-authored actions. An app that
-     * declares them writes nothing else for undo except
+     * — and works out its own enablement (docs/undo-plan.md D6). An app
+     * that declares them writes nothing else for undo except
      * {@link Tx#undoable}. */
     public static final String ROLE_UNDO = "undo";
 
     public static final String ROLE_REDO = "redo";
 
     /**
-     * A container's cross-axis child placement (the align spec enum;
-     * wire values pinned by the generated KayaWire constants).
-     * Baseline is rows-only — the scene rejects it on columns.
+     * A container's cross-axis child placement. Baseline is rows-only —
+     * the root rejects it on columns.
      */
     public enum Align {
         START(0), CENTER(1), END(2), STRETCH(3), BASELINE(4);
@@ -105,30 +83,20 @@ public final class KayaApp {
 
     /**
      * SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
-     * never how it looks. A closed vocabulary — an app picks a meaning
-     * and each platform spells it in its own chrome (red text on Apple,
-     * an error-role container on Material, {@code .destructive-action}
-     * on GTK), which is the whole reason this is an enum and not a
-     * color.
-     *
-     * <p>Each variant fits one kind, and the ROOT refuses the misfits at
-     * declare time in one sentence naming both sides — a destructive
-     * label never reaches a backend to be improvised on.
+     * never how it looks. Each variant fits one kind, and the ROOT
+     * refuses the misfits at declare time.
      *
      * <p>Not to be confused with the {@code ROLE_*} string constants
-     * above: those are the MENU role vocabulary (the platform's own
-     * Cut/Copy/Paste items), a different tier with a different wire
-     * prop.
+     * above: those are the MENU role vocabulary, a different tier with a
+     * different wire prop.
      */
     public enum Role {
         /** An action whose press destroys something — buttons. */
         DESTRUCTIVE(KayaWire.ROLE_DESTRUCTIVE),
-        /** THE primary action, one per dialog's worth of emphasis —
-         * buttons. */
+        /** THE primary action — buttons. */
         PROMINENT(KayaWire.ROLE_PROMINENT),
         /** A text hierarchy heading — labels. The platform's heading
-         * text style AND the accessibility heading trait assistive
-         * users skim by. */
+         * text style AND the accessibility heading trait. */
         HEADING(KayaWire.ROLE_HEADING);
 
         final long wire;
@@ -141,25 +109,12 @@ public final class KayaApp {
     /**
      * THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
      * docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
+     * An app names a CONCEPT and each backend draws its own platform's
+     * glyph. The blob {@code icon} slot stays for app-specific art.
      *
-     * <p>An app names a CONCEPT and each backend draws its own platform's
-     * glyph for it: {@code COPY} is {@code doc.on.doc} on Apple,
-     * {@code content_copy} on Material, {@code edit-copy-symbolic} on
-     * Adwaita, and no single asset is right on all three — SF Symbols are
-     * license-locked to Apple platforms, so a shared one is not even
-     * legal. The platform sets also metric-match the text beside them
-     * (weight, baseline) while a blob cannot. The blob {@code icon} slot
-     * stays for genuinely app-specific art.
-     *
-     * <p>Closed, and small on purpose — the {@link Role} trick one tier
-     * over. Apple keeps its own semantic set to fifteen entries. Growing
-     * it is a spec change with its gates, never a per-app escape hatch.
-     *
-     * <p>THE WIRE VALUES ARE APPEND-ONLY. A new concept takes 21;
-     * renumbering silently redraws every shipped app's menus. They are
-     * read off the generated {@code KayaWire.SYMBOL_*} constants rather
-     * than written out here, so this file cannot hold a number the spec
-     * has moved.
+     * <p>Growing the set is a spec change, never a per-app escape hatch,
+     * and THE WIRE VALUES ARE APPEND-ONLY: renumbering silently redraws
+     * every shipped app's menus.
      */
     public enum Symbol {
         ADD(KayaWire.SYMBOL_ADD),
@@ -202,21 +157,14 @@ public final class KayaApp {
 
     /**
      * WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (spec enum
-     * "platform"; docs/styling-plan.md Slice 2b): one entry per backend
-     * roster row, closed.
+     * "platform"; docs/styling-plan.md Slice 2b).
      *
      * <p>AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
      * {@code Platform.current()} and there will not be — and Java is the
      * binding that proves why: the JVM reports {@code os.name = Linux}
      * on Android, so a guest resolving its own platform here would
-     * silently ship the linux family to every phone. It does not have to
-     * ask: every row travels to every backend on the wire, and each
-     * backend picks its own, because a LOWERING is its platform even
-     * though a binding is not.
-     *
-     * <p>The wire values are read off the generated {@code
-     * KayaWire.PLATFORM_*} constants rather than written out here, so
-     * this file cannot hold a number the spec has moved.
+     * silently ship the linux family to every phone. Every row travels
+     * to every backend, and each backend picks its own.
      */
     public enum Platform {
         MAC(KayaWire.PLATFORM_MAC),
@@ -232,30 +180,22 @@ public final class KayaApp {
         }
     }
 
-    // Which per-appearance brand overrides ride the set_brand_accent
-    // record (Tx.brandAccent packs them). HAND-WRITTEN, because the
-    // mask bits are the one part of that record the generator emits no
-    // constant for: they are named here so the two numbers are said
-    // once, with their meaning, rather than as bare 1 and 2 inside the
-    // call.
+    // The brand/identity record mask bits. HAND-WRITTEN, because they are
+    // the one part of those records the generator emits no constant for,
+    // so they are named once here rather than left as bare numbers in the
+    // calls. Each says a slot in the record's tail means something (an
+    // empty string rides there when it does not, so the field count never
+    // varies with the payload).
     private static final int BRAND_MASK_LIGHT = 1;
     private static final int BRAND_MASK_DARK = 2;
-    // The same for set_brand_typeface's one mask bit: it says a font
-    // BLOB rides in the record's last slot (an empty string rides there
-    // when it does not, so the field count never varies with the
-    // payload).
     private static final int TYPEFACE_MASK_FONT = 1;
-    // And the same for set_app_identity's one mask bit: it says an icon
-    // BLOB rides in the record's last slot (an empty string rides there
-    // when it does not).
     private static final int IDENTITY_MASK_ICON = 1;
 
     private long signals, widgets, collections, nodes, menuItems;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
-    // Menu dispatch tables, keyed by MENU ITEM id — their own id
-    // space, separate from every widget/node table ("two tables,
-    // always" — now N tables, still always). The node flavors receive
-    // the stamped copy's key path (the keys ARE the noun).
+    // Menu dispatch tables, keyed by MENU ITEM id — their own id space,
+    // separate from every widget/node table. The node flavors receive
+    // the stamped copy's key path.
     final Map<Long, Consumer<Tx>> menuActivated = new HashMap<>();
     final Map<Long, BiConsumer<Tx, List<Object>>> menuActivatedNode = new HashMap<>();
     final Map<Long, BiConsumer<Tx, Boolean>> menuToggled = new HashMap<>();
@@ -287,39 +227,31 @@ public final class KayaApp {
             new java.util.HashMap<>();
     private final java.util.Map<Long, PasteHandler> nodePastes = new java.util.HashMap<>();
     private long nextClipboardRead;
-    // Undo/redo handlers, keyed by WINDOW because the ledger is: Undo in
-    // one window has never meant "revert what happened in another". NOT
-    // one-shot — the section-selected stance rather than the alert's; a
-    // history is walked as often as the user likes.
+    // Undo/redo handlers, keyed by WINDOW because the ledger is. NOT
+    // one-shot, unlike the alert's: a history is walked as often as the
+    // user likes.
     private final java.util.Map<Long, UndoHandler> undone = new java.util.HashMap<>();
     private final java.util.Map<Long, UndoHandler> redone = new java.util.HashMap<>();
     // How to rebuild a collection entry's model value from the wire
     // fields an undo hands back. Registered where the collection is
-    // declared, because that is the only place the guest's type is
-    // known — the model keeps the guest's own object, while the delta
-    // is core-authoritative wire values.
+    // declared, the only place the guest's type is known.
     final Map<Long, java.util.function.BiFunction<Integer, List<Object>, Object>> rebuild =
             new HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> windowClosed = new java.util.HashMap<>();
     private final Map<Long, ToggleHandler> nodeToggles = new HashMap<>();
     // The ambient parent stack: containers push their id around their
     // body, constructors parent to the top, and 0 is the template-root
-    // sentinel (template bodies root themselves; a cross-zone addChild
-    // is structurally impossible). The ambient app/tx pair exists for
-    // the generated row traces — an Iterable is static code, and a
-    // collection is only an id (one app per guest process, the Python
-    // binding's own assumption).
+    // sentinel. The ambient app/tx pair exists for the generated row
+    // traces — an Iterable is static code (one app per guest process).
     static KayaApp ambient;
     Tx currentTx;
     final java.util.List<Long> parents = new java.util.ArrayList<>();
     int openTraces;
     // >0 while a template body is being declared (a For body, a When
-    // body, or an open row trace). openFors tracks Fors only — when()
-    // pushes nothing there — so template-scope detection needs its own
-    // counter. The template records once and replays: a model read
-    // inside its body would bake one snapshot into every stamp as
-    // silently dead data, so mirror reads throw while this is armed;
-    // live-zone, handler, and build reads stay legal.
+    // body, or an open row trace); openFors tracks Fors only. The
+    // template records once and replays, so a model read inside its body
+    // would bake one snapshot into every stamp — mirror reads throw
+    // while this is armed; live-zone, handler and build reads stay legal.
     int tplDepth;
     // Signals recomputed from a collection after each of its
     // mutations, written into the same transaction.
@@ -332,9 +264,7 @@ public final class KayaApp {
     }
 
     /** A template widget's paste handler: the stamped copy's keys, then
-     * the one representation that arrived. A paste onto a stamped row
-     * is the same event as a paste onto a live one, exactly as a click
-     * is. */
+     * the one representation that arrived. */
     public interface PasteHandler {
         void accept(Tx tx, List<Object> keys, Representation clip);
     }
@@ -348,8 +278,7 @@ public final class KayaApp {
     /** A template slider's or choice widget's change handler: the
      * stamped copy's keys, then the new value — a choice widget's being
      * its 0-based option index, widened, because the wire carries every
-     * Value as an F64 and a template constructor takes no handler to
-     * narrow it inside. */
+     * Value as an F64. */
     public interface ValueHandler {
         void accept(Tx tx, List<Object> keys, double value);
     }
@@ -363,19 +292,14 @@ public final class KayaApp {
     /** One signal the undo put back. */
     public record UndoSignal(long signal, Object value) {}
 
-    /** One field's restored text, NAMED THE WAY THE EDIT THAT FILLED IT
-     * was named: an EMPTY {@code path} means {@code id} is a live
-     * widget's, and a non-empty one means it is the template node of a
-     * stamped copy, at that key path — the same identity tag a click or
-     * a paste on a copy already carries.
+    /** One field's restored text: an EMPTY {@code path} means {@code id}
+     * is a live widget's, and a non-empty one means it is the template
+     * node of a stamped copy, at that key path.
      *
-     * <p>THE DELTA IS THE ONLY NOTIFICATION for this run: restoring a
-     * typing episode is a programmatic write, and a programmatic write
-     * never echoes, so an app folding {@code onChange} into its own
-     * model would go stale on exactly this step if the payload did not
-     * carry it (docs/undo-plan.md D5). An app with two rows needs the
-     * path for the same reason: a text with no name could only be put
-     * back in the field the app guessed. */
+     * <p>THE DELTA IS THE ONLY NOTIFICATION: restoring a typing episode
+     * is a programmatic write and never echoes, so an app folding
+     * {@code onChange} into its own model would go stale on exactly this
+     * step if the payload did not carry it (docs/undo-plan.md D5). */
     public record UndoText(long id, List<Object> path, String text) {}
 
     /** One collection entry's restored state. {@code present} false is
@@ -399,10 +323,7 @@ public final class KayaApp {
      *
      * <p>A STATEMENT, NOT A REPLAY. Every member says what a thing now
      * IS, so a mirror that applies one twice is still correct and no
-     * binding diffs anything of its own. The core owns the truth; the
-     * eight bindings fold the same payload the way they already fold a
-     * rollback journal, which is what keeps mirror drift to one
-     * implementation instead of eight.
+     * binding diffs anything of its own.
      */
     public record UndoDelta(
             List<UndoSignal> signals,
@@ -455,10 +376,8 @@ public final class KayaApp {
      *
      * <p>INTEGER COUNTS AS I64 BECAUSE THE WIRE SAYS SO:
      * {@code KayaWire.encodeValue} sends both Integer and Long as
-     * VALUE_I64, so a guest that writes {@code insert(tx, 7, ...)} —
-     * autoboxed to Integer — has put a numeric key in the same space
-     * the minter draws from, and the minter has to see it. Double is
-     * VALUE_F64 and Boolean VALUE_BOOL; neither can collide.
+     * VALUE_I64, so a guest that writes {@code insert(tx, 7, ...)} has
+     * put a numeric key in the same space the minter draws from.
      */
     private void absorbKey(long coll, List<Object> path, Object key) {
         long n;
@@ -538,17 +457,8 @@ public final class KayaApp {
         }
     }
 
-    /**
-     * A live widget: exactly one thing on screen. It carries the
-     * transaction that minted it so construction chains read
-     * declaratively (tx.label(s).grow(1)); the id alone is the
-     * widget's name, and a Widget stored past its build keeps naming
-     * the same widget — only the chain methods die with it.
-     */
-    /** The window-prop chain, in the construction-sugar tier. */
-    /** The alert chain: accumulates the one atomic SHOW_ALERT record
-     * and sends it at show() — a request has a send moment, unlike a
-     * window declaration. A chain that never calls show() sends
+    /** The alert chain: accumulates the one atomic SHOW_ALERT record and
+     * sends it at show(). A chain that never calls show() sends
      * nothing. */
     public static final class AlertRef {
         private final Tx tx;
@@ -605,8 +515,6 @@ public final class KayaApp {
             return this;
         }
 
-        /** Send the request, returning its id; the one answer arrives
-         * at the onResult handler. */
         public long show() {
             if (cancel.isEmpty()) {
                 throw new IllegalStateException(
@@ -625,19 +533,9 @@ public final class KayaApp {
         }
     }
 
-    /**
-     * One file the picker answered with: a handle to redeem, a display
-     * name, and localPath — a RE-OPENABLE NAME, empty unless
-     * re-opening it actually works, which measurement puts at the
-     * three desktops and neither phone (DESIGN.md, File dialogs).
-     */
     /** One representation, arriving — the sum a copy is the record of.
-     *
-     * <p>Java has sealed interfaces and records, so this is one of each
-     * and a switch is the elimination. YOU OFFER MANY AND YOU RECEIVE
-     * ONE, and the two shapes say so: a record of five optional fields
-     * would invite a guest to check five where four are structurally
-     * always empty. */
+     * YOU OFFER MANY AND YOU RECEIVE ONE, which is why this is a sealed
+     * interface and not a record of optional fields. */
     public sealed interface Representation {
         record Text(String value) implements Representation {}
 
@@ -649,9 +547,7 @@ public final class KayaApp {
         record Image(byte[] bytes) implements Representation {}
 
         /** Files, plural INSIDE one representation — the same nesting
-         * text/uri-list and CF_HDROP already have. A pasted file is the
-         * picker's own capability arriving through a second door, so it
-         * opens with the call that already exists. */
+         * text/uri-list and CF_HDROP already have. */
         record Files(java.util.List<PickedFile> value) implements Representation {}
 
         /** An app-defined format, round-tripped verbatim. */
@@ -702,13 +598,9 @@ public final class KayaApp {
     /** Join an accept list: the closed kinds by name plus any custom
      * ids, space separated.
      *
-     * <p>A LIST AND NOT A MASK, because half the set is open-ended. A
-     * custom format that could be written and never accepted would be
-     * an escape hatch that only opens outward, and round-tripping an
-     * app's own data is the whole reason to have one. Ids reach every
-     * platform's registry verbatim, so they carry no spaces — which is
-     * what makes the join unambiguous, and what this refuses to let you
-     * break. */
+     * <p>A LIST AND NOT A MASK, because half the set is open-ended. Ids
+     * reach every platform's registry verbatim, so they carry no spaces
+     * — which is what makes the join unambiguous. */
     static String acceptList(String... kinds) {
         for (String kind : kinds) {
             if (kind == null || kind.isEmpty() || kind.contains(" ")) {
@@ -722,6 +614,9 @@ public final class KayaApp {
         return String.join(" ", kinds);
     }
 
+    /** One file the picker answered with. localPath is a RE-OPENABLE
+     * NAME, empty unless re-opening actually works — the three desktops
+     * and neither phone (DESIGN.md, File dialogs). */
     public record PickedFile(long handle, String name, String localPath) {
         /**
          * Redeem the handle for real streams, plus whether it seeks.
@@ -753,28 +648,14 @@ public final class KayaApp {
      * An opened picked file: the halves THE MODE PERMITS, and whether
      * it seeks.
      *
-     * <p>THE DEFECT THIS SHAPE EXISTS TO PREVENT (docs/save-plan.md D3,
-     * measured 2026-08-09): this used to be a record holding one
-     * {@code FileInputStream}, built the same way whatever mode was
-     * asked for. The mode still reached the core and still decided the
-     * OS handle's access, so the descriptor was writable — and the
-     * binding wrapped it in a reading stream anyway. Every Java app on
-     * every platform got "Bad file descriptor" the moment it tried to
-     * write to a file the user picked, and no scene, leg or test asked
-     * for a mode other than read, so nothing said so for four
-     * milestones.
-     *
      * <p>JAVA IS THE ONE LANGUAGE THAT NEEDS TWO OBJECTS HERE, and this
-     * is the whole of the carve-out (DESIGN.md, Binding conventions —
-     * the idiom decides the spelling, never the semantics). Every other
-     * binding hands back ONE duplex object whose permitted operations
-     * follow the mode: {@code std::fs::File}, {@code FileHandle},
-     * {@code FileStream} with a {@code FileAccess}, {@code os.fdopen}
-     * with "rb"/"wb"/"r+b", GHC's {@code Handle}, {@code os.File},
-     * {@code Unix.file_descr}. Java's stream types are unidirectional
-     * and no public API wraps a descriptor in a duplex object at all
-     * ({@code RandomAccessFile} takes a path, and a channel from either
-     * stream carries that stream's one direction), so read-write hands
+     * is the whole of the carve-out (DESIGN.md, Binding conventions;
+     * docs/save-plan.md D3). Every other binding hands back ONE duplex
+     * object whose permitted operations follow the mode. Java's stream
+     * types are unidirectional and no public API wraps a descriptor in a
+     * duplex object at all ({@code RandomAccessFile} takes a path, and a
+     * channel from either stream carries that stream's one direction),
+     * so read-write hands
      * back both halves OVER ONE DESCRIPTOR — MEASURED to share one file
      * offset, which is what makes them a faithful stand-in: read three
      * bytes then write, and the write lands at three, exactly as the
@@ -848,12 +729,10 @@ public final class KayaApp {
             return out;
         }
 
-        /** Whether the handle supports random access. */
         public boolean seekable() {
             return seekable;
         }
 
-        /** The mode this was opened with — one of KayaWire's three. */
         public int mode() {
             return mode;
         }
@@ -875,56 +754,64 @@ public final class KayaApp {
     }
 
     /**
+     * WHAT THIS HOST CAN DO — crates/kaya/src/app.rs carries the
+     * canonical note. Named booleans, never the bits.
+     *
+     * <p>CAPABILITIES INFORM; WALLS REFUSE: a false here is not what
+     * makes a call illegal, it lets a guest ask before it walks into the
+     * wall.
+     *
+     * <p>THE JVM TIER NEEDS THIS MOST: one source is compiled twice
+     * (javac for the desktops, gradle for Android) and Java has no
+     * conditional compilation, so a guest here cannot spell a platform
+     * predicate the way Rust's {@code #[cfg]} and Go's build tags do.
+     *
+     * @param auxWindows the host can materialize a surface beside the
+     *     primary one ({@code tx.createWindow}, {@code tx.mountIn}).
+     *     False on Android, whose system owns surface geometry; there
+     *     {@code createWindow} aborts at the root.
+     */
+    public record Capabilities(boolean auxWindows) {}
+
+    /**
+     * The core's number written again — there is no header on this tier
+     * to read {@code KAYA_CAP_AUX_WINDOWS} out of, the way Go's cgo and
+     * Swift's bridging header do. tools/check-sugar-surface.sh reads the
+     * authoritative value out of crates/kaya/src/scene.rs and fails if
+     * this line disagrees, so the copy cannot go stale in silence.
+     */
+    private static final long CAP_AUX_WINDOWS = 1;
+
+    /**
+     * This host's capabilities. Constant for the life of the process,
+     * so asking once and remembering is fine.
+     */
+    public static Capabilities capabilities() {
+        long bits = KayaRing.capabilities();
+        return new Capabilities((bits & CAP_AUX_WINDOWS) != 0);
+    }
+
+    /**
      * OPEN AN ASSET — a file this app's own BUILD put where the running
-     * program can find it (docs/assets-plan.md, ratified 2026-08-18):
-     * the vendored typeface, the app's mark, a licence text.
+     * program can find it (docs/assets-plan.md).
      *
      * <p>{@code name} is a relative path under the asset root, spelled
      * with {@code /} — {@code KayaApp.asset("fonts/sora-wght.ttf")}. The
-     * ROOT is kaya's problem and not an app's: a directory beside the
-     * program on the desktops, the APK's own {@code assets/} on Android,
-     * and one environment variable ({@code KAYA_ASSET_DIR}) overrides
-     * the whole root for a lane that staged it elsewhere. No guest reads
-     * an environment variable and no guest carries a repo-relative
-     * default; both used to be hand-written once per language, and one
-     * of those eight copies had a language-specific trap severe enough
-     * to have earned its own gate.
+     * root is kaya's problem and not an app's; no guest reads an asset
+     * environment variable or carries a repo-relative default
+     * (tools/check-assets.sh).
      *
-     * <p>A MISS THROWS, with the core's sentence and nothing added.
-     * There is one author for that sentence (crates/kaya/src/assets.rs)
-     * so a Java guest and a Haskell guest name the same fault in the
-     * same words, and a scene can freeze them once. It is an
+     * <p>A MISS THROWS, with the core's sentence and nothing added, so
+     * every language names the same fault in the same words. An
      * {@link IllegalStateException} because a name the build did not
-     * ship is a declaration bug — the same class of mistake as a wrong
-     * scene name — and the answer never changes on a retry.
+     * ship is a declaration bug and the answer never changes on a retry.
      *
-     * <p>TWO REDEMPTIONS, and the whole point of there being two.
-     * {@link Tx#brandTypeface(String, Map, Asset)} and
-     * {@link Tx#appIdentity(String, Asset)} take the handle itself, and
-     * the bytes never enter the JVM's heap — the core hands its own
-     * buffer to the blob table. {@link Asset#bytes()} is for a guest
-     * that is ITSELF the consumer, and copies once.
+     * <p>TWO REDEMPTIONS. {@link Tx#brandTypeface(String, Map, Asset)}
+     * and {@link Tx#appIdentity(String, Asset)} take the handle itself
+     * and the bytes never enter the JVM's heap; {@link Asset#bytes()} is
+     * for a guest that is ITSELF the consumer, and copies once.
      *
-     * <p>FILE-LIKE READING IS BINDING-SIDE SUGAR OVER THESE BYTES and
-     * never a core surface. Six of the eight bindings wrap them in the
-     * language's own standard in-memory reader — std::io::Cursor,
-     * io.BytesIO, bytes.NewReader, MemoryStream,
-     * java.io.ByteArrayInputStream, Foundation's InputStream(data:) —
-     * and OCaml and Haskell wrap them in nothing, because neither
-     * language's dependency set carries one (OCaml's In_channel only
-     * wraps a real channel; base has no in-memory Handle) and kaya will
-     * not add a package to a guest's build to invent one. In those two
-     * the byte value IS the reader — Bytes.t and
-     * Data.ByteString.ByteString — and every reading idiom the language
-     * has applies to it directly. That is the whole of the carve-out
-     * (DESIGN.md, Binding conventions): the idiom decides the spelling,
-     * and here two idioms have no second spelling to decide on.
-     *
-     * <p>READ-ONLY, STRUCTURALLY: there is no mode argument anywhere on
-     * this surface, and no file descriptor either. A descriptor was
-     * {@link PickedFile}'s necessity — a provider-opened file with no
-     * path behind it — and it is not ours: kaya resolved the name and
-     * produced the bytes itself.
+     * <p>READ-ONLY, STRUCTURALLY: no mode argument, no descriptor.
      *
      * <p>EACH CALL READS. No cache, no watch, no reload.
      */
@@ -945,31 +832,13 @@ public final class KayaApp {
      * carry, handed over without throwing. {@code ""} means the name
      * resolves.
      *
-     * <p>WHY THIS EXISTS WHEN THE THROW ALREADY CARRIES IT. Unwinding is
-     * not one semantics in nine languages, and a conformance scene has to
-     * observe this sentence on five platforms. Java catches happily;
-     * Swift's miss is a {@code fatalError}, which traps rather than
-     * unwinding, so a Swift guest cannot catch a miss at all. A total
-     * query has no such split — every binding answers the same string the
-     * same way, and the scene can freeze it.
+     * <p>Line 1 (name, rule, census) is the same on every platform and is
+     * the line a scene freezes; line 2 names the resolved place, which
+     * three platforms spell three ways.
      *
-     * <p>THE SAME SENTENCE, NOT A SECOND ONE: this and
-     * {@link #asset(String)}'s throw both hand back the core's bytes, so
-     * what a scene freezes is what an app's user would have been shown.
-     *
-     * <p>NAMED FOR THE CARRYING and not for the diagnosing: the sentence
-     * has one author ({@code asset_why_not} in crates/kaya/src/assets.rs),
-     * and a {@code whyNot} here would put a diagnostic's name on a call
-     * that only decodes bytes JNI handed it.
-     *
-     * <p>TWO LINES. Line 1 — the name, the rule it broke, and the census
-     * of what the package carries — is the same on every platform and is
-     * the line a scene freezes. Line 2 names the resolved place and the
-     * route that chose it, which a bundle, a device directory and a repo
-     * checkout spell three different ways.
-     *
-     * <p>It measures rather than predicts: each call reads, so {@code ""}
-     * is a fact about the moment it was asked.
+     * <p>Why a query and not just the throw: docs/deferred.md, the assets
+     * entry. The sentence has one author, {@code asset_why_not} in
+     * crates/kaya/src/assets.rs.
      */
     public static String assetMissSentence(String name) {
         byte[] wire = name.getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -988,22 +857,14 @@ public final class KayaApp {
      * Asset's handle is released the next time any asset is opened or
      * closed.
      *
-     * <p>WHY A PHANTOM REFERENCE AND NOT A FINALIZER. Java is the one
-     * binding here with no finalizer to use: {@code Object.finalize} is
-     * deprecated for removal (JEP 421), and its replacement
-     * {@code java.lang.ref.Cleaner} arrived on Android at API 33 while
-     * this file compiles at minSdk 26 (android/kaya/build.gradle.kts) —
-     * so a Cleaner would link on the desktops and die at first use on a
-     * phone, which is precisely the failure shape this repo keeps
-     * closing. A {@link java.lang.ref.PhantomReference} on a
-     * {@link java.lang.ref.ReferenceQueue} is what a Cleaner is built
-     * out of, it has existed since Java 1.2 and Android API 1, and it
-     * needs no thread of its own: the queue is drained on the calls a
-     * program that opens assets is already making. The reference holds
-     * the HANDLE NUMBER, never the Asset — a finalizer that closes over
-     * its own subject keeps it alive forever — and that is safe because
-     * the core mints handles monotonically and never reuses one, so a
-     * late release cannot land on a live asset.
+     * <p>WHY A PHANTOM REFERENCE AND NOT A FINALIZER: {@code
+     * Object.finalize} is deprecated for removal (JEP 421), and its
+     * replacement {@code java.lang.ref.Cleaner} arrived on Android at
+     * API 33 while this file compiles at minSdk 26
+     * (android/kaya/build.gradle.kts) — a Cleaner would link on the
+     * desktops and die at first use on a phone. The reference holds the
+     * HANDLE NUMBER, never the Asset, which a finalizer closing over its
+     * own subject would keep alive forever.
      */
     public static final class Asset implements AutoCloseable {
         private static final java.lang.ref.ReferenceQueue<Asset> DEAD =
@@ -1024,10 +885,7 @@ public final class KayaApp {
         }
 
         /** Release every asset the collector has already reclaimed.
-         * Called at each open and each close, which is the only cadence
-         * that matters: a program that opens one asset and drops it
-         * holds one handle, and a program that opens them in a loop
-         * sweeps on every turn of that loop. */
+         * Called at each open and each close. */
         static void sweep() {
             java.lang.ref.Reference<? extends Asset> dead;
             while ((dead = DEAD.poll()) != null) {
@@ -1049,11 +907,7 @@ public final class KayaApp {
 
         /**
          * THE BYTES REDEMPTION: this asset's bytes, copied out of core
-         * memory. For a guest that is itself the consumer — a licence
-         * text, a JSON table, a shader.
-         *
-         * <p>A fresh array each call, so the caller owns what it gets
-         * and the core's buffer is never aliased into the JVM's heap.
+         * memory, a fresh array each call.
          */
         public byte[] bytes() {
             alive();
@@ -1061,15 +915,10 @@ public final class KayaApp {
         }
 
         /**
-         * The same bytes as a stream, for the many java.io consumers
-         * that want one — {@code javax.imageio.ImageIO.read}, a parser,
-         * a copy loop.
-         *
-         * <p>IN-MEMORY AND NOT A FILE: this is
+         * The same bytes as a stream, for the java.io consumers that
+         * want one. IN-MEMORY AND NOT A FILE: a
          * {@link java.io.ByteArrayInputStream} over {@link #bytes()},
-         * binding-side sugar with no core surface behind it and no
-         * descriptor anywhere. Nothing here blocks and nothing here can
-         * fail.
+         * with no descriptor anywhere.
          */
         public java.io.ByteArrayInputStream stream() {
             return new java.io.ByteArrayInputStream(bytes());
@@ -1079,9 +928,7 @@ public final class KayaApp {
          * THE BLOB REDEMPTION, for the consumers inside this binding:
          * register these bytes into the pending table and answer with
          * the handle the record carries. The bytes never enter the JVM's
-         * heap. Package-private on purpose — a guest names the asset at
-         * {@code brandTypeface}/{@code appIdentity} and never handles a
-         * blob id.
+         * heap. Package-private on purpose.
          */
         long blob() {
             alive();
@@ -1151,7 +998,6 @@ public final class KayaApp {
             return this;
         }
 
-        /** Send the request, returning its id. */
         public long show() {
             if (onResult != null) {
                 app.fileDialogs.put(id, onResult);
@@ -1165,12 +1011,10 @@ public final class KayaApp {
     /** Accumulates the one atomic SHOW_SAVE_DIALOG record; nothing is
      * sent until show, the picker chain's shape exactly.
      *
-     * <p>ONE ID SPACE AND ONE TABLE with the picker, because that is
-     * what the wire says: the answer comes back as a file_dialog_result
-     * and one dialog of either kind is live per process. The narrowing
-     * to at-most-one file happens HERE rather than in every app —
-     * "exactly one locator or none" is a fact of the request, not
-     * something a guest should re-derive from a list length. */
+     * <p>ONE ID SPACE AND ONE TABLE with the picker: the answer comes
+     * back as a file_dialog_result and one dialog of either kind is live
+     * per process. The narrowing to at-most-one file happens HERE rather
+     * than in every app. */
     public static final class SaveDialogRef {
         private final Tx tx;
         private final KayaApp app;
@@ -1209,7 +1053,6 @@ public final class KayaApp {
             return this;
         }
 
-        /** Send the request, returning its id. */
         public long show() {
             if (onResult != null) {
                 BiConsumer<Tx, PickedFile> handler = onResult;
@@ -1225,9 +1068,8 @@ public final class KayaApp {
     /** The copy chain: a clip record under construction. Each method
      * fills one representation, and send() puts it on the clipboard.
      *
-     * <p>A RECORD AND NOT A LIST is the whole shape — at most one per
-     * kind is structural, since a second text() replaces the field
-     * rather than needing a duplicate check the root has to run. */
+     * <p>A RECORD AND NOT A LIST: at most one per kind is structural,
+     * since a second text() replaces the field. */
     public static final class CopyRef {
         private final Tx tx;
         private String text;
@@ -1257,19 +1099,16 @@ public final class KayaApp {
             return this;
         }
 
-        /** Offer a picked file, the picker's own capability put
-         * straight on the clipboard. The bytes never move through
-         * kaya. */
+        /** Offer a picked file: the bytes never move through kaya. */
         public CopyRef file(PickedFile f) {
             files.add(f.handle());
             return this;
         }
 
-        /** An app-defined format, round-tripped verbatim. The id
-         * reaches every platform's own registry unchanged — a UTI on
-         * Apple, RegisterClipboardFormat on Windows, a target atom on
-         * X11 and Wayland, a MIME type on Android — so it carries no
-         * spaces, and kaya does nothing clever with the bytes. */
+        /** An app-defined format, round-tripped verbatim. The id reaches
+         * every platform's own registry unchanged — a UTI on Apple,
+         * RegisterClipboardFormat on Windows, a target atom on X11 and
+         * Wayland, a MIME type on Android — so it carries no spaces. */
         public CopyRef custom(String id, byte[] bytes) {
             acceptList(id);
             custom.add(new Object[] {id, bytes});
@@ -1339,8 +1178,7 @@ public final class KayaApp {
         }
 
         /** Accept an app-defined format by id. Custom formats are tried
-         * FIRST, in the order named: an app's own format round-trips
-         * its data losslessly, which is the only reason to have one. */
+         * FIRST, in the order named. */
         public ClipReadRef custom(String formatId) {
             return accept(formatId);
         }
@@ -1359,7 +1197,6 @@ public final class KayaApp {
             return this;
         }
 
-        /** Send the request, returning its id. */
         public long send() {
             if (onResult != null) {
                 app.clipboardReads.put(id, onResult);
@@ -1399,24 +1236,18 @@ public final class KayaApp {
         }
 
         /**
-         * Binds the undone handler to THIS window (per-window — handlers
-         * scope to the thing that creates them, and the ledger is:
-         * Undo in one window has never meant "revert what happened in
-         * another"): fires each time kaya routes an undo here, with the
-         * group's authored label (EMPTY for a typing episode) and what
-         * the core put back.
+         * Binds the undone handler to THIS window: fires each time kaya
+         * routes an undo here, with the group's authored label (EMPTY
+         * for a typing episode) and what the core put back.
          *
-         * <p>NOT ONE-SHOT — the onSelected stance rather than the
-         * alert's. A history is walked as often as the user likes, and
-         * the registration outlives every step.
+         * <p>NOT ONE-SHOT: a history is walked as often as the user
+         * likes, and the registration outlives every step.
          *
          * <p>THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is
          * a programmatic write, so the echo doctrine silences every
-         * occurrence it would otherwise cause — no onChange for the text
-         * it restored, no value change for the signals. This binding has
-         * already folded the payload into its own collection model
-         * before the handler runs; this is where an app folds it into
-         * ITS model.
+         * occurrence it would cause. The binding's own model is already
+         * folded before the handler runs; this is where an app folds it
+         * into ITS model.
          */
         public WindowRef onUndone(UndoHandler handler) {
             app.undone.put(id, handler);
@@ -1454,18 +1285,11 @@ public final class KayaApp {
 
         /**
          * Say this surface holds UNSAVED WORK: the backend shows its
-         * platform's own affordance — the dot in the close button on
-         * macOS, a leading {@code *} in the rendered caption on
-         * Windows, a bullet beside the header-bar title on GTK,
-         * nothing on the phones, which have none
-         * (docs/dirty-plan.md D2/D4).
+         * platform's own affordance (docs/dirty-plan.md D2/D4).
          *
-         * <p>STATE, NOT CHROME, and the title you declared is left
-         * alone: there is no marker to compose into it and no
-         * placeholder to leave room for (the rejected Qt design). It
+         * <p>STATE, NOT CHROME: the title you declared is left alone. It
          * ARMS NOTHING either — "unsaved changes, close anyway?" is
-         * {@link #vetoClose} plus a dialog, which is yours to compose,
-         * because apps legitimately differ on what it should do.
+         * {@link #vetoClose} plus a dialog, yours to compose.
          */
         public WindowRef dirty(boolean on) {
             tx.emit(KayaWire.txSetWindowDirty(id, on));
@@ -1474,18 +1298,12 @@ public final class KayaApp {
 
         /**
          * The window CONTENT INSET, in layout units — LAYOUT, not
-         * appearance (docs/styling-plan.md D3): the space kaya's own
-         * interpreters put around the mounted root. 16 unless you say
-         * otherwise; 0 is full bleed (a Sublime-shaped editor, a
-         * canvas), honored unconditionally because the inset is kaya's
-         * own padding.
+         * appearance (docs/styling-plan.md D3). 16 unless you say
+         * otherwise; 0 is full bleed.
          *
          * <p>A platform's SAFE AREA is a separate fact and is not
-         * removed by it: content extends to the safe-area edge, not
-         * past it, so a phone keeps flowing like itself at inset 0.
-         *
-         * <p>Negative has no reading — an inset is space, not an offset
-         * — and the root refuses it.
+         * removed by it: content extends to the safe-area edge, not past
+         * it. Negative is refused at the root.
          */
         public WindowRef inset(double units) {
             tx.emit(KayaWire.txSetWindowInset(id, units));
@@ -1515,13 +1333,10 @@ public final class KayaApp {
         }
 
         /**
-         * A top-level menu in this window's command catalog — the
-         * menubar rides the window construct (DESIGN.md, Menus):
-         * tx.window(0).menu("File") returns the retained grouping
-         * handle, whose creators append the children:
+         * A top-level menu in this window's command catalog (DESIGN.md,
+         * Menus): tx.window(0).menu("File") returns the retained
+         * grouping handle, whose creators append the children —
          * file.item("Save").shortcut("primary+s").onActivate(fn).
-         * Append-at-any-time: reopen the retained handle in a later
-         * transaction with tx.menu(file).
          */
         public MenuItem menu(String label) {
             MenuItem m = tx.newMenuItem(KayaWire.MENU_KIND_MENU, label, false);
@@ -1530,12 +1345,9 @@ public final class KayaApp {
         }
 
         /**
-         * A BAR-LEVEL radio group — admissible wherever a menu
-         * grouping node is (it materializes as a top-level menu with
-         * the platform's checkmark idiom). Declare only option()
-         * children; chain value() AFTER them (the Choice contract:
-         * the selected 0-based index; programmatic writes are quiet)
-         * and onSelect() for each USER pick's new index.
+         * A BAR-LEVEL radio group. Declare only option() children and
+         * chain value() AFTER them (the selected 0-based index;
+         * programmatic writes are quiet).
          */
         public MenuItem radioGroup(String label) {
             MenuItem m = tx.newMenuItem(KayaWire.MENU_KIND_RADIO_GROUP, label, false);
@@ -1545,14 +1357,10 @@ public final class KayaApp {
     }
 
     /**
-     * A live menu item: its OWN id space (the c_menu_item counter)
-     * behind its own type, so cross-use with widget or node ids is a
-     * compile error. The id alone is the item's durable name; the
-     * chain methods (props, creators, handlers) ride the transaction
-     * that minted the value and die with it — the Widget.grow
-     * discipline — and tx.menu(item) reopens a retained handle in a
-     * later transaction (append-at-any-time; props mutate freely;
-     * nothing is ever removed in v1).
+     * A live menu item. The id alone is the item's durable name; the
+     * chain methods ride the transaction that minted the value and die
+     * with it, and tx.menu(item) reopens a retained handle in a later
+     * transaction (append-at-any-time; nothing is removed in v1).
      */
     public static final class MenuItem {
         final long id;
@@ -1586,8 +1394,7 @@ public final class KayaApp {
         }
 
         /** Appends an action — a leaf command firing exactly one
-         * menu_activated occurrence (menu click OR its shortcut: ONE
-         * occurrence, one dispatch path). Chain onActivate beside it. */
+         * menu_activated occurrence for a click OR its shortcut. */
         public MenuItem item(String label) {
             return child(KayaWire.MENU_KIND_ACTION, label);
         }
@@ -1631,7 +1438,6 @@ public final class KayaApp {
             return this;
         }
 
-        /** Binds the item's label to a Str signal. */
         public MenuItem label(Signal<String> s) {
             chain().emit(KayaWire.txBindMenuLabel(id, s.id));
             return this;
@@ -1645,7 +1451,6 @@ public final class KayaApp {
             return this;
         }
 
-        /** Binds the item's enablement to a Bool signal. */
         public MenuItem enabled(Signal<Boolean> s) {
             chain().emit(KayaWire.txBindMenuEnabled(id, s.id));
             return this;
@@ -1705,12 +1510,9 @@ public final class KayaApp {
         }
 
         /** Declares this action a standard command (actions only —
-         * root-checked). The declaration is uniform; PLACEMENT is each
-         * host's business: macOS shows {@link #ROLE_SETTINGS} in the
-         * application menu, everyone else leaves the item where it was
-         * declared. One item per role, and a role never invents a
-         * chord — spell shortcut() too if the app wants one.
-         * Const-only. */
+         * root-checked). PLACEMENT is each host's business. One item per
+         * role, and a role never invents a chord — spell shortcut() too
+         * if the app wants one. Const-only. */
         public MenuItem role(String name) {
             if (ctx) {
                 throw new IllegalStateException(
@@ -1722,11 +1524,9 @@ public final class KayaApp {
         }
 
         /** The shortcut of any LEAF command — an action, a toggle, or
-         * one option of a group (window-anchored only).
-         * Canonicalized by the binding's one parser
-         * (KayaWire.canonicalizeShortcut); the shortcut is another
-         * affordance of the same item — it fires the SAME
-         * menu_activated occurrence as a click. Const-only. */
+         * one option of a group (window-anchored only). Canonicalized by
+         * KayaWire.canonicalizeShortcut; it fires the SAME occurrence a
+         * click does. Const-only. */
         public MenuItem shortcut(String spelling) {
             if (ctx) {
                 throw new IllegalStateException(
@@ -1737,19 +1537,16 @@ public final class KayaApp {
             return this;
         }
 
-        /** Binds this action's handler — it rides the declaration (no
-         * app-global menu dispatcher exists), and the action's click
-         * and its shortcut are ONE occurrence on one dispatch path, so
-         * it covers both. */
+        /** Binds this action's handler; a click and its shortcut are ONE
+         * occurrence, so it covers both. */
         public MenuItem onActivate(Consumer<Tx> fn) {
             chain();
             app.menuActivated.put(id, fn);
             return this;
         }
 
-        /** The template-node flavor: an item attached to a stamped
-         * copy reports the copy's key path, outermost first — the keys
-         * ARE the noun the command acts on. */
+        /** The template-node flavor: an item attached to a stamped copy
+         * reports the copy's key path, outermost first. */
         public MenuItem onActivateNode(BiConsumer<Tx, List<Object>> fn) {
             chain();
             app.menuActivatedNode.put(id, fn);
@@ -1831,7 +1628,6 @@ public final class KayaApp {
             return root(KayaWire.MENU_KIND_RADIO_GROUP, label);
         }
 
-        /** Attaches native grouping chrome. */
         public void separator() {
             root(KayaWire.MENU_KIND_SEPARATOR, null);
         }
@@ -1870,7 +1666,6 @@ public final class KayaApp {
             return root(KayaWire.MENU_KIND_TOGGLE, label);
         }
 
-        /** Collects a grouping root. */
         public MenuItem menu(String label) {
             return root(KayaWire.MENU_KIND_MENU, label);
         }
@@ -1880,7 +1675,6 @@ public final class KayaApp {
             return root(KayaWire.MENU_KIND_RADIO_GROUP, label);
         }
 
-        /** Collects native grouping chrome. */
         public void separator() {
             root(KayaWire.MENU_KIND_SEPARATOR, null);
         }
@@ -1990,11 +1784,12 @@ public final class KayaApp {
         }
 
         /**
-         * Weight this widget within its row/column at construction —
-         * the declarative chain. Appends to the transaction that
-         * minted the widget, so it belongs in the build body; on a
-         * Widget that outlived its build it fails loudly — use
-         * Tx.setGrow inside a live transaction for dynamic changes.
+         * Weight this widget within its row/column at construction.
+         *
+         * <p>THE DISCIPLINE EVERY CHAIN METHOD BELOW SHARES: it appends
+         * to the transaction that minted the widget, so it belongs in
+         * the build body and fails loudly on a Widget that outlived its
+         * build. Use the Tx.set* verb for a dynamic change.
          */
         public Widget grow(double weight) {
             if (tx == null || tx.closed) {
@@ -2006,11 +1801,8 @@ public final class KayaApp {
             return this;
         }
 
-        /**
-         * This container's inter-child gap at construction — the
-         * declarative chain: tx.column(() -> {...}).spacing(12).
-         * Same transaction discipline as grow.
-         */
+        /** This container's inter-child gap at construction:
+         * tx.column(() -> {...}).spacing(12). */
         public Widget spacing(double gap) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -2021,13 +1813,9 @@ public final class KayaApp {
             return this;
         }
 
-        /**
-         * This container's own padding at construction — the
-         * declarative chain: tx.row(() -> {...}).inset(8). The window
-         * inset one level down, so a full-bleed window can still hold
-         * an inset status row (the editor, which forced the prop).
-         * Same transaction discipline as grow.
-         */
+        /** This container's own padding at construction:
+         * tx.row(() -> {...}).inset(8) — the window inset one level
+         * down, so a full-bleed window can still hold an inset row. */
         public Widget inset(double pad) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -2038,12 +1826,8 @@ public final class KayaApp {
             return this;
         }
 
-        /**
-         * This container's cross-axis child placement at construction
-         * — the declarative chain:
-         * tx.row(() -> {...}).align(Align.BASELINE). Same transaction
-         * discipline as grow.
-         */
+        /** This container's cross-axis child placement at construction:
+         * tx.row(() -> {...}).align(Align.BASELINE). */
         public Widget align(Align align) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -2055,15 +1839,10 @@ public final class KayaApp {
         }
 
         /**
-         * This widget's SEMANTIC EMPHASIS at construction — the
-         * declarative chain:
-         * tx.button("Delete").role(Role.DESTRUCTIVE). Same transaction
-         * discipline as grow.
-         *
-         * <p>What the widget MEANS, never how it looks: destructive and
-         * prominent are button emphasis, heading is label hierarchy,
-         * and the root refuses a role on a kind it does not fit — at
-         * declare time, in one sentence naming both sides.
+         * This widget's SEMANTIC EMPHASIS at construction:
+         * tx.button("Delete").role(Role.DESTRUCTIVE). What the widget
+         * MEANS, never how it looks; the root refuses a role on a kind
+         * it does not fit, at declare time.
          */
         public Widget role(Role role) {
             if (tx == null || tx.closed) {
@@ -2075,11 +1854,8 @@ public final class KayaApp {
             return this;
         }
 
-        /**
-         * This widget's accessibility identifier at construction — the
-         * declarative chain: tx.entry().a11yId("name"). Same
-         * transaction discipline as grow.
-         */
+        /** This widget's accessibility identifier at construction:
+         * tx.entry().a11yId("name"). */
         public Widget a11yId(String id) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -2090,12 +1866,7 @@ public final class KayaApp {
             return this;
         }
 
-        /**
-         * This widget's spoken accessibility label at construction —
-         * the declarative chain:
-         * tx.entry().a11yId("name").a11yLabel("Full name"). Same
-         * transaction discipline as grow.
-         */
+        /** This widget's accessibility hint at construction. */
         public Widget a11yHint(String hint) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -2113,16 +1884,12 @@ public final class KayaApp {
          * <p>ONE DECLARATION, THREE JOBS: it drives whether the Paste
          * command is live while this widget is focused, it filters what
          * can reach the paste hook, and on Android it IS the native
-         * registration (setOnReceiveContentListener takes the mime
-         * types on the view). Per-widget because whether Paste should
-         * be enabled is the INTERSECTION of what the clipboard offers
-         * and what the FOCUSED target takes.
+         * registration (setOnReceiveContentListener takes the mime types
+         * on the view).
          *
          * <p>DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget
          * that declares nothing gets the platform's own insertion and
-         * reports it through the ordinary change path, which is why a
-         * plain text editor writes none of this and has working cut,
-         * copy and paste. */
+         * reports it through the ordinary change path. */
         public Widget accepts(String... kinds) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -2153,7 +1920,7 @@ public final class KayaApp {
      * {@code String.indexOf}, {@code length()} and {@code substring}
      * all count UTF-16 code units; the wire counts UTF-8 bytes, which
      * is what every binding sends and what the core validates and
-     * converts before a backend sees it (scratchpad/ranges-units.md).
+     * converts before a backend sees it (docs/ranges-units.md).
      * For ASCII the two agree, which is exactly why an unconverted
      * index ships: one CJK word earlier in the document and every
      * offset is three bytes per character short. The conformance
@@ -2240,7 +2007,7 @@ public final class KayaApp {
          * so the offset comes back 2 instead of 5 and every later
          * offset in the document is short by three (measured against
          * .NET, which substitutes U+FFFD instead and is wrong by a
-         * different amount: scratchpad/ranges-units.md §4). Neither
+         * different amount: docs/ranges-units.md §4). Neither
          * runtime raises anything. An index inside a pair is not a
          * position in the text, so it is refused here rather than
          * converted into a plausible number.
@@ -2329,8 +2096,7 @@ public final class KayaApp {
      * A collection instance handle: the collection plus the key path
      * selecting one stamped copy's table. Tx.collection() returns the
      * root (empty-path, live-zone) handle; at() steps into a copy, one
-     * key per enclosing For. Mutations and reads take the handle, so
-     * the target is spelled once.
+     * key per enclosing For.
      */
     public static final class Collection {
         final long id;
@@ -2352,9 +2118,8 @@ public final class KayaApp {
             return new Collection(id, deeper);
         }
 
-        // A For binds the collection itself — its template stamps per
-        // entry of every instance — so handing it an at(...) handle is
-        // a bug.
+        // A For binds the collection itself, so handing it an at(...)
+        // handle is a bug.
         void assertRoot() {
             if (!path.isEmpty()) {
                 throw new IllegalArgumentException(
@@ -2366,11 +2131,9 @@ public final class KayaApp {
         /**
          * The for-each form over a scalar collection: {@code for (var
          * row : items.rows())} traces the For template — the body runs
-         * once over the scalar row surface, a break is caught at
-         * submit, and the trace rides the zone it opens in, so
-         * statement traces nest (the record twin is the generated
-         * {@code <Type>Kaya.rows}; the Go {@code Collection.Rows}
-         * twin).
+         * once over the scalar row surface, a break is caught at submit,
+         * and the trace rides the zone it opens in, so statement traces
+         * nest. The record twin is the generated {@code <Type>Kaya.rows}.
          */
         public Iterable<Row> rows() {
             Collection c = this;
@@ -2415,22 +2178,15 @@ public final class KayaApp {
      * {@link Row} the scalar element's, the generated
      * {@code <Type>Kaya.Row} one per record component.
      *
-     * <p>ONE FORWARDING LIST, WHICH IS THE POINT. The zone had three
-     * surfaces in Java and each hand-listed its own subset: Tpl had
-     * label/button/checkbox/image, this façade had label/button and no
-     * image, the generated one had image/checkbox and no button. A
-     * constructor on one and not another is reachable through
-     * {@code tx.forEach} and not through {@code for (var row : …)},
-     * which is a difference no guest should have to know about, and
-     * three lists cannot be held level by anyone remembering to. So
-     * the forwards live here once and both façades inherit them; the
-     * annotation processor emits tokens and typed handlers, never a
-     * constructor list.
+     * <p>ONE FORWARDING LIST, WHICH IS THE POINT: the forwards live here
+     * once and both façades inherit them, so no surface can hand-list a
+     * subset of the zone. The annotation processor emits tokens and
+     * typed handlers, never a constructor list. tools/tpl-surfaces.py
+     * holds the two level.
      *
      * <p>Handlers register the way they do everywhere in this zone —
-     * {@code app.onClick(node, (tx, keys) -> …)} and its siblings —
-     * because a stamped copy's event names the copy: the keys ARE the
-     * noun.
+     * {@code app.onClick(node, (tx, keys) -> …)} — because a stamped
+     * copy's event names the copy.
      */
     public abstract static class RowSurface {
         private final Tpl t;
@@ -2740,14 +2496,10 @@ public final class KayaApp {
          * signal is true and unstamps when it goes false
          * ({@link Tpl#when(Signal, Consumer)}).
          *
-         * <p>FORWARDED BECAUSE THE WRONG ONE IS IN REACH. A nested For
-         * needs no forward — {@link Collection#rows()} opens its trace
-         * off the ambient transaction, which is how a for-statement
-         * nests today — but a When has no statement-level spelling at
-         * all, and the {@code tx.when} a guest would reach for instead
-         * mints a LIVE widget id where this zone needs a template node
-         * id. That emits the wrong id space with nothing to say so, so
-         * the reachable spelling has to be the right one.
+         * <p>FORWARDED BECAUSE THE WRONG ONE IS IN REACH: a When has no
+         * statement-level spelling, and the {@code tx.when} a guest
+         * would reach for instead mints a LIVE widget id where this zone
+         * needs a template node id, with nothing to say so.
          */
         public Node when(Signal<Boolean> s, Consumer<Tpl> body) {
             return t.when(s, body);
@@ -2786,12 +2538,6 @@ public final class KayaApp {
         }
     }
 
-    /**
-     * A stamped template: the For/When handle in the enclosing zone
-     * plus whatever the body chose to return — the way handles declared
-     * inside the template (nested collections, buttons) reach the
-     * handlers, since Java lambdas cannot assign captured locals.
-     */
     /** An open generated row trace: the Tpl the loop body records
      * against, and the close that ends the template. */
     public static final class RowTrace {
@@ -2808,6 +2554,12 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * A stamped template: the For/When handle in the enclosing zone plus
+     * whatever the body chose to return — the way handles declared
+     * inside the template reach the handlers, since Java lambdas cannot
+     * assign captured locals.
+     */
     public static final class Stamped<H, R> {
         public final H handle;
         public final R out;
@@ -2835,16 +2587,9 @@ public final class KayaApp {
 
         /**
          * THE ONE CHOKEPOINT: the only place that appends to a
-         * transaction. Every constructor, setter and chain method goes
-         * through it so the liveness check cannot be forgotten at a new
-         * callsite. The check used to live on the chain methods only,
-         * so a write through a Tx that had outlived its build appended
-         * into a list already submitted and never submitted again — no
-         * exception, no error, the write simply vanished.
-         *
-         * <p>Nothing invited that mistake until {@code post} arrived.
-         * Posting is exactly the reason a guest now holds a Tx near a
-         * background thread, so the guard has to be total.
+         * transaction, so the liveness check cannot be forgotten at a
+         * new callsite. A write through a Tx that outlived its build
+         * vanishes with no error (tools/check-tx-liveness.sh).
          */
         private void emit(byte[] record) {
             alive();
@@ -2853,38 +2598,24 @@ public final class KayaApp {
 
         /**
          * The head-of-batch undo marker, or null. Held apart from
-         * {@code records} rather than inserted at index 0, for two
-         * reasons that agree: the wire's rule is that the marker LEADS
-         * the batch while the call may sit anywhere in the chain, and
-         * {@link #emit} is the one and only append (a second
-         * {@code records.add} would be a write that skipped the
-         * liveness check — see tools/check-tx-liveness.sh). Prepended by
-         * {@link #submitIfAny}.
+         * {@code records} rather than inserted at index 0, because
+         * {@link #emit} must stay the one and only append (a second
+         * append would skip the liveness check — see
+         * tools/check-tx-liveness.sh). Prepended by {@link #submitIfAny}.
          */
         private byte[] undoGroup;
 
         /**
          * Make this transaction ONE undoable step, under {@code label}.
-         *
-         * <p>The unit of undo is a NAMED GROUP declared at the opener,
-         * not every transaction: handlers fire per-gesture transactions
-         * constantly and most of them are consequences rather than
-         * intents, and a per-keystroke editor would earn one step per
-         * character — the exact problem grouping exists to solve. So a
-         * group is opt-in, which is also what keeps a collaborative app
-         * free to own its own history (docs/undo-plan.md D2, D8).
+         * Opt-in per transaction (docs/undo-plan.md D2, D8).
          *
          * <p>CALLABLE ANYWHERE IN THE CHAIN, and the marker still rides
-         * at the head: a handler naturally builds first and names the
-         * step when it knows what the step was, and the wire's
-         * head-of-batch rule should not turn that into a footgun.
+         * at the head of the batch.
          *
          * <p>WHAT A GROUP MAY HOLD is the reactive half — signal writes
-         * and collection deltas, whose inverse the core derives from
-         * state it already keeps. Focus is permitted and not restored.
+         * and collection deltas. Focus is permitted and not restored.
          * Anything else (a const property write, creating a widget,
-         * clear, showing a dialog) fails at apply, naming the op: undo
-         * restores state, and state is signals plus collections. The app
+         * clear, showing a dialog) fails at apply, naming the op. The app
          * hears the result through {@link WindowRef#onUndone}.
          */
         public void undoable(String label) {
@@ -2892,9 +2623,8 @@ public final class KayaApp {
         }
 
         /**
-         * {@link #undoable} against an auxiliary window's ledger. Each
-         * window has its own history, because Undo in one window has
-         * never meant "revert what happened in another".
+         * {@link #undoable} against an auxiliary window's ledger: each
+         * window has its own history.
          */
         public void undoableIn(long window, String label) {
             alive();
@@ -3328,7 +3058,6 @@ public final class KayaApp {
             return parent;
         }
 
-        /** A button with its caption. */
         public Widget button(String text) {
             Widget w = widget(KayaWire.KIND_BUTTON);
             setText(w, text);
@@ -3363,7 +3092,6 @@ public final class KayaApp {
             return w;
         }
 
-        /** A progress bar in the platform's activity mode. */
         public Widget progressIndeterminate() {
             Widget w = widget(KayaWire.KIND_PROGRESS);
             emit(KayaWire.txSetIndeterminate(w.id, true));
@@ -3454,7 +3182,6 @@ public final class KayaApp {
             return w;
         }
 
-        /** A label bound to a signal. */
         public Widget label(Signal<String> s) {
             Widget w = widget(KayaWire.KIND_LABEL);
             bindText(w, s);
@@ -3473,7 +3200,6 @@ public final class KayaApp {
             return widget(KayaWire.KIND_TEXTAREA);
         }
 
-        /** A text field with its change handler. */
         public Widget entry(BiConsumer<Tx, String> onChange) {
             Widget w = entry();
             KayaApp.this.onChange(w, onChange);
@@ -3493,7 +3219,6 @@ public final class KayaApp {
             return w;
         }
 
-        /** An image bound to a blob signal. */
         public Widget image(Signal<byte[]> s) {
             Widget w = widget(KayaWire.KIND_IMAGE);
             bindSource(w, s);
@@ -3505,22 +3230,18 @@ public final class KayaApp {
         }
 
         /**
-         * Drop the widget's owned content — a one-shot command:
-         * momentary verbs into widget-owned state, riding this
-         * transaction like any write, so the insert and the clear
-         * beside it commit together or not at all. Fire-and-forget: no
-         * state at rest, nothing to journal, and the widget answers
-         * through its normal occurrence path (a clear arrives back as
-         * a text change with empty text, so the app's draft fold
-         * empties itself — never a side assignment).
+         * Drop the widget's owned content — a one-shot command riding
+         * this transaction, so the insert and the clear beside it commit
+         * together or not at all. The widget answers through its normal
+         * occurrence path: a clear arrives back as a text change with
+         * empty text.
          */
         public void clear(Widget w) {
             emit(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_CLEAR));
         }
 
-        /** Give the widget keyboard focus (the post-submit refocus
-         * every real form wants) — a one-shot command riding the
-         * transaction like clear. */
+        /** Give the widget keyboard focus — a one-shot command riding
+         * the transaction like clear. */
         public void focus(Widget w) {
             emit(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_FOCUS));
         }
@@ -3529,32 +3250,15 @@ public final class KayaApp {
          * DECLARE the decorated ranges of a textarea, replacing
          * whatever was declared before; an empty list is the clear.
          *
-         * <p>kaya ships no search. What to decorate is the app's
-         * question and every editor answers it differently — case
-         * folding, word boundaries, a regex dialect with its own rules
-         * — so a find engine, a find bar and a regex dialect belong to
-         * the app (docs/ranges-plan.md §3). What no app can write for
-         * itself is this half: colouring a run of a native text view.
-         * The search that feeds it is five lines of
-         * {@link String#indexOf}, and {@link TextRange#in} is where
-         * those five lines meet kaya's unit:
+         * <p>kaya ships no search — finding the hits is the app's, and
+         * {@link TextRange#in} is where its indices meet kaya's unit
+         * (docs/ranges-plan.md §3).
          *
-         * <pre>{@code
-         * List<KayaApp.TextRange> hits = new ArrayList<>();
-         * for (int at = doc.indexOf(needle); at >= 0;
-         *         at = doc.indexOf(needle, at + needle.length())) {
-         *     hits.add(KayaApp.TextRange.in(doc, at, at + needle.length()));
-         * }
-         * tx.highlightRanges(editor, hits);
-         * }</pre>
-         *
-         * <p>APP-OWNED AND NEVER TRACKED. A declared set is bound to
-         * the text it was declared against: the first edit of any kind
-         * — a keystroke, a programmatic write, a native undo — drops
-         * the whole set with nothing said, and the app re-declares from
-         * the fold its change handler already keeps. Nothing in kaya
-         * adjusts a range across an edit, which is the same
-         * uncontrolled contract the text itself has (D2).
+         * <p>APP-OWNED AND NEVER TRACKED. The first edit of any kind —
+         * a keystroke, a programmatic write, a native undo — drops the
+         * whole set with nothing said, and the app re-declares from the
+         * fold its change handler already keeps. Nothing in kaya adjusts
+         * a range across an edit (D2).
          *
          * <p>TEXTAREA ONLY this milestone; an entry refuses, naming
          * itself (docs/deferred.md carries the measured per-platform
@@ -3578,12 +3282,10 @@ public final class KayaApp {
          * method, in every backend, because honouring it commits the
          * composition mid-word — measured on macOS, where the
          * half-typed kana land in the document and in the app's own
-         * model. The refusal is a NO-OP AND NOT AN EXCEPTION:
-         * composition state is on no kaya channel, so the same app code
-         * is correct one millisecond and racing the next, and an app
-         * cannot be blamed for the user's typing rhythm. The selection
-         * is still worth asking for after the next change occurrence,
-         * which is what ends a composition anyway.
+         * model (docs/ranges-plan.md D4). The refusal is a NO-OP AND NOT
+         * AN EXCEPTION: composition state is on no kaya channel. Ask
+         * again after the next change occurrence, which is what ends a
+         * composition.
          */
         public void selectRange(Widget w, TextRange range) {
             emit(KayaWire.txSelectRange(w.id, range.start, range.stop));
@@ -3592,12 +3294,9 @@ public final class KayaApp {
         /**
          * Scroll the textarea so a range is inside the viewport. A pure
          * effect: it moves no state, leaves the selection alone, and
-         * undo does not put the scroll position back — undo restores
-         * state, not where you were looking.
-         *
-         * <p>How much context lands around the range is the platform's
-         * own scroll-to-range behaviour. What kaya fixes is
-         * containment, which is the only part every platform agrees on.
+         * undo does not put the scroll position back. How much context
+         * lands around the range is the platform's own behaviour; kaya
+         * fixes containment.
          */
         public void revealRange(Widget w, TextRange range) {
             emit(KayaWire.txRevealRange(w.id, range.start, range.stop));
@@ -3654,13 +3353,10 @@ public final class KayaApp {
             return new Stamped<>(w, out);
         }
 
-        /** Open a For template for a generated row trace; the trace
-         * hands the loop body the Tpl once, then close() ends the
-         * template and parents the For into the enclosing scope. A
-         * break leaves the trace open — caught at submit.
-         * The For rides the zone it opens in: the widget id space in
-         * the live zone, the node space inside an enclosing template
-         * (a nested trace) — the Go BeginRowTrace twin. */
+        /** Open a For template for a generated row trace. A break leaves
+         * the trace open — caught at submit. The For rides the zone it
+         * opens in: the widget id space in the live zone, the node space
+         * inside an enclosing template. */
         RowTrace beginRowTrace(Collection c) {
             c.assertRoot();
             long id = tplDepth > 0 ? ++nodes : ++widgets;
@@ -3729,36 +3425,23 @@ public final class KayaApp {
          * {@code KayaRecords.Collection.insertFresh} and
          * {@code KayaSums.SumCollection.insertFresh}.
          *
-         * <p>FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain
-         * identity and guest-chosen (DESIGN.md, the update algebra), so
-         * anything that already HAS a name passes it to
-         * {@link #insert} — today and always. This is the other case,
-         * and it is the common one in a form: the app has a title and
-         * nothing else, and the alternative is a hand-spelled counter
-         * beside the collection, which in Java is a mutable static
-         * reached from every handler that adds, and whose safety rests
-         * on a never-rewind rule nobody wrote down.
+         * <p>FOR DATA THAT HAS NO IDENTITY OF ITS OWN; anything that
+         * already HAS a name passes it to {@link #insert}
+         * (docs/fresh-key-plan.md).
          *
          * <p>ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the
          * minted key is I64 and is counter+1. An instance is a table —
          * the live-zone collection, or one stamped copy selected by
-         * {@code at(...)} — and keys are unique within one, so that is
-         * what the counter is per.
+         * {@code at(...)}.
          *
          * <p>MIXING IS SAFE BY ABSORPTION: an explicit insert whose key
-         * is an I64 at or above the counter carries it up, so a later
-         * mint clears every hand-chosen numeric key already in the
-         * table. A String key cannot collide with an I64 at all and
-         * moves nothing.
+         * is an I64 at or above the counter carries it up. A String key
+         * cannot collide with an I64 and moves nothing.
          *
-         * <p>NO DECREMENT IS EXPRESSIBLE, and that is the whole safety
-         * argument. Undo and redo replay captured keys inside the core
-         * and never re-enter this path ({@link KayaApp#absorbUndo}
-         * writes the model directly), so a history walk never moves the
-         * counter; an abandoned transaction does not move it back
-         * either — {@link #rollback} restores the model, not the
-         * counters, so a key can never be handed out twice. A fresh key
-         * is fresh forever.
+         * <p>NO DECREMENT IS EXPRESSIBLE: undo and redo replay captured
+         * keys inside the core and never re-enter this path, and
+         * {@link #rollback} restores the model but not the counters. A
+         * fresh key is fresh forever.
          */
         public long insertFresh(Collection c, Object value) {
             long key = mintKeyFor(c);
@@ -3798,11 +3481,9 @@ public final class KayaApp {
         }
 
         void insertRecordRaw(Collection c, Object key, Object model, int variant, Object[] fields) {
-            // ABSORPTION, on the one path every explicit key travels
-            // (the untyped insert delegates here): a numeric key at or
-            // above the minter's counter carries it up, so hand-chosen
-            // and minted keys share one space safely and in either
-            // order (insertFresh's contract).
+            // ABSORPTION, on the one path every explicit key travels: a
+            // numeric key at or above the minter's counter carries it up
+            // (insertFresh's contract).
             absorbKey(c.id, c.path, key);
             modelSet(c.id, c.path, key, model);
             emit(KayaWire.txCollectionInsert(c.id, c.path.toArray(), key, variant, fields));
@@ -3822,18 +3503,14 @@ public final class KayaApp {
         }
 
         /**
-         * Repositions an entry before another's: order is collection
-         * data, so the model reorders and the wire carries the same
-         * keys-only delta. Keys, never indices. A missing key or
-         * anchor throws here, at the call site — the same check the
-         * scene makes; moving an entry before itself is a no-op, and
-         * nothing travels.
+         * Repositions an entry before another's. Keys, never indices. A
+         * missing key or anchor throws here, at the call site; moving an
+         * entry before itself is a no-op and nothing travels.
          */
         public void moveBefore(Collection c, Object key, Object anchor) {
             moveEntry(c, key, new Object[] { anchor });
         }
 
-        /** Repositions an entry at the end of its collection. */
         public void moveToEnd(Collection c, Object key) {
             moveEntry(c, key, new Object[0]);
         }
@@ -3940,25 +3617,16 @@ public final class KayaApp {
         }
 
         /**
-         * Create an auxiliary window (capability-gated: phone hosts
-         * reject at the root); materializes hidden, mountIn presents.
-         * Chains are the Java spelling:
-         * tx.createWindow(1).title("inspector").size(480, 320).vetoClose(true).
-         */
-        /**
-         * Request a modal alert (the request/result grammar), the
-         * chain spelling:
+         * Request a modal alert (the request/result grammar):
          * tx.showAlert().title("delete item?").message("…")
          *     .action("Delete").action("Archive").cancel("Keep")
          *     .onResult((tx, choice) -> …).show().
-         * The result handler rides the REQUEST (the widget-handler
-         * precedent) and retires with its one answer — choice is an
-         * action index (0 or 1) or KayaWire.ALERT_CHOICE_CANCEL (-1
-         * in java-int terms), every platform-native dismissal. Ids
-         * are binding-allocated; show() returns the id. Up to two
-         * actions (the platform floor); the cancel label is required.
-         * One alert may be live per process; show the next from the
-         * handler.
+         * The result handler rides the REQUEST and retires with its one
+         * answer — choice is an action index (0 or 1) or
+         * KayaWire.ALERT_CHOICE_CANCEL, every platform-native dismissal.
+         * Up to two actions (the platform floor); the cancel label is
+         * required. One alert may be live per process; show the next
+         * from the handler.
          */
         public AlertRef showAlert() {
             return new AlertRef(this, KayaApp.this, ++nextAlert);
@@ -4012,12 +3680,9 @@ public final class KayaApp {
 
         // --- The clipboard (DESIGN.md, Clipboard) ------------------
         //
-        // A clip is not a string: every host models it as ONE item
-        // available in several types, with the consumer taking the
-        // richest it understands. So COPY TAKES A RECORD — spelled as a
-        // chain here, where a second text() replaces the field rather
-        // than needing a duplicate check — and the two answers are a
-        // SUM.
+        // A clip is ONE item available in several types, so copy takes a
+        // record (a chain here, where a second text() replaces the
+        // field) and the two answers are a sum.
 
         /** Begin a clip: fill in as many representations as the app
          * wants to offer, and send() puts it on the system clipboard. */
@@ -4025,17 +3690,12 @@ public final class KayaApp {
             return new CopyRef(this);
         }
 
-        /** Begin the privileged read — THE ONE NAMED FOR WHAT IT IS
-         * rather than for pasting.
-         *
-         * <p>A user's paste arrives at the widget's hook and costs
-         * nothing; this asks without a gesture, which the platforms
-         * have deliberately made expensive: iOS 16 PROMPTS when the
-         * content came from another app and blocks until the user
-         * answers, Android returns nothing unless the app has focus,
-         * and Wayland delivers no offer to an unfocused client. Reach
-         * for this to detect a URL or import from the clipboard, never
-         * to implement Paste — that is the Paste command, and it is
+        /** Begin the privileged read. Asking without a gesture is
+         * expensive on every platform: iOS 16 PROMPTS when the content
+         * came from another app and blocks until the user answers,
+         * Android returns nothing unless the app has focus, and Wayland
+         * delivers no offer to an unfocused client. Never implement
+         * Paste with this — that is the Paste command, and it is
          * free. */
         public ClipReadRef readClipboard() {
             return new ClipReadRef(this, KayaApp.this, ++nextClipboardRead);
@@ -4051,29 +3711,17 @@ public final class KayaApp {
         /**
          * REQUEST the app's brand accent (docs/styling-plan.md D1/D2):
          * one packed sRGB hex ({@code 0xRRGGBB}) is the whole call, and
-         * for most apps the only one they ever write — kaya derives
-         * every other number from it.
+         * kaya derives every other number from it.
          *
-         * <p>THE APP NEVER WRITES A FOREGROUND and never writes
-         * contrast variants: the core derives fill, on-fill,
-         * standalone and a hover/pressed ramp per appearance, and hands
-         * every backend VALUES. An app-supplied foreground could be
-         * illegible with nothing to catch it, and three of four
-         * platforms compute or hard-code theirs anyway, so honoring one
-         * would mean honoring it on some platforms and ignoring it on
-         * others.
+         * <p>THE APP NEVER WRITES A FOREGROUND and never writes contrast
+         * variants: the core derives fill, on-fill, standalone and a
+         * hover/pressed ramp per appearance.
          *
-         * <p>A REQUEST, NOT A COMMAND, uniformly in all eight
-         * languages: a platform may let its user override the app's
-         * accent. macOS is the one that does today (an app accent
-         * applies only while the system accent is multicolor), and the
-         * semantics does not change if another grows the preference.
+         * <p>A REQUEST, NOT A COMMAND: a platform may let its user
+         * override the app's accent (macOS does today).
          *
-         * <p>SET ONCE, BEFORE THE FIRST MOUNT — brand is identity, not
-         * state. The root refuses a second write and a late one, so a
-         * slot that could flip at runtime never promises the
-         * theme-switching surface the vocabulary deliberately does not
-         * have.
+         * <p>SET ONCE, BEFORE THE FIRST MOUNT. The root refuses a second
+         * write and a late one.
          */
         public void brandAccent(int seed) {
             brandAccent(seed, null, null);
@@ -4092,12 +3740,9 @@ public final class KayaApp {
          * {@code null} handler the constructors already take.
          */
         public void brandAccent(int seed, Integer light, Integer dark) {
-            // The mask says which overrides ride along; the wire
-            // carries 0 for an unstated one (spec.rs's set_brand_accent
-            // — bit 0 light, bit 1 dark). Values, never per-platform
-            // code: what a platform is allowed to differ on is the
-            // NUMBER, and the resolution would happen here, in the
-            // binding.
+            // The mask says which overrides ride along; the wire carries
+            // 0 for an unstated one (spec.rs's set_brand_accent — bit 0
+            // light, bit 1 dark).
             int mask = (light != null ? BRAND_MASK_LIGHT : 0)
                     | (dark != null ? BRAND_MASK_DARK : 0);
             emit(KayaWire.txSetBrandAccent(
@@ -4110,22 +3755,15 @@ public final class KayaApp {
          * platform that has that family installed uses it.
          *
          * <p>THE FAMILY, NEVER THE SCALE. Sizes, weights, metrics and
-         * the whole type ramp stay the platform's — substituting a
-         * family into the platform's own ramp is what makes the swap
-         * safe, and it is the {@link Role} tier, not a font size, that
-         * carries emphasis.
+         * the whole type ramp stay the platform's.
          *
          * <p>A FAMILY A PLATFORM DOES NOT HAVE leaves that platform's
-         * own typeface in place, deliberately: every font API renders
-         * SOMETHING for a name it cannot match, so each lowering gates
-         * on the family being installed rather than letting the platform
-         * pick a stranger, and the scene reads back the RESOLVED family
-         * off the real views rather than the request.
+         * own typeface in place, deliberately: each lowering gates on
+         * the family being installed, because every font API renders
+         * SOMETHING for a name it cannot match.
          *
          * <p>SET ONCE, BEFORE THE FIRST MOUNT — the accent's wall
-         * verbatim, and for its reason: brand is identity, not state,
-         * and a slot that could flip at runtime would promise the
-         * theme-switching surface the vocabulary does not have.
+         * verbatim.
          */
         public void brandTypeface(String family) {
             // The cast picks the bytes overload rather than the Asset
@@ -4153,16 +3791,12 @@ public final class KayaApp {
          * {@code os.name = Linux} on Android — so every row rides the
          * wire and each backend picks its own ({@link Platform}).
          *
-         * <p>A {@code Map} rather than a list of pairs, which Java has
-         * no type for: it also makes the root's duplicate-platform
-         * refusal unreachable from here, a key being able to appear
-         * once. The wire order is the ENUM's, not the map's, so a
-         * {@code HashMap} and an {@code EnumMap} of the same rows emit
-         * the same record. A {@code null} family — the map value or the
-         * argument — travels as the empty string it means, so the answer
-         * comes from the root's own refusal ("an app that wants the
-         * platform's own typeface declares none at all") in the words
-         * every other language gets, rather than from the wire encoder.
+         * <p>A {@code Map} rather than a list of pairs. THE WIRE ORDER
+         * IS THE ENUM'S, not the map's, so a {@code HashMap} and an
+         * {@code EnumMap} of the same rows emit the same record. A
+         * {@code null} family travels as the empty string it means, so
+         * the refusal comes from the root in the words every other
+         * language gets.
          */
         public void brandTypeface(String family, Map<Platform, String> platforms, byte[] font) {
             java.util.List<Object> pairs = new java.util.ArrayList<>();
@@ -4172,16 +3806,14 @@ public final class KayaApp {
                         continue;
                     }
                     String row = platforms.get(platform);
-                    // A Long and a String, in that order: the record's
-                    // pair encoding is the file dialog's filters one
-                    // tier over, read in twos by the root.
+                    // A Long and a String, in that order: read in twos by
+                    // the root.
                     pairs.add(platform.wire);
                     pairs.add(row == null ? "" : row);
                 }
             }
             // ONE COPY INTO CORE MEMORY, the handle consumed by this
-            // transaction's submit — setSource's registration
-            // semantics, which is the channel a font shares.
+            // transaction's submit — setSource's registration semantics.
             emit(KayaWire.txSetBrandTypeface(
                     font != null ? TYPEFACE_MASK_FONT : 0,
                     family == null ? "" : family,
@@ -4196,16 +3828,11 @@ public final class KayaApp {
          * named rather than read — {@code tx.brandTypeface("Sora", null,
          * KayaApp.asset("fonts/sora-wght.ttf"))}.
          *
-         * <p>THE BYTES NEVER ENTER THE JVM'S HEAP. The core already
-         * holds them; this hands the same buffer to the blob table, so a
-         * font file costs one refcount here and no array. That is the
-         * whole reason an asset is a handle rather than a {@code byte[]}
-         * factory — {@code brandTypeface(family, platforms,
-         * asset.bytes())} would work and would copy a megabyte through
-         * Java for nothing.
+         * <p>THE BYTES NEVER ENTER THE JVM'S HEAP: this hands the core's
+         * own buffer to the blob table, so a font file costs one
+         * refcount and no array.
          *
-         * <p>Everything else — the family, the per-platform rows, the
-         * set-once wall, register-then-resolve — is
+         * <p>Everything else is
          * {@link #brandTypeface(String, Map, byte[])}'s, verbatim.
          */
         public void brandTypeface(String family, Map<Platform, String> platforms, Asset font) {
@@ -4242,23 +3869,17 @@ public final class KayaApp {
          * platform-specific artwork rides the wire.
          *
          * <p>SET ONCE, BEFORE THE FIRST MOUNT — the brand's wall
-         * verbatim, and for its reason: identity is not state, and a
-         * slot that could flip at runtime would promise the
-         * identity-switching surface the vocabulary does not have. The
-         * root refuses a second write, a late one and an empty name; an
-         * app that wants the platform's own identity declares none at
-         * all.
+         * verbatim. The root refuses a second write, a late one and an
+         * empty name; an app that wants the platform's own identity
+         * declares none at all.
          *
          * <p>THE BYTES ARE NEVER INSPECTED between here and the
-         * platform's own decoder — whether a blob is an image is a
-         * question only that decoder can answer — so the conformance
-         * scene reads what the DECODER produced rather than echoing this
-         * request back.
+         * platform's own decoder, so bytes that are not an image leave
+         * every platform's default in place.
          */
         public void appIdentity(String name, byte[] icon) {
             // ONE COPY INTO CORE MEMORY, the handle consumed by this
-            // transaction's submit — setSource's registration
-            // semantics, which is the channel a picture shares.
+            // transaction's submit — setSource's registration semantics.
             emit(KayaWire.txSetAppIdentity(
                     IDENTITY_MASK_ICON, name,
                     new KayaWire.BlobHandle(KayaRing.blobRegister(icon))));
@@ -4283,22 +3904,20 @@ public final class KayaApp {
 
         /**
          * The NAME-ONLY form, for an app that has a name and no mark
-         * yet — the second overload {@link #brandTypeface(String)} uses
-         * one verb over, and Java's spelling of Rust's second function.
-         * Its identity still reaches the surfaces a name reaches (the
-         * Windows caption and taskbar tooltip, the macOS menu bar, the
-         * Linux app_id, and both phones' packaging) and every icon
-         * surface keeps the platform's own default, honestly and
-         * visibly.
+         * yet. Its identity still reaches every surface a name reaches,
+         * and every icon surface keeps the platform's own default.
          */
         public void appIdentity(String name) {
-            // The icon slot rides either way and the mask above is what
-            // says whether it means anything: an absent icon travels as
-            // an empty string, so the record's field count never varies
+            // The icon slot rides either way and the mask says whether it
+            // means anything, so the record's field count never varies
             // with the payload.
             emit(KayaWire.txSetAppIdentity(0, name, ""));
         }
 
+        /**
+         * Create an auxiliary window (capability-gated: phone hosts
+         * reject at the root); materializes hidden, mountIn presents.
+         */
         public WindowRef createWindow(long id) {
             emit(KayaWire.txCreateWindow(id));
             return new WindowRef(this, KayaApp.this, id);
@@ -4369,7 +3988,6 @@ public final class KayaApp {
             return new SectionRef(this, KayaApp.this, id);
         }
 
-        /** Append onto another window's section set. */
         public SectionRef addSectionIn(long window, long id) {
             emit(KayaWire.txAddSection(window, id));
             return new SectionRef(this, KayaApp.this, id);
@@ -4468,19 +4086,11 @@ public final class KayaApp {
             return n;
         }
 
-        // PRIVATE, AND THE ONLY PROP WRITE IN THIS ZONE THAT IS. Java
-        // spells the live TEXT VERB — Tx.setText(Widget, String), the
-        // "open a document into the editor" write every scene script
-        // reaches for — and this blueprint prop write with ONE name, and
-        // the sweep that keeps example guests off the explicit tier
-        // reads lines rather than types: `.setText(` cannot tell which
-        // receiver it found. Rust never had the problem, keeping the two
-        // as `set` and `set_text`. Hiding is the stronger half of that
-        // split: no guest can reach the floor spelling at all, so the
-        // compiler holds the rule where a regex would have had to, and
-        // nothing is lost — every kind that carries text is constructed
-        // with it (label, button, entry, textarea, and the option labels
-        // below).
+        // PRIVATE, AND THE ONLY PROP WRITE IN THIS ZONE THAT IS: both
+        // zones spell this `.setText(` and the sweep that keeps example
+        // guests off the explicit tier reads lines rather than types, so
+        // it cannot tell which receiver it found. Hiding this one lets
+        // the compiler hold the rule a regex could not. KEEP IT PRIVATE.
         private void setText(Node n, String text) {
             tx.emit(KayaWire.txSetText(n.id, text));
         }
@@ -4499,8 +4109,6 @@ public final class KayaApp {
             tx.emit(KayaWire.txBindTextElement(n.id, level, f.index));
         }
 
-        /** Bind a checkbox's state to one field of the element; a
-         * Boolean field token only. */
         public void bindCheckedField(Node n, int level, KayaRecords.Field<Boolean> f) {
             tx.emit(KayaWire.txBindCheckedElement(n.id, level, f.index));
         }
@@ -4519,8 +4127,7 @@ public final class KayaApp {
          * an F64 property in the spec, a record component declared
          * {@code long} mints an I64 field, and the root refuses the
          * pairing by name at declaration. A row that holds an option
-         * INDEX therefore declares that component {@code double} — the
-         * wart is the core's prop typing, not Java's.
+         * INDEX therefore declares that component {@code double}.
          */
         public void bindValueField(Node n, int level, KayaRecords.Field<Double> f) {
             tx.emit(KayaWire.txBindValueElement(n.id, level, f.index));
@@ -4533,9 +4140,8 @@ public final class KayaApp {
          * its content and never overflows.
          *
          * <p>A Node carries no transaction, so there is no construction
-         * chain to hang this on the way the live zone does; the setter
-         * directly after construction is the spelling, as it is for
-         * every prop below.
+         * chain here; the setter directly after construction is the
+         * spelling, as it is for every prop below.
          */
         public void setGrow(Node n, double weight) {
             tx.emit(KayaWire.txSetGrow(n.id, weight));
@@ -4546,12 +4152,10 @@ public final class KayaApp {
          * appearance, the blueprint twin of
          * {@link Tx#setRole(Widget, Role)}.
          *
-         * <p>A CONSTANT, not a source, for {@link #setAccepts}'s reason:
-         * what a copy means is a fact about the PROTOTYPE, not about the
-         * row's data. The root refuses a role on a kind it does not fit
-         * at DECLARE time — before a single row stamps, naming both the
-         * role and the kind — so there is no type here to say so, exactly
-         * as there is none for {@link #setA11yHint}.
+         * <p>A CONSTANT, not a source, for {@link #setAccepts}'s reason.
+         * The root refuses a role on a kind it does not fit at DECLARE
+         * time, before a single row stamps, so there is no type here to
+         * say so.
          */
         public void setRole(Node n, Role role) {
             tx.emit(KayaWire.txSetRole(n.id, role.wire));
@@ -4562,32 +4166,20 @@ public final class KayaApp {
          * one level down, the same number {@link Tx#setInset} spells in
          * the live zone.
          *
-         * <p>THE FORCING CASE IS A STAMPED ROW: a find bar stamped from a
-         * template sat flush against a full-bleed window's edge while the
-         * live status row beside it inset, because this zone carried
-         * exactly one layout prop ({@link #setGrow}). Const for
-         * {@link #setRole}'s reason — a prototype's margin describes the
-         * prototype — and container kinds only, which the root says at
-         * declare time.
+         * <p>Const for {@link #setRole}'s reason, and container kinds
+         * only, which the root says at declare time.
          */
         public void setInset(Node n, double pad) {
             tx.emit(KayaWire.txSetInset(n.id, pad));
         }
 
-        // THE ACCESSIBILITY PROPS, one setter per source. They take the
-        // node first for setGrow's reason — a Node holds no transaction,
-        // so there is no chain — and the ARGUMENT'S TYPE picks the
-        // source, the same trichotomy the constructors below use. The
-        // field overload is why this zone needs its own setters at all:
-        // a stamped row announcing its OWN name to assistive tech is
-        // something the live zone cannot spell, because a live widget
-        // has no row to read.
+        // THE ACCESSIBILITY PROPS, one setter per source: the ARGUMENT'S
+        // TYPE picks the source, the same trichotomy the constructors
+        // below use.
         //
-        // A CONSTANT ID ON EVERY COPY IS LEGAL and often right: nothing
-        // in the core deduplicates a11y ids, and the harness addresses a
-        // copy by kind#index, never by id. Reach for the row's own key
-        // field only when something outside kaya must tell the copies
-        // apart.
+        // A CONSTANT ID ON EVERY COPY IS LEGAL and nothing catches the
+        // collision. Reach for the row's own field only when something
+        // outside kaya must tell the copies apart.
 
         /** A template node's accessibility identifier, one constant for
          * every stamped copy — the blueprint twin of
@@ -4596,8 +4188,6 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetA11yId(n.id, id));
         }
 
-        /** An identifier every copy takes from one signal, moving when
-         * it does. */
         public void setA11yId(Node n, Signal<String> s) {
             tx.emit(KayaWire.txBindA11yId(n.id, s.id));
         }
@@ -4609,9 +4199,8 @@ public final class KayaApp {
         }
 
         /** Bind a node's identifier to one field of the element,
-         * {@code level} Fors up (0 = nearest) — {@link #bindTextField}'s
-         * shape, one prop over, and the only way to read an OUTER row's
-         * field from a nested template. */
+         * {@code level} Fors up (0 = nearest) — the only way to read an
+         * OUTER row's field from a nested template. */
         public void bindA11yIdField(Node n, int level, KayaRecords.Field<String> f) {
             tx.emit(KayaWire.txBindA11yIdElement(n.id, level, f.index));
         }
@@ -4627,9 +4216,7 @@ public final class KayaApp {
         }
 
         /** The row's own field as the spoken name: each copy announces
-         * itself. A label whose text already comes from the row usually
-         * wants the SAME field here — otherwise a screen reader is left
-         * inferring the name from the layout around it. */
+         * itself. */
         public void setA11yLabel(Node n, KayaRecords.Field<String> f) {
             bindA11yLabelField(n, 0, f);
         }
@@ -4644,12 +4231,9 @@ public final class KayaApp {
          *
          * <p>THE ONE A11Y PROP THAT IS NOT UNIVERSAL: the root admits it
          * on the activation kinds alone (button, checkbox, select,
-         * radio), because a label, an image or a container has no
-         * activation to describe. There is no type here to say so, in
-         * this zone or the live one — a hint on any other kind fails the
-         * BUILD in the root's own words, as the prototype is recorded
-         * and before a single row stamps, so the message names the
-         * guest's one declaration rather than one copy per row.
+         * radio). There is no type here to say so — a hint on any other
+         * kind fails the BUILD in the root's own words, before a single
+         * row stamps.
          */
         public void setA11yHint(Node n, String hint) {
             tx.emit(KayaWire.txSetA11yHint(n.id, hint));
@@ -4672,20 +4256,15 @@ public final class KayaApp {
          * closed kinds by name ({@link KayaApp#ACCEPT_TEXT} and friends)
          * plus any custom format ids.
          *
-         * <p>THE HALF {@link KayaApp#onPaste(Node, PasteHandler)} WAS
-         * MISSING. Every backend gates the paste occurrence on the
+         * <p>WITHOUT THIS {@link KayaApp#onPaste(Node, PasteHandler)}
+         * NEVER FIRES: every backend gates the paste occurrence on the
          * focused widget's accept list and falls back to the platform's
-         * own insertion when it is empty, so before this setter existed
-         * a handler registered against a template node compiled,
-         * registered, and could never fire — no binding could put an
-         * accept list on a blueprint.
+         * own insertion when it is empty.
          *
          * <p>A CONSTANT, NOT A SOURCE, unlike the a11y props above: what
-         * a control can take is a fact about the PROTOTYPE, the way a
-         * slider's range and a select's options are, and every copy has
-         * it by construction. On Android it is also the native
-         * registration itself (the mime types on the view), which is a
-         * capability rather than row data.
+         * a control can take is a fact about the PROTOTYPE. On Android
+         * it is also the native registration itself (the mime types on
+         * the view).
          */
         public void setAccepts(Node n, String... kinds) {
             tx.emit(KayaWire.txSetAccepts(n.id, acceptList(kinds)));
@@ -4823,7 +4402,6 @@ public final class KayaApp {
             return n;
         }
 
-        /** An image bound to one field of the element. */
         public Node image(KayaRecords.Field<byte[]> f) {
             Node n = widget(KayaWire.KIND_IMAGE);
             bindSourceField(n, 0, f);
@@ -5036,20 +4614,16 @@ public final class KayaApp {
          * label child — at {@code selected}, the initial 0-based index,
          * the same in every stamped copy.
          *
-         * <p>THE OPTIONS ARE THE PROTOTYPE'S. They are children of the
+         * <p>THE OPTIONS ARE THE PROTOTYPE'S: they are children of the
          * blueprint node, so every copy offers the same list and only
-         * the choice varies; a per-row option list would need a
-         * collection inside the choice widget, which the scene rejects
-         * (labels only, deliberately).
+         * the choice varies.
          *
          * <p>Its pick handler is registered against the template node
          * ({@code app.onValueChanged(node, (tx, keys, index) -> …)}) and
-         * receives each USER pick's new index — programmatic writes
-         * never echo, the slider's uncontrolled contract. The index
-         * arrives as a {@code double} and the app narrows it: the live
-         * {@link Tx#select} narrows inside the constructor by wrapping
-         * the handler it was handed, and a template constructor is
-         * handed none.
+         * receives each USER pick's new index; programmatic writes never
+         * echo. The index arrives as a {@code double} and the app
+         * narrows it, since a template constructor is handed no handler
+         * to narrow inside.
          */
         public Node select(String[] options, int selected) {
             Node n = choice(KayaWire.KIND_SELECT, options);
@@ -5071,10 +4645,8 @@ public final class KayaApp {
             return n;
         }
 
-        /** A radio group over fixed options — the choice contract (see
-         * {@link #select(String[], int)}) in its inline presentation:
-         * same option children, same 0-based index, same handler
-         * registration. */
+        /** A radio group over fixed options — {@link #select(String[],
+         * int)}'s contract in its inline presentation. */
         public Node radio(String[] options, int selected) {
             Node n = choice(KayaWire.KIND_RADIO, options);
             tx.emit(KayaWire.txSetValue(n.id, selected));
@@ -5093,10 +4665,9 @@ public final class KayaApp {
             return n;
         }
 
-        // The choice kinds' shared head: the option labels, parented
-        // through the same ambient stack the live zone's select uses.
-        // The index is left to the caller's overload so each source
-        // keeps its own type all the way to the wire.
+        // The choice kinds' shared head: the option labels. The index is
+        // left to the caller's overload so each source keeps its own
+        // type all the way to the wire.
         private Node choice(int kind, String[] options) {
             Node n = widget(kind);
             parents.add(n.id);
@@ -5225,10 +4796,8 @@ public final class KayaApp {
         widgetPastes.put(w.id, handler);
     }
 
-    /** A paste onto a stamped copy: the handler also receives the
-     * copy's key path, outermost first. One record kind, the path
-     * deciding — exactly as a click on a stamped row is one record with
-     * a click on a live widget. */
+    /** A paste onto a stamped copy: the handler also receives the copy's
+     * key path, outermost first. */
     public void onPaste(Node n, PasteHandler handler) {
         nodePastes.put(n.id, handler);
     }
@@ -5236,37 +4805,17 @@ public final class KayaApp {
     /**
      * Fold an undo's payload into the collection model.
      *
-     * <p>The rollback journal in reverse: a rolled-back Tx restores a
-     * snapshot because nothing was shipped, while an undo restores a
-     * delta because everything WAS — the core already moved, and the
-     * model is what would otherwise be left behind. Same machinery,
-     * opposite case, and the payload is core-authoritative so nothing
-     * here re-derives anything.
+     * <p>The payload is core-authoritative, so nothing here re-derives
+     * anything. Signals and text are not mirrored by this binding (there
+     * is no read-back for either), so those two runs pass straight to
+     * the app's own handler.
      *
-     * <p>Signals and text are not mirrored by this binding (there is no
-     * read-back for either, by doctrine), so those two runs pass
-     * straight to the app's own handler.
-     *
-     * <p>NO DERIVED RECOMPUTE HERE, DELIBERATELY — the absence is the
-     * design and not an oversight. A derived signal's write rode the
-     * SAME transaction as the mutation that caused it: every mutation
-     * path calls {@link Tx#recomputeDerived}, which runs the registered
-     * computes into that very transaction. So when the transaction was
-     * a named step, the group banked the derived value in both of its
-     * directions and the core has already restored it before this
-     * method is reached. The compiler states it too — recomputing is a
-     * {@code Tx} method and this method holds no {@code Tx}, only a
-     * payload.
-     *
-     * <p>A recompute added here would write a value the ledger never
-     * banked, in a transaction the app never asked for, landing between
-     * the core's restore and the app's own {@code onUndone}. Where it
-     * agreed with the banked value it would be dead code hiding the
-     * mechanism; where it disagreed — a compute that reads anything
-     * besides the entries, or a derive declared after that step was
-     * banked (docs/deferred.md's one residual) — the screen and the
-     * ledger's record of the step would drift apart, and the next walk
-     * through the history would jump back to the banked value.
+     * <p>NO DERIVED RECOMPUTE HERE, DELIBERATELY. A derived signal's
+     * write rode the SAME transaction as the mutation that caused it, so
+     * a named step banked the derived value and the core has already
+     * restored it. A recompute added here would write a value the ledger
+     * never banked, outside any transaction, and the next walk through
+     * the history would jump back to the banked one.
      */
     private void absorbUndo(UndoDelta delta) {
         for (UndoEntry entry : delta.entries()) {
@@ -5289,9 +4838,7 @@ public final class KayaApp {
             }
             // THE WIRE HANDS BACK WIRE FIELDS AND THE MODEL HOLDS THE
             // GUEST'S OWN OBJECT, so the entry is rebuilt through the
-            // decoder the collection registered when it was declared —
-            // the one place the guest's type is known. An untyped
-            // collection's decoder is the identity on its single field.
+            // decoder the collection registered when it was declared.
             Object value = rebuildEntry(entry.collection(), entry.variant(), entry.fields());
             boolean replaced = false;
             for (int i = 0; i < instance.entries.size(); i++) {
@@ -5311,9 +4858,7 @@ public final class KayaApp {
                 continue;
             }
             // Position by the payload's list, keeping anything it does
-            // not name at the end: the delta describes one instance's
-            // whole order, and an entry it never mentions is one this
-            // undo did not touch.
+            // not name at the end.
             List<Entry> sorted = new ArrayList<>(instance.entries.size());
             for (Object key : order.keys()) {
                 for (int i = 0; i < instance.entries.size(); i++) {
@@ -5330,12 +4875,9 @@ public final class KayaApp {
     }
 
     /**
-     * The decoder's taste-free shape, typed: the signals' flattened
-     * (id, value) pairs become records, and the three arity-first groups
-     * keep theirs. The generated parser owns the LAYOUT (counts in the
-     * head, one flat Values tail cut into four runs); this owns the SUM
-     * the app sees — the same split representation() already makes for
-     * a clip.
+     * The decoder's shape, typed: the generated parser owns the LAYOUT
+     * (counts in the head, one flat Values tail cut into four runs);
+     * this owns what the app sees.
      */
     static UndoDelta undoDelta(KayaWire.UndoValues values) {
         List<UndoSignal> signals = new ArrayList<>(values.signals.size() / 2);
@@ -5369,7 +4911,6 @@ public final class KayaApp {
         return fields.isEmpty() ? null : fields.get(0);
     }
 
-    /** Register a click handler for a live widget. */
     public void onClick(Widget w, Consumer<Tx> handler) {
         widgetHandlers.put(w.id, handler);
     }
@@ -5384,8 +4925,7 @@ public final class KayaApp {
 
     /**
      * Register a change handler for a live entry: the widget owns its
-     * text and reports each edit here; the app folds the text into its
-     * own state — there is no read-back, by doctrine.
+     * text and reports each edit here. There is no read-back.
      */
     public void onChange(Widget w, BiConsumer<Tx, String> handler) {
         widgetChanges.put(w.id, handler);
@@ -5401,8 +4941,7 @@ public final class KayaApp {
 
     /**
      * Register a toggle handler for a live checkbox: the box owns its
-     * checked bit and reports each flip here; the app folds it into its
-     * own state.
+     * checked bit and reports each flip here.
      */
     public void onToggle(Widget w, BiConsumer<Tx, Boolean> handler) {
         widgetToggles.put(w.id, handler);
@@ -5426,12 +4965,6 @@ public final class KayaApp {
     /**
      * Register a change handler for a template slider, select or radio
      * group; it also receives the stamped copy's keys, outermost first.
-     *
-     * <p>The core has always sent this — a stamped copy's move arrives
-     * as a value change carrying the copy's identity tag — and until
-     * this table existed the dispatch loop had a live arm and no node
-     * arm, so the occurrence matched nothing and was dropped in
-     * silence.
      */
     public void onValueChanged(Node n, ValueHandler handler) {
         nodeValues.put(n.id, handler);
@@ -5491,23 +5024,8 @@ public final class KayaApp {
     }
 
     /**
-     * One handler dispatch: an exception crosses the build boundary
-     * (which rolled the model back and dropped the records), is
-     * logged, and the loop moves to the next occurrence — the uniform
-     * dispatch discipline across every binding. VM-fatal errors still
-     * die.
-     */
-
-
-    /**
      * Run {@code body} as a transaction on the app thread, soon. THE ONE
-     * method safe to call from another thread, and the answer to "how
-     * does background work reach the UI".
-     *
-     * <p>{@code build} is a transaction NOW on the calling thread;
-     * {@code post} is the same transaction SOON on the app thread — so a
-     * background thread writes ordinary blocking Java and hands back
-     * only the result:
+     * method safe to call from another thread:
      *
      * <pre>{@code
      * new Thread(() -> {
@@ -5535,9 +5053,9 @@ public final class KayaApp {
      * Run everything posted, each as its own transaction, in order.
      *
      * <p>The batch is taken and the monitor released BEFORE any of it
-     * runs, so a body that posts again lands in the NEXT batch. Holding
-     * the monitor across the calls would let a self-posting body drain
-     * forever and starve the occurrence loop.
+     * runs, so a body that posts again lands in the NEXT batch — holding
+     * the monitor across the calls would let a self-posting body starve
+     * the occurrence loop.
      */
     private void drainPosted() {
         List<Consumer<Tx>> batch;
@@ -5553,6 +5071,12 @@ public final class KayaApp {
         }
     }
 
+    /**
+     * One handler dispatch: an exception crosses the build boundary
+     * (which rolled the model back and dropped the records), is logged,
+     * and the loop moves to the next occurrence. VM-fatal errors still
+     * die.
+     */
     private void dispatch(Consumer<Tx> handler) {
         try {
             build(handler);
@@ -5693,15 +5217,12 @@ public final class KayaApp {
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_FILE_DIALOG_RESULT) {
                 // One-shot like the alert, and the id retires with it.
-                // EMPTY IS CANCEL — no platform can confirm an empty
-                // selection, so there is no sentinel to invent.
+                // EMPTY IS CANCEL.
                 //
                 // A SAVE DIALOG ANSWERS HERE TOO, through the same table
-                // and the same id space (docs/save-plan.md D2): its
-                // handler was wrapped at show() to take the one
-                // destination out of the list, so cancel reaches a save
-                // handler as null by the same route it reaches a picker
-                // handler as an empty list. One retire, one live slot.
+                // and id space (docs/save-plan.md D2): its handler was
+                // wrapped at show() to take the one destination out of
+                // the list. One retire, one live slot.
                 BiConsumer<Tx, java.util.List<PickedFile>> handler =
                         fileDialogs.remove(occ.id);
                 if (handler != null) {
@@ -5741,10 +5262,9 @@ public final class KayaApp {
                 // moved. NOT one-shot — a history is walked as often as
                 // the user likes.
                 UndoDelta delta = undoDelta((KayaWire.UndoValues) occ.payload);
-                // The model follows FIRST, and UNCONDITIONALLY: the core
-                // already moved without a transaction, so an app that
-                // registered no handler would otherwise read a stale
-                // count from the very next one it does run.
+                // The model follows FIRST, and UNCONDITIONALLY: an app
+                // that registered no handler would otherwise read a
+                // stale count from the next one it does run.
                 absorbUndo(delta);
                 UndoHandler handler =
                         (occ.kind == KayaWire.OCC_KIND_UNDONE ? undone : redone).get(occ.id);
@@ -5753,12 +5273,10 @@ public final class KayaApp {
                             delta));
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_MENU_ACTIVATED && occ.keys.isEmpty()) {
-                // Menu occurrences key the menu-item tables — their
-                // own id space, so neither widget nor node ids can
-                // collide with them. Node-anchored context items carry
-                // the stamped copy's keys (the keys ARE the noun);
-                // toggles carry the new state, radio groups the new
-                // 0-based index.
+                // Menu occurrences key the menu-item tables — their own
+                // id space. Node-anchored context items carry the
+                // stamped copy's keys; toggles carry the new state,
+                // radio groups the new 0-based index.
                 Consumer<Tx> handler = menuActivated.get(occ.id);
                 if (handler != null) {
                     dispatch(handler);

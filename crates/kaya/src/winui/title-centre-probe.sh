@@ -1,29 +1,20 @@
 #!/usr/bin/env bash
 # Drive title-centre-probe.ps1 against a live guest on the Windows VM.
 #
-# WHY A DRIVER AT ALL: the probe must run in the VM's INTERACTIVE session
-# (an ssh session has its own window station and can neither see the window
-# nor synthesize input into it), so the guest and the probe are two
+# The probe must run in the VM's INTERACTIVE session — an ssh session has
+# its own window station and can neither see the window nor synthesize
+# input into it (docs/traps.md) — so the guest and the probe are two
 # scheduled tasks created with `schtasks /it`. The guest runs the shipped
-# toolbar scene with a trailing `settle` appended through KAYA_SCENES_DIR —
-# the shipped scene file is never written — and that settle is the window in
+# toolbar scene with a trailing `settle` appended through KAYA_SCENES_DIR;
+# the shipped scene file is never written, and that settle is the window in
 # which the probe measures.
 #
 #   crates/kaya/src/winui/title-centre-probe.sh akhil@192.168.64.2
-#
-# or, through the lane that now carries it:
-#
 #   tools/deploy-win.sh akhil@192.168.64.2 caption-centre
 #
-# It builds and deploys first (tools/deploy-win.sh's toolbar_rust leg), so
-# what it measures is this tree and not yesterday's exe.
-#
-# THE LANE RUNS THIS SCRIPT, and that is the whole point of the flag below.
-# `tools/deploy-win.sh`'s caption-centre phase calls it with
-# KAYA_TCP_NO_DEPLOY=1, because the lane has already built and shipped the
-# very artifacts this would rebuild; there is one driver rather than a
-# second copy of the scheduling in the lane. Run by hand it deploys, so a
-# bare invocation still measures THIS tree.
+# deploy-win.sh's caption-centre phase calls this with KAYA_TCP_NO_DEPLOY=1,
+# having already built and shipped what this would rebuild; run by hand it
+# deploys first, so either way it measures THIS tree.
 #
 # Exit status: 0 only if the probe wrote a measurement. Everything the
 # lane ASSERTS about that measurement it asserts itself, off the AIMV/
@@ -92,9 +83,8 @@ echo "== the guest's own verdict for the same run =="
 ssh "$HOST" "cmd /c type $R\\out.txt" | grep -E "KAYA_SELFTEST|step-failed|panicked|EXIT="
 ssh "$HOST" "cmd /c rmdir /s /q $R" >/dev/null 2>&1
 
-# A PROBE THAT WROTE NOTHING IS A FAILURE, not a silent pass. Everything
-# else about the numbers is the caller's to assert; this is the one thing
-# only the driver can see.
+# A probe that wrote nothing is a failure, not a silent pass — the one
+# thing only the driver can see.
 grep -q "^AIMPLAN " "$WORK/prove.txt"
 rc=$?
 if [ "$rc" -ne 0 ]; then

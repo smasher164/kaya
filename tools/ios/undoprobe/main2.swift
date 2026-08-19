@@ -1,32 +1,9 @@
 // UndoProbe round 2 (iOS simulator) — the ROUTING and GESTURE cells that
 // round 1 could only set up.
 //
-// Round 1 established: a kaya entry is a UITextField with a PRIVATE
-// `_UITextUndoManager`, a kaya textarea a `TextEditorTextView` with its
-// own, neither is the window's, a programmatic write registers nothing
-// AND clears the field's stack by itself, and a shake presents the
-// system "Undo Typing" alert. Round 2 asks:
-//
-//  J1 THE ROUTE. `UIApplication.sendAction(Selector("undo:"), …)` is
-//     what kaya's kayaSendToFocusedResponder would call for a
-//     MenuRole::Undo, exactly as it calls cut:/copy:/paste: today
-//     (KayaSwiftUI.swift:5866). Does it reach the focused field's
-//     manager?
-//  J2 ENABLEMENT. `canPerformAction(undo:)` on the focused responder,
-//     with the field's stack empty and non-empty — D6 wants enablement
-//     computed live at activation.
-//  J3 THE SYSTEM MENU. iPadOS builds an Edit menu; does it already
-//     carry .undoRedo? A kaya Undo role has to coexist with it.
-//  J4 FALL-THROUGH. Arm the WINDOW's undoManager with an app action and
-//     route undo with the field's own stack empty, then full. This is
-//     mac's G/H, which AppKit answered "focused text first, then fall
-//     through". iOS may not.
-//  J5 WHICH STACK DOES THE SHAKE DRIVE? Not inferred from the alert's
-//     title: the alert's Undo button is ACTIVATED through the
-//     accessibility API and the text is read afterwards.
-//  J6 THE THREE-FINGER SWIPE. No in-process way to synthesize a
-//     three-touch gesture, so measure what WOULD handle it: the
-//     interactions installed on the text views and the window.
+// What round 1 established, the J-cells this round asks and what they
+// answered are docs/undo-plan.md §0; the J-labels below mark which
+// reading is which.
 //
 // THROWAWAY. Nothing builds it but build2.sh beside it.
 import SwiftUI

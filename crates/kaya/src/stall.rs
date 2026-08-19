@@ -1,94 +1,40 @@
 //! The stall watchdog: is the app thread still coming back for its
-//! occurrences?
+//! occurrences? An app thread stuck inside a handler LOOKS ALIVE — the
+//! backend keeps drawing and input silently stops meaning anything.
 //!
-//! WHAT IT IS FOR. An app thread stuck inside a handler is the worst
-//! failure kaya can have, because it LOOKS ALIVE: the backend keeps
-//! drawing, the window keeps resizing, and input silently stops meaning
-//! anything. Nothing in the framework noticed. DESIGN's threading
-//! section promised this diagnostic and said it needs no protocol —
-//! "the core reads the app's consumer cursor directly, so stall
-//! detection (log undrained for N seconds) requires no protocol" — and
-//! that is exactly what this does.
+//! WHAT COUNTS AS A STALL is narrower than it looks: a consumer
+//! advances its cursor BEFORE handing the record over, so a handler
+//! that blocks while nothing is queued is indistinguishable from an
+//! idle app. A stall is PENDING WORK NOBODY HAS PICKED UP.
 //!
-//! WHY IT IS WORTH A THREAD. The class is real and already bit once: a
-//! Haskell release used `putMVar`, which blocks when the MVar is full,
-//! so a second click would have blocked the app thread forever. No gate
-//! saw it; it was found by asking whether Go's `close` blocks. The file
-//! dialog design then made the class REACHABLE ON PURPOSE — a guest may
-//! call the blocking open on the app thread, and all eight guests carry
-//! a comment explaining why they do not. Until now nothing would have
-//! reported it if one did.
+//! BOTH TRANSPORTS, EACH IN ITS OWN TERMS. The occurrence RING is asked
+//! through its cursors (every foreign guest, whether it goes through
+//! `wait_pop` or maps the ring and advances `head` itself); the mpsc
+//! CHANNEL, which has no cursor, through its counters (the Rust
+//! binding's in-process path). Asking either in the other's terms
+//! reports a stall on a healthy app — docs/traps.md, "A watchdog that
+//! reports a stall on a HEALTHY app, in five of eight languages".
 //!
-//! WHAT COUNTS AS A STALL, and the definition is narrower than it first
-//! looks. A consumer advances its cursor BEFORE handing the record over,
-//! so a handler that blocks while nothing is queued is
-//! indistinguishable from an idle app — and rightly so, since nothing is
-//! waiting on it. A stall is therefore PENDING WORK NOBODY HAS PICKED
-//! UP: records sitting in the transport while the consumer stands still.
-//! That is also the shape a person reports, which is the point — they
-//! click, and click again, and nothing happens.
-//!
-//! BOTH TRANSPORTS, EACH IN ITS OWN TERMS, and getting this wrong cost
-//! this project a matrix debugging round. There are two, and only one
-//! consumer at a time:
-//!
-//! - the occurrence RING, whose consumer advances `head` — every foreign
-//!   guest, whether it goes through the C function floor (`wait_pop`) or
-//!   maps the ring and peeks at it directly (go, csharp, ocaml, haskell,
-//!   java);
-//! - an mpsc CHANNEL, which has no cursor at all — the Rust binding's
-//!   own in-process path (lib.rs sets an `OccSink::Mpsc`).
-//!
-//! The first cut read cursors alone and reported "keeping up" for a Rust
-//! app that was provably asleep, because nothing an mpsc app does moves
-//! a ring cursor. The second cut answered that with two COUNTERS —
-//! enqueued and taken — and claimed they "say the same thing about
-//! either transport". THEY DO NOT: `taken` is bumped only where the core
-//! itself hands a record over, and the five direct-ring languages never
-//! pass through there. Their `taken` sat at 0 for the life of the
-//! process while `enqueued` climbed, so the difference was permanently
-//! positive and the cursor that WAS moving was not being read — every
-//! healthy leg in those languages reported a stall as soon as the
-//! threshold elapsed (measured 2026-08-04: go, csharp, ocaml, haskell
-//! and java all report on a PASSING clipboard leg; rust, python and
-//! swift do not). It reads as a diagnostic about the app thread, so it
-//! sends the next session hunting a blocked main thread that does not
-//! exist — which is exactly what it did.
-//!
-//! So each transport is asked in the terms it actually has: the ring
-//! through its cursors, the channel through its counters. Pending work
-//! on either, with the consumer of neither moving, is the stall.
-//!
-//! ONE THREAD, POLLING. It reads a few atomics every 100ms and sleeps.
-//! The alternative was a per-backend timer, which is four
-//! implementations of the same loop and none of them shared with the
-//! harness. This is not gated on the harness feature: a shipped app is
-//! precisely where an unreported stall costs the most.
+//! Not gated on the harness feature: a shipped app is precisely where
+//! an unreported stall costs the most.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-/// How long pending work may sit before it is called a stall. One
-/// second is far past any handler that is doing its job — a handler
-/// runs inside a frame — and far short of a person's patience.
+/// How long pending work may sit before it is called a stall. Far past
+/// any handler doing its job, far short of a person's patience.
 const DEFAULT_STALL_MS: u64 = 1000;
 
 /// Milliseconds the app thread has been ignoring pending work, or 0
-/// when it is keeping up. Written by the watchdog, read by anyone;
-/// a plain atomic because that is the whole state.
+/// when it is keeping up.
 static STALLED_FOR_MS: AtomicU64 = AtomicU64::new(0);
 
-/// The mpsc transport's two counters: occurrences handed to the channel,
-/// and occurrences the app has taken off it. The ring transport is not
-/// counted here — it has a cursor, which is a better answer to the same
-/// question and one no binding can forget to update (a consumer that
-/// does not advance `head` wedges itself immediately).
+/// The mpsc transport's two counters. The RING transport is not counted
+/// here — it has a cursor, which no binding can forget to update.
 static ENQUEUED: AtomicU64 = AtomicU64::new(0);
 static TAKEN: AtomicU64 = AtomicU64::new(0);
 
-/// The process's occurrence ring, registered when it is created so the
-/// watchdog can read the consumer cursor DESIGN promised it would.
 static RING: OnceLock<Arc<crate::ring::OccRing>> = OnceLock::new();
 
 /// Hand the watchdog the ring to read. Called once, where the ring is
@@ -100,15 +46,10 @@ pub(crate) fn watch_ring(ring: Arc<crate::ring::OccRing>) {
 /// One occurrence has entered the mpsc transport, bound for the app
 /// thread.
 ///
-/// STARTS THE WATCHDOG, and that is deliberate rather than tidy. It was
-/// started from `kaya_run` first, which is one of THREE entry points —
-/// `kaya::run` reaches `swiftui_host::run` and `backend::run_core`
-/// directly and never passes through the C one, so every Rust guest on
-/// every platform ran with no watchdog at all and the scene reported
-/// "the app thread is keeping up" about an app that was asleep. An
-/// entry point somebody has to remember is not a place to start
-/// something. The first occurrence to reach any transport starts it,
-/// which no path can avoid and no new entry point can forget.
+/// STARTS THE WATCHDOG. The first occurrence to reach any transport
+/// starts it, which no path can avoid and no new entry point can
+/// forget — an entry point is not a place to start it from, there
+/// being three of them (docs/deferred.md).
 pub(crate) fn enqueued() {
     watch();
     ENQUEUED.fetch_add(1, Ordering::Release);
@@ -122,19 +63,16 @@ pub(crate) fn taken() {
     TAKEN.fetch_add(1, Ordering::Release);
 }
 
-/// One occurrence has entered the RING, bound for the app thread. No
-/// counter: the ring's own cursors say both what is pending and whether
-/// the consumer is moving. This exists to start the watchdog on the
-/// first record, for the same reason `enqueued` does.
+/// One occurrence has entered the RING. No counter: the ring's cursors
+/// say both what is pending and whether the consumer is moving. This
+/// exists only to start the watchdog on the first record.
 pub(crate) fn ring_pushed() {
     watch();
 }
 
 /// How long the app thread has been ignoring pending occurrences, or
-/// `None` if it is keeping up.
-///
-/// This is what the harness's `expect_stall` and `expect_no_stall` read,
-/// and what an app can poll if it wants to report its own health.
+/// `None` if it is keeping up. What the harness's `expect_stall` and
+/// `expect_no_stall` read.
 pub fn stalled_for() -> Option<Duration> {
     match STALLED_FOR_MS.load(Ordering::Acquire) {
         0 => None,
@@ -180,10 +118,8 @@ impl Reading {
         self.enqueued != self.taken || matches!(self.ring, Some((h, t)) if h != t)
     }
 
-    /// What moves when the app takes something — the consumer's position
-    /// on each transport. Unchanged between polls while work is pending
-    /// is the stall, and it is the ONE thing this file must read from
-    /// both transports.
+    /// The consumer's position on each transport. Unchanged between
+    /// polls while work is pending IS the stall.
     fn claimed(self) -> (u64, u32) {
         (self.taken, self.ring.map_or(0, |(head, _)| head))
     }
@@ -220,8 +156,6 @@ enum Verdict {
 impl Watch {
     fn poll(&mut self, now: Instant, reading: Reading, limit: Duration) -> Verdict {
         if !reading.pending() {
-            // Nothing pending: the app owes nobody anything, whatever it
-            // is doing.
             self.last_claimed = None;
             self.waiting_since = None;
             return Verdict::KeepingUp;
@@ -267,9 +201,8 @@ fn run(limit: Duration) {
             Verdict::Waiting => {}
             Verdict::Stalled(waited) => {
                 STALLED_FOR_MS.store(waited.as_millis() as u64, Ordering::Release);
-                // ONCE PER EPISODE. A stall that lasts a minute is one
-                // event, not six hundred; a watchdog that floods the log
-                // is a watchdog people turn off.
+                // Once per episode: a watchdog that floods the log is a
+                // watchdog people turn off.
                 if !reported {
                     reported = true;
                     let pending = depth(reading);
@@ -310,16 +243,14 @@ mod tests {
         }
     }
 
-    /// THE DEFECT THIS FILE WAS REWRITTEN FOR. A direct-ring guest never
-    /// moves a counter; its consumer moves the ring's head. A watchdog
-    /// that reads only the counters calls that healthy app stalled.
+    /// A direct-ring guest never moves a counter; its consumer moves
+    /// the ring's head (docs/traps.md).
     ///
     /// A BACKLOG THE WHOLE TIME, deliberately: an app that drains to
     /// empty between polls resets the clock on emptiness alone, and the
-    /// test would then pass with the cursor unread — which is exactly
-    /// how the first draft of it passed against the defect. Here two
-    /// records are always waiting and the consumer is always moving,
-    /// which is the ONE shape that separates the two readings.
+    /// test would then pass with the cursor unread. Two records always
+    /// waiting with the consumer always moving is the ONE shape that
+    /// separates the two readings.
     #[test]
     fn a_consumer_that_only_moves_the_ring_cursor_is_keeping_up() {
         let mut watch = Watch::default();
@@ -386,8 +317,8 @@ mod tests {
         );
     }
 
-    /// A stall that ends is over: the reading clears the moment the
-    /// consumer moves again, which is what lets a scene assert recovery.
+    /// The reading clears the moment the consumer moves again, which is
+    /// what lets a scene assert recovery.
     #[test]
     fn a_stall_that_recovers_clears() {
         let mut watch = Watch::default();
@@ -403,9 +334,8 @@ mod tests {
         );
     }
 
-    /// The ring's record count is what the message quotes, and it counts
-    /// RECORDS rather than bytes — including across a wrap, and never
-    /// counting the pad the wrap leaves behind.
+    /// The message quotes RECORDS rather than bytes — including across
+    /// a wrap, and never counting the pad the wrap leaves behind.
     #[test]
     fn the_report_counts_records_not_bytes() {
         let ring = crate::ring::OccRing::new(64);

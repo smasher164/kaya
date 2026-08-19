@@ -2,9 +2,9 @@
  * is kaya_tx_undo_group at the FRONT of the buffer, and the
  * undone/redone payload is decoded by hand (the generator emits no
  * parser for it). Reasoning: docs/undo-plan.md D2-D5 §3 and
- * docs/fresh-key-plan.md; annotated semantics in guests/rust/undo.rs.
- * The byte-frozen contract is tools/scenes/undo.steps: label#2 renders
- * this app's key list and label#3 its per-row notes. */
+ * docs/fresh-key-plan.md; semantics: guests/rust/undo.rs. Contract:
+ * tools/scenes/undo.steps, where label#2 renders this app's key list and
+ * label#3 its per-row notes. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -14,10 +14,9 @@
 #include <string.h>
 
 /* Guest-allocated ids, counted from 1 per space. CREATION ORDER IS
- * CONTRACT: the harness addresses label#N by creation order, so the keys
- * label must be created third and the notes label fourth for
- * tools/scenes/undo.steps to read them. Creating either later resolves
- * the index to a STAMPED row label instead of failing. */
+ * CONTRACT: the keys label must be created third and the notes label
+ * fourth for tools/scenes/undo.steps to read them. Creating either
+ * later resolves the index to a STAMPED row label instead of failing. */
 #define SIG_STATUS 1
 #define SIG_HISTORY 2
 #define SIG_KEYS 3
@@ -38,9 +37,9 @@
 #define C_TODOS 1
 
 /* Template nodes: their own id space, never widget ids. A node id and a
- * widget id may collide as NUMBERS (N_NOTE is 3, so is W_HISTORY) and
- * nothing is wrong: an occurrence's identity is the PAIR (id, key path),
- * empty path for a live widget. The handlers below match on both. */
+ * widget id may collide as NUMBERS and nothing is wrong: an
+ * occurrence's identity is the PAIR (id, key path), empty path for a
+ * live widget. */
 #define N_ROW 1
 #define N_TITLE 2
 #define N_NOTE 3
@@ -145,8 +144,7 @@ static unsigned n_todos = 0;
 
 /* What has been typed into the ROWS, by key — a row's field has no id
  * an app could hold, so the key indexes it. KEPT SORTED ASCENDING at
- * the insert: label#3 renders it in that order
- * (tools/scenes/undo.steps). */
+ * the insert: label#3 renders it in that order. */
 #define MAX_NOTES MAX_TODOS
 static int64_t note_keys[MAX_NOTES];
 static char note_texts[MAX_NOTES][MAX_TITLE];
@@ -179,8 +177,8 @@ static void key_list(char *out, size_t cap) {
 }
 
 /* Both arrival paths call this — the row's own edit occurrence and the
- * texts run of an undone/redone payload — so "what a note is" has one
- * spelling. An empty text REMOVES the key. */
+ * texts run of an undone/redone payload. An empty text REMOVES the
+ * key. */
 static void note_set(int64_t key, const KayaVal *text) {
     unsigned i = 0;
     while (i < n_notes && note_keys[i] < key)
@@ -247,8 +245,7 @@ static int parse_undo(const uint8_t *rec, uint16_t kind, KayaUndo *u) {
     memcpy(&u->n_orders, rec + at, 4);
     at += 4;
     at = kaya_parse_value(rec, at, &u->label);
-    /* +8 skips the flat list's own head, {u32 count, u32 reserved}: the
-     * run counts above already say how the values divide. */
+    /* +8 skips the flat list's own head, {u32 count, u32 reserved}. */
     u->at = at + 8;
     return 1;
 }
@@ -279,14 +276,13 @@ static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
      *        Str text    the restored text
      *
      *    (crates/kaya/src/wire.rs `undo_bodies_round_trip` pins the
-     *    values one by one; this decode is written against that table.)
-     *    The tail is read by arity — `size` says where the group ends —
-     *    so a group that grows later is walked past, not misread.
+     *    values one by one.) The tail is read by arity — `size` says
+     *    where the group ends — so a group that grows later is walked
+     *    past, not misread.
      *
-     *    THE DELTA IS THE ONLY NOTIFICATION: a restore is a programmatic
-     *    write and never echoes as text_changed, so an app that skips
-     *    this run goes stale. All of it is walked, because one step can
-     *    restore the draft AND a row's note. */
+     *    THE DELTA IS THE ONLY NOTIFICATION: a restore is a
+     *    programmatic write and never echoes as text_changed, so an app
+     *    that skips this run goes stale. */
     for (uint32_t i = 0; i < u->n_texts; i++) {
         KayaVal size, id, path_len, key;
         KayaVal text = kaya_str("");
@@ -340,9 +336,8 @@ static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
         }
         int index = key_index(key.i);
         if (flags.i & 1) {
-            /* THE KEY IS THE ONE THE ENTRY ALREADY HAD — the core kept
-             * it, so nothing here mints and the counter in `app` below
-             * never hears about a history walk. */
+            /* THE KEY IS THE ONE THE ENTRY ALREADY HAD — the core kept it,
+             * so nothing here mints. */
             if (index < 0 && n_todos < MAX_TODOS) {
                 index = (int)n_todos;
                 todo_keys[index] = key.i;
@@ -361,10 +356,10 @@ static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
 
     /* 4. orders: ARITY-FIRST likewise — I64 size, collection, path_len,
      *    path keys, then the instance's keys IN ORDER. "Changed the
-     *    order" INCLUDES an insert or a remove (crates/kaya/src/spec.rs),
-     *    so every group delta in this scene carries one; undoing the
-     *    remove needs it, position being what a per-entry statement
-     *    cannot carry. */
+     *    order" INCLUDES an insert or a remove
+     *    (crates/kaya/src/spec.rs), so every group delta in this scene
+     *    carries one; position is what a per-entry statement cannot
+     *    carry. */
     for (uint32_t i = 0; i < u->n_orders; i++) {
         KayaVal size, collection, path_len, key;
         at = kaya_parse_value(rec, at, &size);
@@ -379,8 +374,8 @@ static void fold_delta(const uint8_t *rec, const KayaUndo *u, char *draft,
             if (n < MAX_TODOS)
                 restated[n++] = key.i;
         }
-        /* A top-level instance is this app's whole list (path_len 0).
-         * The run states positions only, so each restated key's title is
+        /* A top-level instance is this app's whole list (path_len 0). The
+         * run states positions only, so each restated key's title is
          * looked up in the model the entries run just updated. */
         if (path_len.i == 0) {
             char titles[MAX_TODOS][MAX_TITLE];
@@ -414,11 +409,10 @@ static void *app(void *arg) {
     (void)arg;
     build_scene();
     char draft[128] = "";
-    /* The minter the sugar bindings spell `insert_fresh`, hand-kept —
-     * one counter per collection instance (docs/fresh-key-plan.md).
-     * NOTHING DECREMENTS IT: undo and redo replay captured keys inside
-     * the core and never re-enter this handler, so a fresh key is fresh
-     * forever. */
+    /* The minter the sugar bindings spell `insert_fresh`, hand-kept — one
+     * counter per collection instance (docs/fresh-key-plan.md). NOTHING
+     * DECREMENTS IT: undo and redo replay captured keys inside the core
+     * and never re-enter this handler. */
     int64_t fresh = 0;
     const uint8_t *rec;
     for (;;) {
@@ -447,9 +441,8 @@ static void *app(void *arg) {
                 memcpy(draft, text.s, len);
                 draft[len] = 0;
             } else if (id == N_NOTE && n_keys > 0) {
-                /* NOT an undoable transaction: the typing is the step,
-                 * and a group here would bank a second one per
-                 * keystroke. */
+                /* NOT an undoable transaction: the typing is the step, and
+                 * a group here would bank a second one per keystroke. */
                 note_set(keys[0].i, &text);
                 KayaTx tx = {buf, 0};
                 note_list(notes_text, sizeof notes_text);
@@ -461,8 +454,7 @@ static void *app(void *arg) {
                 continue;
             if (id == W_ADD) {
                 KayaTx tx = {buf, 0};
-                /* The empty-draft guard, and NOT an undoable step: a
-                 * refused add is not a step a user expects back. */
+                /* The empty-draft guard, and NOT an undoable step. */
                 if (draft[0] == '\0') {
                     snprintf(status, sizeof status, "nothing to add, %u total",
                              n_todos);
@@ -474,8 +466,8 @@ static void *app(void *arg) {
                 int64_t key = fresh;
                 char step[160];
                 snprintf(step, sizeof step, "add %s", draft);
-                /* AT THE FRONT OF THE BUFFER: everything after it in
-                 * this batch is what the step did. */
+                /* AT THE FRONT OF THE BUFFER: everything after it in this
+                 * batch is what the step did. */
                 kaya_tx_undo_group(&tx, 0, kaya_str(step));
                 kaya_tx_collection_insert(&tx, C_TODOS, 0, 0, kaya_i64(key), 0,
                                           (KayaVal[]){kaya_str(draft)}, 1);
@@ -493,8 +485,7 @@ static void *app(void *arg) {
                 kaya_submit(tx.buf, tx.len);
                 /* Finishing the form gets its OWN transaction: `clear`
                  * inside an undo group is REFUSED at apply, destroying
-                 * widget-owned text the core never held. The field then
-                 * reports text_changed("") and the fold empties draft. */
+                 * widget-owned text the core never held. */
                 uint8_t finish[64];
                 KayaTx form = {finish, 0};
                 kaya_tx_widget_command(&form, W_FIELD, KAYA_COMMAND_CLEAR);
@@ -504,8 +495,6 @@ static void *app(void *arg) {
                  * widget's. */
                 KayaTx tx = {buf, 0};
                 if (n_todos == 0) {
-                    /* Not a step either, and not exercised by the
-                     * script. */
                     snprintf(status, sizeof status, "nothing to remove, %u total",
                              n_todos);
                     kaya_tx_write_signal(&tx, SIG_STATUS, kaya_str(status));
@@ -515,9 +504,8 @@ static void *app(void *arg) {
                 char step[160], title[MAX_TITLE];
                 snprintf(title, sizeof title, "%s", todo_titles[0]);
                 snprintf(step, sizeof step, "remove %s", title);
-                /* The app remembers neither the key nor the position:
-                 * the core captured both and hands them back in the
-                 * delta's entries and orders runs. */
+                /* The app remembers neither the key nor the position: the
+                 * core captured both and hands them back in the delta. */
                 kaya_tx_undo_group(&tx, 0, kaya_str(step));
                 kaya_tx_collection_remove(&tx, C_TODOS, 0, 0,
                                           kaya_i64(todo_keys[0]));
@@ -544,8 +532,8 @@ static void *app(void *arg) {
                 kaya_submit(tx.buf, tx.len);
             }
         } else if (parse_undo(rec, KAYA_OCCURRENCE_UNDONE, &undo)) {
-            /* The fold runs BEFORE the transaction is built: the
-             * record's bytes are the core's and live only until the next
+            /* The fold runs BEFORE the transaction is built: the record's
+             * bytes are the core's and live only until the next
              * kaya_next_occurrence. */
             char name[128];
             const char *step = what(&undo.label, name, sizeof name);
@@ -556,7 +544,7 @@ static void *app(void *arg) {
             /* Keys and notes ride the SAME transaction as the history
              * label: the script reads history first, so what it then
              * reads is the app's own answer and not the value the core
-             * restored on its way past (tools/scenes/undo.steps). */
+             * restored on its way past. */
             key_list(keys_text, sizeof keys_text);
             kaya_tx_write_signal(&tx, SIG_KEYS, kaya_str(keys_text));
             note_list(notes_text, sizeof notes_text);

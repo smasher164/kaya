@@ -27,20 +27,15 @@ import java.io.FileInputStream
  *
  * The questions, in the order they decide things:
  *
- *  Q1 Where can this process WRITE a directory that DocumentsUI can then
- *     browse? The scene's premise is that guest and interpreter agree on
- *     a directory with no runner involvement, and the desktops' answer
- *     (the temp dir) is invisible to DocumentsUI.
- *  Q2 Does `java.io.tmpdir` agree with what Rust's `std::env::temp_dir`
- *     returns on Android? KayaCompose already assumes it does.
- *  Q3 Does EXTRA_INITIAL_URI aim the picker at a chosen directory, from
- *     an app (not just from `am start`)?
+ *  Q1 Where can this process WRITE a directory that DocumentsUI can
+ *     then browse?
+ *  Q2 Does `java.io.tmpdir` agree with Rust's `std::env::temp_dir`?
+ *  Q3 Does EXTRA_INITIAL_URI aim the picker, from an app?
  *  Q4 Can the picker be launched through activityResultRegistry AFTER
  *     the activity is RESUMED — which is when the apply pump runs?
  *  Q5 Does the accessibility service SEE the picker's tree, and does
- *     performAction(ACTION_CLICK) on a row actually answer the picker?
- *  Q6 Is the URI RE-OPENABLE — the property the whole source design was
- *     chosen for? And openable off the main thread?
+ *     performAction(ACTION_CLICK) on a row answer the picker?
+ *  Q6 Is the URI RE-OPENABLE, and off the main thread?
  *  Q7 Does the OPEN_DOCUMENT grant carry WRITE, and is the descriptor
  *     seekable?
  */
@@ -70,10 +65,8 @@ class ProbeActivity : ComponentActivity() {
         log("Q2 env TMPDIR=${System.getenv("TMPDIR")}")
         log("Q2 rust std::env::temp_dir would be TMPDIR or /data/local/tmp")
         log("Q2 cacheDir=$cacheDir")
-        // Can a guest that has no JNI find the shared root WITHOUT
-        // hardcoding /storage/emulated/0? Android sets these in the
-        // process environment, and a Rust guest reads them with
-        // std::env::var.
+        // Can a guest with no JNI find the shared root WITHOUT
+        // hardcoding /storage/emulated/0?
         log("Q8 env EXTERNAL_STORAGE=${System.getenv("EXTERNAL_STORAGE")}")
         log("Q8 env ANDROID_STORAGE=${System.getenv("ANDROID_STORAGE")}")
         log("Q8 Environment.getExternalStorageDirectory=" +
@@ -82,8 +75,8 @@ class ProbeActivity : ComponentActivity() {
             "${Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)}")
         log("Q2 externalFilesDir=${getExternalFilesDir(null)}")
 
-        // Q1: which candidate directories this process can actually make
-        // and fill. `isExternalStorageManager` is the appops state the
+        // Q1: which candidate directories this process can make and
+        // fill. `isExternalStorageManager` is the appops state the
         // runner would have to grant.
         log("Q1 isExternalStorageManager=${Environment.isExternalStorageManager()}")
         val pid = android.os.Process.myPid()
@@ -101,9 +94,7 @@ class ProbeActivity : ComponentActivity() {
             val ok = tryWrite(path)
             log("Q1 $label $path -> $ok")
             // ONLY the shared collections: aiming at Android/data/ is
-            // accepted by the intent and silently lands on Recent
-            // instead — measured on the first run of this probe, and the
-            // failure looks exactly like the extra being ignored.
+            // accepted and silently lands on Recent (docs/traps.md).
             if (ok == "OK" && aimAt == null && label == "shared-documents") aimAt = path
         }
 
@@ -127,8 +118,8 @@ class ProbeActivity : ComponentActivity() {
 
     /**
      * Q3/Q4. StartActivityForResult rather than the OpenDocument
-     * contract, because the real arm needs the intent verbatim: the
-     * initial directory rides as an extra and WRITE has to be asked for.
+     * contract: the real arm needs the intent verbatim, since the
+     * initial directory rides as an extra and WRITE must be asked for.
      */
     private fun launchPicker(aimAt: String?) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
@@ -182,11 +173,8 @@ class ProbeActivity : ComponentActivity() {
             log("Q4 LAUNCH THREW ${e.javaClass.simpleName}: ${e.message}")
         }
         // Q5: let the picker come up, then read and drive it — FROM A
-        // WORKER THREAD, which is where the harness's verbs run. It is
-        // not a detail: getWindows() is refreshed on the service's main
-        // looper, which is this app's, so a drive that blocks the main
-        // thread reads a FROZEN window list and concludes the picker is
-        // still up when it has already gone. Measured.
+        // WORKER THREAD, which is where the harness's verbs run and
+        // which the frozen-window-list trap requires (docs/traps.md).
         main.postDelayed({ Thread { readAndDrivePicker() }.start() }, 3000)
     }
 
@@ -218,12 +206,9 @@ class ProbeActivity : ComponentActivity() {
                 "breadcrumbs=${allTexts(nodes, "breadcrumb_text")}")
             if (variant == "cancel") {
                 // The scene's `file_choose cancel`. There is no Cancel
-                // button in this picker at all — dismissal is the system
-                // back gesture. ONE IS NOT ENOUGH: measured, the first
-                // back walks UP the directory tree (the picker was aimed
-                // three levels deep) and only the back taken at the root
-                // dismisses. So: bounded, and the picker being gone is
-                // the only proof.
+                // button — dismissal is BACK, and ONE IS NOT ENOUGH
+                // (docs/traps.md). Bounded, with the picker being gone
+                // as the only proof.
                 var backs = 0
                 while (backs < 8) {
                     if (!ProbeA11y.live?.windowPackages().orEmpty().contains(pkg)) break
@@ -235,7 +220,7 @@ class ProbeActivity : ComponentActivity() {
                     !ProbeA11y.live?.windowPackages().orEmpty().contains(pkg)
                 }")
             } else {
-                // The row: an item_root whose subtree carries the basename.
+                // An item_root whose subtree carries the basename.
                 val row = nodes.firstOrNull { n ->
                     n.viewIdResourceName?.endsWith("/item_root") == true &&
                         titlesUnder(n).contains("picked.txt")
@@ -247,9 +232,8 @@ class ProbeActivity : ComponentActivity() {
                     log("Q5 performAction(ACTION_CLICK) on item_root -> $ok")
                 }
             }
-            // THE PRESS MUST HAVE LANDED. A click that arrives before the
-            // picker is interactive is swallowed with no error anywhere,
-            // so the picker being GONE is the only honest proof.
+            // THE PRESS MUST HAVE LANDED. A click that arrives before
+            // the picker is interactive is swallowed with no error.
             Thread.sleep(1500)
             log("Q5 picker still up 1500ms after the drive: " +
                 "${ProbeA11y.live?.windowPackages().orEmpty().contains(pkg)}")
@@ -283,7 +267,7 @@ class ProbeActivity : ComponentActivity() {
 
     /** Q6/Q7: the properties the source design was chosen for. */
     private fun onPicked(uri: Uri) {
-        // The display name, which is what PickedFile.name must carry.
+        // The display name PickedFile.name must carry.
         try {
             contentResolver.query(uri, null, null, null, null)?.use { c ->
                 val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
@@ -298,13 +282,11 @@ class ProbeActivity : ComponentActivity() {
         // THE PROPERTY THE DESIGN TURNS ON: a second redemption.
         openOnce("second r (main thread)", uri, "r")
 
-        // ...and off the thread that picked, which is what the scene
-        // uniquely proves.
+        // ...and off the thread that picked.
         Thread {
             openOnce("third r (worker thread)", uri, "r")
             openOnce("rw (worker thread)", uri, "rw")
-            // LAST, because "w" truncates: everything after it would
-            // measure an empty file.
+            // LAST, because "w" truncates.
             openOnce("w (worker thread)", uri, "w")
             log("==== end")
         }.start()

@@ -10,11 +10,11 @@ import android.net.Uri
 import android.os.PersistableBundle
 import java.io.File
 
-// The BACKGROUND seed: writes are not focus-gated (measured, §0e Q5,
-// and confirmed in the ClipboardService source across 10..15), so a
-// broadcast receiver can put content on the clipboard while the guest
-// keeps the foreground. The result rides an ORDERED broadcast's
-// result data, which `am broadcast` prints on stdout — no logcat race.
+// The BACKGROUND seed: writes are not focus-gated
+// (docs/clipboard-plan.md §7), so a broadcast receiver can put content
+// on the clipboard while the guest keeps the foreground. The result
+// rides an ORDERED broadcast's result data, which `am broadcast`
+// prints on stdout — no logcat race.
 class SeedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -28,11 +28,9 @@ class SeedReceiver : BroadcastReceiver() {
                 }
                 "fiverep" -> {
                     // One clip, several representations, built BY HAND:
-                    // newHtmlText advertises text/html alone (measured
-                    // in the AOSP source), so the description lists
-                    // every offered mime explicitly. Item 0 carries
-                    // text+html inline; the byte payloads ride provider
-                    // URIs, one item each.
+                    // newHtmlText advertises text/html alone, so the
+                    // description lists every offered mime explicitly
+                    // (docs/clipboard-plan.md §7).
                     File(context.filesDir, "custom.bin").writeBytes("note=1".toByteArray())
                     File(context.filesDir, "pixel.png").writeBytes(PIXEL_PNG)
                     val description = ClipDescription(
@@ -45,9 +43,7 @@ class SeedReceiver : BroadcastReceiver() {
                         ),
                     )
                     // The API 33+ copy overlay is suppressible on an
-                    // emulator (SystemUI honors this extra when
-                    // Build.IS_EMULATOR) — measured by the screenshot
-                    // phase.
+                    // emulator (docs/clipboard-plan.md §7).
                     description.extras = PersistableBundle().apply {
                         putBoolean("com.android.systemui.SUPPRESS_CLIPBOARD_OVERLAY", true)
                     }
@@ -59,9 +55,10 @@ class SeedReceiver : BroadcastReceiver() {
                     "seeded fiverep"
                 }
                 "ungrantable" -> {
-                    // A URI no provider serves: the documented-nowhere
-                    // failure is that getPrimaryClip CLEARS THE WHOLE
-                    // CLIPBOARD when a grant fails. Provoke it.
+                    // A URI no provider serves, to provoke the
+                    // documented-nowhere clear-the-whole-clipboard
+                    // failure (docs/clipboard-plan.md §7: unconfirmed
+                    // on API 35).
                     val clip = ClipData(
                         ClipDescription("kayaprobe", arrayOf("application/octet-stream")),
                         ClipData.Item(Uri.parse("content://dev.kaya.clipprobe.bogus/x")),

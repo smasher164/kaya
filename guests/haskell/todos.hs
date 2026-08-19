@@ -64,7 +64,6 @@ main = kayaMain $ \app -> do
                 focusWidget entryField
         onToggle keys checked =
           submitTx app $
-            -- One field's delta: the title never travels.
             patch todos (head keys) [set (field @"done" @Todo) checked]
 
     root <-

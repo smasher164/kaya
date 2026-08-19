@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,89 +11,38 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# A GO GUEST READS THE HOST'S ENVIRONMENT, NEVER GO'S COPY OF IT.
+# A GO GUEST READS THE HOST'S ENVIRONMENT, NEVER GO'S COPY OF IT
+# (docs/go-mobile-plan.md D2). In a `-buildmode=c-shared` .so Go's view
+# of the environment is empty forever while C's getenv(3) reads the live
+# `environ`, and the failure is SILENT: an empty KAYA_SELFTEST is not an
+# unknown scene name, it is the default arm.
 #
-# THE DEFECT (measured 2026-08-07 in a real Android app process,
-# scratchpad/mobilepkg-go.md §4.4, ratified as docs/go-mobile-plan.md's
-# D2). Go fills runtime.envs from the envp handed to the PROCESS ENTRY.
-# A library loaded with System.loadLibrary never sees one, so in a
-# `-buildmode=c-shared` .so Go's view of the environment is empty
-# forever, while C's getenv(3) reads the live `environ` the host wrote:
+# NOTHING AT COMPILE TIME OR RUN TIME CAN TELL THE TWO SPELLINGS APART:
+# both compile everywhere, both RETURN on Android, and an empty
+# environment is Android's normal state for a c-shared library. That
+# leaves the static text. BOTH ROOTS are scanned — guests/go is where
+# the defect would be written, bindings/go is where it would be written
+# a second time by whoever "fixes" kaya.Env to call os.Getenv.
 #
-#     os.Getenv("KAYA_SELFTEST") == ""     len(os.Environ()) == 0
-#     C.getenv("KAYA_SELFTEST")  == "milestone2"
+# THE SECOND RULE: A GUEST ASKS KAYA FOR PLATFORM LOCATIONS, NEVER THE
+# LANGUAGE RUNTIME'S SNAPSHOT. `os.TempDir` is the same defect wearing a
+# different name — on unix it IS `Getenv("TMPDIR")` with a "/tmp"
+# fallback, so it answers CONFIDENTLY out of the same empty map with a
+# path an Android app may not write. UserHomeDir, UserCacheDir and
+# UserConfigDir are here for the same reason.
 #
-# WHY THAT IS WORSE THAN A CRASH. kaya picks its scene by name from
-# KAYA_SELFTEST and the selector's guard is a panic on an UNKNOWN name.
-# "" is not an unknown name — it is the DEFAULT ARM — so the idiomatic
-# Go spelling runs milestone2 against every other scene's script and
-# fails every step for the wrong reason, with no diagnosis anywhere.
-# And it works on iOS, where the guest is -buildmode=exe and Go owns
-# main, so the natural build order (iOS first, per D3) tests the broken
-# call on the platform where it is not broken.
-#
-# WHY THIS IS A GATE AND NOT A WALL SOMEWHERE BETTER, since CLAUDE.md's
-# invariant 3 asks that question first and answers "gate" last.
-# NOTHING AT COMPILE TIME OR RUN TIME CAN TELL THE TWO SPELLINGS APART.
-# `os.Getenv("X")` and `kaya.Env("X")` both compile on every platform;
-# on Android both RETURN — one the host's value, one the empty string —
-# and an empty environment is Android's NORMAL state for a c-shared
-# library, not an error condition, so an assertion at attach that fired
-# on the wrong spelling would fire on the right one too. Go has no
-# mechanism to make a standard-library call unavailable to a package.
-# That leaves the static text, and the static text is this. So the
-# doctrine's stated fallback applies — "when only a gate will do, put it
-# in the set the lanes already run": this gate is in tools/gates.sh's
-# list, which tools/validate-mac.sh runs whole, and CLAUDE.md's rung 2
-# names it, which tools/check-gates.sh's three-way census then holds.
-#
-# WHAT IT SCANS AND WHY BOTH ROOTS. guests/go is where the defect would
-# be written. bindings/go is where it would be written a second time,
-# by whoever "fixes" kaya.Env by making it call os.Getenv — the
-# replacement is the thing most worth guarding, so the gate also
-# requires it to still exist and still go through C (clause 3 below).
-#
-# THE SECOND RULE, ratified 2026-08-17: A GUEST ASKS KAYA FOR PLATFORM
-# LOCATIONS, NEVER THE LANGUAGE RUNTIME'S SNAPSHOT.
-#
-# `os.TempDir` is the same defect wearing a different name. On unix it
-# IS `Getenv("TMPDIR")` with a hardcoded "/tmp" fallback, so in a
-# c-shared library it answers out of the same empty map — and it answers
-# CONFIDENTLY: "/tmp", which is not a place an Android app may write.
-# The scene's files go where nothing looks and nothing errors. The same
-# is true of every other "where is X" reader Go answers from that copy
-# (UserHomeDir, UserCacheDir, UserConfigDir), so all four are here.
-#
-# IT IS NOT A FLAT BAN, because the desktop arm of a platform switch is
-# the one place the call is right: the two mobile arms return before it,
-# and on a desktop the guest owns main, so Go's copy IS the host's. That
-# is exactly the shape guests/go/{save,editor,clipboard,filedialog}
-# already carry — a `sceneRoot()` that branches on runtime.GOOS, asks
-# kaya.Env for the phone locations (EXTERNAL_STORAGE, HOME) and falls
-# back to os.TempDir. So the rule is STRUCTURAL: a location reader must
+# NOT A FLAT BAN: the desktop arm of a platform switch is the one place
+# the call is right. So the rule is STRUCTURAL — a location reader must
 # sit inside a function that both branches on runtime.GOOS and reaches a
-# location through kaya.Env. A BARE one — a scene computing its
-# directory straight out of Go's snapshot — is red. That was
-# guests/go/filedialog/filedialog.go until the day this clause landed,
-# and the file's own header comment argued FOR it.
+# location through kaya.Env. A name rule ("call it sceneRoot") would be
+# satisfied by renaming; a flat ban would push guests toward hardcoding
+# "/tmp".
 #
-# WHY A STRUCTURE AND NOT A NAME. "The function must be called
-# sceneRoot" would be satisfied by renaming, and misses the real
-# property; "os.TempDir may not appear" would delete a correct desktop
-# fallback and push guests toward hardcoding "/tmp" themselves, which is
-# worse. The two things that make the fallback safe are the branch and
-# the host channel, and those are the two things checked.
-#
-# THE SCAN IS A PARSER, NOT A GREP, and that is load-bearing here more
-# than in most gates: every file this rule protects DOCUMENTS the rule,
-# so bindings/go/runtime.go says "os.Getenv" six times in prose and
-# filedialog.go now spends a paragraph on os.TempDir. A grep would have
-# to be taught to ignore comments and would then be one clever regex
-# away from ignoring code too. go/parser knows the difference for free,
-# resolves whatever local name the `os` import was given, skips an
-# identifier that is a local variable rather than the package, and can
-# answer "which function is this call in", which the second rule needs
-# and no line-oriented reader has.
+# THE SCAN IS A PARSER, NOT A GREP, and that is load-bearing: every file
+# this rule protects DOCUMENTS the rule, so bindings/go/runtime.go says
+# "os.Getenv" six times in prose. go/parser also resolves whatever local
+# name the `os` import was given and answers "which function is this
+# call in", which the second rule needs.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -434,10 +378,8 @@ func main() {
 GO
 
 # doctor SRC FROM TO OUT — write SRC with FROM replaced by TO, and print
-# how many times that happened. THE COUNT IS THE POINT: a negative test
-# whose perturbation did not apply passes for the wrong reason, which
-# has misfired twice in this tree (check-tx-liveness, the wayland seat
-# guard), so every self-test below reads this number and refuses a zero.
+# how many times that happened. THE COUNT IS THE POINT: every self-test
+# below reads this number and refuses a zero.
 doctor() {
     python3 - "$1" "$2" "$3" "$4" <<'PY'
 import sys
@@ -449,10 +391,9 @@ open(out, "w", encoding="utf-8").write(text.replace(frm, to))
 PY
 }
 
-# BUILT ONCE AND RUN, rather than `go run` six times. Not only for the
-# speed: `go run` prints its own "exit status 1" to stderr when the
-# program it ran exits non-zero, so a caller that treats a non-empty
-# stderr as "the scanner itself broke" can never tell the two apart.
+# BUILT ONCE AND RUN, not `go run` six times: `go run` prints its own
+# "exit status 1" to stderr when the program exits non-zero, so a caller
+# reading stderr cannot tell that from the scanner breaking.
 if ! go build -o "$T/goenv" "$T/goenv.go"; then
     echo "check-go-env: the scanner would not build — fix it here, in this file." >&2
     exit 1
@@ -484,21 +425,10 @@ elif scan -file "$T/s1.go" >/dev/null 2>&1; then
     status=1
 fi
 
-# 2. The scan sees the defect in a GUEST, which is the other root and
-#    the one the trap actually lands in.
-#
-#    THE FILE MOVED TWICE, and the way it moved the first time is worth
-#    keeping: this used to plant over `os.Exit(` in
-#    guests/go/milestone2/main.go, and the Android composition split that
-#    guest into a scene body and two platform tails — so os.Exit went to
-#    main_desktop.go, the substitution count came back ZERO, and the gate
-#    refused to vouch for itself instead of passing. That is the clause
-#    working. (The second move was the collapse to one entry package:
-#    guests/go/cmd/main_desktop.go is the same tail, now the only one.)
-#    The token has to sit in a file that IMPORTS os (the scanner resolves
-#    the import's local name and ignores a bare `os` bound to nothing),
-#    which is exactly what main_desktop.go is: the tail that owns main,
-#    selects the scene and exits.
+# 2. The scan sees the defect in a GUEST, the root the trap lands in.
+#    The token has to sit in a file that IMPORTS os — the scanner
+#    resolves the import's local name and ignores a bare `os` bound to
+#    nothing — which is what main_desktop.go is.
 n=$(doctor guests/go/cmd/main_desktop.go 'os.Exit(' 'os.Getenv(' "$T/s2.go")
 echo "check-go-env: self-test 2 planted $n defect(s) in guests/go/cmd/main_desktop.go"
 if [ "${n:-0}" -lt 1 ]; then
@@ -509,20 +439,14 @@ elif scan -file "$T/s2.go" >/dev/null 2>&1; then
     status=1
 fi
 
-# 2b. AND IT READS A FILE NO MAC EVER COMPILES. The rule is about
-#    ANDROID, and the Android arm of a Go guest is behind
-#    `//go:build android` — so if the scanner honoured build constraints
-#    it would be blind in precisely the one place the defect can happen,
-#    and every clause above would still pass. go/parser does not evaluate
-#    constraints, and this is the clause that says so out loud instead of
-#    leaving it as a fact somebody has to know.
+# 2b. AND IT READS A FILE NO MAC EVER COMPILES: the Android arm is
+#    behind `//go:build android`, so a scanner honouring build
+#    constraints would be blind exactly where the defect can happen.
+#    go/parser does not evaluate them.
 #
-#    THE PLANT CARRIES ITS OWN IMPORT, and under an ALIAS, which buys a
-#    second property for free: the scanner must resolve whatever local
-#    name the os import was given, not match the literal text "os.".
-#    Keyed on `package main` — the one token every Go file has exactly
-#    one of — so a rewrite of the imports or the selector cannot quietly
-#    empty it.
+#    THE PLANT CARRIES ITS OWN IMPORT, under an ALIAS, so the scanner
+#    must resolve the local name rather than match the text "os.".
+#    Keyed on `package main`, the one token every Go file has once.
 n=$(doctor guests/go/cmd/main_android.go 'package main' \
     $'package main\n\nimport osprobe "os"\n\nvar _ = osprobe.Getenv("KAYA_SELFTEST")' \
     "$T/s2b.go")
@@ -543,20 +467,14 @@ elif scan -file "$T/s2b.go" >/dev/null 2>&1; then
     status=1
 fi
 
-# 3. PROSE IS NOT CODE, and this gate would be unusable if it were:
-#    every file the rule protects explains the rule, so runtime.go names
-#    os.Getenv in its own comments (the count is printed below).
+# 3. PROSE IS NOT CODE: every file the rule protects explains the rule,
+#    so runtime.go names os.Getenv in its own comments.
 #
-#    ISOLATED RATHER THAN READ OFF THE REAL FILE, which is the whole
-#    craft of this clause. Scanning the undoctored runtime.go and calling
-#    a finding "you flagged a comment" was the first spelling, and it
-#    MISDIAGNOSED: with the binding perturbed to call os.Getenv for real,
-#    the gate went red — correctly — while printing that the scanner
-#    could not tell code from prose, which was false and would have sent
-#    the reader into this file instead of theirs. So the clause is built
-#    from the real comment lines ALONE, lifted out of the real file into
-#    a file that has nothing else in it. Then the only thing that can
-#    fail it is the property it names.
+#    ISOLATED RATHER THAN READ OFF THE REAL FILE: scanning the
+#    undoctored runtime.go would MISDIAGNOSE a real defect as "you
+#    flagged a comment". The clause is built from the real comment lines
+#    alone, lifted into a file that has nothing else in it, so the only
+#    thing that can fail it is the property it names.
 mentions=$(python3 - "$T/s3.go" <<'PY'
 import sys
 
@@ -585,10 +503,9 @@ elif ! scan -file "$T/s3.go" >/dev/null 2>&1; then
     status=1
 fi
 
-# 4. THE REPLACEMENT MUST EXIST AND MUST GO THROUGH C. A ban with no
-#    replacement is a gate that gets deleted the first time someone
-#    needs a variable; a replacement that has quietly become os.Getenv
-#    is the same defect wearing kaya's name.
+# 4. THE REPLACEMENT MUST EXIST AND MUST GO THROUGH C: a replacement
+#    that has quietly become os.Getenv is the same defect wearing
+#    kaya's name.
 replacement() {
     python3 - "$1" <<'PY'
 import sys
@@ -622,13 +539,9 @@ fi
 # ------------------------------------------- the location rule's four
 #
 # 5a-5d. EVERY BRANCH OF THE LOCATION VERDICT IS MADE TO PRINT, and the
-#    MESSAGE is what each clause reads, not merely the exit status. This
-#    rule answers "why is that os.TempDir wrong?", and a why-not is
-#    believed: the sentence it prints is what the next reader chases
-#    (CLAUDE.md invariant 3, and kayaOpenPanelWhyNot's two lost
-#    sessions). A branch nobody has seen print is a guess about a state
-#    nobody has reached — so all four are reached here, off the REAL
-#    bytes of the file the rule was written for.
+#    MESSAGE is what each clause reads, not merely the exit status
+#    (CLAUDE.md invariant 3: a why-not is believed). All four are
+#    reached off the REAL bytes of the file the rule was written for.
 loc_says() { # doctored-file expected-fragment label
     if out=$("$T/goenv" -file "$1" 2>&1); then
         echo "check-go-env: SELF-TEST FAIL — the location rule passed $3." >&2
@@ -644,10 +557,8 @@ loc_says() { # doctored-file expected-fragment label
     esac
 }
 
-# 5a. The BARE call — the defect itself, reconstructed by putting back
-#     exactly the line guests/go/filedialog/filedialog.go carried until
-#     2026-08-17: a scene directory computed straight from Go's snapshot,
-#     in a function that has branched on nothing.
+# 5a. The BARE call: a scene directory computed straight from Go's
+#     snapshot, in a function that has branched on nothing.
 n=$(doctor guests/go/filedialog/filedialog.go 'filepath.Join(sceneRoot(),' \
     'filepath.Join(os.TempDir(),' "$T/s5a.go")
 echo "check-go-env: self-test 5a planted $n bare location read(s) in guests/go/filedialog/filedialog.go"
@@ -688,10 +599,8 @@ elif ! loc_says "$T/s5c.go" "never reads runtime.GOOS" \
 fi
 
 # 5d. And PACKAGE LEVEL, where there is no function to have branched at
-#     all — the case a per-function rule would silently skip if it only
-#     ever looked inside functions.
-#     Anchored AFTER the import block (Go refuses a declaration before
-#     one), on the declaration the rule is really about.
+#     all. Anchored AFTER the import block (Go refuses a declaration
+#     before one).
 n=$(doctor guests/go/filedialog/filedialog.go 'func sceneRoot() string {' \
     $'var _ = os.TempDir\n\nfunc sceneRoot() string {' "$T/s5d.go")
 echo "check-go-env: self-test 5d planted $n package-level location read(s)"
@@ -715,11 +624,9 @@ if ! scan bindings/go guests/go >"$T/found.txt" 2>"$T/err.txt"; then
         cat "$T/err.txt" >&2
         exit 1
     fi
-    # ONE SENTENCE PER RULE, over the findings that rule produced. The
-    # two failures share a cause but not a fix — one wants kaya.Env in
-    # place of a call, the other wants the call moved behind a platform
-    # switch — and a gate that printed both paragraphs every time would
-    # send half its readers to the wrong one.
+    # ONE SENTENCE PER RULE: the two failures share a cause but not a
+    # fix, so printing both paragraphs would send half the readers to
+    # the wrong one.
     grep '^env: ' "$T/found.txt" >"$T/env.txt"
     grep '^loc: ' "$T/found.txt" >"$T/loc.txt"
     if [ -s "$T/env.txt" ]; then

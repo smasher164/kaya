@@ -1,8 +1,6 @@
 // The entry scene from C#: the uncontrolled contract end to end. The
 // field owns its text and reports each edit through OnChange; the app
-// folds those into a plain variable (draft) — its own model, per
-// doctrine. The add button inserts the draft and answers with the count
-// read from the collection model.
+// folds those into a plain variable (draft).
 //
 // This scene documents CENTRAL REGISTRATION: the build body hands the
 // widget handles back out and app.OnChange/app.OnClick attach to them
@@ -10,10 +8,6 @@
 // argument. That is the only thing separating this build body from
 // TodosScene.cs's.
 //
-// Keys come from InsertFresh rather than the app
-// (docs/fresh-key-plan.md).
-//
-// Build the library first (cargo build), then:
 //     KAYA_SELFTEST=entry KAYA_LIB=target/debug/libkaya.dylib \
 //         dotnet run --project guests/csharp
 
@@ -57,9 +51,6 @@ static class EntryScene
             tx.InsertFresh(todos, draft);
             int total = tx.Count(todos);
             tx.Write(status, $"added {draft}, {total} total");
-            // Atomically with the insert. The field answers with
-            // text_changed("") through its normal edit path, so the fold
-            // above empties the draft.
             tx.Clear(field);
             tx.Focus(field);
         });

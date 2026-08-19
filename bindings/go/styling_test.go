@@ -1,26 +1,14 @@
 package kaya
 
-// The styling surface's guards (docs/styling-plan.md slice 1), pinned
-// where a lane already walks: tools/check-abort.sh runs
-// `go test dev.kaya/bindings/go` on every desktop lane, so these run
-// with no GUI, no window and no mac.
+// The styling surface's guards (docs/styling-plan.md slice 1).
 //
-// AND NOTHING HERE READS A STYLING WRITE BACK THROUGH THE API THAT MADE
-// IT — the pass's own doctrine, because every platform's accent
-// read-back lies (macOS FB13688723, GTK's AdwStyleManager, WinUI's
-// no-op SystemAccentColor write). Two distinct surfaces answer instead:
-//
-//   - the WIRE BYTES the core will consume, decoded from the queued
-//     record: that is what leaves this process, not what the binding
-//     believes it queued.
-//   - THE REAL ROOT, driven end-to-end. Each trap below builds a scene
-//     through the ordinary Go sugar, submits it, and pumps
-//     kaya_next_commands so the core's Scene actually applies it. A
-//     transaction the root refuses aborts the child process with the
-//     root's own sentence on stderr; the parent asserts on the corpse.
-//     That is the only way to test a declare-time wall from a binding:
-//     a headless queue never reaches the check, and the binding's
-//     opinion of the rule is not the rule.
+// NOTHING HERE READS A STYLING WRITE BACK THROUGH THE API THAT MADE IT:
+// every platform's accent read-back lies (docs/styling-plan.md). Two
+// surfaces answer instead — the WIRE BYTES decoded from the queued
+// record, and THE REAL ROOT, driven end-to-end in a re-exec because a
+// root refusal is an abort that crosses an extern "C" frame and nothing
+// in this process can recover it. A headless queue never reaches a
+// declare-time wall.
 
 import (
 	"context"
@@ -67,11 +55,8 @@ func brandRecord(t *testing.T, build func(tx *Tx)) []byte {
 	return found
 }
 
-// ONE CALL IS ONE RECORD, whatever it is given. The override form is
-// variadic, so the shape that would be easy to write by accident — one
-// record per override — is exactly the shape the root refuses at the
-// second one, and it would only ever be seen on a branded app's first
-// frame.
+// One call is one record, whatever it is given: one record per override
+// would die on the root's set-once wall, on a branded app's first frame.
 func TestBrandAccentPacksOneRecord(t *testing.T) {
 	for _, c := range []struct {
 		name              string
@@ -84,9 +69,8 @@ func TestBrandAccentPacksOneRecord(t *testing.T) {
 		{"both", func(tx *Tx) {
 			tx.BrandAccent(0x3584E4, DarkAccent(0x62A0EA), LightAccent(0x1C71D8))
 		}, 3, 0x1C71D8, 0x62A0EA},
-		// The zero value is "unstated", so a caller holding an
-		// AccentOverride variable it never filled brands with the seed
-		// rather than with black.
+		// The zero value is "unstated": an AccentOverride nobody filled
+		// brands with the seed rather than with black.
 		{"zero value", func(tx *Tx) { tx.BrandAccent(0x3584E4, AccentOverride{}) }, 0, 0, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -102,9 +86,7 @@ func TestBrandAccentPacksOneRecord(t *testing.T) {
 	}
 }
 
-// NAMING EACH OVERRIDE IS THE WHOLE REASON THE FORM IS VARIADIC, and
-// last-wins would give that away: two lights in one call is a brand
-// book's real value shadowed with no error anywhere.
+// Last-wins would shadow a brand book's real value with no error.
 func TestBrandAccentRefusesTheSameAppearanceTwice(t *testing.T) {
 	defer func() {
 		r := recover()
@@ -121,9 +103,8 @@ func TestBrandAccentRefusesTheSameAppearanceTwice(t *testing.T) {
 	})
 }
 
-// The chain discipline every construction method carries (Grow's
-// precedent): a Role written through a transaction that has already
-// shipped is a lost write, not a late one.
+// A Role written through a transaction that has already shipped is a
+// lost write, not a late one.
 func TestRoleOutsideItsBuildTransactionDies(t *testing.T) {
 	app := NewApp()
 	var label Widget
@@ -145,20 +126,17 @@ func stylingTrap(trap string) {
 	app.Build(func(tx *Tx) {
 		switch trap {
 		case "role-on-label":
-			// Destructive is an ACTION's emphasis; a label presses
-			// nothing. The root names both sides.
+			// Destructive is an ACTION's emphasis; a label presses nothing.
 			tx.Mount(tx.Column(func() { tx.LabelText("Sections").Role(RoleDestructive) }))
 		case "role-on-button":
-			// The styling scene's own pairing, which must survive.
 			tx.Mount(tx.Column(func() {
 				tx.LabelText("Sections").Role(RoleHeading)
 				tx.Button("Delete", nil).Role(RoleDestructive)
 				tx.Button("Save", nil).Role(RoleProminent)
 			}))
 		case "role-unknown":
-			// Go spells the closed vocabulary as int constants, so a
-			// caller can hand it a number that is not in it; the root
-			// is what refuses.
+			// Go spells the vocabulary as int constants, so a caller can
+			// hand it a number that is not in it; the root refuses.
 			tx.Mount(tx.Column(func() { tx.Button("Delete", nil).Role(9) }))
 		case "inset-negative":
 			tx.Window(0).Inset(-1)
@@ -172,10 +150,8 @@ func stylingTrap(trap string) {
 			tx.BrandAccent(0x62A0EA)
 			tx.Mount(tx.Column(func() { tx.LabelText("Sections") }))
 		case "brand-overrides":
-			// One call, both appearances: if the variadic form shipped
-			// a record per override this would die on the set-once
-			// wall, which is why the alive case is worth as much as the
-			// dead ones.
+			// One call, both appearances: a record per override would
+			// die on the set-once wall.
 			tx.BrandAccent(0x3584E4, LightAccent(0x1C71D8), DarkAccent(0x62A0EA))
 			tx.Mount(tx.Column(func() { tx.LabelText("Sections") }))
 		default:
@@ -193,11 +169,7 @@ func runStylingTrap(t *testing.T, trap string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTheRootIsTheStylingWall$")
-	// cmd.Environ() rather than os.Environ(): tools/check-go-env.sh keeps
-	// Go's own view of the environment out of this tree entirely (it is
-	// empty forever in an Android c-shared guest), and this is the
-	// exec package's own spelling of "what the child will inherit,
-	// plus this".
+	// cmd.Environ() rather than os.Environ(): tools/check-go-env.sh.
 	cmd.Env = append(cmd.Environ(), "KAYA_STYLING_TRAP="+trap)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() != nil {
@@ -206,18 +178,10 @@ func runStylingTrap(t *testing.T, trap string) (string, error) {
 	return string(out), err
 }
 
-// THE WALLS ARE THE ROOT'S, AND THIS IS WHAT PROVES THE GO SURFACE
-// REACHES THEM. Each case runs in a re-exec of this binary because a
-// root refusal is an abort, not a Go panic: it crosses an extern "C"
-// frame, so nothing in this process can recover it.
-//
-// The ALIVE cases carry as much weight as the dead ones. A binding
-// whose Role chain emitted nothing would sail through every dead case
-// too (nothing to refuse), so the pairing is what distinguishes "the
-// root refuses this" from "the binding sends nothing".
+// The ALIVE cases carry as much weight as the dead ones: a Role chain
+// that emitted nothing would sail through every dead case too, so the
+// pairing is what tells "the root refuses this" from "nothing was sent".
 func TestTheRootIsTheStylingWall(t *testing.T) {
-	// LookupEnv is the binding's own reader (through C's getenv), which
-	// is the only environment spelling this tree allows anywhere.
 	if trap, set := LookupEnv("KAYA_STYLING_TRAP"); set && trap != "" {
 		stylingTrap(trap)
 		return

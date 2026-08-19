@@ -1,18 +1,12 @@
 // The entry scene from Swift: the uncontrolled contract end to end. The
 // field owns its text and reports each edit through onChange; the app
-// folds those into a plain variable. The add button inserts the draft,
-// then clears and refocuses — the clear's own text_changed("") re-enters
-// through the fold and empties the draft, so a second add finds nothing.
+// folds those into a plain variable. The clear's own text_changed("")
+// re-enters through the fold and empties the draft.
 //
-// WHAT THIS SCENE DOCUMENTS IS HOW OCCURRENCES REACH AN APP, and only
-// that. Its two handlers are registered CENTRALLY, after the build,
-// against the handles the build body handed back — the tier underneath
-// the onChange:/onClick: arguments todos.swift and undo.swift pass to
-// their constructors. That is why these two widgets are the only ones
-// that leave the container body.
-//
-// The key comes from insertFresh and nothing here reads it back
-// (docs/fresh-key-plan.md).
+// WHAT THIS SCENE DOCUMENTS IS HOW OCCURRENCES REACH AN APP: its two
+// handlers are registered CENTRALLY, after the build, against the
+// handles the build body handed back — the tier underneath the
+// onChange:/onClick: arguments todos.swift and undo.swift pass.
 
 import Foundation
 
@@ -50,8 +44,6 @@ app.onChange(field) { _, text in
     draft = text
 }
 app.onClick(add) { tx in
-    // The empty-draft guard, and the proof that clear emptied the draft
-    // through the occurrence fold rather than a side assignment.
     if draft.isEmpty {
         tx.write(status, .str("nothing to add, \(tx.count(todos)) total"))
         return
@@ -59,8 +51,6 @@ app.onClick(add) { tx in
     tx.insertFresh(todos, .str(draft))
     let total = tx.count(todos)
     tx.write(status, .str("added \(draft), \(total) total"))
-    // Finish the form, atomically with the insert. The field answers with
-    // text_changed("") through its normal edit path.
     tx.clear(field)
     tx.focus(field)
 }

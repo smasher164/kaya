@@ -263,7 +263,15 @@ in docs/deferred.md.
    two that are not (Go's, which EMBEDS the zone so the compiler holds
    it, and Swift's, which forwards no prop setter at all and is a slice
    of its own) are named in the file's exemption list, on the record
-   rather than merely absent),
+   rather than merely absent.
+   AND THE CAPABILITY SURFACE SINCE 2026-08-19, in three clauses: the
+   `capabilities` QUERY in all eight, one NAMED BOOLEAN per bit
+   (`aux_windows` and its casings) in all eight, and the bit NUMBER
+   against the core's own — five bindings have no header to read
+   `KAYA_CAP_AUX_WINDOWS` out of and write the number themselves, which
+   is the file-modes trap one surface over, and the three that DO read
+   the core's constant (Rust, Go's cgo, Swift's bridging header) are
+   checked for still naming it rather than quietly becoming copiers),
    `tools/check-universal-props.sh` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
@@ -292,6 +300,21 @@ in docs/deferred.md.
    failure path with ONE answer, or an answer that interpolates nothing:
    such a sentence is printed for every cause it does not name, and it is
    believed),
+   `tools/check-empty-child.sh` (ONE NODE IS ONE WIDGET, even when its
+   content will not decode. The widget backends have that by
+   construction — GTK keeps the GtkPicture and clears the paintable,
+   WinUI keeps the Image and leaves Source unset — while a declarative
+   backend that renders nothing takes the node OUT OF THE TREE, and
+   every layout above it that counts children positionally then reads
+   the wrong one. SwiftUI answered a failed decode with `EmptyView()`
+   and `KayaCell` indexed `subviews[0]`: an undecodable image in a flex
+   cell was a SIGTRAP during layout, on a position no scene has, so it
+   survived every lane for months. Its macOS clause is a RUNTIME
+   negative — the interpreter's own source compiled with
+   tools/checks/swiftui-empty-child.swift and run, four byte shapes plus
+   an unknown kind through the real KayaFlex/KayaCell; the static
+   clauses hold all four backends' image arms present-and-empty and
+   panic-free),
    `tools/check-abort.sh` (uniform abort
    semantics, all languages),
    `tools/check-tx-liveness.sh` (a transaction is usable only inside

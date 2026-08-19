@@ -1,8 +1,6 @@
-{- The milestone-2 scene from Haskell, on the construction sugar:
-   constructors carry their props and handlers, containers take their
-   children, and When and For are combinators taking do-blocks. Template
-   bodies are Tpl and the live zone is Build, and the two element types
-   (Node vs Widget) make mixing the zones a type error.
+{- The milestone-2 scene from Haskell, on the construction sugar.
+   Template bodies are Tpl and the live zone is Build, and the two
+   element types (Node vs Widget) make mixing the zones a type error.
 
    WHAT THIS SCENE DOCUMENTS IS HOW A STAMPED WIDGET'S CLICK COMES BACK.
    The remove button is ONE declaration, so its handler is registered

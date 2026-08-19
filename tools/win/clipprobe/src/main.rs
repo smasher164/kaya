@@ -1,35 +1,9 @@
-// ClipProbe (Windows) — what does the classic Win32 clipboard charge
-// for kaya's five representations, measured ON THE PATH THE ARM WILL
-// USE, in the interactive session, with a FOREIGN PowerShell process
-// on the other side of every assertion.
-//
-// WHY CLASSIC WIN32 AND NOT WinRT DataTransfer: researched 2026-08-03
-// (docs/clipboard-plan.md §6 records the citations). WinRT
-// `Clipboard.SetContent` is documented to work "only when the
-// application is in the foreground", which a matrix leg cannot
-// promise; the WinRT→Win32 bridge for a CUSTOM format id is
-// documented only in the read direction (and the write direction of
-// that bridge is explicitly recorded as asymmetric); and SetContent's
-// data does not outlive the process without Flush(). Classic
-// OpenClipboard/SetClipboardData has none of those charges — the data
-// is clipboard-owned the moment it is set.
-//
-// The questions, each of which has burned a platform already:
-//
-//  set:  W1 does a multi-format set in ONE open (custom + files +
-//           image + html + text, descending richness) leave all five
-//           foreign-visible AFTER THIS PROCESS EXITS?
-//        W2 does RegisterClipboardFormatW accept the ratified slashed
-//           id `dev.kaya/note` and read its name back VERBATIM?
-//        W3 is the hand-built CF_HTML header (10-digit fixed-width
-//           offsets; Microsoft's own worked example is arithmetically
-//           wrong, do not pattern-match it) parseable by a foreign
-//           consumer?
-//  read: W4 what does a FOREIGN seed look like from the arm's side —
-//           the offer list, and each representation's bytes read back
-//           through GetClipboardData (including parsing a CF_HTML
-//           header WE did not write, and a DROPFILES struct a stock
-//           tool built)?
+// ClipProbe (Windows) — what the classic Win32 clipboard charges for
+// kaya's five representations, measured ON THE PATH THE ARM WILL USE,
+// in the interactive session, with a FOREIGN PowerShell process on the
+// other side of every assertion. Why classic Win32 and not WinRT
+// DataTransfer, and what each question found, is docs/clipboard-plan.md
+// §6.
 //
 // Throwaway; nothing builds or runs this but a human, via build.sh,
 // which runs everything in ONE interactive-session scheduled task —

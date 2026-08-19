@@ -2,16 +2,13 @@
 // spoiled rounds 1 and 2 removed.
 //
 // THE ARTIFACT: rounds 1-2 ran three modes back to back from one
-// script, and every difference between them tracked LAUNCH ORDER, not
-// the hook mode — the first launch became the active app and the later
-// ones did not, so `NSApp.target(forAction: undo:)` came back nil and
-// the routed undo did nothing. A conclusion drawn from that would have
-// blamed windowWillReturnUndoManager for an activation failure. Round 3
-// WAITS for the window to become key and says so, and every reading is
-// taken at THREE layers — the kaya model, the NSTextField's
-// stringValue, and the field editor's string — because "the undo did
-// not happen" and "the undo happened and never reached the model" are
-// different findings and rounds 1-2 could not tell them apart.
+// script, so every difference between them tracked LAUNCH ORDER rather
+// than the hook mode — only the first launch became the active app, and
+// `NSApp.target(forAction: undo:)` came back nil in the others. This one
+// WAITS for the window to become key and says so, and reads at THREE
+// layers (the kaya model, the NSTextField's stringValue, the field
+// editor's string), because "the undo did not happen" and "the undo
+// happened and never reached the model" are different findings.
 //
 // One mode per process. Run it three times; see build3.sh.
 //

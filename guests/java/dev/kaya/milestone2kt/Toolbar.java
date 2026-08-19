@@ -10,8 +10,6 @@ import dev.kaya.KayaApp;
  * tools/scenes/toolbar.steps.
  */
 final class Toolbar {
-    // A field rather than a local: a Java lambda cannot assign a
-    // captured one.
     private static boolean saveEnabled = true;
 
     static void app() {
@@ -45,7 +43,6 @@ final class Toolbar {
                     .symbol(KayaApp.Symbol.SEARCH)
                     .primary(true)
                     .onActivate(t -> t.write(status, "found"));
-            // The remainder: catalog, not chrome, on every platform.
             edit.item("Replace").symbol(KayaApp.Symbol.EDIT);
 
             KayaApp.MenuItem view = win.menu("View");

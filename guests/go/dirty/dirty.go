@@ -1,7 +1,5 @@
 // The dirty-state conformance scene, Go port — unsaved work as window
-// chrome (docs/dirty-plan.md). One boolean beside Title and VetoClose
-// on the window chain: the app declares STATE and the backend spells
-// its platform's own affordance. TWO DECLARATIONS, on purpose — an edit
+// chrome (docs/dirty-plan.md). TWO DECLARATIONS, on purpose — an edit
 // writes the document AND says Dirty(true), because kaya does not watch
 // your signals and guess. See guests/rust/dirty.rs and
 // tools/scenes/dirty.steps.
@@ -35,10 +33,9 @@ func App() *kaya.App {
 						tx.Write(status, "kept editing")
 						return
 					}
-					// Agreeing destroys the PRIMARY window, which
-					// ABORTS — docs/traps.md, "An app can VETO a close
-					// but cannot AGREE to one". The scene answers
-					// cancel, so nothing has ever taken this arm.
+					// Agreeing destroys the PRIMARY window, which ABORTS —
+					// docs/traps.md, "An app can VETO a close but cannot
+					// AGREE to one". The scene answers cancel.
 					tx.DestroyWindow(0)
 				}).
 				Show()
@@ -48,8 +45,6 @@ func App() *kaya.App {
 			tx.Label(doc)    // label#0
 			tx.Label(status) // label#1
 			tx.Button("edit", func(tx *kaya.Tx) { // button#0
-				// The document AND the declaration, in ONE transaction;
-				// neither implies the other.
 				tx.Write(doc, "notes and a line")
 				tx.Write(status, "unsaved")
 				tx.Window(0).Dirty(true)

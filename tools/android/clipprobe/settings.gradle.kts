@@ -14,8 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-// A STANDALONE gradle build, deliberately outside android/'s: the probe
-// must never be able to affect what the lane ships, and a module in the
-// real build is one `assemble` away from doing exactly that.
+// STANDALONE, deliberately outside android/'s build: a module in the
+// real build is one `assemble` away from affecting what the lane ships.
 rootProject.name = "kaya-picker-probe"
 include(":app")

@@ -10,9 +10,8 @@
 //
 // THE MISS IS A QUESTION, NOT A catch. AssetMissSentence answers the
 // same sentence tx.Asset would throw with, without throwing, and that is
-// the only shape nine languages share: Swift's raise is fatalError,
-// which traps rather than unwinding, so a Swift sibling cannot catch its
-// own miss at all.
+// the only shape all nine share — the C floor catches nothing at all
+// (docs/deferred.md, the assets entry).
 //
 // LINE 1 ONLY. Line 2 of that sentence names the place the core resolved
 // and the route that chose it, which a bundle, a device directory and a
@@ -44,17 +43,13 @@ static class AssetsScene
         {
             tx.Window(title: "assets", width: 480, height: 360);
 
-            // Both handles live for the whole build and the `using`
-            // releases them on the way out, as the typeface scene
-            // releases its font.
             using var mark = tx.Asset(Mark);
             using var font = tx.Asset(Font);
 
             string census = FirstLine(tx.AssetMissSentence(Missing));
             string complaint = tx.AssetMissSentence(Font);
-            // Never "no complaint" on a healthy lane's other arm, and
-            // that arm shows the sentence rather than a word about it:
-            // a failure here has to say what was measured.
+            // Never "no complaint" on a healthy lane's other arm, and it
+            // shows the sentence rather than a word about it.
             string verdict = complaint.Length == 0 ? "no complaint" : FirstLine(complaint);
 
             var title = tx.Signal("assets");
@@ -70,15 +65,13 @@ static class AssetsScene
             {
                 tx.Label(bind: title);  // label#0
                 // THE BYTES, not the blob handle: this scene is the
-                // consumer, so what reaches the decoder is what Bytes()
-                // handed back.
+                // consumer.
                 tx.Image(mark.Bytes()); // image#0
                 tx.Label(bind: found);  // label#1
                 tx.Label(bind: sizes);  // label#2
             }));
         });
 
-        // Nothing to drive: every observation is a read of the first mount.
         Environment.Exit(app.Run());
     }
 

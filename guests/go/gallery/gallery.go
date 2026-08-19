@@ -33,16 +33,12 @@ func App() *kaya.App {
 				})
 				tx.Label(volume)
 				tx.Button("quarter", func(tx *kaya.Tx) {
-					// The programmatic write: fans out to the control
-					// and must NOT come back as a volume occurrence.
 					tx.Write(pos, 0.25)
 				})
 			})
 			tx.Row(func() {
-				// A valid 2x2 PNG decodes and reports its size;
-				// deliberately invalid bytes read 0x0 — decode
-				// failure is the placeholder class, never a crash, on
-				// every backend.
+				// Deliberately invalid bytes read 0x0 — decode failure
+				// is the placeholder class, never a crash.
 				tx.Image(testPNG)
 				tx.Image([]byte("not an image"))
 			})

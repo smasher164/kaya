@@ -1,9 +1,6 @@
-/* Ordered cursor access for the OCaml direct-ring example. OCaml reaches
- * the ring's bytes through a Bigarray without FFI, but has no ordered
- * loads and stores on foreign memory, so these two carry the
- * acquire/release — the recipe ocaml-uring uses for the real io_uring.
- * [@@noalloc] on the OCaml side makes them bare C calls: no runtime-lock
- * traffic, no allocation. */
+/* Ordered cursor access for the OCaml direct-ring example: OCaml has no
+ * ordered loads and stores on foreign memory (DESIGN.md's milestone-0
+ * note). [@@noalloc] on the OCaml side makes these bare C calls. */
 
 #include <caml/mlvalues.h>
 

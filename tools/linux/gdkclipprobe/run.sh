@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 
 # Drive probe.rs inside the lane's own image, under sway — the
-# compositor the wayland leg moved to, because it is the one with
-# data-control (docs/clipboard-plan.md §0e finding 1). Running it
-# anywhere else would measure a different clipboard than the lane has.
+# compositor the wayland leg uses, because it is the one with
+# data-control (docs/clipboard-plan.md §0e finding 1). Anywhere else
+# would measure a different clipboard than the lane has.
 #
-# Throwaway. Nothing in the validation ladder calls this; a human does,
-# once, before the GTK arm is written. Answers land on stdout under
-# "PROBE".
+# Throwaway; a human runs it. Answers land on stdout under "PROBE".
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -21,20 +19,16 @@ if [ -z "$(docker image ls -q kaya-linux 2>/dev/null)" ]; then
     exit 1
 fi
 
-# The probe is a cargo example so it links against the SAME gtk4 crate
-# version the backend does; measuring a different one would answer a
-# question nobody asked.
+# A cargo example, so it links against the SAME gtk4 crate the backend
+# does.
 docker run --rm -v "$ROOT:/work" kaya-linux bash -c '
     cd /work || exit 1
     export CARGO_TARGET_DIR=/work/target-linux
     export XDG_RUNTIME_DIR=/tmp/xdg
     mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 
-    # GUARD ON THE TOOL THE PROBE ACTUALLY CALLS. Checking sway and
-    # installing both meant an image WITH sway and WITHOUT wl-clipboard
-    # skipped the install, and every foreign answer came back
-    # "<wl-paste failed: No such file or directory>" — a missing reader
-    # reads exactly like an empty clipboard.
+    # Guard on EVERY tool the probe calls, not just sway: a missing
+    # reader reads exactly like an empty clipboard.
     if ! command -v sway >/dev/null || ! command -v wl-paste >/dev/null \
         || ! command -v wayland-info >/dev/null || ! command -v wtype >/dev/null; then
         apt-get update -qq >/dev/null 2>&1
@@ -54,11 +48,8 @@ docker run --rm -v "$ROOT:/work" kaya-linux bash -c '
     }
 
     # Floating, or sway tiles the window to the output and the probe
-    # measures a size nobody asked for (the same one line the lane
-    # needs). -d so the log holds wlroots debug lines: a rejected
-    # set_selection is logged at DEBUG and invisible at the default
-    # level (candidate 2 in docs/clipboard-plan.md 5b would otherwise
-    # fail silently on the compositor side, by design).
+    # measures a size nobody asked for. -d because a rejected
+    # set_selection is logged at DEBUG and invisible by default.
     printf "for_window [app_id=\".*\"] floating enable\n" >/tmp/sway.conf
     WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
         sway -d -c /tmp/sway.conf >/tmp/sway.log 2>&1 &
@@ -66,16 +57,8 @@ docker run --rm -v "$ROOT:/work" kaya-linux bash -c '
     export WAYLAND_DISPLAY=wayland-1
     unset DISPLAY
 
-    # Candidate 1, the cheapest and the one that matched the Weston
-    # finding: does THIS sway session expose a wl_seat at all, and with
-    # what capabilities? Same tool the Weston probe used.
-    # (Run 1: a seat exists, capabilities EMPTY — no keyboard, no
-    # pointer — so no client can ever receive an input serial, and
-    # wlroots rejects every set_selection. Run 2: a modifier-only wtype
-    # tap did not help; modifiers are not key events. Run 3: a held
-    # virtual keyboard put `keyboard` in the capabilities and a real
-    # F24 tap made the selection foreign-visible; the probe now runs
-    # the primer variants itself, so the session starts holder-free.)
+    # Candidate 1: does THIS sway session expose a wl_seat, and with
+    # what capabilities? Findings in docs/clipboard-plan.md §5b.
     SEAT="$(wayland-info -i wl_seat 2>&1)"
     if [ -z "$SEAT" ]; then
         echo "PROBE seat: NO wl_seat advertised"
@@ -83,16 +66,10 @@ docker run --rm -v "$ROOT:/work" kaya-linux bash -c '
         echo "PROBE seat: $SEAT" | tr "\n" " "; echo
     fi
 
-    # Examples are declared explicitly in Cargo.toml with paths into
-    # guests/rust, so the probe needs a target of its own. It is added
-    # for the length of this run and taken out again by a trap, so an
-    # interrupted probe cannot leave the manifest dirty. Adding an
-    # example target changes no dependency, so --locked stays honest.
-    #
-    # A SIGKILLed run (docker kill) skips the trap and leaves the block
-    # behind, and the next run would then back up the dirty manifest
-    # and append a duplicate — so strip any leftover block FIRST, then
-    # back up the clean file.
+    # Examples are declared explicitly in Cargo.toml, so the probe adds
+    # a target of its own for the length of this run and a trap takes it
+    # out again. A SIGKILLed run skips the trap, so strip any leftover
+    # block FIRST, then back up the clean file.
     python3 - <<PYEOF
 p = "crates/kaya/Cargo.toml"
 lines = open(p).read().split("\n")
@@ -125,8 +102,7 @@ PYEOF
     rc=$?
 
     # Candidate 2: wlroots logs a rejected set_selection (bad or absent
-    # input serial) at DEBUG and tells the client nothing. If the grep
-    # prints a rejection, that is the whole finding.
+    # input serial) at DEBUG and tells the client nothing.
     echo "PROBE sway.log selection/serial lines:"
     grep -iE "selection|serial|data.device|data.source" /tmp/sway.log \
         | grep -ivE "get_data_device|wl_data_device_manager" | tail -30

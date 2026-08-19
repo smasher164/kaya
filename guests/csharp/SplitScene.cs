@@ -1,9 +1,6 @@
-// The split conformance scene, C# port — adaptive list-detail via
-// named arguments: listDetail rides the window, PushEntry(title:,
-// onPopped:) plus MountIn presents the detail.
-//
-// The guest asks for the presentation ONCE and does nothing adaptive
-// after that; there is no prop for WHICH way it presents.
+// The split conformance scene, C# port — adaptive list-detail via named
+// arguments. The guest asks for the presentation ONCE and does nothing
+// adaptive after that; there is no prop for WHICH way it presents.
 //
 // TWO scripts drive this ONE app: split resizes and names the
 // presentation on each side, listdetail asserts the bare invariant at
@@ -26,10 +23,10 @@ static class SplitScene
 
             tx.Mount(tx.Column(() =>
             {
-                // Authored ids so the REAL-TREE read can address these:
-                // an index read passes whether or not anything reached
-                // the screen, which once let a non-rendering split arm
-                // look green.
+                // Authored ids so the REAL-TREE read can address these: an
+                // index read passes whether or not anything reached the
+                // screen, which once let a non-rendering split arm look
+                // green.
                 tx.SetA11yId(tx.Label(bind: status), "list"); // label#0
                 tx.Button("open detail", onClick: inner => // button#0
                 {

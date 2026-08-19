@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,10 +9,9 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# Run every milestone-0 validation natively on macOS: the Rust example,
-# Python over the function floor, and Go and C# over the direct ring.
-# Run inside the dev shell (direnv or `nix develop`), with a logged-in
-# GUI session; each suite opens a window briefly.
+# Run every milestone-0 validation natively on macOS. Run inside the
+# dev shell, with a logged-in GUI session; each suite opens a window
+# briefly.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,9 +22,7 @@ source "$ROOT/tools/lib/swift-toolchain.sh"
 # here (the guests' sys.path shims are gone).
 export PYTHONPATH="$ROOT/bindings/python"
 
-# Phase timing: greppable "TIMING <phase> <n>s" lines say where a
-# run's wall time went — build, legs, or capture — so the dev loop's
-# bottleneck is measured, never guessed.
+# Phase timing: greppable "TIMING <phase> <n>s" lines.
 KAYA_T0=$SECONDS
 timing() {
     echo "TIMING $1 $((SECONDS - KAYA_T0))s"
@@ -39,45 +30,21 @@ timing() {
 }
 
 # --lib as well as --example: the foreign guests load the cdylib, and
-# --example alone would leave a stale libkaya.dylib in place. The header
-# check keeps guests from compiling against an ABI the source has left
-# behind.
-# THE scene list: the mechanical per-scene surfaces below (the rust
-# example build and the guest build loop) derive from it — one
-# registration per new scene; the leg blocks stay explicit because
-# they encode per-language coverage decisions (the deploy-win
-# panels_go lesson: a fourth hand-maintained list is a forgotten
-# registration waiting to ship).
+# --example alone would leave a stale libkaya.dylib in place.
+# THE scene list: the mechanical per-scene surfaces below derive from
+# it — one registration per new scene; the leg blocks stay explicit
+# because they encode per-language coverage decisions.
 SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling toolbar identity assets"
 # Depth-slice scenes: a rust example + steps exist, the language sweep
-# has not landed yet — built and run rust-only until their guests
-# arrive, when they move into SCENES. Empty today: styling graduated
-# 2026-08-12 when its fan-out landed all eight guests and the real
-# brand lowerings (winui's heading arm was the last stub out).
-# The typeface (docs/styling-plan.md Slice 2b) is the depth slice in
-# flight: protocol + SwiftUI + the Rust binding, mac only. The other
-# three backends decode the record and refuse through depth_stub, which
-# is what holds their lanes' legs off in check-steps and check-stubs.
-# The toolbar (docs/chrome-plan.md C2) GRADUATED 2026-08-17: all five
-# platforms' arms landed, no backend carries a toolbar depth stub, and
-# the seven other guests exist — so it moved into SCENES above and
-# check-steps demands its legs on this lane like any other scene.
-# The identity scene (docs/app-identity-plan.md) went STRAIGHT into
-# SCENES rather than through DEPTH_SCENES: its depth platform was
-# Windows, and by the time this lane's arm landed all eight guests
-# existed, so a depth entry here would have held seven legs off a
-# backend that had the feature. It carries no C floor guest, exactly as
-# `toolbar` does not (guests/c/Makefile's SCENES is the other side of
-# that, read by check-steps' sweep_c_floor).
-# The assets conformance scene (docs/assets-plan.md) is NOT a depth
-# entry: `asset()` shipped in all eight bindings on 2026-08-18, so all
-# eight guests exist and a depth entry would have held seven legs off a
-# backend that has the feature — the identity scene's reasoning, one
-# slice later. It carries a C FLOOR guest, which neither typeface nor
-# identity does: the floor is where `kaya_asset_open` + `kaya_asset_blob`
-# are documented longhand, and this is the first scene whose assertions
-# were written for it (guests/c/Makefile's SCENES is the other side,
-# read by check-steps' sweep_c_floor).
+# has not landed — built and run rust-only until their guests arrive,
+# when they move into SCENES.
+#
+# A scene goes STRAIGHT INTO SCENES when all eight guests already exist
+# by the time this lane's arm lands, because a depth entry would then
+# hold seven legs off a backend that has the feature (identity and
+# assets both did). Which scenes carry a C FLOOR guest is
+# guests/c/Makefile's SCENES, read from the other side by check-steps'
+# sweep_c_floor.
 DEPTH_SCENES="typeface"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
@@ -89,29 +56,13 @@ tools/build-id.sh --verify target/debug/libkaya.dylib || exit 1
 
 # STAGE THE RUST GUESTS OUT OF THE BUILD DIRECTORY, and run them from
 # here. Not tidiness — 48% of this lane's leg time was one line of
-# CoreFoundation.
-#
-# Launching a bare (unbundled) executable on macOS registers it with
-# LaunchServices, and `_LSApplicationCheckIn` reads the executable's
-# CONTAINING DIRECTORY as if it were a bundle: `_CFBundleReadDirectory`
-# enumerates every sibling. `target/debug/examples` is a cargo build
-# directory — it accumulates a hashed binary, a .d and a .dSYM per
-# example per build — and on this machine it had reached 776,613
-# entries and 3.8 GB. Every rust leg paid that walk.
-#
-# MEASURED 2026-08-10, the same binary, back to back:
-#     target/debug/examples/split   7.7s
-#     a two-entry directory         0.13s
-# Fifty-nine times, and it is the whole of the difference between the
-# rust legs (mean 30.6s, 979s of this lane's 2020s of leg time) and the
-# go/python/csharp/java ones (mean ~1.2s). Nothing about Rust: the same
-# staged binary is as fast as any of them. The ocaml, haskell and swift
-# guests already live in small directories and were never affected.
-#
-# It is also what made the five-lane matrix a coin flip: under
-# contention these legs stretched ~3x, and split-rust at 38s crossed the
-# 120s per-leg timeout. Two consecutive matrix runs failed on different
-# lanes with nothing wrong in the tree.
+# CoreFoundation: launching an unbundled executable registers it with
+# LaunchServices, and `_LSApplicationCheckIn` enumerates the
+# executable's CONTAINING DIRECTORY. `target/debug/examples` had reached
+# 776,613 entries and 3.8 GB; the same binary took 7.7s from there
+# against 0.13s from a two-entry directory (measured 2026-08-10,
+# docs/deferred.md). It is also what made the five-lane matrix a coin
+# flip, by pushing split-rust past the 120s per-leg timeout.
 #
 # The staged list DERIVES FROM $SCENES, like BUILD_EXAMPLES above, so a
 # new scene cannot be built and then left running out of the build
@@ -125,9 +76,8 @@ done
 # THE GUARD, on the path nobody can avoid: this staging is worthless if
 # the directory it stages INTO is itself large, and the only way that
 # happens is someone pointing it somewhere else. Checked here rather
-# than in a gate because the number is only true at this moment, and a
-# lane that quietly went back to 30s legs would read as "the machine is
-# busy" for another six months.
+# than in a gate because a lane that quietly went back to 30s legs
+# would read as "the machine is busy" for another six months.
 staged=$(find "$RUST_GUESTS" -maxdepth 1 | wc -l | tr -d ' ')
 if [ "$staged" -gt 64 ]; then
     echo "validate-mac: the rust guest staging directory holds $staged entries." \
@@ -136,29 +86,22 @@ if [ "$staged" -gt 64 ]; then
         "was target/debug/examples. Stage somewhere clean." >&2
     exit 1
 fi
-# THE GATE SWEEP, and the artifacts it reads, in one entry point. The
-# list used to live right here as twenty-six lines nobody could count,
-# and it had already drifted four gates from the list CLAUDE.md
-# documents — so an agent that "ran the fast gates" from the prose ran
-# 22 of 26 and called it a sweep. tools/gates.sh owns the list now, it
-# BUILDS libkaya and the SwiftUI interpreter before any gate reads them,
-# and it refuses to report success unless the number of gates that ran
-# equals the number it declared. tools/check-gates.sh (one of the gates)
-# holds this file, that list and CLAUDE.md's rung 2 to the same census,
-# and refuses this file the right to invoke a gate directly.
-# NOTHING TO STAGE FOR ASSETS, AND HERE IS WHY, CHECKED. The guests
-# call `asset(name)` and the core resolves it; with no KAYA_ASSET_DIR set
-# it falls through to the compile-time repo-relative default
-# (crates/kaya/src/assets.rs), and this lane runs from the repo root, so
-# guests/assets is exactly where that default points. Written down at the
-# site rather than left to be inferred: the next person to add an asset
-# reads this file looking for a staging line, and its absence has to be
-# an answer (docs/assets-plan.md A5.4).
+# THE GATE SWEEP, and the artifacts it reads, in one entry point.
+# tools/gates.sh owns the list, BUILDS libkaya and the SwiftUI
+# interpreter before any gate reads them, and refuses a verdict unless
+# the number that ran equals the number declared. tools/check-gates.sh
+# holds this file, that list and CLAUDE.md's rung 2 to one census, and
+# refuses this file the right to invoke a gate directly.
+# NOTHING TO STAGE FOR ASSETS, AND HERE IS WHY, CHECKED. The guests call
+# `asset(name)`; with no KAYA_ASSET_DIR set the core falls through to
+# the compile-time repo-relative default and this lane runs from the
+# repo root, so guests/assets is exactly where that points. Written
+# down at the site because the next person to add an asset reads this
+# file looking for a staging line, and its absence has to be an answer
+# (docs/assets-plan.md A5.4).
 #
-# LOUD, AND BEFORE ANY LEG RUNS — the linux lane's identity block one
-# tier up. Without the root, every guest that names an asset dies inside
-# its build closure on eight legs at once, and the reader works back from
-# eight stack traces to one absent directory.
+# LOUD, AND BEFORE ANY LEG RUNS: without the root, every guest that
+# names an asset dies inside its build closure on eight legs at once.
 if [ ! -f "$ROOT/guests/assets/fonts/sora-wght.ttf" ]; then
     echo "validate-mac: the asset root guests/assets is not where the core's" >&2
     echo "  repo-relative default points. This lane stages nothing because it" >&2
@@ -182,30 +125,21 @@ LEGS_DIR="$(mktemp -d)"
 
 # ── THE MAC FILE-PANEL VIEW MODE, ROTATED RATHER THAN INHERITED ──────
 # NSOpenPanel's file browser publishes a DIFFERENT accessibility
-# identifier per view mode — ListView / IconView / ColumnView — and the
-# mode is not the app's to choose: it is the machine-wide `NSGlobalDomain
-# NSNavPanelFileListModeForOpenMode2` (1 columns, 2 list, 3 icons), which
-# any application's open panel writes for EVERY application on the box
-# the moment a human clicks View Options. On 2026-08-06 it moved to Icons
-# and the eight filedialog legs went red together an hour after passing
-# 8/8: "the lane's colour was decided by a setting no gate reads and
-# nothing in the log named it" (docs/traps.md).
+# identifier per view mode, and the mode is machine-wide
+# (`NSGlobalDomain NSNavPanelFileListModeForOpenMode2`: 1 columns, 2
+# list, 3 icons), written by any application's open panel for every
+# application on the box (docs/traps.md).
 #
-# The interpreter now reads all three shapes (swift/KayaSwiftUI.swift,
-# KayaPanelShape). Nothing EXERCISED two of them — the lane ran whichever
-# mode the machine happened to be in, so the other two readers, and both
-# selection idioms (AXSelectedRows for the outline, AXSelectedChildren
-# for the collection view and the browser column, whose wrong choice is
-# a SILENT WRONG FILE), were dead code on any given run. So the lane sets
-# the mode itself and splits the eight legs across the three modes: same
-# leg count, three readers proven every run instead of one.
+# The interpreter reads all three shapes (KayaPanelShape), but the lane
+# used to run whichever mode the machine was in, so two readers and one
+# of the two selection idioms — whose wrong choice is a SILENT WRONG
+# FILE — were dead code on any given run. So the lane sets the mode
+# itself and splits the eight legs across the three.
 #
 # WRITING A MACHINE-WIDE USER PREFERENCE IS A SIDE EFFECT ON THE
-# DEVELOPER'S BOX. The original value is captured before the first
-# change, restored on EXIT/INT/TERM, and — because SIGKILL runs no trap
-# — written to a stamp file that the next run restores from before it
-# does anything else. probe-env.sh reports both the live value and a
-# leftover stamp.
+# DEVELOPER'S BOX. The original is captured before the first change,
+# restored on EXIT/INT/TERM, and — because SIGKILL runs no trap —
+# written to a stamp file the next run restores from first.
 PANEL_MODE_KEY=NSNavPanelFileListModeForOpenMode2
 PANEL_MODE_STAMP="$ROOT/target/panel-mode.orig"
 
@@ -301,14 +235,12 @@ trap 'panel_mode_restore; trap - TERM; kill -TERM $$' TERM
 leg_names=()
 leg_pids=()
 
-# Recording mode (KAYA_RECORD=1): ONE suite-long ScreenCaptureKit
-# stream films every leg. The filter is display-scoped but
-# include-listed — only guest windows are composited, so the human's
-# screen never appears — and parallel legs tile into slots
+# Recording mode (KAYA_RECORD=1): ONE suite-long ScreenCaptureKit stream
+# films every leg. The filter is display-scoped but include-listed —
+# only guest windows are composited — and parallel legs tile into slots
 # (KAYA_WIN_SLOT) so their crops never overlap. One stream on purpose:
-# concurrent SCK window streams starve and die where a single stream
-# is reliable; parallelism scales by adding tiles, not streams.
-# Per-leg videos and stills are derived from the suite film by crop.
+# concurrent SCK window streams starve and die where a single stream is
+# reliable.
 if [ -n "${KAYA_RECORD:-}" ]; then
     JOBS="${KAYA_JOBS:-8}"
     command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null \
@@ -317,12 +249,11 @@ if [ -n "${KAYA_RECORD:-}" ]; then
     RECORDINGS="$ROOT/target/recordings/mac"
     rm -rf "$RECORDINGS"
     mkdir -p "$RECORDINGS"
-    # The binary's path+content is its identity to the capture stack,
-    # and REBUILDING IN PLACE POISONS IT: after enough rebuilds at one
-    # path, shareable-content queries for that identity hang or return
-    # bogus TCC declines — and the poisoned state survives reboots. A
-    # content-hashed name gives each source version one stable, fresh
-    # identity, built at most once.
+    # The binary's path+content is its identity to the capture stack, and
+    # REBUILDING IN PLACE POISONS IT: after enough rebuilds at one path,
+    # shareable-content queries for that identity hang or return bogus TCC
+    # declines, and the poisoned state survives reboots. A content-hashed
+    # name gives each source version one stable, fresh identity.
     REC_BIN="target/tools/record-suite-$(shasum tools/record-suite/main.swift | cut -c1-12)"
     if [ ! -x "$REC_BIN" ]; then
         mkdir -p target/tools
@@ -345,13 +276,11 @@ if [ -n "${KAYA_RECORD:-}" ]; then
     REC_PID=$!
 fi
 
-# One recorded leg: claim a tile, launch the guest into it, register
-# its pid with the suite recorder, and release the guest's gate once
-# the recorder reports the window tracked — a leg cannot outrun its
-# recording. Stills come later, from the suite film, after the
-# recorder stops. Returns nonzero only for a guest failure; recording
-# gaps surface at extraction (a leg with no WINDOW record fails the
-# stills-count guard, loudly).
+# One recorded leg: claim a tile, launch the guest into it, register its
+# pid with the suite recorder, and release the guest's gate once the
+# recorder reports the window tracked — a leg cannot outrun its
+# recording. Returns nonzero only for a guest failure; recording gaps
+# surface at extraction.
 run_recorded() {
     local name="$1"
     shift
@@ -511,9 +440,8 @@ run() {
         return
     fi
     (
-        # Per-leg wall time rides the verdict: the matrix's cost
-        # lives in its slowest legs, so every verdict names its
-        # price and a bottleneck hunt greps instead of guessing.
+        # Per-leg wall time rides the verdict, so a bottleneck hunt greps
+        # instead of guessing.
         local t0=$SECONDS
         if KAYA_SELFTEST=1 timeout 120 "$@" >"$LEGS_DIR/$name.log" 2>&1; then
             echo PASS >"$LEGS_DIR/$name.verdict"
@@ -562,13 +490,12 @@ drain() {
                 echo "$name: note — verdict was OK but the process did not exit cleanly (finish()/exit-path bug?)"
             fi
             # A SILENT leg has two very different meanings and the bare
-            # verdict cannot tell them apart — the linux runner's note,
-            # split by duration because the mac timeout is a KILL: a
-            # killed guest loses whatever its block-buffered stdout was
-            # holding, so an empty log there means "hung with its trace
-            # in the buffer", not "never started". Read the wrong way
-            # (2026-07-25) it sends you hunting a startup failure while
-            # the real answer needs `sample $pid` on the live process.
+            # verdict cannot tell them apart — split by duration because the
+            # mac timeout is a KILL: a killed guest loses whatever its
+            # block-buffered stdout was holding, so an empty log there means
+            # "hung with its trace in the buffer", not "never started". Read
+            # the wrong way (2026-07-25) it sends you hunting a startup
+            # failure while the real answer needs `sample $pid`.
             if ! grep -q "KAYA_HARNESS" "$LEGS_DIR/$name.log" 2>/dev/null; then
                 if [ "$(cat "$LEGS_DIR/$name.secs" 2>/dev/null || echo 0)" -ge 115 ]; then
                     echo "$name: note — NO OUTPUT, and it ran to the 120s timeout." \
@@ -590,13 +517,10 @@ drain() {
     leg_names=()
 }
 
-# The guest builds are per-language INDEPENDENT, so they run as a
-# pool (measured 2026-07-22: 29-38s serial, bounded by the slowest
-# language when pooled). Each job logs to its own file; any failure
-# prints its log and dies — no silent partial builds. The Swift
-# per-scene compiles pool too (each recompiled the four binding
-# files; a shared module is the iOS runner's cleaner fix, but the
-# mac loop is already saturated by the job pool).
+# The guest builds are per-language INDEPENDENT, so they run as a pool
+# (measured 2026-07-22: 29-38s serial, bounded by the slowest language
+# when pooled). Each job logs to its own file; any failure prints its
+# log and dies — no silent partial builds.
 BUILDS_DIR="$(mktemp -d)"
 build_names=()
 build_pids=()
@@ -627,26 +551,14 @@ build_csharp() {
 }
 
 build_go() {
-    # ONE BINARY FOR EVERY SCENE. guests/go/cmd is the only main package
-    # in the guest tree: it imports all 31 scene libraries and picks one
-    # from KAYA_SELFTEST, which every leg below already passes.
+    # ONE BINARY FOR EVERY SCENE. guests/go/cmd is the only main package in
+    # the guest tree: it imports every scene library and picks one from
+    # KAYA_SELFTEST. A scene with no Go body has no import and no table key
+    # in guests/go/cmd/scenes.go, so nothing here can go looking for it.
     #
-    # It used to be one main per scene, so this pooled 32 independent
-    # links — 13s serial, ~2.2s pooled, 84 MB of target/go-guests — and
-    # the pool was worth writing down because go was the guest phase's
-    # critical path. One link is 0.6s and 3.4 MB (measured 2026-08-09,
-    # same machine, warm compile cache), which is why the pool is gone
-    # rather than kept for two commands.
-    #
-    # AND NO PER-SCENE DIRECTORY TEST ANY MORE. It existed so a depth
-    # scene whose Go guest had not landed was skipped instead of failing
-    # the build; a scene with no Go body now simply has no import and no
-    # table key in guests/go/cmd/scenes.go, so nothing here can go
-    # looking for it.
-    #
-    # encodebench is guest-only (no rust example) and is a benchmark
-    # rather than a scene — its own main package, which tools/
-    # bench-encode.sh runs from this directory.
+    # encodebench is guest-only (no rust example) and is a benchmark rather
+    # than a scene — its own main package, which tools/bench-encode.sh runs
+    # from this directory.
     mkdir -p target/go-guests
     go build -o target/go-guests/kaya-go dev.kaya/guests/go/cmd || return 1
     go build -o target/go-guests/encodebench dev.kaya/guests/go/encodebench
@@ -695,19 +607,15 @@ build_swift() {
 }
 
 build_c() {
-    # THE C FLOOR, ON THIS LANE FOR THE FIRST TIME. The floor guests
-    # were a linux-suite exclusive (tools/linux/run-suites.sh), which
-    # made every floor scene's mac behaviour a thing nobody had ever
-    # observed; they build and pass here unchanged, because kaya::run
-    # dlopens the SwiftUI interpreter for a C guest exactly as it does
-    # for a Go or Swift one.
+    # THE C FLOOR. The floor guests build and pass here unchanged, because
+    # kaya::run dlopens the SwiftUI interpreter for a C guest exactly as it
+    # does for a Go or Swift one.
     #
-    # THE SCENES THIS LANE ACTUALLY RUNS, not the Makefile's whole list:
-    # a guest built here and run nowhere is the false-coverage shape
+    # THE SCENES THIS LANE ACTUALLY RUNS, not the Makefile's whole list: a
+    # guest built here and run nowhere is the false-coverage shape
     # check-steps was written against, and its sweep_c_floor reads this
-    # very assignment to say so — every name here must have a leg below.
-    # SCENES is a command-line override, so the Makefile keeps one list
-    # and the linux suite keeps building all of them.
+    # very assignment — every name here must have a leg below. SCENES is a
+    # command-line override, so the Makefile keeps one list.
     make -C guests/c SCENES="undo dirty ranges save a11yrows styling assets" TARGET_DIR="$ROOT/target/debug" \
         OUT="$ROOT/target/c-guests"
 }
@@ -751,14 +659,11 @@ CS_GUEST="guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 CS_GUEST="$CS_GUEST" tools/bench-encode.sh || exit 1
 timing guest-builds+bench
 
-# Every guest against the SwiftUI backend — the one macOS backend
-# (one backend per platform; AppKit was deleted when the roster was
-# ratified). kaya::run hosts the interpreter dylib unconditionally.
+# Every guest against the SwiftUI backend, the one macOS backend.
 # The build's exit status is load-bearing: unchecked, a swiftc failure
 # left the PREVIOUS dylib in place and 152 legs false-PASSed against
-# stale code (2026-07-22; iOS caught the same source because its lane
-# checks its compile). A failed build must kill the lane, not degrade
-# it to yesterday's interpreter.
+# stale code (2026-07-22). A failed build must kill the lane, not
+# degrade it to yesterday's interpreter.
 export KAYA_SWIFTUI_LIB="$ROOT/target/swiftui/libkaya_swiftui.dylib"
 # The Swift interpreter reads the scene script from the environment
 # (the Rust backends embed theirs at build time). Comments stripped:
@@ -844,12 +749,11 @@ run feed-swift-swiftui env KAYA_SELFTEST=feed target/swift-guests/feed
 run feed-java-swiftui env KAYA_SELFTEST=feed KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The layout and grow scenes against the SwiftUI interpreter — the same
-# examples on the interpreter. Each scene exports its OWN script:
-# the Rust backends embed theirs at build time, but the interpreter
-# reads KAYA_SELFTEST_SCRIPT from the environment, so a leg that does
-# not set it silently runs the previous group's script against this
-# scene's tree.
+# The layout and grow scenes against the SwiftUI interpreter. Each
+# scene exports its OWN script: the Rust backends embed theirs at build
+# time, but the interpreter reads KAYA_SELFTEST_SCRIPT from the
+# environment, so a leg that does not set it silently runs the previous
+# group's script against this scene's tree.
 KAYA_SELFTEST_SCRIPT="$(scene_script grow)"
 export KAYA_SELFTEST_SCRIPT
 run grow-rust-swiftui env KAYA_SELFTEST=grow "$RUST_GUESTS"/grow
@@ -883,9 +787,8 @@ run window-swift-swiftui env KAYA_SELFTEST=window target/swift-guests/window
 run window-java-swiftui env KAYA_SELFTEST=window KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The panels scene: the auxiliary-window grammar — two surfaces, the
-# veto class fired by the REAL chrome close, destroy as confirmation.
-# Rust depth; the language sweep rides the phase's next slice.
+# The panels scene: the auxiliary-window grammar. Rust depth; the
+# language sweep rides the phase's next slice.
 KAYA_SELFTEST_SCRIPT="$(scene_script panels)"
 export KAYA_SELFTEST_SCRIPT
 run panels-rust-swiftui env KAYA_SELFTEST=panels "$RUST_GUESTS"/panels
@@ -900,10 +803,6 @@ run panels-swift-swiftui env KAYA_SELFTEST=panels target/swift-guests/panels
 run panels-java-swiftui env KAYA_SELFTEST=panels KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The nav scene: the serial navigation grammar — push/pop entries in
-# the primary surface, the REAL back affordance driven per platform,
-# and the intercept_back veto class (back_requested + the guest's
-# pop_entry confirmation). All eight languages, byte-identical.
 KAYA_SELFTEST_SCRIPT="$(scene_script nav)"
 export KAYA_SELFTEST_SCRIPT
 run nav-rust-swiftui env KAYA_SELFTEST=nav "$RUST_GUESTS"/nav
@@ -918,14 +817,6 @@ run nav-swift-swiftui env KAYA_SELFTEST=nav target/swift-guests/nav
 run nav-java-swiftui env KAYA_SELFTEST=nav KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The scroll scene: the scroll viewport's contract — overflow,
-# scroll_end through the REAL scrolling API, at-end read back, and a
-# live click on the scrolled-to button. All eight languages,
-# byte-identical.
-# The split scene: adaptive list-detail (DESIGN.md). The window asks
-# for list_detail once and the PLATFORM decides; resize_window drives
-# the transition for real so the far side is re-asserted. All eight
-# languages, byte-identical.
 KAYA_SELFTEST_SCRIPT="$(scene_script split)"
 export KAYA_SELFTEST_SCRIPT
 run split-rust-swiftui env KAYA_SELFTEST=split "$RUST_GUESTS"/split
@@ -941,11 +832,10 @@ run split-java-swiftui env KAYA_SELFTEST=split KAYA_LIB="$ROOT/target/debug/libk
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The listdetail scene: THE SAME GUESTS, asserting list-detail's bare
-# invariant at whatever width the host gives. One app, two scripts — a
-# scene selects a SCRIPT, never an app, so every leg here runs the
-# binary the block above just ran. Desktop-redundant on this lane and
-# carried anyway, because the file is shared verbatim with the phone
-# lanes where it is the only list-detail coverage there is.
+# invariant at whatever width the host gives — a scene selects a
+# SCRIPT, never an app. Desktop-redundant on this lane and carried
+# anyway, because the file is shared verbatim with the phone lanes
+# where it is the only list-detail coverage there is.
 KAYA_SELFTEST_SCRIPT="$(scene_script listdetail)"
 export KAYA_SELFTEST_SCRIPT
 run listdetail-rust-swiftui env KAYA_SELFTEST=listdetail "$RUST_GUESTS"/split
@@ -964,8 +854,8 @@ run listdetail-java-swiftui env KAYA_SELFTEST=listdetail KAYA_LIB="$ROOT/target/
 # TIER — rust only until the sweep lands the other seven. Its worker
 # parks until a click releases it, so a binding that ran background
 # work ON the app thread cannot deliver its own release and this leg
-# TIMES OUT rather than failing an assertion. That is deliberate
-# (docs/background-work-plan.md §5): the deadlock is the gate.
+# TIMES OUT rather than failing an assertion: the deadlock is the gate
+# (docs/background-work-plan.md §5).
 KAYA_SELFTEST_SCRIPT="$(scene_script background)"
 export KAYA_SELFTEST_SCRIPT
 run background-rust-swiftui env KAYA_SELFTEST=background "$RUST_GUESTS"/background
@@ -981,22 +871,17 @@ run background-java-swiftui env KAYA_SELFTEST=background KAYA_LIB="$ROOT/target/
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The filedialog scene: the picker's request/result grammar and the
-# capability it hands back, in every language. It drives REAL NSOpenPanel
-# chrome over accessibility, so it needs the same logged-in GUI session
-# the alert legs do.
+# capability it hands back, driving REAL NSOpenPanel chrome over
+# accessibility, so it needs a logged-in GUI session.
 #
-# THE EIGHT LEGS ARE SPLIT ACROSS THE THREE PANEL VIEW MODES rather than
-# all inheriting whichever one the machine is in (panel_mode_set above
-# says why, and restores the developer's value at exit). The view mode
-# is a property of the PANEL, read by one language-independent reader in
-# swift/KayaSwiftUI.swift, so crossing it with the language axis would
-# buy nothing: 8 legs in 3 groups prove all three readers and both
-# selection idioms every run, at the cost of two drains rather than
-# sixteen extra legs.
+# THE EIGHT LEGS ARE SPLIT ACROSS THE THREE PANEL VIEW MODES rather
+# than all inheriting whichever one the machine is in (panel_mode_set
+# above says why). The mode is a property of the PANEL, read by one
+# language-independent reader, so crossing it with the language axis
+# would buy nothing.
 #
 # A drain BEFORE the first group as well, because a mode is set for
-# whatever is running, not for a leg: no filedialog leg may still be in
-# flight when the next group's write lands.
+# whatever is running, not for a leg.
 KAYA_SELFTEST_SCRIPT="$(scene_script filedialog)"
 export KAYA_SELFTEST_SCRIPT
 drain
@@ -1027,18 +912,15 @@ if [ -n "$panel_modes_gap" ]; then
 fi
 panel_mode_restore || status=1
 
-# The save scene: the round trip an editor walks — open, save back, save
-# as, reopen — and the two things nothing else drives (docs/save-plan.md
-# D5). It runs REAL NSSavePanel chrome over accessibility, so it needs
-# the same logged-in GUI session the picker legs do.
+# The save scene: the round trip an editor walks (docs/save-plan.md
+# D5), driving REAL NSSavePanel chrome over accessibility.
 #
 # NO PANEL VIEW MODE IS SET FOR IT, and that is measured rather than an
 # omission: a save panel's COLLAPSED form publishes no file browser at
 # all, its collapsed/expanded state is a DIFFERENT machine-wide
-# preference (NSNavPanelExpandedStateForSaveMode) from the open panel's
-# view mode, and the reader deliberately never looks for rows. Setting a
-# mode here would exercise nothing and would leave a preference behind
-# for the legs above.
+# preference (NSNavPanelExpandedStateForSaveMode), and the reader never
+# looks for rows. Setting a mode here would exercise nothing and would
+# leave a preference behind for the legs above.
 KAYA_SELFTEST_SCRIPT="$(scene_script save)"
 export KAYA_SELFTEST_SCRIPT
 drain
@@ -1046,9 +928,7 @@ drain
 # the scene: macOS remembers a save panel's last directory as a USER
 # PREFERENCE shared by every process, so nine guests opening panels in
 # one pool trample it — measured 2026-08-10, a leg asserting its own
-# kaya-save-<pid> directory was shown a SIBLING leg's. Same rule as the
-# clipboard legs below, for the same reason: one shared piece of session
-# state per lane.
+# kaya-save-<pid> directory was shown a SIBLING leg's.
 run save-rust-swiftui env KAYA_SELFTEST=save "$RUST_GUESTS"/save
 # Java's leg rides the same script, and it is the only one that also
 # proves a BINDING fix: until this milestone dev.kaya.KayaApp wrapped
@@ -1082,26 +962,18 @@ drain
 run save-c-swiftui env KAYA_SELFTEST=save target/c-guests/save
 drain
 
-# THE TEXT EDITOR — kaya's forcing artifact (docs/editor-plan.md), and
-# the only script on this lane that drives an APP rather than a feature:
-# launch to an empty buffer, type, save-as, open, edit, undo, save, find
-# with a regex, and the unsaved-work warning on close.
+# THE TEXT EDITOR (docs/editor-plan.md), the only script on this lane
+# that drives an APP rather than a feature.
 #
-# GO ALONE, AND NOT AS A DEPTH SLICE WAITING ON SEVEN BINDINGS. The plan
-# chose Go deliberately — an editor in Rust would be kaya testing itself,
-# and every awkward corner of a BINDING would stay invisible — so there
-# is no rust example and no per-language sweep pending. That is why
-# `editor` is in neither SCENES nor DEPTH_SCENES: both of those derive a
-# `cargo build --example` and a per-language guest hunt this app does not
-# want. The Go guest is one binary carrying every scene, so the leg needs
-# nothing but its name.
+# GO ALONE, AND NOT A DEPTH SLICE WAITING ON SEVEN BINDINGS: the plan
+# chose Go so a BINDING's awkward corners would show, so there is no
+# rust example and `editor` is in neither SCENES nor DEPTH_SCENES (both
+# derive a `cargo build --example` this app does not want).
 #
-# ALONE BETWEEN DRAINS, for both reasons this file already states
-# elsewhere. It opens real NSSavePanel and NSOpenPanel chrome, and macOS
-# remembers a panel's last directory as a USER PREFERENCE shared by every
-# process (measured 2026-08-10 — a save leg was shown a sibling leg's
-# directory). And it injects REAL key events, which land wherever the
-# window server thinks focus is, not where the leg does.
+# ALONE BETWEEN DRAINS, for both reasons this file states elsewhere: it
+# opens real NSSavePanel and NSOpenPanel chrome, whose last directory
+# macOS remembers as a USER PREFERENCE shared by every process
+# (measured 2026-08-10), and it injects REAL key events.
 KAYA_SELFTEST_SCRIPT="$(scene_script editor)"
 export KAYA_SELFTEST_SCRIPT
 drain
@@ -1110,13 +982,9 @@ drain
 
 # THE STAMPED-ACCESSIBILITY SCENE (docs/tpl-props-plan.md P3): two
 # entries stamped from one template, each carrying its own row's a11y
-# identity, read back from the platform's real tree — the assertion the
-# a11y milestone's 719 legs never made. A SEPARATE scene because the
-# a11y scene asserts containers ordinally and a For's column would
-# shift `column#0` per language (the steps file carries the full
-# reasoning). Graduated 2026-08-11 with wave 2's guests: all eight
-# bindings plus the C floor, which spells the template props as the
-# generated setters (its usual relationship to sugar).
+# identity, read back from the platform's real tree. A SEPARATE scene
+# because the a11y scene asserts containers ordinally and a For's
+# column would shift `column#0` per language.
 KAYA_SELFTEST_SCRIPT="$(scene_script a11yrows)"
 export KAYA_SELFTEST_SCRIPT
 run a11yrows-rust-swiftui env KAYA_SELFTEST=a11yrows "$RUST_GUESTS"/a11yrows
@@ -1136,12 +1004,7 @@ drain
 # THE STYLING SCENE (docs/styling-plan.md slice 1): the brand accent,
 # the role tier and the window inset. `heading` is frozen from the real
 # tree (measured: SwiftUI's .isHeader IS the AXHeading role on macOS);
-# the inset is asserted by measurement (expect_inset, the halved
-# outer-minus-offer gap); destructive/prominent press like any button —
-# their chrome is the captures' business. Began as a DEPTH slice; the
-# fan-out landed all eight sugar spellings and their guests on
-# 2026-08-12 and the scene graduated from DEPTH_SCENES into SCENES —
-# check-steps demands these legs now. The C floor rides too, spelling
+# the inset is asserted by measurement. The C floor rides too, spelling
 # the brand record, the role prop and the inset wprop as the generated
 # primitives they are (invariant 5's documentation tier).
 KAYA_SELFTEST_SCRIPT="$(scene_script styling)"
@@ -1161,36 +1024,27 @@ run styling-c-swiftui env KAYA_SELFTEST=styling target/c-guests/styling
 drain
 
 # The typeface scene: the brand typeface swaps the FAMILY and nothing
-# else. A DEPTH slice — rust only, mac only — and the one assertion that
-# matters reads the RESOLVED family off the real NSTextField and
-# NSTextView, never the request: every font API on this platform renders
-# something for a family it does not have, so an echo would report a
-# perfect swap for a font that was never installed.
+# else. A DEPTH slice — rust only, mac only — and the one assertion
+# that matters reads the RESOLVED family off the real NSTextField and
+# NSTextView, never the request: every font API on this platform
+# renders something for a family it does not have.
 KAYA_SELFTEST_SCRIPT="$(scene_script typeface)"
 export KAYA_SELFTEST_SCRIPT
 run typeface-rust-swiftui env KAYA_SELFTEST=typeface "$RUST_GUESTS"/typeface
 drain
 
 # The toolbar scene: the `primary` bit as real window chrome
-# (docs/chrome-plan.md C2). Both assertions read the REAL NSToolbar: the
-# promoted set's presence in the bar (crossed against the promotion
-# list, so a lowering that never attached a toolbar fails naming both
-# numbers) and each button's symbol and enablement. ENABLEMENT IS NOT
-# NSToolbarItem.isEnabled, which stays true for a visibly disabled
-# SwiftUI button — the read goes through the accessibility tree, where
-# the disable actually lands.
+# (docs/chrome-plan.md C2). Both assertions read the REAL NSToolbar.
+# ENABLEMENT IS NOT NSToolbarItem.isEnabled, which stays true for a
+# visibly disabled SwiftUI button — the read goes through the
+# accessibility tree, where the disable actually lands.
 #
-# Began as a DEPTH slice; the fan-out landed all five backends' arms and
-# the seven other guests on 2026-08-17 and the scene graduated from
-# DEPTH_SCENES into SCENES — check-steps demands these legs now. No C
-# floor guest: guests/c/toolbar.c does not exist and the floor's
+# No C floor guest: guests/c/toolbar.c does not exist and the floor's
 # Makefile SCENES does not name it, which check-steps' sweep_c_floor
 # reads from the other side.
 #
-# POOLED, the styling block's reasoning rather than the save block's:
-# the scene's `click` is in-process, no chord is pressed, no window is
-# closed, and every read is of this leg's own window through its own
-# accessibility tree. Nothing here is session-wide state.
+# POOLED: the scene's `click` is in-process, no chord is pressed, no
+# window is closed, and every read is of this leg's own window.
 KAYA_SELFTEST_SCRIPT="$(scene_script toolbar)"
 export KAYA_SELFTEST_SCRIPT
 run toolbar-rust-swiftui env KAYA_SELFTEST=toolbar "$RUST_GUESTS"/toolbar
@@ -1206,34 +1060,25 @@ run toolbar-java-swiftui env KAYA_SELFTEST=toolbar KAYA_LIB="$ROOT/target/debug/
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
 
-# The identity scene (docs/app-identity-plan.md): an app says what it is
-# called and what it looks like, and this platform shows both.
+# The identity scene (docs/app-identity-plan.md).
 #
 # THESE LEGS PUT A DOCK TILE ON THE SCREEN, and that is ruling 2 rather
-# than a side effect to apologize for. An `.accessory` app — every other
-# leg on this lane, deliberately, so a suite never steals the human's
-# keyboard — has NO DOCK TILE to put a picture in: measured, the setter
-# succeeded, the image read back at 512x512, and the Dock did not move
-# one pixel. So an app that DECLARES an identity becomes `.regular`, and
-# these eight legs are the only ones on this lane that do. They do not
-# ACTIVATE (nothing calls NSApplication.activate, which stays behind
-# KAYA_ACTIVATE=1), so the tiles appear and go without taking the front
-# — measured while capturing the Dock, with another app still frontmost
-# throughout.
+# than a side effect. An `.accessory` app — every other leg on this
+# lane, so a suite never steals the human's keyboard — has NO DOCK TILE
+# to put a picture in: measured, the setter succeeded, the image read
+# back at 512x512, and the Dock did not move one pixel. So an app that
+# DECLARES an identity becomes `.regular`. They do not ACTIVATE
+# (KAYA_ACTIVATE=1 gates that), so the tiles appear and go without
+# taking the front.
 #
-# THE POLICY IS RAISED LATE, AND THAT WAS THE PLAN'S ONE OPEN QUESTION.
-# The identity arrives while the app is building its first screen, so it
-# arrives after launch, and nobody had measured whether a policy raised
-# at that moment puts the tile up. It does: captured 2026-08-18, the
-# declared four-quadrant mark in this machine's Dock beside thirteen
-# rounded system icons (unmasked, which is the blob owning its own
-# shape). The KAYA_ACTIVATE=1 fallback swift/KayaSwiftUIEntry.swift
-# holds open was not needed and is not set here.
+# THE POLICY IS RAISED LATE, which was the plan's one open question:
+# the identity arrives while the app is building its first screen. It
+# works — captured 2026-08-18, the declared mark in this machine's Dock
+# beside thirteen rounded system icons, unmasked.
 #
-# POOLED, the toolbar block's reasoning: the scene's `click` is
-# in-process, no chord is pressed, no window is closed, and both icon
-# reads are of this process's own AppKit state. The activation policy is
-# per-process too, so eight of these are eight independent Dock tiles.
+# POOLED: the scene's `click` is in-process, no chord is pressed, no
+# window is closed, and both icon reads are of this process's own
+# AppKit state.
 #
 # NO C FLOOR LEG: guests/c/identity.c does not exist and the floor's
 # Makefile SCENES does not name it, which check-steps' sweep_c_floor
@@ -1253,21 +1098,17 @@ run identity-java-swiftui env KAYA_SELFTEST=identity KAYA_LIB="$ROOT/target/debu
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 drain
 
-# The assets conformance scene (docs/assets-plan.md): `asset(name)`'s two
-# redemptions, observed through real surfaces.
+# The assets conformance scene (docs/assets-plan.md).
 #
-# THIS LANE STAGES NOTHING, and that is the assertion. No KAYA_ASSET_DIR
-# is exported anywhere below, so the core resolves the root by its
-# compile-time repo-relative default — and the frozen census in
-# tools/scenes/assets.steps is what proves it found the whole root rather
-# than one file. The pre-flight above says the same thing before any leg
-# runs, so a missing root is named there rather than as nine identical
-# failures here.
+# THIS LANE STAGES NOTHING, and that is the assertion: no
+# KAYA_ASSET_DIR is exported anywhere below, so the core resolves the
+# root by its compile-time repo-relative default — and the frozen
+# census in tools/scenes/assets.steps is what proves it found the whole
+# root rather than one file.
 #
 # ALL NINE TIERS, including the C FLOOR — the only scene that has one
 # beside the eight hosted guests, because the floor is where
-# `kaya_asset_open` and `kaya_asset_blob` are documented longhand and
-# this is the first scene whose assertions were written for it.
+# `kaya_asset_open` and `kaya_asset_blob` are documented longhand.
 KAYA_SELFTEST_SCRIPT="$(scene_script assets)"
 export KAYA_SELFTEST_SCRIPT
 run assets-rust-swiftui env KAYA_SELFTEST=assets "$RUST_GUESTS"/assets
@@ -1316,26 +1157,20 @@ run clipboard-java-swiftui env KAYA_SELFTEST=clipboard KAYA_LIB="$ROOT/target/de
 drain
 
 # The undo scene: one history over two tiers, walked newest-first
-# (docs/undo-plan.md §3). Began as a DEPTH slice; the fan-out finished
-# 2026-08-04, all nine guests answer alike, and the scene graduated
-# from DEPTH_SCENES into SCENES — check-steps demands these legs now.
+# (docs/undo-plan.md §3).
 #
 # ALONE BETWEEN DRAINS, and the reason is the `type` verb rather than
 # the scene: it delivers REAL KEYSTROKES, and a backend that ever
 # synthesizes those at the system level puts them on the input queue of
-# whatever is FRONTMOST rather than of the leg that asked — the same
-# class that makes the Windows menus legs serial (docs/traps.md). The
-# mac arm delivers them in-process, so this bracket currently buys
-# insurance rather than correctness; it costs one leg's worth of pool.
+# whatever is FRONTMOST (docs/traps.md). The mac arm delivers them
+# in-process, so this bracket currently buys insurance.
 KAYA_SELFTEST_SCRIPT="$(scene_script undo)"
 export KAYA_SELFTEST_SCRIPT
 drain
 run undo-rust-swiftui env KAYA_SELFTEST=undo "$RUST_GUESTS"/undo
 drain
 # The AMBIENT tier's undo guest: a handler does not open its transaction
-# here, so the group is named from inside it (kaya.undoable) and the
-# clear that finishes the form is posted as the second one — same two
-# commits, same order, same expected strings.
+# here, so the group is named from inside it (kaya.undoable).
 run undo-python-swiftui env KAYA_SELFTEST=undo python3 guests/python/undo.py
 drain
 # The HANDLE tier's undo guest, beside its clipboard sibling: the group
@@ -1345,10 +1180,9 @@ drain
 # handler already holds one and Build-in-Build is refused.
 run undo-go-swiftui env KAYA_SELFTEST=undo target/go-guests/kaya-go
 drain
-# The C floor's undo guest: the same script, the same expected strings,
-# and the head-of-batch undo_group record spelled out — invariant 5's
-# documentation tier, and the only reader of the undone/redone body that
-# decodes it by hand instead of through a binding's fold.
+# The C floor's undo guest: the head-of-batch undo_group record spelled
+# out, and the only reader of the undone/redone body that decodes it by
+# hand instead of through a binding's fold.
 run undo-c-swiftui env KAYA_SELFTEST=undo target/c-guests/undo
 drain
 run undo-haskell-swiftui env KAYA_SELFTEST=undo "$(hs_bin undo)"
@@ -1379,8 +1213,6 @@ run scroll-swift-swiftui env KAYA_SELFTEST=scroll target/swift-guests/scroll
 run scroll-java-swiftui env KAYA_SELFTEST=scroll KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The progress scene: the bar's contract — fraction and activity
-# mode read back from the REAL control. All eight languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script progress)"
 export KAYA_SELFTEST_SCRIPT
 run progress-rust-swiftui env KAYA_SELFTEST=progress "$RUST_GUESTS"/progress
@@ -1395,10 +1227,6 @@ run progress-swift-swiftui env KAYA_SELFTEST=progress target/swift-guests/progre
 run progress-java-swiftui env KAYA_SELFTEST=progress KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The select scene: the dropdown's contract — the collapsed control
-# shows the selected option's label, choose drives the toolkit's own
-# selection route, the pick reaches the guest as the new index. All
-# eight languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script select)"
 export KAYA_SELFTEST_SCRIPT
 run select-rust-swiftui env KAYA_SELFTEST=select "$RUST_GUESTS"/select
@@ -1413,9 +1241,6 @@ run select-swift-swiftui env KAYA_SELFTEST=select target/swift-guests/select
 run select-java-swiftui env KAYA_SELFTEST=select KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The radio scene: the choice contract inline — the group shows the
-# selected option, choose drives the toolkit's own route. All eight
-# languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script radio)"
 export KAYA_SELFTEST_SCRIPT
 run radio-rust-swiftui env KAYA_SELFTEST=radio "$RUST_GUESTS"/radio
@@ -1430,9 +1255,6 @@ run radio-swift-swiftui env KAYA_SELFTEST=radio target/swift-guests/radio
 run radio-java-swiftui env KAYA_SELFTEST=radio KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The grid scene: the 2D layout contract (natural-width columns
-# aligned across rows) plus the spacer's grow sugar. All eight
-# languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script grid)"
 export KAYA_SELFTEST_SCRIPT
 run grid-rust-swiftui env KAYA_SELFTEST=grid "$RUST_GUESTS"/grid
@@ -1447,9 +1269,6 @@ run grid-swift-swiftui env KAYA_SELFTEST=grid target/swift-guests/grid
 run grid-java-swiftui env KAYA_SELFTEST=grid KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The textarea scene: the multi-line entry — the newline riding the
-# text both ways is the observable that separates it from the entry.
-# All eight languages.
 KAYA_SELFTEST_SCRIPT="$(scene_script textarea)"
 export KAYA_SELFTEST_SCRIPT
 run textarea-rust-swiftui env KAYA_SELFTEST=textarea "$RUST_GUESTS"/textarea
@@ -1464,9 +1283,6 @@ run textarea-swift-swiftui env KAYA_SELFTEST=textarea target/swift-guests/textar
 run textarea-java-swiftui env KAYA_SELFTEST=textarea KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The sections scene: the presentation context — echo doctrine both
-# ways (user switch emits, programmatic select stays quiet) plus
-# retention (DESIGN.md, Sections).
 KAYA_SELFTEST_SCRIPT="$(scene_script sections)"
 export KAYA_SELFTEST_SCRIPT
 run sections-rust-swiftui env KAYA_SELFTEST=sections "$RUST_GUESTS"/sections
@@ -1481,12 +1297,6 @@ run sections-swift-swiftui env KAYA_SELFTEST=sections target/swift-guests/sectio
 run sections-java-swiftui env KAYA_SELFTEST=sections KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The menus scene: the command vocabulary — one catalog, two anchors;
-# enablement/checked/value live-bound, the shortcut through the
-# platform's own dispatch table, context menus on a live label and on
-# a stamped row (the keys are the noun), and the late catalog rebuild
-# (rename/append/promotion recompute). All eight languages,
-# byte-identical.
 KAYA_SELFTEST_SCRIPT="$(scene_script menus)"
 export KAYA_SELFTEST_SCRIPT
 run menus-rust-swiftui env KAYA_SELFTEST=menus "$RUST_GUESTS"/menus
@@ -1502,19 +1312,13 @@ run menus-java-swiftui env KAYA_SELFTEST=menus KAYA_LIB="$ROOT/target/debug/libk
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
 # The a11y scene: the two universal accessibility props read back out
-# of the PLATFORM'S OWN accessibility tree — the tree an assistive
-# client walks — so the wrap-native bet's central claim is a matrix
-# fact rather than a paragraph in DESIGN. Asserts both halves: names
-# DERIVED by the control from its own caption (free by construction)
-# and names AUTHORED where there is no caption to derive from, over
-# EVERY widget kind, because the props are universal.
-# These legs run POOLED like every other scene. They were serialized for
-# a few hours on 2026-07-25 while the read's hangs were misread as
-# contention; the actual defect was a lock inversion inside the read
-# itself (docs/traps.md), and with that fixed nine concurrent
-# accessibility guests pass — so the barrier came back out. A carve-out
-# that no longer earns its keep is worse than none: it hides the class
-# of failure it was invented for.
+# of the PLATFORM'S OWN accessibility tree, over EVERY widget kind.
+# Asserts both halves — names DERIVED by the control from its own
+# caption, and names AUTHORED where there is no caption.
+# These legs run POOLED like every other scene. They were serialized
+# for a few hours on 2026-07-25 while the read's hangs were misread as
+# contention; the defect was a lock inversion inside the read itself
+# (docs/traps.md), and the barrier came back out.
 KAYA_SELFTEST_SCRIPT="$(scene_script a11y)"
 export KAYA_SELFTEST_SCRIPT
 run a11y-rust-swiftui env KAYA_SELFTEST=a11y "$RUST_GUESTS"/a11y
@@ -1548,23 +1352,15 @@ run commands-swift-swiftui env KAYA_SELFTEST=commands target/swift-guests/comman
 run commands-java-swiftui env KAYA_SELFTEST=commands KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The confirm scene: the modal-alert grammar — the REAL platform
-# dialog materialized, all three answer paths (action 0, action 1,
-# the cancel slot) driven through the native press, the id retired
-# between rounds. Desktop AND phone: alerts are the first
-# presentation context every host has natively.
-# The stall diagnostic: the one scene that deliberately blocks the app
-# thread, asserting that kaya REPORTS it (crates/kaya/src/stall.rs).
-# EVERY LANGUAGE, because the misuse it guards is available in every
-# one of them — the discipline each other guest follows (blocking work
-# goes to a worker, the result comes back through post) was entirely
-# unenforced until this scene, and a diagnostic that only fires for
-# Rust guests would leave seven bindings exactly as blind as before.
+# The confirm scene: the REAL platform dialog, all three answer paths.
+# The stall diagnostic (crates/kaya/src/stall.rs): the one scene that
+# deliberately blocks the app thread, in EVERY LANGUAGE — a diagnostic
+# that only fired for Rust guests would leave seven bindings exactly as
+# blind as before.
 #
 # ITS OWN SCRIPT EXPORT, like every group here. KAYA_SELFTEST_SCRIPT is
 # exported once per scene and PERSISTS, so a leg placed after another
-# scene's export silently runs that scene's steps — which this one did,
-# reporting confirm's assertions against a scene that has no alerts.
+# scene's export silently runs that scene's steps — which this one did.
 KAYA_SELFTEST_SCRIPT="$(scene_script stall)"
 export KAYA_SELFTEST_SCRIPT
 run stall-rust-swiftui env KAYA_SELFTEST=stall "$RUST_GUESTS"/stall
@@ -1593,21 +1389,14 @@ run confirm-swift-swiftui env KAYA_SELFTEST=confirm target/swift-guests/confirm
 run confirm-java-swiftui env KAYA_SELFTEST=confirm KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     java -XstartOnFirstThread -cp target/java-guests dev.kaya.milestone2kt.Main
 
-# The dirty scene: unsaved work as window chrome (docs/dirty-plan.md).
-# The app declares one boolean and macOS shows the dot in the close
-# button; expect_dirty reads that dot back through the accessibility
-# tree (AXEdited on the close button — measured to be exactly where it
-# lives), never the model, so a lowering that never reached the
-# NSWindow fails here. The scene ends on the D3 composition: the close
-# attempt fires the veto class, the app's own dialog opens, cancel
-# keeps the window and the mark stays up.
+# The dirty scene (docs/dirty-plan.md). The app declares one boolean
+# and macOS shows the dot in the close button; expect_dirty reads that
+# dot back through the accessibility tree (AXEdited on the close
+# button — measured to be exactly where it lives), never the model.
 #
-# DEPTH until the sugar lands in the other seven bindings and their
-# guests follow (it is in DEPTH_SCENES for exactly that reason, so
-# check-steps demands no BINDING leg yet). The C floor is not one of
-# those bindings and does not wait on them: it takes no sugar at all,
-# so its guest is writable the day the wire constant exists — the
-# undo-c precedent, where the floor rode this lane first.
+# DEPTH until the sugar lands in the other seven bindings. The C floor
+# does not wait on them: it takes no sugar at all, so its guest is
+# writable the day the wire constant exists.
 KAYA_SELFTEST_SCRIPT="$(scene_script dirty)"
 export KAYA_SELFTEST_SCRIPT
 run dirty-rust-swiftui env KAYA_SELFTEST=dirty "$RUST_GUESTS"/dirty
@@ -1619,16 +1408,13 @@ run dirty-rust-swiftui env KAYA_SELFTEST=dirty "$RUST_GUESTS"/dirty
 run dirty-python-swiftui env KAYA_SELFTEST=dirty python3 guests/python/dirty.py
 # OCaml's guest: the prop is a labelled argument on the window construct
 # ([~dirty]), and setting it later is that construct called again inside
-# the handler — an ambient binding's handler already IS the transaction,
-# so the edit's three statements ride one.
+# the handler — an ambient binding's handler already IS the transaction.
 run dirty-ocaml-swiftui env KAYA_SELFTEST=dirty KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     _build/default/guests/ocaml/dirty.exe
-# The C floor's dirty guest: the same script, the same expected strings,
-# and the prop spelled as the SET_WINDOW_PROP record it is — the same
-# record the title rides, one constant apart from veto_close. It is also
-# the floor's first reader of close_requested and alert_result, neither
-# of which the generator emits a parser for, so the veto/confirm
-# composition is decoded by hand here (invariant 5's documentation tier).
+# The C floor's dirty guest: the prop spelled as the SET_WINDOW_PROP
+# record it is. It is also the floor's first reader of close_requested
+# and alert_result, neither of which the generator emits a parser for,
+# so the veto/confirm composition is decoded by hand here.
 run dirty-c-swiftui env KAYA_SELFTEST=dirty target/c-guests/dirty
 run dirty-go-swiftui env KAYA_SELFTEST=dirty target/go-guests/kaya-go
 run dirty-haskell-swiftui env KAYA_SELFTEST=dirty "$(hs_bin dirty)"
@@ -1636,29 +1422,22 @@ run dirty-swift-swiftui env KAYA_SELFTEST=dirty target/swift-guests/dirty
 run dirty-csharp-swiftui env KAYA_SELFTEST=dirty KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet exec "$CS_GUEST"
 
-# The text-ranges scene: HIGHLIGHT a set, SELECT one, REVEAL one, plus
-# the two rules that make them a contract — a keystroke drops a
-# declared set (D2), and a select_range mid-composition is refused
-# (D4). Every assertion reads the PLATFORM'S accessibility tree, never
-# kaya's memory of what it declared.
+# The text-ranges scene. Every assertion reads the PLATFORM'S
+# accessibility tree, never kaya's memory of what it declared.
 #
-# DEPTH, rust-only, until the sugar reaches the other seven bindings and
-# the four other backends grow their arms — which is why `ranges` is in
-# DEPTH_SCENES and why gtk.rs, winui/mod.rs, KayaCompose.kt and this
-# file's iOS half all carry `depth_stub("ranges")`. check-stubs and
-# check-steps read those from their two sides and between them hold
-# every other runner's ranges legs shut until the feature is there.
+# DEPTH, rust-only, until the sugar reaches the other seven bindings
+# and the four other backends grow their arms — which is why gtk.rs,
+# winui/mod.rs, KayaCompose.kt and this file's iOS half all carry
+# `depth_stub("ranges")`.
 KAYA_SELFTEST_SCRIPT="$(scene_script ranges)"
 export KAYA_SELFTEST_SCRIPT
 run ranges-rust-swiftui env KAYA_SELFTEST=ranges "$RUST_GUESTS"/ranges
 run ranges-python-swiftui env KAYA_SELFTEST=ranges python3 guests/python/ranges.py
 # The C floor's ranges guest, which does not wait on the seven sugar
-# bindings because it takes no sugar (the undo-c and dirty-c precedent):
-# the three primitives spelled as the wire records they are, the day the
-# constants exist. It is also where the unit ruling is most legible —
-# `at - doc` is a pointer difference into the app's own buffer, i.e. a
-# UTF-8 byte offset, and the frozen 57/203/753 are those bytes rather
-# than the 51/197/747 a UTF-16 counter would produce.
+# bindings because it takes no sugar. It is also where the unit ruling
+# is most legible — `at - doc` is a pointer difference into the app's
+# own buffer, i.e. a UTF-8 byte offset, and the frozen 57/203/753 are
+# those bytes rather than the 51/197/747 a UTF-16 counter would give.
 run ranges-c-swiftui env KAYA_SELFTEST=ranges target/c-guests/ranges
 # The C# guest, where the unit ruling costs something rather than being
 # free: .NET's IndexOf answers in UTF-16 code units, so this leg passes

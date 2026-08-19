@@ -2,14 +2,11 @@
 // no UI, no scene — read the simulator's pasteboard through
 // UIPasteboard, and does the paste prompt gate it?
 //
-// Why it matters: pbsync device->host DROPS app-defined types
-// (measured, campaign A), so no stock host tool can confirm the custom
-// representation's bytes under their id. The android lane's answer was
-// a genuinely-separate reading process (the helper APK); this is the
-// iOS spelling of the same question. If the read answers here, this
-// binary is the lane's foreign reader for every kind; if it prompts,
-// there is no screen to press and the answer is a hang, which the
-// bounded runner reads as "no".
+// Why it matters: pbsync device->host DROPS app-defined types, so no
+// stock host tool can confirm the custom representation's bytes under
+// their id. If the read answers here, this binary is the lane's foreign
+// reader for every kind; if it prompts, there is no screen to press and
+// the answer is a hang, which the bounded runner reads as "no".
 import UIKit
 
 let pb = UIPasteboard.general

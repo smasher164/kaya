@@ -1,13 +1,9 @@
-// The uniform-abort guard, JVM shape: the Java runtime is ring-only
-// (no desktop native harness), so this check is pure JVM — no
-// transaction with records ever commits, because submitIfAny would
-// call into KayaRing's natives. Every mutating transaction aborts and
-// the committed ones are read-only (empty record list, nothing
-// submits), which makes the shape weaker than the desktop checks:
-// rollback and propagation are pinned, a shipped post-abort commit is
-// not. The dispatch wrapper and the derived registry are private to
-// KayaApp, so the boundary test covers the rollback and both stay
-// compile-visible only.
+// The uniform-abort guard, JVM shape. PURE JVM: no transaction with
+// records may ever commit here, because submitIfAny would call into
+// KayaRing's natives — so every mutating transaction aborts and the
+// committed ones are read-only. That makes it weaker than the desktop
+// checks: rollback and propagation are pinned, a shipped post-abort
+// commit is not.
 //
 // Compile and run (from the repo root, inside `nix develop`; javac
 // resolution mirrors tools/java-typecheck.sh — the KayaRing stub
@@ -82,12 +78,9 @@ public final class AbortCheck {
         });
 
         // The record-time mirror-read guard: while a template body is
-        // being declared (a For body, a When body), the model is
-        // off-limits — the template records once and replays, so a
-        // read baked into it is silently dead data. Live-zone and
-        // build reads stay legal, pinned below. The template records
-        // (createFor/createWhen) must never reach submit in this
-        // pure-JVM check, so the whole transaction aborts at the end.
+        // being declared, the model is off-limits — the template records
+        // once and replays, so a read baked into it is dead data.
+        // Live-zone and build reads stay legal, pinned below.
         Consumer<KayaApp.Tx> guarded = tx -> {
             tx.forEach(todos[0], t -> {
                 boolean threw = false;
@@ -147,16 +140,12 @@ public final class AbortCheck {
             }
         });
 
-        // The menu surface, JVM shape: the record list is private to
-        // the Tx, so the record-level emission asserts live in the
-        // desktop fixtures (ledgered for the JVM). What this pure-JVM
-        // fixture pins is the surface's guard behavior — the chain
-        // constructs, the binding's ONE shortcut parser rejects
-        // aliases at record time, a context chain rejects shortcuts,
-        // and an aborted menu transaction propagates and leaves the
-        // app usable. Menu records are records, so every one of these
-        // transactions must abort (submitIfAny would hit KayaRing's
-        // natives otherwise — the file-header rule).
+        // The menu surface, JVM shape. The record list is private to the
+        // Tx, so record-level emission asserts live in the desktop
+        // fixtures; what this pins is guard BEHAVIOR — the chain
+        // constructs, the binding's ONE shortcut parser rejects aliases
+        // at record time, a context chain rejects shortcuts, and an
+        // aborted menu transaction propagates.
         KayaApp.MenuItem[] file = new KayaApp.MenuItem[1];
         Consumer<KayaApp.Tx> menuBuild = tx -> {
             file[0] = tx.window(0).menu("File");

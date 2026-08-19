@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,12 +9,9 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# Compile-check the Java binding and every guest against the REAL
-# desktop KayaRing (bindings/java-desktop: native declarations compile
-# anywhere, no Gradle or emulator needed — the stub this gate once
-# carried is gone). Globbed, not listed: a hand-maintained file list
-# here silently skipped three scenes once (the deploy-win panels_go
-# lesson, java spelling).
+# Compile-check the Java binding and every guest against the real
+# desktop KayaRing (bindings/java-desktop). Globbed, not listed: a
+# hand-maintained file list here once skipped three scenes silently.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

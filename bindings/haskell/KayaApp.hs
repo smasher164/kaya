@@ -10,60 +10,24 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
--- THE GADT APPLIERS' TOTALITY, AS A BUILD ERROR AND NOT A COMMENT.
--- 'applyAttr' and 'applyTplAttr' turn a closed prop GADT into wire
--- records one constructor at a time, and a prop added to either GADT
--- without its arm is a prop that compiles, ships, and silently does
--- nothing at the one call site that matters. -Wincomplete-patterns is
--- NOT in GHC's default set and this package sets no -Wall, so the
--- match was total by habit alone until 2026-08-10; the module was
--- already clean under it (0 warnings), so the wall costs nothing and
--- stands where everyone walks — `cabal build`.
+-- KEEP THE PRAGMA BELOW: 'applyAttr' and 'applyTplAttr' must be TOTAL,
+-- and a prop added to either GADT without its arm compiles, ships and
+-- silently does nothing. -Wincomplete-patterns is not in GHC's default
+-- set and this package sets no -Wall.
 {-# OPTIONS_GHC -Werror=incomplete-patterns #-}
 
--- kaya's idiomatic surface for Haskell: the structural core, and the
--- monad-sugar experiment the roster promised — scene declaration as a
--- builder monad, with When and For as combinators taking do-blocks.
+-- kaya's idiomatic surface for Haskell: scene declaration as a builder
+-- monad, with When and For as combinators taking do-blocks.
 --
--- The zone rule is in the types: Build is the live zone and its
--- elements are Widgets (each exactly one thing on screen); Tpl is a
--- template body and its elements are Nodes (blueprint entries, stamped
--- per collection entry). The shared vocabulary lives in the Declare
--- class, whose associated element type keeps the two id spaces from
--- ever mixing — addChild across zones is a type error, which is the
--- design's "declaring is not instantiating" made compiler-checked.
---
--- HOW THE TWO ZONES SHARE ONE NAMESPACE. Every other binding gives the
--- template zone a scope of its own — rust's `impl Tpl`, ocaml's
--- `module Tpl`, swift's `KayaTpl` — so `Tpl.row` and `row` can be the
--- same word. This module cannot: KayaApp is one flat namespace, and a
--- second module would be a second FILE. So the RESULT TYPE is this
--- zone's scope, and the rule that follows from that is:
---
---   * A constructor that is IDENTICAL in both zones keeps one name and
---     picks its zone off the result type ('BothZones': button, entry,
---     textarea, progressIndeterminate; 'Declare' directly: spacer).
---   * A constructor that takes a SOURCE — the whole reason the zones
---     differ, since a stamp makes N copies and each copy's value can
---     come from its own row — is template-only, and takes the plain
---     kind name where the live zone has not already taken it (label,
---     checkbox, image, slider, select, radio) or `<kind>Bound` where it
---     has (buttonBound, entryBound, textareaBound, progressBound).
---   * A container takes NODES rather than widgets, so it cannot share
---     a name at all: rowOf, columnOf, scrollOf, gridOf against the live
---     row, column, scroll, grid.
---
--- The payoff is that the zone is ENUMERABLE — `grep '-> Tpl Node'` is
--- its whole surface, which is what tools/tpl-surfaces.py reads and what
--- a reader gets for free. row and column used to dispatch on the result
--- type like button; they were real, they worked, and neither the census
--- nor a reader could see them, so they became rowOf/columnOf and the
--- old spelling now fails with a TypeError that names the new one.
---
--- Dispatch: handlers register per button; the app loop routes each
--- click, handing template-node handlers the stamped copy's key path.
--- The core never calls into the guest — dispatch runs on the app
--- thread after it pulls from the ring.
+-- THE ZONE RULE IS IN THE TYPES: Build is the live zone and its elements
+-- are Widgets; Tpl is a template body and its elements are Nodes. This
+-- module is ONE FLAT NAMESPACE, so the RESULT TYPE is the template
+-- zone's only scope: a constructor identical in both zones keeps one
+-- name and dispatches on it, a source-taking one is template-only and
+-- takes the plain kind name or `<kind>Bound`, and a container takes
+-- NODES so it cannot share a name at all (rowOf, columnOf, scrollOf,
+-- gridOf). That makes the zone enumerable — `grep '-> Tpl Node'` is its
+-- whole surface, which is what tools/tpl-surfaces.py reads.
 module KayaApp
   ( App,
     Build,
@@ -72,6 +36,8 @@ module KayaApp
     Node,
     Signal,
     Collection,
+    Capabilities (..),
+    capabilities,
     Declare (..),
     kayaMain,
     newApp,
@@ -209,14 +175,8 @@ module KayaApp
     spacer,
     imageBytes,
     imageBound,
-    -- The TEMPLATE zone's own surface: one constructor per widget kind,
-    -- each returning 'Tpl Node'. See the naming rule in the module
-    -- header — the result type is this zone's only scope.
-    -- The Str class exports no method, unlike its three siblings: its
-    -- method takes the prop's emitter table, which is binding
-    -- machinery, and 'bindTextSource' is the one call a guest could
-    -- want. The class name still travels — a guest writing its own
-    -- signature over a source needs to name the constraint.
+    -- The TEMPLATE zone's own surface: one constructor per widget kind, each
+    -- returning 'Tpl Node' (the module header's naming rule).
     TplStrSource,
     bindTextSource,
     TplBoolSource (..),
@@ -303,6 +263,7 @@ where
 
 import Control.Concurrent (ThreadId, forkIO, myThreadId, newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
+import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import Data.ByteString.Builder (Builder)
@@ -340,17 +301,32 @@ import qualified KayaRuntime as R
 import System.IO (Handle)
 import qualified KayaWire as W
 
+-- | WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the
+-- canonical note, which every binding's copy of this surface shortens.
+newtype Capabilities = Capabilities
+  { -- | The host can materialize a surface beside the primary one
+    -- ('createWindow', 'mountIn'). 'False' on iOS and Android, whose
+    -- systems own surface geometry; there 'createWindow' aborts at the
+    -- root.
+    auxWindows :: Bool
+  }
+  deriving (Eq, Show)
+
+-- | This host's capabilities. Constant for the life of the process, so
+-- asking once and remembering is fine.
+capabilities :: IO Capabilities
+capabilities = do
+  bits <- R.capabilityBits
+  pure (Capabilities ((bits .&. R.capAuxWindows) /= 0))
+
 newtype Signal = Signal Word64
 
 newtype Widget = Widget Word64
 
 newtype Node = Node Word64
 
--- | A collection instance handle: the collection plus the key path
--- selecting one stamped copy's table. 'collection' returns the root
--- (empty-path, live-zone) handle; 'at' steps into a copy, one key per
--- enclosing For. Mutations and reads take the handle, so the target is
--- spelled once.
+-- | A collection instance handle: the collection plus the key path selecting
+-- one stamped copy's table.
 data Collection = Collection Word64 [W.Value]
 
 -- | The instance of this collection inside the copy keyed by @key@ of
@@ -369,16 +345,8 @@ assertRoot _ = error "kaya: forEach binds the collection itself, not an instance
 -- works, which measurement puts at the three desktops and neither
 -- phone (DESIGN.md, File dialogs).
 -- | One representation, arriving — the sum a copy is the record of.
---
--- YOU OFFER MANY AND YOU RECEIVE ONE, and the two shapes say so: a
--- record here would invite a guest to check five fields where four are
--- structurally always empty. Constructors carry the type's initial,
--- the convention 'AlignCenter' and 'AMessage' already follow.
---
--- 'RImage' may be a RE-ENCODE of what was copied — the hosts convert
--- freely between image types — so compare what the image IS, never the
--- bytes it arrived in. 'RFiles' is plural INSIDE one representation,
--- the same nesting text/uri-list and CF_HDROP already have.
+-- 'RImage' may be a RE-ENCODE of what was copied, so compare what the
+-- image IS, never the bytes it arrived in.
 data Representation
   = RText String
   | RHtml String
@@ -387,17 +355,6 @@ data Representation
   | RCustom String BS.ByteString
 
 -- | One clip, offered in as many representations as the app fills in.
---
--- A RECORD AND NOT AN ATTRIBUTE LIST, and this is the one place the
--- binding departs from the @showAlert [attrs]@ shape beside it. The
--- departure is the DESIGN's, not taste: at most one per kind has to be
--- structural, and a list of attributes cannot say that — @[CText "a",
--- CText "b"]@ would typecheck. A record with optional fields makes the
--- second one impossible to write.
---
--- kaya DERIVES NOTHING between representations: whether list bullets
--- survive html-to-text is the app's decision, so an app that wants
--- plain text beside html fills in both.
 data Clip = Clip
   { clipText :: Maybe String,
     clipHtml :: Maybe String,
@@ -406,9 +363,8 @@ data Clip = Clip
     -- same currency, so a picked file goes straight on and the bytes
     -- never move through kaya.
     clipFiles :: [PickedFile],
-    -- | The one plural field with names, since several app-defined
-    -- formats are legitimate. Each id reaches every platform's own
-    -- registry verbatim, so it carries no spaces.
+    -- | The one plural field with names, since several app-defined formats
+    -- are legitimate.
     clipCustom :: [(String, BS.ByteString)]
   }
 
@@ -430,11 +386,8 @@ data PickedFile = PickedFile
   }
 
 -- | Redeem the handle for a real 'Handle', plus whether it seeks.
---
--- BLOCKS, and may block for a long time — a cloud provider can download
--- the file before it answers — so call it from a thread you chose and
--- post the result back. kaya is not in the data path: what comes back
--- is an ordinary handle.
+-- BLOCKS, possibly for a long time, so call it from a thread you chose
+-- and post the result back.
 openPicked :: PickedFile -> Word32 -> IO (Handle, Bool)
 openPicked f = R.openPicked (pickedHandle f)
 
@@ -443,91 +396,31 @@ openPicked f = R.openPicked (pickedHandle f)
 -- vendored typeface, the app's mark, a licence text.
 type Asset = R.Asset
 
--- | Open an asset. The name is a relative path under the asset root,
--- spelled with @\/@ — @asset "fonts\/sora-wght.ttf"@ — and THE ROOT IS
--- KAYA'S PROBLEM AND NOT AN APP'S: a directory beside the program on the
--- desktops, the packaged assets on the phones, and one environment
--- variable (@KAYA_ASSET_DIR@) overrides the whole root for a lane that
--- staged it elsewhere. No guest reads an environment variable and no
--- guest carries a repo-relative default; both used to be hand-written
--- once per language, and one of those eight copies had a
--- language-specific trap severe enough to have earned its own gate.
+-- | Open an asset by its relative path under the asset root, spelled
+-- with @\/@ — @asset "fonts\/sora-wght.ttf"@. Resolving the root is the
+-- core's (docs\/assets-plan.md); no guest reads an asset environment
+-- variable or carries a repo-relative default, and tools/check-assets.sh
+-- enforces that.
 --
--- IO, AND CALLED OUTSIDE THE TRANSACTION. 'Build' is a pure state monad,
--- so a scene opens its assets in the IO around 'buildTx' — exactly where
--- the eight typeface guests already read their font, one call instead of
--- ten lines.
---
--- A MISS RAISES with the core's sentence and nothing added. There is one
--- author for that sentence (crates\/kaya\/src\/assets.rs) so a Haskell
--- guest and a Java guest name the same fault in the same words, and a
--- scene can freeze them once.
---
--- TWO REDEMPTIONS, and the whole point of there being two. 'TFontAsset'
--- and 'appIdentityAsset' take the handle itself, and the bytes never
--- enter the Haskell heap — the core hands its own buffer to the blob
--- table. 'assetBytes' is for a guest that is ITSELF the consumer, and
--- copies once.
---
--- FILE-LIKE READING IS BINDING-SIDE SUGAR OVER THESE BYTES and never a
--- core surface. Six of the eight bindings wrap them in the language's
--- own standard in-memory reader — std::io::Cursor, io.BytesIO,
--- bytes.NewReader, MemoryStream, java.io.ByteArrayInputStream,
--- Foundation's InputStream(data:) — and OCaml and Haskell wrap them in
--- nothing, because neither language's dependency set carries one
--- (OCaml's In_channel only wraps a real channel; base has no in-memory
--- Handle) and kaya will not add a package to a guest's build to invent
--- one. In those two the byte value IS the reader — Bytes.t and
--- Data.ByteString.ByteString — and every reading idiom the language has
--- applies to it directly. That is the whole of the carve-out (DESIGN.md,
--- Binding conventions): the idiom decides the spelling, and here two
--- idioms have no second spelling to decide on.
---
--- READ-ONLY, STRUCTURALLY: no mode argument anywhere on this surface,
--- and no file descriptor either. A descriptor was 'PickedFile''s
--- necessity — a provider-opened file with no path behind it — and it is
--- not ours: kaya resolved the name and produced the bytes itself.
---
--- EACH CALL READS. No cache, no watch, no reload.
---
--- RELEASE IS EXPLICIT ('assetClose') AND AUTOMATIC: the runtime hangs a
--- weak-reference finalizer on every handle, so a guest that forgets
--- leaks nothing.
+-- IO, AND CALLED OUTSIDE THE TRANSACTION: 'Build' is a pure state monad,
+-- so a scene opens its assets in the IO around 'buildTx'. A miss raises
+-- with the core's sentence verbatim, and EACH CALL READS — no cache, no
+-- watch, no reload. In Haskell the byte value IS the reader (DESIGN.md,
+-- Binding conventions).
 asset :: String -> IO Asset
 asset = R.openAsset
 
 -- | Why 'asset' would raise for this name — the sentence it would carry,
--- handed over without raising. @""@ means the name resolves.
---
--- WHY THIS EXISTS WHEN THE RAISE ALREADY CARRIES IT. Unwinding is not one
--- semantics in nine languages, and a conformance scene has to observe this
--- sentence on five platforms. Haskell catches an 'Control.Exception.ErrorCall'
--- happily; Swift's miss is a @fatalError@, which traps rather than
--- unwinding, so a Swift guest cannot catch a miss at all. A total query has
--- no such split — every binding answers the same string the same way.
---
--- THE SAME SENTENCE, NOT A SECOND ONE: 'asset''s raise carries exactly this
--- string, so what a scene freezes is what an app's user would have been
--- shown.
---
--- NAMED FOR THE CARRYING and not for the diagnosing — the long form is on
--- 'R.assetMissSentence'. The sentence has one author (@asset_why_not@ in
--- crates/kaya/src/assets.rs); this only ferries it.
---
--- TWO LINES. Line 1 — the name, the rule it broke, and the census of what
--- the package carries — is the same on every platform and is the line a
--- scene freezes. Line 2 names the resolved place and the route that chose
--- it, which a bundle, a device directory and a repo checkout spell three
--- different ways.
---
--- It measures rather than predicts: each call reads, so @""@ is a fact
--- about the moment it was asked.
+-- handed over without raising. @""@ means the name resolves. LINE 1
+-- (name, rule, census) is the same on every platform and is the line a
+-- scene freezes; line 2 names the resolved place, which three platforms
+-- spell three ways. Authored by @asset_why_not@ in
+-- crates\/kaya\/src\/assets.rs.
 assetMissSentence :: String -> IO String
 assetMissSentence = R.assetMissSentence
 
--- | THE BYTES REDEMPTION: this asset's bytes, copied out of core memory,
--- for a guest that is itself the consumer. In Haskell this IS the
--- reader — see the carve-out on 'asset'.
+-- | THE BYTES REDEMPTION: this asset's bytes, copied out of core memory, for
+-- a guest that is itself the consumer.
 assetBytes :: Asset -> IO BS.ByteString
 assetBytes = R.assetBytes
 
@@ -547,48 +440,32 @@ data Counters = Counters
     cMenuItem :: !Word64
   }
 
--- One instance of a collection: the table inside the stamped copy
--- selected by its path (the empty path for a live-zone collection).
--- Entries keep insertion order, matching the core's rendering.
+-- One instance of a collection: the table inside the stamped copy selected by
+-- its path (the empty path for a live-zone collection).
 data Instance = Instance
   { iPath :: ![W.Value],
-    -- One [W.Value] per entry: the record's wire fields (a scalar
-    -- collection is the one-field case).
-    -- (key, (variant, fields)): the discriminant rides with the
-    -- record, so refined reads and witnessed writes see the same fold
-    -- the core holds.
+    -- One [W.Value] per entry: the record's wire fields (a scalar collection
+    -- is the one-field case).
     iEntries :: ![(W.Value, (Word32, [W.Value]))]
   }
 
--- The collection is the model — the only copy: every mutation op edits
--- it and appends the wire delta in the same state step, so reads
--- (items, count) are exactly the writes. The child map records the
--- declared-inside-a-For edges the model purges along when a parent
--- entry's copy is torn down.
+-- The collection is the model — the only copy: every mutation op edits it and
+-- appends the wire delta in the same state step, so reads (items, count) are
+-- exactly the writes.
 type Model = Map.Map Word64 [Instance]
 
--- The minter's counters, one per collection INSTANCE, keyed the way
--- the model is: collection id to a list of (path, counter). A path is
--- a [W.Value] and W.Value carries a Double, so it is compared rather
--- than hashed or ordered — 'lookupEntries' does the same.
+-- The minter's counters, one per collection INSTANCE, keyed the way the
+-- model is: collection id to a list of (path, counter). A path is a
+-- [W.Value] carrying a Double, so it is compared rather than hashed.
 --
--- DELIBERATELY BESIDE THE MODEL AND NOT INSIDE IT. 'absorbUndo'
--- rebuilds Instances from the core's payload, so a counter living in
--- an Instance would be rewritten by every history walk — which is the
--- one thing 'insertFresh' promises can never happen.
+-- BESIDE THE MODEL AND NOT INSIDE IT: 'absorbUndo' rebuilds Instances
+-- from the core's payload, so a counter living in an Instance would be
+-- rewritten by every history walk.
 type Fresh = Map.Map Word64 [([W.Value], Int64)]
 
 data BuildState = BuildState
   { bCounters :: !Counters,
     -- The transaction under construction: IO Builder, not Builder.
-    -- Record construction stays pure (the Build fold below), but
-    -- serialization runs at buildTx's IO boundary — which is where
-    -- blob-carrying records (image sources, ByteString record fields)
-    -- register their bytes with the core. Handles are core-issued and
-    -- single-submit, so they cannot exist earlier; the Semigroup on IO
-    -- runs left-to-right, so registrations interleave in exact record
-    -- order, immediately before the submit that consumes them. Pure
-    -- records enter as `pure builder`.
     bRecords :: IO Builder,
     bModel :: !Model,
     -- The fresh-key counters, threaded through the same fold as the
@@ -597,16 +474,13 @@ data BuildState = BuildState
     bFresh :: !Fresh,
     bChildren :: !(Map.Map Word64 [Word64]),
     bOpenFors :: ![Word64],
-    -- Handlers declared at their constructors (buttonOn, entryOn,
-    -- checkbox ...): pure data until buildTx registers them with
-    -- the app alongside the submit — an abandoned Build abandons its
-    -- handlers with its records.
+    -- Handlers declared at their constructors: pure data until buildTx
+    -- registers them alongside the submit, so an abandoned Build
+    -- abandons its handlers with its records.
     bPending :: ![Pending],
-    -- Signals recomputed from a collection after each of its
-    -- mutations, written into the same transaction; stored back at
-    -- buildTx like the model, so an abandoned Build abandons its
-    -- registrations too. The compute is wire-level: entries in, one
-    -- value out.
+    -- Signals recomputed from a collection after each of its mutations,
+    -- written into the same transaction; stored back at buildTx like the
+    -- model, so an abandoned Build abandons its registrations too.
     bDerived :: !(Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)])
   }
 
@@ -689,7 +563,6 @@ lookupEntries cid path model =
     [] -> []
 
 -- One instance's counter, made if this is the first anyone has asked.
--- Split out because both the mint and the absorb want the same lookup.
 withCounter :: Word64 -> [W.Value] -> (Int64 -> (a, Int64)) -> Fresh -> (a, Fresh)
 withCounter cid path body fresh =
   let instances = Map.findWithDefault [] cid fresh
@@ -701,16 +574,11 @@ withCounter cid path body fresh =
       | p == path = let (a, n') = body n in (a, (path, n') : rest)
       | otherwise = let (a, rest') = go rest in (a, (p, n) : rest')
 
--- The next fresh key for one instance: counter+1, and the counter
--- keeps it. Monotonic by construction — nothing else writes it
--- downwards (see 'insertFresh').
+-- The next fresh key for one instance: counter+1, and the counter keeps it.
 mintKey :: Word64 -> [W.Value] -> Fresh -> (Int64, Fresh)
 mintKey cid path = withCounter cid path (\n -> (n + 1, n + 1))
 
--- An explicit key, shown to the minter on its way into the table. A
--- numeric key at or above the counter carries it up so the next mint
--- clears it; anything else moves nothing, having no way to collide
--- with an I64.
+-- An explicit key, shown to the minter on its way into the table.
 absorbKey :: Word64 -> [W.Value] -> W.Value -> Fresh -> Fresh
 absorbKey cid path key fresh = case key of
   W.VI64 n -> snd (withCounter cid path (\c -> ((), max c n)) fresh)
@@ -782,20 +650,16 @@ allocN = Tpl $ \s ->
       n = cNode c + 1
    in (n, s {bCounters = c {cNode = n}})
 
--- Menu items get their OWN id space (the c_menu_item counter) —
--- never a widget, node, or surface id. Build-only: menu items are
--- live, so the type system itself is the "no items in a template
--- body" guard every closure-language binding carries at runtime.
+-- Menu items get their OWN id space (the c_menu_item counter) — never a
+-- widget, node, or surface id.
 allocM :: Build Word64
 allocM = Build $ \s ->
   let c = bCounters s
       n = cMenuItem c + 1
    in (n, s {bCounters = c {cMenuItem = n}})
 
--- Runs a template body inside whichever zone hosts it, bracketing its
--- records with the opener and template_end. A For's collection id is
--- kept open across the body so collections declared inside record
--- their parent edge (Whens pass Nothing).
+-- Runs a template body inside whichever zone hosts it, bracketing its records
+-- with the opener and template_end.
 bracketTpl :: (BuildState -> (Word64, BuildState)) -> (Word64 -> Builder) -> Maybe Word64
            -> Tpl a -> BuildState -> ((Word64, a), BuildState)
 bracketTpl alloc opener forCid (Tpl body) s0 =
@@ -817,36 +681,19 @@ class Monad m => Declare m where
   type El m
   widget :: Word32 -> m (El m)
   -- | Write Prop::Text on this element, in whichever zone — THE FLOOR
-  -- SPELLING, and named apart from the 'setText' VERB below since
-  -- 2026-08-10 for a reason that is not cosmetic. The verb is sugar
-  -- (check-sugar-surface requires it of all eight bindings); a text
-  -- write on a template NODE is floor, because the template zone's
-  -- text has a source-taking spelling ('label', 'entryBound', ...) and
-  -- this one throws that away. One name could not be both: the
-  -- RECEIVER'S TYPE decides which it is, and no regex sees a type
-  -- (docs/tpl-props-plan.md F3). Rust never had the problem — it keeps
-  -- @Tx::set@ and @Tx::set_text@ apart — and this is the same split.
+  -- SPELLING, kept apart from the 'setText' VERB below: the verb is the
+  -- sugar check-sugar-surface requires of all eight bindings, and a
+  -- text write on a template NODE is floor. No regex sees a type, so
+  -- one name could not be both (docs/tpl-props-plan.md F3).
   setTextProp :: El m -> String -> m ()
   setChecked :: El m -> Bool -> m ()
-  -- | This element's flex weight within its row\/column: 0 is natural
-  -- size, positive weights divide the container's leftover main-axis
-  -- space in proportion (see Prop::Grow in the core). The dynamic path
-  -- in both zones; the declarative spelling is the 'Grow' attr live and
-  -- 'TplGrow' in a template, two GADTs because an attr LIST in template
-  -- position has no instance (see 'withTplAttrs' for why it cannot).
-  --
-  -- ON 'Declare' RATHER THAN BUILD, since 2026-08-10: it used to be
-  -- Build-only, held there because no language had template grow. Rust's
-  -- template zone has it now — @Tpl::spacer@ sets Prop::Grow through the
-  -- general @Tpl::set@ floor, and the root runs the same @check_prop@ on
-  -- both paths — so holding it back here would be the divergence rather
-  -- than the caution. 'spacer' is the reason it matters: a spacer IS an
-  -- empty grown column, so a template spacer is a template grow.
+  -- | This element's flex weight within its row\/column: 0 is natural size,
+  -- positive weights divide the container's leftover main-axis space in
+  -- proportion.
   setGrow :: El m -> Double -> m ()
   -- | A grid's column count: its children lay out row-major into this
   -- many columns. Describes the PROTOTYPE, so it is a constant in both
-  -- zones — every stamped copy of a grid has the same shape, and only
-  -- the values inside it vary.
+  -- zones.
   setColumns :: El m -> Int -> m ()
   -- | Put a progress bar in the platform's activity mode: no fraction,
   -- so nothing to source.
@@ -930,10 +777,8 @@ signal initial = Build $ \s ->
 writeSignal :: Signal -> W.Value -> Build ()
 writeSignal (Signal n) v = emitB (W.txWriteSignal n v)
 
--- Every derived signal rooted at this collection, recomputed from the
--- new model and written into the same transaction. Deriveds hang off
--- root handles, so nested-instance mutations cannot change their
--- input.
+-- Every derived signal rooted at this collection, recomputed from the new
+-- model and written into the same transaction.
 recomputeDerived :: Word64 -> [W.Value] -> BuildState -> BuildState
 recomputeDerived cid path s
   | not (null path) = s
@@ -945,11 +790,9 @@ recomputeDerived cid path s
               (Map.findWithDefault [] cid (bDerived s))
        in s {bRecords = bRecords s <> pure writes}
 
--- THE ONE INSERT PATH EVERY KEY TRAVELS, scalar or record: the model
--- fold, the wire record, the derived recompute — and ABSORPTION,
--- which is why it is one function and not two. A numeric key at or
--- above the minter's counter carries it up, so hand-chosen and minted
--- keys share one space safely and in either order ('insertFresh').
+-- THE ONE INSERT PATH EVERY KEY TRAVELS, scalar or record: the model fold,
+-- the wire record, the derived recompute — and ABSORPTION, which is why it is
+-- one function and not two.
 insertEntry :: Word64 -> [W.Value] -> W.Value -> [W.Value] -> IO Builder -> BuildState -> BuildState
 insertEntry n path key vals record s0 =
   let s = s0 {bFresh = absorbKey n path key (bFresh s0)}
@@ -973,11 +816,8 @@ remove (Collection n path) key = Build $ \s ->
     s {bRecords = bRecords s <> pure (W.txCollectionRemove n path key),
        bModel = modelRemove (bChildren s) n path key (bModel s)})
 
--- | Reposition an entry before another's: order is collection data,
--- so the model reorders and the wire carries the same keys-only
--- delta. Keys, never indices. A missing key or anchor fails here, at
--- the call site — the same check the scene makes; moving an entry
--- before itself is a no-op, and nothing travels.
+-- | Reposition an entry before another's: order is collection data, so the
+-- model reorders and the wire carries the same keys-only delta.
 moveBefore :: Collection -> W.Value -> W.Value -> Build ()
 moveBefore c key anchor = moveEntry c key [anchor]
 
@@ -1035,9 +875,8 @@ items (Collection n path) = Build $ \s ->
 count :: Collection -> Build Int
 count c = length <$> items c
 
--- | One per-appearance override of the brand accent, for a brand book
--- that specifies a dark variant. Unstated cells fall back to the seed,
--- which is why most apps pass none of these.
+-- | One per-appearance override of the brand accent, for a brand book that
+-- specifies a dark variant.
 data BrandAttr
   = -- | The accent to use while the platform is in its LIGHT appearance.
     BLight Word32
@@ -1049,25 +888,8 @@ data BrandAttr
 -- @brandAccent 0x3584E4@ — and the per-appearance form adds the
 -- attribute list: @brandAccent 0x3584E4 [BDark 0x62A0EA]@.
 --
--- A REQUEST, uniformly: a platform may let its user override it, and
--- macOS does today (an app accent applies only while the user's system
--- accent is multicolor). The app states a brand; the platform stays the
--- judge of its own chrome. That sentence is the semantics in all eight
--- languages, so nothing here is a macOS carve-out.
---
--- SET ONCE, BEFORE THE FIRST MOUNT — brand is identity, not state, and
--- the root refuses a second write or a late one.
---
--- THE APP NEVER WRITES A FOREGROUND and never writes contrast variants:
--- the core derives fill, on-fill, standalone and a hover/pressed ramp
--- per appearance, and hands every backend values. There is no slot here
--- to put an illegible pair in.
---
--- ONE NAME, BOTH ARITIES — the 'row' and 'button' idiom of this module,
--- for the same reason: the bare call is what most apps write, and a
--- mandatory @[]@ on it would be the paper cut the sugar tier exists to
--- remove. A repeated attribute is last-wins, like every other attribute
--- list here.
+-- SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write or
+-- a late one. The app never writes a foreground or a contrast variant.
 brandAccent :: (BrandArgs r) => Word32 -> r
 brandAccent = brandish
 
@@ -1097,21 +919,9 @@ emitBrand seed attrs = emitB (W.txSetBrandAccent seed mask (pack light) (pack da
 -- roster row, closed.
 --
 -- AN APP NAMES THESE, IT NEVER ASKS WHICH ONE IT IS. There is no
--- @currentPlatform@ here and there will not be: this binding cannot
--- answer that question — GHC's @System.Info.os@ reports the compile
--- target and says @darwin@ for both macOS and iOS — and it does not have
--- to. Every row travels to every backend and each backend picks its own,
--- which is the asymmetry with 'brandAccent': a colour resolves to one
--- number anywhere, a family name has to survive to the lowering that
--- will look it up.
---
--- CONSTRUCTORS ARE PREFIXED, the 'Align' and 'Symbol' spelling rather
--- than 'Role's, on this module's stated criterion — prefix a word a
--- scene is likely to claim. @Windows@ bare is that word in a GUI
--- toolkit whose flat namespace a guest imports unqualified, and the
--- prefix also matches the generated wire names ('W.platformMac' and
--- friends) constructor for constructor, so the two spellings of one
--- vocabulary read alike.
+-- @currentPlatform@ and there will not be: GHC's @System.Info.os@
+-- reports the COMPILE TARGET and says @darwin@ for both macOS and iOS.
+-- Every row travels to every backend and each backend picks its own.
 data Platform
   = PlatformMac
   | PlatformIos
@@ -1139,56 +949,24 @@ data TypefaceAttr
     -- for that platform alone: @TFor PlatformLinux "DejaVu Serif"@.
     TFor Platform String
   | -- | A font FILE, as bytes: the backend hands them to its platform's
-    -- app-font API, reads back the family that registration named, and
-    -- uses it in preference to any name above. One vector file, arriving
-    -- in the first build transaction — which is exactly when the brand
-    -- applies, and why fonts need no asset pipeline.
+    -- app-font API, reads back the family that registration named, and uses
+    -- it in preference to any name above.
     TFont BS.ByteString
   | -- | The same font slot with the file NAMED rather than read:
     -- @TFontAsset =<< asset "fonts\/sora-wght.ttf"@ opened in the IO
-    -- around 'buildTx'.
-    --
-    -- THE BYTES NEVER ENTER THE HASKELL HEAP. The core already holds
-    -- them, and this hands the same buffer to the blob table, so a font
-    -- file costs one reference here and no ByteString. That is the whole
-    -- reason an asset is a handle rather than a bytes factory — @TFont
-    -- \<$\> assetBytes a@ would work and would copy a megabyte through
-    -- Haskell for nothing.
-    --
-    -- A CONSTRUCTOR AND NOT AN ARGUMENT, because Haskell spells this
-    -- call's options as a list and there is nothing to add: 'TFont' and
-    -- 'TFontAsset' are two ways to fill ONE slot, so the last one
-    -- written wins exactly as two 'TFont's do.
+    -- around 'buildTx'. THE BYTES NEVER ENTER THE HASKELL HEAP: the core
+    -- hands the same buffer to the blob table.
     TFontAsset Asset
 
 -- | REQUEST this app's brand typeface (docs/styling-plan.md Slice 2b):
 -- one family name is the whole call — @brandTypeface "Georgia"@ — and
--- every platform that has that family installed uses it.
+-- every platform that has that family installed uses it. THE FAMILY,
+-- NEVER THE SCALE.
 --
--- THE FAMILY, NEVER THE SCALE (ratified DESIGN.md). Sizes, weights,
--- metrics and the whole type ramp stay the platform's; substituting a
--- family into the platform's own ramp is what makes the swap safe, and
--- it is the role tier ('Role'), not a font size, that carries emphasis.
---
--- SET ONCE, BEFORE THE FIRST MOUNT — 'brandAccent''s two walls verbatim
--- and for its reason: brand is identity, not state, and a slot that
--- could flip at runtime would promise the theme-switching surface the
--- vocabulary deliberately does not have. The root refuses a second write
--- and a late one, in its own words, in all eight languages.
---
--- A FAMILY A PLATFORM DOES NOT HAVE LEAVES THAT PLATFORM'S OWN TYPEFACE
--- IN PLACE, deliberately and silently: every font API renders SOMETHING
--- for a name it cannot match, so each lowering gates on the family being
+-- SET ONCE, BEFORE THE FIRST MOUNT, like 'brandAccent'. A FAMILY A
+-- PLATFORM DOES NOT HAVE LEAVES THAT PLATFORM'S OWN TYPEFACE IN PLACE,
+-- deliberately and silently: each lowering gates on the family being
 -- installed rather than letting the platform pick a stranger.
---
--- ONE NAME, BOTH ARITIES, and the attribute list is where the
--- per-platform names and the font bytes ride:
---
--- @
--- brandTypeface "Georgia"
--- brandTypeface "Georgia" [TFor PlatformLinux "DejaVu Serif"]
--- brandTypeface "Georgia" [TFor PlatformWindows "Georgia Pro", TFont bytes]
--- @
 brandTypeface :: (TypefaceArgs r) => String -> r
 brandTypeface = typefacish
 
@@ -1205,15 +983,10 @@ emitTypeface :: String -> [TypefaceAttr] -> Build ()
 emitTypeface family attrs =
   emitBIO (W.txSetBrandTypeface mask (W.VStr family) rows <$> slot)
   where
-    -- THE ROWS ARE A LIST AND THE FONT IS A CELL, and the two obey
-    -- different rules on purpose. A repeated 'TFont' is last-wins, like
-    -- every other attribute in this module ('BLight' one construct up) —
-    -- there is one font slot on the wire. The 'TFor' rows are NOT folded
-    -- and NOT deduplicated: they travel in the order written, so a
-    -- platform named twice reaches the root and dies there, with the
-    -- root's sentence, exactly as it does from Rust. Folding them here
-    -- would make that wall unreachable from Haskell alone, which is
-    -- invariant-1 divergence hidden inside a convenience.
+    -- THE ROWS ARE A LIST AND THE FONT IS A CELL. A repeated 'TFont' is
+    -- last-wins — one font slot on the wire — while the 'TFor' rows are NOT
+    -- folded and NOT deduplicated: a platform named twice must reach the root
+    -- and die there, as it does from Rust.
     rows =
       concatMap
         ( \a -> case a of
@@ -1237,10 +1010,9 @@ emitTypeface family attrs =
     -- The wire's presence mask: bit 0 says a font blob rides the slot.
     mask = maybe 0 (const 1) font
     -- The slot is written either way — an empty Str stands in when there
-    -- are no bytes, which is why this is the one brand write that needs
-    -- IO: bytes register through the blob channel first (the menu icon's
-    -- mechanism) and travel as a handle, and an ASSET registers there
-    -- without ever passing through this heap.
+    -- are no bytes — so the record's field count never varies with the
+    -- payload. Bytes register through the blob channel and travel as a
+    -- handle, which is why this write needs IO.
     slot = case font of
       Nothing -> pure (W.VStr "")
       Just (Left b) -> W.VBlob <$> registerBlob b
@@ -1248,26 +1020,11 @@ emitTypeface family attrs =
 
 -- | DECLARE this app's identity (docs/app-identity-plan.md): the name it
 -- goes by and the picture that stands for it, as the bytes of one image
--- file — @appIdentity "Aurora Notes" markPng@.
+-- file — @appIdentity "Aurora Notes" markPng@. Send a PNG; each lowering
+-- converts, and no platform-specific artwork rides the wire.
 --
--- ONE PICTURE, FIVE PLATFORMS. The same bytes become the macOS Dock
--- tile, the Windows taskbar\/alt-tab icon and the caption's mark, and an
--- X11 window's icon; the same FILE, read at build time, becomes the
--- Android launcher icon and the iOS Home Screen icon. Send a PNG: each
--- lowering converts, and no platform-specific artwork rides the wire.
---
--- SET ONCE, BEFORE THE FIRST MOUNT — 'brandTypeface''s walls verbatim
--- and for their reason: identity is not state, and a slot that could
--- flip at runtime would promise the identity-switching surface the
--- vocabulary deliberately does not have. The root refuses a second
--- write, a late one and an empty name, in its own words, in all eight
--- languages.
---
--- THE BYTES ARE NEVER INSPECTED between here and the platform's own
--- decoder. Whether a blob is an image is a question only that decoder
--- can answer, so bytes that are not one leave every platform's default
--- in place — which is why the conformance scene reads what the DECODER
--- produced rather than echoing this request back.
+-- SET ONCE, BEFORE THE FIRST MOUNT: the root refuses a second write, a
+-- late one and an empty name.
 appIdentity :: String -> BS.ByteString -> Build ()
 appIdentity name icon =
   -- Real bytes register through the blob channel first (the menu icon's
@@ -1277,24 +1034,13 @@ appIdentity name icon =
 -- | The ASSET form of the icon slot: the same declaration, with the mark
 -- NAMED rather than read — @appIdentityAsset "Aurora Notes" =\<\< asset
 -- "icons\/kaya-mark.png"@.
---
--- THE BYTES NEVER ENTER THE HASKELL HEAP: the core hands its own buffer
--- to the blob table, so a picture costs one reference here and no
--- ByteString. A SECOND FUNCTION rather than an attribute, for
--- 'appIdentityNamed''s reason — this call has no attribute list, it has
--- one optional thing, and Haskell names it by naming the function.
--- Everything else is 'appIdentity''s, verbatim.
 appIdentityAsset :: String -> Asset -> Build ()
 appIdentityAsset name icon =
   emitBIO (W.txSetAppIdentity 1 (W.VStr name) . W.VBlob <$> R.assetBlob icon)
 
--- | The NAME-ONLY form, for an app that has a name and no mark yet — a
--- SECOND FUNCTION rather than an attribute list, because there is
--- exactly one optional thing here and Haskell names it by naming the
--- function. Its identity still reaches the surfaces a name reaches (the
--- Windows caption and taskbar tooltip, the macOS menu bar, the Linux
--- app_id, and both phones' packaging) and every icon surface keeps the
--- platform's own default, honestly and visibly.
+-- | The NAME-ONLY form, for an app that has a name and no mark yet — a SECOND
+-- FUNCTION rather than an attribute list, because there is exactly one
+-- optional thing here and Haskell names it by naming the function.
 appIdentityNamed :: String -> Build ()
 appIdentityNamed name =
   -- The slot is written either way — an empty Str stands in when there
@@ -1320,70 +1066,30 @@ data WindowAttr
     WListDetail Bool
   | WSectionsPresentation Int64
   | -- | Whether this surface holds unsaved work (docs/dirty-plan.md
-    -- D1). STATE, not chrome: the backend spells its own platform's
-    -- affordance — the dot in the close button on macOS, a leading
-    -- @*@ in the rendered caption on Windows, a bullet beside the
-    -- GTK header-bar title, nothing at all on the phones, which have
-    -- no chrome to show it in (D4). 'WTitle' is never touched by it,
-    -- here or anywhere: a marker composed into the app's own title
-    -- string is the rejected Qt @[*]@ design, and kaya's titles are
+    -- D1). STATE, not chrome: each backend spells its own platform's
+    -- affordance. 'WTitle' IS NEVER TOUCHED BY IT — kaya's titles are
     -- byte-compared across platforms.
-    --
-    -- DECLARED, NEVER INFERRED. Writing a signal does not raise it —
-    -- "the document has unsaved changes" is a statement only the app
-    -- can make, so the app makes it, beside the write, in the same
-    -- transaction.
-    --
-    -- AND IT ARMS NOTHING (D3). The unsaved-changes confirmation is
-    -- composed from 'WVetoClose' and 'showAlert', which predate this
-    -- prop; the two are orthogonal and either rides the window
-    -- construct without the other.
     WDirty Bool
   | -- | The space kaya's own interpreters put around this window's
     -- mounted root, in layout units — LAYOUT, not appearance
-    -- (docs/styling-plan.md D3). 16 unless you say otherwise; 0 is full
-    -- bleed, for an editor or a canvas, and it is honored
-    -- unconditionally because the inset is kaya's own padding — nothing
-    -- platform-side defends it.
-    --
-    -- A PLATFORM'S SAFE AREA IS A SEPARATE FACT and is not removed by
-    -- it: on the phones content extends to the safe-area edge (the
-    -- notch, the home indicator), not past it. Two facts, one knob.
-    --
-    -- Negative has no reading — an inset is space, not an offset — so
-    -- the root refuses one at declare time rather than letting four
-    -- backends improvise.
+    -- (docs/styling-plan.md D3).
     WInset Double
   | WOnCloseRequested (IO ())
   | WOnClosed (IO ())
   | -- | Hear an undo kaya routed in this window: the step's label —
     -- EMPTY for a typing episode, since kaya invents no user-facing
-    -- strings — and what the core put back. The ledger is per window,
-    -- so its observer is a window attribute like any other, and the
-    -- handler reads no id to learn which window it is (the same reason
-    -- 'EOnPopped' rides the push).
-    --
-    -- NOT ONE-SHOT, the 'addSection' stance rather than the alert's: a
-    -- history is walked as often as the user likes, so the registration
-    -- outlives every step.
-    --
-    -- THE DELTA IS THE ONLY NOTIFICATION. Applying an inverse is a
-    -- programmatic write, so the echo doctrine silences every occurrence
-    -- it would otherwise cause — no text_changed for the text it
-    -- restored, no value_changed for the signals. This binding has
-    -- already folded the payload into its own collection model before
-    -- the handler runs (so 'count' and 'recordItems' answer about the
-    -- restored state); this is where an app folds it into ITS own state.
+    -- strings — and what the core put back. THE DELTA IS THE ONLY
+    -- NOTIFICATION: applying an inverse is a programmatic write, so the
+    -- echo doctrine silences every occurrence it would otherwise cause.
     WOnUndone (String -> UndoDelta -> IO ())
   | -- | The 'WOnUndone' twin. A frontier typing episode redoes on the
     -- platform's own stack and reports itself as an ordinary edit, so
     -- that one does not arrive here.
     WOnRedone (String -> UndoDelta -> IO ())
   | -- | The menubar rides the window construct (the window-attribute
-    -- unification rule): 'WMenus' realizes its inline Build actions in
-    -- order and appends each top-level grouping node ('menu' or
-    -- 'radioGroup') to this window's command catalog — append-only, at
-    -- any time. A retained handle re-enters through 'pure'.
+    -- unification rule): 'WMenus' realizes its inline Build actions in order
+    -- and appends each top-level grouping node ('menu' or 'radioGroup') to
+    -- this window's command catalog — append-only, at any time.
     WMenus [Build (MItem 'BarM)]
 
 -- | Set a window's attributes in one construct — the attribute set
@@ -1444,19 +1150,16 @@ data EntryAttr
 data SectionAttr
   = STitle String
   | -- | The switcher item's SEMANTIC ICON ('Symbol'): a concept each
-    -- backend draws in its own platform's symbol set — a tab bar
-    -- without icons is not the platform's real thing, and a blob is the
-    -- wrong primitive for a STANDARD one. Const-only, like the title.
+    -- backend draws in its own platform's symbol set — a tab bar without
+    -- icons is not the platform's real thing, and a blob is the wrong
+    -- primitive for a STANDARD one.
     SSymbol Symbol
   | SOnSelected (IO ())
 
--- | Push a navigation entry onto the primary surface's stack (entry
--- ids are guest-allocated in the shared surface namespace, the
--- 'createWindow' discipline); materializes covered, 'mountIn'
--- presents it:
--- @pushEntry 7 [ETitle "detail", EOnPopped (…)]@. Handler
--- registrations ride 'bPending': an abandoned Build abandons them
--- with its records.
+-- | Push a navigation entry onto the primary surface's stack (entry ids are
+-- guest-allocated in the shared surface namespace, the 'createWindow'
+-- discipline); materializes covered, 'mountIn' presents it: @pushEntry 7
+-- [ETitle "detail", EOnPopped (…)]@.
 pushEntry :: Word64 -> [EntryAttr] -> Build ()
 pushEntry n attrs = do
   emitB (W.txPushEntry 0 n)
@@ -1467,9 +1170,8 @@ pushEntry n attrs = do
     apply (EOnPopped handler) = pendB (PEntryPopped n handler)
     apply (EOnBack handler) = pendB (PBackRequested n handler)
 
--- | Pop the primary stack's top navigation entry and forget its tree
--- — also the back-veto grammar's confirmation after
--- 'onBackRequested'. Popping an empty stack is a scene error.
+-- | Pop the primary stack's top navigation entry and forget its tree — also
+-- the back-veto grammar's confirmation after 'onBackRequested'.
 popEntry :: Build ()
 popEntry = emitB (W.txPopEntry 0)
 
@@ -1485,11 +1187,8 @@ popEntry = emitB (W.txPopEntry 0)
 addSection :: Word64 -> [SectionAttr] -> Build ()
 addSection = addSectionIn 0
 
--- | 'addSection' with the HOST WINDOW said out loud — 0 is the
--- primary, an aux window's id otherwise. The rust\/go\/java name for
--- the same spelling; it arrived here when the sidebar-coverage scene
--- put sections in an aux window and this binding could not say so
--- (2026-08-15; the primary-only form silently added to window 0).
+-- | 'addSection' with the HOST WINDOW said out loud — 0 is the primary, an
+-- aux window's id otherwise.
 addSectionIn :: Word64 -> Word64 -> [SectionAttr] -> Build ()
 addSectionIn w n attrs = do
   emitB (W.txAddSection w n)
@@ -1509,26 +1208,6 @@ selectSection n = emitB (W.txSelectSection 0 n)
 -- | THE SEMANTIC ICON VOCABULARY (spec enum @symbol@; DESIGN.md "Icons
 -- want names, not bytes"), shared by the two constructs above and below
 -- it: 'SSymbol' on a section, 'ISymbol' on a menu item.
---
--- An app names a CONCEPT and each backend draws its own platform's
--- glyph for it: 'SymbolCopy' is @doc.on.doc@ on Apple, @content_copy@ on
--- Material, @edit-copy-symbolic@ on Adwaita, and no single asset is
--- right on all three — SF Symbols are license-locked to Apple platforms,
--- so a shared one is not even legal either. The platform sets also
--- metric-match the text beside them (weight, baseline) while a blob
--- cannot. The blob icon slot stays for genuinely app-specific art.
---
--- Closed, and small on purpose — the 'Role' trick one tier over. Apple
--- keeps its own semantic set to fifteen entries. Growing it is a spec
--- change with its gates, never a per-app escape hatch.
---
--- CONSTRUCTORS ARE PREFIXED, the 'Align' spelling rather than 'Role's.
--- Role's three words are specific enough to claim unprefixed; these
--- twenty are the most ordinary nouns an app has, and a scene's own
--- @Add@, @Remove@, @Done@ or @Home@ is not merely likely but the
--- expected shape of a message type. The prefix also matches the
--- generated wire names ('W.symbolAdd' and friends) constructor for
--- constructor, so the two spellings of one vocabulary read alike.
 data Symbol
   = SymbolAdd
   | SymbolRemove
@@ -1598,12 +1277,8 @@ symbolWire s = fromIntegral $ case s of
 -- runtime guard at the root remains the floor beneath.
 data MScope = BarM | CtxM
 
--- | A live menu item: its OWN id space behind its own type (indexed
--- by anchor scope), so cross-use with 'Widget'/'Node' handles is a
--- type error. One command identity: exactly one parent or anchor,
--- forever (append-only; nothing is removed in v1). The handle is
--- durable — the dynamic tier ('setMenuLabel', 'menuAppend', ...)
--- reopens it in any later transaction.
+-- | A live menu item: its OWN id space behind its own type (indexed by anchor
+-- scope), so cross-use with 'Widget'/'Node' handles is a type error.
 newtype MItem (s :: MScope) = MItem Word64
 
 -- | A radio option: its own type, so an option outside a 'radioGroup'
@@ -1611,25 +1286,18 @@ newtype MItem (s :: MScope) = MItem Word64
 -- closed parent/child grammar, compile-checked).
 newtype MOption (s :: MScope) = MOption Word64
 
--- | A context catalog built UNANCHORED ('contextCatalog') for a
--- template node: menu items are live and shared across stamped
--- copies, so the catalog is built in the live zone and
--- 'nodeContextMenu' attaches it inside the template, where each
--- activation carries the copy's key path. An item takes exactly one
--- anchor — the root rejects a second attach.
+-- | A context catalog built UNANCHORED ('contextCatalog') for a template
+-- node: menu items are live and shared across stamped copies, so the catalog
+-- is built in the live zone and 'nodeContextMenu' attaches it inside the
+-- template, where each activation carries the copy's key path.
 newtype Catalog = Catalog [Word64]
 
 -- | The closed standard-command vocabulary (DESIGN.md, Menus): macOS
 -- places this one in the application menu, and every other host leaves
 -- the item where the app declared it.
--- | A NAMED VOCABULARY FOR THE CLOSED HALF, exactly as the menu roles
--- are. The accept list is open-ended — a custom format id is any
--- app-chosen string — so the four closed kinds cannot be a mask; but
--- they can be spelled once here instead of quoted at every call site.
--- A MISTYPED BARE STRING IS SILENT: it becomes a custom format id no
--- clipboard will ever offer, so Paste stays dead and the paste hook
--- never fires, with nothing to see anywhere. A custom id has no
--- constant by nature — the app that defines it names it.
+-- | A named vocabulary for the accept list's closed half. A MISTYPED
+-- BARE STRING IS SILENT: it becomes a custom format id no clipboard will
+-- ever offer, so Paste stays dead and the paste hook never fires.
 acceptText :: String
 acceptText = "text"
 acceptHtml :: String
@@ -1645,13 +1313,6 @@ roleSettings = "settings"
 -- | The three clipboard commands. They lower to the platform's own, act
 -- on the FOCUSED widget, and work out their own enablement from what
 -- the clipboard offers and what that widget accepts.
---
--- GESTURES ARE COMMANDS BECAUSE KAYA HAS NO SELECTION API: only the
--- widget knows what is selected, so an app cannot assemble the payload
--- for "copy the selected text" out of the data layer. Copy of a
--- selection is therefore necessarily a command, and Paste is its
--- mirror. 'copy' and 'readClipboard' are for overriding that default
--- and for targets with no native behaviour.
 roleCut :: String
 roleCut = "cut"
 
@@ -1661,17 +1322,10 @@ roleCopy = "copy"
 rolePaste :: String
 rolePaste = "paste"
 
--- | The two history commands — the same gesture layer one tier deeper
--- (docs/undo-plan.md D6). They ask the FOCUSED widget first: a text
--- field whose own edit history has something to give answers before the
--- app's ledger does, which is what an editor user expects — mid-typing,
--- Undo means the typing; after a structural action, Undo means the
--- action. Enablement is that same question, asked live at activation.
---
--- AN APP OPTS IN TO THE OTHER TIER BY NAMING ITS STEPS ('undoableTx')
--- and hears the result through 'WOnUndone'. An app that names none still
--- gets working text undo from these two items, because the first tier
--- is the platform's own.
+-- | The two history commands (docs/undo-plan.md D6). They ask the
+-- FOCUSED widget first — a text field with its own edit history answers
+-- before the app's ledger does — and enablement is that same question,
+-- asked live at activation.
 roleUndo :: String
 roleUndo = "undo"
 
@@ -1709,10 +1363,8 @@ data IAttr (s :: MScope) where
   -- dispatch home, and the type carries that rule (the root carries
   -- the kind rule).
   IShortcut :: String -> IAttr 'BarM
-  -- | Window-anchored actions only: a role names a standard command in
-  -- the window catalog. Uniform declaration, per-host placement —
-  -- macOS shows 'roleSettings' in the application menu, everyone else
-  -- leaves the item where it was declared.
+  -- | Window-anchored actions only: a role names a standard command in the
+  -- window catalog.
   IRole :: String -> IAttr 'BarM
   IOnActivate :: IO () -> IAttr s
   IOnActivateNode :: ([W.Value] -> IO ()) -> IAttr 'CtxM
@@ -1775,12 +1427,9 @@ separator :: Build (MItem s)
 separator = MItem <$> newMenuItem W.menuKindSeparator Nothing []
 
 -- | A menu grouping node — a bar root through the window construct's
--- 'WMenus', or nested as an inline Build action in a parent's child
--- list (one nested grouping level is the cap, root-checked):
--- @menu "File" [IEnabledBy canExport] [item "Save" [...], ...]@.
--- Children are inline Build actions (the todos.hs container shape);
--- a realized handle re-enters through 'pure'. Disabling a menu
--- disables its subtree (the inherited-disabled contract).
+-- 'WMenus', or nested as an inline Build action in a parent's child list (one
+-- nested grouping level is the cap, root-checked): @menu "File" [IEnabledBy
+-- canExport] [item "Save" [...], ...]@.
 menu :: String -> [IAttr s] -> [Build (MItem s)] -> Build (MItem s)
 menu label attrs children = do
   n <- newMenuItem W.menuKindMenu (Just label) []
@@ -1801,11 +1450,8 @@ radioGroup label attrs options = do
   mapM_ (applyIAttr n) attrs
   return (MItem n)
 
--- | A context menu on a LIVE widget: the same item vocabulary scoped
--- to a NOUN, with the platform's own gesture (right-click,
--- long-press). Calling it again appends more roots. The editable text
--- controls (entry, textarea) reject attachment at the root; the
--- 'CtxM index rejects shortcuts at compile time.
+-- | A context menu on a LIVE widget: the same item vocabulary scoped to a
+-- NOUN, with the platform's own gesture (right-click, long-press).
 contextMenu :: Widget -> [Build (MItem 'CtxM)] -> Build ()
 contextMenu (Widget w) roots =
   mapM_ (\root -> root >>= \(MItem n) -> emitB (W.txContextAttach w n)) roots
@@ -1818,11 +1464,9 @@ contextCatalog :: [Build (MItem 'CtxM)] -> Build Catalog
 contextCatalog roots =
   Catalog <$> mapM (\root -> (\(MItem n) -> n) <$> root) roots
 
--- | Attach a live-built context catalog to a template node: every
--- stamped copy shows the same catalog, and each activation carries
--- that copy's key path — the keys ARE the noun (received by the
--- @...Node@ attr handlers). An item takes exactly one anchor; the
--- root rejects a second attach.
+-- | Attach a live-built context catalog to a template node: every stamped
+-- copy shows the same catalog, and each activation carries that copy's key
+-- path — the keys ARE the noun (received by the @...Node@ attr handlers).
 nodeContextMenu :: Node -> Catalog -> Tpl ()
 nodeContextMenu (Node n) (Catalog roots) =
   mapM_ (emitT . W.txContextAttachNode n) roots
@@ -1861,9 +1505,8 @@ bindMenuValue (MItem n) (Signal s) = emitB (W.txBindMenuValue n s)
 setMenuIcon :: MItem s -> BS.ByteString -> Build ()
 setMenuIcon (MItem n) bytes = emitBIO (W.txSetMenuIcon n <$> registerBlob bytes)
 
--- | The item's SEMANTIC ICON, dynamic path — the declarative spelling is
--- the 'ISymbol' attr. Writing it again replaces it; there is no clearing
--- spelling, exactly as for 'setMenuIcon'.
+-- | The item's SEMANTIC ICON, dynamic path — the declarative spelling is the
+-- 'ISymbol' attr.
 setMenuSymbol :: MItem s -> Symbol -> Build ()
 setMenuSymbol (MItem n) s = emitB (W.txSetMenuSymbol n (symbolWire s))
 
@@ -1881,18 +1524,14 @@ setMenuPrimary (MItem n) v = emitB (W.txSetMenuPrimary n v)
 setMenuShortcut :: MItem s -> String -> Build ()
 setMenuShortcut (MItem n) spelling = emitB (W.txSetMenuShortcut n spelling)
 
--- | Declare a retained action a standard command (actions only —
--- root-checked). Uniform declaration, per-host placement; a role never
--- invents a chord. Const-only.
+-- | Declare a retained action a standard command (actions only — root-
+-- checked).
 setMenuRole :: MItem 'BarM -> String -> Build ()
 setMenuRole (MItem n) name = emitB (W.txSetMenuRole n name)
 
 -- | Reopen a RETAINED grouping node and append more children — the
--- append-at-any-time discipline: @menuAppend file [item "Publish"
--- [IPrimary True, IOnActivate h]]@. The scope index rides the
--- retained handle, so appends inherit the anchor's compile-time
--- rules; the root re-validates the appended subtree (depth,
--- shortcuts, duplicates).
+-- append-at-any-time discipline: @menuAppend file [item "Publish" [IPrimary
+-- True, IOnActivate h]]@.
 menuAppend :: MItem s -> [Build (MItem s)] -> Build ()
 menuAppend (MItem n) children =
   mapM_ (\child -> child >>= \(MItem c) -> emitB (W.txMenuItemAppend n c)) children
@@ -1911,17 +1550,11 @@ data AlertAttr
   | AAction String
   | ACancel String
 
--- | Request a modal alert (the request/result grammar), the handler
--- riding the request like 'buttonOn':
--- @showAlert [ATitle "delete item?", AMessage "…", AAction "Delete",
--- AAction "Archive", ACancel "Keep"] $ \choice -> …@. The handler
--- fires exactly once — choice is an action index (0 or 1) or
--- 'W.alertChoiceCancel', every platform-native dismissal — and its
--- registration retires with the result. Ids are binding-allocated.
--- At most two AActions (the platform floor) and exactly one ACancel
--- — required, the slot every native dismissal resolves to (no
--- binding invents a default label). One alert may be live per
--- process; show the next from the handler.
+-- | Request a modal alert (the request/result grammar), the handler riding
+-- the request like 'buttonOn'. The handler fires exactly once — choice is an
+-- action index (0 or 1) or 'W.alertChoiceCancel' — and its registration
+-- retires with the result. AT MOST TWO AActions (the platform floor) and
+-- EXACTLY ONE ACancel, required.
 showAlert :: [AlertAttr] -> (Word32 -> IO ()) -> Build ()
 showAlert attrs handler = do
   let titles = [t | ATitle t <- attrs]
@@ -1954,21 +1587,14 @@ showAlert attrs handler = do
 
 -- | Ask the platform for files. THE PICK, NOT THE OPEN — the result
 -- carries handles you redeem later, so the name says @pick@
--- (DESIGN.md, File dialogs).
+-- (DESIGN.md, File dialogs). The filters are (label, space-separated
+-- extensions) pairs, ADVISORY on every platform.
 --
--- The filters are (label, space-separated extensions) pairs, ADVISORY
--- on every platform: a default view rather than a guarantee, so the
--- guest still validates what it got.
---
--- The handler fires exactly once and retires with its answer. CANCEL
--- IS THE EMPTY LIST, faithfully: no platform can confirm an empty
--- selection. One dialog may be live per process; show the next from
--- the handler.
--- | Check one accept-list entry and return it.
---
--- Ids reach every platform's own registry verbatim, so they carry no
--- spaces — which is what makes the space-separated join unambiguous,
--- and what this refuses to let you break.
+-- The handler fires exactly once and retires with its answer. CANCEL IS
+-- THE EMPTY LIST. One dialog may be live per process; show the next
+-- from the handler.
+-- | Check one accept-list entry and return it. Ids reach every
+-- platform's own registry verbatim, so they carry no spaces.
 acceptToken :: String -> String
 acceptToken kind
   | null kind || ' ' `elem` kind =
@@ -1984,25 +1610,11 @@ acceptToken kind
 
 -- | Join an accept list: the closed kinds by name plus any custom ids,
 -- space separated.
---
--- A LIST AND NOT A MASK, because half the set is open-ended. A custom
--- format that could be written and never accepted would be an escape
--- hatch that only opens outward, and round-tripping an app's own data
--- is the whole reason to have one.
 acceptList :: [String] -> String
 acceptList = unwords . map acceptToken
 
 -- | Put ONE clip on the system clipboard:
 -- @copy emptyClip { clipText = Just "kaya clip" }@.
---
--- The blob registrations ride the deferred record action, which is why
--- this is one 'emitBIO' rather than a sequence: 'Build' is pure, and
--- the bytes reach the core when the transaction submits.
---
--- The wire order is kaya's, not this record's — descending richness,
--- which is preference order on every host that has one, so a backend
--- writes what it is handed in the order it is handed. (@W.clipText@
--- below is the wire MASK; @clipText@ is this record's field.)
 copy :: Clip -> Build ()
 copy clip = emitBIO $ do
   customValues <-
@@ -2035,19 +1647,10 @@ copy clip = emitBIO $ do
         values
     )
 
--- | Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE,
--- named for what it is rather than for pasting.
---
--- A user's paste arrives at the widget's hook and costs nothing; this
--- asks without a gesture, which the platforms have deliberately made
--- expensive: iOS 16 PROMPTS when the content came from another app and
--- blocks until the user answers, Android returns nothing unless the app
--- has focus, and Wayland delivers no offer to an unfocused client.
--- Reach for this to detect a URL or import from the clipboard, never to
+-- | Read the clipboard OUTSIDE any paste gesture — THE PRIVILEGED ONE. The
+-- platforms have deliberately made it expensive (DESIGN.md, and
+-- docs/clipboard-plan.md): reach for it to detect a URL or import, never to
 -- implement Paste — that is the Paste command, and it is free.
---
--- The handler fires exactly once, with @Just rep@ or @Nothing@, and the
--- registration retires with it — the alert's grammar.
 readClipboard :: [String] -> (Maybe Representation -> IO ()) -> Build ()
 readClipboard accepting handler = do
   n <- Build $ \st ->
@@ -2087,27 +1690,14 @@ pick multiple filters handler = do
 
 -- | Ask the platform WHERE TO SAVE — the picker's twin, on the same
 -- request\/result grammar and out of the same one-live-dialog slot. The
--- handler fires exactly once and retires with its answer.
---
--- CANCEL IS 'Nothing', and a destination is 'Just'. The picker's list
--- narrows to a 'Maybe' HERE rather than in the guest, because "one
--- locator or none" is a fact of the REQUEST — a save names one place —
--- and not something every app should re-derive from a length.
+-- handler fires exactly once and retires with its answer; CANCEL IS
+-- 'Nothing'.
 --
 -- The first argument is the name the dialog OPENS with, and every
--- platform treats it the way it treats a filter: it takes it and
--- guarantees nothing. The user renames it; Android's SAF may append an
--- extension matching the mime type. Read the name you GOT
--- ('pickedName'), never the one you asked for.
---
--- WHAT YOU GET BACK OPENS EMPTY. A save destination may not exist yet —
--- macOS, GTK and Windows answer with a name for a file nobody has made
--- (measured), while Android and iOS hand back a document that already
--- does — so the handle's open CREATES: 'openPicked' with 'fileModeWrite'
--- succeeds and yields an empty file on every platform, which is the one
--- behaviour a guest writes against (docs\/save-plan.md D1). 'pickedLocalPath'
--- is empty on both phones exactly as it is for a picked file; read the
--- destination back through the HANDLE.
+-- platform guarantees nothing about it: read the name you GOT
+-- ('pickedName'), never the one you asked for. WHAT YOU GET BACK OPENS
+-- EMPTY — 'openPicked' with 'fileModeWrite' succeeds and yields an empty
+-- file on every platform (docs\/save-plan.md D1; DESIGN.md).
 saveFile :: String -> [(String, String)] -> (Maybe PickedFile -> IO ()) -> Build ()
 saveFile suggested filters handler = do
   -- THE PICKER'S COUNTER AND THE PICKER'S TABLE, deliberately. The core
@@ -2123,22 +1713,16 @@ saveFile suggested filters handler = do
   emitB (W.txShowSaveDialog 0 n (W.VStr suggested) (filterValues filters))
 
 -- (label, space-separated extensions) pairs, flattened the way the wire
--- carries them. Shared by the two requests so the picker and the save
--- dialog cannot drift on how a filter is spelled.
+-- carries them.
 filterValues :: [(String, String)] -> [W.Value]
 filterValues = concatMap (\(label, exts) -> [W.VStr label, W.VStr exts])
 
 mount :: Widget -> Build ()
 mount (Widget n) = emitB (W.txMount 0 n)
 
--- One-shot commands: momentary verbs into widget-owned state, riding
--- the open transaction like any record — the insert and the clear
--- beside it submit together or not at all. Fire-and-forget: no model
--- state, nothing to journal; the widget answers through its normal
--- occurrence path (a clear arrives back as text_changed "" and the
--- app's draft fold empties itself). Build-zone Widgets only — a Node
--- is a blueprint, and a blueprint has nothing to clear (the
--- type-level arm of the scene's own template rejection).
+-- One-shot commands: momentary verbs into widget-owned state, riding the open
+-- transaction like any record — the insert and the clear beside it submit
+-- together or not at all.
 
 -- | Drop an entry's content now (the field stays authoritative).
 clearWidget :: Widget -> Build ()
@@ -2148,44 +1732,22 @@ clearWidget (Widget n) = emitB (W.txWidgetCommand n W.commandClear)
 focusWidget :: Widget -> Build ()
 focusWidget (Widget n) = emitB (W.txWidgetCommand n W.commandFocus)
 
--- The three text-range verbs (docs\/ranges-plan.md D1): DECLARE a set
--- of decorated ranges, put the SELECTION at one, SCROLL one into view.
--- Textarea only this milestone — the entry is deferred with measured
--- per-platform reasons (docs\/deferred.md).
+-- The three text-range verbs (docs\/ranges-plan.md D1): DECLARE a set of
+-- decorated ranges, put the SELECTION at one, SCROLL one into view.
+-- Textarea only (docs\/deferred.md).
 --
--- A RANGE IS A PAIR OF UTF-8 BYTE OFFSETS, half-open: @(start, stop)@
--- covers the bytes from @start@ up to but not including @stop@, and
--- @start == stop@ is a caret. The pair is Haskell's spelling of an
--- interval — 'Data.Array' bounds and the result of 'span' are the same
--- shape — and Int is what 'length' and 'Data.ByteString.length' answer
--- with, so an app's own offsets arrive without a conversion.
---
--- THE UNIT IS BYTES, AND HASKELL'S OWN UNIT IS NOT. A 'String' is a
--- list of 'Char', so @findIndex@ over one counts SCALARS: on a document
--- that opens @日本語@ every offset a String search returns is six short
--- of the offset kaya wants, and nothing downstream can tell. Search the
--- document's UTF-8 encoding instead — @Data.ByteString.breakSubstring@
--- over @toLazyByteString . stringUtf8@, which is what a Haskell editor
--- holds its buffer as anyway. The core refuses a malformed offset
--- before any backend sees it (@start <= stop@, inside the text, both
--- endpoints on a code-point boundary), naming the widget and the
--- character it splits; a GRAPHEME split is legal and covers exactly the
--- code points it names.
+-- A RANGE IS A PAIR OF UTF-8 BYTE OFFSETS, half-open, and HASKELL'S OWN
+-- UNIT IS NOT BYTES: a 'String' is a list of 'Char', so @findIndex@ over
+-- one counts SCALARS and every offset it returns is wrong for a
+-- non-ASCII document, silently. Search the UTF-8 encoding instead —
+-- @Data.ByteString.breakSubstring@ over @toLazyByteString . stringUtf8@.
+-- The core refuses a malformed offset before any backend sees it.
 
 -- | Declare the decorated ranges of a textarea, replacing whatever was
--- declared before; @[]@ is the clear.
---
--- APP-OWNED AND NEVER TRACKED. A declared set is bound to the text it
--- was declared against: the first edit of any kind — a keystroke, a
--- write, a native undo — drops it, and the app re-declares from the
--- fold 'onChange' already drives, which is the same uncontrolled
--- contract the text itself has. kaya adjusts no range across an edit,
--- because range tracking is editor-component work and lives in the app.
---
--- kaya likewise ships no search: what to decorate is the app's
--- question, and a find engine, a find bar and a regex dialect belong to
--- the editor (docs\/ranges-plan.md §3). What kaya ships is the
--- primitive underneath, which no app can write for itself.
+-- declared before; @[]@ is the clear. APP-OWNED AND NEVER TRACKED: the
+-- first edit of any kind drops the set, and the app re-declares from the
+-- fold 'onChange' already drives. kaya adjusts no range across an edit
+-- and ships no search (docs\/ranges-plan.md §3).
 highlightRanges :: Widget -> [(Int, Int)] -> Build ()
 highlightRanges (Widget n) ranges =
   emitB (W.txHighlightRanges n (fromIntegral (length ranges)) (concatMap pair ranges))
@@ -2194,25 +1756,17 @@ highlightRanges (Widget n) ranges =
     -- the count travels beside it and the two must agree.
     pair (start, stop) = [W.VI64 (fromIntegral start), W.VI64 (fromIntegral stop)]
 
--- | Put the textarea's selection at one range (an empty range is a
--- caret). Same offsets, same validation as 'highlightRanges'.
---
--- REFUSED WHILE THE USER IS COMPOSING through an input method, in every
--- backend, because honouring it commits the composition mid-word —
--- measured on macOS, where the half-typed kana land in the document and
--- in the app's own model. The refusal is a no-op and not an error:
--- composition state is on no kaya channel, so an app cannot see the
--- race and is not blamed for it. The selection is still worth asking
--- for after the next 'onChange', which is what ends a composition.
+-- | Put the textarea's selection at one range (an empty range is a caret).
+-- Same offsets, same validation as 'highlightRanges'. REFUSED WHILE THE USER
+-- IS COMPOSING through an input method, in every backend, and the refusal is
+-- a no-op rather than an error (docs\/deferred.md).
 selectRange :: Widget -> (Int, Int) -> Build ()
 selectRange (Widget n) (start, stop) =
   emitB (W.txSelectRange n (fromIntegral start) (fromIntegral stop))
 
--- | Scroll the textarea so a range is inside the viewport. A pure
--- effect: it moves no state, leaves the selection alone, and undo does
--- not put the scroll position back (undo restores state, not where you
--- were looking). How much context lands around the range is the
--- platform's own scroll behaviour; what kaya fixes is containment.
+-- | Scroll the textarea so a range is inside the viewport. A pure effect: it
+-- moves no state, leaves the selection alone, and undo does not put the
+-- scroll position back (undo restores state, not where you were looking).
 revealRange :: Widget -> (Int, Int) -> Build ()
 revealRange (Widget n) (start, stop) =
   emitB (W.txRevealRange n (fromIntegral start) (fromIntegral stop))
@@ -2231,9 +1785,8 @@ setText = setTextProp
 bindText :: Widget -> Signal -> Build ()
 bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
 
--- | A container's inter-child gap (main axis, DIP; the normalized
--- default is 8). Containers only — held by 'BoxCfg' here and by the
--- scene core everywhere. 'setSpacing' is the dynamic path.
+-- | A container's inter-child gap (main axis, DIP; the normalized default is
+-- 8).
 setSpacing :: Widget -> Double -> Build ()
 setSpacing (Widget w) gap = emitB (W.txSetSpacing w gap)
 
@@ -2255,9 +1808,8 @@ setInset (Widget w) pad = emitB (W.txSetInset w pad)
 -- props on a leaf are type errors before they are scene errors.
 data WClass = BoxW | LeafW
 
--- | A container's cross-axis child placement (the align spec enum;
--- the normalized default is 'AlignStart'). 'AlignBaseline' is
--- rows-only — the scene rejects it on columns at the root.
+-- | A container's cross-axis child placement (the align spec enum; the
+-- normalized default is 'AlignStart').
 data Align
   = AlignStart
   | AlignCenter
@@ -2277,16 +1829,8 @@ alignWire AlignBaseline = 4
 setAlign :: Widget -> Align -> Build ()
 setAlign (Widget w) a = emitB (W.txSetAlign w (alignWire a))
 
--- | The role vocabulary (docs/styling-plan.md D4): SEMANTIC EMPHASIS —
--- what a widget MEANS, never how it looks. Closed, and closed to apps:
--- kaya grows it by shipping a lowering in every backend, the way the
--- menu roles grow, and there is deliberately no raw value beside it.
---
--- Unprefixed constructors, unlike 'Align' beside it: @Role Destructive@
--- reads as the sentence it is, and the three words are specific enough
--- to claim (a scene's own @Start@ or @End@ is likely, a @Prominent@ is
--- not). The type and the 'Attr' constructor share the name @Role@ the
--- way 'Align' does — different namespaces, one word at the call site.
+-- | The role vocabulary (docs/styling-plan.md D4): SEMANTIC EMPHASIS — what a
+-- widget MEANS, never how it looks.
 data Role
   = -- | An action whose press destroys something. Buttons only.
     Destructive
@@ -2304,52 +1848,35 @@ roleWire Prominent = 2
 roleWire Heading = 3
 
 -- | The dynamic path; the declarative spelling is the 'Role' attr.
---
--- WHICH KIND EACH ROLE FITS IS THE ROOT'S CALL, not this type's: the
--- index below narrows it to leaves (a heading column is a type error
--- here), and the scene refuses the rest at declare time, in one
--- sentence naming both the role and the kind — the same answer in all
--- eight languages.
 setRole :: Widget -> Role -> Build ()
 setRole (Widget w) r = emitB (W.txSetRole w (roleWire r))
 
--- | A widget's accessibility IDENTIFIER: a stable authored key that
--- assistive tooling and UI automation address it by, and which is
--- NEVER spoken. Universal — every kind carries one. The dynamic path;
--- the declarative spelling is the 'A11yId' attr.
+-- | A widget's accessibility IDENTIFIER: a stable authored key that assistive
+-- tooling and UI automation address it by, and which is NEVER spoken.
 setA11yId :: Widget -> String -> Build ()
 setA11yId (Widget w) i = emitB (W.txSetA11yId w i)
 
--- | What an assistive client SPEAKS for a widget. Universal, and
--- deliberately separate from the identifier — an automation key is not
--- a spoken name. Leave it unset to keep whatever the platform derives
--- from the control's own content; setting it OVERRIDES that. The
--- dynamic path; the declarative spelling is the 'A11yLabel' attr.
+-- | What an assistive client SPEAKS for a widget. Universal, and deliberately
+-- separate from the identifier — an automation key is not a spoken name.
+-- Leave it unset to keep whatever the platform derives from the control's own
+-- content; setting it OVERRIDES that.
 setA11yLabel :: Widget -> String -> Build ()
 setA11yLabel (Widget w) l = emitB (W.txSetA11yLabel w l)
 
--- | What ACTIVATING this widget does — the platforms' hint (Apple
--- defines it as the result of performing an action; Android carries it
--- as the click action's label). Write a VERB PHRASE. Activation kinds
--- only; the root rejects it elsewhere. The dynamic path; the
--- declarative spelling is the 'A11yHint' attr.
+-- | What ACTIVATING this widget does — the platforms' hint (Apple defines it
+-- as the result of performing an action; Android carries it as the click
+-- action's label). Write a VERB PHRASE.
 setA11yHint :: Widget -> String -> Build ()
 setA11yHint (Widget w) h = emitB (W.txSetA11yHint w h)
 
 data Attr (c :: WClass) where
   -- | This widget's flex weight — any widget class.
   Grow :: Double -> Attr c
-  -- | This container's inter-child gap (main axis, DIP; the
-  -- normalized default is 8). Containers only, held by the index.
+  -- | This container's inter-child gap (main axis, DIP; the normalized
+  -- default is 8).
   Spacing :: Double -> Attr 'BoxW
-  -- | This container's own padding, between its bounds and its
-  -- children — the window inset one level down. Containers only,
-  -- held by the index like 'Spacing'.
-  --
-  -- Born from the first full-bleed app: a window at inset 0 put the
-  -- status row on the window edge along with the buffer the 0 was
-  -- for, and the answer is an inset on the row rather than a window
-  -- that means two things.
+  -- | This container's own padding, between its bounds and its children — the
+  -- window inset one level down.
   Inset :: Double -> Attr 'BoxW
   -- | This container's cross-axis child placement. Containers only,
   -- held by the index like 'Spacing'.
@@ -2365,28 +1892,11 @@ data Attr (c :: WClass) where
   -- other two: a hint needs an activation to describe, and the root
   -- admits it on button, checkbox, select and radio alone.
   A11yHint :: String -> Attr 'LeafW
-  -- | What this widget MEANS (docs/styling-plan.md D4) — semantic
-  -- emphasis, never appearance. Leaf-class, the 'A11yHint' precedent:
-  -- every role in the vocabulary lands on a button or a label, so a
-  -- container asking for one is a type error, and the root holds the
-  -- finer rule (which role fits which kind).
+  -- | What this widget MEANS (docs/styling-plan.md D4) — semantic emphasis,
+  -- never appearance.
   Role :: Role -> Attr 'LeafW
   -- | What this widget takes from a paste — the closed kinds by name
-  -- ('acceptText' and friends) plus any custom format ids. Any widget
-  -- class, like 'Grow'.
-  --
-  -- ONE DECLARATION, THREE JOBS: it drives whether the Paste command is
-  -- live while this widget is focused, it filters what can reach the
-  -- paste hook, and on Android it IS the native registration
-  -- (setOnReceiveContentListener takes the mime types on the view).
-  -- Per-widget because whether Paste should be enabled is the
-  -- INTERSECTION of what the clipboard offers and what the FOCUSED
-  -- target takes.
-  --
-  -- DECLARING IS HOW AN APP OVERRIDES THE DEFAULT. A widget that
-  -- declares nothing gets the platform's own insertion and reports it
-  -- through the ordinary change path, which is why a plain text editor
-  -- writes none of this and has working cut, copy and paste.
+  -- ('acceptText' and friends) plus any custom format ids.
   Accepts :: [String] -> Attr c
 
 applyAttr :: Attr c -> Widget -> Build ()
@@ -2406,25 +1916,11 @@ withAttrs attrs act = do
   mapM_ (`applyAttr` w) attrs
   return w
 
--- One name, both arities — the lucid Term idiom over the GADT:
--- `row [kids]` and `row [Grow 2, Spacing 12] [kids]` dispatch on the
--- RESULT type, which is always constructor-known (a do-bind pins the
--- zone monad, application to a second list pins the function shape)
--- even when its argument is not — an empty attr or children list. The
--- equality-constrained general heads are what make that selection fire
--- before the element types are known, and then push them top-down into
--- the lists. An 'Attr' list in template position has no instance, and
--- the compiler says so — template props are a GADT of their own,
--- attached by 'withTplAttrs', because they take SOURCES where these
--- take values.
---
--- LIVE-ONLY SINCE 2026-08-10. There used to be a third instance, at
--- `Tpl b`, so `row [nodes]` built a template row too. It worked, and
--- neither tools/tpl-surfaces.py nor a reader scanning this file could
--- see it: a signature reading `(RowCol a r) => [a] -> r` names no zone.
--- One flat module means the result type IS this zone's scope (module
--- header), so the template containers are their own monomorphic names
--- and the old spelling now fails saying which.
+-- One name, both arities — `row [kids]` and `row [Grow 2] [kids]`
+-- dispatch on the RESULT type. The equality-constrained general heads
+-- are what make that selection fire before the element types are known.
+-- LIVE ZONE ONLY: an 'Attr' list in template position has no instance,
+-- because template props take SOURCES where these take values.
 class RowCol a r where
   rowish :: Word32 -> [a] -> r
 
@@ -2465,16 +1961,9 @@ column = rowish W.kindColumn
 scroll :: [Attr 'BoxW] -> Build Widget -> Build Widget
 scroll attrs child = withAttrs attrs (containerOf W.kindScroll [child])
 
--- | A grid from its children, laid out row-major into N columns —
--- each column takes its NATURAL width, aligned across rows (the
--- thing nested rows cannot express). The columns record lands before
--- the addChilds (backends re-flow either way).
---
--- Named @gridOf@ until 2026-08-10, when the template zone needed that
--- name: the live containers are now @row@\/@column@\/@scroll@\/@grid@
--- and the template ones @rowOf@\/@columnOf@\/@scrollOf@\/@gridOf@,
--- which also puts this one's live spelling where every other binding
--- already had it (@tx.grid@, @Tx.Grid@).
+-- | A grid from its children, laid out row-major into N columns — each column
+-- takes its NATURAL width, aligned across rows (the thing nested rows cannot
+-- express).
 grid :: Int -> [Build Widget] -> Build Widget
 grid = gridWith
 
@@ -2499,11 +1988,9 @@ spacer = do
   setGrow w 1.0
   return w
 
--- The leaf half of the same idiom: every leaf constructor's result is
--- either the widget or a function awaiting its attr list —
--- `labelBound probe` and `labelBound probe [Grow 1]` under one name.
--- The equality-constrained head keeps matching eager, so empty attr
--- lists type without annotation.
+-- The leaf half of the same idiom: every leaf constructor's result is either
+-- the widget or a function awaiting its attr list — `labelBound probe` and
+-- `labelBound probe [Grow 1]` under one name.
 class LeafArgs r where
   leafish :: Build Widget -> r
 
@@ -2534,8 +2021,7 @@ containerOf kind children = do
   mapM_ (addChild parent) handles
   return parent
 
--- Construction sugar, live zone: props and handlers at the
--- constructor. The handler is pure state until buildTx registers it.
+-- Construction sugar, live zone: props and handlers at the constructor.
 pendB :: Pending -> Build ()
 pendB pending = Build $ \s -> ((), s {bPending = pending : bPending s})
 
@@ -2546,40 +2032,10 @@ buttonOn text handler = leafish $ do
   pendB (PClick n handler)
   return w
 
--- The handler-free siblings: the same leaves with the event slot
--- empty, for an app that registers its handlers centrally (the entry
--- scene's documented mechanism) rather than at the constructor. Added
--- 2026-08-05 when the entry graduation found the sugar could not
--- spell "leaf, no handler" — the one hole of its kind among the eight
--- bindings (python's handler kwarg is optional, go takes nil).
---
--- THE LEAVES THAT STAND IN BOTH ZONES dispatch on their result type
--- through a class of their own rather than through 'LeafArgs' — the
--- idiom 'row' and 'column' use in the live zone for the same reason.
--- The body is written ONCE, over 'Declare', and the instance picks
--- which zone's id space and record list it lands in; that is what the
--- rank-2 argument is for. The live arm keeps its attr-list arity, the
--- template arm has none.
---
--- WHICH LEAVES QUALIFY: exactly the ones whose arguments are the same
--- in both zones — a constant caption, or nothing at all. A template's
--- button is a blueprint entry stamped once per element, and a click on
--- a copy names that copy by key path, so it CANNOT take the live zone's
--- @IO ()@ handler at the constructor: the app registers one handler
--- centrally with 'onClickNode' and reads the keys off the occurrence
--- (guests/haskell/milestone2.hs). That is why there is no template
--- 'buttonOn' beside it — the live zone's @IO ()@ has nowhere to put the
--- keys, so the overload could only be the wrong one. The same argument
--- retires 'entryOn' and 'textareaOn' from the template zone, where
--- 'onChangeNode' is the spelling. The other bindings carry the same
--- handler-free constructors in their template zones (swift's
--- @KayaTpl.button@, java's @Tpl.button@); button reached this zone
--- 2026-08-05 with the milestone2 graduation, entry and textarea
--- 2026-08-10 with the rest of the template surface.
---
--- A leaf whose value can come from the ROW is NOT here: it takes a
--- source, the live zone has nothing to source from, and the two
--- signatures have nothing in common. Those are the @Bound@ names below.
+-- The handler-free siblings: the same leaves with the event slot empty, for
+-- an app that registers its handlers centrally. THE LEAVES THAT STAND IN BOTH
+-- ZONES are exactly the ones whose arguments are the same in both — a
+-- constant caption, or nothing.
 class BothZones r where
   bothish :: (forall m. Declare m => m (El m)) -> r
 
@@ -2619,12 +2075,6 @@ entryOn handler = leafish $ do
 
 -- | A multi-line editor, in either zone: the entry's uncontrolled
 -- contract over the platform's real multi-line control.
---
--- The LIVE half of this arrived with the template pass. Until
--- 2026-08-10 the only spelling here was 'textareaOn', so a Haskell
--- scene that wanted a textarea and no handler passed a no-op one
--- (guests/haskell/grow.hs says so out loud) — the same hole the entry
--- graduation closed for 'entry' on 2026-08-05, one kind over.
 textarea :: (BothZones r) => r
 textarea = bothish (widget W.kindTextarea)
 
@@ -2675,19 +2125,8 @@ sliderOn lo hi value handler = leafish $ do
   pendB (PValue n handler)
   return w
 
--- | A slider whose POSITION follows a float signal, with its change
--- handler co-located: 'sliderOn' with the value bound instead of
--- constant. That is the programmatic write path — 'writeSignal' fans
--- out to the control, and a property write never echoes an occurrence,
--- so a handler's own writes cannot loop back at it.
---
--- BOTH SUFFIXES BECAUSE IT IS BOTH. @Bound@ is this file's mark for a
--- value that comes from a source ('labelBound', 'imageBound') and @On@
--- for a handler at the constructor, and a live slider always has one —
--- it is uncontrolled, so the app hears every move or hears nothing.
--- The floor it replaces is @sliderOn@ followed by 'bindValue', which is
--- what guests\/haskell\/gallery.hs spelled while the other seven
--- bindings all had this arm.
+-- | A slider whose POSITION follows a float signal, with its change handler
+-- co-located: 'sliderOn' with the value bound instead of constant.
 sliderBoundOn :: (LeafArgs r) => Double -> Double -> Signal -> (Double -> IO ()) -> r
 sliderBoundOn lo hi sig handler = leafish $ do
   w@(Widget n) <- widget W.kindSlider
@@ -2746,13 +2185,9 @@ labelBound sig = leafish $ do
   bindText w sig
   return w
 
--- | An image displaying constant encoded bytes (PNG, JPEG, ...): the
--- toolkit decodes natively, and decode failure renders the
--- placeholder, never a crash. One registration copy into core memory,
--- made at the boundary of the transaction this Build submits through;
--- the handle is consumed by that submit, and the caller's bytes are
--- free to drop the moment buildTx returns. Text belongs on labels —
--- image bytes have their own channel.
+-- | An image displaying constant encoded bytes (PNG, JPEG, ...): the toolkit
+-- decodes natively, and decode failure renders the placeholder, never a
+-- crash.
 imageBytes :: (LeafArgs r) => BS.ByteString -> r
 imageBytes bytes = leafish $ do
   w@(Widget n) <- widget W.kindImage
@@ -2767,24 +2202,13 @@ imageBound sig = leafish $ do
   return w
 
 -- Construction sugar, template flavor: one name per widget, and the
--- argument's type picks the addressable source — a constant, a signal,
--- or an element field. The protocol's closed union, as a class per
--- prop type; handlers receive the stamped copy's keys first.
+-- argument's type picks the addressable source — a constant, a signal, or an
+-- element field.
 pendT :: Pending -> Tpl ()
 pendT pending = Tpl $ \s -> ((), s {bPending = pending : bPending s})
 
 -- One Str prop's three generated emitters, travelling together: the
 -- const form, the signal form, the element form.
---
--- THE PROP IS AN ARGUMENT AND NOT A CLASS, since 2026-08-10, because
--- Str is the value type with FOUR props — a widget's text, its
--- accessibility id, its spoken label, its activation hint — and the
--- three source flavours are the same three for every one of them. A
--- class per prop is twelve one-line instance bodies that can drift
--- apart; this is four tables that cannot, and a fifth Str prop costs a
--- table and no instances at all. (Prop::Min and Prop::Max are the same
--- shape one value type over, if a per-row slider range ever finds an
--- artifact that wants it.)
 data StrProp = StrProp
   { strConst :: Word64 -> String -> Builder,
     strSignal :: Word64 -> Word64 -> Builder,
@@ -2798,11 +2222,8 @@ a11yLabelProp = StrProp W.txSetA11yLabel W.txBindA11yLabel W.txBindA11yLabelElem
 a11yHintProp = StrProp W.txSetA11yHint W.txBindA11yHint W.txBindA11yHintElement
 
 -- | What a template Str prop can bind to: a constant, a signal, or the
--- ROW'S OWN field. Named for the prop's VALUE TYPE — the wire's
--- @ValueType::Str@ — which is what the name has always claimed to be:
--- it was 'TplTextSource' while text was the zone's only Str prop, and
--- 'bindLabelSource' before that, while a label was the only kind that
--- used it.
+-- ROW'S OWN field. Named for the prop's VALUE TYPE, the wire's
+-- @ValueType::Str@.
 class TplStrSource s where
   bindStrSource :: StrProp -> Node -> s -> Tpl ()
 
@@ -2852,19 +2273,13 @@ instance TplImageSource (KField BS.ByteString) where
   bindImageSource n fd = bindSourceField n 0 fd
 
 -- | What a template F64 prop can bind to: a progress bar's fraction, a
--- slider's position, a choice's selected index. The 'KField' instance
--- is Double-ONLY, because Prop::Value is an F64 slot — an I64 field
--- here is a type error rather than a scene panic, which is the same
--- fact 'bindCheckedField' states one prop over.
+-- slider's position, a choice's selected index. The 'KField' instance is
+-- Double-ONLY, because Prop::Value is an F64 slot.
 --
--- A NUMERIC LITERAL NEEDS ITS TYPE SAID OUT LOUD in this one class:
--- @progressBound (0.5 :: Double)@, not @progressBound 0.5@. The
--- constraint set is @(Fractional s, TplNumberSource s)@ and Haskell's
--- defaulting rules only fire when every class in it is a standard one,
--- so GHC reports an ambiguous type variable instead of picking Double.
--- The other three source classes never meet a literal, so this is the
--- only place it shows. It is a papercut on the CONSTANT case, which is
--- the case a template zone exists least for.
+-- A NUMERIC LITERAL NEEDS ITS TYPE SAID OUT LOUD here and nowhere else:
+-- @progressBound (0.5 :: Double)@. The constraint set is @(Fractional s,
+-- TplNumberSource s)@ and Haskell defaults only when every class in it
+-- is standard, so GHC reports an ambiguous type variable instead.
 class TplNumberSource s where
   bindValueSource :: Node -> s -> Tpl ()
 
@@ -2877,31 +2292,9 @@ instance TplNumberSource Signal where
 instance TplNumberSource (KField Double) where
   bindValueSource n fd = bindValueField n 0 fd
 
--- | Props on a TEMPLATE node — the live 'Attr' one zone down, attached
--- by 'withTplAttrs'.
---
--- WHERE 'Attr' TAKES A VALUE, THIS TAKES A SOURCE. That is why the two
--- are not one GADT: a stamp makes N copies and each copy's prop can
--- come from its own row, which is the same argument that gives this
--- zone 'label' against the live 'labelText'. Grow and accepts are the
--- exceptions and each says why on itself. The constraint rides IN the
--- constructor so one list can mix flavours — a const id beside a
--- field-sourced label is the call this zone exists for.
---
--- NO WIDGET-CLASS INDEX, unlike 'Attr', and the absence is the honest
--- half. The live index bites because an attr list is an ARITY of a
--- constructor whose class is known (@row [Spacing 12] [...]@ pins
--- @Attr 'BoxW@ before the children are read). Props here attach through
--- a COMBINATOR over @Tpl Node@, and 'Node' names no widget class, so an
--- index would unify with whatever the list happened to hold and reject
--- nothing. A phantom that cannot fire is worse than none: it reads as a
--- wall. The root is the wall — a hint on a row dies in @check_prop@ at
--- declare time, before a single row stamps, naming what it refused.
---
--- THE NAMES CARRY A PREFIX because they must: one flat module cannot
--- declare 'A11yId' twice, and a data constructor — unlike 'button' —
--- cannot pick its zone off its result type. 'Tpl' is this zone's
--- convention for its type-level names ('TplStrSource' and siblings).
+-- | Props on a TEMPLATE node — the live 'Attr' one zone down, attached by
+-- 'withTplAttrs'. WHERE 'Attr' TAKES A VALUE, THIS TAKES A SOURCE, because
+-- each stamped copy's prop can come from its own row.
 data TplAttr where
   -- | This stamped element's flex weight within its row\/column. A
   -- CONSTANT and not a source: grow describes the prototype's share of
@@ -2912,26 +2305,9 @@ data TplAttr where
   -- | This stamped CONTAINER's own padding, in layout units — the
   -- window inset two levels up and the live 'Inset' one zone down, the
   -- same number and the same prop.
-  --
-  -- THE FORCING CASE IS A STAMPED ROW. The editor's status row is live
-  -- and insets; its find bar is a copy stamped from a template, and it
-  -- sat flush against a full-bleed window's edge because this zone
-  -- carried exactly one layout prop (grow) and nothing could give a
-  -- stamped row its margin back.
-  --
-  -- A CONSTANT, on 'TplAccepts''s rule: a prototype's margin describes
-  -- the prototype, not the row's data. Container kinds only, and the
-  -- ROOT is what says so — a leaf dies at declare time naming the prop,
-  -- before a row stamps, as does a negative or non-finite pad.
   TplInset :: Double -> TplAttr
   -- | This stamped copy's accessibility IDENTIFIER — the authored key
   -- automation addresses it by, never spoken.
-  --
-  -- A CONSTANT GIVES EVERY COPY THE SAME KEY, which is legal and often
-  -- what you want: nothing in the core deduplicates ids, and the
-  -- harness addresses by kind#index rather than by id, so a const id
-  -- names the ROLE ("row-note") while the per-copy identity comes from
-  -- the row — a field source here, or the label below.
   TplA11yId :: TplStrSource s => s -> TplAttr
   -- | What an assistive client SPEAKS for this stamped copy. THE
   -- ROW-FIELD CASE IS WHY THIS PROP EXISTS: @TplA11yLabel (field
@@ -2946,36 +2322,17 @@ data TplAttr where
   -- nothing for @Attr 'LeafW@'s trick to stand on.
   TplA11yHint :: TplStrSource s => s -> TplAttr
   -- | What this stamped copy MEANS — semantic emphasis, never
-  -- appearance, over the live 'Role' vocabulary. The live zone has
-  -- carried it since the styling pass while this one could not spell it
-  -- at all, so a stamped \"Delete\" button inside a For was declarable
-  -- as destructive in no language.
-  --
-  -- A CONSTANT, on 'TplAccepts''s rule: what a copy MEANS is a fact
-  -- about the prototype, and every copy of one blueprint means the same
-  -- thing. Which role fits which kind is the ROOT'S call, refused at
-  -- declare time in one sentence naming both — so there is no
-  -- type-level wall here, for the reason written above the GADT (a
-  -- class-free 'Node' gives @Attr 'LeafW@'s index nothing to stand on).
+  -- appearance, over the live 'Role' vocabulary. A CONSTANT: what a copy
+  -- means is a fact about the prototype. Which role fits which kind is
+  -- the ROOT'S call.
   TplRole :: Role -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
-  -- name ('acceptText' and friends) plus any custom format ids.
-  --
-  -- A CONSTANT LIST AND NOT A SOURCE, unlike the three above: an accept
-  -- list describes the PROTOTYPE — what this KIND of row takes — the
-  -- way a slider's range and a select's options do. The root agrees
-  -- mechanically as well as by design: the domain check (at least one
-  -- token, no token twice) runs on the const branch alone, so a
-  -- row-sourced list would reach four backends unchecked, and
-  -- 'acceptList' would lose its half of it too — the row's value
-  -- arrives already joined.
-  --
-  -- AND IT IS THE STAMPED PASTE HOOK'S KEYSTONE. Every backend gates
-  -- the paste occurrence on the focused widget's accept list and falls
-  -- back to the platform's own insertion when that list is empty, so
-  -- before this constructor existed 'onPasteNode' registered a handler
-  -- that could never fire — silently, in seven bindings
-  -- (docs\/tpl-props-plan.md §1).
+  -- name ('acceptText' and friends) plus any custom format ids. A
+  -- CONSTANT LIST AND NOT A SOURCE: an accept list describes the
+  -- PROTOTYPE, and the root's domain check runs on the const branch
+  -- alone. Every backend gates the paste occurrence on the focused
+  -- widget's accept list, so without this 'onPasteNode' could never
+  -- fire (docs\/tpl-props-plan.md §1).
   TplAccepts :: [String] -> TplAttr
 
 applyTplAttr :: TplAttr -> Node -> Tpl ()
@@ -2993,31 +2350,20 @@ applyTplAttr (TplAccepts kinds) n = setNodeAccepts n kinds
 setNodeAccepts :: Node -> [String] -> Tpl ()
 setNodeAccepts (Node n) kinds = emitT (W.txSetAccepts n (acceptList kinds))
 
--- A template node's padding and its role: 'setInset' and 'setRole' one
--- zone down, through the SAME emitters and the same 'roleWire', because
--- a template node rides the ordinary SetProperty record a live widget
--- does. Nothing in the spec moved for these two; the stamp turns the
--- template op into an ApplyOp naming the copy's live widget id, so a
--- stamped role and a live one lower through one backend arm.
+-- A template node's padding and its role: 'setInset' and 'setRole' one zone
+-- down, through the SAME emitters and the same 'roleWire', because a template
+-- node rides the ordinary SetProperty record a live widget does.
 setNodeInset :: Node -> Double -> Tpl ()
 setNodeInset (Node n) pad = emitT (W.txSetInset n pad)
 
 setNodeRole :: Node -> Role -> Tpl ()
 setNodeRole (Node n) r = emitT (W.txSetRole n (roleWire r))
 
--- | Props on a template node:
---
--- > withTplAttrs [TplA11yLabel (field @"title" @Task)]
--- >   (entryBound (field @"title" @Task))
---
--- A COMBINATOR AND NOT AN EXTRA ARITY, for two measured reasons. The
+-- | Props on a template node. A COMBINATOR AND NOT AN EXTRA ARITY: the
 -- four leaves that stand in both zones dispatch through 'BothZones' on
 -- the head shape @[a] -> r@, and a second instance at that head is
--- GHC-59692 "Duplicate instance declarations" — so an arity could never
--- have reached a template 'button', 'entry' or 'textarea', and the prop
--- would have had two spellings depending on which constructor carried
--- it. And every constructor here keeps its @-> Tpl Node@ signature,
--- which is what makes this zone ENUMERABLE (module header) and what
+-- GHC-59692 "Duplicate instance declarations". Keeping every
+-- constructor's @-> Tpl Node@ signature is also what
 -- tools\/tpl-surfaces.py reads.
 withTplAttrs :: [TplAttr] -> Tpl Node -> Tpl Node
 withTplAttrs attrs act = do
@@ -3046,14 +2392,9 @@ image src = do
   bindImageSource n src
   return n
 
--- | A stamped button whose caption comes from an addressable source —
--- a signal, or the ROW'S OWN field, which is the thing @button "text"@
--- cannot say and the thing a list of named actions wants ("Delete
--- <title>"). Constant captions stay on 'button', which spells the same
--- widget in both zones.
---
--- Handler-free like 'button', for the reason written there: a click on
--- a copy names the copy, so the app registers once with 'onClickNode'.
+-- | A stamped button whose caption comes from an addressable source — a
+-- signal, or the ROW'S OWN field, which is the thing @button "text"@ cannot
+-- say and the thing a list of named actions wants ("Delete <title>").
 buttonBound :: TplStrSource s => s -> Tpl Node
 buttonBound src = do
   n <- widget W.kindButton
@@ -3061,15 +2402,10 @@ buttonBound src = do
   return n
 
 -- | A stamped entry SEEDED from an addressable source: the copy opens
--- holding the row's own text. (The live zone has no twin, because a
--- live widget has no row to read.)
---
--- STILL UNCONTROLLED, which is why this is a separate name and not an
--- optional argument on 'entry': the field owns its text from the first
--- keystroke, and the source keeps writing. Seed from a field the app
--- does NOT write back to — one that folds 'onChangeNode' into the same
--- field re-writes what the user is typing. Not an occurrence loop, since
--- a property write never echoes one (DESIGN.md), but the caret moves.
+-- holding the row's own text. STILL UNCONTROLLED — the field owns its
+-- text from the first keystroke and the source keeps writing, so seed
+-- from a field the app does NOT write back to, or the caret moves while
+-- the user types.
 entryBound :: TplStrSource s => s -> Tpl Node
 entryBound src = do
   n <- widget W.kindEntry
@@ -3084,10 +2420,7 @@ textareaBound src = do
   bindTextSource n src
   return n
 
--- | A template row: the live 'row' one zone down, taking NODES. It is
--- its own name because the element type is the difference — see the
--- naming rule in the module header, and the TypeError on `row` in a
--- template body, which says this.
+-- | A template row: the live 'row' one zone down, taking NODES.
 rowOf :: [Tpl Node] -> Tpl Node
 rowOf = containerOf W.kindRow
 
@@ -3095,15 +2428,8 @@ rowOf = containerOf W.kindRow
 columnOf :: [Tpl Node] -> Tpl Node
 columnOf = containerOf W.kindColumn
 
--- | A template scroll viewport over EXACTLY ONE child — the signature
--- says so, as the live 'scroll''s does (the scene enforces it too). No
--- attr list, because this zone attaches props through 'withTplAttrs'
--- rather than an arity: @withTplAttrs [TplGrow 1] (scrollOf child)@ is
--- the weight, and an unconstrained viewport hugs its content, so a
--- stamped scroll wants either that or an enclosing track that already
--- constrains it. (The sentence here used to read "template-zone props
--- do not exist in any binding yet"; 'setGrow' on 'Declare' falsified it
--- the same day, and 'TplAttr' falsifies it again.)
+-- | A template scroll viewport over EXACTLY ONE child — the signature says
+-- so, as the live 'scroll''s does.
 scrollOf :: Tpl Node -> Tpl Node
 scrollOf child = containerOf W.kindScroll [child]
 
@@ -3114,24 +2440,15 @@ scrollOf child = containerOf W.kindScroll [child]
 gridOf :: Int -> [Tpl Node] -> Tpl Node
 gridOf = gridWith
 
--- | A stamped progress bar whose fraction follows an addressable
--- source — the per-row case this zone exists for,
--- @progressBound (field \@"done" \@Task)@. Display-only, like label and
--- image. 'progressIndeterminate' is the activity mode, in either zone.
+-- | A stamped progress bar whose fraction follows an addressable source — the
+-- per-row case this zone exists for, @progressBound (field \@"done" \@Task)@.
 progressBound :: TplNumberSource s => s -> Tpl Node
 progressBound src = do
   n <- widget W.kindProgress
   bindValueSource n src
   return n
 
--- | A stamped slider over @lo@..@hi@ whose POSITION comes from a
--- source. The range describes the prototype and is constant; the
--- position is the part that varies per row. A per-row range IS
--- expressible on the wire (Prop::Min and Prop::Max take an element
--- source) and has no artifact asking for it, so it waits for one.
---
--- Handler-free like the template 'button': a copy's move arrives naming
--- the copy, so the app registers once with 'onValueChangedNode'.
+-- | A stamped slider over @lo@..@hi@ whose POSITION comes from a source.
 slider :: TplNumberSource s => Double -> Double -> s -> Tpl Node
 slider lo hi src = do
   n@(Node i) <- widget W.kindSlider
@@ -3140,18 +2457,8 @@ slider lo hi src = do
   bindValueSource n src
   return n
 
--- | A stamped dropdown over fixed options — each option becomes a label
--- child — with the SELECTED 0-based index from a source. Handler-free:
--- a copy's pick arrives naming the copy, so the app registers once with
--- 'onValueChangedNode' and reads the new index off the occurrence
--- (programmatic writes never echo) — the slider's uncontrolled contract.
---
--- THE OPTION LIST IS THE BLUEPRINT'S, not the row's. A template is one
--- shape stamped N times, so every copy shows the same options and only
--- the choice varies. The COUNT cannot vary at all: a per-row list would
--- need a collection inside the choice widget, and a For's container is a
--- Column, which a select rejects as a non-label child
--- (docs/sugar-pass-plan.md §2).
+-- | A stamped dropdown over fixed options — each option becomes a label child
+-- — with the SELECTED 0-based index from a source.
 select :: TplNumberSource s => [String] -> s -> Tpl Node
 select = choiceWith W.kindSelect
 
@@ -3161,10 +2468,9 @@ radio :: TplNumberSource s => [String] -> s -> Tpl Node
 radio = choiceWith W.kindRadio
 
 -- The options are built CHILDREN-FIRST — declare the label, set its
--- text, then addChild — because that is the order the backends already
--- accommodate for this binding: gtk.rs reads an option's text at the
--- AddChild, and a text set afterwards would arrive too late (caught live
--- on linux 2026-07-22, when every ocaml/haskell row read "").
+-- text, then addChild. gtk.rs reads an option's text AT the AddChild, so
+-- a text set afterwards arrives too late (docs/traps.md, "prop writes
+-- before AddChild").
 choiceWith :: TplNumberSource s => Word32 -> [String] -> s -> Tpl Node
 choiceWith kind options src = do
   n <- widget kind
@@ -3180,27 +2486,14 @@ choiceWith kind options src = do
 
 -- | A For as a child: forEach whose body keeps no handles — the common
 -- case once handlers co-locate at their constructors.
---
--- IN EITHER ZONE since 2026-08-10, exactly as the 'forEach' underneath
--- it has always been: the result type picks the monad, and the inner
--- For is what a collection declared inside a template body needs
--- (guests\/haskell\/menus.hs, one collection per group). It returned
--- @Build Widget@ while nothing had asked for the nested one, so a
--- template body that kept no handles had to spell the combinator and
--- throw the @()@ away by hand — the floor 'each' exists to retire, one
--- zone up from where it retired it.
 each :: Declare m => Collection -> Tpl a -> m (El m)
 each c body = fst <$> forEach c body
 
--- Sums: the data declaration is the sum. KayaSum derives everything
--- from the Generic representation — one schema per constructor (each
--- constructor's fields walked by the same GRecord machinery records
--- use), the discriminant, both conversions — so `deriving Generic` +
--- an empty instance is the whole obligation, exactly as with records.
--- Elimination is Haskell-shaped where the guest holds the value (case
--- / pattern matches); the template takes a product of arms checked
--- complete at declaration, with the scene as the second check.
--- Mutation is witnessed by the scrutinee the guest just matched.
+-- Sums: the data declaration is the sum. KayaSum derives everything from the
+-- Generic representation — one schema per constructor (each constructor's
+-- fields walked by the same GRecord machinery records use), the discriminant,
+-- both conversions — so `deriving Generic` + an empty instance is the whole
+-- obligation, exactly as with records.
 
 class GSum f where
   gsCount :: proxy f -> Word32
@@ -3339,10 +2632,8 @@ data SumArm = SumArm !Word32 (Tpl ())
 sumArm :: KayaSum a => a -> Tpl () -> SumArm
 sumArm prototype = SumArm (kayaSumVariant prototype)
 
--- | The template eliminator: a product of arms, one per constructor,
--- handed over whole. Completeness is checked here at declaration (one
--- arm per constructor, any order) and again by the scene — an omitted
--- constructor never waits for its first insert to fail.
+-- | The template eliminator: a product of arms, one per constructor, handed
+-- over whole.
 eachSum :: forall a. KayaSum a => SumCollection a -> [SumArm] -> Build Widget
 eachSum (SumCollection coll) arms = Build $ \s ->
   let count = length (kayaVariantSchemas (Proxy :: Proxy a))
@@ -3364,12 +2655,10 @@ eachSum (SumCollection coll) arms = Build $ \s ->
 bindTextElement :: Node -> Word32 -> Tpl ()
 bindTextElement (Node n) level = emitT (W.txBindTextElement n level 0)
 
--- Records: the type is the schema. KayaRecord derives everything from
--- the Generic representation — one field tag, one conversion each way,
--- and the selector names for field tokens — so schema, insert order,
--- and indexes cannot drift from the data declaration. Every field must
--- be wire-typed (String, Bool, Int64, Double); Haskell keeps handlers
--- out of records by idiom, so there is no guest-only skipping here.
+-- Records: the type is the schema. KayaRecord derives everything from the
+-- Generic representation — one field tag, one conversion each way, and the
+-- selector names for field tokens — so schema, insert order, and indexes
+-- cannot drift from the data declaration.
 
 -- | A Haskell type that can be one record field.
 class KayaFieldType v where
@@ -3397,14 +2686,10 @@ instance KayaFieldType Double where
   toFieldValue = W.VF64
   fromFieldValue v = case v of W.VF64 x -> x; _ -> error "kaya: field is not an F64"
 
--- | Encoded image bytes are a wire type: the schema slot is Blob, and
--- every encode registers the bytes with the core right then — handles
--- are single-submit, so insert, update, and update_field all
--- re-register (one copy into core memory per write). The model keeps
--- the guest's own bytes, never a consumed handle: W.Value is generated
--- and closed, so the model's copy rides a byte-per-Char VStr carrier
--- (Char8 pack/unpack, lossless over 0..255) that encodeFieldWire
--- converts to a fresh VBlob handle on every trip to the wire.
+-- | Encoded image bytes are a wire type: the schema slot is Blob, and every
+-- encode registers the bytes with the core right then — handles are single-
+-- submit, so insert, update, and update_field all re-register (one copy into
+-- core memory per write).
 instance KayaFieldType BS.ByteString where
   fieldTag _ = W.valueBlob
   toFieldValue = W.VStr . BC.unpack
@@ -3478,8 +2763,6 @@ class KayaRecord a where
   fromValues = to . fst . gFrom
 
 -- | A typed projection: one field of a record type, by wire position.
--- The phantom pins the Haskell type, so bindCheckedField rejects a
--- KField String at compile time.
 newtype KField v = KField Word32
 
 -- | The field token for a's field, by type-level name:
@@ -3497,16 +2780,9 @@ field = case elemIndex (symbolVal (Proxy :: Proxy name)) (kayaFieldNames (Proxy 
   -- wire-typed, so the name is always in the derived list.
   Nothing -> error ("kaya: field " ++ symbolVal (Proxy :: Proxy name) ++ " has no wire slot")
 
--- | The ELEMENT ITSELF as an addressable source: a scalar collection
--- (the plain 'collection') carries exactly one field and the element
--- is it, so there is no name to give. @label element@ is the scalar
--- twin of @label (field \@"title" \@Todo)@, and lowers to the same
--- bind_element the index spelling did.
---
--- go and java reach this token through a row proxy (@row.Value()@); a
--- template body here takes no argument, so it stands alone and says
--- what it addresses. String because that is a scalar collection's
--- whole schema — @[[valueStr]]@, one field, one type.
+-- | The ELEMENT ITSELF as an addressable source: a scalar collection (the
+-- plain 'collection') carries exactly one field and the element is it, so
+-- there is no name to give.
 element :: KField String
 element = KField 0
 
@@ -3537,41 +2813,10 @@ insertRecord (RecordCollection (Collection n path)) key value = Build $ \s ->
       )
 
 -- | Insert a record under a key the binding authors, and hand the key
--- back.
---
--- FOR DATA THAT HAS NO IDENTITY OF ITS OWN. Keys are domain identity
--- and guest-chosen (DESIGN.md, the update algebra), so anything that
--- already HAS a name passes it to 'insertRecord' — today and always.
--- This is the other case, and it is the common one in a form: the app
--- has a title and nothing else, and the alternative is a hand-spelled
--- counter beside the collection, which in this language is an IORef
--- the Build cannot even see and whose safety rests on a never-rewind
--- rule nobody wrote down.
---
--- ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted key
--- is 'W.VI64' and is counter+1. An instance is a table — the live-zone
--- collection, or one stamped copy selected by 'at' — and keys are
--- unique within one, so that is what the counter is per.
---
--- MIXING IS SAFE BY ABSORPTION: an explicit 'insertRecord' (or
--- 'insert') whose key is an I64 at or above the counter carries it up,
--- so a later mint clears every hand-chosen numeric key already in the
--- table. A non-numeric key cannot collide with an I64 at all and moves
--- nothing.
---
--- NO DECREMENT IS EXPRESSIBLE, and that is the whole safety argument.
--- Undo and redo replay captured keys inside the core and never re-enter
--- this path ('absorbUndo' folds the model and touches no counter), so a
--- history walk never moves the minter and a fresh key is fresh forever.
--- A Build that THROWS abandons its counters with everything else it
--- held — records, model, handlers — because in this binding an
--- abandoned transaction is a transaction that never happened at all;
--- the key it minted reached no core and no guest, so re-minting it
--- names nothing twice.
---
--- THE KEY IS THE RESULT even where a scene discards it: an app that
--- selects the row it just added takes the name from here rather than
--- inventing a second one for the same datum.
+-- back. ONE COUNTER PER COLLECTION INSTANCE, starting at 0; the minted
+-- key is 'W.VI64' and is counter+1. MIXING IS SAFE BY ABSORPTION — an
+-- explicit numeric key at or above the counter carries it up — and NO
+-- DECREMENT IS EXPRESSIBLE, so a history walk never moves the minter.
 insertFresh :: forall a. KayaRecord a => RecordCollection a -> a -> Build Int64
 insertFresh c@(RecordCollection (Collection n path)) value = Build $ \s ->
   let (key, fresh) = mintKey n path (bFresh s)
@@ -3612,9 +2857,8 @@ data FieldSet a = FieldSet !Word32 !Word32 !W.Value
 set :: forall v a. KayaFieldType v => KField v -> v -> FieldSet a
 set (KField i) v = FieldSet i (fieldTag (Proxy :: Proxy v)) (toFieldValue v)
 
--- | Typed field writes with the key spelled once:
--- @patch todos key [set (field \@"done" \@Todo) True]@. Each entry
--- records one update_field — a patch is recorded writes, never a diff.
+-- | Typed field writes with the key spelled once: @patch todos key [set
+-- (field \@"done" \@Todo) True]@.
 patch :: RecordCollection a -> W.Value -> [FieldSet a] -> Build ()
 patch c key = mapM_ (\(FieldSet i tag v) -> updateFieldWire c key i tag v)
 
@@ -3623,11 +2867,9 @@ recordItems :: KayaRecord a => RecordCollection a -> Build [(W.Value, a)]
 recordItems (RecordCollection (Collection n path)) = Build $ \s ->
   (map (\(k, (_, vs)) -> (k, fromValues vs)) (lookupEntries n path (bModel s)), s)
 
--- | A signal the binding recomputes from this collection's entries
--- after every mutation, written into the same transaction — the
--- items-left label with no handler remembering to update it. The
--- function is pure presentation: entries in, one value out; the core
--- sees an ordinary signal.
+-- | A signal the binding recomputes from this collection's entries after
+-- every mutation, written into the same transaction — the items-left label
+-- with no handler remembering to update it.
 derive ::
   forall a. KayaRecord a =>
   RecordCollection a -> ([(W.Value, a)] -> W.Value) -> Build Signal
@@ -3674,9 +2916,8 @@ data App = App
     appPosted :: MVar [IO ()],
     appCounters :: IORef Counters,
     appModel :: IORef (Model, Map.Map Word64 [Word64]),
-    -- The minter's counters, outliving any one transaction exactly as
-    -- the id counters above do. Never written by 'absorbUndo': a
-    -- history walk replays keys the core captured and mints nothing.
+    -- The minter's counters, outliving any one transaction exactly as the id
+    -- counters above do.
     appFresh :: IORef Fresh,
     appDerived :: IORef (Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)]),
     appWidgetHandlers :: IORef (Map.Map Word64 (IO ())),
@@ -3686,11 +2927,9 @@ data App = App
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
     appNodeToggles :: IORef (Map.Map Word64 ([W.Value] -> Bool -> IO ())),
     appWidgetValues :: IORef (Map.Map Word64 (Double -> IO ())),
-    -- The node twin of the line above, added 2026-08-10 with the
-    -- template slider, select and radio. The core has always emitted
-    -- Occurrence::InstanceValueChanged; without this table the dispatch
-    -- loop had a live arm and no instance arm, so a stamped control's
-    -- move matched nothing and was dropped with no error anywhere.
+    -- The node twin of the line above: without it a stamped control's
+    -- Occurrence::InstanceValueChanged matches nothing and is dropped
+    -- with no error anywhere.
     appNodeValues :: IORef (Map.Map Word64 ([W.Value] -> Double -> IO ())),
     -- Per-window lifecycle handlers, keyed by window id — handlers
     -- scope to the thing that creates them.
@@ -3735,23 +2974,12 @@ data App = App
 -- threw) leaves the model exactly as committed.
 -- | The app thread, learned when the dispatch loop starts. Nothing
 -- before then, which is the single-threaded construction phase.
---
--- A process-wide fact gets a process-wide ref, which is also how Python
--- and OCaml spell it -- the three bindings whose transaction is ambient
--- rather than a handle say this the same way.
 appThreadRef :: IORef (Maybe ThreadId)
 appThreadRef = unsafePerformIO (newIORef Nothing)
 {-# NOINLINE appThreadRef #-}
 
 -- | The Haskell spelling of a rule the handle bindings get from a
 -- stale-transaction check.
---
--- A Build is a pure state function, so there is no handle to invalidate
--- -- but 'buildTx' reads and writes the app's IORefs and submits to the
--- ring, and a background thread doing that races the app thread on both.
--- Rust makes the equivalent a compile error (its Tx is !Send); Go, Java,
--- C# and Swift raise on a transaction that has closed; Haskell, like
--- Python and OCaml, has nothing to check but the thread.
 requireAppThread :: IO ()
 requireAppThread = do
   owner <- readIORef appThreadRef
@@ -3785,13 +3013,10 @@ buildTx app (Build f) = do
   -- (the catch-and-continue dispatch would trip on it transactions
   -- after the guilty one).
   _ <- evaluate s
-  -- Serialize now, before any store-back: this runs the records' IO,
-  -- which is where image sources and Blob record fields register
-  -- their bytes with the core — in record order, immediately before
-  -- the submit whose handle table they fill. A Build whose records
-  -- throw still abandons everything (no store-back has run), and
-  -- registrations already made are harmless: the next submit drains
-  -- the pending table, referenced or not.
+  -- Serialize now, before any store-back: this runs the records' IO, which is
+  -- where image sources and Blob record fields register their bytes with the
+  -- core — in record order, immediately before the submit whose handle table
+  -- they fill.
   records <- bRecords s
   writeIORef (appCounters app) (bCounters s)
   writeIORef (appModel app) (bModel s, bChildren s)
@@ -3837,34 +3062,14 @@ submitTx :: App -> Build () -> IO ()
 submitTx app b = buildTx app b
 
 -- | 'buildTx' as ONE undoable step, named @label@ (docs/undo-plan.md
--- D2): @undoableTx app ("add " ++ draft) $ do insertRecord ...@.
---
--- THE ENTRY POINT TAKES THE NAME because this binding's transaction is
--- AMBIENT — a 'Build' is a pure state function with no handle to hang a
--- name on, so the three ambient bindings each spell the group at the
--- scope that opens it (Python a keyword argument, OCaml a labelled
--- optional, Haskell this variant) while the five handle bindings spell
--- it on the transaction object. Same semantics everywhere; the idiom
--- decides only the spelling. It also makes the wire's head-of-batch
--- rule unfalsifiable here: the marker is emitted before @body@ runs, so
--- no call order can put it anywhere but first.
---
--- THE UNIT OF UNDO IS A NAMED GROUP, NOT EVERY TRANSACTION. Handlers
--- fire per-gesture transactions constantly and most of them are
--- consequences rather than intents, and a per-keystroke editor would
--- earn one step per character — the exact problem grouping exists to
--- solve. So a group is opt-in, which is also what keeps a collaborative
--- app free to own its own history (D8).
+-- D2): @undoableTx app ("add " ++ draft) $ do insertRecord ...@. The
+-- marker is emitted before @body@ runs, so no call order can put it
+-- anywhere but first.
 --
 -- WHAT A GROUP MAY HOLD is the reactive half — signal writes and
--- collection deltas, whose inverse the core derives from state it
--- already keeps. Focus is permitted and simply not restored. Anything
--- else (a const property write, creating a widget, 'clearWidget',
--- showing a dialog) fails at apply, naming the op: undo restores STATE,
--- and state is signals plus collections. An app that wants a widget
--- property undoable binds it to a signal. The label must be non-empty —
--- the empty one is how a typing EPISODE names itself on the same
--- occurrence. The result comes back through 'WOnUndone'.
+-- collection deltas. Anything else (a const property write, creating a
+-- widget, showing a dialog) fails at apply, naming the op. The label
+-- must be NON-EMPTY: the empty one is how a typing episode names itself.
 undoableTx :: App -> String -> Build a -> IO a
 undoableTx app = undoableTxIn app 0
 
@@ -3875,36 +3080,13 @@ undoableTxIn :: App -> Word64 -> String -> Build a -> IO a
 undoableTxIn app windowId label body =
   buildTx app (emitB (W.txUndoGroup windowId (W.VStr label)) >> body)
 
--- Fold an undo's payload into the collection model.
+-- Fold an undo's payload into the collection model. The payload is
+-- core-authoritative, so nothing here re-derives anything.
 --
--- The rollback journal in reverse: an abandoned Build restores nothing
--- because nothing was shipped, while an undo restores a delta because
--- everything WAS — the core already moved, and the model is what would
--- otherwise be left behind. The payload is core-authoritative, so
--- nothing here re-derives anything. Signals and text are not mirrored
--- by this binding (there is no read-back for either, by doctrine), so
--- those two runs pass straight to the app's handler.
---
--- NO DERIVED RECOMPUTE HERE, DELIBERATELY: the absence is the design
--- and not an omission. A derived signal's write rode the SAME
--- transaction as the mutation that caused it — 'recomputeDerived'
--- appends an ordinary 'txWriteSignal' to 'bRecords' on every mutation
--- path there is — so when that transaction was a named group the core
--- banked the derived value in both of the step's directions and has
--- already restored it by the time this runs. The types point the same
--- way: 'recomputeDerived' is a 'BuildState' step that appends to the
--- batch it is already inside, and there is no batch here. Reaching
--- 'appDerived' from IO would mean opening a transaction of the
--- binding's own, which is exactly the thing that would be wrong.
---
--- Because that transaction is one the app never asked for, carrying a
--- value the ledger never banked, arriving between the core's restore
--- and the app's 'WOnUndone'. Where it agreed with the banked value it
--- would be dead code hiding the mechanism; where it disagreed — a
--- compute reading anything beyond the entries, or a derive declared
--- after the step was banked (the residual docs/deferred.md keeps) — the
--- screen and the ledger's record of the step would drift apart, and the
--- next walk through the history would jump back to the banked value.
+-- NO DERIVED RECOMPUTE HERE, DELIBERATELY: a derived signal's write rode
+-- the SAME transaction as the mutation that caused it, so the core has
+-- already restored it by the time this runs. Recomputing would open a
+-- transaction the app never asked for.
 absorbUndo :: App -> UndoDelta -> IO ()
 absorbUndo app delta = modifyIORef' (appModel app) fold
   where
@@ -3945,20 +3127,15 @@ onChange :: App -> Widget -> (String -> IO ()) -> IO ()
 onChange app (Widget n) handler =
   modifyIORef' (appWidgetChanges app) (Map.insert n handler)
 
--- | Take pasted content at a live widget.
---
--- COSTS NOTHING ON ANY PLATFORM, unlike 'readClipboard': a paste is a
--- user gesture, so it is its own authorisation — iOS raises no prompt
--- and the focus rules are satisfied by construction. Only fires for a
--- widget that declared what it 'Accepts'.
+-- | Take pasted content at a live widget. COSTS NOTHING ON ANY PLATFORM,
+-- unlike 'readClipboard': a paste is a user gesture, so it is its own
+-- authorisation.
 onPaste :: App -> Widget -> (Representation -> IO ()) -> IO ()
 onPaste app (Widget n) handler =
   modifyIORef' (appWidgetPastes app) (Map.insert n handler)
 
--- | A paste onto a stamped copy: the handler also receives the copy's
--- key path, outermost first. One record kind, the path deciding —
--- exactly as a click on a stamped row is one record with a click on a
--- live widget.
+-- | A paste onto a stamped copy: the handler also receives the copy's key
+-- path, outermost first.
 onPasteNode :: App -> Node -> ([W.Value] -> Representation -> IO ()) -> IO ()
 onPasteNode app (Node n) handler =
   modifyIORef' (appNodePastes app) (Map.insert n handler)
@@ -3989,26 +3166,16 @@ onToggleNode :: App -> Node -> ([W.Value] -> Bool -> IO ()) -> IO ()
 onToggleNode app (Node n) handler =
   modifyIORef' (appNodeToggles app) (Map.insert n handler)
 
--- | Register a change handler for a template slider, select or radio;
--- it also receives the stamped copy's keys, outermost first. A choice
--- reports its new 0-based index as the Double, which is the same value
--- the live 'onValueChanged' hands a 'selectOn' handler before it rounds.
---
--- CENTRAL, NOT CO-LOCATED, like 'onClickNode' and unlike the template
--- 'checkbox': the three constructors that produce these occurrences
--- ('slider', 'select', 'radio') take a source and no handler, because
--- one blueprint is stamped N times and the handler has to be able to
--- tell the copies apart.
+-- | Register a change handler for a template slider, select or radio; it also
+-- receives the stamped copy's keys, outermost first.
 onValueChangedNode :: App -> Node -> ([W.Value] -> Double -> IO ()) -> IO ()
 onValueChangedNode app (Node n) handler =
   modifyIORef' (appNodeValues app) (Map.insert n handler)
 
--- | Turn the decoder's kind-and-parts into the sum, or Nothing.
---
--- EMPTY IS THE UNIVERSAL NO: Nothing covers a denied prompt on iOS, an
--- unfocused reader on Android or Wayland, an empty clipboard, and
--- content in no representation this read accepted. The guest is not
--- told which, because the platforms deliberately do not say.
+-- | Turn the decoder's kind-and-parts into the sum, or Nothing. EMPTY
+-- IS THE UNIVERSAL NO: Nothing covers a denied prompt, an unfocused
+-- reader, an empty clipboard and content in no accepted representation
+-- alike, because the platforms deliberately do not say which.
 representationOf :: Maybe W.ClipValues -> Maybe Representation
 representationOf Nothing = Nothing
 representationOf (Just cv)
@@ -4030,16 +3197,12 @@ representationOf (Just cv)
     regroup _ = []
 
 -- | A fresh app: zeroed id counters, an empty model, empty dispatch
--- tables. kayaMain starts from one; headless checks use it directly,
--- without ever entering the core.
+-- tables. kayaMain starts from one; headless checks use it directly.
 --
--- EVERY LINE NAMES ITS FIELD, because this chain is POSITIONAL and
--- most of the fields are @IORef (Map …)@ filled with the same
--- polymorphic @Map.empty@: a new table inserted one line off would
--- typecheck and silently swap two dispatch tables. The two @newIORef 0@
--- lines are the only positions the compiler pins on its own, which is
--- why the comments carry the rest. (Learned adding appNodeValues,
--- 2026-08-10.)
+-- EVERY LINE BELOW NAMES ITS FIELD, because this chain is POSITIONAL and
+-- most fields are @IORef (Map …)@ filled with the same polymorphic
+-- @Map.empty@: a new table inserted one line off would typecheck and
+-- silently swap two dispatch tables.
 newApp :: IO App
 newApp =
   App
@@ -4101,20 +3264,8 @@ dispatch body =
   body `catch` \e ->
     hPutStrLn stderr ("kaya: handler threw (transaction rolled back): " ++ show (e :: SomeException))
 
--- | Run @body@ as a transaction on the app thread, soon. THE ONE
--- action safe to call from another thread, and the answer to "how does
--- background work reach the UI".
---
--- @build app@ is a transaction NOW on the calling thread; @post app@ is
--- the same transaction SOON on the app thread — so a background thread
--- writes ordinary blocking Haskell and hands back only the result:
---
--- > _ <- forkIO $ do
--- >   text <- readFile path            -- blocks this thread
--- >   post app (set content text)      -- back on the app thread
---
--- Signals are ids and are meant to be captured; that is how the posted
--- action names what to write. A posted action runs in its OWN
+-- | Run @body@ as a transaction on the app thread, soon. THE ONE action
+-- safe to call from another thread. A posted action runs in its OWN
 -- transaction, after whatever is running now, so posting from inside a
 -- handler queues for after and never nests.
 post :: App -> IO () -> IO ()
@@ -4125,10 +3276,9 @@ post app body = do
   -- only way it hears about it.
   wake
 
--- | Run everything posted, each as its own transaction, in order.
---
--- The batch is taken and the MVar put back BEFORE any of it runs, so an
--- action that posts again lands in the NEXT batch. Holding the MVar
+-- | Run everything posted, each as its own transaction, in order. The
+-- batch is taken and the MVar put back BEFORE any of it runs, so an
+-- action that posts again lands in the NEXT batch; holding the MVar
 -- across the calls would deadlock the moment one of them posted.
 drainPosted :: App -> IO ()
 drainPosted app = do
@@ -4205,10 +3355,9 @@ dispatchLoop app = do
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindSectionSelected -> do
-          -- NOT one-shot: sections never die, and the user can
-          -- return any number of times (ident is the section; the
-          -- window rides as the payload). A programmatic
-          -- selectSection never lands here (the echo doctrine).
+          -- NOT one-shot: sections never die, and the user can return any
+          -- number of times (ident is the section; the window rides as the
+          -- payload).
           handlers <- readIORef (appSectionSelected app)
           dispatch (mapM_ id (Map.lookup ident handlers))
           dispatchLoop app
@@ -4222,10 +3371,8 @@ dispatchLoop app = do
           dispatch (mapM_ ($ representationOf clip) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindPasted -> do
-          -- A paste rides a click tag verbatim, so it arrives on the
-          -- ordinary widget/node split — one record kind, the key path
-          -- deciding. Never empty: a paste that delivered nothing is not
-          -- an occurrence.
+          -- A paste rides a click tag verbatim, so it arrives on the ordinary
+          -- widget/node split — one record kind, the key path deciding.
           case (representationOf clip, keys) of
             (Nothing, _) -> return ()
             (Just rep, []) -> do
@@ -4259,13 +3406,11 @@ dispatchLoop app = do
           dispatch (mapM_ ($ choice) (Map.lookup ident handlers))
           dispatchLoop app
       -- The undo pair keys the per-WINDOW tables (ident is the window;
-      -- the label rides as the payload). NOT one-shot — a history is
-      -- walked as often as the user likes.
-      --
-      -- THE MODEL IS RECONCILED FIRST, and unconditionally: the core
-      -- moved without a transaction, so an app reading `count` inside
-      -- the handler must see the restored state, and an app with no
-      -- handler at all must not be left with a stale model.
+      -- the label rides as the payload). NOT one-shot. THE MODEL IS
+      -- RECONCILED FIRST, and unconditionally: the core moved without a
+      -- transaction, so an app reading `count` in the handler must see
+      -- the restored state, and an app with no handler must not be left
+      -- with a stale model.
       | kind == W.occKindUndone || kind == W.occKindRedone -> do
           let delta = maybe emptyUndoDelta id undone
               label = case payload of Just (W.VStr s) -> s; _ -> ""

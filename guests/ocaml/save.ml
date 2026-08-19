@@ -121,14 +121,10 @@ let () =
         ignore (pick_file ~on_result:opened ())
       in
       let save_back () =
-        (* No dialog: the handle the OPEN picker handed over is writable, which
-           is the claim this step drives. *)
         let file = Option.get !source in
         work (fun () -> "saved " ^ write_back file "second draft")
       in
       let save_as () =
-        (* "copy" is the name the dialog OPENS with; the harness types
-           over it. *)
         ignore (save_file ~on_result:saved "copy")
       in
       let reopen () =

@@ -1,15 +1,12 @@
 # shellcheck shell=bash
-# Shared Swift/macOS toolchain resolution — source, don't execute.
-# (No shebang, because it is sourced. The directive on line 1 is what
-# names the dialect to lint this as; without it the check errors out.)
+# Shared Swift/macOS toolchain resolution — source, don't execute. No
+# shebang for that reason; line 1's directive is what names the dialect
+# to shellcheck, and without it check-shell errors out.
 #
 # Inside the nix dev shell DEVELOPER_DIR/SDKROOT point at a nix apple-sdk
-# where `xcrun` finds no swiftc, so every Swift build has to steer back to
-# a real Apple toolchain. That dance was copy-pasted (with drift) across
-# validate-mac.sh, swift-typecheck.sh, and swiftui/build-dylib.sh; this is
-# the single source of truth. Callers `source` this file, then invoke
-# `kaya_swiftc <args>` — a swiftc that already carries the right SDK and
-# the right DEVELOPER_DIR/SDKROOT handling.
+# where `xcrun` finds no swiftc, so every Swift build has to steer back
+# to a real Apple toolchain. Callers source this file, then invoke
+# `kaya_swiftc <args>`.
 #
 # Resolution order (prefer the fullest SDK, since the SwiftUI dylib build
 # needs frameworks CommandLineTools may not carry):
@@ -49,9 +46,8 @@ kaya_resolve_swiftc() {
     SWIFT_SDK_ARGS=(-sdk "$sdk")
 }
 
-# Invoke the resolved swiftc with its SDK and the correct DEVELOPER_DIR
-# handling (set for a full Xcode; unset otherwise so the nix apple-sdk
-# doesn't shadow it). SDKROOT is always cleared — an explicit -sdk wins.
+# DEVELOPER_DIR is set for a full Xcode and unset otherwise, so the nix
+# apple-sdk cannot shadow it; SDKROOT is always cleared so -sdk wins.
 kaya_swiftc() {
     kaya_resolve_swiftc || return 1
     if [ -n "${SWIFT_DEVELOPER_DIR:-}" ]; then

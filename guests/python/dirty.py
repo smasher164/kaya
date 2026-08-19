@@ -1,13 +1,9 @@
 """The dirty-state conformance scene, Python port — unsaved work as
-window chrome (docs/dirty-plan.md). One boolean beside `title` and
-`veto_close` on the window construct: the app declares STATE, and each
-backend spells its own platform's affordance — the dot in the close
-button on macOS, a leading `*` in the rendered caption on Windows, a
-bullet in the GTK header bar, nothing on the phones, which have none.
+window chrome (docs/dirty-plan.md). The app declares STATE, and each
+backend spells its own platform's affordance.
 
 TWO DECLARATIONS, ON PURPOSE: an edit writes the document AND says
-`dirty=True`. kaya does not watch your signals and guess. The mark arms
-nothing — the close attempt fires the veto class the window opted into.
+`dirty=True`. kaya does not watch your signals and guess.
 
 See guests/rust/dirty.rs and tools/scenes/dirty.steps."""
 
@@ -19,14 +15,8 @@ app = kaya.App()
 
 
 def edit():
-    # Neither implies the other: writing the document does not mark the
-    # window, and marking it writes nothing.
     doc.set("notes and a line")
     status.set("unsaved")
-    # The LIVE spelling of the window construct — the same call without
-    # the `with`, since this handler's transaction is already open. A
-    # window attribute is never a loose function outside the construct
-    # (DESIGN.md, Binding conventions).
     app.window(dirty=True)
 
 

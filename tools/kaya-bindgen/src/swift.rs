@@ -163,13 +163,11 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         emit_packer(&mut c, r);
     }
 
-    // The set_property arms, one trio per property: spec-driven so new
-    // props reach every binding without emitter edits.
+    // The set_property arms, one trio per property, spec-driven.
     for (prop, _, kind) in prop_variants(spec) {
         let pc = pascal(prop);
         let up = prop.to_uppercase();
-        // Blob setters take the u64 kaya_blob_register handle (see
-        // KayaValue.blob), so the parameter says so.
+        // Blob setters take the u64 kaya_blob_register handle (KayaValue.blob).
         let (p, ty, ctor) = match kind {
             crate::PropKind::Str => (camel(prop), "String", "str"),
             crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
@@ -211,9 +209,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
-    // The window-prop duos (const + signal — element sources are
-    // rejected by the wire). Window 0, the primary surface, until aux
-    // windows land.
+    // The window-prop duos: const + signal, element sources being
+    // rejected by the wire.
     for (prop, _, kind) in window_prop_variants(spec) {
         let pc = pascal(prop);
         let up = prop.to_uppercase();
@@ -311,11 +308,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
-    // The menu-prop setters (const for every prop; signal binders only
-    // for the bindable ones — icon/primary/shortcut are const-only and
-    // SOURCE_SIGNAL on them dies at the root). The shortcut setter
-    // routes through kayaCanonicalizeShortcut (defined after the
-    // struct), so no call site can bypass canonicalization.
+    // The menu-prop setters: a const setter for every prop, signal
+    // binders only for the bindable ones (SOURCE_SIGNAL on the rest
+    // dies at the root). The shortcut setter routes through
+    // kayaCanonicalizeShortcut, so no call site can bypass it.
     for (prop, _, kind) in crate::menu_prop_variants(spec) {
         let pc = pascal(prop);
         let up = prop.to_uppercase();
@@ -426,11 +422,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("    return (primary ? \"primary+\" : \"\") + (shift ? \"shift+\" : \"\") + (alt ? \"alt+\" : \"\") + key");
     c.line("}");
     c.line("");
-    // The occurrence blob table, the third direction. A blob in an
-    // OCCURRENCE is a table handle, not the apply channel's batch-local
-    // index: this channel has no boundary that retires one, so it is
-    // released explicitly. Redeeming inside the decoder is what keeps a
-    // handle from ever reaching an app.
+    // The occurrence blob table. A blob in an OCCURRENCE is a table
+    // handle, not the apply channel's batch-local index, and nothing
+    // retires one here — so the decoder redeems and releases it, which
+    // is what keeps a handle from ever reaching an app.
     c.line("/// One value of a representation. Its own type rather than a case");
     c.line("/// on KayaValue, because bytes reach a guest ONLY here — nothing");
     c.line("/// else on the occurrence channel has ever carried them.");
@@ -546,9 +541,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("            return (kind, id, [], nil, files, nil)");
     c.line("        }");
-    // The privileged read's one answer. Its own arm for the
-    // file_dialog_result reason and then some: the generic tail would
-    // take the CLIP KIND for a path length, so a text answer (kind 1)
+    // The privileged read's one answer, in its own arm: the generic
+    // tail would take the CLIP KIND for a path length, so a text answer
     // would read the values header as a key.
     for name in crate::clip_answer_occurrence_names(spec) {
         c.line(&format!(
@@ -637,9 +631,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("            }");
     c.line("        }");
     // A paste rides a click tag VERBATIM, so the key path above is
-    // already read and the clip sits after it — the way text_changed's
-    // payload does. One record kind, path_len deciding, exactly as a
-    // click on a stamped row is one record with a click on a live one.
+    // already read and the clip sits after it. One record kind, path_len
+    // deciding.
     c.line("        var clip: KayaClipValues? = nil");
     let pasted = crate::pasted_occurrence_names(spec)
         .iter()

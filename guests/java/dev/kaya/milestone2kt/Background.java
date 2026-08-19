@@ -14,9 +14,6 @@ import java.util.concurrent.CountDownLatch;
  * <p>The worker MUST be a daemon thread: a parked non-daemon thread
  * keeps the JVM alive, which never shows on a passing run and turns a
  * FAILING one into a timeout instead of a report.
- *
- * <p>The accumulators need no lock — everything that touches them runs
- * on the app thread, inside a posted transaction.
  */
 final class Background {
     private static final CountDownLatch RELEASED = new CountDownLatch(1);
@@ -60,8 +57,6 @@ final class Background {
                     worker.start();
                     inner.write(status, "working");
                 });
-                // Proof the app thread still serves input while the
-                // worker is parked.
                 tx.button("ping", inner -> inner.write(alive, "alive")); // button#1
                 tx.button("release", inner -> RELEASED.countDown()); // button#2
                 // A post from INSIDE a handler QUEUES for after; it

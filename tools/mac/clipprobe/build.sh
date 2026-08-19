@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/../../.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,18 +11,13 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# Build and run ClipProbe TWICE — as a bare binary and as an .app
-# bundle — and print both transcripts.
+# Build and run ClipProbe TWICE — bare binary and .app bundle — and
+# print both transcripts. A probe, not a lane: questions in main.swift,
+# answers in docs/clipboard-plan.md.
 #
-# NOT A LANE. It answers what macOS charges for a clipboard read before
-# the arm is written; see main.swift's header for the questions and
-# docs/clipboard-plan.md for what it found.
-#
-# BOTH SHAPES ON PURPOSE (Q6). macOS's paste restriction is about which
-# APP is reading, and a bare CLI binary has no bundle identity at all.
-# If the two disagree, the bundled answer is the one that describes
-# kaya, and a probe that only ran the easy shape would have said the
-# wrong thing confidently.
+# BOTH SHAPES ON PURPOSE (Q6): macOS's paste restriction is about which
+# APP is reading, and a bare CLI binary has no bundle identity. Where
+# they disagree, the bundled answer is the one that describes kaya.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -35,8 +25,8 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 cd "$ROOT"
 
 # Inside the dev shell DEVELOPER_DIR/SDKROOT point at a nix apple-sdk
-# where xcrun finds no swiftc. tools/lib/swift-toolchain.sh is the
-# single source of truth for steering back to a real Apple toolchain.
+# where xcrun finds no swiftc; this steers back to a real Apple
+# toolchain.
 # shellcheck source=tools/lib/swift-toolchain.sh
 . "$ROOT/tools/lib/swift-toolchain.sh"
 kaya_resolve_swiftc || exit 1
@@ -65,8 +55,7 @@ cat >"$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 echo "=== bare binary (no bundle identity) ==="
-# `if !` and not an rc capture: set -e is on, so the failing command
-# would take the script down before anything could read $?.
+# `if !` and not an rc capture: set -e would take the script down first.
 if ! "$OUT/clipprobe"; then echo "clipprobe: refused to run"; fi
 
 echo

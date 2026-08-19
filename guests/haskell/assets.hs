@@ -11,8 +11,8 @@
 
    THE MISS IS A QUESTION, NOT A @catch@. @assetMissSentence@ answers the
    same sentence @asset@ would raise with, without raising, and that is
-   the only shape nine languages share: Swift's raise is a trap rather
-   than an exception, so a Swift sibling cannot catch its own miss at all.
+   the only shape all nine share — the C floor catches nothing at all
+   (docs/deferred.md, the assets entry).
 
    LINE 1 ONLY. Line 2 of that sentence names the place the core resolved
    and the route that chose it, which a bundle, a device directory and a

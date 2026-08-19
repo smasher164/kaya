@@ -4,9 +4,8 @@ import dev.kaya.KayaApp;
 
 /**
  * The align conformance scene from the JVM — see guests/rust/align.rs
- * and tools/scenes/align.steps for the rationale. Children of three
- * different natural widths, and a tall no-baseline image in the
- * baseline row: the construction that separates the modes on every
+ * and tools/scenes/align.steps. The tall no-baseline image in the
+ * baseline row is the construction that separates the modes on every
  * platform's control metrics.
  */
 final class Align {

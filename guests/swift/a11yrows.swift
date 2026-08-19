@@ -39,9 +39,6 @@ app.build { tx in
             t.setInset(bar, 8)
         }
     }
-    // OUTSIDE THE BUILDER, BEFORE THE MOUNT: an insert is not a child.
-    // Seeding after the mount also stamps (reorder.swift does it), so
-    // this is a difference with no upside rather than a rule.
     tx.insertFresh(notes, .str("First note"))
     tx.insertFresh(notes, .str("Second note"))
     tx.insertFresh(heads, .str("Heading one"))

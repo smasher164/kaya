@@ -11,16 +11,15 @@
 // window scoping makes captures occlusion-proof and crop-free — the
 // same shape as the macOS recorder.
 //
-// Watches for windows titled "kaya*"; while one exists, saves frames
-// as <epoch_ms>.png into <outdir> (throttled to ~5 fps). When the
-// window closes, goes back to watching — one invocation films every
-// serial leg of a suite run. Exits when <outdir>\stop appears. The
-// epoch in each filename is this machine's clock, the same clock the
-// harness transcripts stamp, so extraction needs no other anchor.
+// While a kaya window exists, saves frames as <slot>-<epoch_ms>.png into
+// <outdir>; when it closes, goes back to watching, so one invocation
+// films every serial leg of a suite run. Exits when <outdir>\stop
+// appears. The epoch is this machine's clock, the same one the harness
+// transcripts stamp, so extraction needs no other anchor.
 //
-// The interop follows robmikh's ManagedScreenshotDemo / CsWinRT
-// interop docs verbatim; Vortice supplies D3D11 (no hand-rolled COM
-// vtables — the exact code category where guessed slot orders fail).
+// The interop follows robmikh's ManagedScreenshotDemo / CsWinRT interop
+// docs verbatim; Vortice supplies D3D11, so there are no hand-rolled COM
+// vtables.
 
 using System.Runtime.InteropServices;
 using SharpGen.Runtime;
@@ -84,19 +83,15 @@ internal static class Program
     }
 
     // A GUEST WINDOW IS A WinUI WINDOW, not a window whose title happens
-    // to start with "kaya". The title test alone was written when every
-    // scene ran under the milestone-2 app's "kaya milestone 2" title;
-    // scenes have set their own since (`tx.window(...).title("undo")`),
-    // so the recorder filmed NOTHING for them — the run reported "the
-    // capturer produced no frames" and the leg still passed, which is
-    // the shape of a recording gap that reads as an empty lane.
+    // to start with "kaya": a scene that titles its own window
+    // (`tx.window(...).title("undo")`) was filmed NOT AT ALL by the title
+    // test, the run reported "the capturer produced no frames", and the
+    // leg still passed.
     //
     // Microsoft.UI.Xaml.Window's HWND carries the class
-    // WinUIDesktopWin32WindowClass, and this VM runs no other WinUI app,
-    // so the class is the whole identification — for every language,
-    // every scene, whatever the guest titles its window. The title test
-    // stays as well: it costs nothing and keeps any window a future
-    // helper names "kaya*" in the film.
+    // WinUIDesktopWin32WindowClass and this VM runs no other WinUI app,
+    // so the class is the whole identification. The title test stays too,
+    // to keep any window a future helper names "kaya*" in the film.
     private const string WinUiClass = "WinUIDesktopWin32WindowClass";
 
     private static List<IntPtr> FindKayaWindows()
@@ -172,20 +167,16 @@ internal static class Program
         Marshal.Release(inspPtr);
 
         Console.WriteLine("RECORDER_READY");
-        // One worker per live kaya window: parallel legs each get
-        // their own capture loop; the worker retires when its window
+        // One worker per live kaya window; it retires when its window
         // closes.
         //
         // KAYA_RECORD_LANES > 1 puts SEVERAL workers on the same window,
-        // staggered across the sample period. A cycle is mostly WAITING
-        // — the session's first frame comes back from the compositor in
-        // tens of milliseconds — so overlapping cycles is what raises
-        // the true frame rate; shortening the sleep alone cannot go
-        // below the cycle's own cost. It exists because a WinUI leg is
-        // FASTER THAN THE RECORDER: undo_rust's 90 steps run in 313ms,
-        // and at one lane the whole scripted part of the leg lands in
-        // two frames. Default 1 — a matrix run's four concurrent legs
-        // want the cheap loop, and nothing but a showcase asks for more.
+        // staggered across the sample period. A cycle is mostly WAITING,
+        // so overlapping cycles is what raises the true frame rate;
+        // shortening the sleep alone cannot go below the cycle's own
+        // cost. It exists because a WinUI leg is FASTER THAN THE
+        // RECORDER: undo_rust's 90 steps run in 313ms, and at one lane
+        // the whole scripted part of the leg lands in two frames.
         var lanes = 1;
         if (int.TryParse(Environment.GetEnvironmentVariable("KAYA_RECORD_LANES"),
                 out var l) && l >= 1 && l <= 8)
@@ -243,12 +234,10 @@ internal static class Program
         GetClassName(hwnd, cls, 256);
         if (lane == 0)
             Console.WriteLine($"CAPTURING {hwnd:x} slot={slot} title=\"{title}\" class={cls} lanes={lanes}");
-        // The sample period: 150ms (~3fps of true pixels) is what a
-        // matrix run wants — enough for the extractor's covering frame,
-        // cheap on a VM running four legs at once. A SHOWCASE film of a
-        // single serial leg wants more, and a WinUI leg is over in
-        // seconds: KAYA_RECORD_PERIOD_MS asks for a denser film without
-        // changing what any other run does.
+        // 150ms (~3fps of true pixels) is what a matrix run wants: enough
+        // for the extractor's covering frame, cheap on a VM running four
+        // legs at once. KAYA_RECORD_PERIOD_MS buys a denser showcase film
+        // without changing what any other run does.
         var period = 150;
         if (int.TryParse(Environment.GetEnvironmentVariable("KAYA_RECORD_PERIOD_MS"),
                 out var p) && p >= 10 && p <= 5000)
@@ -268,12 +257,11 @@ internal static class Program
             {
                 Console.Error.WriteLine($"record-win: shot: {e.Message} (0x{e.HResult:x})");
             }
-            // SPREAD THE LANES OVER A MEASURED CYCLE, not over the sleep.
-            // A cycle is the sleep PLUS the session round trip (~90ms
+            // SPREAD THE LANES OVER A MEASURED CYCLE, not over the sleep:
+            // a cycle is the sleep PLUS the session round trip (~90ms
             // here), so staggering by the sleep alone leaves four lanes
-            // firing within a few ms of each other: 40 frames arrived as
-            // 10 instants, four copies each. The first cycle measures
-            // itself and the lane then shifts by its share of it.
+            // firing within a few ms of each other. The first cycle
+            // measures itself and the lane shifts by its share of it.
             if (!staggered)
             {
                 var cycle = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - c0 + period;
@@ -348,10 +336,9 @@ internal static class Program
 
     // <slot>-<epoch_ms>.png is the contract the host-side extraction
     // parses, so a second lane landing in the same millisecond takes the
-    // next one rather than a suffix. Reserved (not just checked) because
-    // the encoder's write comes later, and two lanes would otherwise
-    // both pass the existence test and one would be encoding into the
-    // other's file.
+    // next millisecond rather than a suffix. RESERVED, not just checked:
+    // the encoder's write comes later, so two lanes would otherwise both
+    // pass the existence test and one would encode into the other's file.
     private static string ReserveName(string outdir, string slot, long now)
     {
         lock (NameLock)
@@ -396,13 +383,12 @@ internal static class Program
             CPUAccessFlags = CpuAccessFlags.Read,
             MiscFlags = ResourceOptionFlags.None,
         });
-        // ONLY THE CONTEXT WORK IS SERIALIZED. The PNG encode used to sit
-        // inside this lock too, and with several capture lanes that
-        // produced a convoy: every lane queued on the encode, left the
-        // lock in single file, and came back to the compositor in step,
-        // so four lanes sampled ONE instant four times over (measured:
-        // 40 frames arriving as 10 instants). Copy and map under the
-        // lock, encode outside it.
+        // ONLY THE CONTEXT WORK IS SERIALIZED. With the PNG encode inside
+        // this lock, several capture lanes convoy: each queues on the
+        // encode, leaves in single file and returns to the compositor in
+        // step, so four lanes sample ONE instant four times over
+        // (measured: 40 frames arriving as 10 instants). Copy and map
+        // under the lock, encode outside it.
         var stride = width * 4;
         var pixels = new byte[stride * height];
         lock (CtxLock)

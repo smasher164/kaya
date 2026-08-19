@@ -3,8 +3,7 @@
 {-# LANGUAGE TypeApplications #-}
 
 {- The reorder scene from Haskell: order as collection data. Each
-   handler repositions an entry BY KEY, never by index, and expect_order
-   reads the toolkit's actual child order back.
+   handler repositions an entry BY KEY, never by index.
 
    THE ROOT IS A ROW so the For's container is the scene's only
    column-kind widget: languages disagree on whether a container is

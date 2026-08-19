@@ -182,7 +182,7 @@ The 5 non-guest copies of the 4x4 image are separately compiled programs
 on four toolchains: tools/win/clipprobe/src/main.rs:55,
 tools/linux/gdkclipprobe/probe.rs:66, tools/ios/clipprobe/main2.swift:57,
 tools/android/clipprobe/app/src/main/kotlin/dev/kaya/clipprobe/SeedReceiver.kt:82,
-and tools/android/cliphelper/run3.sh:75 (base64 over an intent extra, the
+and tools/android/cliphelper/run3.sh:63 (base64 over an intent extra, the
 only base64 of it in the tree).
 
 ### Why the images stay inline, stated properly

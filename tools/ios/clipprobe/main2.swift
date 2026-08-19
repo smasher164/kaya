@@ -4,38 +4,14 @@
 // measures the WRITE PATH, the sync bridge, and the prompt's mechanics
 // under the reads the arm will actually issue.
 //
-//  W  (mode=write) THE UNION WRITE, on the path the arm will use:
-//     `pb.items = [[type: value]]` with all five representations in
-//     one item (files as a second item). The cells:
-//     W1 does the slashed custom id `dev.kaya/note` survive VERBATIM
-//        in `types`? macOS's NSPasteboardItem silently dropped it and
-//        the board-level path served it — which path serves on iOS is
-//        THE question §8 orders answered first.
-//     W2 does each representation read back byte-exact as OUR OWN
-//        content (no prompt)?
-//     W3 if setItems drops the custom id, does setData(_:forPasteboardType:)
-//        preserve it instead (the 2x2 the mac finding demands)?
-//     The host then terminates the app and pbsyncs device->host: what
-//     crosses, and does the custom id cross under its own name —
-//     PERSISTENCE PAST PROCESS EXIT measured in the same stroke.
-//
-//  R  (mode=recv) THE PROMPT-FREE QUERIES against host-seeded content:
-//     numberOfItems / types / has* only, NO data touch — the cell that
-//     decides whether the unsatisfiable read (accepts files, clipboard
-//     holds text) can answer "empty" without an alert.
-//
-//  P  (mode=read) THE PROMPTED READ, on the arm's thread plan: the
-//     read runs on a BACKGROUND queue while the main thread heartbeats
-//     — proving the app stays drivable while the read blocks on the
-//     alert. Then:
-//     P1 the first foreign read (blocks until the host presses a
-//        button; wall time printed).
-//     P2 an immediate second read — does Allow persist for the pair,
-//        or does every read prompt?
-//     P3 a read after the host RE-SEEDS (new changeCount, same
-//        source) — does fresh content from the same source re-prompt?
-//        The app polls changeCount (prompt-free) to know when the
-//        re-seed landed.
+// Three modes, and the cells each measures are docs/clipboard-plan.md §8:
+//   W (mode=write) the union write on the arm's own path, then the host
+//     terminates the app and pbsyncs device->host, so persistence past
+//     process exit is measured in the same stroke.
+//   R (mode=recv)  the prompt-free queries against host-seeded content,
+//     NO data touch.
+//   P (mode=read)  the prompted read, on the arm's thread plan — the
+//     read on a BACKGROUND queue while the main thread heartbeats.
 //
 // Answers land on stdout under "PROBE". Not a lane; nothing builds it
 // but run2.sh beside it.

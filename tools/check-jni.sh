@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain.
-# A shell entered before the flake last changed is a bystander
-# toolchain; the marker carries the fingerprint the shell was built
-# from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -13,33 +9,19 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# The JNI registration gate: every native/external method a JVM-facing
-# class declares has an implementation the moment the library attaches.
-#
-# JNI's own check runs one way only. register_native_methods fails
-# loudly at attach for an entry the CLASS lacks — but a native the
-# class declares and no list registers just waits, and the
-# UnsatisfiedLinkError fires at FIRST USE, on whichever platform and
-# scene first walks that path. That is how KayaRing.openPicked sat in
-# the desktop-only list for months (under a comment promising it was
-# shared) and died on Android's first pasted file, in the first leg
-# ever to redeem one there (2026-08-03).
-#
-# So this gate closes the other direction, statically, both ways:
+# The JNI registration gate. JNI's own check runs one way only: it fails
+# at attach for a registered native the class lacks, but a
+# declared-and-unregistered one waits and throws UnsatisfiedLinkError at
+# FIRST USE. So this closes the other direction, statically:
 #   - every external fun in android/kaya's KayaRing.kt, KayaPresent.kt
-#     and Kaya.kt is registered on the ANDROID attach path (the shared
-#     ring list, the present list) or is a name-resolved
-#     Java_dev_kaya_* export in android.rs;
-#   - every native method in bindings/java-desktop's KayaRing.java is
-#     registered on the DESKTOP attach path (the shared ring list, the
-#     desktop list) or exported in jvm.rs;
-#   - every registered name is declared where its list targets — the
-#     shared ring list in BOTH KayaRing classes, the desktop list in
-#     the Java one, the present list in KayaPresent.kt.
+#     and Kaya.kt is on the ANDROID attach path (the shared ring list,
+#     the present list) or is a Java_dev_kaya_* export in android.rs;
+#   - every native in bindings/java-desktop's KayaRing.java is on the
+#     DESKTOP attach path or exported in jvm.rs;
+#   - every registered name is declared where its list targets.
 #
-# Name-level on purpose: once the name is in the right list, a
-# signature mismatch DOES fail loudly at attach — the silent hole is
-# coverage, and coverage is what this pins.
+# Name-level on purpose: a signature mismatch DOES fail at attach. The
+# silent hole is coverage.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -62,9 +44,8 @@ def kotlin_externals(text):
     return set(re.findall(r"external fun (\w+)", text))
 
 def java_natives(text):
-    # `public static native java.io.FileDescriptor openPicked(` — the
-    # name is the identifier right before the parameter list, on the
-    # same line as the `native` keyword or a continuation of it.
+    # The identifier right before the parameter list, on the `native`
+    # line or a continuation of it.
     return set(re.findall(r"\bnative\b[^(;=]*?(\w+)\s*\(", text))
 
 def fn_registration_names(text, fnname):
@@ -104,8 +85,7 @@ def check(src):
     desktop = fn_registration_names(src["jvm.rs"], "register_desktop_natives")
     present = fn_registration_names(src["android.rs"], "register_present_natives")
 
-    # Vacuity pins (the check-tx-liveness lesson: a pattern that stops
-    # matching must fail the gate, not pass it).
+    # Vacuity pins: a pattern that stops matching must fail the gate.
     for label, got, sentinel in [
         ("KayaRing.kt externals", kt_ring, "submit"),
         ("KayaPresent.kt externals", kt_present, "emitClicked"),
@@ -132,8 +112,7 @@ def check(src):
     exp_android_kaya    = exports(src["android.rs"], "Kaya")
     exp_jvm_ring        = exports(src["jvm.rs"], "KayaRing")
 
-    # Android attach path: what the Kotlin classes declare must all be
-    # reachable the moment android.rs's attach runs.
+    # Android attach path.
     for name in sorted(kt_ring - ring - exp_android_ring):
         errs.append(f"KayaRing.kt declares external fun {name} but the android "
                     f"attach path never registers it (register_ring_natives in "
@@ -152,7 +131,7 @@ def check(src):
                     f"register_desktop_natives in jvm.rs)")
 
     # Reverse: a registered name the class lacks fails at attach on ONE
-    # platform — catch it here, for both, before any JVM runs.
+    # platform — catch it here, for both.
     for name in sorted(ring - kt_ring):
         errs.append(f"register_ring_natives registers {name} which "
                     f"KayaRing.kt does not declare (the shared list serves "
@@ -174,8 +153,8 @@ def check(src):
 
 src = {name: path.read_text() for name, path in FILES.items()}
 
-# ---- Self-tests: perturb a copy, prove the perturbation applied
-# (substitution count printed, zero is a FAILED test), demand red. ----
+# ---- Self-tests: perturb a copy, prove the perturbation applied,
+# demand red. ----
 
 def perturbed(base, name, pattern, repl):
     text, n = re.subn(pattern, repl, base[name], flags=re.S)
@@ -188,8 +167,8 @@ def perturbed(base, name, pattern, repl):
     return out
 
 selftests = [
-    # The historic failure, replayed: the openPicked entry vanishes from
-    # the shared list while both classes still declare it.
+    # The entry vanishes from the shared list while both classes still
+    # declare it.
     ("openPicked entry dropped from register_ring_natives",
      perturbed(src, "jvm.rs",
                r'NativeMethod \{\s*name: "openPicked"\.into\(\),.*?\},', ""),
@@ -203,8 +182,7 @@ selftests = [
      perturbed(src, "KayaRing.java",
                r"native int run\(", "native int runGone("),
      "run"),
-    # Vacuity: an emptied jvm.rs must be a loud parse failure, never a
-    # clean pass.
+    # An emptied jvm.rs must be a loud parse failure, not a clean pass.
     ("jvm.rs emptied",
      {**src, "jvm.rs": ""},
      "vacuous"),

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
+# Dev-shell guard; the marker is the flake fingerprint (CLAUDE.md).
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,50 +10,25 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# A HANDLER IS A TRANSACTION — and a guest must never open one itself.
+# A HANDLER IS A TRANSACTION — and a guest must never open one itself
+# (CLAUDE.md's gate list for the Python defect it exists for). The gate
+# does not test the binding; it removes the guests' ability to hide a
+# regression, so the existing scenes become the test.
 #
-# THE DEFECT THIS EXISTS FOR (found 2026-07-27, by a documentation
-# audit rather than by any gate). Python's dispatch loop wrapped widget
-# and menu handlers in an ambient transaction but called the six
-# LIFECYCLE handlers bare — close_requested, window_closed,
-# entry_popped, section_selected, back_requested, alert_result. So
-# `kaya.destroy_window()` inside an on_close_requested raised "no
-# ambient transaction", and DESIGN's ratified rule ("a handler is a
-# transaction ... atomic without any effort from the author") was false
-# in Python alone.
-#
-# WHY NO GATE SAW IT, which is the part worth keeping: the scenes
-# PASSED. Five guests each opened a transaction by hand —
-# `with app.build():` at the top of the handler — so the lane was green
-# while the binding was wrong. The workaround WAS the camouflage.
-#
-# So this gate does not test the binding. It removes the ability to
-# HIDE a regression: with no guest able to compensate, the existing
-# scenes become the test, and a binding that stops supplying the
-# transaction fails them loudly on every lane.
-#
-# WHY PYTHON ONLY. The defect needs an AMBIENT transaction — one the
-# handler cannot see. Go, Java, Swift and C# hand the handler its
-# transaction as a parameter (`tx2 -> tx2.write(...)`), so a missing one
-# is not expressible. Haskell opens one explicitly in EVERY handler,
-# widget and lifecycle alike; that is the config-list idiom, uniform,
-# and not a workaround. OCaml is ambient like Python and was already
-# correct — but it has no reliable textual discriminator (its
-# scene-declaring `build app` is itself indented, inside `let () =`, and
-# in menus.ml appears twice at two different depths, both legitimate).
-# A rule that misfires gets disabled, which is worse than a narrower
-# rule that is always right; OCaml's guard, if it is ever wanted, is a
-# behavioural check in the check-abort family, not a grep.
+# PYTHON ONLY. The handle bindings pass the transaction in, so a missing
+# one is not expressible. Haskell opens one in every handler by idiom.
+# OCaml is ambient too but has no reliable textual discriminator (its
+# `build app` is itself indented, and appears twice at two depths in
+# menus.ml, both legitimate); its guard would be a behavioural check in
+# the check-abort family, not a grep.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-# INDENTATION IS THE DISCRIMINATOR, and in Python it is exact. At module
-# scope `with app.build():` is the blessed spelling for mutations
-# OUTSIDE any handler — guests/python/menus.py seeds its collections
-# that way after mount, and that is correct. Indented, it is inside a
-# def, which is inside a handler, which already has a transaction.
+# INDENTATION IS THE DISCRIMINATOR: at module scope `with app.build():`
+# is the blessed spelling for mutations OUTSIDE any handler; indented,
+# it is inside a def, which is inside a handler.
 lint() {
     # $1: a python guest (or - for stdin). Prints offenders, returns 1 on any.
     python3 -c '
@@ -76,8 +46,7 @@ sys.exit(1 if bad else 0)
 ' "$1"
 }
 
-# The guard guards itself, both directions: a handler-scoped build must
-# be caught, and the module-scope one must NOT be.
+# Self-test, both directions: handler-scoped caught, module-scope not.
 if printf 'def popped():\n    with app.build():\n        s.set("x")\n' \
     | lint - >/dev/null; then
     echo "check-ambient-tx: SELF-TEST FAIL (handler-scoped build passed)" >&2

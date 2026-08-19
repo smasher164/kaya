@@ -19,21 +19,11 @@ final class Typeface {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            // BEFORE THE FIRST MOUNT, per the set-once wall.
-            //
-            // ONE CALL, AND NO FILE I/O IN THE GUEST. The path, the
-            // environment override and the sentence for a miss were all
-            // hand-written here (and in seven sibling scenes) until
-            // asset() arrived; they live in the core now
-            // (crates/kaya/src/assets.rs), which is also why the bytes
-            // never enter this JVM's heap — the handle goes straight to
-            // the blob channel.
-            //
-            // try-with-resources because the release is explicit here
-            // and the redemption has already happened: brandTypeface
-            // registered the bytes into the pending blob table, which
-            // keeps its own reference, so letting go of the asset at the
-            // brace costs the transaction nothing.
+                        // BEFORE THE FIRST MOUNT, per the set-once wall. The bytes
+                        // never enter this JVM's heap — the handle goes straight to
+                        // the blob channel — and try-with-resources is safe because
+                        // brandTypeface has already registered them into the pending
+                        // blob table, which keeps its own reference.
             try (KayaApp.Asset font = KayaApp.asset("fonts/sora-wght.ttf")) {
                 tx.brandTypeface("Sora", null, font);
             }

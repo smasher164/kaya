@@ -16,8 +16,7 @@ main = kayaMain $ \app -> buildTx app $ do
   status <- signal (VStr "saved")
 
   -- `WDirty` is absent here on purpose: the default False is the scene's
-  -- first assertion, and a window that starts marked would pass the rest
-  -- of the script while meaning nothing.
+  -- first assertion.
   window
     0
     [ WTitle "dirty",
@@ -50,8 +49,6 @@ main = kayaMain $ \app -> buildTx app $ do
       []
       [ labelBound doc, -- label#0
         labelBound status, -- label#1
-        -- One transaction for all three writes: the document, the status
-        -- and the declaration are one atomic edit.
         buttonOn "edit" -- button#0
           ( submitTx app $ do
               writeSignal doc (VStr "notes and a line")

@@ -26,7 +26,6 @@ main :: IO ()
 main = kayaMain $ \app -> do
   visitTally <- newIORef (0 :: Int)
   _ <- buildTx app $ do
-    -- The presentation hint is ADVISORY: no observable rides on it.
     window 0 [WTitle "sections", WSectionsPresentation 1]
     visits <- signal (VStr "archive: 0 visits")
     -- A semantic icon names a CONCEPT; each platform draws it from its

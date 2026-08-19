@@ -1,27 +1,20 @@
 //! kaya: a cross-platform GUI library that wraps native widgets.
 //!
-//! Milestone 0: an AppKit skeleton proving the threading model and the
-//! ring transport. See DESIGN.md at the repository root.
+//! See DESIGN.md at the repository root.
 
 mod app;
-// Assets: `asset(name)` resolves a file the guest's own BUILD put where
-// the running program can find it, and hands the bytes to the blob
-// channel (docs/assets-plan.md). UNGATED on purpose — capi compiles on
-// all five targets and every one of them can be handed a name.
+// Asset resolution: docs/assets-plan.md. Ungated on purpose — capi
+// compiles on all five targets and every one can be handed a name.
 mod assets;
 mod brand;
-// The Rust-side harness serves the Rust-native backends (GTK, WinUI)
-// and the unit tests; the interpreter platforms run their own Kotlin/
-// Swift step runners against the shared .steps scripts.
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
 #[cfg(feature = "harness")]
 mod harness;
 mod protocol;
 mod ring;
 mod scene;
-// The stall watchdog: pending occurrences nobody is taking. Not gated
-// on the harness feature — a shipped app is where an unreported stall
-// costs the most (DESIGN, Threading model and protocol).
+// Not harness-gated: a shipped app is where an unreported stall costs
+// the most (DESIGN.md, Threading model and protocol).
 mod stall;
 /// The protocol as data — the root document tools/kaya-bindgen walks.
 pub mod spec;
@@ -35,15 +28,12 @@ mod winui;
 mod gtk;
 
 
-// Public because kaya::android_main! expands to a JNI entry in the app's
+// pub because kaya::android_main! expands to a JNI entry in the app's
 // own crate, which needs the module's types and start function.
 #[cfg(target_os = "android")]
 pub mod android;
 
-// The JVM guest tier's transport (the KayaRing natives): Android's
-// attach registers them beside the Compose pump; each desktop's
-// cdylib exports its own attach so a plain JVM process is a guest
-// like any other (bindings/java-desktop is the Java side).
+// The JVM guest tier's transport (the KayaRing natives).
 #[cfg(any(
     target_os = "android",
     target_os = "macos",
@@ -65,21 +55,20 @@ mod swiftui_host;
 pub mod capi;
 
 // The derive's generated code names types through `::kaya::...`; this
-// alias makes that path resolve inside the crate itself (examples and
-// unit tests), the serde trick.
+// alias makes that path resolve inside the crate itself.
 extern crate self as kaya;
 
 pub use app::{
-    Accepts, ActionRef, Align, AnyAnchor, AppCtx, Asset, BarAnchor, BlobSource, Collection, ContextAnchor, ContextCatalog,
+    Accepts, ActionRef, Align, AnyAnchor, AppCtx, Asset, BarAnchor, BlobSource, Capabilities, Collection, ContextAnchor, ContextCatalog,
+    capabilities,
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
     CatalogHome, MenuRole, Platform, Role, Symbol, ToggleRef, Tpl, TplSource, Tx, ValueKind,
     props,
 };
 
-/// The type's own shape is the schema: an enum derives the element
-/// sum, a struct the one-variant case (with field tokens and the typed
-/// patch builder).
+/// The type's own shape is the schema: an enum derives the element sum,
+/// a struct the one-variant case.
 pub use kaya_derive::KayaGen;
 pub use protocol::{
     AlertChoice, AlertId, CollectionId, DEFAULT_WINDOW, EntryProp, MenuItemId, MenuItemKind,
@@ -92,21 +81,14 @@ pub use protocol::{
 pub(crate) use winui as backend;
 #[cfg(target_os = "linux")]
 pub(crate) use gtk as backend;
-// Apple's and Android's backends are the SwiftUI and Compose
-// interpreters: their pumps block in kaya_next_commands on the
-// presentation channel itself, so a sent transaction IS the wakeup
-// and the doorbell has nothing to ring.
+// The SwiftUI and Compose pumps block in kaya_next_commands on the
+// presentation channel itself, so a sent transaction IS the wakeup and
+// the doorbell has nothing to ring.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
 pub(crate) mod backend {
     pub(crate) fn ring_doorbell() {}
 }
 
-/// Start the core on the current thread (which must be the process main
-/// thread) and run `app_main` on the app thread. Does not return.
-///
-/// Not the entry point on Android, where the OS owns the process main
-/// (Zygote forks it and an Activity is the way in): use
-/// [`android_main!`](crate::android_main) and start from the Activity.
 #[cfg(any(
     target_os = "macos",
     target_os = "windows",
@@ -116,18 +98,9 @@ pub(crate) mod backend {
 ))]
 /// The one spelling of "this backend has not reached that scene yet".
 ///
-/// Depth slices legitimately leave a backend behind (CLAUDE.md's
-/// sequencing: protocol + one backend + one binding, then fan out), and
-/// two gates read that state — check-stubs refuses a runner that wires a
-/// scene's legs while its backend is still here, and check-steps stops
-/// demanding those legs. BOTH READ THE CALL, not a sentence, because a
-/// sentence is a contract nobody can be made to spell: the convention
-/// was a free-form string for four milestones and not one backend ever
-/// wrote it, so check-stubs could only ever pass. A call names the scene
-/// in an argument the compiler already checks the shape of.
-// WHICH backends call this is a per-target question — gtk.rs only
-// compiles on linux, winui only on windows — so on any given build most
-// callers are cfg'd out and a live helper looks dead.
+/// check-stubs and check-steps both read THIS CALL, never a sentence; a
+/// backend that refuses in its own words fails check-stubs.
+// Most callers are cfg'd out on any given build, so this looks dead.
 #[allow(dead_code)]
 pub(crate) fn depth_stub(scene: &str) -> ! {
     panic!(
@@ -136,14 +109,12 @@ pub(crate) fn depth_stub(scene: &str) -> ! {
     )
 }
 
+/// Start the core on the current thread (which must be the process main
+/// thread) and run `app_main` on the app thread. Does not return.
+///
+/// Not the entry point on Android, where the OS owns the process main:
+/// use [`android_main!`](crate::android_main) and start from an Activity.
 pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
-    
-
-    // One backend per platform. On Apple that is the SwiftUI
-    // interpreter: its Swift pump consumes resolved commands through
-    // the C API, its emissions route into this AppCtx's inbox, and
-    // the host dylib takes the main thread (which Apple pins the UI
-    // to regardless of toolkit).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         let (occ_tx, occ_rx) = std::sync::mpsc::channel();

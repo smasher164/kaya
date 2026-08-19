@@ -1,27 +1,9 @@
 #!/usr/bin/env bash
 
-# ClipProbe, second campaign (2026-08-03) — the cells the Compose arm
-# and the helper APK turn on, each measured before a line of arm code:
-#
-#  P1 background SEED via broadcast (writes are not focus-gated).
-#  P2 background READ without the IME trick — expect denied/null.
-#  P3 the DEFAULT-IME exemption: `ime enable/set` this package, read
-#     again from the same unfocused receiver — expect content. This
-#     cell decides the helper APK's whole shape.
-#  P4 the five-representation clip, BUILT BY HAND (description lists
-#     every mime; text+html inline; custom/image bytes via provider
-#     URIs) — read back per kind through the paste-grant mechanics.
-#  P5 grant REVOCATION: the URI captured in P4, re-opened after the
-#     clip changes — expect refused.
-#  P6 the ungrantable-URI trap: getPrimaryClip is documented nowhere
-#     to CLEAR THE CLIPBOARD when a grant fails — provoke and confirm.
-#  P7 the EMULATOR-HOST BRIDGE: EmulatorClipboardMonitor pushes guest
-#     clips to the HOST clipboard over vsock. If live, an android
-#     clipboard leg can clobber the mac lane mid-validate-all. Measure
-#     both directions.
-#  P8 a broadcast to a STOPPED package (post-force-stop) is silently
-#     dropped (FLAG_EXCLUDE_STOPPED_PACKAGES); measure, and measure
-#     whether am's --include-stopped-packages overrides it.
+# ClipProbe, second campaign — the SAME-PACKAGE clipboard cells
+# (P1..P8 below). Results: docs/clipboard-plan.md:1223. The
+# cross-package half, which is the half that counts, is
+# tools/android/cliphelper/run3.sh.
 #
 # Throwaway; nothing in the validation ladder calls this. Results on
 # stdout — the receivers answer through ORDERED broadcast result data,

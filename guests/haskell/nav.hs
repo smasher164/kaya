@@ -23,8 +23,6 @@ main = kayaMain $ \app -> do
         [ labelBound s, -- label#0
           buttonOn "open detail" $
             buildTx app $ do
-              -- The popped handler rides the push, so it can only ever
-              -- mean this screen, and it retires with the one pop.
               pushEntry
                 detailId
                 [ ETitle "detail",
@@ -33,7 +31,6 @@ main = kayaMain $ \app -> do
               caption <- signal (VStr "detail pane")
               pane <- column [] [labelBound caption]
               mountIn detailId pane
-              -- The covered root keeps taking writes; the pop reveals it.
               writeSignal s (VStr "pushed detail"),
           buttonOn "open settings" $
             buildTx app $ do

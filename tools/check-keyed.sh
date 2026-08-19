@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -16,14 +10,8 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     exit 1
 fi
 
-# The gate for the gate cache (tools/keyed.sh). A cache that skips work
-# is only ever as trustworthy as the answer to "what would make it skip
-# something it shouldn't", so this asks that question five ways.
-#
-# The fifth clause is the one that matters most: the gates whose verdict
-# depends on a BUILT ARTIFACT must never be wrapped. Their sources can
-# sit unchanged while target/ holds something else entirely, so an
-# input-keyed skip would report PASS about a library it never looked at.
+# The gate for the gate cache (tools/keyed.sh): what would make it skip
+# something it shouldn't, asked seven ways.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,12 +32,11 @@ fail() {
     status=1
 }
 
-# The command is `true`/`false` rather than a real gate: what is under
-# test is the wrapper's decision, and a hermetic command makes a wrong
-# decision unambiguous.
+# `true`/`false` rather than a real gate: what is under test is the
+# wrapper's decision.
 run() { KAYA_FAST=1 tools/keyed.sh "$FIXTURE" -- "$@" 2>&1; }
 
-# 1. First run executes; second run skips. The baseline the rest leans on.
+# 1. First run executes; second run skips.
 out=$(run true)
 case "$out" in *CACHED*) fail "a gate with no stored key was reported CACHED" ;; esac
 out=$(run false)
@@ -59,16 +46,15 @@ case "$out" in
 esac
 
 # 2. A change INSIDE the input set must re-run it. `false` as the
-# command means a re-run is visible as a non-zero exit.
+# command makes a re-run visible as a non-zero exit.
 : >"$INSIDE"
 if run false >/dev/null; then
     fail "a change under tools/ did not invalidate the key"
 fi
 rm -f "$INSIDE"
 
-# 3. A change OUTSIDE the input set must NOT re-run it. This is the
-# early-cutoff property itself — without it the keys are not
-# discriminating and the whole exercise is one global dirty bit.
+# 3. A change OUTSIDE the input set must NOT re-run it — without this
+# the keys are one global dirty bit.
 run true >/dev/null
 : >"$OUTSIDE"
 out=$(run false)
@@ -78,8 +64,7 @@ case "$out" in
 esac
 rm -f "$OUTSIDE"
 
-# 4. A FAILING gate must never be stored. Otherwise one red run poisons
-# the cache into reporting the failure as a pass forever after.
+# 4. A FAILING gate must never be stored.
 rm -f "$STORE/$FIXTURE"
 run false >/dev/null
 out=$(run true)
@@ -88,15 +73,10 @@ case "$out" in
 esac
 rm -f "$STORE/$FIXTURE"
 
-# 5. Without KAYA_FAST there is no cache at all: the matrix path must be
-# incapable of consulting one.
-#
-# `env -u`, not a bare invocation: this gate itself runs inside lanes
-# that may have exported KAYA_FAST=1, and a clause that INHERITS the
-# variable it claims to have unset is testing the opposite of what it
-# says. It shipped that way and failed on the first fast lane — which
-# is the gate working, but the lesson is that a self-test has to
-# construct its environment rather than assume one.
+# 5. Without KAYA_FAST there is no cache at all. `env -u`, not a bare
+# invocation: this gate runs inside lanes that may have exported
+# KAYA_FAST=1, and a clause that inherits the variable it claims to have
+# unset tests the opposite of what it says.
 rm -f "$STORE/$FIXTURE"
 KAYA_FAST=1 tools/keyed.sh "$FIXTURE" -- true >/dev/null
 out=$(env -u KAYA_FAST tools/keyed.sh "$FIXTURE" -- echo ran 2>&1)
@@ -105,17 +85,11 @@ case "$out" in
     *) fail "KAYA_FAST unset still consulted the cache (matrix runs must be clean): $out" ;;
 esac
 
-# 6 and 7 read tools/gates.sh's list, NOT a grep over validate-mac.sh.
-# The lane delegates its whole sweep now and holds no list of its own, so
-# the old grep would have matched nothing and both clauses would have
-# passed while checking zero gates — the precise false green this file
-# exists to refuse. Hence the vacuity floor inside: a census that finds
-# almost nothing is a broken census, not a clean tree.
+# 6 and 7 read tools/gates.sh's list, with a vacuity floor inside — a
+# census that finds almost nothing is a broken census, not a clean tree.
 #
-#   6. The gates that read a BUILT ARTIFACT must never be wrapped. Their
-#      sources can sit unchanged while target/ holds something else, so
-#      an input-keyed skip would report PASS about a library it never
-#      looked at.
+#   6. The gates that read a BUILT ARTIFACT must never be wrapped: their
+#      sources can sit unchanged while target/ holds something else.
 #   7. Everything that IS wrapped must have an input set, or keyed.sh
 #      dies at run time inside a lane instead of here.
 keyedcount=$(python3 - <<'PY'
@@ -155,9 +129,7 @@ for name in wrapped:
               f"build-id.sh's GATES", file=sys.stderr)
         status = 1
 
-# An UNKEYED gate must say why, in the list, beside itself. "Why is this
-# one not cached" is the question whose unwritten answer gets a gate
-# wrongly cached later.
+# An UNKEYED gate must say why, in the list, beside itself.
 for name, g in sorted(gates.items()):
     if not g["keyed"] and len(g["unkeyed_because"].strip()) < 20:
         print(f"check-keyed: {name} is not keyed and gives no reason — state it "
@@ -171,10 +143,7 @@ PY
 
 # A gate that READS a file it does not DECLARE is a false-PASS machine
 # under KAYA_FAST, and it misfires exactly when the undeclared file is
-# what changed. check-steps was declared ["guests"] from birth, then grew
-# a rule reading all four backends; removing a depth-stub declaration —
-# the edit that makes its missing legs a real failure — would have
-# re-run nothing. Caught by hand once, which is not a mechanism.
+# what changed.
 if ! python3 tools/lib/keyed-inputs.py; then
     status=1
 fi

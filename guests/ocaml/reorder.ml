@@ -1,11 +1,9 @@
-(* The reorder scene from OCaml: order as collection data, end to end.
-   Three stamped rows and two buttons that never touch a widget — each
-   handler repositions an entry by key (collection_move on the wire,
-   move_child at the toolkit), and the selftest's expect_order reads
-   the toolkit's actual child order back. The root is a row so the
-   For's container is the scene's only column-kind widget: languages
-   disagree on whether containers are created before or after their
-   children, and column#0 must name the same widget everywhere.
+(* The reorder scene from OCaml: order as collection data. Each handler
+   repositions an entry by key and expect_order reads the toolkit's
+   actual child order back. The root is a row so the For's container is
+   the scene's only column-kind widget: languages disagree on whether
+   containers are created before or after their children, and column#0
+   must name the same widget everywhere.
 
    Build like milestone2.ml, then run with KAYA_SELFTEST=reorder. *)
 

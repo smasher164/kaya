@@ -1,6 +1,5 @@
 // The toolbar conformance scene, C# port: the `primary` bit as real
-// window chrome (docs/chrome-plan.md C2). One catalog, two primaries,
-// and no toolbar vocabulary of its own. Canonical semantics in
+// window chrome (docs/chrome-plan.md C2). Canonical semantics in
 // guests/rust/toolbar.rs; the byte-frozen contract in
 // tools/scenes/toolbar.steps.
 
@@ -40,7 +39,6 @@ static class ToolbarScene
             {
                 tx.Item("Find", symbol: Symbol.Search, primary: true,
                     onActivate: t => t.Write(status, "found")),
-                // Everything below is catalog, not chrome, on every host.
                 tx.Item("Replace", symbol: Symbol.Edit),
             });
             var view = tx.Menu("View", items: new[]

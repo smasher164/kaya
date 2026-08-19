@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Everything runs inside the dev shell: the flake pins every toolchain
-# (rust + cross targets, swiftc, ffmpeg, the android sdk). Running
-# against anything else is an error, not something to paper over — and
-# a shell entered before the flake last changed is just as much a
-# bystander toolchain, so the marker carries the fingerprint of
-# flake.nix+flake.lock the shell was actually built from.
 kaya_flake="$(cd "$(dirname "$0")/.." && cat flake.nix flake.lock | shasum -a 256 | cut -c1-12)"
 if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     if [ -z "${KAYA_DEV_SHELL:-}" ]; then
@@ -15,23 +9,11 @@ if [ "${KAYA_DEV_SHELL:-}" != "$kaya_flake" ]; then
     fi
     exit 1
 fi
-# One place that knows how to ask whether each test surface is ready —
-# the probes encode every lesson their ad-hoc predecessors got wrong.
-# Run it before a session (or let suites fail loud); nothing here
-# mutates state except `--warm`, which boots what is cold.
+# One place that knows how to ask whether each test surface is ready.
+# Nothing here mutates state except `--warm`, which boots what is cold.
 #
 #   tools/probe-env.sh          report readiness of every surface
 #   tools/probe-env.sh --warm   also boot the simulator / emulator / VM
-#
-# Lessons encoded:
-#   - simctl exists only under Xcode's developer dir; outside the dev
-#     shell, xcrun silently resolves to a stub or CommandLineTools and
-#     queries read as EMPTY, not as errors. Probe via the dev shell's
-#     xcrun and treat "cannot list" as broken-env, never as "no sim".
-#   - The Windows VM drops ICMP: ping reads as down while sshd answers.
-#     Probe with ssh BatchMode + timeout, exactly as deploy-win does.
-#   - macOS screen capture wedges silently (poisoned binary identity,
-#     sick daemons); record-suite --probe answers in seconds.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -88,26 +70,15 @@ else
 fi
 
 # --- macOS file-panel view mode --------------------------------------
-# NSOpenPanel's file browser publishes a different accessibility
-# identifier per view mode, and the mode is MACHINE-WIDE: any
-# application's open panel writes `NSGlobalDomain
-# NSNavPanelFileListModeForOpenMode2` for every application on the box
-# the moment a human clicks View Options. On 2026-08-06 it moved to
-# Icons and the eight mac filedialog legs went red together an hour
-# after passing 8/8 — and nothing in the log named the setting, which
-# cost two hours across three agents (docs/traps.md).
-#
-# It is REPORTED rather than demanded, because the lane no longer
-# inherits it: validate-mac rotates 1/2/3 across the filedialog legs and
-# restores this value. What this line buys is the two minutes at the
-# start of a filedialog investigation — and the one state that IS a
-# problem, a fourth mode the interpreter's KayaPanelShape cannot read.
+# NSOpenPanel publishes a different accessibility identifier per view
+# mode, and the mode is MACHINE-WIDE (docs/traps.md). Reported, not
+# demanded: validate-mac rotates 1/2/3 across the filedialog legs and
+# restores this value. The one state that IS a problem is a fourth mode
+# the interpreter's KayaPanelShape cannot read.
 panel_mode=$(defaults read -g NSNavPanelFileListModeForOpenMode2 2>/dev/null || echo unset)
 panel_stamp=""
-# A stamp file left behind means a validate-mac run died before putting
-# the mode back (SIGKILL, or a restore that itself failed). The next
-# validate-mac restores it, but a human reading a strange panel today
-# deserves to know why the box is in this mode.
+# A stamp left behind means a validate-mac run died before putting the
+# mode back. The next validate-mac restores it; say so meanwhile.
 if [ -f "$ROOT/target/panel-mode.orig" ]; then
     panel_stamp=" — a validate-mac run left the mode rotated (killed mid-run, or a restore that could not write); target/panel-mode.orig says the machine's own value is $(cat "$ROOT/target/panel-mode.orig"), and the next validate-mac puts it back"
 fi
@@ -160,14 +131,11 @@ else
 fi
 
 # --- iOS clipboard isolation -----------------------------------------
-# Simulator.app relays the macOS pasteboard into and out of EVERY booted
-# simulator when its Edit > Automatically Sync Pasteboard is on, which
-# it is by default (measured 2026-08-03: a host `pbcopy` replaced a
-# booted device's clip in 260ms). The clipboard legs then share one
-# board with the mac lane and fail a different step every matrix run,
-# so run-sim.sh MEASURES it per run and refuses. This report is the
-# early warning, not the verdict: it names the app rather than the
-# pref, because a running Simulator.app ignores a `defaults write` and
+# Simulator.app relays the macOS pasteboard into and out of every booted
+# simulator by default (docs/clipboard-plan.md:1502), so the clipboard
+# legs would share one board with the mac lane. Early warning only —
+# run-sim.sh MEASURES the relay per run and refuses. It names the APP,
+# not the pref: a running Simulator.app ignores a `defaults write` and
 # the pref can read NO while the relay is live.
 if pgrep -qx Simulator; then
     pref=$(defaults read com.apple.iphonesimulator PasteboardAutomaticSync 2>/dev/null || echo unset)
@@ -209,11 +177,9 @@ if docker info >/dev/null 2>&1; then
     # `docker images -q` over `image inspect`: the latter misreports
     # untagged lookups under some docker CLIs.
     if [ -n "$(docker images -q kaya-linux 2>/dev/null)" ]; then
-        # A cached image can predate a Dockerfile layer, and the run
-        # that discovers it is a clipboard leg failing on a missing
-        # tool with the failure landing on whatever the guest asserted
-        # next. The clipboard tools are the youngest layer, so probing
-        # them names the fix early: rebuild the image.
+        # A cached image can predate a Dockerfile layer. The clipboard
+        # tools are the youngest layer, so probing them names the fix
+        # early instead of a clipboard leg failing on a missing tool.
         if docker run --rm kaya-linux bash -c \
             'command -v wl-copy && command -v xclip && command -v wtype && command -v identify' \
             >/dev/null 2>&1; then
@@ -231,8 +197,7 @@ fi
 # --- Windows VM ------------------------------------------------------
 WIN_HOST="${KAYA_WIN_HOST:-akhil@192.168.64.2}"
 if ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$WIN_HOST" 'exit 0' 2>/dev/null; then
-    # Display sleep blanks every window while suites keep passing;
-    # recorded runs assert this too, but say it early here.
+    # Display sleep blanks every window while suites keep passing.
     if ssh -n -o BatchMode=yes "$WIN_HOST" 'powercfg /q SCHEME_CURRENT SUB_VIDEO VIDEOIDLE' 2>/dev/null \
         | grep -q 'AC Power Setting Index: 0x00000000'; then
         report windows OK "$WIN_HOST answering; display never sleeps"
@@ -240,8 +205,6 @@ if ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$WIN_HOST" 'exit 0' 2>/dev/null;
         report windows DOWN "$WIN_HOST answering but display CAN sleep — run: powercfg /change monitor-timeout-ac 0"
     fi
 elif [ "$WARM" = 1 ]; then
-    # deploy-win auto-starts the VM the same way; doing it here just
-    # front-loads the wait.
     utmctl=$(command -v utmctl || echo /Applications/UTM.app/Contents/MacOS/utmctl)
     if "$utmctl" start "${KAYA_WIN_VM:-Windows}" 2>/dev/null; then
         report windows COLD "VM starting (deploy-win will wait for sshd)"
