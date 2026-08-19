@@ -1021,6 +1021,9 @@ func kayaCopyToPasteboard(
     text: String?, html: String?, image: Data?, files: [String],
     custom: [(String, Data)]
 ) {
+    // The stage opens here and closes at kayaClipOwned below, so no
+    // consumer reads this board halfway written (kayaClipStages).
+    kayaClipStaging()
     #if os(macOS)
         let urls = files.compactMap { URL(string: $0) }
         let board = NSPasteboard.general
@@ -1203,13 +1206,87 @@ func kayaClipNote(
 /// pretending an Int is atomic.
 private let kayaClipOwnerLock = NSLock()
 private var kayaClipOwnerChange = -1
+/// Stages this leg is in the middle of. A stage is not one instruction
+/// — the board is cleared, filled, and only then recorded — so a
+/// consumer that looks inside that window sees a moved count against
+/// the PREVIOUS staged value and would name a foreign writer for kaya's
+/// own write. That is the witness's one failure mode, so the window is
+/// held open explicitly rather than assumed away: every stage runs
+/// kayaClipStaging() … kayaClipOwned().
+private var kayaClipStages = 0
+/// The first breach the witness saw, kept for the harness to fail on.
+private var kayaClipBreach: String?
 
-/// Remember the board kaya just produced. Every clipboard write kaya
-/// asks for ends here — there is no second place to add one.
+/// A stage is starting: this leg is about to write the board.
+func kayaClipStaging() {
+    kayaClipOwnerLock.lock()
+    kayaClipStages += 1
+    kayaClipOwnerLock.unlock()
+}
+
+/// Remember the board kaya just produced, and close the stage that
+/// produced it. Every clipboard write kaya asks for ends here — there
+/// is no second place to add one.
 func kayaClipOwned(_ change: Int) {
     kayaClipOwnerLock.lock()
     kayaClipOwnerChange = change
+    if kayaClipStages > 0 { kayaClipStages -= 1 }
     kayaClipOwnerLock.unlock()
+}
+
+/// The board this leg staged against the board that is there now, or
+/// nil when they are the same one — the single comparison the trace
+/// clause and the witness below both read.
+///
+/// Silent before this leg has staged anything (nothing to be replaced)
+/// and silent inside a stage (the count is mid-write, see
+/// kayaClipStages).
+///
+/// AND SILENT ON iOS ALTOGETHER, because the count is not evidence
+/// there. The whole comparison rests on one premise — the change count
+/// moves when, and only when, somebody writes the board — and that
+/// premise is true of NSPasteboard and false of UIPasteboard. MEASURED
+/// 2026-08-18 on the iOS 26.5 simulator, one action per phase with a
+/// 5ms poller printing every distinct count:
+///
+///   - a UITextField taking first-responder status moves
+///     UIPasteboard.general.changeCount BY FOUR — +2 inside the ~105ms
+///     becomeFirstResponder call and +2 about 10ms after it returns —
+///     while `types` (six entries), `numberOfItems` (1) and the BYTES
+///     are identical on both sides of the move: the off-thread read
+///     answers the same "kaya clip" before and after, promptlessly,
+///     which is also the proof the clip is still this app's own.
+///     Focusing a second time repeats it exactly.
+///   - no changedNotification is posted for any of those increments.
+///   - by contrast every write moves it by exactly 1, SYNCHRONOUSLY,
+///     and it then sits still for seconds; doing nothing, resigning
+///     first responder and selecting all move it by 0.
+///
+/// So on this platform a moved count does not mean moved content, and
+/// the failure it produced is the one this whole guard exists to
+/// prevent: clipboard.steps focuses an entry (`click button#5`,
+/// `expect_focused entry#0`) and then pastes, so all three iOS
+/// clipboard legs failed `changeCount N -> N+2` naming a foreign writer
+/// that was the leg's own keyboard. A witness that cannot discriminate
+/// must not fail a step — it says so instead, in kayaClipOwnerClause
+/// below and in docs/traps.md.
+///
+/// THE STAGING BRACKETS STAY ON BOTH PLATFORMS (kayaClipStaging /
+/// kayaClipOwned). What iOS invalidates is READING the count as
+/// evidence, not the record of which writes were kaya's own; that
+/// record is correct everywhere and costs a lock.
+func kayaClipDrifted() -> (staged: Int, now: Int)? {
+    #if !os(macOS)
+        return nil
+    #else
+        kayaClipOwnerLock.lock()
+        let staged = kayaClipOwnerChange
+        let staging = kayaClipStages
+        kayaClipOwnerLock.unlock()
+        if staged < 0 || staging > 0 { return nil }
+        let now = kayaClipBoardNow().change
+        return staged == now ? nil : (staged, now)
+    #endif
 }
 
 /// A clause naming a board that has changed since kaya last wrote it,
@@ -1224,15 +1301,81 @@ func kayaClipOwned(_ change: Int) {
 /// own: 2026-08-04's matrix failure was a paste that silently did
 /// nothing because an image clip had replaced the seeded text 25ms
 /// earlier, and nothing in the log said the board had moved at all.
+///
+/// ON iOS IT SAYS THAT IT CANNOT TELL, rather than saying nothing. A
+/// reader who has just been handed an empty read is about to ask
+/// exactly this question, and a clause that is silent there reads as
+/// "the board did not move" — which this platform's count cannot
+/// establish either way (kayaClipDrifted above has the measurement).
+/// So it names the limit and prints what it does have, which is the
+/// offer list the note already carries.
 func kayaClipOwnerClause() -> String {
+    #if !os(macOS)
+        return
+            " — and whether another process replaced it CANNOT BE TOLD on this "
+            + "platform: UIPasteboard's changeCount moves by 4 when a text field "
+            + "takes focus, with the types, the item count and the bytes "
+            + "unchanged (measured 2026-08-18, docs/traps.md), so the offer list "
+            + "above is the whole of the evidence here"
+    #else
+        guard let drift = kayaClipDrifted() else { return "" }
+        return
+            " — AND THE BOARD HAS MOVED SINCE KAYA WROTE IT "
+            + "(cc \(drift.staged) -> \(drift.now)): "
+            + "another process is writing this clipboard"
+    #endif
+}
+
+/// THE WITNESS, called by every read and paste that consumes what this
+/// leg staged. Nothing on the matching path: the counts agree and the
+/// consumer proceeds exactly as it always did.
+///
+/// A machine has ONE pasteboard and every process on it is a writer, so
+/// a leg's staged clip can be replaced under it by anybody — a human
+/// pressing Cmd-C in another window is enough, and that is what happened
+/// on 2026-08-18: two mac clipboard legs failed mid-matrix with pastes
+/// reading "" while six siblings passed and the same legs passed
+/// standalone. The step's sentence was "label#0 reads """, which is the
+/// same sentence a broken paste prints, and telling those two apart cost
+/// a rerun of the matrix. The changeCount is the evidence that separates
+/// them, and this is where it gets read.
+///
+/// IT SAYS WHAT IT MEASURED AND STOPS THERE. kaya staged the board at
+/// one count, made no write of its own since, and finds another count —
+/// so some writer that is not this leg replaced the content. WHO is not
+/// on the pasteboard at all: no API answers it, so this names nobody.
+/// The type list is the board as it is now, for the reader who has to
+/// guess anyway (a text clip where files were staged reads very
+/// differently from an image one).
+///
+/// macOS ONLY, and not by an #if here: kayaClipDrifted answers nil on
+/// iOS because UIPasteboard's count moves without the content moving
+/// (its comment carries the measurement), so this latches nothing
+/// there. The consumers below still call it on both platforms — one
+/// call site per consumption, one place that decides whether the
+/// platform can answer.
+func kayaClipWitness(_ consumer: String) {
+    guard let drift = kayaClipDrifted() else { return }
+    let offered = kayaClipBoardNow().types
     kayaClipOwnerLock.lock()
-    let owned = kayaClipOwnerChange
+    if kayaClipBreach == nil {
+        kayaClipBreach =
+            "the pasteboard changed under this leg "
+            + "(changeCount \(drift.staged) -> \(drift.now)): "
+            + "a foreign writer replaced the staged content"
+            + " — \(consumer) is reading a board this leg did not stage, "
+            + "and it now offers \(offered)"
+    }
     kayaClipOwnerLock.unlock()
-    let now = kayaClipBoardNow().change
-    if owned < 0 || owned == now { return "" }
-    return
-        " — AND THE BOARD HAS MOVED SINCE KAYA WROTE IT (cc \(owned) -> \(now)): "
-        + "another process is writing this clipboard"
+}
+
+/// The breach the witness latched, for the harness to fail a step with.
+/// A PEEK, never a take: an expect retries, and a sentence taken on one
+/// attempt would be gone from the attempt that finally reports.
+func kayaClipBreachNote() -> String? {
+    kayaClipOwnerLock.lock()
+    defer { kayaClipOwnerLock.unlock() }
+    return kayaClipBreach
 }
 
 /// The walk itself, shared by the privileged read and by a paste
@@ -1240,6 +1383,10 @@ func kayaClipOwnerClause() -> String {
 /// implementation, because the two differ in their trigger and never in
 /// what they can materialize.
 func kayaReadClipboardValue(accepting: String) -> KayaClipValue? {
+    // The consumption both triggers share, so the witness sits here
+    // once: whatever this walk is about to materialize came off the
+    // board, and the board has to be the one this leg staged.
+    kayaClipWitness("the read of [\(accepting)]")
     #if os(macOS)
         let (kinds, custom) = kayaParseAcceptList(accepting)
         let board = NSPasteboard.general
@@ -1551,6 +1698,14 @@ func kayaClipboardSeed(kind: String, argument: String) {
     // waiting here cannot raise the very alert the read after it is
     // meant to raise.
     //
+    // THAT FIRST CLAUSE IS A macOS CLAIM. On iOS the count also moves
+    // when a text field takes focus, content unchanged (measured
+    // 2026-08-18 — kayaClipDrifted carries the numbers, and it is why
+    // the witness is scoped away from that platform), so there the
+    // count narrows the window rather than proving anything and the
+    // TYPE is what says the seed landed. This wait is unchanged: it
+    // requires both, and both together are no weaker than before.
+    //
     // AND RE-ISSUE A WRITE THAT DID NOT LAND, because waiting longer
     // cannot help one that never happened. `set the clipboard to`
     // REPORTS SUCCESS AND WRITES NOTHING when another process touches
@@ -1565,6 +1720,12 @@ func kayaClipboardSeed(kind: String, argument: String) {
     // construction — the same file, the same content, the same command —
     // so a write that is not on the board within a second is simply made
     // again.
+    // A SEED IS THIS LEG'S OWN STAGE, however foreign the process that
+    // performs the write, and it takes several tries by construction —
+    // so the witness stays quiet from here until the settle records the
+    // board (kayaClipStages). Without this the seed's own re-issue would
+    // report itself as a foreign writer.
+    kayaClipStaging()
     let want = kayaClipUTI(kind)
     let before = kayaClipBoardNow().change
     let started = Date()
@@ -5524,7 +5685,10 @@ private func kayaRunScript(_ script: String) {
     setvbuf(stdout, nil, _IOLBF, 0)
     let start = Date()
     print("KAYA_HARNESS: epoch \(Int(start.timeIntervalSince1970 * 1000))")
-    for rawLine in script.split(separator: "\n", omittingEmptySubsequences: true) {
+    // Labelled for the one thing that ends a script early: the
+    // pasteboard witness (kayaClipWitness) finding that this leg no
+    // longer owns the board it staged.
+    scriptLines: for rawLine in script.split(separator: "\n", omittingEmptySubsequences: true) {
         let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
         if trimmedLine.isEmpty || trimmedLine.hasPrefix("#") { continue }
         for raw in trimmedLine.split(separator: ";", omittingEmptySubsequences: true) {
@@ -6270,6 +6434,12 @@ private func kayaRunScript(_ script: String) {
                     var got = ""
                     let deadline = Date().addingTimeInterval(5)
                     repeat {
+                        // The harness's own consumption, witnessed
+                        // inside the poll rather than before it: five
+                        // seconds of retry is the widest window in the
+                        // scene for somebody else's clip to arrive.
+                        kayaClipWitness("the foreign read of \(kind)")
+                        if kayaClipBreachNote() != nil { break }
                         got = kayaClipboardRead(kind)
                         if got == want { break }
                         usleep(20_000)
@@ -7512,6 +7682,25 @@ private func kayaRunScript(_ script: String) {
             default:
                 failures.append("unknown step \(line)")
             }
+                if let breach = kayaClipBreachNote() {
+                    // THE WITNESS FIRED: somebody else's clip is on the
+                    // board, so nothing this leg asserts from here is
+                    // about the clip it staged.
+                    //
+                    // What this attempt observed is RETRACTED rather
+                    // than reported beside the breach — an expect had
+                    // not reached its deadline, so it was never final,
+                    // and "reads """ printed next to the cause is the
+                    // sentence that sent 2026-08-18 after kaya's paste.
+                    // The read's own account stays in the stderr trace
+                    // (kayaClipNote). Then the script stops: every
+                    // remaining step would print this same sentence
+                    // after burning its own deadline.
+                    failures.removeLast(failures.count - failuresBefore)
+                    failures.append(breach)
+                    print("KAYA_HARNESS: step-failed \(breach)")
+                    break scriptLines
+                }
                 if failures.count > failuresBefore, parts[0].hasPrefix("expect"),
                     Date() < stepDeadline
                 {
@@ -9327,7 +9516,8 @@ func kayaRoleEnabled(_ role: String) -> Bool {
 }
 
 /// ONE LINE WHEN A STANDARD COMMAND DOES NOTHING, naming the
-/// intersection that came up empty.
+/// intersection that came up empty — AND the door where a paste's
+/// board is witnessed (kayaClipWitness, first line of the body).
 ///
 /// A role item works out its own enablement — what the clipboard offers
 /// INTERSECTED with what the focused widget accepts — and a disabled
@@ -9345,6 +9535,16 @@ func kayaRoleEnabled(_ role: String) -> Bool {
 /// (kayaClipNote) could not help, because the disabled command never
 /// reached the read. This is that note for the door before it.
 func kayaRoleInertNote(_ item: KayaMenuItemModel, verb: String) {
+    // AND THE WITNESS FIRST, before the enablement question, because a
+    // paste whose staged content was replaced is usually DISABLED —
+    // nothing the focused widget accepts is on the board any more — and
+    // every route past this point turns a disabled item away without
+    // touching the clipboard. On macOS the harness's dispatch is the
+    // REAL NSMenuItem's action, so kaya gets no say at all once AppKit
+    // has greyed it; this line, which every activation route reaches
+    // before dispatching, is where the leg can still be told whose clip
+    // it is about to paste.
+    if item.role == "paste" { kayaClipWitness("the paste command (\(verb))") }
     guard !item.role.isEmpty, !kayaMenuEffectiveEnabled(item) else { return }
     if item.role == "undo" || item.role == "redo" {
         kayaUndoInertNote(item, verb: verb)
@@ -10494,11 +10694,20 @@ func kayaSendToFocusedResponder(_ selector: Selector) -> Bool {
 func kayaPerformClipboardRole(_ role: String) -> Bool {
     #if os(macOS)
         switch role {
-        case "cut":
-            kayaSendToFocusedResponder(#selector(NSText.cut(_:)))
-            return true
-        case "copy":
-            kayaSendToFocusedResponder(#selector(NSText.copy(_:)))
+        case "cut", "copy":
+            // A NATIVE CUT OR COPY IS A WRITE THIS LEG ASKED FOR, so it
+            // stages like any other: the responder puts the selection on
+            // the board and the count it leaves is the one the witness
+            // measures against. Missing this is how the guard would
+            // report a foreign writer for an editor's own Cmd-X — the
+            // false positive it exists to avoid. The send is synchronous
+            // (tryToPerform/sendAction), so the board is already written
+            // when it returns; a responder that refused leaves the count
+            // where it was and re-recording it changes nothing.
+            kayaClipStaging()
+            kayaSendToFocusedResponder(
+                role == "cut" ? #selector(NSText.cut(_:)) : #selector(NSText.copy(_:)))
+            kayaClipOwned(kayaClipBoardNow().change)
             return true
         case "paste":
             guard let id = kayaScene.focusedId, let node = kayaScene.nodes[id] else {
@@ -10525,11 +10734,16 @@ func kayaPerformClipboardRole(_ role: String) -> Bool {
         }
     #else
         switch role {
-        case "cut":
-            kayaSendToFocusedResponder(#selector(UIResponderStandardEditActions.cut(_:)))
-            return true
-        case "copy":
-            kayaSendToFocusedResponder(#selector(UIResponderStandardEditActions.copy(_:)))
+        case "cut", "copy":
+            // The same stage the macOS arm opens, for the same reason:
+            // a native cut or copy is this leg's own write, and the
+            // board it leaves is the one the witness measures against.
+            kayaClipStaging()
+            kayaSendToFocusedResponder(
+                role == "cut"
+                    ? #selector(UIResponderStandardEditActions.cut(_:))
+                    : #selector(UIResponderStandardEditActions.copy(_:)))
+            kayaClipOwned(kayaClipBoardNow().change)
             return true
         case "paste":
             guard let id = kayaScene.focusedId, let node = kayaScene.nodes[id] else {

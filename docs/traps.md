@@ -3742,3 +3742,60 @@ the guests are where it shows:
 
 docs/ranges-plan.md covers the design and says nothing about any
 language's indexing.
+
+## UIPasteboard's changeCount moves when a TEXT FIELD TAKES FOCUS, with
+## the clip unchanged
+
+Measured 2026-08-18 on the iOS 26.5 simulator, with Simulator.app not
+running and `PasteboardAutomaticSync` = 0 (so no host relay is in the
+picture). One action per phase, a 5ms poller printing every distinct
+count, and a bounded off-thread read of the bytes at each phase:
+
+    write a union clip        cc 722 -> 723   (+1, SYNCHRONOUS)
+    nothing, 4.5s                    723      (+0)
+    becomeFirstResponder      cc 723 -> 727   (+4)
+    resignFirstResponder             727      (+0)
+    becomeFirstResponder      cc 727 -> 731   (+4)
+    selectAll                        731      (+0)
+    responder-chain copy      cc 731 -> 732   (+1, SYNCHRONOUS)
+    nothing, 4.5s                    732      (+0)
+
+The +4 arrives as two +2 steps: one inside the ~105ms
+`becomeFirstResponder` call, one about 10ms after it returns. Across
+every one of those increments the board is the SAME board — `types`
+identical (six entries), `numberOfItems` identical, and the bytes
+identical, the read answering promptlessly, which is also the proof the
+clip is still the app's own. No `changedNotification` is posted for any
+of them (the app's own writes DO post it, twice each: once bare, once
+carrying `UIPasteboardChangedTypesAddedKey`/`...RemovedKey`).
+
+SO THE COUNT IS NOT A FUNCTION OF THE CONTENT on this platform. That
+breaks the one premise a foreign-writer witness can be built on — kaya
+staged the board at one count, wrote nothing since, so another count
+means another writer — and it broke it in the most expensive way
+available: the guard was correct on macOS, shipped, and then failed all
+three iOS clipboard legs with a confident sentence naming a stranger
+("the pasteboard changed under this leg (changeCount N -> N+2): a
+foreign writer replaced the staged content"). The stranger was the
+leg's own keyboard: clipboard.steps focuses an entry and then pastes.
+
+NSPasteboard does NOT do this — the same steps on the eight mac legs
+focus the same entries and the count sits still — which is why a guard
+written and watched failing on macOS says nothing at all about iOS.
+
+The guard is scoped in `kayaClipDrifted` (swift/KayaSwiftUI.swift), the
+one comparison both the witness and the trace clause read; the trace
+clause STATES that it cannot discriminate on iOS rather than going
+quiet, because silence there reads as "the board did not move". The
+probes are throwaway (a UIKit app, `simctl launch --console-pty`); the
+shape to reuse is one action per phase plus a poller, since a timeline
+that only samples after WRITES would have concluded "no async bump" and
+stopped — which is exactly what the first probe concluded.
+
+A SECOND FINDING FROM THE SAME PROBE, paid for at five minutes of a
+parked main thread: reading `pb.string` at launch BLOCKS on the
+per-clip paste alert when the board holds anything this install did not
+write, and a probe with nobody to answer it simply hangs. Sample the
+prompt-free surface (`changeCount`, `types`, `numberOfItems`) and put
+any read of the bytes on a background queue behind a deadline, so a
+block is a measurement instead of a wedge.
