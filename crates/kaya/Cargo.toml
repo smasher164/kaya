@@ -173,6 +173,46 @@ pango = { version = "0.22.8", features = ["v1_56"] }
 # there. Not optional — a semantics that appears only in some builds is
 # not a semantics.
 adw = { package = "libadwaita", version = "0.9.2", features = ["v1_4"] }
+# THE TWO DISPLAY BACKENDS, NAMED, so a declared app identity can move a
+# window's CLASS — the string a Linux desktop matches a running window to
+# an installed `.desktop` file by, and therefore what decides the launcher
+# icon, the dock grouping and the switcher entry.
+#
+# `g_set_prgname` alone cannot do it. GDK reads the program name when it
+# CREATES a surface, and this backend builds and presents its primary
+# window in `run_core`'s activate handler, before the app thread's first
+# transaction is drained — so a name arriving with the identity renames
+# every later surface and leaves the primary wearing the launcher
+# binary's name (MEASURED 2026-08-18: the identity leg's primary read
+# `WM_CLASS(STRING) = "identity", "identity"` while its second window read
+# `"Aurora Notes", "Aurora Notes"`). Moving an EXISTING surface's class is
+# per-protocol, and each protocol's route lives in its own crate:
+#
+#   wayland — `gdk_wayland_toplevel_set_application_id`, which the xdg-shell
+#     protocol explicitly allows after map ("Like other properties, a
+#     set_app_id request can be sent after the xdg_toplevel has been mapped
+#     to update the property").
+#   x11 — `XSetClassHint` on the surface's xid. GDK4 exposes NO wrapper for
+#     it: gdk4-x11's whole surface surface is xid/lookup/desktop/group/
+#     frame-sync/skip-hints/theme-variant/urgency/user-time/utf8-property,
+#     and `set_utf8_property` is not the route — WM_CLASS is ICCCM `STRING`,
+#     two NUL-separated latin-1 words, and a `UTF8_STRING` copy of it is a
+#     property with the right name and the wrong type. So the x11 arm needs
+#     the display's Xlib connection (`xdisplay()`, the `xlib` feature) and
+#     the Xlib call itself.
+#
+# `x11-dl` IS NOT A NEW NODE IN THE GRAPH: gdk4-x11's own `xlib` feature
+# already requires it (it is that crate's `x11` dependency, package
+# `x11-dl`), and naming it here is what makes `XSetClassHint` callable and
+# what makes the pointer types line up with `xdisplay()`'s return by
+# construction rather than by cast.
+#
+# The version floor is stated once, as gtk4's: one GTK install answers all
+# three pkg-config modules (`gtk4`, `gtk4-x11`, `gtk4-wayland` all report
+# 4.18.6 in the lane image).
+gdk4-x11 = { version = "0.11.4", features = ["v4_10", "xlib"] }
+gdk4-wayland = { version = "0.11.4", features = ["v4_10"] }
+x11-dl = "2.20"
 # The desktop JVM guest tier (jvm.rs): a plain JVM process loads the
 # cdylib and speaks the same KayaRing natives as Android's JVM tier.
 jni = "0.21"
@@ -343,6 +383,10 @@ path = "../../guests/rust/toolbar.rs"
 [[example]]
 name = "identity"
 path = "../../guests/rust/identity.rs"
+
+[[example]]
+name = "assets"
+path = "../../guests/rust/assets.rs"
 
 # Android has no native process entry (Zygote forks the process and an
 # Activity is the way in), so the Android packaging of milestone 0 is a

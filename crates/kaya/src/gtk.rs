@@ -1669,6 +1669,251 @@ fn apply_identity_icon(core: &mut CoreState, window: u64) {
     core.identity_icon_on.insert(window);
 }
 
+/// What a re-class did to ONE window, in this process's own words.
+///
+/// FOUR OUTCOMES AND NOT TWO, for invariant 3's reason: "the class
+/// moved", "there was no surface to move yet", "this display has no
+/// route" and "the route refused" are four different states of the
+/// world, and a sentence that could not tell them apart would send the
+/// next reader after the wrong one. Only the third and fourth are
+/// failures, and only they are printed by a shipped app.
+enum ClassMove {
+    /// `XSetClassHint` wrote `WM_CLASS` on this window's xid.
+    X11,
+    /// `xdg_toplevel.set_app_id` was sent for this window's toplevel.
+    Wayland,
+    /// The window has no `GdkSurface` yet, which is NOT a miss: GDK
+    /// writes the class when it creates the surface, and it reads
+    /// `g_get_prgname()` to do it — which this same apply has already
+    /// moved. The window is covered by the program name, not by this
+    /// function.
+    Unrealized,
+    /// Neither an X11 nor a Wayland surface. Broadway is the live
+    /// example; a future GDK backend is the general case. The class
+    /// stays whatever the launcher gave it, no `.desktop` entry can
+    /// match this window, and saying so is the whole point of carrying
+    /// this arm — the silent fallback is what the identity scene exists
+    /// to catch one layer up.
+    NoRoute { display: String, surface: String },
+}
+
+/// Move EXISTING toplevels' class to the app's declared name
+/// (docs/app-identity-plan.md I9, the `.desktop` precondition
+/// docs/deferred.md carried).
+///
+/// WHY `g_set_prgname` IS NOT ENOUGH, since the line above this call
+/// looks like it should be. A toplevel's class — `WM_CLASS` on X11,
+/// `app_id` on Wayland — is written when the surface is CREATED, and this
+/// backend builds and presents its primary window inside `run_core`'s
+/// activate handler, before the app thread's first transaction is
+/// drained. So by the time an identity arrives that window's class has
+/// already been sent. The program name reaches every LATER surface
+/// (measured: the identity scene's second window read
+/// `WM_CLASS(STRING) = "Aurora Notes", "Aurora Notes"` with no help from
+/// this function); the primary needs its class moved where it stands.
+///
+/// AND THE CLASS IT IS WEARING IS NOT ALWAYS THE PROGRAM NAME, which is
+/// worth knowing before reading a `WM_CLASS` and concluding anything.
+/// MEASURED on this lane, same binary and protocol, differing only in
+/// whether a session bus was running: with none, the primary advertised
+/// `identity` — the launcher binary; with one, `dev.kaya.Milestone2` —
+/// this backend's own GApplication id, because on Wayland a
+/// GtkApplication window's `app_id` comes from the application id and
+/// that startup path needs the bus. Auxiliary windows are plain
+/// `gtk4::Window`s with no application and carry the program name either
+/// way. Two sources, one of them a name every kaya app would have shared,
+/// and NEITHER is the app's own — which is the whole reason this function
+/// writes the declared name over whatever is there.
+///
+/// AND THAT STRING IS NOT COSMETIC. It is what a Linux desktop matches a
+/// running window to its installed `.desktop` entry by, which is what
+/// decides the launcher icon, the dock grouping and the alt-tab entry.
+/// Until the primary's class follows the declaration, no `.desktop` file
+/// a kaya app ships could ever match its main window.
+///
+/// TWO PROTOCOLS, TWO ROUTES, AND ONLY ONE OF THEM IS A GDK CALL:
+///
+/// - **Wayland** has it as public API — `gdk_wayland_toplevel_set_-
+///   application_id`, which xdg-shell explicitly permits after map:
+///   "Like other properties, a set_app_id request can be sent after the
+///   xdg_toplevel has been mapped to update the property."
+/// - **X11 does not.** gdk4-x11's whole surface surface is
+///   xid/lookup/desktop/group/frame-sync/skip-hints/theme-variant/
+///   urgency/user-time/utf8-property, and `set_utf8_property` is NOT the
+///   route: `WM_CLASS` is ICCCM `STRING`, two NUL-separated latin-1
+///   words, and a `UTF8_STRING` property of the same name is the right
+///   name with the wrong type — no window manager reads it. So the X11
+///   arm goes to Xlib through the display's own connection, which is
+///   exactly what GDK itself does when it writes the property at surface
+///   creation.
+///
+/// BOTH FIELDS GET THE DECLARED NAME, because that is what GDK writes:
+/// its `res_class` falls back to `g_get_prgname()` when nothing called
+/// `gdk_x11_display_set_program_class`, which is why the measured second
+/// window read the name TWICE. The point of this function is that the
+/// primary becomes indistinguishable from a window created after the
+/// declaration, so it must write the pair GDK would have written — and
+/// the linux legs assert exactly that, by requiring every one of an
+/// app's mapped toplevels to carry the SAME class.
+fn reclass_toplevels(core: &CoreState, name: &str) -> Vec<(u64, ClassMove)> {
+    let live: Vec<u64> = std::iter::once(0).chain(core.aux_windows.keys().copied()).collect();
+    live.into_iter()
+        .filter_map(|id| gtk_window_read(core, id).map(|window| (id, window)))
+        .map(|(id, window)| {
+            use gtk4::prelude::NativeExt;
+            let Some(surface) = window.surface() else {
+                return (id, ClassMove::Unrealized);
+            };
+            (id, reclass_surface(&surface, name))
+        })
+        .collect()
+}
+
+/// One surface, whichever protocol it turns out to be sitting on.
+///
+/// THE PROTOCOL IS READ OFF THE OBJECT, never off `GDK_BACKEND`: the
+/// environment variable is a REQUEST and which backend GDK opened is the
+/// fact, which is the same rule `identity_probe` follows one function
+/// down. A downcast that fails is not an error to swallow — it is the
+/// `NoRoute` sentence, and it names both types so the reader knows what
+/// this process was actually looking at.
+fn reclass_surface(surface: &gtk4::gdk::Surface, name: &str) -> ClassMove {
+    use gtk4::glib::prelude::{Cast, ObjectExt};
+
+    if let Ok(toplevel) = surface.clone().downcast::<gdk4_wayland::WaylandToplevel>() {
+        toplevel.set_application_id(name);
+        return ClassMove::Wayland;
+    }
+
+    let x11_surface = surface.clone().downcast::<gdk4_x11::X11Surface>();
+    let x11_display = surface.display().downcast::<gdk4_x11::X11Display>();
+    if let (Ok(x11_surface), Ok(x11_display)) = (x11_surface, x11_display) {
+        // The Xlib entry points are dlopen'd rather than linked: that is
+        // the crate gdk4-x11's own `xlib` feature already pulls in, so
+        // the `Display` pointer `xdisplay()` hands back and the one
+        // `XSetClassHint` wants are the SAME type by construction and
+        // not by a cast. libX11 is already resident in any process that
+        // opened an X11 GdkDisplay, so this resolves the copy GDK is
+        // using rather than loading a second one.
+        let xlib = match x11_dl::xlib::Xlib::open() {
+            Ok(xlib) => xlib,
+            Err(why) => {
+                return ClassMove::NoRoute {
+                    display: format!("GdkX11Display, but libX11 could not be opened: {why}"),
+                    surface: x11_surface.type_().name().to_string(),
+                };
+            }
+        };
+        // A NUL in the middle would make Xlib see a shorter name than
+        // the app declared, so the name is refused rather than truncated
+        // — the class a desktop matches on is not a place to guess.
+        let Ok(class) = std::ffi::CString::new(name) else {
+            return ClassMove::NoRoute {
+                display: "GdkX11Display, but the declared name contains a NUL byte and \
+                          WM_CLASS is two NUL-TERMINATED words"
+                    .to_owned(),
+                surface: x11_surface.type_().name().to_string(),
+            };
+        };
+        let mut hint = x11_dl::xlib::XClassHint {
+            res_name: class.as_ptr().cast_mut(),
+            res_class: class.as_ptr().cast_mut(),
+        };
+        // SAFETY: `xdisplay()` is the display GDK opened and is live for
+        // as long as the GdkX11Display is; `xid()` is that surface's
+        // window on it; `hint` outlives the call and Xlib only reads it.
+        // The flush is required: this runs inside an apply, and the
+        // property would otherwise sit in GDK's output buffer until the
+        // next frame — long enough for a read taken in the same beat to
+        // see the old class and blame the wrong thing.
+        unsafe {
+            let xdisplay = x11_display.xdisplay();
+            (xlib.XSetClassHint)(xdisplay, x11_surface.xid(), &mut hint);
+            (xlib.XFlush)(xdisplay);
+        }
+        return ClassMove::X11;
+    }
+
+    ClassMove::NoRoute {
+        display: surface.display().type_().name().to_string(),
+        surface: surface.type_().name().to_string(),
+    }
+}
+
+/// The re-class, in one sentence per outcome, and WHO SEES IT.
+///
+/// The failure branch is printed by every build, the way the icon's
+/// refusal is: an app whose windows cannot carry its declared class will
+/// never group under its `.desktop` entry, and nothing else in the
+/// system will say so. The success branch is a harness-only record —
+/// a working app has no business narrating its own startup — and it is
+/// what the linux legs grep for as this process's half of the claim, the
+/// server's copy being the other half.
+fn report_class_moves(moves: &[(u64, ClassMove)], name: &str) {
+    let listed = |want: fn(&ClassMove) -> bool| {
+        moves
+            .iter()
+            .filter(|(_, how)| want(how))
+            .map(|(id, _)| format!("#{id}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    for (id, how) in moves {
+        if let ClassMove::NoRoute { display, surface } = how {
+            eprintln!(
+                "KAYA_DIAG app identity: window#{id} keeps the class its launcher gave \
+                 it — kaya has no route to move a class on this display ({display}, \
+                 surface {surface}), so no .desktop entry naming \"{name}\" can match \
+                 this window"
+            );
+        }
+    }
+    #[cfg(feature = "harness")]
+    {
+        let x11 = listed(|how| matches!(how, ClassMove::X11));
+        let wayland = listed(|how| matches!(how, ClassMove::Wayland));
+        let later = listed(|how| matches!(how, ClassMove::Unrealized));
+        // THE FOURTH BUCKET IS COUNTED HERE TOO, and it is not decoration.
+        // Without it the four outcomes shared three clauses, so a run where
+        // EVERY window took the no-route branch printed "this app holds no
+        // window at all" — a sentence that is simply false, on the one path
+        // a reader would be reading it. Caught by making the branch print
+        // (docs/deferred.md, invariant 3: a branch nobody has seen print is
+        // a guess about a state nobody has reached).
+        let stuck = listed(|how| matches!(how, ClassMove::NoRoute { .. }));
+        let mut clauses = Vec::new();
+        if !x11.is_empty() {
+            clauses.push(format!("XSetClassHint rewrote WM_CLASS on window {x11}"));
+        }
+        if !wayland.is_empty() {
+            clauses.push(format!("xdg_toplevel.set_app_id was sent for window {wayland}"));
+        }
+        if !later.is_empty() {
+            clauses.push(format!(
+                "window {later} had no surface yet, so GDK writes the class at realize \
+                 from the program name this apply already moved"
+            ));
+        }
+        if !stuck.is_empty() {
+            clauses.push(format!(
+                "window {stuck} kept the class its launcher gave it, this display \
+                 having no route (see the line above)"
+            ));
+        }
+        if clauses.is_empty() {
+            clauses.push("this app holds no window at all".to_owned());
+        }
+        eprintln!(
+            "KAYA_DIAG app identity: class -> \"{name}\": {} (that call returns nothing \
+             and GDK reads no class back, so this clause is a record of what this \
+             process did, not of what the server holds)",
+            clauses.join("; ")
+        );
+    }
+    #[cfg(not(feature = "harness"))]
+    let _ = listed;
+}
+
 /// The caption a window falls back to when it declares none of its own —
 /// the app's declared NAME, or nothing (docs/app-identity-plan.md I9).
 ///
@@ -6257,22 +6502,25 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // g_get_application_name, so both writes land somewhere an
             // assistive client can see (I9, measured).
             //
-            // WHAT IT DOES NOT MOVE, stated because a reader will
-            // otherwise assume it does: a toplevel's `app_id` and
-            // `WM_CLASS` are sent when the SURFACE is created, and this
-            // backend builds and presents its primary window inside
-            // `run_core`'s activate handler — before the app thread's
-            // first transaction is drained. So a name arriving here
-            // renames the PROGRAM and every surface created afterwards,
-            // and the primary's already-sent class keeps the launcher
-            // binary's name. Moving that one needs
-            // `gdk_wayland_toplevel_set_application_id` (and its X11
-            // sibling), which live in crates this tree does not depend
-            // on; the ledger carries it.
+            // AND THE PROGRAM NAME ONLY REACHES SURFACES NOT YET
+            // CREATED, which is why the line under it exists. A
+            // toplevel's `app_id`/`WM_CLASS` is sent when GDK CREATES
+            // the surface, and this backend builds and presents its
+            // primary window inside `run_core`'s activate handler —
+            // before the app thread's first transaction is drained. So
+            // the name arriving here covers every LATER window by
+            // itself, and `reclass_toplevels` is what moves the class of
+            // the windows that already exist. Both halves are needed and
+            // neither is redundant: without the first, later windows
+            // would keep the launcher's name; without the second, the
+            // PRIMARY would, and the primary is the window a desktop
+            // matches to the app's `.desktop` entry.
             if !identity.name.is_empty() {
                 glib::set_prgname(Some(identity.name.as_str()));
                 glib::set_application_name(&identity.name);
                 core.identity_name = Some(identity.name.clone());
+                let moves = reclass_toplevels(core, &identity.name);
+                report_class_moves(&moves, &identity.name);
                 // ...and the name fills the blank on every window that
                 // has none of its own, which is where an app's name is
                 // observable at runtime on this platform. Never over a

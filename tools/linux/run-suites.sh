@@ -38,7 +38,7 @@ eval "$(opam env 2>/dev/null)" || true
 # --example alone would build only the rlib it depends on.
 # THE scene list — the mechanical build/guest surfaces derive from it
 # (one registration per new scene; leg blocks stay explicit).
-SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity"
+SCENES="background stall milestone2 entry gallery todos reorder feed grow layout align window panels confirm nav split scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets"
 # Depth-slice scenes: built and run for rust only until the language
 # sweep lands their guests (the validate-mac DEPTH_SCENES convention).
 DEPTH_SCENES=""
@@ -163,21 +163,36 @@ status=0
 # which has anything to do with the clipboard.
 #
 # AND THE RULE IS `app_id=".*"` FOR A REASON, which this comment used to
-# get wrong. It claimed kaya's windows carry
-# `application_id("dev.kaya.Milestone2")` — the GApplication id — and
-# that the rule matches because of it. THEY DO NOT. A Wayland toplevel's
-# `app_id` (and an X11 window's `WM_CLASS`) follows `g_get_prgname()`,
-# which defaults to the LAUNCHER BINARY's name, so this lane's legs
-# advertise `python3`, `dotnet`, `java`, `milestone2` and `kaya-go` —
-# one per launcher, none of them the GApplication id. MEASURED
-# 2026-08-18 in this image: the identity scene's primary window, built
-# before any transaction is drained, reported `WM_CLASS = "identity"`
-# (the example binary's name), and its SECOND window — created after
-# `set_app_identity` had called `g_set_prgname("Aurora Notes")` —
-# reported `WM_CLASS = "Aurora Notes"`. So the name really is settable
-# at runtime, and it reaches every surface created after it is set.
-# A rule naming any one id would match a fraction of the legs;
-# `app_id=".*"` is what makes every leg float.
+# get wrong in one direction and then in another. It first claimed kaya's
+# windows carry `application_id("dev.kaya.Milestone2")` — the GApplication
+# id — and that the rule matches because of it; the correction said the
+# class follows `g_get_prgname()`, the LAUNCHER BINARY's name. BOTH ARE
+# TRUE, of different legs, and the discriminator is a session bus.
+# MEASURED 2026-08-18 in this image, same binary and same protocol,
+# differing only in whether one was running:
+#
+#   x11, every leg           WM_CLASS = the launcher binary's name
+#   wayland, no session bus  app_id   = the launcher binary's name
+#   wayland, a11y-leg.sh     app_id   = "dev.kaya.Milestone2"
+#
+# because on Wayland a GtkApplication window's `app_id` comes from the
+# GApplication ID, and that startup path runs only when the application
+# registers on a session bus. `a11y-leg.sh` launches one, so the identity,
+# styling, typeface and toolbar legs take that arm and every other leg
+# does not. AUXILIARY windows are plain `gtk4::Window`s with no
+# application and carry the program name on both arms.
+#
+# So this lane's legs advertise `python3`, `dotnet`, `java`, `milestone2`,
+# `kaya-go` — and, on the wayland legs that hold a bus, one shared
+# `dev.kaya.Milestone2`. A rule naming any one id would match a fraction
+# of them; `app_id=".*"` is what makes every leg float.
+#
+# NONE OF THOSE IS THE APP'S OWN NAME, which is the point of the identity
+# arm below: an app that declares an identity now moves the class of the
+# windows that already exist (crates/kaya/src/gtk.rs, `reclass_toplevels`)
+# rather than only of the ones created afterwards, so a `.desktop` entry
+# can match its PRIMARY window. Before that, a kaya app on Wayland
+# advertised kaya's own milestone-2 id to the whole desktop.
 #
 # The socket name is sway's to choose, unlike Weston's --socket, so it
 # is discovered after start rather than declared.
@@ -475,8 +490,9 @@ timing guest-builds
 # block's rule one asset over, and for the same reason: the identity
 # guests default to the mark's repo-relative path, this script runs from
 # /work (the `cd` at the top) and /work IS the repo, so that default
-# resolves here. KAYA_ICON_FILE is for a runner whose guest cannot see
-# the repo, which is a phone.
+# resolves here — and since the migration the guests name the mark
+# `asset("icons/kaya-mark.png")` rather than a path, so what resolves is
+# the ROOT and not one file.
 #
 # AND THE PATH IS READ FROM THE DECLARATION, never retyped. The app
 # identity is written down once, in guests/assets/identity.toml
@@ -762,6 +778,34 @@ for proto in x11 wayland; do
     # keeps this comment honest — that sweep reads the BINARY PATH out of
     # this file, comments included, so the path is not written here even
     # to say it is absent.
+    # THE ASSETS CONFORMANCE SCENE (docs/assets-plan.md): `asset(name)`'s
+    # two halves, observed through real surfaces. THIS LANE STAGES
+    # NOTHING and that is an assertion rather than an omission — the repo
+    # is bind-mounted at /work, so the core's compile-time repo-relative
+    # default resolves, and the scene's frozen census is what proves it
+    # found the whole root. GTK decodes the mark with its own loader, so
+    # `expect image#0` here is the platform's answer and not kaya's.
+    #
+    # THROUGH a11y-leg.sh like the block above, for that block's reason.
+    run "$proto" assets-rust env KAYA_SELFTEST=assets \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/assets"
+    run "$proto" assets-python env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/assets.py
+    run "$proto" assets-go env KAYA_SELFTEST=assets \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" assets-csharp env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" assets-ocaml env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/assets.exe
+    run "$proto" assets-haskell env KAYA_SELFTEST=assets \
+        tools/linux/a11y-leg.sh "$(hs_bin assets)"
+    run "$proto" assets-java env KAYA_SELFTEST=assets KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
+    # AND THE C FLOOR, which no other scene's block on this lane can say
+    # of an asset call: guests/c/assets.c writes kaya_asset_open,
+    # kaya_asset_blob and kaya_asset_why_not longhand, and this is one of
+    # the two lanes that run it.
+    run "$proto" assets-c env KAYA_SELFTEST=assets /tmp/c-guests/assets
     # THE TOOLBAR SCENE (docs/chrome-plan.md C2): the `primary` bit's
     # desktop lowering. On this backend that is buttons packed into the
     # window's AdwHeaderBar in catalog preorder, symbol-first, bound to
@@ -851,25 +895,63 @@ for proto in x11 wayland; do
     # GTK-and-compositor fact that no binding can change, where the X11
     # ring below runs the full roster because the SCENE is about the
     # semantics every language shares.
+    #
+    # ============ AND THE CLASS IS ASSERTED ON BOTH RINGS ==============
+    # THE NAME HALF HAS A SECOND SURFACE, and it is the one an INSTALLED
+    # app is matched by: a window's CLASS — `WM_CLASS` on X11, `app_id`
+    # on wayland — is what a desktop uses to tie a running window to its
+    # `.desktop` entry, and therefore what decides the launcher icon, the
+    # dock grouping and the alt-tab entry. It is not a widget, no harness
+    # verb reads it, and tools/scenes/*.steps are shared verbatim by five
+    # platforms, so it is asserted HERE, outside the leg, the way the
+    # wayland witness below is. tools/linux/identity-class-leg.py wraps
+    # every identity leg on both rings and requires every MAPPED toplevel
+    # of the app to carry the declared name — which is the primary
+    # window's assertion, since the auxiliary one is created after the
+    # declaration and gets it for free.
+    #
+    # THIS IS THE RING THE TWO PROTOCOLS ARE THE SAME ON, unlike the icon
+    # above, and that is measured rather than hoped: X11 takes
+    # `XSetClassHint` on the realized surface and wayland takes
+    # `xdg_toplevel.set_app_id` after map, which xdg-shell explicitly
+    # permits ("Like other properties, a set_app_id request can be sent
+    # after the xdg_toplevel has been mapped to update the property").
+    # So the wayland leg asserts the class through sway's OWN TREE — the
+    # compositor's grouping view, which is the thing a shell would match
+    # a `.desktop` against — while still witnessing the icon gap.
     case "$proto" in
         x11)
             run "$proto" identity-rust env KAYA_SELFTEST=identity \
+                tools/linux/identity-class-leg.py \
                 tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/identity"
             run "$proto" identity-python env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
+                tools/linux/identity-class-leg.py \
                 tools/linux/a11y-leg.sh python3 guests/python/identity.py
             run "$proto" identity-go env KAYA_SELFTEST=identity \
+                tools/linux/identity-class-leg.py \
                 tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
             run "$proto" identity-csharp env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
+                tools/linux/identity-class-leg.py \
                 tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
             run "$proto" identity-ocaml env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
+                tools/linux/identity-class-leg.py \
                 tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/identity.exe
             run "$proto" identity-haskell env KAYA_SELFTEST=identity \
+                tools/linux/identity-class-leg.py \
                 tools/linux/a11y-leg.sh "$(hs_bin identity)"
             run "$proto" identity-java env KAYA_SELFTEST=identity KAYA_LIB="$LIB" \
+                tools/linux/identity-class-leg.py \
                 tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.milestone2kt.Main
             ;;
         wayland)
+            # The class reader is OUTERMOST, and the nesting is load-
+            # bearing. The witness converts the icon gap into a PASS, so
+            # a class failure inside it would be swallowed by the very
+            # clause that expects this leg to fail; with the reader on
+            # the outside the leg's verdict is the class assertion's, and
+            # the witness's is the exit status it reads.
             run "$proto" identity-witness-rust env KAYA_SELFTEST=identity \
+                tools/linux/identity-class-leg.py \
                 tools/linux/identity-wayland-witness.sh \
                 tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/identity"
             ;;
