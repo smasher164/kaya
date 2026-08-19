@@ -454,6 +454,14 @@ in docs/deferred.md.
    project has and renders BLANK on the floor, so NO scene can see it;
    its self-test perturbs doc.on.doc to the macOS-15 rename out of the
    real file, count printed, and demands the refusal on every run),
+   `tools/check-symbol-parity.sh` (its sibling: ONE symbol vocabulary,
+   SIX files. wire::SYMBOLS owns the (value, name) set and is not in
+   the spec hash; GTK and WinUI name the wire constants so the compiler
+   holds their values and the gate holds coverage, while Swift, Compose
+   and the C floor copy the NUMBERS by hand — check-file-modes' trap
+   one surface over — so there it holds value, name and coverage all
+   three. Four self-tests perturb copies of the real files, counts
+   printed, red demanded on every run),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing, and the three

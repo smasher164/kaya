@@ -17,9 +17,17 @@ import Foundation
 
 let app = KayaApp()
 
-// TMPDIR FIRST: NSTemporaryDirectory() ignores TMPDIR and answers with
-// the per-user Darwin temp directory (docs/traps.md).
-let kayaTmp = ProcessInfo.processInfo.environment["TMPDIR"] ?? NSTemporaryDirectory()
+// NOT THE TEMP DIRECTORY ON iOS: $TMP there is the app's own Documents
+// (kayaTempDir in swift/KayaSwiftUI.swift), because the picker is a
+// remote view controller that browses PROVIDERS and cannot see an
+// app's private storage — the clipboard guest draws the same line.
+// TMPDIR FIRST EVERYWHERE ELSE — NSTemporaryDirectory() ignores TMPDIR
+// (docs/traps.md).
+#if os(iOS)
+    let kayaTmp = (NSHomeDirectory() as NSString).appendingPathComponent("Documents")
+#else
+    let kayaTmp = ProcessInfo.processInfo.environment["TMPDIR"] ?? NSTemporaryDirectory()
+#endif
 let pickedDir = (kayaTmp as NSString)
     .appendingPathComponent("kaya-picked-\(ProcessInfo.processInfo.processIdentifier)")
 try? FileManager.default.createDirectory(

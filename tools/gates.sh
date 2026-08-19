@@ -145,6 +145,12 @@ GATES = [
     ("check-symbols", ["tools/check-symbols.sh"], False,
      "half its input is /System's name_availability.plist, which moves with "
      "the OS rather than the tree — check-design-generation's shape"),
+    # ONE symbol vocabulary, SIX files: wire::SYMBOLS is not in the spec
+    # hash, so a concept added to five of six sites fails nowhere and
+    # renders as a missing glyph on the sixth platform alone.
+    ("check-symbol-parity", ["tools/check-symbol-parity.sh"], False,
+     "no input set is declared for it in build-id.sh's GATES; same shape as "
+     "check-tx-liveness above"),
     ("check-verbs", ["tools/check-verbs.sh"], True, ""),
     # The file-mode numbers against the spec that owns them: five
     # hand-written sites decode the integer kaya_open_picked takes.

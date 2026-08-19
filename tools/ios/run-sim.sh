@@ -1420,7 +1420,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background styling toolbar identity assets"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background undo ranges dirty filedialog save styling toolbar identity assets"
     # Machine-read by check-steps' wired(), which replaced a bare-name
     # grep that comments and unrelated code satisfied: a scene is wired
     # here IF AND ONLY IF it is in a list above, declared desktop-only,
@@ -1428,14 +1428,14 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # chrome no phone has; split drives resize_window, rejected above.
     # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
     IOS_DESKTOP_ONLY_SCENES="window panels split"
-    # NOT NARROWER, and where it is, it is written here: dirty, save,
-    # filedialog, ranges and undo run on this lane from the RUST-SWIFTUI
-    # suite's hand-queued legs alone (each owns host-specific plumbing —
-    # simdrive watchers, phone-expressible cuts), and editor from the Go
-    # suite. A swift or go leg on any of the five is a guest-breadth
-    # fan-out, the same divergence the android runner records for its
-    # compose-only trio; wired() keys on scene x runner, so language
-    # breadth lives in this sentence, not in a gate.
+    # NOT NARROWER any more, except by design: editor runs from the Go
+    # suite alone (the plan chose Go so a binding's awkward corners
+    # would show; there is no rust or swift editor guest). Everything
+    # else in the roster runs from ALL THREE suites — undo, ranges,
+    # dirty, filedialog and save graduated into the lists 2026-08-19
+    # (plain legs but dirty, which carries the documented chrome-close
+    # cut; the simdrive watcher engages per-verb inside run_swiftui_on,
+    # so the picker scenes needed no leg-specific plumbing).
     swift_pids=()
     swift_names=()
     for entry in $IOS_SWIFT_SCENES; do
@@ -1504,6 +1504,11 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
             # that opens it — and the keep guard holds the section
             # asserts above the cut.
             queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest" "" expect_windows "expect_section expect_section_symbol"
+        elif [ "$guest" = dirty ]; then
+            # The cut this mechanism was designed around: dirty's last
+            # six steps hang off a chrome close and iOS's close grammar
+            # is macOS-only; the prefix is D4's iOS arm.
+            queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest" "" close_window expect_dirty
         else
             queue_leg run_swiftui_on "$guest-swift" "$APP" "dev.kaya.${guest}swift" "$guest-swift" "$guest" "$guest"
         fi
@@ -1551,7 +1556,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # sysroot. Both ride CC rather than CGO_CFLAGS/CGO_LDFLAGS, because
     # cgo uses CC to LINK as well as compile and -isysroot needs both.
     IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
-    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background styling toolbar identity assets"
+    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background undo ranges dirty filedialog save styling toolbar identity assets"
     # ONE CROSS-BUILD FOR THE WHOLE SUITE. guests/go/cmd is the guest
     # tree's only main package: it imports every scene library and picks
     # one from KAYA_SELFTEST. The bundles still differ — one per scene,
@@ -1583,6 +1588,9 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         elif [ "$guest" = sections ]; then
             # The same phone-expressible prefix as the swift leg above.
             queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest" "" expect_windows "expect_section expect_section_symbol"
+        elif [ "$guest" = dirty ]; then
+            # The swift leg's cut, verbatim and for its reasons.
+            queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest" "" close_window expect_dirty
         else
             queue_leg run_swiftui_on "$guest-go" "$APP" "dev.kaya.${guest}go" "$guest-go" "$guest" "$guest"
         fi

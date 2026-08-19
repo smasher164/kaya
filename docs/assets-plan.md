@@ -247,13 +247,11 @@ crates/kaya/src/winui/mod.rs for Fluent, and KayaCompose.kt for Material,
 DESIGN.md:2418 already ruled the question: "Icons want names, not bytes
 ... The Blob stays for genuinely app-specific art."
 
-A measured gap found while surveying them, out of scope here and worth a
-ledger line: **no gate pins the four tables to one another**, only two
-Rust length-and-order assertions inside gtk.rs and winui/mod.rs. (The
-second half of this finding closed 2026-08-19: the `check-symbols.sh`
-the SwiftUI table's comment named had never existed under tools/ — it
-now does, registered as gate 38, holding that one table's names to the
-OS floor. The four-tables-pinned-together gap stands.)
+A measured gap found while surveying them, since closed in full
+(2026-08-19): `check-symbols.sh` (gate 38) holds the SwiftUI table's
+names to the OS floor, and `check-symbol-parity.sh` (gate 39) pins all
+the tables to `wire::SYMBOLS` — value, name and coverage for the
+hand-copied layers, coverage for the two that name the wire constants.
 
 ## A2. The convention
 
@@ -592,9 +590,9 @@ which is how the survey found it at all.
    identity plan's terms.
 
 Two findings that stand on their own, whether or not any of this
-proceeds, and which are ledger items rather than blockers: **no gate
-pins the four per-platform icon tables to one another** [MEASURED] (the
-missing `check-symbols.sh` half of this landed 2026-08-19, gate 38);
+proceeds: ~~no gate pins the four per-platform icon tables to one
+another~~ [MEASURED] (closed 2026-08-19: `check-symbols.sh` gate 38 +
+`check-symbol-parity.sh` gate 39);
 and **the core's only
 `include_bytes!` reaches into guests/assets/ with nothing stating the
 dependency**, so moving the font breaks a core harness test with an error

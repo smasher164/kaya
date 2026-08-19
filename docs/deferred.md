@@ -4090,7 +4090,17 @@ that convention lives, in the runner beside its scene lists. The real
 work item this entry leaves behind: the two mobile lanes each run five
 scenes single-guest, and a breadth fan-out (Swift and Go legs on iOS,
 Go legs on android where guests exist) is a milestone of its own, on
-the roster whenever the maintainer wants it.
+the roster whenever the maintainer wants it. (THE iOS HALF LANDED
+the same day: undo, ranges, dirty, filedialog and save all run from all
+three suites now — plain list entries but dirty, which carries the
+documented chrome-close cut; filedialog needed one real fix, the Swift
+guest staging in TMPDIR where the picker browses providers, cured with
+the clipboard guest's iOS Documents line. Only editor stays single-guest
+there, Go by design. THE ANDROID HALF IS A CONVENTION QUESTION, not a
+wiring one: its Go suite mirrors the JVM suite entry for entry so the
+two stay comparable, and Go legs for dirty/ranges/filedialog/save —
+scenes with no Java guest — would make Go wider than the mirror. The
+maintainer rules on that trade before anyone wires it.)
 
 
 ## FLAKE, one occurrence — identity-ocaml-x11 exited dirty after an OK verdict (2026-08-19)
