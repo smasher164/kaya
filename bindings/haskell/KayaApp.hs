@@ -174,6 +174,7 @@ module KayaApp
     radioOn,
     spacer,
     imageBytes,
+    imageAsset,
     imageBound,
     -- The TEMPLATE zone's own surface: one constructor per widget kind, each
     -- returning 'Tpl Node' (the module header's naming rule).
@@ -2192,6 +2193,17 @@ imageBytes :: (LeafArgs r) => BS.ByteString -> r
 imageBytes bytes = leafish $ do
   w@(Widget n) <- widget W.kindImage
   emitBIO (W.txSetSource n <$> registerBlob bytes)
+  return w
+
+-- | The ASSET form of the source slot: the same image, with the picture
+-- NAMED rather than read — @imageAsset mark [A11yLabel \"Logo\"]@, the mark
+-- opened in the IO around 'buildTx'. THE BYTES NEVER ENTER THIS GUEST'S
+-- HEAP: the core clones one refcount into the blob table,
+-- 'appIdentityAsset''s route verbatim.
+imageAsset :: (LeafArgs r) => Asset -> r
+imageAsset src = leafish $ do
+  w@(Widget n) <- widget W.kindImage
+  emitBIO (W.txSetSource n <$> R.assetBlob src)
   return w
 
 -- | An image whose source follows a Blob signal.

@@ -9,15 +9,6 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
-// A 2x2 RGB PNG (red/green over blue/white), 75 bytes.
-var testPNG = []byte{
-	137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
-	0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154, 115, 0,
-	0, 0, 18, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 192, 0,
-	194, 12, 255, 129, 0, 0, 31, 238, 5, 251, 11, 217, 104, 139, 0,
-	0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
-}
-
 func App() *kaya.App {
 	app := kaya.NewApp()
 
@@ -35,7 +26,8 @@ func App() *kaya.App {
 			tx.Textarea(nil).A11yID("notes").A11yLabel("Notes")
 			tx.Slider(0.0, 1.0, 0.5, nil).A11yID("volume").A11yLabel("Volume")
 			tx.Progress(0.25).A11yID("loading").A11yLabel("Loading")
-			tx.Image(testPNG).A11yID("logo").A11yLabel("Logo")
+			logo := tx.Asset("images/a11y-logo.png")
+			tx.ImageAsset(logo).A11yID("logo").A11yLabel("Logo")
 			tx.Select([]string{"Red", "Green"}, 0, nil).
 				A11yID("color").A11yLabel("Color")
 			tx.Radio([]string{"Small", "Large"}, 0, nil).

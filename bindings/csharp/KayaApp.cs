@@ -1529,6 +1529,28 @@ sealed class Tx
         return w;
     }
 
+    /// The PICTURE-FILE overload: the same image, showing what THE APP'S
+    /// OWN BUILD PUT BESIDE IT.
+    ///
+    ///     using var mark = tx.Asset("icons/kaya-mark.png");
+    ///     tx.Image(mark);
+    ///
+    /// The picture never enters .NET — the redemption clones one refcount
+    /// into the blob table, AppIdentity(string, Asset)'s route exactly.
+    /// The asset is REQUIRED, so this is not ambiguous with the
+    /// bytes/signal call above.
+    public Widget Image(Asset source, double? grow = null)
+    {
+        if (source is null)
+            throw new ArgumentNullException(nameof(source),
+                "kaya: Image got no asset — open one with " +
+                "tx.Asset(\"icons/...\"), or pass encoded bytes");
+        var w = Widget(KayaWire.KindImage);
+        Records.Add(KayaWire.TxSetSource(w.Id, source.Blob()));
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
     /// A container parents everything declared inside its body (the
     /// ambient stack). `inset:` is this container's own padding.
     public Widget Column(

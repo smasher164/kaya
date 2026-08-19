@@ -1059,6 +1059,19 @@ func (tx *Tx) Image(source []byte) Widget {
 	return w
 }
 
+// ImageAsset displays the picture THE APP'S OWN BUILD PUT BESIDE IT —
+// Image's request by a different route: the bytes never enter Go, and
+// the redemption clones one refcount into the blob table (FontAsset's
+// mechanics, one widget over).
+func (tx *Tx) ImageAsset(a *Asset) Widget {
+	if a == nil {
+		panic("kaya: ImageAsset got no asset — open one with tx.Asset(\"icons/...\")")
+	}
+	w := tx.Widget(KindImage)
+	tx.emit(TxSetSource(w.id, a.blobHandle()))
+	return w
+}
+
 // ImageSignal creates an image whose source is bound to a blob signal;
 // each write of the signal re-registers its bytes (see Tx.Write).
 func (tx *Tx) ImageSignal(s Signal[[]byte]) Widget {

@@ -6,24 +6,18 @@
    ordinal. See guests/rust/a11y.rs; the byte-frozen contract is
    tools/scenes/a11y.steps. -}
 
-import qualified Data.ByteString as BS
-
 import KayaApp
 
-{- A 2x2 RGB PNG (red/green over blue/white), 75 bytes, embedded as
-   source. -}
-testPng :: BS.ByteString
-testPng =
-  BS.pack
-    [ 137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
-      0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154, 115,
-      0, 0, 0, 18, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 192,
-      0, 194, 12, 255, 129, 0, 0, 31, 238, 5, 251, 11, 217, 104, 139,
-      0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130
-    ]
+-- The one the mark is under: the picture this app's own BUILD shipped.
+markName :: String
+markName = "images/a11y-logo.png"
 
 main :: IO ()
 main = kayaMain $ \app -> do
+  -- Out here rather than below: Build is a pure state monad, so the
+  -- asset is opened in the IO around the transaction. THE BYTES NEVER
+  -- ENTER THIS GUEST'S HEAP — the handle goes to the blob channel.
+  mark <- asset markName
   _ <- buildTx app $ do
     root <-
       column
@@ -41,7 +35,7 @@ main = kayaMain $ \app -> do
           textareaOn (const (return ())) [A11yId "notes", A11yLabel "Notes"],
           sliderOn 0 1 0.5 (const (return ())) [A11yId "volume", A11yLabel "Volume"],
           progress 0.25 [A11yId "loading", A11yLabel "Loading"],
-          imageBytes testPng [A11yId "logo", A11yLabel "Logo"],
+          imageAsset mark [A11yId "logo", A11yLabel "Logo"],
           selectOn ["Red", "Green"] 0 (const (return ()))
             [A11yId "color", A11yLabel "Color"],
           radioOn ["Small", "Large"] 0 (const (return ()))
@@ -64,4 +58,6 @@ main = kayaMain $ \app -> do
         ]
     mount root
     return ()
+  -- Safe here: the blob table already holds its own reference.
+  assetClose mark
   return ()

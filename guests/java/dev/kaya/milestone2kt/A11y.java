@@ -27,7 +27,13 @@ final class A11y {
                 tx.textarea().a11yId("notes").a11yLabel("Notes");
                 tx.slider(0.0, 1.0, 0.5, null).a11yId("volume").a11yLabel("Volume");
                 tx.progress(0.25).a11yId("loading").a11yLabel("Loading");
-                tx.image(TEST_PNG).a11yId("logo").a11yLabel("Logo");
+                // THE MARK THE APP'S OWN BUILD SHIPPED: the bytes never
+                // enter this JVM's heap, and try-with-resources is safe
+                // because the blob table already holds its own
+                // reference.
+                try (KayaApp.Asset mark = KayaApp.asset("images/a11y-logo.png")) {
+                    tx.image(mark).a11yId("logo").a11yLabel("Logo");
+                }
                 tx.select(new String[] {"Red", "Green"}, 0, null)
                         .a11yId("color").a11yLabel("Color");
                 tx.radio(new String[] {"Small", "Large"}, 0, null)
@@ -47,15 +53,4 @@ final class A11y {
 
         app.dispatchLoop();
     }
-
-        /** A 2x2 RGB PNG, embedded as source. */
-    private static final byte[] TEST_PNG = {
-        (byte) 137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
-        0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, (byte) 253, (byte) 212,
-        (byte) 154, 115, 0, 0, 0, 18, 73, 68, 65, 84, 120, (byte) 156, 99,
-        (byte) 248, (byte) 207, (byte) 192, (byte) 192, 0, (byte) 194, 12,
-        (byte) 255, (byte) 129, 0, 0, 31, (byte) 238, 5, (byte) 251, 11,
-        (byte) 217, 104, (byte) 139, 0, 0, 0, 0, 73, 69, 78, 68, (byte) 174,
-        66, 96, (byte) 130,
-    };
 }

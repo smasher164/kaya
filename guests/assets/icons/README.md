@@ -5,6 +5,12 @@ repo, for this repo: there is no upstream and no licence to carry, which
 is the one hygiene question a vendored binary asks and the reason it is
 answered here rather than left to be looked up.
 
+THIS FAMILY IS THE MARK'S ALONE: tools/check-app-identity.sh reads any
+`icons/...` asset open as a reference to the declared mark and refuses
+a name that is not it. A picture that is not the mark lives in
+guests/assets/images/ (its README carries the a11y stand-in's story and
+the measured viewport cliff behind its size).
+
 It is four quadrants in four flat colours:
 
 | quadrant | colour |

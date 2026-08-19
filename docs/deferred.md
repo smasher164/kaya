@@ -4115,3 +4115,43 @@ in the solo lane rerun minutes later (551/551), and the day’s changes
 touched neither the OCaml binding, the identity guest, nor gtk.rs. One
 in ~2,500 legs. If the sentence shows again, start at the OCaml guest’s
 exit path under contention, not at the scene.
+
+
+## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
+KEY: a11y TEST_PNG, inline image bytes, asset icons
+
+guests/rust/a11y.rs:34 draws its image from an inline TEST_PNG byte
+array, and its seven siblings do the same. The assets survey ruled the
+tree's inline PNGs 'stay' under one blanket reason — a DECODE-assertion
+scene must not fail because a file was not staged — but a11y is not a
+decode assertion: its image exists so the accessibility read has an
+image widget with a label, and the staging risk died when the asset
+root became a hash-verified unit on every lane (tools/check-assets.sh).
+The example tier should read as the kaya calls an app would make:
+asset(name) for the picture, the way the typeface and identity guests
+already do. The decode-assertion inlines (the gallery's corrupt PNG and
+kin) KEEP their bytes — their subject is the bytes. Closing this:
+sweep all nine a11y guests (eight bindings + the C floor's verdict per
+invariant 2), land the picture under guests/assets/, and re-run the
+matrix — expect_ax reads are stamped observations, so nothing in the
+scene moves.
+
+RESOLVED 2026-08-19, same day: image-from-asset landed in all eight
+bindings — Rust rides Into&lt;Blob&gt; (an Arc refcount clone), Go grew
+ImageAsset beside AppIdentityAsset, Python's image() source slot takes
+an Asset the way its identity and typeface keywords already did, C#,
+Java and Swift overloaded, OCaml paired ~source_asset with ~source
+under the both-named refusal its siblings use, Haskell exported
+imageAsset beside imageBytes. All nine a11y guests' inline PNGs are
+gone but the C floor's, which KEEPS its bytes as the floor's
+documentation (invariant 5) — that is the per-language verdict, not an
+omission. The gallery scenes keep theirs everywhere: their bytes are
+decode-assertion inputs, the survey's original reason, now scoped to
+the scenes it is true of. The picture itself is guests/assets/images/a11y-logo.png
+— the guests' old 2x2 TEST_PNG extracted verbatim, NOT the kaya mark,
+and that is a measured cliff rather than a taste call: the 64x64 mark
+grew the scene ~62px, pushed its last three widgets past the emulator
+viewport, and the a11y provider answers offscreen nodes with 20s of
+silence per read — the leg timed out with the scene substantively
+green. The full story is in the icons README, beside the file a future
+hand would swap.

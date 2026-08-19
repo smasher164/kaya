@@ -587,9 +587,13 @@ applied "$hits" "N5's redacted reason"
 refuses "$s" "needs no asset staging" "N5 (an unexplained absence)"
 
 # N6 — C2: the census floor refuses a root that lost most of itself.
+# EVERYTHING BUT identity.toml GOES, not a named list: a named list is
+# sized against today's root, and the day two small files joined the
+# root the deletions stopped reaching the floor and this self-test
+# failed sideways (2026-08-19, the a11y stand-in picture and its
+# family README).
 s="$(fresh n6)"
-rm -f "$s/guests/assets/fonts/sora-wght.ttf" "$s/guests/assets/icons/kaya-mark.png" \
-    "$s/guests/assets/fonts/OFL.txt" "$s/guests/assets/win/minimal-resources.pri"
+find "$s/guests/assets" -type f ! -name identity.toml -delete
 refuses "$s" "below the floor of" "N6 (a census that reads almost nothing)"
 
 # N7 — C5: a stager verifies by size rather than by hash.

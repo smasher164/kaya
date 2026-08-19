@@ -682,6 +682,13 @@ let set_source (Widget id) data =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_set_source id (Kaya_runtime.register_blob data))
 
+(* The same slot from an open asset: the core clones one refcount into the
+   blob table, so the picture never enters the OCaml heap
+   ([~icon_asset]'s route, verbatim). *)
+let set_source_asset (Widget id) a =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_source id (Kaya_runtime.asset_blob a))
+
 let bind_source (Widget id) (Signal s) =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_bind_source id s)
@@ -898,12 +905,23 @@ let checkbox ?grow ?a11y_id ?a11y_label ?a11y_hint ?text ?checked ?on_toggle () 
   w
 
 (* An image displaying encoded bytes (PNG, JPEG, ...): the toolkit decodes
-   natively, and decode failure renders the placeholder, never a crash. *)
-let image ?grow ?a11y_id ?a11y_label ?source ?bind () =
+   natively, and decode failure renders the placeholder, never a crash.
+   [~source] ships the bytes and [~source_asset] the same slot with the
+   picture NAMED rather than read (the bytes never enter the OCaml heap).
+   The two are EXCLUSIVE — naming both is refused, [~font]/[~font_asset]'s
+   rule verbatim. *)
+let image ?grow ?a11y_id ?a11y_label ?source ?source_asset ?bind () =
   let w = widget Kaya_wire.kind_image in
   Option.iter (fun g -> set_grow w g) grow;
   set_a11y ?a11y_id ?a11y_label w;
-  Option.iter (fun data -> set_source w data) source;
+  (match (source, source_asset) with
+   | Some _, Some _ ->
+     invalid_arg
+       "kaya: image takes ~source or ~source_asset, never both — there is \
+        one source slot on the wire"
+   | Some data, None -> set_source w data
+   | None, Some a -> set_source_asset w a
+   | None, None -> ());
   Option.iter (fun s -> bind_source w s) bind;
   w
 

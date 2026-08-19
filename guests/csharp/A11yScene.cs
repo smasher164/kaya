@@ -37,7 +37,12 @@ static class A11yScene
                 var loading = tx.Progress(0.25);
                 tx.SetA11yId(loading, "loading");
                 tx.SetA11yLabel(loading, "Loading");
-                var logo = tx.Image(TestPng);
+                // THE MARK THE APP'S OWN BUILD SHIPPED: the bytes go
+                // from the core's read straight to the decoder, and the
+                // `using` releases the core's handle once the blob
+                // table holds its own reference.
+                using var mark = tx.Asset("images/a11y-logo.png");
+                var logo = tx.Image(mark);
                 tx.SetA11yId(logo, "logo");
                 tx.SetA11yLabel(logo, "Logo");
                 var color = tx.Select(new[] { "Red", "Green" });
@@ -71,14 +76,4 @@ static class A11yScene
 
         System.Environment.Exit(app.Run());
     }
-
-    // A 2x2 RGB PNG, 75 bytes, embedded as source.
-    static readonly byte[] TestPng =
-    {
-        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82,
-        0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154, 115, 0,
-        0, 0, 18, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 192, 0,
-        194, 12, 255, 129, 0, 0, 31, 238, 5, 251, 11, 217, 104, 139, 0,
-        0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
-    };
 }

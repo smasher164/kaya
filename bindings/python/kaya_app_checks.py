@@ -1749,6 +1749,20 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
           and _identity(rows[0])[3] == kaya.wire.VALUE_BLOB)
     _rewind(before)
 
+    # THE THIRD CONSUMER: an image built from an asset, whose record has
+    # to be the one bytes produce — same prop, same const source, same
+    # Blob — because the wire learns nothing about assets.
+    before = len(kaya._tx)
+    with kaya.column():
+        kaya.image(kaya.asset("icons/kaya-mark.png"))
+    last = kaya._tx[before:][-1]
+    check("image(<asset>) queues the same set_source bytes would",
+          _rec_kind(last) == kaya.wire.TX_SET_PROPERTY
+          and int.from_bytes(last[16:20], "little") == kaya.wire.PROP_SOURCE
+          and int.from_bytes(last[20:24], "little") == kaya.wire.SOURCE_CONST
+          and int.from_bytes(last[24:28], "little") == kaya.wire.VALUE_BLOB)
+    _rewind(before)
+
     # THE WALLS, REFUSED IN THE CORE AND NOT HERE: this binding
     # contributes no prose of its own, so the check is that the core's
     # sentence ARRIVED.

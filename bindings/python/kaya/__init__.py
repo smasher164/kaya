@@ -2166,9 +2166,10 @@ class Asset:
     app's: a repo directory, a `.app` bundle's Resources, an APK's
     packaged `assets/`, which is not a directory and has no path at all.
 
-    TWO REDEMPTIONS: hand it to kaya (`font=asset`, `icon=asset` — the
-    bytes never enter Python, the core clones a refcount into the blob
-    table), or read it yourself (`bytes()`, `reader()`).
+    TWO REDEMPTIONS: hand it to kaya (`font=asset`, `icon=asset`,
+    `kaya.image(asset)` — the bytes never enter Python, the core clones a
+    refcount into the blob table), or read it yourself (`bytes()`,
+    `reader()`).
 
     THERE IS NO FILE DESCRIPTOR anywhere on this surface and no call
     takes a mode; the descriptor is `PickedFile`'s necessity, not this
@@ -2209,8 +2210,8 @@ class Asset:
         """THE BLOB REDEMPTION: register the core's own bytes into the
         pending table and return the handle the next submit consumes — no
         copy, nothing through Python. PRIVATE, because
-        `brand_typeface(font=...)` and `app_identity(icon=...)` are the
-        whole offer."""
+        `brand_typeface(font=...)`, `app_identity(icon=...)` and
+        `image(asset)` are the whole offer."""
         self._alive("a blob redemption")
         return runtime.asset_blob(self._handle)
 
@@ -3013,7 +3014,10 @@ def image(source=None, grow=None):
     """An image displaying encoded bytes: the toolkit decodes natively,
     and a decode failure renders the placeholder, never a crash. `source`
     is the encoded bytes (one registration copy into core memory,
-    consumed by the next submit), a Signal, or an element field."""
+    consumed by the next submit), an `Asset` the app's own BUILD shipped
+    (no copy — the core clones a refcount into the blob table, the same
+    slot `app_identity(icon=...)` takes), a Signal, or an element
+    field."""
     handle = _widget(wire.KIND_IMAGE)
     if source is not None:
         if isinstance(source, Signal):
@@ -3023,14 +3027,15 @@ def image(source=None, grow=None):
                 wire.tx_bind_source_element(handle.id, source._level(),
                                             source._index)
             )
-        elif isinstance(source, (bytes, bytearray, memoryview)):
+        elif isinstance(source, (Asset, bytes, bytearray, memoryview)):
             _records().append(
-                wire.tx_set_source(handle.id, runtime.register_blob(source))
+                wire.tx_set_source(handle.id, _blob_of(source))
             )
         else:
             raise TypeError(
-                f"kaya: image source takes encoded bytes (or a Signal or "
-                f"element field), not {type(source).__name__} — text "
+                f"kaya: image source takes encoded bytes, an asset the "
+                f"app's build shipped (kaya.asset('icons/...')), a Signal "
+                f"or an element field, not {type(source).__name__} — text "
                 "belongs on kaya.label"
             )
     _set_grow(handle, grow)

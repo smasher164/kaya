@@ -2183,6 +2183,17 @@ final class KayaAppTx {
         return w
     }
 
+    /// The ASSET form of the source slot: the same image, with the picture
+    /// NAMED rather than read — `tx.image(try KayaAsset("icons/kaya-mark.png"))`.
+    /// THE BYTES NEVER ENTER THE GUEST'S HEAP; `appIdentity(_:icon:)`'s
+    /// route, verbatim.
+    func image(_ source: KayaAsset, grow: Double? = nil) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_IMAGE))
+        tx.setSource(w.id, source.blob())
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
     func column(
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
         align: KayaAlign? = nil,

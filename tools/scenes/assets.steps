@@ -43,7 +43,7 @@
 # wait.
 expect label#0 "assets"
 expect image#0 "64x64"
-expect label#1 "kaya: no asset named "icons/nope.png"; the package carries fonts/OFL.txt, fonts/README.md, fonts/sora-wght.ttf, icons/README.md, icons/kaya-mark.png, identity.toml, win/README.md, win/minimal-resources.pri"
+expect label#1 "kaya: no asset named "icons/nope.png"; the package carries fonts/OFL.txt, fonts/README.md, fonts/sora-wght.ttf, icons/README.md, icons/kaya-mark.png, identity.toml, images/README.md, images/a11y-logo.png, win/README.md, win/minimal-resources.pri"
 # The other end of the same query, and the large asset. 111400 is the
 # vendored font's whole size (guests/assets/fonts/README.md says why it
 # ships whole), so a reader that truncated into a fixed buffer fails

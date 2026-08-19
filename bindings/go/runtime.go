@@ -375,7 +375,8 @@ func (a *Asset) Close() {
 
 // blobHandle registers the core's own bytes into the pending table and
 // answers the handle the next submit consumes; the bytes never enter Go.
-// Unexported: FontAsset and AppIdentityAsset are the whole offer.
+// Unexported: FontAsset, AppIdentityAsset and ImageAsset are the whole
+// offer.
 func (a *Asset) blobHandle() uint64 {
 	a.alive("a blob redemption")
 	handle := uint64(C.kaya_asset_blob(C.uint64_t(a.handle)))

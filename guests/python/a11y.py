@@ -16,15 +16,6 @@ import kaya
 
 app = kaya.App()
 
-# A 2x2 RGB PNG, 75 bytes, embedded as source: scenes carry their inputs
-# and do no runtime file I/O.
-TEST_PNG = bytes([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68,
-                  82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154,
-                  115, 0, 0, 0, 18, 73, 68, 65, 84, 120, 156, 99, 248, 207,
-                  192, 192, 0, 194, 12, 255, 129, 0, 0, 31, 238, 5, 251, 11,
-                  217, 104, 139, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96,
-                  130])
-
 with app.window():
     with kaya.column() as form:
         # Caption-bearing controls: identified, deliberately NOT labelled
@@ -39,7 +30,11 @@ with app.window():
         kaya.textarea().a11y_id("notes").a11y_label("Notes")
         kaya.slider(min=0.0, max=1.0, value=0.5).a11y_id("volume").a11y_label("Volume")
         kaya.progress(value=0.25).a11y_id("loading").a11y_label("Loading")
-        kaya.image(TEST_PNG).a11y_id("logo").a11y_label("Logo")
+        # THE MARK THE APP'S OWN BUILD SHIPPED: the bytes never enter
+        # Python, and the `with` releases the core's handle once the
+        # blob table holds its own reference.
+        with kaya.asset("images/a11y-logo.png") as logo:
+            kaya.image(logo).a11y_id("logo").a11y_label("Logo")
         kaya.select(["Red", "Green"]).a11y_id("color").a11y_label("Color")
         kaya.radio(["Small", "Large"]).a11y_id("size").a11y_label("Size")
         with kaya.grid(2) as cells:

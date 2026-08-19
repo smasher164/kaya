@@ -31,7 +31,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             tx.textarea().a11y_id("notes").a11y_label("Notes");
             tx.slider(0.0, 1.0, 0.5).a11y_id("volume").a11y_label("Volume");
             tx.progress(0.25).a11y_id("loading").a11y_label("Loading");
-            tx.image(&TEST_PNG[..]).a11y_id("logo").a11y_label("Logo");
+            let logo = tx.asset("images/a11y-logo.png");
+            tx.image(&logo).a11y_id("logo").a11y_label("Logo");
             tx.select(&["Red", "Green"], 0).a11y_id("color").a11y_label("Color");
             tx.radio(&["Small", "Large"], 0).a11y_id("size").a11y_label("Size");
             // NAMING a container declares it a group, and its children
@@ -68,7 +69,3 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
 fn main() {
     kaya::run(app)
 }
-
-/// A 2x2 RGB PNG (red/green over blue/white), 75 bytes. Embedded as
-/// source: scenes carry their inputs, no runtime file I/O.
-const TEST_PNG: [u8; 75] = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 2, 8, 2, 0, 0, 0, 253, 212, 154, 115, 0, 0, 0, 18, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 192, 0, 194, 12, 255, 129, 0, 0, 31, 238, 5, 251, 11, 217, 104, 139, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130];

@@ -987,8 +987,9 @@ impl<R> From<Widget<'_, '_, R>> for WidgetId {
 /// # Two redemptions
 ///
 /// - **Hand it to kaya.** [`Tx::brand_typeface_with`] and
-///   [`Tx::app_identity`] take a [`BlobSource`], and an `Asset`'s impl
-///   clones the `Arc`: a refcount bump, not a copy.
+///   [`Tx::app_identity`] take a [`BlobSource`], and [`Tx::image`] takes
+///   `&Asset` through its `Into<Blob>` — every route clones the `Arc`:
+///   a refcount bump, not a copy.
 /// - **Read it yourself.** [`Asset::bytes`] and [`Asset::reader`].
 ///
 /// Reading is READ-ONLY structurally: no mode argument anywhere on this
@@ -1088,6 +1089,12 @@ impl BlobSource for Vec<u8> {
 impl BlobSource for Asset {
     fn blob_bytes(&self) -> Arc<[u8]> {
         Arc::clone(&self.bytes)
+    }
+}
+
+impl From<&Asset> for crate::protocol::Blob {
+    fn from(asset: &Asset) -> Self {
+        crate::protocol::Blob(Arc::clone(&asset.bytes))
     }
 }
 

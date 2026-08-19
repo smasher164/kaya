@@ -9,19 +9,17 @@
 
 open Kaya_app
 
-(* A 2x2 RGB PNG, 75 bytes, embedded as source. *)
-let test_png =
-  Bytes.of_string
-    "\137\080\078\071\013\010\026\010\000\000\000\013\073\072\068\
-     \082\000\000\000\002\000\000\000\002\008\002\000\000\000\253\
-     \212\154\115\000\000\000\018\073\068\065\084\120\156\099\248\
-     \207\192\192\000\194\012\255\129\000\000\031\238\005\251\011\
-     \217\104\139\000\000\000\000\073\069\078\068\174\066\096\130"
+(* The one the mark is under: the picture this app's own BUILD shipped. *)
+let mark_name = "images/a11y-logo.png"
 
 let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
+     (* THE BYTES NEVER ENTER THE OCAML HEAP — [~source_asset] hands the
+        core's own buffer to the blob table, and the close is safe
+        because that table keeps its own reference. *)
+     let mark = asset mark_name in
      let root =
        column ~a11y_id:"form" ~a11y_label:"Form"
          [
@@ -38,7 +36,7 @@ let () =
            slider ~a11y_id:"volume" ~a11y_label:"Volume" ~min:0.0 ~max:1.0
              ~value:0.5;
            progress ~a11y_id:"loading" ~a11y_label:"Loading" ~value:0.25;
-           image ~a11y_id:"logo" ~a11y_label:"Logo" ~source:test_png;
+           image ~a11y_id:"logo" ~a11y_label:"Logo" ~source_asset:mark;
            select ~a11y_id:"color" ~a11y_label:"Color" [ "Red"; "Green" ];
            radio ~a11y_id:"size" ~a11y_label:"Size" [ "Small"; "Large" ];
            grid ~columns:2 ~a11y_id:"cells" ~a11y_label:"Cells"
@@ -52,6 +50,7 @@ let () =
          ]
          ()
      in
+     asset_close mark;
      mount root);
 
   exit (run app)

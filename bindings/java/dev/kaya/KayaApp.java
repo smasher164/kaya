@@ -806,10 +806,11 @@ public final class KayaApp {
      * {@link IllegalStateException} because a name the build did not
      * ship is a declaration bug and the answer never changes on a retry.
      *
-     * <p>TWO REDEMPTIONS. {@link Tx#brandTypeface(String, Map, Asset)}
-     * and {@link Tx#appIdentity(String, Asset)} take the handle itself
-     * and the bytes never enter the JVM's heap; {@link Asset#bytes()} is
-     * for a guest that is ITSELF the consumer, and copies once.
+     * <p>TWO REDEMPTIONS. {@link Tx#brandTypeface(String, Map, Asset)},
+     * {@link Tx#appIdentity(String, Asset)} and {@link Tx#image(Asset)}
+     * take the handle itself and the bytes never enter the JVM's heap;
+     * {@link Asset#bytes()} is for a guest that is ITSELF the consumer,
+     * and copies once.
      *
      * <p>READ-ONLY, STRUCTURALLY: no mode argument, no descriptor.
      *
@@ -3222,6 +3223,27 @@ public final class KayaApp {
         public Widget image(Signal<byte[]> s) {
             Widget w = widget(KayaWire.KIND_IMAGE);
             bindSource(w, s);
+            return w;
+        }
+
+        /**
+         * The ASSET form of the source slot: the same image, showing the
+         * picture named rather than read — {@code
+         * tx.image(KayaApp.asset("icons/kaya-mark.png"))}.
+         *
+         * <p>THE BYTES NEVER ENTER THE JVM'S HEAP: the core hands its own
+         * buffer to the blob table, so a picture costs one refcount here
+         * and no array. {@link #appIdentity(String, Asset)}'s route,
+         * verbatim.
+         */
+        public Widget image(Asset source) {
+            if (source == null) {
+                throw new IllegalArgumentException(
+                        "kaya: image got no asset — open one with "
+                        + "KayaApp.asset(\"icons/...\"), or pass encoded bytes");
+            }
+            Widget w = widget(KayaWire.KIND_IMAGE);
+            emit(KayaWire.txSetSource(w.id, source.blob()));
             return w;
         }
 
