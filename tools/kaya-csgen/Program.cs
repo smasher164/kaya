@@ -309,6 +309,8 @@ static class Program
         Fwd("Label", ["Signal s"], "s");
         Fwd("Label", ["Field<string> f"], "f");
         Fwd("Button", ["string text"], "text");
+        Fwd("Button", ["Signal s"], "s");
+        Fwd("Button", ["Field<string> f"], "f");
         Fwd("Image", ["byte[] source"], "source");
         Fwd("Image", ["Signal s"], "s");
         Fwd("Image", ["Field<byte[]> f"], "f");

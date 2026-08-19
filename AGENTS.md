@@ -462,6 +462,13 @@ in docs/deferred.md.
    one surface over — so there it holds value, name and coverage all
    three. Four self-tests perturb copies of the real files, counts
    printed, red demanded on every run),
+   `tools/check-accent.sh` (the Windows accent near-no-op has a fast
+   wall: Fluent fills read six DERIVED stops, never bare
+   SystemAccentColor, so writing the bare key moves the text-selection
+   highlight and nothing else and no lane can see it — this holds the
+   emitted markup to exactly the six stops, self-tested both directions
+   on every run; winui::tests' brand test is its rendered-output sibling
+   on the windows guest's unit phase),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing, and the three

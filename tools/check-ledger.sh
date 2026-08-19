@@ -212,6 +212,26 @@ RESOLUTION = re.compile(
     r"|ANSWERED|SHIPPED|SWEPT|SUPERSEDED|WITHDRAWN)\b[^.]{0,60}?\d{4}-\d{2}-\d{2}"
 )
 
+# CLAUSE C's live phrases: a CLOSED entry whose body still claims open
+# work. Measured 2026-08-19 — six instances in one triage, including a
+# "STILL OPEN" paragraph describing work that had shipped, under a
+# correctly-struck headline where no skim ever looks. The phrase is
+# legal when the same line or the next POINTS at where the work went
+# (a promotion, its own entry, a doc) — the honest pointer form.
+LIVE_CLAIM = re.compile(
+    r"STILL OPEN|is not done|not done yet|never landed|did NOT land"
+    r"|remains unbuilt|filed rather than done", re.I)
+# The honest forms a closed entry may keep a live phrase in, measured
+# off the eight instances the clause's first run found: a promotion, a
+# named entry or file, a designed-red gate holding the remainder, or a
+# stated deliberate hold. Searched over the WHOLE body — a pointer
+# anywhere in the entry legalizes its claims, which trades one missed
+# mixed case for zero false alarms on the honest shapes.
+LIVE_POINTER = re.compile(
+    r"PROMOTED|own entry|docs/[a-z0-9-]+\.md|tools/[a-z0-9/.-]+"
+    r"|held (?:open )?by|gate that is RED|deliberately|by design", re.I)
+TILDE_SPAN_ALL = re.compile(r"~~.*?~~", re.S)
+
 
 def terminal(line):
     return bool(TERMINAL_WORD.search(line)
@@ -241,6 +261,26 @@ def findings(text):
             joined = " ".join(line.strip() for _, line in body)
             if not RESOLUTION.search(joined):
                 out.append(("B", at, head, body[-1][0] if body else at, None))
+            # STRIKE PARITY ACROSS LINES: a `~~` span can open on one
+            # line and close lines later, and a per-line strip reads its
+            # middle as live text — two of the first run's eight false
+            # candidates were exactly that.
+            whole = "\n".join(line for _, line in body)
+            if not LIVE_POINTER.search(TILDE_SPAN_ALL.sub("", whole)):
+                inside = False
+                for n, line in body:
+                    scan = line
+                    if inside:
+                        if "~~" not in line:
+                            continue
+                        scan = line.split("~~", 1)[1]
+                        inside = False
+                    scan = re.sub(r"~~.*?~~", "", scan)
+                    if scan.count("~~"):
+                        scan = scan.split("~~", 1)[0]
+                        inside = True
+                    if LIVE_CLAIM.search(scan):
+                        out.append(("C", at, head, n, line))
             continue
         for n, line in body:
             if terminal(line):
@@ -264,6 +304,15 @@ def report(clause, at, head, n, line):
              f"entry's KEY nouns through docs/ and the code comments, or say "
              f"in the entry what is still open. A headline is what the next "
              f"reader believes.")
+    elif clause == "C":
+        fail(f"{who} {kind} at line {at} is closed but its body still claims "
+             f"LIVE work with no pointer to where it went.\n"
+             f"    line {at}: {short}\n"
+             f"    line {n}: {line.strip()[:96]}\n"
+             f"    Either the claim is stale — strike it with its resolution — "
+             f"or the work is real: promote it to its own entry and say so "
+             f"here (PROMOTED <date> / its own entry / a docs/ path). A live "
+             f"claim inside a closed entry is invisible to every skim.")
     else:
         last = f"{at}-{n}" if n and n != at else f"{at}"
         how = ("struck through or marked SOLVED:" if kind == "section entry"
@@ -552,6 +601,33 @@ if renamed == text:
 elif census(entries(renamed), sections(renamed), renamed) is None:
     fail("self-test N6b: the census accepted a file in which a named "
          "organizing heading is absent — the exemption can rot in silence")
+
+# N7 — CLAUSE C, both directions: a closed entry whose body claims live
+# work must be flagged when the claim has no pointer, and must NOT be
+# when it points at where the work went.
+SYNTH_C_HOT = """
+## ~~The selftest pane collapsed correctly~~ (found 2026-08-17)
+CLOSED 2026-08-17 with the depth slice. The breadth half is STILL OPEN
+and nothing here says where it lives.
+"""
+SYNTH_C_COLD = """
+## ~~The selftest pane collapsed on cue~~ (found 2026-08-17)
+CLOSED 2026-08-17 with the depth slice. The breadth half is STILL OPEN
+— PROMOTED 2026-08-17 to its own entry below.
+"""
+hot_hits = [f for f in findings(text + SYNTH_C_HOT) if f[0] == "C"]
+cold_hits = [f for f in findings(text + SYNTH_C_COLD) if f[0] == "C"]
+base_hits = [f for f in findings(text) if f[0] == "C"]
+print(f"check-ledger: self-test N7 appended a closed entry claiming live work, "
+      f"hot and behind a pointer -> {len(hot_hits) - len(base_hits)} and "
+      f"{len(cold_hits) - len(base_hits)} new finding(s)")
+if len(hot_hits) - len(base_hits) != 1:
+    fail("self-test N7: a live claim with no pointer inside a closed entry was "
+         "not flagged — clause C is vacuous")
+if len(cold_hits) != len(base_hits):
+    fail("self-test N7: a POINTED live claim was flagged anyway — the honest "
+         "pointer form is being punished, and the clause will be turned off "
+         "rather than heeded")
 
 # ------------------------------------------------------- 1. the clauses
 

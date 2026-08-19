@@ -1455,7 +1455,7 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
                 bindings/swift/KayaWire.swift bindings/swift/KayaApp.swift \
                 bindings/swift/KayaRecords.swift bindings/swift/KayaSums.swift \
                 "${companions[@]}" "$stage/main.swift" \
-                -L "$TARGET_DIR" -lkaya \
+                "$TARGET_DIR/libkaya.a" \
                 -framework UIKit -framework Foundation -framework CoreFoundation \
                 -framework CoreGraphics -framework QuartzCore \
                 -o "$BUNDLES/${guest}swift-bin" >"$stage/build.log" 2>&1
@@ -1475,6 +1475,16 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     done
     rm -rf "$BUNDLES"/.stage-*
     [ "$swift_status" = 0 ] || exit 1
+    # AND EACH BINARY MUST CARRY THE MARKER ITSELF, the Go arm's test one
+    # suite down: the id lives in libkaya.a, so it is in this executable
+    # only if the archive really was linked in. Write `-L"$TARGET_DIR"
+    # -lkaya` here instead and ld64 prefers the .dylib beside it — the
+    # bundle then names an absolute build-machine path to a library
+    # outside itself, runs anyway because the Simulator shares the host
+    # filesystem, and tells nobody.
+    for entry in $IOS_SWIFT_SCENES; do
+        "$ROOT/tools/build-id.sh" --verify "$BUNDLES/${entry%%:*}swift-bin" || exit 1
+    done
     for entry in $IOS_SWIFT_SCENES; do
         guest="${entry%%:*}"
         # THE DECLARED IDENTITY GOES INTO ONE BUNDLE, the one whose guest

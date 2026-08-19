@@ -87,7 +87,9 @@ interpreter and swift/KayaSwiftUI.swift):
 
 Three new `Stage` methods (`save_dialog_state`, `set_save_name`,
 `confirm_save`) with PANICKING DEFAULT BODIES, so gtk.rs/winui keep
-compiling for breadth. Ledgered as a thing to flip to no-default.
+compiling for breadth. Ledgered as a thing to flip to no-default —
+FLIPPED 2026-08-17 in `cbf6476`: all three signatures end in `;` and
+tools/lib/stage-coverage.py holds them.
 
 **mac arm**: `kayaLiveOpenPanel: NSOpenPanel?` became
 `kayaLivePanel: NSSavePanel?` with two computed readers

@@ -102,7 +102,15 @@ static class MenusScene
                     items = g.Collection();
                     g.Each(items, r =>
                     {
-                        var row = r.Label(KayaRecords.FieldAt<string>(0)); // label#2 once g2/a stamps
+                        // The element token, not a hand-minted index:
+                        // KayaRecords.FieldAt is the generator's spelling
+                        // (its own doc says so) and a scene is not the
+                        // floor's documentation. Swift's `KayaField
+                        // <String>.element` and Go's `row.Value()` are the
+                        // same read. The For stays open here because the
+                        // generated row façade forwards no ContextMenu
+                        // (docs/deferred.md, the three-façades entry).
+                        var row = r.Label(Field<string>.Element); // label#2 once g2/a stamps
                         r.ContextMenu(row, catalog);
                     });
                 }));

@@ -494,6 +494,63 @@ NOT_FORWARDED_CSHARP = {
 }
 
 
+# A NAME SET CANNOT SEE AN OVERLOAD. `Button` cancels against `Button`,
+# so a façade forwarding one of the zone's three Button overloads reads
+# level — measured, and it is what let C#'s generated row façade lag the
+# template button's caption arms for a milestone (docs/deferred.md).
+# The C-family façades are therefore keyed by ARITY AND TYPE, with the
+# same splitter the source census's `_overload_params` reads for.
+#
+# Rust's `Row` is still keyed by NAME: `pub fn` has no overloads to lose,
+# so the shape this exists to catch cannot occur there.
+
+
+def _split_params(params):
+    """One parameter list into its parameters, generics kept whole."""
+    out, depth, cur = [], 0, ""
+    for ch in params:
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur)
+    return [p.strip() for p in out]
+
+
+def _param_type(param):
+    """A parameter's TYPE, spelled the same on both sides of a forward.
+
+    Drops the default, the namespace the two sides spell differently
+    (`System.Action` against `Action`), and the parameter NAME, which a
+    forward is free to rename and routinely does."""
+    p = " ".join(param.split()).split("=")[0].strip()
+    p = re.sub(r"\b(?:System\.Collections\.Generic|System|java\.util\.function"
+               r"|java\.util)\.", "", p)
+    toks = p.split()
+    if len(toks) > 1 and re.fullmatch(r"[A-Za-z_]\w*", toks[-1]):
+        toks = toks[:-1]
+    return re.sub(r"\s+", "", " ".join(toks))
+
+
+def _typed_members(body, pattern):
+    """`{(name, (type, …))}` for every method the pattern matches."""
+    return {(name, tuple(_param_type(p) for p in _split_params(params)))
+            for name, params in re.findall(pattern, body, re.S | re.M)}
+
+
+def show_member(member):
+    """A (name, types) pair as the reader would write it."""
+    if isinstance(member, tuple) and len(member) == 2 and isinstance(member[1], tuple):
+        return f"{member[0]}({', '.join(member[1])})"
+    return str(member)
+
+
 def facade_rust():
     src = read("crates/kaya/src/app.rs")
     tpl = brace_block(src, r"^impl Tpl<'_, '_> \{")
@@ -515,12 +572,14 @@ def facade_java():
     row = brace_block(src, r"^\s*public abstract static class RowSurface\b")
     if tpl is None or row is None:
         return None
-    pat = r"^\s*public\s+(?:void|Node)\s+([a-zA-Z][A-Za-z0-9]*)\s*\("
+    pat = r"^\s*public\s+(?:void|Node)\s+([a-zA-Z][A-Za-z0-9]*)\s*\(([^)]*)\)"
+    zone = {m for m in _typed_members(tpl, pat) if m[0] not in NOT_FORWARDED_JAVA}
+    facade = {m for m in _typed_members(row, pat) if m[0] not in NOT_FORWARDED_JAVA}
     return [(
         "Java's `RowSurface` (the `for (var row : ...)` façade, "
         "bindings/java/dev/kaya/KayaApp.java)",
-        set(re.findall(pat, tpl, re.M)) - NOT_FORWARDED_JAVA,
-        set(re.findall(pat, row, re.M)) - NOT_FORWARDED_JAVA,
+        zone,
+        facade,
         "class RowSurface",
     )]
 
@@ -536,8 +595,8 @@ def facade_csharp():
                       r"^\s*(public |internal )?sealed class Tpl\b")
     if tpl is None:
         return None
-    pat = r"^\s*public\s+(?:void|Node)\s+([A-Za-z][A-Za-z0-9]*)\s*\("
-    zone = set(re.findall(pat, tpl, re.M)) - NOT_FORWARDED_CSHARP
+    pat = r"^\s*public\s+(?:void|Node)\s+([A-Za-z][A-Za-z0-9]*)\s*\(([^)]*)\)"
+    zone = {m for m in _typed_members(tpl, pat) if m[0] not in NOT_FORWARDED_CSHARP}
     out = []
     for path in sorted(glob.glob(f"{ROOT}/guests/csharp/*Kaya.cs")):
         src = open(path, encoding="utf-8").read()
@@ -549,8 +608,8 @@ def facade_csharp():
             out.append((
                 f"C#'s generated `{m.group(1)}` façade ({rel})",
                 zone,
-                set(re.findall(r"^\s*public\s+(?:void|Node)\s+([A-Za-z][A-Za-z0-9]*)\s*\(",
-                               body, re.M)),
+                {x for x in _typed_members(body, pat)
+                 if x[0] not in NOT_FORWARDED_CSHARP},
                 f"tools/kaya-csgen (the generator that emits {m.group(1)})",
             ))
     if not out:
@@ -739,7 +798,7 @@ def main():
             if gap:
                 print(
                     f"tpl-surfaces: {where} has drifted from the zone it forwards to. "
-                    "It does not forward: " + ", ".join(gap)
+                    "It does not forward: " + ", ".join(show_member(g) for g in gap)
                     + f". Add the forward in {fix}, or add the name to this file's "
                     "NOT_FORWARDED set for that binding, with a reason."
                 )
@@ -748,7 +807,7 @@ def main():
             if wide:
                 print(
                     f"tpl-surfaces: {where} offers members the zone does not: "
-                    + ", ".join(wide)
+                    + ", ".join(show_member(w) for w in wide)
                     + " — a façade cannot be wider than the zone it forwards to."
                 )
                 status = 1

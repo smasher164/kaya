@@ -172,6 +172,9 @@ reuse the existing history strings.
 
 ## ITEM 2 — STAMPED-COPY EPISODES: MEASURED, NOT BUILT
 ## (RATIFICATION PROPOSAL — the maintainer's call, tree unchanged)
+## RULED option A, 2026-08-06 (docs/undo-plan.md), and SHIPPED in
+## `1d2cf95`: `texts` is an arity-first group in spec.rs today, so this
+## section is the record of the decision and not a live proposal.
 
 ### The deciding fact: the texts run cannot address an instance field
 `undone`/`redone` carry FOUR runs, and only two of them are arity-first

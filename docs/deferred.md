@@ -39,7 +39,13 @@ own the state (see the undo note in this file).
   entries. Editor prerequisites remaining after this: undo/redo,
   dirty-state window titles, find.
 
-- **Saving a file** — IN FLIGHT 2026-08-09. The design is ratified and
+- ~~**Saving a file**~~ — CLOSED 2026-08-19 on this entry's own terms:
+  every piece of scope below is struck, the last of it (the three `Stage`
+  default bodies) in `cbf6476`. What survives are the two RECORDED
+  DEFERRALS at the end, each with its own trigger and its own reason —
+  the save-over-an-existing-file path, and `filters` — not pending work.
+  The body below is the record. As filed, IN FLIGHT 2026-08-09. The
+  design is ratified and
   written down: docs/save-plan.md D1-D5, off five probe reports. One new
   request record (`show_save_dialog { window, dialog, suggested_name,
   filters }`) answering on the PICKER'S result grammar with one locator,
@@ -54,7 +60,7 @@ own the state (see the undo note in this file).
   (`tx.save_file(name)`, `msgs.on_saved`) + the SwiftUI mac arm + the
   `save` scene. BREADTH LANDED 2026-08-10 (`67d14f0`): the two remaining
   backend arms, the seven other bindings and their guests, and the
-  file-mode gate — the struck bullets below. What is still open:
+  file-mode gate — the struck bullets below. What survives:
   - ~~**DEPTH STUB: save on swiftui/ios**~~ — LANDED 2026-08-09.
     `UIDocumentPickerViewController(forExporting:asCopy:)`, whose every
     initializer takes a URL that ALREADY EXISTS, so the backend stages a
@@ -124,17 +130,13 @@ own the state (see the undo note in this file).
     Finder preference hides extensions — a machine-wide setting deciding
     a byte-frozen assertion. A scene that wants filters must name files
     whose extension is already in the filter.
-  - **THE THREE SAVE `Stage` METHODS STILL CARRY DEFAULT BODIES**
-    (`save_dialog_state`, `set_save_name`, `confirm_save` in
-    crates/kaya/src/harness.rs). Every other observation there is
-    no-default so a backend that forgets fails to COMPILE;
-    these panic instead, only because the slice landed depth-first and
-    gtk.rs/winui/mod.rs are the breadth arms' files. THE PREMISE HAS
-    MOVED and only the deletion is left: both real `Stage` impls
-    (`GtkStage`, `WinUiStage`) implement all three as of 2026-08-10, as
-    do the three mock stages in harness.rs, so DELETE the bodies and end
-    the signatures with `;` — tools/lib/stage-coverage.py then holds them
-    like the rest.
+  - ~~**THE THREE SAVE `Stage` METHODS STILL CARRY DEFAULT BODIES**~~ —
+    DONE 2026-08-17 in `cbf6476`. `save_dialog_state`, `set_save_name`
+    and `confirm_save` now end in `;` (crates/kaya/src/harness.rs:877,
+    :881, :884), so a backend that forgets one fails to COMPILE like
+    every other observation, and tools/lib/stage-coverage.py — whose
+    REQUIRED regex is exactly a signature ending in `;` — holds all
+    three for GTK and WinUI the way the entry asked.
 
 - **No bookmark/persistence machinery: a picked file cannot be reopened
   across restarts** (deferred by docs/save-plan.md §3, which said
@@ -228,7 +230,16 @@ own the state (see the undo note in this file).
     DEPTH_SCENES.~~ — DONE: all eight bindings spell the prop, all nine
     guests exist, and `dirty` is in validate-mac's SCENES.
 
-- **Text ranges** — IN FLIGHT 2026-08-06. The design is ratified
+- ~~**Text ranges**~~ — CLOSED 2026-08-19 on this entry's own terms, as
+  the struck bullet below already said: all four backend arms landed, all
+  eight bindings carry the three primitives, the nine guests exist and
+  `ranges` is in validate-mac's SCENES. What survives is what that bullet
+  names — the three unstruck bullets below (the iOS composition guard no
+  leg can fail for, the windows highlight read that is not the
+  accessibility tree, and the IME-composition sweep GTK/WinUI/Compose
+  still owe) plus the ASCII constraint, which is a recorded constraint
+  and not pending work. The body below is the record. As filed,
+  IN FLIGHT 2026-08-06. The design is ratified
   (docs/ranges-plan.md D1-D6) off five probe reports and a units
   ruling: three primitives on the TEXTAREA — `highlight_ranges` (a
   declared set), `select_range` (one range) and `reveal_range` (scroll
@@ -773,7 +784,9 @@ own the state (see the undo note in this file).
   "refuse where the affordance is absent" four times; an
   affordance-presence assertion (the `expect_ax` precedent — read the
   real tree, not a flag) would make it one. That is a protocol change,
-  so it is filed rather than done.
+  so it is filed rather than done — PROMOTED 2026-08-19 to its own
+  entry ("The refusal affordances are never asserted PRESENT"), because
+  a live item inside struck text is invisible to every skim.
 
 - ~~**The phone lanes have no list-detail coverage**~~ — LANDED
   2026-07-27. The `listdetail` scene is the `split` scene's phone-safe
@@ -831,6 +844,9 @@ own the state (see the undo note in this file).
   regular window wanting several columns where a compact one wants
   one is still unbuilt, and it wants its own admission pass (the
   4/4 test list-detail passed is not automatic for a column grammar).
+  PROMOTED 2026-08-19 to its own entry ("Multi-column adaptive layout
+  — the unbuilt half, now the ACTIVE milestone"), same reason: live
+  work inside struck text is invisible to every skim.
   Encouraging for admission: the adaptive split IS a 4/4 native
   intersection, unlike the DRAGGABLE splitter (2/4) it is easily
   confused with — SwiftUI `NavigationSplitView`, Compose's Material 3
@@ -883,7 +899,19 @@ own the state (see the undo note in this file).
 
 - **Window vocabulary** remainder (the rest LANDED through the
   window/panels/confirm/nav/sections scenes): presentation styles
-  beyond the primary set (utility panels, always-on-top).
+  beyond the primary set (utility panels, always-on-top). Auxiliary
+  windows themselves landed (`create_window`/`destroy_window`, gated on
+  `KAYA_CAP_AUX_WINDOWS`, driven by tools/scenes/panels.steps), but
+  every window is an ORDINARY one: `WINDOW_PROPS` holds title, width,
+  height, veto_close, sections_presentation, list_detail, dirty and
+  inset, and no level or presentation style. Scope when it fires: a
+  presentation-style enum plus four lowerings and a scene.
+  TRIGGER: an artifact that wants a floating inspector or palette — a
+  tool-shaped app. Nothing in the tree has one. Written down 2026-08-19,
+  because as filed this entry named no trigger at all and could only
+  ever be read and skipped.
+  KEY: window presentation style, utility panel, always-on-top,
+  floating inspector, WINDOW_PROPS, window level
 - **App-developer capability decisions** (raised 2026-07-23; each
   wants a design pass or an explicit v2 verdict, none is speculative
   protocol work):
@@ -903,14 +931,18 @@ own the state (see the undo note in this file).
       `AccentFillColorDefaultBrush` family in `ThemeDictionaries`.
       A lowering that sets `SystemAccentColor` compiles, runs, and is
       silently ignored, so this wants a gate, not a comment.
-    - **Semantic icon names.** `icon` is a Blob today (sprop 2 /
-      mprop 5), which is the wrong primitive for STANDARD icons: the
-      platforms draw the same concept differently, and their symbol
-      sets metric-match adjacent text while a blob cannot. Wants a
-      small closed name set mapped per backend (SF Symbols / Material
-      Symbols / Adwaita names / Fluent). The Blob stays for
-      app-specific art. NOT a tinting problem — a single-color raster
-      tints fine on all four.
+    - ~~**Semantic icon names.**~~ — LANDED 2026-08-16 in `c94da13`,
+      exactly as filed: a closed name set (`symbol`, sprop 3 / mprop 9,
+      `PropKind::Enum("symbol")` at crates/kaya/src/spec.rs:229 and
+      :253) BESIDE the `icon` Blob, which stays for app-specific art.
+      The vocabulary is `wire::SYMBOLS` and two gates hold it —
+      tools/check-symbols.sh (every SF name exists at kaya's floor) and
+      tools/check-symbol-parity.sh (one vocabulary, six files). As
+      filed: `icon` is a Blob today (sprop 2 / mprop 5), which is the
+      wrong primitive for STANDARD icons — the platforms draw the same
+      concept differently, and their symbol sets metric-match adjacent
+      text while a blob cannot. NOT a tinting problem: a single-color
+      raster tints fine on all four.
     - **Vector/DPI story for the Blob** (separate from the above): all
       four decoders are raster-only today — `NSImage(data:)`,
       `BitmapFactory.decodeByteArray`, `gdk::Texture::from_bytes`
@@ -923,9 +955,16 @@ own the state (see the undo note in this file).
       doctrine as the shared scene scripts, and it routes around the
       Android limit. Cost: core must learn the target scale factor,
       which it does not know today.
-    - Typeface substitution must change the FAMILY only, never the
+    - ~~Typeface substitution must change the FAMILY only, never the
       scale (Dynamic Type / `sp` both break otherwise), which makes the
-      role tier a precondition rather than an alternative.
+      role tier a precondition rather than an alternative.~~ — LANDED
+      2026-08-16 in `31ace6b` with that rule in the wire contract:
+      `set_brand_typeface` (crates/kaya/src/spec.rs:1078) carries a
+      family and no scale, and `expect_typeface` reads back the family
+      the text system actually resolved (tools/scenes/typeface.steps
+      freezes `expect_typeface "Sora"`). The one remainder is the iOS
+      observation depth stub, held by the typeface tracker section
+      further down this file, not here.
   - ~~**Accessibility surfacing**~~ — LANDED 2026-07-25. Two universal
     props (`a11y_id`, `a11y_label`) in all 8 bindings plus the C
     floor, and `expect_ax`, which reads each platform's REAL tree
@@ -1299,11 +1338,14 @@ So the header defines `CLIP_TEXT`, not `KAYA_CLIP_TEXT` — and the
 what is actually there.
 
 THE WIDER PROBLEM is not the clipboard's. kaya.h currently exports
-about sixty unprefixed defines — every `REC_*`, every `TX_*`, every
+214 unprefixed defines of 418 in all — the MAJORITY of the header, not a
+corner of it (re-measured 2026-08-19; as filed it said "about sixty").
+Every `REC_*`, every `TX_*`, every
 `APPLY_*`, the `VALUE_*` types, the `PROP_*` and `WPROP_*` keys, the
-`CLIP_*` masks, and `HEADER_SIZE`, which is a name no public header
-should take. Any C or Swift consumer that includes kaya.h inherits all
-of them.
+`CLIP_*` masks, the `KIND_*`/`MPROP_*`/`EPROP_*`/`ALIGN_*`/
+`FILE_MODE_*`/`ALERT_CHOICE_*` families, and `HEADER_SIZE`, which is a
+name no public header should take. Any C or Swift consumer that includes
+kaya.h inherits all of them.
 
 WHY IT IS A SLICE AND NOT A RENAME. Fixing it means deciding how the
 Swift binding should name what the header exposes at all — generated
@@ -1348,8 +1390,10 @@ count, so the saving is measured rather than assumed.
   second instance.** Measured 2026-08-10 on mac: under an environmental
   slowdown the file picker missed the step budget, the scene proceeded
   and requested a second dialog, and the one-dialog-per-process guard
-  (`file_dialog_shown`, crates/kaya/src/capi.rs:1855 as of 2026-08-17;
-  filed as :1732) panicked in a non-unwinding context —
+  (`file_dialog_shown`, crates/kaya/src/capi.rs:1916 as of 2026-08-19;
+  :1855 as of 2026-08-17; filed as :1732 — the number has now moved
+  twice, so GREP THE FUNCTION NAME rather than trusting it) panicked in
+  a non-unwinding context —
   so the leg died with `fatal runtime error: failed to initiate panic`
   and no verdict list, rather than reporting the steps that failed. The
   Windows IME-refusal abort (recorded above, 2026-08-09) is the same
@@ -1371,10 +1415,16 @@ count, so the saving is measured rather than assumed.
   ratified D4 rule) — and then the NEXT apply op into the RichEditBox
   fails with `HRESULT(0x8000FFFF) "Catastrophic failure"`, which
   panics at `drain_transactions`' `apply(core, op).expect(…)`
-  (crates/kaya/src/winui/mod.rs:1318 as of 2026-08-17; filed as :830)
-  inside a function that
+  (crates/kaya/src/winui/mod.rs:1227 as of 2026-08-19; :1318 as of
+  2026-08-17; filed as :830 — moved twice, so grep the `.expect` string
+  rather than trusting the number) inside a function that
   cannot unwind, so the process aborts (exit 0xC0000409) rather than
-  failing the leg. Frequency: 1 abort in 5 observed runs of that leg
+  failing the leg.
+  IT HAS A TWIN, found 2026-08-19 and unmentioned until now:
+  crates/kaya/src/winui/mod.rs:7683 `apply(core, op).expect("kaya:
+  applying an undo op failed")` is the same shape on the undo path, in
+  the same non-unwinding position. Whatever fixes one fixes both, and a
+  fix that moves only the first leaves the abort reachable from undo. Frequency: 1 abort in 5 observed runs of that leg
   (2 passes before, 2 passes on demand after). Not caused by the Go
   work — that milestone touches no Rust and no WinUI, and the leg
   passed on this lane before and after.
@@ -1401,16 +1451,25 @@ count, so the saving is measured rather than assumed.
   timing), which would also make the failure legible.
 
 
-- **The Swift iOS bundle is not self-contained** (measured 2026-08-07
-  while landing Go on iOS, by a negative test aimed at something else).
-  The Go arm proved that linking `-L … -lkaya` instead of naming the
-  archive by path still BUILDS, and `otool -L` then shows the binary
-  naming an absolute build-machine path to `…/deps/libkaya.dylib` —
-  which is what the SWIFT iOS leg ships today. It works only because
-  the lane builds and runs on one machine. Fix: name the archive by
-  path as the Go arm does; the cheap guard already exists — a
-  `build-id.sh --verify` per built binary, since the id only reaches
-  the executable if the archive was really linked in.
+- ~~**The Swift iOS bundle is not self-contained**~~ (measured 2026-08-07
+  while landing Go on iOS, by a negative test aimed at something else)
+  — FIXED 2026-08-19, both halves, in tools/ios/run-sim.sh's swift
+  suite: the link names `"$TARGET_DIR/libkaya.a"` by path the way the Go
+  arm's `#cgo ios` line does, and every `${guest}swift-bin` is
+  `build-id.sh --verify`'d before a bundle is made — the Go arm's own
+  test one suite down, moved up.
+  WATCHED FAILING against the real toolchain, one guest linked both
+  ways: with `-L … -lkaya` the binary carries `otool -L
+  …/target/aarch64-apple-ios-sim/debug/deps/libkaya.dylib`, an absolute
+  build-machine path outside the bundle, and the new verify refuses it
+  ("NO build id — nothing here was built from core", rc 1); with the
+  archive named by path `otool -L` lists no libkaya at all and the
+  verify passes.
+  As measured: the Go arm proved that linking `-L … -lkaya` instead of
+  naming the archive by path still BUILDS, and `otool -L` then shows the
+  binary naming an absolute build-machine path to `…/deps/libkaya.dylib`
+  — which is what the SWIFT iOS leg shipped. It worked only because
+  the lane builds and runs on one machine.
 - ~~**guests/go/filedialog/filedialog.go computes its scene directory from a
   bare `os.TempDir()`**~~ — FIXED 2026-08-17, together with the doctrine
   that decides it. The guest now branches in `sceneRoot()` and asks the
@@ -1487,8 +1546,17 @@ count, so the saving is measured rather than assumed.
     activating (unbanked, the first failure is `menu "Edit>Redo" reads
     "disabled", wanted "enabled"` — watched, with the banking reverted
     and the tree rebuilt).
-  - **A stamped copy's typing is not banked** — MEASURED, and it is a
-    RATIFICATION the maintainer owns, so the tree is unchanged on it.
+  - ~~**A stamped copy's typing is not banked**~~ — SHIPPED 2026-08-05 in
+    `1d2cf95` ("rows join the ledger: the texts run carries a path, the
+    stamp keeps its map, and no field is beneath undo"). Option A is in
+    the tree: crates/kaya/src/spec.rs:275 reads `texts: groups(i64 size,
+    i64 id, i64 path_len, path_len key values, str text)` and :2001-2007
+    spells out the identity rule (path_len 0 = a live widget id, a
+    non-empty path = the TEMPLATE NODE of a stamped copy addressed by
+    that key path). The ruling below is the record of how it was decided;
+    it is no longer a plan.
+    As MEASURED, and it was a
+    RATIFICATION the maintainer owns, so the tree was unchanged on it.
     The deciding fact: the `undone`/`redone` payload's `texts` run is
     fixed-arity PAIRS (`I64 widget id, Str` — spec.rs, wire.rs's one
     encoder), while `entries`/`orders` are arity-first GROUPS that can
@@ -1513,7 +1581,8 @@ count, so the saving is measured rather than assumed.
     not assumed). Stamped-row typing then joins the ledger with the
     same guarantees as everything else — the reactive doctrine's own
     answer, since text is app state everywhere else in the design.
-    Ships as the final undo slice, immediately after this one.**
+    Ships as the final undo slice, immediately after this one.** —
+    and it did, the same day: `1d2cf95`.
   - ~~**note_native_undo has no redo twin.**~~ **RESOLVED BY EVIDENCE.**
     The item said "revisit with the first arm whose platform
     distinguishes them"; all five do, and every one already feeds the
@@ -1544,8 +1613,23 @@ count, so the saving is measured rather than assumed.
   collection idioms graduate to sugar. Entry graduates first,
   milestone2 rides the next slice, and the gate clause extends to it
   then.
-  - **What tier does the entry scene sit at, per language — and why is
-    the tree split?** DESIGN.md sanctions entry and milestone2 as "the
+  - **The entry/milestone2 tier question is RULED and APPLIED; what is
+    left is one gate clause.** ~~What tier does the entry scene sit at,
+    per language — and why is the tree split?~~ — ANSWERED 2026-08-05
+    (option B, above) and applied since: both guests carry the ratified
+    scope in their own headers ("ONE OF TWO RUST GUESTS ON THE RAW EVENT
+    SURFACE … Construction is the ordinary sugar either way — the
+    carve-out is the event mechanism, not the tree"), and the
+    CONSTRUCTION half is pinned by a gate — tools/guest-floor.py sweeps
+    every non-C guest for floor spellings with an empty exemption table
+    and reports zero hits.
+    STILL OPEN, and it is the only thing left here: nothing in tools/
+    names entry and milestone2 as THE two raw-event guests, so a third
+    could join or one could quietly graduate and no gate would notice.
+    One clause beside guest-floor.py's sweep closes it.
+    KEY: raw event surface, entry.rs, milestone2.rs, guest-floor,
+    documented floor, occurrence loop
+    As found: DESIGN.md sanctions entry and milestone2 as "the
     documented floor" for the raw occurrence loop, and four entry
     guests (rust, swift, ocaml, haskell) are spelled at the explicit
     widget floor with hand-counted keys — but python's is
@@ -1605,8 +1689,9 @@ count, so the saving is measured rather than assumed.
     and the interpreters' `parents` maps can see that one. No such
     defect is on record; all three recorded instances were made above
     the core, in a binding. That tier stays open below.
-  - **The sibling suspicion was right, and a THIRD instance was still
-    live at HEAD.** `guests/swift/menus.swift` was fixed by eye in
+  - ~~**The sibling suspicion was right, and a THIRD instance was still
+    live at HEAD.**~~ — FIXED 2026-08-07, see the note below this
+    paragraph. `guests/swift/menus.swift` was fixed by eye in
     aadbe9e. `guests/swift/feed.swift:27-55` was not: `promote`,
     `status` and `list` were built at ambient parent 0 and only
     MENTIONED inside `tx.row { }`, whose result builder discards a bare
@@ -1616,13 +1701,14 @@ count, so the saving is measured rather than assumed.
     debugging: the whole mac lane came back 257 PASS / 1 FAIL and the
     one failure printed which widget and why.
 
-    OPEN — the fix is one guest file, and the wall arm does not own
-    guests/. The correction is aadbe9e's: declare each child WHERE IT
-    STANDS, inside `tx.row { }`, instead of building it outside and
-    naming it within. Proven green in scratch before this was written
-    (the doctored guest ran the real `feed.steps` to
-    `KAYA_SELFTEST: OK`), so it needs applying and re-running, not
-    designing.
+    ~~OPEN — the fix is one guest file, and the wall arm does not own
+    guests/.~~ — FIXED 2026-08-07 in `11bde48`, the same commit that
+    landed the orphan wall. `guests/swift/feed.swift:27-55` now declares
+    every child inside `tx.row { }` and carries the reason at the site
+    ("a widget parents at CREATION, and a bare expression never reaches
+    buildExpression"). The correction is aadbe9e's: declare each child
+    WHERE IT STANDS, inside `tx.row { }`, instead of building it outside
+    and naming it within.
   - **STILL OPEN — the core never prunes `self.widgets`.**
     `DestroyWindow` (scene.rs) removes the window, its nav stacks, its
     sections and its shortcuts, and touches `self.widgets` not at all;
@@ -1776,8 +1862,16 @@ count, so the saving is measured rather than assumed.
     anyone wants it closed: rebuild the exact 48cfbad tree and loop
     commands_rust there.
 
-- **GAP — an `#if os(iOS)` branch in a SWIFT GUEST is invisible to
-  every fast gate.** Found 2026-08-03 while wiring the iOS clipboard
+- ~~**GAP — an `#if os(iOS)` branch in a SWIFT GUEST is invisible to
+  every fast gate.**~~ — CLOSED 2026-08-18, and the closing record is
+  the "No gate compiles a Swift GUEST for iOS" section further down this
+  file (the same gap, found again and written down twice).
+  tools/swift-typecheck.sh:160-214 is exactly the loop this asked for:
+  it reads IOS_SWIFT_SCENES and IOS_MIN out of tools/ios/run-sim.sh,
+  refuses when a shipped guest's source is missing, typechecks each
+  against `-sdk iphonesimulator … arm64-apple-ios$ios_min-simulator`,
+  and skips with the loud note when there is no simulator SDK.
+  As found 2026-08-03 while wiring the iOS clipboard
   legs: tools/swift-typecheck.sh's guest loop compiles the guests for
   macOS only, so the iOS scene_root branch guests/swift/clipboard.swift
   needed (the §7.6 android trap's cousin — the guest and the
@@ -1939,8 +2033,13 @@ count, so the saving is measured rather than assumed.
   extractor (correctly) refuses. Android has the weaker form: it
   anchors at stop time minus duration, and screenrecord drops its
   buffered tail. Fix direction: calibrate rate, not just offset — two
-  fiducials per film, or a per-leg in-band fiducial — rather than
-  trusting one anchor across a whole suite. Windows has a third
+  fiducials AT OPPOSITE ENDS of a film, or a per-leg in-band fiducial —
+  rather than trusting one anchor across a whole suite. THE PHRASING IS
+  DELIBERATE (sharpened 2026-08-19): iOS already plants two fiducials
+  (tools/ios/run-sim.sh — a dark flip and the flip BACK) and they are
+  BOTH AT THE START, which makes the anchor survive a recorder that
+  attached mid-flip and does nothing at all for the rate. Two fiducials
+  at one end is not this item. Windows has a third
   variant: `KAYA_RECORD=1 deploy-win … menus_rust` passed the leg and
   then reported "the capturer produced no frames" — the WGC capturer
   never attached to a window that lives about two seconds.
@@ -2103,9 +2202,13 @@ tools/deploy-win.sh silently swallowed five `run_suite background_*`
 lines; only check-steps caught it.
 
 What to move, roughly in order of pain: tools/guest/*.cmd (CRLF, cmd
-escaping, forty near-identical files), tools/deploy-win.sh (the longest
+escaping, 188 near-identical files — re-measured 2026-08-19; as filed it
+said "forty", so the surface has quadrupled and 188 near-identical files
+is a GENERATION problem rather than a translation one, which changes the
+item's shape as well as its size), tools/deploy-win.sh (the longest
 and the one whose leg ordering is load-bearing), then the rest of
-tools/*.sh. Python is the obvious target — it is already the mandated
+tools/*.sh — 52 of them today against 2 tools/*.py, so nothing has moved
+yet. Python is the obvious target — it is already the mandated
 language for text processing here, it is in the dev shell, and it has
 real data structures for things the shell fakes with string splicing.
 
@@ -2396,9 +2499,21 @@ a template setter deleted while its identically-spelled LIVE twin stays
 façade, and the zone's own header renamed — the third proving the reader
 REFUSES a verdict rather than reporting an empty zone as a clean one.
 
-## The styling scene's depth stubs (slice 1 mid-flight, expected to close with the fan-out)
+## ~~The styling scene's depth stubs (slice 1 mid-flight, expected to close with the fan-out)~~
 
-Three backends hold `depth_stub("styling")` while the SwiftUI
+CLOSED 2026-08-19 as a tracker, and it closed the way it said it would —
+with the fan-out. All three depth stubs below are struck and LANDED
+2026-08-12; no `depth_stub("styling")` survives anywhere in the tree
+(check-stubs green, and the ONE remaining depth-stub call in the whole
+repo is typeface-on-iOS), and `styling` is a live scene on all five
+lanes: validate-mac's SCENES, deploy-win's SCENES, run-suites' SCENES
+with nine legs including the C floor, run-sim's IOS_SWIFT_SCENES and
+IOS_GO_SCENES, and `run_apk styling-compose`. The one thing it carried
+that is NOT closed by this strike — the full M3 scheme from a seed —
+has been lifted out into its own entry directly below, so it stops
+living inside a closed tracker.
+
+As filed: three backends hold `depth_stub("styling")` while the SwiftUI
 interpreter carries slice 1's one real brand lowering
 (docs/styling-plan.md §3 — depth then breadth, the standing pattern):
 
@@ -2453,30 +2568,60 @@ interpreter carries slice 1's one real brand lowering
   tertiary and neutral palettes stay Material's baseline, because
   deriving them needs HCT chroma clamping and that is a dependency
   decision rather than a coding one.
-- **THE FULL M3 SCHEME FROM A SEED NEEDS A DEPENDENCY DECISION** (open,
-  Akhil's; measured 2026-08-12 while landing the entry above). The
-  Compose brand lowering derives the PRIMARY family from the seed —
-  Material's own tone→role table, its own contrast curves, and its own
-  tone function (CIELab lightness) with a gamut loop that keeps the tone
-  and gives up chroma. What it cannot do without HCT is the other four
-  palettes, whose whole content is chroma clamping: secondary is the
-  seed's hue at chroma 16, tertiary at hue+60, the neutrals at chroma 4
-  and 8. Visible consequence today: under a brand, a NavigationBar's
-  selected-item indicator (secondaryContainer) and the page's surfaces
-  keep Material's baseline lavender hint. The four routes, priced:
-  (a) vendor Google's Java sources (Apache-2.0, a few thousand lines in
-  the tree, nothing to pin — the styling research's own first choice);
-  (b) `com.materialkolor:material-color-utilities`, a third-party KMP
-  port of the same code, one pinned line; (c) MDC-Android 1.12.0, which
-  bundles the utilities but marks every class `@RestrictTo` and drags
-  appcompat and a dozen more artifacts behind it (measured: 46 classes
-  under its `color/utilities` package, all restricted);
-  (d) leave it — the accent family is what every other backend brands
-  too. Nothing here is urgent and (d) is a real answer.
 
-## The identity scene's depth stubs (the Windows depth, expected to close with the fan-out)
+## THE FULL M3 SCHEME FROM A SEED NEEDS A DEPENDENCY DECISION
+KEY: HCT, chroma clamp, material-color-utilities, secondaryContainer,
+seed palette, M3 scheme, materialkolor
 
-The depth landed 2026-08-18: spec (`set_app_identity` / the apply
+Open, and it is Akhil's: a dependency choice, not a coding one. Measured
+2026-08-12 while landing the Compose styling arm; lifted out of that
+tracker 2026-08-19 when the tracker closed, so it is not read as part of
+a finished slice. TRIGGER: someone wanting a brand seed to reach the
+whole scheme rather than the accent family — or the maintainer simply
+picking route (d).
+
+The Compose brand lowering derives the PRIMARY family from the seed —
+Material's own tone→role table, its own contrast curves, and its own
+tone function (CIELab lightness) with a gamut loop that keeps the tone
+and gives up chroma. What it cannot do without HCT is the other four
+palettes, whose whole content is chroma clamping: secondary is the
+seed's hue at chroma 16, tertiary at hue+60, the neutrals at chroma 4
+and 8. Visible consequence today: under a brand, a NavigationBar's
+selected-item indicator (secondaryContainer) and the page's surfaces
+keep Material's baseline lavender hint. The four routes, priced:
+(a) vendor Google's Java sources (Apache-2.0, a few thousand lines in
+the tree, nothing to pin — the styling research's own first choice);
+(b) `com.materialkolor:material-color-utilities`, a third-party KMP
+port of the same code, one pinned line; (c) MDC-Android 1.12.0, which
+bundles the utilities but marks every class `@RestrictTo` and drags
+appcompat and a dozen more artifacts behind it (measured: 46 classes
+under its `color/utilities` package, all restricted);
+(d) leave it — the accent family is what every other backend brands
+too. Nothing here is urgent and (d) is a real answer.
+
+## ~~The identity scene's depth stubs (the Windows depth, expected to close with the fan-out)~~
+
+CLOSED 2026-08-19 as a depth-stub tracker: all four stubs below are
+struck and LANDED 2026-08-18, no `depth_stub("identity")` survives
+anywhere in the tree (check-stubs green), and `identity` is a live scene
+on all five lanes — validate-mac's SCENES, deploy-win's SCENES,
+run-suites' SCENES (seven X11 legs, each wrapped in
+identity-class-leg.py, plus the wayland witness), run-sim's
+IOS_SWIFT_SCENES and IOS_GO_SCENES, and `run_apk identity-compose`.
+
+WHAT THIS STRIKE DOES NOT CLOSE, and it is still inside this section
+because each piece wants a home of its own rather than an agent's
+filing: (1) the MEASURED maintainer question below — where the mark sits
+in a PROMOTED window's caption — which is a caption-band arrangement
+decision and the band's arrangement was a ruling; and (2) the three
+packaging routes at the end of this section, all three re-checked absent
+from the tree on 2026-08-19: Windows' AUMID
+(`SetCurrentProcessExplicitAppUserModelID` — zero hits anywhere),
+the macOS `.app` bundle (no kaya-authored bundle tooling), and the Linux
+`.desktop` install (no `.desktop` file is tracked), whose precondition —
+the `WM_CLASS` entry below — is now CLOSED, so it is unblocked.
+
+As filed: the depth landed 2026-08-18: spec (`set_app_identity` / the apply
 record) + the WinUI arm (both sinks — the window icon through
 `CreateIconFromResourceEx` -> `Windowing_GetIconIdFromIcon` ->
 `AppWindow.SetIcon(IconId)`, and the caption through
@@ -3121,19 +3266,35 @@ own shape — plus a deleted overload in an UNTOUCHED sibling (java) and a
 renamed constructor that must make the reader refuse rather than report
 an empty set.
 
-STILL OPEN, one surface over: C#'s generated `<Rec>Row` façade
+~~STILL OPEN, one surface over: C#'s generated `<Rec>Row` façade
 (guests/csharp/*Kaya.cs, emitted by tools/kaya-csgen) forwards
-`Button(string)` alone and now lags the zone by two overloads, so the
-new arms are reachable through `tx.Each` and not through `foreach (var
-row in c.Rows())`. Two `Fwd` lines beside Program.cs's `Fwd("Button",
-["string text"], "text")` and a regeneration close it; it is its own
-entry below because the generator and its three generated files move
-together and this slice did not own the guest tree.
+`Button(string)` alone and now lags the zone by two overloads~~ — FIXED
+2026-08-19 with the census clause that could not see it; the record is
+the entry directly below. As filed: the new arms were reachable through
+`tx.Each` and not through `foreach (var row in c.Rows())`, and two `Fwd`
+lines beside Program.cs's `Fwd("Button", ["string text"], "text")` plus
+a regeneration closed it.
 
-## C#'s generated row façade lags the template button's new caption arms (2026-08-18)
+## ~~C#'s generated row façade lags the template button's new caption arms (2026-08-18)~~
 KEY: csharp Rec Row facade, kaya-csgen Fwd, Button overloads, tpl-surfaces name-set blindness
 
-tools/kaya-csgen/Program.cs:322 forwards `Button(string text)` and
+FIXED 2026-08-19, as one slice exactly as this entry required. Both
+`Fwd` lines went in beside `Fwd("Button", ["string text"], "text")` in
+tools/kaya-csgen/Program.cs (line 311 today, not the :322 below — the
+file shifted), the two generated façades moved with them
+(guests/csharp/{Item,Todo}Kaya.cs now carry `Button(Signal)` and
+`Button(Field<string>)`), and tpl-surfaces.py's façade clause compares
+ARITY-AND-TYPE instead of name sets — the C-family façades are keyed by
+`(name, (parameter types…))` through `_typed_members`, reusing the
+splitter the source census already reads for, with Rust's `Row` left
+name-keyed because `pub fn` has no overloads to lose. WATCHED FAILING:
+one `Button(Signal)` forward deleted from a copy of TodoKaya.cs, 1
+substitution printed, the census red naming `Button(Signal)` — and the
+OLD name-keyed clause measured GREEN against that same perturbed file,
+which is the whole point. Restored from the saved copy, `shasum -c` OK,
+census green, `dotnet build` clean.
+
+As filed: tools/kaya-csgen/Program.cs:322 forwards `Button(string text)` and
 nothing else, so the `Button(Signal)` and `Button(Field<string>)`
 overloads added to `Tpl` on 2026-08-18 are missing from every generated
 `<Rec>Row`. A guest writing `foreach (var row in todos.Rows())` cannot
@@ -3215,9 +3376,17 @@ milestone and only a film caught it, because a plain field is not a
 compile error and the scenes read the other surface.
 
 AUDITED WHEN THE FIX LANDED, so the entry records a state and not a
-worry: 16 of KayaSceneModel's 51 fields are state-backed, 13 plain ones
+worry: 16 of KayaSceneModel's 53 fields are state-backed, 13 plain ones
 are named inside an `@Composable`, and none of the 13 is a second
-instance of the defect. Four (`alertTitle`, `alertMessage`,
+instance of the defect. AN AUDIT IS ONLY AS FRESH AS ITS DATE, and this
+one decayed within two days of being written: re-measured 2026-08-19 the
+object holds 53 fields (16 state-backed, 37 plain), where the audit said
+51 — `appIdentityName` and `appIdentityIcon` joined from the identity
+fan-out, both written at the apply and read only by the harness
+diagnostic `kayaAppIconSamples`, never inside a composable that draws,
+so they fall in the "stamped BY the composition for the harness to read"
+class and the CONCLUSION below still holds. That decay is itself the
+argument for the gate. Four (`alertTitle`, `alertMessage`,
 `alertActions`, `alertCancel`) are written on the lines immediately
 before `alertId`, which IS state, so the flip carries them into the
 composition — safe by ORDERING, which is the fragile kind of safe. Five
@@ -3361,9 +3530,19 @@ standing pattern):
   Closing it is one bundled open-licensed face plus a second scene (the
   slot is set once per process, so the two forms cannot share a run).
 
-## The toolbar scene's depth stubs (C2 mid-flight, expected to close with the fan-out)
+## ~~The toolbar scene's depth stubs (C2 mid-flight, expected to close with the fan-out)~~
 
-The depth landed 2026-08-17: no spec movement at all — the `primary` bit
+CLOSED 2026-08-19, with nothing left inside it. Every bullet below is
+struck and LANDED 2026-08-17; no `depth_stub("toolbar")` survives
+anywhere in the tree (check-stubs green); `toolbar` runs on all five
+lanes (validate-mac's SCENES, deploy-win's SCENES, run-suites' SCENES
+with seven legs, run-sim's IOS_SWIFT_SCENES and IOS_GO_SCENES, and
+`run_apk toolbar-compose`); the seven other bindings owed nothing and
+their guests arrived in `a3ea86d`; and the last clause — the graduation
+out of validate-mac's DEPTH_SCENES — was already true two days before
+the sentence claiming otherwise was written (`cbf6476`).
+
+As filed: the depth landed 2026-08-17: no spec movement at all — the `primary` bit
 kaya already ships grew its first desktop lowering (docs/chrome-plan.md
 C2, ratified 2026-08-16) — plus two harness verbs (`expect_toolbar`,
 `expect_toolbar_item`), the SwiftUI **macOS** arm, the Rust guest and the
@@ -3451,9 +3630,14 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   have shipped since the menus milestone, so this slice adds no binding
   surface and the 8-way sweep is empty by construction. The `toolbar`
   GUEST each language owed ARRIVED 2026-08-17 (`a3ea86d`): python, go,
-  csharp, java, swift, ocaml and haskell all have one. WHAT IS LEFT is
+  csharp, java, swift, ocaml and haskell all have one. ~~WHAT IS LEFT is
   the graduation itself — `toolbar` is still in validate-mac's
-  DEPTH_SCENES rather than SCENES, the way styling moved.
+  DEPTH_SCENES rather than SCENES, the way styling moved.~~ — DONE, and
+  it was already done when this sentence was committed: `cbf6476`
+  (2026-08-17) moved `toolbar` out of DEPTH_SCENES into SCENES in the
+  same edit that added it to the other lanes. Verified 2026-08-19:
+  tools/validate-mac.sh:37 carries `toolbar` in SCENES and :48 reads
+  `DEPTH_SCENES="typeface"`.
 
 ## Styling follow-ups the fan-out surfaced (2026-08-12, none blocking)
 
@@ -3494,7 +3678,9 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   backends run — appends `"{prefix}sections {arm}"`, so the windows lane
   prints `window#1 sections sidebar`; the Compose interpreter spells it
   the same. The SwiftUI interpreter appends `"sections \(armPrefix)…"`
-  (KayaSwiftUI.swift:7060, and the failure sentence one line below it),
+  (KayaSwiftUI.swift:6513 and the failure sentence at :6516, re-anchored
+  2026-08-19; filed at :7060, so grep `armPrefix` rather than the
+  number),
   so the mac lane prints `sections window#1 sidebar`. Three
   implementations, two spellings, measured side by side:
 
@@ -3560,7 +3746,9 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   extended is DERIVED (toolbar or sidebar present), and the knob
   exists only for the chrome-less case. The toolbar construct (C2, the
   promotion list over the command catalog) is a separate question and
-  stays in the draft awaiting its own ratification.
+  ~~stays in the draft awaiting its own ratification~~ — C2 was ratified
+  2026-08-16 and LANDED 2026-08-17 (docs/chrome-plan.md's status line
+  names the five commits); C1 alone is held. Corrected 2026-08-19.
 
 - **The per-platform accent VALUE map is spelled in no binding, and
   cannot be until the core carries a platform id.** D1's grammar admits
@@ -3651,14 +3839,26 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   else would be legislating from a gate), and the result is that a C#
   guest holding a row cannot anchor a per-row context menu the way a
   Rust one can — it must open the For itself. One of the two doctrines
-  is wrong and the scene that would decide it (menus, per-row) does not
-  exist in C#. Small, but it is a semantics difference behind a
+  is wrong and ~~the scene that would decide it (menus, per-row) does not
+  exist in C#~~ — CORRECTION 2026-08-19: IT DOES, and it is paying the
+  cost. `guests/csharp/MenusScene.cs:100-107` opens the For itself
+  exactly as this predicted, where `guests/rust/menus.rs:106-114` does
+  the same work through the typed row façade
+  (`item.label(Task::title())`, `item.context_menu(row, …)`). So this is
+  no longer hypothetical: the C# façade header's own predicted failure
+  is happening in the EXAMPLE tier, which invariant 5 reserves for the C
+  guests. The guest's field READ was moved off the generator-only
+  `KayaRecords.FieldAt<string>(0)` onto the element token 2026-08-19; the
+  For is still open there, and it must be, because that is where the
+  ContextMenu lives. Small, but it is a semantics difference behind a
   spelling difference, which invariant 1 does not allow to stand once
-  someone has seen it.
+  someone has seen it. THE DIRECTION IS THE MAINTAINER'S — forward
+  `ContextMenu` on the C# façade, or ratify Rust's forward away — and
+  until it is taken, no agent should pick one by editing a generator.
 - **The brand mask bits deserve generated constants.** The
   `set_brand_accent` record's mask (bit 0 = light override, bit 1 =
-  dark) has no spec-emitted name, so five bindings and both
-  interpreters hand-write `1` and `2` at their pack/decode sites — the
+  dark) has no spec-emitted name, so SEVEN bindings hand-write `1` and
+  `2` at their pack sites — the
   check-file-modes shape one record over: renumber the bits and every
   generated surface holds while the literals drift, and the failure is
   a dark override painting the light appearance with no error
@@ -3666,6 +3866,21 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   decoded the core's derived words per bit); a `BRAND_MASK_LIGHT`/
   `BRAND_MASK_DARK` pair in the spec moves the agreement from measured
   to structural. Spec-hash move + regeneration + seven callsite edits.
+  TWO CORRECTIONS, re-measured 2026-08-19. (1) It is SEVEN bindings, not
+  five: python (`__init__.py:2080`), swift (`KayaApp.swift:2669-2670`),
+  csharp (`KayaApp.cs:1919`), go (`app.go:1364,1367`), haskell
+  (`KayaApp.hs:915`), ocaml (`kaya_app.ml:1286-1287`) — and JAVA, which
+  names them `BRAND_MASK_LIGHT`/`BRAND_MASK_DARK`
+  (`KayaApp.java:189-190`) but still hand-writes the numbers and is
+  checked against the spec by nothing. Rust is the one that cannot
+  drift: `app.rs:1468 brand_accent_with` passes `Option<u32>` and never
+  packs a mask. (2) The INTERPRETERS do not decode the accent mask at
+  all — they receive the DERIVED eleven-word brand. What they
+  hand-decode is bit 0 of the OTHER masks: the typeface record's
+  (`KayaSwiftUI.swift:3309 if mask & 1 != 0`, `KayaCompose.kt:1949`) and
+  the app-identity record's (`KayaCompose.kt:1897`). Same class of
+  defect, two records over, so whatever names these bits should name
+  those too.
 
 ## ~~The APK's own assets/ is not read (asset packaging, Android)~~
 KEY: assets, Android, AssetManager, APK, packaging, KAYA_ASSET_DIR
@@ -4037,20 +4252,20 @@ catch, with a warning, and the guest pass does not compile
 -warnings-as-errors. Watched: that perturbation reds the row and passes
 the compiler.
 
-STILL OPEN, AND IT IS PROSE ONLY: fifteen files argue for the query by
-naming SWIFT as the language that cannot catch, and that clause is now
-false everywhere it appears. No behavior depends on it and no gate reads
-it; the argument itself survives with the C floor in Swift's place (the
-paragraph above is the replacement text). The Swift-side copies are
-already fixed. The rest, measured 2026-08-19:
-crates/kaya/src/app.rs:1642, bindings/go/app.go:1672,
-bindings/python/kaya/__init__.py:2663,
-bindings/java/dev/kaya/KayaApp.java:998, bindings/csharp/KayaApp.cs:2204,
-bindings/haskell/KayaApp.hs:533, bindings/ocaml/kaya_app.ml:165,
-tools/scenes/assets.steps:22, and the assets-guest headers in
-guests/{rust,python,go,csharp,java,haskell,ocaml}. Left for one sweep
-rather than done here because every one of those files is in another
-slice's uncommitted diff.
+~~STILL OPEN, AND IT IS PROSE ONLY: fifteen files argue for the query by
+naming SWIFT as the language that cannot catch~~ — SWEPT 2026-08-19 in
+`9f8975e` ("the tree sheds a third of its talk"). Re-checked the same
+day: a tree-wide search for SWIFT near "cannot catch"/"catches
+nothing"/"no way to catch" over the bindings, the core, the guests and
+the `.steps` files returns ZERO lines, and every one of those sites now
+carries the pointer form instead — "Why a query and not just the raise:
+docs/deferred.md, the assets entry" (crates/kaya/src/app.rs:1504,
+bindings/go/app.go:1436, and the python/java/csharp/haskell/ocaml twins),
+with tools/scenes/assets.steps:20-23 carrying the replacement argument
+in the C floor's name rather than Swift's. The file-and-line list this
+paragraph used to carry is deliberately not reproduced: it was hundreds
+of lines out of date within two days, which is the argument for the
+pointer form and not for a better list.
 
 The original entry is kept below for the record.
 
@@ -4174,3 +4389,60 @@ viewport, and the a11y provider answers offscreen nodes with 20s of
 silence per read — the leg timed out with the scene substantively
 green. The full story is in the icons README, beside the file a future
 hand would swap.
+
+
+## Multi-column adaptive layout — the unbuilt half, now the ACTIVE milestone (promoted 2026-08-19)
+KEY: multi-column, adaptive layout, three-pane, NavigationSplitView, pane roles
+
+Promoted out of the struck adaptive entry whose body filed it "rather
+than done": the part of adaptive layout that never landed. kaya has the
+two-pane list_detail with width-driven collapse; it has no way to
+declare a THIRD pane or any pane-role/priority vocabulary, and every
+platform ships a native construct for exactly that (NavigationSplitView's
+three columns, WinUI's pane patterns, Adw's split views, Compose's
+ListDetailPaneScaffold/SupportingPaneScaffold). The maintainer ranked
+this FIRST among feature milestones (2026-08-19), tables second. A
+research scout across all five platforms plus cross-toolkit prior art is
+in flight; its draft plan lands beside this entry for ratification.
+
+## The refusal affordances are never asserted PRESENT (promoted 2026-08-19)
+KEY: affordance presence, refuse-when-absent, four backends
+
+Promoted out of a struck parent for the same reason: filed inside text
+that got struck. All four backends implement "refuse the action where
+the affordance is absent," and scenes assert the refusals — but nothing
+anywhere asserts the affordance EXISTS where it should, so a backend
+that lost an affordance entirely would pass every refusal test vacuously.
+A presence assertion per affordance closes the loophole. MILESTONE.
+
+## HOLD — Python's Signal comparison operators await a use-case (2026-08-19)
+KEY: Signal operators, derived comparison, python sugar, invariant 1
+
+Python's Signal alone carries the comparison-operator vocabulary
+(eq/ne/lt/gt/le/ge and friends); the other seven bindings have none of
+it — an invariant-1 divergence, HELD deliberately rather than resolved
+blind (maintainer, 2026-08-19: "I can see the argument for fanning out
+and making all bindings have that sugar provided we find the use-case").
+No scene, example, or the editor uses the operators; every guest that
+wanted derived state computed it in its own fold. TRIGGER: the first
+scene or example that genuinely wants a declared derived comparison
+("enable Save when count > 0" as a bound signal rather than guest code).
+When it fires: fan the vocabulary out to all eight. If a full milestone
+cycle passes without the trigger, strip Python's instead — either way
+the divergence ends.
+
+## WATCH — typeface-haskell-wayland segfaulted at exit after an OK verdict (2026-08-19)
+KEY: haskell segfault, typeface wayland, RTS teardown, exit path
+
+Once, under a five-lane matrix; 20/20 green solo immediately after. The
+reworded runner note plus the leg log carried the whole signature this
+time: `KAYA_SELFTEST: OK` then `a11y-leg.sh: line 40: <pid>
+Segmentation fault` — the Haskell guest's process died in TEARDOWN, verdict
+already printed. The suspects live where Haskell's RTS finalization
+meets GTK/pango teardown after the typeface blob registration
+(gtk.rs's register_font_blob file is mapped by fontconfig/freetype at
+exit). NOT the torn-diag class (fixed, kaya_diag!) and NOT a witness
+clause — this leg has no wrapper beyond a11y-leg.sh. If it repeats:
+core-dump the container (ulimit -c unlimited, coredumpctl or
+/proc/sys/kernel/core_pattern in docker), and look at the RTS's
+foreign-finalizer ordering against gtk_main teardown, not at the scene.

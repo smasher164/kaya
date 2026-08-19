@@ -3996,3 +3996,19 @@ old_string exactly as declared, in order, and a re-run reproduces the
 bytes. The recovery tooling and per-file op indexes from the 2026-08-19
 run are kept beside the recovered set’s staging area in that session’s
 artifacts; the landed files are docs/probes/ (see its README).
+
+
+## The emulator pool degrades across a long day of lane runs — reboot it
+## before believing a new android one-off
+
+Measured 2026-08-19, after ~20 lane/matrix runs on the same four
+long-lived emulators: three DISTINCT android one-off failures in three
+different matrix runs (a storage AccessDeniedException, two
+empty-logcat 62s timeouts where the app never reached the harness),
+every one 20/20-green solo and none reproducible — then a pool kill
+(`adb emu kill` x4), a cold boot by the lane itself, and the very next
+matrix ran ALL PASS. The mac lane has the same trap one platform over
+("Heavy concurrent GUI churn degrades the macOS accessibility
+subsystem, LANE-WIDE"). The rule: on a long session, when a SECOND
+unrelated android one-off appears, reboot the pool BEFORE chasing the
+leg — the reboot costs two minutes and the chase costs an evening.

@@ -151,6 +151,13 @@ GATES = [
     ("check-symbol-parity", ["tools/check-symbol-parity.sh"], False,
      "no input set is declared for it in build-id.sh's GATES; same shape as "
      "check-tx-liveness above"),
+    # The Windows accent near-no-op: a bare SystemAccentColor write
+    # changes the text-selection highlight and nothing else, invisibly
+    # to every lane. Fast-sweep sibling of winui::tests' rendered check
+    # on the windows guest.
+    ("check-accent", ["tools/check-accent.sh"], False,
+     "no input set is declared for it in build-id.sh's GATES; same shape as "
+     "check-tx-liveness above"),
     ("check-verbs", ["tools/check-verbs.sh"], True, ""),
     # The file-mode numbers against the spec that owns them: five
     # hand-written sites decode the integer kaya_open_picked takes.

@@ -65,6 +65,10 @@ sealed class TodoRow
 
     public Node Button(string text) => t.Button(text);
 
+    public Node Button(Signal s) => t.Button(s);
+
+    public Node Button(Field<string> f) => t.Button(f);
+
     public Node Image(byte[] source) => t.Image(source);
 
     public Node Image(Signal s) => t.Image(s);
