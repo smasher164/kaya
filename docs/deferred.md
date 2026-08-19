@@ -2885,6 +2885,53 @@ shown the mark. Closing it is a signing/provisioning story — its own
 slice when a device lane exists; recorded so "iOS identity works" is
 read at its true width.
 
+## The iOS pasteboard witness has its marker; two questions stay open (2026-08-18)
+KEY: UIPasteboard changedNotification, changeCount focus bumps, iOS witness, marker type
+
+WITNESS LANDED 2026-08-18, on a private marker type rather than the
+count. Every clip a kaya-controlled writer composes on iOS carries
+`dev.kaya/staged` (swift/KayaSwiftUI.swift's `kayaClipMarkerType`, and
+tools/ios/clipctl/main.swift for a seed), and the same consumption sites
+the mac witness guards check its PRESENCE where mac checks the count.
+Watched failing both ways: a foreign write between stage and consumption
+fails the leg naming the marker, and deleting the marker from the seed's
+writer fails it naming the stage. docs/traps.md carries the design and
+its limits.
+
+THE NOTIFICATION CANDIDATE THIS ENTRY USED TO PROPOSE IS DEAD, and it
+was measured rather than argued: a genuine foreign write from another
+process on the same simulator delivered ZERO `changedNotification` to an
+observing app, twice — app `active` (printed, not assumed), runloop
+turning, observer on `object: nil`. It fires for the app's own writes
+only. A witness keyed on it would never fire on the event it exists to
+catch, which is worse than the false positive it was meant to replace.
+Do not build it. (The earlier reading — "it discriminated correctly in
+both directions" — came from a probe that only ever saw the app's own
+writes.)
+
+WHY FOCUS TOUCHES THE COUNT is answered too, and the answer is that it
+does not touch the pasteboard SERVER at all: the +4 is private to the
+focusing process, the server's count moves +1 per write, and the two
+never reconcile (docs/traps.md). What raises it is the text-input
+session — a bare `UIView & UIKeyInput` bumps, a non-editable UITextView
+does not, a secure field does not.
+
+WHAT STAYS OPEN, both small:
+- REAL HARDWARE is unmeasured. No device in this environment, and no
+  credible source compares simulator with device for this behaviour.
+  The phenomenon is device-attested in kind for iOS 13 (Apple forums
+  123596 and 131419); the magnitude on iOS 26 hardware, and the
+  per-process finding above, are untested there. Nothing in the marker
+  route depends on the number, so this is confirmation rather than risk.
+- THE UIKit FUNCTION BEHIND THE CONSULTATION is unidentified. Not
+  `canPerformAction(_:withSender:)` for `paste:` — the 2019 forum
+  attribution — which moves nothing when called directly on iOS 26.5.
+  The one clue is that `isSecureTextEntry = true` is EXEMPT, which is
+  exactly the field iOS does not offer clipboard content to, so the
+  consultation is plausibly the clipboard OFFER; no callable API
+  reproduces it, and the +4's shape (two inside `becomeFirstResponder`,
+  two ~10ms after) says two consultations, twice.
+
 ## Comments are drowning the code (maintainer, 2026-08-17)
 KEY: comment verbosity, examples readability, war stories, traps pointers
 

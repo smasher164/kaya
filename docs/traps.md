@@ -3743,8 +3743,8 @@ the guests are where it shows:
 docs/ranges-plan.md covers the design and says nothing about any
 language's indexing.
 
-## UIPasteboard's changeCount moves when a TEXT FIELD TAKES FOCUS, with
-## the clip unchanged
+## UIPasteboard's changeCount is a PER-PROCESS number, and a text field
+## taking focus inflates the reader's copy of it
 
 Measured 2026-08-18 on the iOS 26.5 simulator, with Simulator.app not
 running and `PasteboardAutomaticSync` = 0 (so no host relay is in the
@@ -3783,14 +3783,135 @@ NSPasteboard does NOT do this — the same steps on the eight mac legs
 focus the same entries and the count sits still — which is why a guard
 written and watched failing on macOS says nothing at all about iOS.
 
+### AND THE INFLATION IS PRIVATE TO THE FOCUSING PROCESS
+
+Measured 2026-08-18, and this is the part no published report has: the
+pasteboard SERVER's count is correct throughout. It is the reader's copy
+that is wrong, and only in the process that focused.
+
+- An app and a second process on the same simulator polled the same
+  `UIPasteboard.general.changeCount` at 5ms. The outside process moved
+  by exactly +1 per write and by NOTHING on focus, while the app went
+  747 -> 751 on one focus and 752 -> 756 on the next.
+- Two FRESH processes reading cold after the run read 748 while the
+  focusing app had reached 756. The same board, the same instant, two
+  numbers.
+- The simulator's own `com.apple.Pasteboard` log carries a line for
+  every write ("is saving pasteboard", "Saved item … type
+  public.utf8-plain-text") and NOT ONE for any focus, in either process.
+
+AND IT NEVER RESYNCS. When another process really did write, the server
+went 753 -> 754 while the app went 757 -> **758** — the foreign write
+arrives as a +1 delta on top of the inflation, never as a correction. So
+what the property returns is *the server's count when this process first
+read it, plus every increment it has seen since, including the ones only
+it can see*. Absolute values are not comparable across processes, and no
+amount of waiting, coalescing or re-reading reconciles them: THE TWO
+COUNTERS ARE SIMPLY DIFFERENT NUMBERS. That is why there is no tolerance
+window and no settle that could have rescued the count route.
+
+WHAT RAISES THEM is the text-input session, isolated by measurement
+rather than by argument. A bare `UIView & UIKeyInput` with none of
+UITextField's machinery is +4; a `UITextView` with `isEditable = false,
+isSelectable = true` — a real first responder with an edit menu and a
+Copy command, but no input session — is 0; a plain `UIView` with
+`canBecomeFirstResponder` is 0. Ruled out: the system keyboard's UI (a
+custom `inputView` still bumps +4), the correction/prediction stack (all
+of it off, still +4), the board's content (an EMPTY board bumps +4, an
+image-only board bumps +4), and every pasteboard API an app can call
+(`string`, `hasStrings`, `itemProviders`, `detectPatterns`,
+`setNeedsRebuild` — all 0). A field with `isSecureTextEntry = true` is
+0, which is the one functional clue: a secure field is exactly the one
+iOS does not offer clipboard content to. The exact UIKit function is NOT
+identified.
+
+THE PUBLISHED REPORTS ARE OLD AND THEIR FRAMING IS WRONG. Apple's own
+forums, thread 123596 (Sep 2019, iOS 13, Feedback FB7397122) and thread
+131419 (Apr 2020, an independent Objective-C reproduction), both report
++2 per `becomeFirstResponder` with no notification, both note iOS 11 and
+12 did not do it, and people were still asking in Jan 2024 — four and a
+half years unacknowledged. Both read it as a WRONG GLOBAL COUNT; it is
+not, and anyone who starts from that will look for a way to make the
+number right. The delta grew from +2 (iOS 13) to +4 (iOS 26.5), still in
+units of two. Thread 123596's reporter attributed his +2 to
+`canPerformAction(_:withSender:)` for `paste:` — called directly on iOS
+26.5, once or five times, focused or not, that moves NOTHING, so the
+2019 mechanism is not the callable cause today.
+
+### changedNotification IS NOT THE WAY BACK — MEASURED, TWICE
+
+The obvious replacement — treat a `changedNotification` arriving while
+this leg is not staging as a foreign writer — is UNSOUND, and it fails
+in the silent direction. A genuine foreign write from a separate process
+on the same simulator produced **zero** notifications in the observing
+app: probe 7 (one write, 23s of watching, one notification, the app's
+own) and probe 8 (25s of watching after the stranger's write, two
+notifications, both the app's own). The app was `active` at the time —
+PRINTED in every sample rather than assumed — its runloop was turning,
+and the observer was registered with `object: nil`, which is the
+registration shape that matters (forums 54227: `general` does not always
+vend the same instance, so registering on the object can silently miss
+even your own writes). It fires for the app's OWN writes only, and for
+those it fires TWICE.
+
+Third-party attestation for the same shape: rdar 28771678 (PSPDFKit,
+iOS 10, another app copying in SplitScreen delivers nothing), forum
+threads 760154 and 110504 (the same question asked twice, zero replies),
+rdar 43844502 (an XCUITest write delivers nothing to the app under
+test). Apple has never documented a delivery condition either way — not
+in the current page, not in the 2018 archive guide, not in the iOS 3.0
+reference — while `changeCount`'s page still says, and has said for 17
+years, that increments happen when "items are added, modified, or
+removed" and that UIPasteboard "posts the notifications" after each one.
+Both halves are false as measured.
+
+### WHAT IS SOUND: A PRIVATE MARKER TYPE
+
+`pb.contains(pasteboardTypes: ["dev.kaya/…"])` held TRUE through the
+entire focus inflation and flipped FALSE within 13ms of the stranger's
+write, prompt-free, one call. That is the signal the counter was
+standing in for, and it is also the answer Apple's own DTS gave the 2019
+reporter: stop trusting the count, put a type you control on your own
+clip and look for it.
+
+kaya does exactly that. `kayaClipMarkerType` (`dev.kaya/staged`,
+swift/KayaSwiftUI.swift) rides on every clip a kaya-controlled writer
+composes — the app's own `items =`, and tools/ios/clipctl/main.swift for
+a seed — and `kayaClipDrifted` compares the MARKER on iOS and the COUNT
+on macOS. Its honest limits, in the comment at the check: it sees the
+staged clip being REPLACED, never a stranger carrying kaya's own marker
+(a second kaya leg on one device would; the lane runs one leg per
+simulator), and never a writer who APPENDS an item and leaves kaya's in
+place (which the macOS count does catch). The threat model is the
+machine-wide resource shared by ACCIDENT — a human pressing Cmd-C, a
+clipboard manager, a VM relay, a sibling lane — not an adversary.
+
+THE MARKER'S OWN FAILURE MODE IS VACUITY, and it is guarded rather than
+trusted: a stage that closes without the marker makes the witness stand
+down, so a marker that silently stopped being written would leave a
+guard that can only ever agree. `kayaClipOwned(_:composed:)` fails the
+leg at that moment instead, which is what pins the spelling across the
+two binaries no compiler spans. Both branches were watched failing:
+strike the board from another process and the leg dies naming the marker;
+delete the marker from clipctl and the leg dies naming the stage.
+
+THE NEGATIVE HAS TO BE FAST. The window between the scene's last stage
+closing and the last step that consumes it measured 1.3s, and a
+host-side trigger (`simctl spawn` to poll, `simctl spawn` to write) takes
+about two — the first attempt struck the board AFTER the scene and the
+leg passed. Put the striker INSIDE the guest (a resident CLI polling
+`pb.types` on a runloop at 10ms, writing the instant it sees the scene's
+last stage) and detection costs milliseconds. A process that reads the
+pasteboard with NO runloop turning reads a frozen number forever — the
+client learns of changes by a Darwin notification and nothing delivers
+it — which cost one probe 120 seconds of a single unchanging value.
+
 The guard is scoped in `kayaClipDrifted` (swift/KayaSwiftUI.swift), the
-one comparison both the witness and the trace clause read; the trace
-clause STATES that it cannot discriminate on iOS rather than going
-quiet, because silence there reads as "the board did not move". The
-probes are throwaway (a UIKit app, `simctl launch --console-pty`); the
-shape to reuse is one action per phase plus a poller, since a timeline
-that only samples after WRITES would have concluded "no async bump" and
-stopped — which is exactly what the first probe concluded.
+one comparison both the witness and the trace clause read. The probes
+are throwaway (a UIKit app, `simctl launch --console-pty`); the shape to
+reuse is one action per phase plus a poller, since a timeline that only
+samples after WRITES would have concluded "no async bump" and stopped —
+which is exactly what the first probe concluded.
 
 A SECOND FINDING FROM THE SAME PROBE, paid for at five minutes of a
 parked main thread: reading `pb.string` at launch BLOCKS on the

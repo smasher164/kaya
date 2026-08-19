@@ -45,21 +45,41 @@ if verb == "write" {
     // exactly as pbcopy and the other lanes' seeds behave. The value
     // spellings are the measured ones (§8 finding 1: items= preserves
     // each verbatim).
+    var item: [String: Any]
     switch kind {
     case "text":
-        pb.items = [["public.utf8-plain-text": String(decoding: bytes, as: UTF8.self)]]
+        item = ["public.utf8-plain-text": String(decoding: bytes, as: UTF8.self)]
     case "html":
-        pb.items = [["public.html": String(decoding: bytes, as: UTF8.self)]]
+        item = ["public.html": String(decoding: bytes, as: UTF8.self)]
     case "image":
-        pb.items = [["public.png": bytes]]
+        item = ["public.png": bytes]
     case "files":
         // The payload is the file's absolute path — the container path
         // is the same string on the host and inside the simulator.
-        pb.items = [["public.file-url": URL(fileURLWithPath: String(decoding: bytes, as: UTF8.self))]]
+        item = ["public.file-url": URL(fileURLWithPath: String(decoding: bytes, as: UTF8.self))]
     default:
         FileHandle.standardError.write(Data("clipctl cannot write \(kind)\n".utf8))
         exit(2)
     }
+    // AND KAYA'S STAGE MARKER BESIDE IT. A seed is foreign in its WRITER
+    // and this leg's in its INTENT, and the app's witness asks the
+    // second question: is this still the clip the leg staged? On this
+    // platform the only answer is a private type kaya put there —
+    // UIPasteboard's change count is a per-process number that a text
+    // field taking focus inflates, and no notification is delivered for
+    // another process's write (both measured 2026-08-18, docs/traps.md).
+    // So the board this seed leaves has to be markable as kaya's, or the
+    // witness has nothing to compare and the scene's widest window — the
+    // last seed, with three consuming steps after it — goes unwatched.
+    //
+    // THE SPELLING IS swift/KayaSwiftUI.swift's `kayaClipMarkerType` and
+    // no compiler can hold the two binaries to it. The app does, at
+    // runtime: its stage refuses to close on a board it composed without
+    // its marker, so a drift between these two strings fails the first
+    // iOS clipboard leg with a sentence naming both. Change one, change
+    // the other.
+    item["dev.kaya/staged"] = "staged"
+    pb.items = [item]
     print("W types=\(pb.types)")
     fflush(stdout)
     // HOLD: stay alive until killed. The pasteboard daemon serves an
