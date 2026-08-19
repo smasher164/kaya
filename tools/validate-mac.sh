@@ -484,10 +484,13 @@ drain() {
         if [ "$verdict" != PASS ]; then
             cat "$LEGS_DIR/$name.log" 2>/dev/null
             # The confusing failure class: verdict printed OK but the
-            # leg still failed — the process never exited (a broken
-            # Stage::finish exit path, once bitten on GTK and WinUI).
+            # leg still failed. Two causes share it and the note may not
+            # pick one (invariant 3 — the linux twin of this note guessed
+            # "exit-path bug?" while the real cause was a wrapper clause,
+            # twice): a nonzero guest exit (the Stage::finish class), or
+            # a wrapper around the guest failing after the verdict.
             if grep -q "KAYA_SELFTEST: OK" "$LEGS_DIR/$name.log" 2>/dev/null; then
-                echo "$name: note — verdict was OK but the process did not exit cleanly (finish()/exit-path bug?)"
+                echo "$name: note — verdict was OK but the leg exited nonzero: the guest's exit path, or a wrapper clause failing after the verdict — its sentence, if any, is above"
             fi
             # A SILENT leg has two very different meanings and the bare
             # verdict cannot tell them apart — split by duration because the

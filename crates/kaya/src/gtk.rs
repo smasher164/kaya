@@ -19,6 +19,22 @@ use crate::protocol::{
 };
 use crate::scene::Scene;
 
+/// A diagnostic line as ONE write. Rust's stderr is unbuffered and
+/// `eprintln!` issues a write per format fragment, so under host load
+/// another thread's line lands INSIDE this one — a torn
+/// `KAYA_DIAG app identity: class` line put the route name on the wrong
+/// line and the identity class witness failed a green leg, twice on the
+/// matrix before the 300-sample probe caught it mid-tear
+/// (docs/deferred.md, the identity-x11 flake entry).
+macro_rules! kaya_diag {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let mut line = format!($($arg)*);
+        line.push('\n');
+        let _ = std::io::stderr().write_all(line.as_bytes());
+    }};
+}
+
 /// Where a child's grow weight is parked so the layout manager can find
 /// it.
 const GROW_KEY: &str = "kaya-grow";
@@ -1460,7 +1476,7 @@ fn report_class_moves(moves: &[(u64, ClassMove)], name: &str) {
     };
     for (id, how) in moves {
         if let ClassMove::NoRoute { display, surface } = how {
-            eprintln!(
+            kaya_diag!(
                 "KAYA_DIAG app identity: window#{id} keeps the class its launcher gave \
                  it — kaya has no route to move a class on this display ({display}, \
                  surface {surface}), so no .desktop entry naming \"{name}\" can match \
@@ -1500,7 +1516,7 @@ fn report_class_moves(moves: &[(u64, ClassMove)], name: &str) {
         if clauses.is_empty() {
             clauses.push("this app holds no window at all".to_owned());
         }
-        eprintln!(
+        kaya_diag!(
             "KAYA_DIAG app identity: class -> \"{name}\": {} (that call returns nothing \
              and GDK reads no class back, so this clause is a record of what this \
              process did, not of what the server holds)",
@@ -5431,7 +5447,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // first: a live preedit means the user is mid-word. Refused as a
             // no-op under a named reason, never a panic.
             if let Some(preedit) = core.preedit.borrow().get(&id.0) {
-                eprintln!(
+                kaya_diag!(
                     "KAYA_DIAG select_range refused: ime_composition (widget {}, preedit {preedit:?})",
                     id.0
                 );
@@ -5494,7 +5510,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     match gtk4::gdk::Texture::from_bytes(&bytes) {
                         Ok(texture) => IdentityIcon::Texture(texture),
                         Err(why) => {
-                            eprintln!(
+                            kaya_diag!(
                                 "KAYA_DIAG app identity: GDK refused the declared icon \
                                  blob ({} bytes): {why} — the platform's own icon stays \
                                  in place",
@@ -6566,7 +6582,7 @@ fn register_font_blob(core: &CoreState, bytes: &[u8], named: &str) -> Option<Str
             // names the path and the OS error, and the resolved-family read
             // still reports the truth.
             let _ = std::fs::remove_file(&staged);
-            eprintln!(
+            kaya_diag!(
                 "KAYA_DIAG brand typeface: {} bytes could not be written to {} ({why}) \
                  — the family name is all this platform has left to go on",
                 bytes.len(),
@@ -6582,7 +6598,7 @@ fn register_font_blob(core: &CoreState, bytes: &[u8], named: &str) -> Option<Str
     let before: std::collections::BTreeSet<String> =
         map.list_families().iter().map(|f| f.name().to_string()).collect();
     if let Err(why) = map.add_font_file(&path) {
-        eprintln!(
+        kaya_diag!(
             "KAYA_DIAG brand typeface: pango refused {} ({} bytes): {why}",
             path.display(),
             bytes.len()
@@ -6602,7 +6618,7 @@ fn register_font_blob(core: &CoreState, bytes: &[u8], named: &str) -> Option<Str
     match (fresh.next(), fresh.next()) {
         (Some(one), None) => Some(one.clone()),
         (Some(one), Some(two)) => {
-            eprintln!(
+            kaya_diag!(
                 "KAYA_DIAG brand typeface: {} added {} families ({one}, {two}, …) and the \
                  request names {named:?}, which is not among them — kaya asks for {named:?} \
                  and the resolved-family read reports what the text system does with it",
@@ -6612,7 +6628,7 @@ fn register_font_blob(core: &CoreState, bytes: &[u8], named: &str) -> Option<Str
             None
         }
         (None, _) => {
-            eprintln!(
+            kaya_diag!(
                 "KAYA_DIAG brand typeface: pango accepted {} ({} bytes) and the font map's \
                  {} families did not change — the file carries a family this process \
                  already had, or none it could read",

@@ -4103,20 +4103,39 @@ scenes with no Java guest — would make Go wider than the mirror. The
 maintainer rules on that trade before anyone wires it.)
 
 
-## FLAKE, one occurrence — identity-ocaml-x11 exited dirty after an OK verdict (2026-08-19)
-KEY: identity-ocaml-x11, did not exit cleanly, Stage finish exit path
+## ~~FLAKE — identity-x11 legs exited dirty after an OK verdict~~ (2026-08-19)
+KEY: identity-ocaml-x11, identity-csharp-x11, did not exit cleanly, torn KAYA_DIAG, kaya_diag
 
-One leg in one five-lane matrix run: every assertion passed, then the
-process exited non-zero at teardown — run-suites.sh’s own note for the
-class (“verdict was OK but the process did not exit cleanly”), the
-Stage::finish exit-path shape bitten on GTK and WinUI before. Not
-reproduced: the same leg was green in the matrix an hour earlier, green
-in the solo lane rerun minutes later (551/551), and the day’s changes
-touched neither the OCaml binding, the identity guest, nor gtk.rs. One
-in ~2,500 legs. If the sentence shows again, start at the OCaml guest’s
-exit path under contention, not at the scene.
+Two occurrences in one day (ocaml, then csharp — so never one binding's
+exit path), each 3s, solo-green on either side. ROOT CAUSE FOUND, AND
+FIXED 2026-08-19, via a 300-sample probe of the exact leg stack
+running 12-wide UNDER A CONCURRENT MATRIX (0/300 solo and 0/120 with
+in-container contention alone — host-wide load is the trigger). The one
+dirty sample carried the whole story in its log: the guest exited 0
+with verdict OK, and the leg's 1 came from identity-class-leg.py's
+route clause — because the guest's `KAYA_DIAG app identity: class ->
+"..."` line was TORN, the harness thread's epoch line spliced into its
+middle, putting the route name on the wrong line. Rust's stderr is
+unbuffered and `eprintln!` writes once per FORMAT FRAGMENT, so under
+load another thread lands between fragments. Never an exit-path bug;
+the runner note that guessed "finish()/exit-path bug?" was itself the
+invariant-3 shape and is reworded in both runners. FIX: `kaya_diag!` in
+crates/kaya/src/gtk.rs — the whole line as ONE write — at all 8 diag
+sites. The witness's same-line route clause is CORRECT and unchanged:
+with atomic lines it reads truth, and its refusal sentence is what
+cracked the case.
 
+## WATCH — save-jvm once died to AccessDeniedException on /sdcard/Documents (2026-08-19)
+KEY: save-jvm AccessDenied, sdcard Documents, storage state
 
+One pool device, one matrix run, 4s-green solo on either side. The
+validation apps hold NO storage permission BY MEASUREMENT
+(tools/android/pickerprobe's manifest carries the finding: the
+permissionless shared-collection write was measured succeeding, and a
+probe with a wider manifest measures a different app) — so a transient
+denial is one emulator's storage state, not a missing grant. If it
+repeats, dumpsys the mount and appops state of the DEVICE the leg drew,
+not the guest.
 ## ~~The a11y example still embeds its image as source bytes~~ (found 2026-08-19)
 KEY: a11y TEST_PNG, inline image bytes, asset icons
 

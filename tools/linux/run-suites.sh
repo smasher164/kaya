@@ -349,10 +349,15 @@ drain() {
                     "connect), so look before the scene, not inside it."
             fi
             # The confusing failure class: verdict printed OK but the leg
-            # still failed — the process never exited (a broken
-            # Stage::finish exit path, bitten on GTK and WinUI).
+            # still failed. TWO causes share it and the note may not pick
+            # one (invariant 3 — this note said "exit-path bug?" while the
+            # real cause was a wrapper clause, twice): the process exited
+            # nonzero (the Stage::finish class, bitten on GTK and WinUI),
+            # or a WRAPPER around the guest failed after the verdict — the
+            # identity class witness prints its refusal above when it is
+            # the one.
             if grep -q "KAYA_SELFTEST: OK" "$LEGS_DIR/$name.log" 2>/dev/null; then
-                echo "$name: note — verdict was OK but the process did not exit cleanly (finish()/exit-path bug?)"
+                echo "$name: note — verdict was OK but the leg exited nonzero: the guest's exit path, or a wrapper clause failing after the verdict — its sentence, if any, is above"
             fi
             status=1
         fi
