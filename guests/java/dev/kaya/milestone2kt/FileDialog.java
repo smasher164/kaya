@@ -41,6 +41,16 @@ final class FileDialog {
         if (tmp == null || tmp.isEmpty()) {
             tmp = System.getProperty("java.io.tmpdir");
         }
+        // THE PHONE USES THE SHARED COLLECTION, and must: no document
+        // provider publishes an app's private storage, so a picker
+        // aimed at temp opens on Recent instead — the Clipboard guest
+        // draws the same line, for the same reader-outside-the-app
+        // reason.
+        if (System.getProperty("java.specification.vendor", "")
+                .contains("Android")) {
+            String ext = System.getenv("EXTERNAL_STORAGE");
+            tmp = (ext == null || ext.isEmpty() ? "/sdcard" : ext) + "/Documents";
+        }
         Path dir = Paths.get(tmp, "kaya-picked-" + pid());
         try {
             Files.createDirectories(dir);

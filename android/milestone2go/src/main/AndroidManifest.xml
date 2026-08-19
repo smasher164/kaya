@@ -13,7 +13,7 @@
     <application
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
-        android:theme="@style/Theme.Kaya">
+        android:theme="@style/Theme.Kaya.NoActionBar">
         <activity
             android:name=".MainActivity"
             android:exported="true">

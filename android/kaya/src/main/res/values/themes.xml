@@ -20,12 +20,13 @@
          simply stay light, which is exactly what `isSystemInDarkTheme()`
          reports there).
 
-         Two entries, because the validation apps differ and that
-         difference is theirs to keep: the Rust app hides the platform
-         action bar (Compose draws the whole surface), the JVM and Go
-         apps keep it. -->
-    <style name="Theme.Kaya" parent="@android:style/Theme.Material.Light" />
-
+         ONE entry, NoActionBar, for every validation app since
+         2026-08-19: kaya's Compose backend draws the whole chrome
+         surface, so a platform action bar above it is double chrome no
+         kaya app ships — and it shifts every window-space rectangle
+         the ranges pixel witness aims its photograph with, which is
+         how the divergence was found (ranges-jvm/-go, the day both
+         suites first ran the scene). -->
     <style name="Theme.Kaya.NoActionBar"
         parent="@android:style/Theme.Material.Light.NoActionBar" />
 </resources>

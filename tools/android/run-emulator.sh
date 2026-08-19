@@ -1176,8 +1176,7 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity filedialog \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script filedialog)'"
-    # The save scene (docs/save-plan.md D5), still a DEPTH slice while the
-    # bindings fan out, so rust only.
+    # The save scene (docs/save-plan.md D5).
     #
     # ACTION_CREATE_DOCUMENT, which is DocumentsUI once more. The service
     # tells the two modes apart by the node the create mode inflates
@@ -1554,6 +1553,32 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity undo \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script undo)'"
+    # The four scenes the 2026-08-19 breadth ruling widened both suites
+    # with, in mirror with the go suite below. Shapes are the compose
+    # legs': plain for filedialog/save, the chrome-close cut plus the
+    # appended title claim for dirty, the IME bracket for ranges.
+    run_apk filedialog-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity filedialog \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script filedialog)'"
+    run_apk save-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity save \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script save)'"
+    dirty_script="$(scene_script_cut dirty close_window expect_dirty)" || exit 1
+    run_apk dirty-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity dirty \
+        --es KAYA_SELFTEST_SCRIPT "'${dirty_script}expect_title \"dirty\"'"
+    drain
+    for serial in "${SERIALS[@]}"; do
+        select_helper_ime "$serial" || exit 1
+    done
+    run_apk ranges-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity ranges \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script ranges)'"
+    drain
     run_apk styling-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity styling \
@@ -1584,11 +1609,11 @@ fi
 # comparable leg for leg, which is how uniform binding semantics gets
 # checked at all (invariant 1).
 #
-# NOT WIDER: filedialog, dirty and ranges run from the RUST guest only,
-# and each carries host-specific harness plumbing that leg owns. A Go
-# leg on any of them would make Go the first NON-RUST guest there,
-# which is a sweep of that scene across guest languages, not this depth
-# slice. window/panels/split are desktop-only by design.
+# NOT WIDER only where the roster is: window/panels/split are
+# desktop-only by design, and every other scene runs from all three
+# suites (filedialog, save, dirty and ranges joined both lists
+# 2026-08-19, the maintainer's breadth ruling — the Java guests had
+# existed unwired the whole time).
 #
 # `editor` IS THE ONE ENTRY THE JVM SUITE DOES NOT HAVE, and that is
 # not a coverage divergence: the text editor is a GO app by design and
@@ -1789,6 +1814,29 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity undo \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script undo)'"
+    # The jvm suite's four, in mirror and for its reasons.
+    run_apk filedialog-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity filedialog \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script filedialog)'"
+    run_apk save-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity save \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script save)'"
+    dirty_script="$(scene_script_cut dirty close_window expect_dirty)" || exit 1
+    run_apk dirty-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity dirty \
+        --es KAYA_SELFTEST_SCRIPT "'${dirty_script}expect_title \"dirty\"'"
+    drain
+    for serial in "${SERIALS[@]}"; do
+        select_helper_ime "$serial" || exit 1
+    done
+    run_apk ranges-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity ranges \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script ranges)'"
+    drain
     # THE TEXT EDITOR (docs/editor-plan.md), the only script on this lane
     # that drives an APP rather than a feature. THE ONE SCENE HERE WITH NO
     # RUST SIBLING, by design: the plan chose Go so a BINDING's awkward

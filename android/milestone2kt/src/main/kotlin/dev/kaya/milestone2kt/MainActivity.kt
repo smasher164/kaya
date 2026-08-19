@@ -61,6 +61,9 @@ class MainActivity : ComponentActivity() {
             "background" -> Background::app
             "undo" -> Undo::app
             "ranges" -> Ranges::app
+            "dirty" -> Dirty::app
+            "save" -> Save::app
+            "filedialog" -> FileDialog::app
             "styling" -> Styling::app
             // The asset root arrives from outside: the leg pushes it and
             // names it in KAYA_ASSET_DIR, an extra that reaches the core
