@@ -116,7 +116,7 @@ own the state (see the undo note in this file).
     prompt at all — they rename to `name (1)` — so a `file_save replace`
     step would be unsatisfiable on two of five platforms. If it is ever
     wanted it is a mac/linux/windows-only leg, not a line in
-    `save.steps`. Measurements: scratchpad/save-probe-mac.md.
+    `save.steps`. Measurements: docs/probes/save-probe-mac.md.
   - **`filters` on a save request is exercised at the wire level only.**
     The `save` scene sends none, deliberately: with `allowedContentTypes`
     set, NSSavePanel appends the first allowed extension to a name that
@@ -1053,7 +1053,7 @@ own the state (see the undo note in this file).
   measurement bug class lives and is a permanent first-class citizen;
   the native-kit button bridges are load-bearing indefinitely, not
   transitional.
-  APPROVED 2026-08-16 (maintainer): bump the SDK for the kaya-built legs so guests opt into macOS 26's modern design generation; the artifact-screenshot caveat (stills will show the modern look, not older releases') is acknowledged. The constraint above still binds: the compat generation keeps a leg — the vendor-stamped hosts (JVM, .NET apphost) stay compat regardless of the flake, and the bump slice must VERIFY that coverage rather than assume it. Scout report: scratchpad/chrome/sdk-bump-scout.md.
+  APPROVED 2026-08-16 (maintainer): bump the SDK for the kaya-built legs so guests opt into macOS 26's modern design generation; the artifact-screenshot caveat (stills will show the modern look, not older releases') is acknowledged. The constraint above still binds: the compat generation keeps a leg — the vendor-stamped hosts (JVM, .NET apphost) stay compat regardless of the flake, and the bump slice must VERIFY that coverage rather than assume it. Scout report: docs/chrome/sdk-bump-scout.md.
   THE BUMP LANDED 2026-08-17 (`4e5c67e`), and the verification is now
   mechanical rather than owed: `tools/check-design-generation.sh` reads
   which generation each mac leg's host was linked for and refuses if
@@ -1469,7 +1469,7 @@ count, so the saving is measured rather than assumed.
   one slice rather than accumulating stages. One is a ratification the
   maintainer owns and is stated as a proposal, not a change; the rest
   are done or answered from evidence. Commit forthcoming; the working
-  record is scratchpad/undo-completion.md.
+  record is docs/probes/undo-completion.md.
   - ~~**A fully-undone episode is not redoable.**~~ **FIXED.** A walk
     that reaches the run's start now CLOSES the episode and pushes it
     onto the redo side (`Scene::note_native_undo`), so it redoes through
@@ -1505,7 +1505,7 @@ count, so the saving is measured rather than assumed.
     own answer — bind the row's text to a record field and the `entries`
     run already carries it; C: carry the internal id, named only so it
     is not rediscovered) are written out with their bills in
-    scratchpad/undo-completion.md §ITEM 2.
+    docs/probes/undo-completion.md §ITEM 2.
     **RULED 2026-08-06, option A (the maintainer): `texts` becomes an
     arity-first group like its two siblings, instance paths join the
     channel, the spec hash moves, the eight bindings' delta decode and
@@ -2379,7 +2379,7 @@ reports named:
   four names measured to be plumbing.
 - ~~**C#**: the generated `<Rec>Row` façade wants the same; a tested
   implementation was offered at the fan-out
-  (scratchpad/csprobe/facade-parity.py, watched failing against HEAD's
+  (docs/probes/csprobe/facade-parity.py, watched failing against HEAD's
   11 missing forwards including a year-old SetGrow drift).~~ CLOSED
   2026-08-17. The clause reads the GENERATED files — what a guest
   actually calls — and names the generator as the fix; finding none of
@@ -2871,7 +2871,7 @@ SetRegionRects(NonClientRegionKind.Icon, ...) — the Icon kind is
 MEASURED PRESENT in the pinned winmd and absent from the generated
 bindings. Closing it: two winui-bindgen filter entries, then the
 precedence measurement the report says cannot be made until the binding
-exists (scratchpad/chrome/winui-icon-position.md).
+exists (docs/chrome/winui-icon-position.md).
 
 ## The identity scene cannot SEE the promoted caption's mark (proved 2026-08-18)
 KEY: identity read, LeftHeader mark, read gap, wall-only guard
@@ -2914,7 +2914,7 @@ kayaRoleInertNote, ahead of the enablement question, which every
 activation route reaches.
 
 Watched both ways, the perturbation measured rather than assumed
-(scratchpad/chrome/pasteboard-witness.md): a driver waits for the leg's
+(docs/chrome/pasteboard-witness.md): a driver waits for the leg's
 own trace to reach the step after the seed, writes the machine's
 pasteboard from OUTSIDE the leg, and reads pbpaste before and after.
 With the witness disabled the leg says `label#0 reads "empty", wanted
@@ -3041,8 +3041,18 @@ into docs/traps.md (if it is not already there) and shrinks to a
 one-line pointer at the trap's name. The walls stay; the war stories
 relocate.
 
-## GAP — the symbol-floor gate was drafted and never landed (found 2026-08-19)
+## ~~GAP — the symbol-floor gate was drafted and never landed~~ (found 2026-08-19)
 KEY: symbol-floor gate, check-symbols, name_availability.plist, kayaSymbolTable
+
+RESOLVED 2026-08-19, same day: the maintainer ruled "register it" and the
+draft landed as tools/check-symbols.sh, gate 38 in gates.sh's sweep, the
+check-gates census and both doctrine mirrors. Two changes against the
+draft: the row regex learned the table's fourth column (`rendered`, the
+AX read-back measurement, which the floor deliberately does not bind),
+and the OK line's count now comes from the same python that enforced the
+rule rather than a second grep that could drift to zero. The
+kayaSymbolTable header now names the gate. 20 names verified at or below
+macOS 13.0 / iOS 16.0 on landing day.
 
 The styling milestone measured (2026-08-16) that NO SCENE can guard the
 SF Symbols floor column in swift/KayaSwiftUI.swift's `kayaSymbolTable`:
@@ -3151,7 +3161,7 @@ CLOSED 2026-08-17, the day it was found, in
 android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt.
 
 WHAT THE FILM SAW. The android film of the editor scene
-(scratchpad/chrome/film-android.md §9, still-2.45.png) caught one frame
+(docs/chrome/film-android.md §9, still-2.45.png) caught one frame
 holding two different titles: the platform ActionBar read "notes" while
 the M3 TopAppBar directly under it read "untitled".
 `KayaSceneModel.windowTitle` was a PLAIN field where every neighbour a
@@ -3434,7 +3444,7 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   SYMBOL's name as its accessible name and never the item's label, and
   adding the label to that description would turn the menus scene's
   already-green `expect_menu_symbol` on a promoted item red
-  (scratchpad/chrome/toolbar-android.md §6). Three legs on the emulator
+  (docs/chrome/toolbar-android.md §6). Three legs on the emulator
   pool — compose, jvm, go. The depth-stub helper left with it.
 - **The seven other bindings need nothing** — and that is the point of
   the ratified shape: `primary(true)` is a spelling all eight bindings
@@ -3476,7 +3486,7 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   24` back to `body + 20` in the SwiftUI decode now fails the sections
   leg with `section "Feed" symbol "symbol 85899345928 is not in this
   interpreter's table", wanted "home"`, where the whole matrix once
-  stayed green. Report: scratchpad/chrome/sections-symbol.md.
+  stayed green. Report: docs/chrome/sections-symbol.md.
 
 - **`expect_sections_presentation`'s window#N verdict is spelled two
   different ways** (found 2026-08-17 while comparing the sections legs
@@ -4061,3 +4071,44 @@ one platform it is not available. Nothing in the tree depends on the
 answer today, because no scene catches a miss — which is the assets
 conformance scene's job above, and the reason that scene reads the
 sentence through a query rather than through a catch.~~
+
+
+## GAP — six iOS legs the android lane already runs (found 2026-08-19)
+KEY: IOS_UNWIRED_SCENES, dirty editor filedialog ranges save undo, run-sim wiring
+
+The comment sweep’s gate survey found check-steps’ wired() satisfied by
+COMMENT text for four (scene, runner) pairs, and the structural rewrite
+that fixed it (the maintainer’s ruling, 2026-08-19: “fix the gate and
+fix the issues”) exposed the honest coverage picture underneath. Two of
+the four ruled pairs were real gaps and were WIRED the same day: the
+background scene now runs on both phones (background-compose/-jvm/-go on
+the emulator, both iOS suites — all five legs green on landing day).
+The other two were policy — window/panels/split are desktop-only — and
+are now DECLARED, machine-read by the gate (IOS_DESKTOP_ONLY_SCENES,
+ANDROID_DESKTOP_ONLY_SCENES), with staleness checks on the declarations
+themselves.
+
+WHAT REMAINS OPEN is this entry: six scenes the android lane runs and
+the iOS lane never got — dirty, editor, filedialog, ranges, save, undo
+— declared in tools/ios/run-sim.sh’s IOS_UNWIRED_SCENES, which cites
+this entry. None has a stated iOS-cannot reason: the compose backend
+runs all six on the emulator, and docs/undo-plan.md even designed the
+iOS routing (P6, the gesture two-step). Each is a fan-out slice — a
+guest arm in the iOS suites plus whatever the SwiftUI-on-iOS backend
+still lacks — and wiring one moves its name from the declaration into
+the IOS_*_SCENES lists (the gate holds the two mutually exclusive).
+Closing this entry means the declaration variable is EMPTY.
+
+
+## FLAKE, one occurrence — identity-ocaml-x11 exited dirty after an OK verdict (2026-08-19)
+KEY: identity-ocaml-x11, did not exit cleanly, Stage finish exit path
+
+One leg in one five-lane matrix run: every assertion passed, then the
+process exited non-zero at teardown — run-suites.sh’s own note for the
+class (“verdict was OK but the process did not exit cleanly”), the
+Stage::finish exit-path shape bitten on GTK and WinUI before. Not
+reproduced: the same leg was green in the matrix an hour earlier, green
+in the solo lane rerun minutes later (551/551), and the day’s changes
+touched neither the OCaml binding, the identity guest, nor gtk.rs. One
+in ~2,500 legs. If the sentence shows again, start at the OCaml guest’s
+exit path under contention, not at the scene.

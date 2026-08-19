@@ -9,7 +9,7 @@ has its own "Chrome promotion and `primary`" section. C1 remains
 DEFERRED. Claims are marked
 [DOC] (platform documentation, cited in the research reports), [MEASURED]
 (observed by this repo's probes — the five reports under
-scratchpad/chrome/toolbar-{mac,android,gtk,winui,repo}.md, 2026-08-16),
+docs/chrome/toolbar-*.md (mac, android, gtk, winui, repo; 2026-08-16),
 [REPO] (read from this tree), [INFER] (a depth slice must confirm).
 
 ## 0. What this pass is for, in one paragraph
@@ -103,7 +103,7 @@ Per-platform materialization, all rows evidence-backed:
    carrying; only the three aspects a modifier carries into the chrome
    (enablement, checkedness, value) still read the model, and the
    function says so.
-   Probe: scratchpad/chrome/symprobe.py reports every `.symbol`
+   Probe: docs/chrome/symprobe.py reports every `.symbol`
    read/write in KayaSwiftUI.swift with its `#if` nesting — a rendering
    read must exist outside `#if os(macOS)`.
 2. **The GTK look flip (RATIFIED 2026-08-16, visual shown).** Adopting
@@ -113,7 +113,7 @@ Per-platform materialization, all rows evidence-backed:
    header (bar and content one surface; hairline+shadow only while
    content is scrolled beneath). Same 46px, same drag, same buttons
    **[MEASURED: side-by-side in the lane image,
-   scratchpad/chrome/gtk-sidebyside.png]**. Migration note from probe
+   docs/chrome/gtk-sidebyside.png]**. Migration note from probe
    9: AdwApplicationWindow IS a GtkApplicationWindow and a GActionMap,
    so the `win.*` action route survives; a plain GtkApplicationWindow
    can also host an AdwToolbarView **[MEASURED]**.

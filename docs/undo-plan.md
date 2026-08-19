@@ -9,7 +9,7 @@ The working record for the undo/redo milestone, in the shape
 docs/clipboard-plan.md proved out: the argument first, every decision
 stated with what it REPLACED, measurements before arms. The recon this
 section rests on is three reports with file:line for every claim
-(scratchpad/undo-recon-{core,platforms,surface}.md, 2026-08-04); the
+(docs/probes/undo-recon-*.md — core, platforms, surface; 2026-08-04); the
 load-bearing findings are restated here so this file stands alone.
 
 ## §0 — the argument, and the decisions (RATIFIED 2026-08-04)
@@ -333,8 +333,8 @@ required by removing it.
 ## §2 — the design, stress-tested (2026-08-04) and AMENDED
 
 Two research passes after the probes, deliberately adversarial: the
-prior-art sweep (scratchpad/undo-prior-art.md, 56 sources) and the
-toolkit survey (scratchpad/undo-framework-survey.md, 30 frameworks
+prior-art sweep (docs/probes/undo-prior-art.md, 56 sources) and the
+toolkit survey (docs/probes/undo-framework-survey.md, 30 frameworks
 sorted by whether they own their rendering or lower to native
 widgets). The strategy stands. Five things about the WRITING of it
 did not, and are amended below.
@@ -776,7 +776,7 @@ assertion about a string says why.
 ### 5.2 THE TWO GUARDS NO SCENE CAN FAIL, AND THE GATE THAT CAN
 
 The Compose arm broke the ledger-quiet bracket and A1's backend clear in
-turn and watched its whole lane stay GREEN (scratchpad/compose-undo-arm.md
+turn and watched its whole lane stay GREEN (docs/probes/compose-undo-arm.md
 §3.3/§3.4). The reason is core-side and therefore true of every arm:
 observing either guard needs TWO CONSECUTIVE NATIVE WALKS, and the first
 walk spends the frontier episode, so the second Edit>Undo routes CORE by
@@ -835,6 +835,6 @@ B: ratify native-tier-only for stamped fields, with the reactive
 doctrine's own answer (bind the row's text to a record field and the
 `entries` run already carries it); C: carry the internal id, named only
 so it is not rediscovered — are written out in
-scratchpad/undo-completion.md §ITEM 2. Whichever way it goes, invariant
+docs/probes/undo-completion.md §ITEM 2. Whichever way it goes, invariant
 1 wants the carve-out stated uniformly in DESIGN.md's Binding
 conventions.

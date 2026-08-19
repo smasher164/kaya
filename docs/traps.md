@@ -3964,3 +3964,35 @@ diff). The next comments pass starts from these, not from scratch:
   anchors (13 files went red from shrinking alone) and a small one can
   leave an anchor pointing at the WRONG line with the gate green —
   re-anchor by TEXT, never by arithmetic.
+
+
+## Transcript replay: a Write/Edit-only reconstruction silently invents
+## or truncates files — replay VERDICTS, not just payloads
+
+Measured 2026-08-19, recovering 49 dead scratchpad documents out of
+session transcripts (the docs/probes/ landing). Four traps, each of
+which corrupted a first-cut reconstruction:
+
+1. REPLAY ONLY OPERATIONS THAT SUCCEEDED. A transcript records the tool
+   CALL even when it errored (InputValidationError, “String to replace
+   not found”, “File has not been read yet”). Replaying an errored Edit
+   invents content the file never carried; skipping errored ops turned
+   one false PARTIAL into a clean FULL. The op’s RESULT block is part of
+   the recipe.
+2. A FILE CAN EXIST WITH NO Write AT ALL. One 26 KB report was built by
+   seven Bash heredocs appending in sequence — search Bash commands for
+   redirections into the path, not just Write/Edit file_paths.
+3. GROUP BY EXACT PATH, NEVER BY BASENAME. Sessions also wrote
+   same-named siblings to mistyped roots, some containing the literal
+   word “placeholder”; a basename-keyed replay truncates the real
+   document to one word.
+4. MATCH DELIMITERS EXACTLY. An Edit whose old_string was matched with a
+   whitespace-flexible pattern desynchronises every later Edit — one
+   recovery matched a heredoc delimiter with a pattern whose \s ate the
+   following newline, and every subsequent old_string then missed.
+
+The proof of a reconstruction is per-file: every Edit found its
+old_string exactly as declared, in order, and a re-run reproduces the
+bytes. The recovery tooling and per-file op indexes from the 2026-08-19
+run are kept beside the recovered set’s staging area in that session’s
+artifacts; the landed files are docs/probes/ (see its README).

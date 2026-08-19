@@ -9,7 +9,7 @@ before ranges, a milestone that ONLY re-founds the textarea on every
 platform's rich-CAPABLE native control, pinned to plain-text behavior.
 No new protocol surface, no spec change, no binding change, no scene
 change: a backend refactor with a parity exit bar. The evidence base
-is the range-probe fleet (scratchpad/range-probe-*.md).
+is the range-probe fleet (docs/probes/range-probe-*.md).
 
 ## The rule this milestone lives by
 

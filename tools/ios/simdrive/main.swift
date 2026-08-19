@@ -471,7 +471,7 @@ func waitForPickerGone(_ tries: Int = 20) -> Bool {
 
 /// The export sheet's name fields, BY ROLE. The field publishes no
 /// description of its own — the words "Save as" belong to a static text
-/// beside it (measured, scratchpad/save-probe-ios.md B.4) — so there is
+/// beside it (measured, docs/probes/save-probe-ios.md B.4) — so there is
 /// no label to match on, and role is what is left.
 func nameFields(_ nodes: [Node]) -> [Node] {
     nodes.filter { $0.role == "AXTextField" && !$0.frame.isEmpty }

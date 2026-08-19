@@ -2569,7 +2569,7 @@ const CAPTION_COMMAND_CELL: f64 = 48.0;
 /// The theme key holding the height an `AppBarButton`'s own template is
 /// laid out for, which is NOT the height of the row it sits in.
 ///
-/// WHAT IT REPAIRS, measured (scratchpad/chrome/winui-clip.md §2). An
+/// WHAT IT REPAIRS, measured (docs/chrome/winui-clip.md §2). An
 /// `AppBarButton` in a CLOSED CommandBar is put in the `Compact` visual
 /// state, which sets its pointer-over visual's margin to
 /// `AppBarButtonInnerBorderCompactMargin` = **2,6,2,22**
@@ -2612,7 +2612,7 @@ const CAPTION_COMMAND_BUTTON_BOX_KEY: &str = "AppBarThemeMinHeight";
 ///
 /// WHAT OWNS THAT GAP, read off the template rather than guessed. The
 /// `TitleBar` control's template is a twelve-column Grid
-/// (`scratchpad/chrome/TitleBar-v220.xaml:168-193`). Column 9 is
+/// (`docs/chrome/TitleBar-v220.xaml:168-193`). Column 9 is
 /// `PART_RightHeaderPresenter`, where kaya's `CommandBar` lives, and it
 /// carries no margin and no padding — neither in the template nor from
 /// this backend. Column 11 is `RightPaddingColumn`, which the control
@@ -2708,7 +2708,7 @@ const CAPTION_DRAG_STRIP: f64 = 8.0;
 /// is not readable without a layout pass, and there is none here. That
 /// half is measured on the lane instead, by reading the gap between the
 /// last command and the first caption button off UIA — 48 before this
-/// function existed, 8 after (`scratchpad/chrome/winui-caption-gap.md`).
+/// function existed, 8 after (`docs/chrome/winui-caption-gap.md`).
 fn apply_caption_drag_strip() -> windows_core::Result<()> {
     const KEY: &str = "TitleBarMinDragRegionWidth";
     APP.with_borrow(|app| {
@@ -2860,7 +2860,7 @@ fn assert_caption_command_geometry(titlebar: &TitleBar) -> windows_core::Result<
          that FontIcon's Height to. The library's own value for that key is 3 \
          against a FontSize of 20, and at 3 the glyph loses an anti-aliased \
          row off the bottom of every dot (measured 1:1, \
-         scratchpad/chrome/winui-clip.md). A box of the library's size means \
+         docs/chrome/winui-clip.md). A box of the library's size means \
          the write did not reach the control — the usual cause is ordering: a \
          {{ThemeResource}} is resolved when the template is applied, so \
          apply_caption_ellipsis_box has to run BEFORE the CommandBar exists, \
@@ -2965,7 +2965,7 @@ fn assert_caption_command_geometry(titlebar: &TitleBar) -> windows_core::Result<
 /// census in `tools/` that `TitleBar::new()` appears in this module only
 /// inside this function. That is the clause which survives someone adding
 /// a second caption; it is noted in
-/// `scratchpad/chrome/winui-caption-gap.md` for the maintainer rather
+/// `docs/chrome/winui-caption-gap.md` for the maintainer rather
 /// than left to memory.
 fn mint_caption_titlebar() -> windows_core::Result<TitleBar> {
     apply_caption_drag_strip()?;
@@ -3089,7 +3089,7 @@ fn caption_left_header(window: u64, titlebar: &TitleBar) -> windows_core::Result
 
 /// The height of the box the CommandBar's "…" glyph is drawn in, in DIP.
 ///
-/// WHY THIS EXISTS, measured (scratchpad/chrome/winui-clip.md §1-2). The
+/// WHY THIS EXISTS, measured (docs/chrome/winui-clip.md §1-2). The
 /// CommandBar template draws its overflow affordance as
 ///
 /// ```xml
@@ -3097,7 +3097,7 @@ fn caption_left_header(window: u64, titlebar: &TitleBar) -> windows_core::Result
 ///           Height="{ThemeResource AppBarExpandButtonCircleDiameter}" />
 /// ```
 ///
-/// (`scratchpad/chrome/v220-CommandBar_themeresources.xaml:839`) and that
+/// (`docs/chrome/v220-CommandBar_themeresources.xaml:839`) and that
 /// resource is **3** in the shipped dictionary — a key whose name is ONE
 /// DOT'S DIAMETER used as the whole icon's height. So a 20 DIP glyph is
 /// arranged in a 3 DIP box: read off the live tree, `EllipsisIcon` is
@@ -3206,7 +3206,7 @@ const CAPTION_TITLE_TOLERANCE: f64 = 1.5;
 /// The `TitleBar` template's name for the element that occupies column 8 —
 /// the caption's content slot, and the one thing that says where the space
 /// between the two headers begins and ends
-/// (`scratchpad/chrome/TitleBar-v220.xaml:262-266`).
+/// (`docs/chrome/TitleBar-v220.xaml:262-266`).
 const CAPTION_CONTENT_SLOT_PART: &str = "PART_ContentPresenterGrid";
 
 /// What the last centring pass asked for, and the geometry it asked it
@@ -3592,7 +3592,7 @@ fn center_caption_title(window: u64, titlebar: &TitleBar) -> windows_core::Resul
              so its template has been applied, and yet it publishes no part \
              named {CAPTION_CONTENT_SLOT_PART}. That part is the element \
              carrying Grid.Column=\"8\" in the control's template \
-             (scratchpad/chrome/TitleBar-v220.xaml:262-266) and it is the only \
+             (docs/chrome/TitleBar-v220.xaml:262-266) and it is the only \
              thing that says where the caption's content slot begins and ends; \
              without it the title cannot be kept inside that slot while it is \
              aimed at the window's centre. A renamed part means the pinned \
@@ -3785,7 +3785,7 @@ fn promoted_items(core: &CoreState, window: u64) -> Vec<u64> {
 /// THE 2026-08-17 REVISION, and it is a mount-point decision, nothing
 /// else. The first lowering hung the stock `CommandBar` in its own Auto
 /// row under the MenuBar; the capture
-/// (`scratchpad/chrome/cap-toolbar-windows.png`) showed what the
+/// (`docs/chrome/cap-toolbar-windows.png`) showed what the
 /// research already implied — a sparse third strip with a standard
 /// caption above it is not the shell Windows 11 ships. Files, Terminal
 /// and Settings MERGE the command surface into the title bar, and the
@@ -3840,8 +3840,8 @@ fn promoted_items(core: &CoreState, window: u64) -> Vec<u64> {
 /// breakpoints, the label hidden while the bar is closed and re-laid
 /// beside the icon in the overflow — every one of those is still the
 /// default of having the control (measured against the pinned WinUI 2.2.1
-/// metadata and the 2.2.0 theme resources, scratchpad/chrome/
-/// toolbar-winui.md §3). The one metric written per button is
+/// metadata and the 2.2.0 theme resources,
+/// docs/chrome/toolbar-winui.md §3). The one metric written per button is
 /// `CAPTION_COMMAND_CELL`; that constant carries why a 68px toolbar cell
 /// is the wrong cell in a caption band and where 48 comes from. Restyling
 /// the platform's control to the platform's OWN caption metrics is
@@ -4460,7 +4460,7 @@ fn window_text(hwnd: isize) -> String {
 /// failure is invisible behind that.
 ///
 /// FOUND BY IDENTITY, NOT BY CAPTION AND NOT BY SHAPE. Measured
-/// (scratchpad/save-probe-windows.md §B.3): the prompt is a SECOND
+/// (docs/probes/save-probe-windows.md §B.3): the prompt is a SECOND
 /// top-level `#32770` whose 17 descendants are a `DirectUIHWND` plus
 /// `CtrlNotifySink`-wrapped Buttons **with id 0** — so no id lookup finds
 /// anything and `dialog_control` is useless here. Matching its caption
@@ -4686,7 +4686,7 @@ fn sample_folder_view(
 ///
 /// `IFileDialog::GetFileName` and not the file-name Edit's text, though
 /// both were on the table and the control is right there (id 1001, class
-/// `Edit`, measured — scratchpad/save-probe-windows.md §B.3). Reading the
+/// `Edit`, measured — docs/probes/save-probe-windows.md §B.3). Reading the
 /// control would mean `WM_GETTEXT`, whose lParam is a POINTER: only
 /// `SendMessage` marshals one, and a send is what puts the receiving
 /// thread into the input-synchronous call that makes this dialog fatal to
@@ -4764,7 +4764,7 @@ const ID_CANCEL: i32 = 2;
 const ID_FILENAME: i32 = 1148;
 /// The SAVE dialog's file-name box, and it is a DIFFERENT CONTROL — not
 /// the same id in a different place. Measured in one session against both
-/// dialogs (scratchpad/save-probe-windows.md §B.3): the save dialog has no
+/// dialogs (docs/probes/save-probe-windows.md §B.3): the save dialog has no
 /// id 1148 at all, and `dialog_control(dialog, 1148, "Edit")` answers
 /// nothing, which is a SILENT no-op rather than an error. Its box is id
 /// 1001, class `Edit` — and the class half of the lookup is load-bearing
@@ -5040,7 +5040,7 @@ fn file_dialog_show(
 /// thread, exactly as the picker does.
 ///
 /// `IFileSaveDialog` AND NOT `FileSavePicker`, measured
-/// (scratchpad/save-probe-windows.md §B.1) rather than assumed, and the
+/// (docs/probes/save-probe-windows.md §B.1) rather than assumed, and the
 /// first charge is the one that decides it: the WinRT picker's
 /// `SetSuggestedStartLocation` takes a `PickerLocationId` — an ENUM of
 /// well-known folders — so it cannot be aimed at `<temp>/kaya-save-<pid>`
@@ -5125,7 +5125,7 @@ fn file_save_show(
                 // `bare.txt`). Only under a filter — with none there is no
                 // extension to be the default, and the shared scene sends
                 // none for exactly that reason (docs/save-plan.md, and
-                // scratchpad/save-depth.md §8: a completed name would be
+                // docs/probes/save-depth.md §8: a completed name would be
                 // read back by `expect_save_dialog` on one platform and
                 // not another).
                 stage = "SetDefaultExtension";
@@ -13640,7 +13640,7 @@ impl crate::harness::Stage for WinUiStage {
         // caption with SetWindowTextW from a SECOND PROCESS, and the
         // in-guest harness read the rewritten string back — so this
         // getter follows the OS caption and is not a XAML-side cache of
-        // what kaya last set (scratchpad/dirty-probe-windows.md §5).
+        // what kaya last set (docs/probes/dirty-probe-windows.md §5).
         //
         // UNREADABLE IS NOT CLEAN. window_title answers an error with
         // "<unreadable: ...>", which does not start with the marker and
@@ -14118,7 +14118,7 @@ impl crate::harness::Stage for WinUiStage {
     /// top-level `#32770` titled "Confirm Save As" — and it is not a
     /// classic dialog: its 17 descendants are a `DirectUIHWND` plus
     /// `CtrlNotifySink`-wrapped Buttons WITH ID 0, so no id lookup finds
-    /// anything (measured, scratchpad/save-probe-windows.md §B.3). Class
+    /// anything (measured, docs/probes/save-probe-windows.md §B.3). Class
     /// plus caption does, and `BM_CLICK` on the "&Yes" button dismisses
     /// it.
     ///
@@ -14132,7 +14132,7 @@ impl crate::harness::Stage for WinUiStage {
     /// per-pid directory that nobody has made — so this arm is not covered
     /// by the leg and cannot be, the script being byte-frozen across five
     /// platforms. It was driven by hand on the VM instead
-    /// (scratchpad/save-winui.md §5).
+    /// (docs/probes/save-winui.md §5).
     fn confirm_save(&self, save: bool) {
         // The picker's loop, verbatim in shape: press, then wait for the
         // dialog to GO, because a press that lands before the dialog is

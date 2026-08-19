@@ -2531,7 +2531,7 @@ object KayaCompose {
      * docs/save-plan.md D1 says the core absorbs it: DocumentsUI
      * creates the file when SAVE is pressed, so the first `wt` open
      * reports size 0 and the guest's write lands (measured,
-     * scratchpad/save-probe-android.md).
+     * docs/probes/save-probe-android.md).
      *
      * THE NAME IS A SUGGESTION AND THE PLATFORM MAY NOT KEEP IT — SAF
      * appends an extension for the mime type and renames on collision
@@ -4446,7 +4446,7 @@ object KayaCompose {
      * that description is a measured trap: [kayaMenuSymbolRead] rejects
      * anything outside the twenty symbol names, so `expect_menu_symbol`
      * on a promoted item would go red
-     * (scratchpad/chrome/toolbar-android.md §6).
+     * (docs/chrome/toolbar-android.md §6).
      *
      * TOTAL: every failure is a short sentence naming what was
      * measured, and a retryable non-match rather than an exception.
@@ -6575,7 +6575,7 @@ internal fun kayaRouteCode(code: Int): KayaUndoRoute =
  * ONE REPORT AND NOT TWO, on a backend where BOTH channels fire. §3a
  * demands each arm measure whether a native undo reaches kaya's model,
  * and this one answered YES where the mac arm answered no
- * (scratchpad/undo-fan-compose.md §1 Q-a, re-measured on the shipped
+ * (docs/probes/undo-fan-compose.md §1 Q-a, re-measured on the shipped
  * source at §3 point 6): `undoState.undo()` writes the same snapshot
  * state the field's collector observes, so the ordinary `text_changed`
  * arrives a frame later on its own. That emission is bracketed

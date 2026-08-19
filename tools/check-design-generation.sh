@@ -82,7 +82,7 @@ if len(sdks) != 1:
         f"`buildInputs = [ pkgs.apple-sdk_26 ];` is what puts it there; the "
         f"`packages = [ ... ]` spelling puts the SDK in the build role instead, "
         f"where the setup hook clashes with the stdenv's default and breaks cc "
-        f"outright (measured, scratchpad/chrome/sdk-bump-scout.md §2)."
+        f"outright (measured, docs/chrome/sdk-bump-scout.md §2)."
     )
 print(sdks[0].rstrip("/"))
 PY

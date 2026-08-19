@@ -59,6 +59,15 @@ fi
 #
 # THE EXEMPTIONS ARE COUNTED AND PRINTED on every run, and the gate
 # REFUSES A VERDICT if the exempt references outnumber the checked ones.
+#
+# AND ONE CLAUSE OVER EVERY TRACKED FILE, not just the .md set: nothing
+# tracked may cite scratchpad/ — a session scratch directory dies on
+# reboot, so a comment pointing there points at nothing, sooner or
+# later. Measured 2026-08-19: 47 tracked files carried such citations
+# and 19 of the cited documents were already dead, replayed out of
+# session transcripts to land them (docs/chrome/, docs/styling/,
+# docs/probes/). The one legal spelling of a dead scratch path is the
+# same `(gone)` marker as above.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -458,6 +467,60 @@ if blind is None:
     fail("self-test N5: the census accepted a scan that read no line anchor at "
          "all — the anchor floor is decorative")
 
+# The mortal-path clause's own pieces, defined before its self-test.
+MORTAL = re.compile(r"scratchpad/[A-Za-z0-9_./{},*?-]*")
+MORTAL_SELF = "tools/check-doc-refs.sh"
+MORTAL_FLOOR = 400
+
+
+def mortal_scan(text):
+    """Every un-exempt scratchpad citation in one file's text."""
+    hits = []
+    for n, line in enumerate(text.split("\n"), 1):
+        for m in MORTAL.finditer(line):
+            if GONE in line[m.end():][:12]:
+                continue
+            hits.append((n, m.group(0)))
+    return hits
+
+
+def mortal_run():
+    out = subprocess.run(["git", "ls-files", "-z"], cwd=root,
+                         stdout=subprocess.PIPE, text=True, check=False)
+    paths = [p for p in out.stdout.split("\0") if p]
+    findings, scanned = [], 0
+    for p in paths:
+        if p == MORTAL_SELF:
+            continue
+        f = root / p
+        if not f.is_file():
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        scanned += 1
+        if "scratchpad/" in text:
+            findings.extend((p, n, token) for n, token in mortal_scan(text))
+    return findings, scanned
+
+
+# N7 — THE MORTAL-PATH CLAUSE, hot and behind the marker. Planted into a
+# real doc's real text like the others.
+n7_base = len(mortal_scan(sample_text))
+n7_hot = len(mortal_scan(
+    sample_text + "\nSee scratchpad/foo-was-here.md for this.\n"))
+n7_cold = len(mortal_scan(
+    sample_text + "\nSee scratchpad/foo-was-here.md (gone) for this.\n"))
+print(f"check-doc-refs: self-test N7 planted a scratch path hot and behind "
+      f"{GONE} -> {n7_hot - n7_base} and {n7_cold - n7_base} new finding(s)")
+if n7_hot - n7_base != 1:
+    fail("self-test N7: a planted scratch-path citation was not reported — "
+         "the mortal-path clause is vacuous")
+if n7_cold != n7_base:
+    fail(f"self-test N7: a {GONE}-marked scratch path was reported anyway — "
+         f"the exemption is not being applied")
+
 # ------------------------------------------------------- 1. the clauses
 
 files = docs() + extra
@@ -479,12 +542,29 @@ else:
                       f"fenced block, or mark it `{token} {GONE}`.")
         fail(f"{where}:{n} cites {token}, which {why}.\n    {advice}")
 
+# ---------------------------------------- 2. the mortal-path clause
+
+mortal_findings, mortal_scanned = mortal_run()
+if mortal_scanned < MORTAL_FLOOR:
+    fail(f"mortal-path clause read {mortal_scanned} tracked file(s) — below "
+         f"its floor of {MORTAL_FLOOR} (the tree has ~950). A scan that read "
+         f"almost nothing agrees with everything: REFUSAL, not a pass.")
+else:
+    for where, n, token in mortal_findings:
+        fail(f"{where}:{n} cites {token}, which lives in a session scratch "
+             f"directory — scratch dies on reboot, so nothing tracked may "
+             f"point there.\n    Land the file in the repo (docs/chrome/, "
+             f"docs/styling/ and docs/probes/ hold the precedents) and "
+             f"repoint, or — for a sentence that must name what is already "
+             f"lost — mark it `{token} {GONE}`.")
+
 detail = ", ".join(f"{k} {v}" for k, v in sorted(exempt.items())) or "none"
 if status == 0:
     print(f"check-doc-refs: OK ({len(files)} files, {checked} references "
           f"checked, {anchored} of them line-anchored and held to the target's "
           f"length, {groups} brace group(s) expanded to {members} member(s); "
-          f"exempt: {detail})")
+          f"exempt: {detail}; mortal-path clause over {mortal_scanned} tracked "
+          f"files)")
 else:
     print("check-doc-refs: FINDINGS ABOVE", file=sys.stderr)
 sys.exit(status)

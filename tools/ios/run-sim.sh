@@ -1420,7 +1420,19 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # scene selects a SCRIPT, never an app, and the split guest is the
     # app both list-detail scenes drive. (`split` itself stays out —
     # it drives resize_window, which this host rejects by design.)
-    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar identity assets"
+    IOS_SWIFT_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail:split scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background styling toolbar identity assets"
+    # Machine-read by check-steps' wired(), which replaced a bare-name
+    # grep that comments and unrelated code satisfied: a scene is wired
+    # here IF AND ONLY IF it is in a list above, declared desktop-only,
+    # or ledgered below. window/panels drive aux windows and panel
+    # chrome no phone has; split drives resize_window, rejected above.
+    # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
+    IOS_DESKTOP_ONLY_SCENES="window panels split"
+    # GAP, not policy: the android lane runs all six of these and this
+    # lane never got the fan-out (docs/deferred.md "iOS legs the android
+    # lane already runs"). Wiring one moves it up into the lists.
+    # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
+    IOS_UNWIRED_SCENES="dirty editor filedialog ranges save undo"
     swift_pids=()
     swift_names=()
     for entry in $IOS_SWIFT_SCENES; do
@@ -1536,7 +1548,7 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     # sysroot. Both ride CC rather than CGO_CFLAGS/CGO_LDFLAGS, because
     # cgo uses CC to LINK as well as compile and -isysroot needs both.
     IOS_GO_CC="$(xcrun -sdk iphonesimulator -f clang) -target arm64-apple-ios$IOS_MIN-simulator -isysroot $SDKROOT_SIM"
-    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard styling toolbar identity assets"
+    IOS_GO_SCENES="milestone2 stall entry gallery todos reorder feed grow align layout confirm nav listdetail scroll progress select radio grid textarea sections menus commands a11y a11yrows clipboard background styling toolbar identity assets"
     # ONE CROSS-BUILD FOR THE WHOLE SUITE. guests/go/cmd is the guest
     # tree's only main package: it imports every scene library and picks
     # one from KAYA_SELFTEST. The bundles still differ — one per scene,

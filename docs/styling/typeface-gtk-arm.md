@@ -6,11 +6,11 @@ crates/kaya/src/gtk.rs (linux platform row), replace the loud
 both display legs in the container. NO commits; no tools/** or *.steps
 edits.
 
-Mechanics from the PROBE (scratchpad/styling/typeface-gtk.md): `:root`
+Mechanics from the PROBE (docs/styling/typeface-gtk.md): `:root`
 at APPLICATION priority in its OWN provider, `ctx.load_font` +
 `describe().family()` for the honest read, `ctx.font_description()`
 LIES, an unmatched family renders byte-identically to the unbranded
-window. Depth: scratchpad/styling/typeface-depth.md.
+window. Depth: docs/styling/typeface-depth.md.
 
 ## VERDICT
 
@@ -180,7 +180,7 @@ is not.
 family and are told apart only by the diagnosis. 3 is the measurement
 that says why `expect_typeface` cannot read the model.
 
-Driver: `scratchpad/styling/gtk-arm/negatives.py` (prints the
+Driver: `docs/styling/gtk-arm/negatives.py` (prints the
 substitution count, treats 0 as a failed test, restores and re-hashes),
 logs beside it as `neg-*.log`, `green.log`, `blob.log`.
 

@@ -1,6 +1,6 @@
 """What FEATURES does a scene's script need, and which backend refuses them.
 
-THE FAILURE THIS EXISTS FOR (2026-08-05, scratchpad/derive-pin-depth.md
+THE FAILURE THIS EXISTS FOR (2026-08-05, docs/probes/derive-pin-depth.md
 §8). check-steps and check-stubs state one rule between them — a scene's
 legs are wired on a runner IF AND ONLY IF that runner's backend has the
 feature — and for four milestones they stated it KEYED ON THE SCENE

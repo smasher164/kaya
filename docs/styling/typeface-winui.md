@@ -1,8 +1,9 @@
 # The typeface probe — the WinUI 3 arm
 
 Measure-first probe for docs/styling-plan.md Slice 2b. **No repo file was
-changed.** Everything below lives in
-`scratchpad/styling/typeface-winui/`.
+changed.** Everything below lived in
+`scratchpad/styling/typeface-winui/ (gone)` — session scratch, dead with
+the session; the measurements survive in this report.
 
 **I CANNOT RUN THE WINDOWS LANE.** §6 says exactly which half of each
 answer is measured here and which needs the VM, per question, with the

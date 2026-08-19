@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
             "menus" -> Menus::app
             "commands" -> Commands::app
             "clipboard" -> Clipboard::app
+            "background" -> Background::app
             "undo" -> Undo::app
             "ranges" -> Ranges::app
             "styling" -> Styling::app

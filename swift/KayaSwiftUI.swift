@@ -206,10 +206,9 @@ private let valueBlob: UInt32 = 5
 /// floor, so the assertion that looks like the guard is vacuous
 /// everywhere it is run. The only thing that can answer is Apple's own
 /// `name_availability.plist` — every name's introduction year against
-/// the declared floor — which is a static gate, not a scene step. That
-/// gate was drafted in the styling milestone and never landed; nothing
-/// guards this column until it does (docs/deferred.md "symbol-floor
-/// gate" carries the draft's recovery route and what landing requires).
+/// the declared floor — which is tools/check-symbols.sh: it reads the
+/// `sf` column out of this table and self-tests by perturbing
+/// doc.on.doc to the macOS-15 rename on every run.
 ///
 /// THE `rendered` COLUMN IS THE OTHER HALF OF THAT SAME TRAP, and it is
 /// what a READ meets rather than a lowering. `sf` is what kaya ASKS FOR;
@@ -226,7 +225,7 @@ private let valueBlob: UInt32 = 5
 /// `ToolbarItemGroup(.primaryAction)` inside a NavigationStack, one row
 /// per pass in a fresh hosting controller — and read the identifier back
 /// through kayaToolbarIOSButtons' own walk (iOS 26.5, 2026-08-17;
-/// scratchpad/chrome/sf-rendered-names.md holds the 20-row table, the
+/// docs/chrome/sf-rendered-names.md holds the 20-row table, the
 /// probe and its canaries). EXACTLY TWO ROWS DIFFER, and they are the
 /// `doc.*` -> `document.*` family SF Symbols 6 renamed. The rename is
 /// not a relabeling: the rendered image is a DIFFERENT UIImage object

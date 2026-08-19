@@ -79,8 +79,8 @@ class KayaHarnessAccessibility : AccessibilityService() {
          * THE DISCRIMINATOR IS THE NAME FIELD, because it is the only
          * thing the create mode actually adds. `container_save` looks
          * like the obvious answer and is NOT one: MEASURED on both
-         * panels, phone and tablet (scratchpad/open-panel-phone.xml vs
-         * save-panel-phone.xml, identical id sets), it is in the SHARED
+         * panels, phone and tablet (docs/probes/open-panel-phone.md —
+         * the two uiautomator dumps' identical id sets), it is in the SHARED
          * layout and is published EMPTY by the browse mode — a
          * discriminator that says "save" about every picker. Keying on
          * it turned every `expect_file_dialog` on this platform red.
@@ -160,7 +160,7 @@ class KayaHarnessAccessibility : AccessibilityService() {
      * ACTION_SET_TEXT and not a synthesized key stream: measured to
      * return true and to read back as the typed value, and the URI the
      * panel then answered with carried that name
-     * (scratchpad/save-probe-android.md, log-B2). False when no save
+     * (docs/probes/save-probe-android.md, log-B2). False when no save
      * panel is up or the field refused, which the caller reports —
      * silence here would let the leg save under the SUGGESTED name with
      * every byte assertion still passing.

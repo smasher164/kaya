@@ -43,7 +43,7 @@ second.
 
 Claims are marked [REPO] (read from this tree), [MEASURED] (run by this
 pass; the notes and the extraction script's output are in
-scratchpad/chrome/assets-survey.md), [INFER] (reasoning a depth slice
+docs/chrome/assets-survey.md), [INFER] (reasoning a depth slice
 must confirm).
 
 Every path and line this document cites is checked by
@@ -249,9 +249,11 @@ DESIGN.md:2418 already ruled the question: "Icons want names, not bytes
 
 A measured gap found while surveying them, out of scope here and worth a
 ledger line: **no gate pins the four tables to one another**, only two
-Rust length-and-order assertions inside gtk.rs and winui/mod.rs, and the
-`check-symbols.sh` that the SwiftUI table's own comment names as the
-intended gate **has never existed under tools/** [MEASURED].
+Rust length-and-order assertions inside gtk.rs and winui/mod.rs. (The
+second half of this finding closed 2026-08-19: the `check-symbols.sh`
+the SwiftUI table's comment named had never existed under tools/ — it
+now does, registered as gate 38, holding that one table's names to the
+OS floor. The four-tables-pinned-together gap stands.)
 
 ## A2. The convention
 
@@ -470,7 +472,7 @@ header matched would stay green on all five lanes forever. The gate
 decodes every image literal in the tree, in all nine guest spellings plus
 Kotlin and PowerShell base64, groups them by scene, and requires the
 copies of one image to be identical. The extraction is already written
-and measured (scratchpad/chrome/assets-survey.md).
+and measured (docs/chrome/assets-survey.md).
 
 It follows tools/tpl-surfaces.py's shape, and for the same forced reason:
 a line-oriented grep cannot read a 75-byte array spelled nine different
@@ -591,8 +593,8 @@ which is how the survey found it at all.
 
 Two findings that stand on their own, whether or not any of this
 proceeds, and which are ledger items rather than blockers: **no gate
-pins the four per-platform icon tables to one another, and the
-`check-symbols.sh` their comments name has never existed** [MEASURED];
+pins the four per-platform icon tables to one another** [MEASURED] (the
+missing `check-symbols.sh` half of this landed 2026-08-19, gate 38);
 and **the core's only
 `include_bytes!` reaches into guests/assets/ with nothing stating the
 dependency**, so moving the font breaks a core harness test with an error

@@ -685,12 +685,19 @@ done
 
 # Every scene must be WIRED into every platform runner, not merely
 # registered: a scene can exist, parse and be registered yet run
-# nowhere. The grep demands each runner's LEG SIGNATURE, not the bare
-# name — a leg block that is dead (cloned below the script's exit,
-# commented out, mangled) satisfies a name check while running nowhere.
-# (iOS and Android stay name-level: their legs derive mechanically from
-# the scene list, so the name IS the wiring, except for the scenes each
-# platform deliberately skips, carved out below.)
+# nowhere. EVERY runner is held to a STRUCTURAL signature — mac, linux
+# and windows to their leg spellings, android to its `run_apk <scene>-`
+# blocks, iOS to membership in the IOS_*_SCENES lists its legs are
+# generated from. NEVER the bare name: the name-level check this
+# replaced was satisfied by a COMMENT (the only `background` in
+# run-sim.sh sat in a sentence about shell jobs) and by unrelated CODE
+# (`window` inside resize_window), so four pairs claimed wiring that
+# did not exist — found by the 2026-08-19 comment sweep's gate survey.
+#
+# A runner may DECLARE a scene off instead: *_DESKTOP_ONLY_SCENES for
+# platform policy, IOS_UNWIRED_SCENES for ledgered gaps. Declarations
+# are checked too — one that names a scene the roster lacks, or a scene
+# that is ALSO wired, is a red, so a stale declaration cannot linger.
 #
 # EXCEPT where the backend says it has not got there yet: a backend left
 # behind by a depth slice declares `depth_stub("<scene>")`, the same
@@ -704,8 +711,24 @@ done
 # `undo` that held only the `undo` legs off a runner would leave no tree
 # able to satisfy both gates. tools/lib/scene-features.py derives the
 # pairs and is the SAME predicate the cross-check uses.
+
+# The scene-halves of every word in the VAR="..." assignments matching
+# the $2 alternation in file $1, one per line (`listdetail:split`
+# yields `listdetail`).
+runner_list_scenes() {
+    local line entry
+    grep -E "^[[:space:]]*($2)=\"" "$1" | while IFS= read -r line; do
+        line="${line#*=\"}"
+        line="${line%%\"*}"
+        for entry in $line; do
+            printf '%s\n' "${entry%%:*}"
+        done
+    done
+}
+
 wired() {
-    local runner scene sig status=0 exempt
+    local runner scene status=0 exempt sig decl roster ok
+    local ios_wired ios_declared android_declared
     exempt="$(python3 tools/lib/scene-features.py --mode exempt)"
     local rc=$?
     if [ "$rc" -ne 0 ]; then
@@ -720,6 +743,41 @@ wired() {
     # which requires one after the pair — could never match the LAST
     # derived exemption.
     exempt=$'\n'"$exempt"$'\n'
+
+    ios_wired="$(runner_list_scenes tools/ios/run-sim.sh 'IOS_SWIFT_SCENES|IOS_GO_SCENES')"
+    ios_declared="$(runner_list_scenes tools/ios/run-sim.sh 'IOS_DESKTOP_ONLY_SCENES|IOS_UNWIRED_SCENES')"
+    android_declared="$(runner_list_scenes tools/android/run-emulator.sh 'ANDROID_DESKTOP_ONLY_SCENES')"
+    # A reader that reads nothing agrees with everything.
+    if [ -z "$ios_wired" ]; then
+        echo "check-steps: wired() read NO scenes out of run-sim.sh's IOS_*_SCENES assignments — they moved, and this clause is blind" >&2
+        return 1
+    fi
+
+    roster=" "
+    for scene in tools/scenes/*.steps; do
+        roster="$roster$(basename "${scene%.steps}") "
+    done
+    for decl in $ios_declared; do
+        case "$roster" in *" $decl "*) ;; *)
+            echo "check-steps: run-sim.sh declares \"$decl\" off, but no such scene exists" >&2
+            status=1 ;;
+        esac
+        if printf '%s\n' "$ios_wired" | grep -qFx "$decl"; then
+            echo "check-steps: run-sim.sh declares \"$decl\" off AND lists it in IOS_*_SCENES — one of the two is stale" >&2
+            status=1
+        fi
+    done
+    for decl in $android_declared; do
+        case "$roster" in *" $decl "*) ;; *)
+            echo "check-steps: run-emulator.sh declares \"$decl\" off, but no such scene exists" >&2
+            status=1 ;;
+        esac
+        if grep -qE "run_apk[[:space:]]+$decl-" tools/android/run-emulator.sh; then
+            echo "check-steps: run-emulator.sh declares \"$decl\" off AND carries a run_apk leg for it — one of the two is stale" >&2
+            status=1
+        fi
+    done
+
     for scene in tools/scenes/*.steps; do
         scene="$(basename "${scene%.steps}")"
         for runner in tools/validate-mac.sh tools/linux/run-suites.sh \
@@ -728,18 +786,47 @@ wired() {
                 *$'\n'"$runner"$'\t'"$scene"$'\n'*) continue ;;
             esac
             case "$runner" in
-                tools/validate-mac.sh) sig="run $scene-" ;;
-                tools/linux/run-suites.sh) sig="run \"\$proto\" $scene-" ;;
-                tools/deploy-win.sh) sig="run_suite ${scene}_" ;;
-                *) sig="$scene" ;;
+                tools/ios/run-sim.sh)
+                    ok=1
+                    if printf '%s\n' "$ios_wired" | grep -qFx "$scene"; then
+                        ok=0
+                    elif printf '%s\n' "$ios_declared" | grep -qFx "$scene"; then
+                        ok=0
+                    fi
+                    if [ "$ok" = 1 ]; then
+                        echo "check-steps: scene \"$scene\" has no live legs in $runner (not in IOS_*_SCENES and not declared off)" >&2
+                        status=1
+                    fi
+                    ;;
+                tools/android/run-emulator.sh)
+                    # milestone2's legs drop the scene prefix (they ARE
+                    # the unprefixed originals); its check stays coarse.
+                    ok=1
+                    if [ "$scene" = milestone2 ]; then
+                        if grep -qF "$scene" "$runner"; then ok=0; fi
+                    elif grep -qE "run_apk[[:space:]]+$scene-" "$runner"; then
+                        ok=0
+                    elif printf '%s\n' "$android_declared" | grep -qFx "$scene"; then
+                        ok=0
+                    fi
+                    if [ "$ok" = 1 ]; then
+                        echo "check-steps: scene \"$scene\" has no run_apk leg in $runner and is not declared off" >&2
+                        status=1
+                    fi
+                    ;;
+                *)
+                    case "$runner" in
+                        tools/validate-mac.sh) sig="run $scene-" ;;
+                        tools/linux/run-suites.sh) sig="run \"\$proto\" $scene-" ;;
+                        tools/deploy-win.sh) sig="run_suite ${scene}_" ;;
+                    esac
+                    [ "$scene" = milestone2 ] && sig="$scene"
+                    if ! grep -qF "$sig" "$runner"; then
+                        echo "check-steps: scene \"$scene\" has no live legs in $runner (wanted \"$sig\")" >&2
+                        status=1
+                    fi
+                    ;;
             esac
-            # milestone2's legs drop the scene prefix (they ARE the
-            # unprefixed originals); its name check stays coarse.
-            [ "$scene" = milestone2 ] && sig="$scene"
-            if ! grep -qF "$sig" "$runner"; then
-                echo "check-steps: scene \"$scene\" has no live legs in $runner (wanted \"$sig\")" >&2
-                status=1
-            fi
         done
     done
     return "$status"

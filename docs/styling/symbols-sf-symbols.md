@@ -45,7 +45,7 @@ Swift program on this machine. All 25 resolved; two deliberately bogus names
 (`kaya.definitely.not.a.symbol`, `house.of.leaves.bogus`) returned nil. The
 canaries matter: without them a run in which everything resolves proves nothing,
 because a check that cannot fail agrees with any name. Harness kept at
-`.../scratchpad/styling/symcheck.swift`.
+`docs/styling/symcheck.swift`.
 Two things this measured, beyond spelling: the old spellings (`doc.on.doc`,
 `doc.on.clipboard`) are still live on the *newest* OS, so shipping the old name
 is safe forward as well as backward; and an unknown name yields nil rather than

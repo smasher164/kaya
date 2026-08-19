@@ -8,7 +8,7 @@ state of the tree.
 
 The editor's last prerequisite. Probe reports (2026-08-09, five arms,
 every claim tagged measured/documented/assumed):
-scratchpad/save-probe-{mac,ios,linux,windows,android}.md.
+docs/probes/save-probe-*.md (mac, ios, linux, windows, android).
 
 ## §0 — what the probes found
 

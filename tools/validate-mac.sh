@@ -1443,7 +1443,7 @@ run ranges-c-swiftui env KAYA_SELFTEST=ranges target/c-guests/ranges
 # free: .NET's IndexOf answers in UTF-16 code units, so this leg passes
 # only if the binding's TextRange.In converted — an unconverted hit
 # decorates `e 02:` instead of `alpha`, six characters early, and the
-# scene's frozen offsets say so (watched failing, scratchpad/ranges-csharp.md).
+# scene's frozen offsets say so (watched failing, docs/probes/ranges-csharp.md).
 run ranges-csharp-swiftui env KAYA_SELFTEST=ranges KAYA_LIB="$ROOT/target/debug/libkaya.dylib" \
     dotnet exec "$CS_GUEST"
 run ranges-go-swiftui env KAYA_SELFTEST=ranges target/go-guests/kaya-go

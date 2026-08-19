@@ -16,7 +16,7 @@ everything.
 Claims in the evidence sections are marked [DOC] (platform
 documentation, cited by URL in the research reports), [MEASURED] (run by
 the research pass, whose reports are
-scratchpad/chrome/identity-{mac,winui,gtk,phones}.md and
+docs/chrome/identity-*.md (mac, winui, gtk, phones) and
 app-identity-research.md, 2026-08-18), [REPO] (read from this tree),
 [INFER] (reasoning from the above, which a depth slice must confirm
 before relying on it).

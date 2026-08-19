@@ -182,9 +182,12 @@ in docs/deferred.md.
    naming both sides of any disagreement; the three had already drifted
    by four gates the day it landed. What each gate is for:
    `tools/gen-header.sh --check`, `tools/gen-bindings.sh --check`,
-   `tools/gen-guests.sh --check` (NOTE: diffs generated surfaces against
-   git HEAD — cannot pass pre-commit if generated files changed; prove
-   idempotence instead and commit generators together with outputs),
+   `tools/gen-guests.sh --check` (compares what the generators produce
+   against the WORKING TREE and puts every byte back — snapshot,
+   regenerate, diff, restore, and a refusal if the restore left the tree
+   changed. It used to regenerate in place and diff against git, which
+   silently reverted any hand-edit to a generated file and then called
+   the tree clean),
    `tools/check-steps.sh`, `tools/check-shell.sh`,
    `tools/check-mirror.sh` (CLAUDE.md and AGENTS.md are true mirrors
    modulo the line-3 comment — they drifted once, silently, for two
@@ -445,6 +448,12 @@ in docs/deferred.md.
    nobody chose. It measures COMPILES rather than artifacts (two probes
    built on the spot, three hosts resolved off PATH the way the lane
    resolves them) and refuses a verdict unless all five stamps were read),
+   `tools/check-symbols.sh` (every SF name in the mac interpreter's
+   symbol table exists in Apple's own availability plist at or below
+   kaya's floor — an SF Symbols 6 rename resolves on every machine the
+   project has and renders BLANK on the floor, so NO scene can see it;
+   its self-test perturbs doc.on.doc to the macOS-15 rename out of the
+   real file, count printed, and demands the refusal on every run),
    `tools/check-keyed.sh` (the gate cache is honest: a change inside a
    gate's input set re-runs it, a change outside does NOT, a FAILED gate
    is never cached, KAYA_FAST unset consults nothing, and the three

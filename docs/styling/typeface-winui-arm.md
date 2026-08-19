@@ -1,7 +1,7 @@
 # The typeface WinUI arm — progressive log
 
 Charge: implement the WinUI lowering for docs/styling-plan.md Slice 2b.
-Probe report: scratchpad/styling/typeface-winui.md (read first; its §1/§2
+Probe report: docs/styling/typeface-winui.md (read first; its §1/§2
 are the mechanics this arm is built on).
 
 ## 0. FIRST FINDING, and it changes what this arm can prove
@@ -34,7 +34,8 @@ fallback family name).
 
 ## 1. THE VM MEASUREMENT — DirectWrite half (the probe's §3 and §4 answered)
 
-`dwprobe2.exe` (scratchpad/styling/typeface-winui-arm/dwprobe2), run on
+`dwprobe2.exe` (`scratchpad/styling/typeface-winui-arm/dwprobe2 (gone)`
+— session scratch; source recoverable from the transcripts), run on
 the lane image over ssh. Raw log: `dwprobe2-run1.txt` beside it.
 
     families-in-system-collection 81
@@ -401,7 +402,7 @@ over a thousand stale `kaya-clip-*`, `kaya-picked-*`, `kaya-editor-*` and
 before deleting — but nothing on that lane cleans them up.
 
 On this mac: the probe crate's `target/` is deleted; the scratch
-directory `scratchpad/styling/typeface-winui-arm/` is 636K (the two
+directory `scratchpad/styling/typeface-winui-arm/ (gone)` was 636K (the two
 `.cmd` files, `cycle.sh`, the pristine copy of mod.rs, and the run logs).
 The repo's own `target/` grew by one windows example; nothing of the
 user's was deleted.

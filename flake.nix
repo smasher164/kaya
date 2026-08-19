@@ -50,7 +50,7 @@
           # mkShell's alias for nativeBuildInputs (the build role), and
           # the SDK hook then clashes with the stdenv's 14.4 and breaks
           # cc outright — loud, measured twice (the scout report,
-          # scratchpad/chrome/sdk-bump-scout.md §2).
+          # docs/chrome/sdk-bump-scout.md §2).
           #
           # THE DESIGN-GENERATION SPLIT this chooses (the ledger's
           # standing constraint, docs/deferred.md): MODERN = the legs

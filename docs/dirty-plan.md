@@ -7,8 +7,8 @@ every runner's SCENES.
 The working record for the dirty-state milestone, in the undo-plan's
 shape: probes first, decisions stated with what they replaced, nothing
 ratified until the maintainer says so. The probe reports (2026-08-06,
-five arms) are scratchpad/dirty-probe-{mac,windows,linux,mobile}.md and
-scratchpad/dirty-prior-art.md; every measured claim below cites its arm.
+five arms) are docs/probes/dirty-probe-*.md (mac, windows, linux, mobile) and
+docs/probes/dirty-prior-art.md; every measured claim below cites its arm.
 
 ## §0 — what the probes found (the facts the design rests on)
 

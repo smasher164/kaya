@@ -9,7 +9,9 @@ point, so edits here are limited to fixing a path the tree no longer has.
 They were written to a session scratchpad during the milestone and cited
 from code as `styling/<name>.md`; the scratchpad died with the session
 and the citations pointed at nothing until the eight cited reports were
-recovered and landed here (2026-08-19). The full corpus was ~70 reports;
+recovered and landed here (2026-08-19; typeface-gtk.md and
+typeface-depth.md joined the same day when the no-scratchpad-citations
+gate clause surfaced their citations). The full corpus was ~70 reports;
 only the ones code cites were landed. The rest are recoverable from the
 session transcripts under
 `~/.claude/projects/-Users-akhilindurti-Projects-kaya/` if a future

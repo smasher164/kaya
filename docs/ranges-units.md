@@ -4,7 +4,7 @@ UNITS ARM of the text-ranges milestone. Charter: docs/ranges-plan.md.
 Repo HEAD 4f40e59. No repo file edited.
 
 Everything below is either MEASURED (probe source and output under
-`scratchpad/units/`, cited per claim) or QUOTED from a vendor document
+`docs/probes/units/`, cited per claim) or QUOTED from a vendor document
 (URL given). Nothing is assumed from memory.
 
 ---
@@ -600,7 +600,7 @@ strings:**
 
 ## §10 — Evidence index
 
-All under `/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/units/`:
+All under `docs/probes/units/` (recovered there 2026-08-19; originally a session scratch directory):
 
 | file | what it measures |
 | --- | --- |

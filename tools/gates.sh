@@ -139,6 +139,12 @@ GATES = [
      "files in this tree — a source-keyed skip would go quiet exactly when a "
      "nixpkgs or vendor rebuild moved a stamp, which is the move it exists to "
      "catch"),
+    # An SF Symbols name above the OS floor renders BLANK on the floor
+    # and resolves fine on every machine the project has — no scene can
+    # see it; only Apple's own availability plist can answer.
+    ("check-symbols", ["tools/check-symbols.sh"], False,
+     "half its input is /System's name_availability.plist, which moves with "
+     "the OS rather than the tree — check-design-generation's shape"),
     ("check-verbs", ["tools/check-verbs.sh"], True, ""),
     # The file-mode numbers against the spec that owns them: five
     # hand-written sites decode the integer kaya_open_picked takes.

@@ -8,8 +8,8 @@ The reshaped find milestone (ratified in conversation 2026-08-06: the
 framework ships range primitives; the find bar, engine, and regex
 dialect belong to the text editor app — the prior-art survey's forty
 citations record the industry drawing the same line). Probe reports:
-scratchpad/range-probe-{mac,ios,linux,windows,android}.md and
-scratchpad/find-{frameworks,editors}.md; every claim cites its arm.
+docs/probes/range-probe-*.md (mac, ios, linux, windows, android) and
+docs/probes/find-*.md (frameworks, editors); every claim cites its arm.
 
 ## §0 — what the probes found
 

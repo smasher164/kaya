@@ -70,6 +70,8 @@ mod a11yrows;
 mod filedialog;
 #[path = "clipboard.rs"]
 mod clipboard;
+#[path = "background.rs"]
+mod background;
 #[path = "save.rs"]
 mod save;
 
@@ -132,6 +134,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("a11yrows") => a11yrows::app(ctx),
         Ok("filedialog") => filedialog::app(ctx),
         Ok("clipboard") => clipboard::app(ctx),
+        Ok("background") => background::app(ctx),
         Ok("save") => save::app(ctx),
         Ok("undo") => undo::app(ctx),
         Ok("dirty") => dirty::app(ctx),

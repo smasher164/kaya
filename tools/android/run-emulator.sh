@@ -1349,6 +1349,10 @@ if [ "$SUITE" = compose ] || [ "$SUITE" = all ]; then
     # real KeyEvents, so the field's own undo stack fills the way a user's
     # typing fills it. A set_text stand-in would CLEAR that stack (D7) and
     # the native tier would have nothing to answer with.
+    run_apk background-compose \
+        "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
+        dev.kaya.milestone2/.MainActivity background \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script background)'"
     run_apk undo-compose \
         "$ROOT/android/milestone2/build/outputs/apk/debug/milestone2-debug.apk" \
         dev.kaya.milestone2/.MainActivity undo \
@@ -1542,6 +1546,10 @@ if [ "$SUITE" = jvm ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity clipboard \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script clipboard)'"
+    run_apk background-jvm \
+        "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
+        dev.kaya.milestone2kt/.MainActivity background \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script background)'"
     run_apk undo-jvm \
         "$ROOT/android/milestone2kt/build/outputs/apk/debug/milestone2kt-debug.apk" \
         dev.kaya.milestone2kt/.MainActivity undo \
@@ -1607,6 +1615,14 @@ fi
 # `<queries><package android:name="dev.kaya.cliphelper" />`, without
 # which an explicit broadcast to the helper is filtered out with no
 # error anywhere.
+
+# Machine-read by check-steps' wired(), which demands a `run_apk
+# <scene>-` leg for every scene not declared here (milestone2 is the
+# unprefixed default arm and stays a special case there). The reason is
+# the coverage comment above: window/panels/split are desktop-only by
+# design.
+# shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
+ANDROID_DESKTOP_ONLY_SCENES="window panels split"
 if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
     JNILIBS="$ROOT/android/milestone2go/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
@@ -1769,6 +1785,10 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity commands \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script commands)'"
+    run_apk background-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity background \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script background)'"
     run_apk undo-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity undo \

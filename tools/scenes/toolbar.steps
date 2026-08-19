@@ -13,7 +13,7 @@ expect_toolbar
 # menu rows draw from (docs/styling-plan.md D6). Read off the button
 # the platform rendered, never off the promotion list — the read that
 # agrees with the model is the one that hid the iOS symbol gap for a
-# whole milestone (scratchpad/chrome/toolbar-repo.md §2.4).
+# whole milestone (docs/chrome/toolbar-repo.md §2.4).
 expect_toolbar_item "Save" "done"
 expect_toolbar_item "Find" "search"
 expect_toolbar_item "Save" "enabled"

@@ -13,7 +13,7 @@ assumptions, and every place a BINDING is awkward or wrong would stay
 invisible. The forcing artifact has to go through a binding.
 
 Evidence base (2026-08-07, four arms, every claim tagged
-measured/documented/assumed): scratchpad/mobilepkg-contract.md,
+measured/documented/assumed): docs/probes/mobilepkg-contract.md,
 -go.md, -csharp.md, -python.md, -threading.md.
 
 ## §0 — what the research settled
@@ -90,7 +90,7 @@ and invariant 6's byte-identical strings.
 ### D5 — the entry point: one main.go for an app, a registration for a library
 
 Ratified 2026-08-09, after reading how Gio and gomobile solve it
-(scratchpad/goentry-gio.md §1, goentry-fyne.md §1) and measuring the
+(docs/probes/goentry-gio.md §1, goentry-fyne.md §1) and measuring the
 mechanism under the toolchain kaya pins.
 
 **An app author writes ONE main.go, with no build tags and no second

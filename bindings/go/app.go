@@ -1845,7 +1845,7 @@ func (r SaveDialogRef) In(window uint64) SaveDialogRef {
 // AND IT IS NOT FREE ON A SAVE DIALOG the way it is on a picker: with an
 // allowed type set, NSSavePanel APPENDS the first extension to a name
 // that has none, so a filter changes the name the user gets rather than
-// only what they see (measured — scratchpad/save-probe-mac.md).
+// only what they see (measured — docs/probes/save-probe-mac.md).
 func (r SaveDialogRef) Filter(label, extensions string) SaveDialogRef {
 	r.filters = append(r.filters, label, extensions)
 	return r

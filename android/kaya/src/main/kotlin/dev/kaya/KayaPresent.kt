@@ -243,7 +243,7 @@ object KayaPresent {
      * `quiet = true`, so the change is banked once no matter which of
      * the two the platform delivers first — and on this backend BOTH
      * arrive (measured: a routed `undoState.undo()` moves the snapshot
-     * the field's collector observes, scratchpad/undo-fan-compose.md
+     * the field's collector observes, docs/probes/undo-fan-compose.md
      * §1 Q-a and §3 point 6). kaya_note_native_undo's JNI spelling.
      */
     @JvmStatic external fun noteNativeUndo(

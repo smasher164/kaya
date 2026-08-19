@@ -491,7 +491,7 @@ pub enum Step {
     /// ENABLEMENT IS PER-PLATFORM MEASURED, and the macOS measurement is
     /// the reason this doc says so: `NSToolbarItem.isEnabled` stays
     /// `true` for a visibly disabled SwiftUI toolbar button (measured
-    /// 2026-08-16, scratchpad/chrome/toolbar-mac.md §2.3), so a backend
+    /// 2026-08-16, docs/chrome/toolbar-mac.md §2.3), so a backend
     /// must read the property its own disable actually moves and say
     /// which one that is at the arm.
     ExpectToolbarItem(String, String),
