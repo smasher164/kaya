@@ -17,7 +17,7 @@ import sys
 ROOT = pathlib.Path("/Users/akhilindurti/Projects/kaya")
 SCRATCH = pathlib.Path(
     "/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/"
-    "24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/styling/gtk-arm")
+    "24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/styling/gtk-arm (gone)")
 GTK = ROOT / "crates/kaya/src/gtk.rs"
 GUEST = ROOT / "guests/rust/typeface.rs"
 

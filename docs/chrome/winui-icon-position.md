@@ -518,7 +518,7 @@ file, no scene: one backend file.
 |---|---|
 | Rust, Python, Go, C#, Java | **DO** — every promoted window on this backend gets the repositioned mark; all 171 lane legs pass with byte-identical verdicts. Only `identity_rust` DECLARES an identity today, so it is the only leg whose caption carries a mark — the others exercise the empty-column path |
 | Swift, OCaml, Haskell | **DEFER on this lane only** — no toolchain on the VM; their guests run the identical scenes on the mac/iOS/linux runners, none of which this touches |
-| C floor | **DEFER** — no `guests/c/toolbar.c` exists; there is no leg to write |
+| C floor | **DEFER** — no `guests/c/toolbar.c (gone)` exists; there is no leg to write |
 
 Invariant 1 has nothing to say here: WHERE a backend draws the app's mark
 inside its own caption is a lowering-fidelity fact, not a behaviour an app
@@ -570,7 +570,7 @@ still carry the identity depth stubs the previous slice logged.
   (`ssh -O exit`) and the grep now counts **0**. Top-CPU shows only macOS
   Spotlight and the Android emulator, both weeks old and predating this
   session.
-- **Disk**: this arm's scratch (`scratchpad/chrome/ip`) is **3.0 MB**;
+- **Disk**: this arm's scratch (`scratchpad/chrome/ip (gone)`) is **3.0 MB**;
   session scratchpad **135 MB**; host free **414 GB**.
 - **Repo**: `git status` shows exactly one path,
   `crates/kaya/src/winui/mod.rs`. Nothing committed; nothing pushed.
@@ -581,11 +581,11 @@ Changed: `/Users/akhilindurti/Projects/kaya/crates/kaya/src/winui/mod.rs`
 (+352 / −40).
 
 Captures:
-`scratchpad/chrome/captures/icon-promoted-2.png`,
+`scratchpad/chrome/captures/icon-promoted-2.png (gone)`,
 `icon-unpromoted-2.png`, `icon-sysmenu-altspace.png`.
 
 This arm's instruments (scratch, not the tree):
-`scratchpad/chrome/ip/icon-probe.{sh,ps1}` (the driver and the probe:
+`scratchpad/chrome/ip/icon-probe.{sh,ps1} (gone)` (the driver and the probe:
 tree dump, band metrics, system-menu facts, the hit-test discrimination,
 the width sweep, the captures), `ip/marklocate.py`, `ip/cornerscan.py`,
 `ip/inkscan.py` (a dependency-free PNG reader), and the run logs

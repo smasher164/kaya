@@ -6,7 +6,7 @@ API 35 / Android 15, `sdk_gphone64_arm64` google_apis, headless
 (`-no-window`), standing since before this session.
 
 Raw logs (kept):
-`scratchpad/log-A.txt` (write), `log-B1.txt` (create), `log-B2.txt`
+`scratchpad/log-A.txt (gone)` (write), `log-B1.txt` (create), `log-B2.txt`
 (createname, createcollide-crash), `log-B3.txt` (createcollide, persist,
 plain2), `log-C.txt` (persist2, reopen), `log-D.txt` (createcancel,
 createempty).
@@ -254,7 +254,7 @@ landed §6a-§6e.
 - `settings secure enabled_accessibility_services` restored to
   `dev.kaya.milestone2go/dev.kaya.KayaHarnessAccessibility`,
   `accessibility_enabled` restored to `1` (saved before the run in
-  `scratchpad/a11y-before-5554.txt`).
+  `scratchpad/a11y-before-5554.txt (gone)`).
 - No emulator was booted, deleted or rebooted; all four standing
   instances are still up.
 - The GUI lock was NOT taken: the emulators run `-no-window`
@@ -274,7 +274,7 @@ landed §6a-§6e.
   this arm by ~2.5 h and was left alone.
 - Repo: `git status --porcelain` is empty.
 - MID-RUN INCIDENT worth telling the coordinator: every platform arm
-  was given the SAME probe path (`scratchpad/saveprobe/`). Mine was
+  was given the SAME probe path (`scratchpad/saveprobe/ (gone)`). Mine was
   deleted out from under me mid-session by a sibling arm (the iOS and
   Windows arms show up as `saveprobe-ios/` and `saveprobe-windows/`).
   Only the build tree was lost — all six logs survived — and the last

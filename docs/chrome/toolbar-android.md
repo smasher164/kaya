@@ -23,7 +23,7 @@ All **[MEASURED]** from the tree and this machine's gradle cache.
 | → material3 resolved | **1.3.1** | `~/.gradle/caches/modules-2/files-2.1/androidx.compose.material3/material3-android/1.3.1/` |
 | → compose-ui resolved | **1.7.5** | `~/.gradle/caches/.../androidx.compose.ui/ui-android/1.7.5/` |
 | material3-adaptive | **1.0.0** (adaptive + adaptive-layout) | `android/kaya/build.gradle.kts:65-66` |
-| material-icons core/extended | **1.7.8** (frozen; last release) | `android/kaya/build.gradle.kts:96-97` |
+| material-icons core/extended | **1.7.8** (frozen; last release) | `android/kaya/build.gradle.kts:96-97 (gone)` |
 | activity-compose | **1.9.3** | `android/kaya/build.gradle.kts:52` |
 | AGP / Kotlin | **8.7.3 / 2.0.21** | `android/build.gradle.kts` |
 | emulator system image | **`system-images;android-35;google_apis;arm64-v8a`** (Android 15) | `tools/android/run-emulator.sh:70` |

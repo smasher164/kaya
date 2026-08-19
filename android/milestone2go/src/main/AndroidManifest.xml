@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Without this, an explicit broadcast to the clipboard helper is
+         FILTERED OUT with no error anywhere (package visibility,
+         API 30+); its absence was half of what kept clipboard-go off
+         this lane. -->
+    <queries>
+        <package android:name="dev.kaya.cliphelper" />
+    </queries>
     <!-- The declared identity, read out of guests/assets/identity.toml by
          android/build.gradle.kts. The reasoning is spelled once, in
          milestone2's manifest. -->

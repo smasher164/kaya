@@ -415,10 +415,10 @@ prop that makes a window non-closable today.
 ## 5. Reproducing this
 
 ```
-scratchpad/dirtyprobe-mac/build.sh ax-regular     # AX + captures, active window
-scratchpad/dirtyprobe-mac/build.sh ax-accessory   # same, .accessory + inactive
-scratchpad/dirtyprobe-mac/build.sh close          # Cmd+W on an edited window
-scratchpad/dirtyprobe-mac/build.sh aux            # a second WindowGroup surface
+scratchpad/dirtyprobe-mac/build.sh (gone) ax-regular     # AX + captures, active window
+scratchpad/dirtyprobe-mac/build.sh (gone) ax-accessory   # same, .accessory + inactive
+scratchpad/dirtyprobe-mac/build.sh (gone) close          # Cmd+W on an edited window
+scratchpad/dirtyprobe-mac/build.sh (gone) aux            # a second WindowGroup surface
 ```
 
 Run each under `nix develop -c` and under the GUI lock. Two traps the probe
@@ -443,13 +443,13 @@ itself hit, worth knowing for any successor:
   GUI applications with windows (System Events) contains no probe.
 - **Windows**: none left open; the `close` run closed its window as part of
   the measurement, the others closed at terminate.
-- **GUI lock**: `scratchpad/leg.lock` released on every path (checked absent).
+- **GUI lock**: `scratchpad/leg.lock (gone)` released on every path (checked absent).
 - **Repo**: untouched. `git status --porcelain` shows only
   `M tools/guest/record-win/Program.cs`, which is ANOTHER arm's edit — this arm
   wrote nothing inside /Users/akhilindurti/Projects/kaya, and no commits.
 - **Disk**: probe directory was 2.2 MB (three app bundles, four Swift
   binaries, 14 full-size PNG captures). Deleted; **final size of
-  `scratchpad/dirtyprobe-mac/` is 80 KB** — sources, four logs, and 16 KB of
+  `scratchpad/dirtyprobe-mac/ (gone)` is 80 KB** — sources, four logs, and 16 KB of
   evidence crops under `evidence/` (`diff-screen-{a,b}.png` active window,
   `diff-acc-screen-{a,b}.png` inactive/.accessory). Session scratchpad total
   107 MB (105 MB before this arm started; the difference is mostly the other

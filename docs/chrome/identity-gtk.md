@@ -518,7 +518,7 @@ X11-only, and it must be stated that way rather than skipped quietly.
   total, measured. The GTK reference sources downloaded for line-accurate
   citation (1.2 MB) were deleted after the citations above were taken; the
   deletion is measured (`rm` then `ls`). The enclosing
-  `scratchpad/chrome/` directory is 110 MB, all of it from earlier sessions
+  `scratchpad/chrome/ (gone)` directory is 110 MB, all of it from earlier sessions
   (files dated 16-17 Aug), not this task.
 - The repo was not modified. NOTE, unrelated to this task: `git status` went from
   clean to ~10 modified files (bindings/csharp, bindings/python, bindings/swift,

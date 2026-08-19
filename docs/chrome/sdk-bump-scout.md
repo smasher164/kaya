@@ -170,7 +170,7 @@ the OS reads. Stamps read with `vtool -arch arm64 -show-build`.
 | **go** | `run go-swiftui target/go-guests/kaya-go` | `target/go-guests/kaya-go` | 14.0 | **14.4** | **ours** (cgo links via the nix clang wrapper) |
 | **c** | `run …-c-swiftui target/c-guests/<scene>` | `target/c-guests/milestone2` | 14.0 | **14.4** | **ours** |
 | **ocaml** | `… _build/default/guests/ocaml/milestone2.exe` | that `.exe` | 14.0 | **14.4** | **ours** (ocamlopt links via nix clang) |
-| **haskell** | `run haskell-swiftui "$(hs_bin milestone2)"` | `guests/haskell/dist-newstyle/.../milestone2` | 14.0 | **14.4** | **ours** (ghc links via nix clang) |
+| **haskell** | `run haskell-swiftui "$(hs_bin milestone2)"` | `guests/haskell/dist-newstyle/.../milestone2 (gone)` | 14.0 | **14.4** | **ours** (ghc links via nix clang) |
 | **swift** | `run swift-swiftui target/swift-guests/milestone2` | `target/swift-guests/milestone2` | **26.0** | **26.0** | **Apple system toolchain** — built by `kaya_swiftc`, which deliberately steers back to Xcode/CommandLineTools |
 | **python** | `run python-swiftui python3 guests/python/milestone2.py` | `/nix/store/…-python3-3.14.6-env/bin/python3.14` | 14.0 | **14.4** | nixpkgs prebuilt (moves only with the nixpkgs input, *not* with our SDK choice) |
 | **csharp** | `… dotnet exec "$CS_GUEST"` | `/nix/store/…-dotnet-sdk-10.0.301/share/dotnet/dotnet` | 12.0 | **14.4** | **vendor** (Microsoft-built host, nix only repackages) |

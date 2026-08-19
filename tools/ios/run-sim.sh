@@ -1428,11 +1428,14 @@ if [ "$SUITE" = swift ] || [ "$SUITE" = all ]; then
     # chrome no phone has; split drives resize_window, rejected above.
     # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
     IOS_DESKTOP_ONLY_SCENES="window panels split"
-    # GAP, not policy: the android lane runs all six of these and this
-    # lane never got the fan-out (docs/deferred.md "iOS legs the android
-    # lane already runs"). Wiring one moves it up into the lists.
-    # shellcheck disable=SC2034  # read by check-steps' wired(), not by this script
-    IOS_UNWIRED_SCENES="dirty editor filedialog ranges save undo"
+    # NOT NARROWER, and where it is, it is written here: dirty, save,
+    # filedialog, ranges and undo run on this lane from the RUST-SWIFTUI
+    # suite's hand-queued legs alone (each owns host-specific plumbing —
+    # simdrive watchers, phone-expressible cuts), and editor from the Go
+    # suite. A swift or go leg on any of the five is a guest-breadth
+    # fan-out, the same divergence the android runner records for its
+    # compose-only trio; wired() keys on scene x runner, so language
+    # breadth lives in this sentence, not in a gate.
     swift_pids=()
     swift_names=()
     for entry in $IOS_SWIFT_SCENES; do

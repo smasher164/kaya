@@ -4,7 +4,7 @@ Research arm: GIO + synthesis. Started 2026-08-08.
 Every claim tagged MEASURED (I ran it / read the exact bytes),
 DOCUMENTED (upstream source or vendor doc, cited), or ASSUMED.
 Repo claims cite `file:line`. Probes live in
-`scratchpad/goentry/` and touch no repo file.
+`scratchpad/goentry/ (gone)` and touch no repo file.
 
 Source under study, all fetched from the module proxy on 2026-08-08 and
 therefore reproducible by version, not by path:
@@ -18,7 +18,7 @@ Repo citations are against the working tree at **HEAD `19cd5ef` plus the
 staged scene-library refactor** — note that the tree moved under me
 during this session (a concurrent session landed `0e35bd8` "Go reaches
 iOS" and `19cd5ef` "Go lands on Android" and staged the
-`guests/go/scenes/*` split). I wrote nothing to the repo; every line
+`guests/go/scenes/* (gone)` split). I wrote nothing to the repo; every line
 number below was re-verified against the tree at the end of the run.
 
 ---
@@ -57,7 +57,7 @@ The chain, all four links read from source:
    main function here and call it from Java."*
    (DOCUMENTED, same file:7-10.) That is kaya's `main_android.go`
    comment — "`-buildmode=c-shared` requires exactly one main package
-   and then NEVER CALLS its main" (`guests/go/milestone2/main_android.go:18-22`)
+   and then NEVER CALLS its main" (`guests/go/milestone2/main_android.go:18-22 (gone)`)
    — written by the other project, four years earlier.
 
 2. `app/os_android.go:373` is a cgo `//export` JNI entry with the
@@ -129,7 +129,7 @@ time in the app.**
 
 ## §1a — I reproduced the trick in 30 lines (MEASURED)
 
-Probe at `scratchpad/goentry/linkprobe/` (throwaway, no repo file
+Probe at `scratchpad/goentry/linkprobe/ (gone)` (throwaway, no repo file
 touched). A `lib` package does the `//go:linkname main.main` pull and
 `go fn()`; `package main` has a cgo `//export Java_probe_Shim_attach`
 and an ordinary `func main()`.
@@ -175,7 +175,7 @@ BUILD_RC=0
 nm libgio.so | grep -c "T Java_org_gioui"   ->  34
 nm libgio.so | grep    "T main.main"        ->  000000000058a3f0 T main.main
 ```
-(MEASURED, `scratchpad/goentry/gioapp/`.) **34 JNI entry points ship in
+(MEASURED, `scratchpad/goentry/gioapp/ (gone)`.) **34 JNI entry points ship in
 that library.** The app author wrote none of them. That is the honest
 size of "a single main.go": the second entry point did not disappear,
 it moved into the toolkit.
@@ -294,9 +294,9 @@ equivalent in Gio's model; you would rebuild the APK per scene.
 
 | | Gio | gomobile | kaya |
 |---|---|---|---|
-| Who calls Go first | `Gio.init` → `Java_org_gioui_Gio_runGoMain`, from the `GioView` constructor on the UI thread (`GioView.java:85`) | framework → `ANativeActivity_onCreate` on the UI thread (`android.c:72`) | shell Activity `onCreate` → `Java_dev_kaya_KayaGo_attach` on the UI thread (`bindings/go/android.go:153`) |
-| How `main`/app starts | `go fn()` where `fn = main.main` via linkname (`runmain.go:22-28`) | `go callfn.CallFn(mainPC)` via dlsym (`android.go:102`) | `go func(){ runtime.LockOSThread(); app() }()` (`bindings/go/android.go:184-193`) |
-| Is that thread locked? | **No** — a bare goroutine; it migrates across Ms | **No** | **Yes** — `runtime.LockOSThread()`, because the app thread parks inside a C call (`kaya_wait_occurrences` → a pthread condvar) and the occurrence ring is single-consumer (`bindings/go/android.go:184-192`) |
+| Who calls Go first | `Gio.init` → `Java_org_gioui_Gio_runGoMain`, from the `GioView` constructor on the UI thread (`GioView.java:85`) | framework → `ANativeActivity_onCreate` on the UI thread (`android.c:72`) | shell Activity `onCreate` → `Java_dev_kaya_KayaGo_attach` on the UI thread (`bindings/go/android.go:153 (gone)`) |
+| How `main`/app starts | `go fn()` where `fn = main.main` via linkname (`runmain.go:22-28`) | `go callfn.CallFn(mainPC)` via dlsym (`android.go:102`) | `go func(){ runtime.LockOSThread(); app() }()` (`bindings/go/android.go:184-193 (gone)`) |
+| Is that thread locked? | **No** — a bare goroutine; it migrates across Ms | **No** | **Yes** — `runtime.LockOSThread()`, because the app thread parks inside a C call (`kaya_wait_occurrences` → a pthread condvar) and the occurrence ring is single-consumer (`bindings/go/android.go:184-192 (gone)`) |
 | What ends `main` | `app.Main()` → `osMain()` → `select {}` (`os_android.go:1327-1329`) | `app.Main(f)` runs the event loop | `App.Serve()` — the dispatch loop |
 | UI thread after attach | returns to the Looper | returns to the Looper | returns to the Looper |
 
@@ -418,7 +418,7 @@ Why Compose does not block it, from the tree:
       app()
   }()
   ```
-  (`bindings/go/android.go:184-193`). The only difference from Gio is
+  (`bindings/go/android.go:184-193 (gone)`). The only difference from Gio is
   where `app` comes from — a registration (`kaya.AndroidMain`, an
   `init()`) instead of `//go:linkname main.main`.
 
@@ -450,7 +450,7 @@ So the change is mechanical: add an `//go:build android` file to
    under `//go:build !android` (Gio's precedent: a package `init()` at
    `app/os_macos.go:342-347`). On Android it must NOT be in an `init()`
    — inits run while `System.loadLibrary` is executing, on a thread Go
-   made (`android/milestone2go/.../MainActivity.kt:47-51`) — it stays
+   made (`android/milestone2go/.../MainActivity.kt:47-51 (gone)`) — it stays
    inside the spawned goroutine as it already is. That tagged/untagged
    pair is invisible to every compiler, which is exactly the shape
    invariant 3 asks for a guard around.
@@ -458,11 +458,11 @@ So the change is mechanical: add an `//go:build android` file to
    holds the 31-entry table and `tools/check-steps.sh:1617-1620` parses
    that file to learn which scenes the APK carries. With one `main` and
    no tags, the aggregate would be an ordinary package (say
-   `guests/go/androidapk/main.go`) whose `main()` reads
+   `guests/go/androidapk/main.go (gone)`) whose `main()` reads
    `kaya.Env("KAYA_SELFTEST")` and serves the chosen scene — arguably
    *simpler* (no build tags anywhere in the Go tree), but it forces one
    refactor: milestone2's scene body currently lives in a `main` package
-   and so cannot be imported; it would move to `guests/go/scenes/milestone2`
+   and so cannot be imported; it would move to `guests/go/scenes/milestone2 (gone)`
    like the other 30 (the reasoning at `main_android.go:8-16` already
    explains why the 30 are libraries).
 5. **The empty-`KAYA_SELFTEST` panic relocates.** It is the *only*
@@ -490,7 +490,7 @@ So the change is mechanical: add an `//go:build android` file to
    thread.
 
 **The one thing that stays no matter what:** the Kotlin shell. Five lines
-in `onCreate` (`android/milestone2go/.../MainActivity.kt:46-55`). The
+in `onCreate` (`android/milestone2go/.../MainActivity.kt:46-55 (gone)`). The
 linkname removes the *guest's* second entry point, not the *host's*
 first one. Gio has the identical five-lines-in-Java and hides them in
 a shipped `GioActivity`.
@@ -610,7 +610,7 @@ the same decision seen from two sides.
 
 **Repo:** nothing written. The 69 modified/staged paths reported by
 `git status` at the end of this run belong to the concurrent session
-that landed `19cd5ef` and staged the `guests/go/scenes/*` refactor; this
+that landed `19cd5ef` and staged the `guests/go/scenes/* (gone)` refactor; this
 arm issued no Write, Edit, or shell redirect anywhere under
 `/Users/akhilindurti/Projects/kaya`.
 
@@ -627,8 +627,8 @@ processes still running from this arm's probes: 0
 
 | | before cleanup | after |
 |---|---|---|
-| `scratchpad/goentry/` | 675 MB | **28 MB** |
-| whole `scratchpad/` | 783 MB | **135 MB** |
+| `scratchpad/goentry/ (gone)` | 675 MB | **28 MB** |
+| whole `scratchpad/ (gone)` | 783 MB | **135 MB** |
 
 Deleted: `modcache/` (508 MB), `gocache/` (127 MB), `gioapp/`,
 `linkprobe/`, `probe/`, `gopath/`. **Left in place deliberately:**

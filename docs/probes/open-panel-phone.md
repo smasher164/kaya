@@ -6,7 +6,7 @@ its bytes:
 
     adb -s emulator-5554 shell uiautomator dump /sdcard/open-panel.xml
     adb -s emulator-5554 pull /sdcard/open-panel.xml \
-        .../scratchpad/open-panel-phone.xml
+        .../scratchpad/open-panel-phone.xml (gone)
 
 Source: `24aa5ebf-.../subagents/workflows/wf_cebfca56-011/agent-a5c32ffcc28163df6.jsonl`,
 2026-08-10T06:15:50Z, the save-probe Android arm. It is a `uiautomator`

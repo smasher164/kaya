@@ -329,5 +329,5 @@ drawing the wrong picture (toolbar-ios-arm.md §1.3).
   `ios-sfprobe` (160K), `ios-bundles-menusleg` (13M),
   `ios-bundles-toolbarleg` (13M), `menusleg-guests` (5.7M),
   `toolbarleg-guests` (4.8M) — 37M, all five removed and their absence
-  checked. This report's directory, scratchpad/chrome, is 20M in total,
+  checked. This report's directory, scratchpad/chrome (gone), is 20M in total,
   most of it earlier stages'.

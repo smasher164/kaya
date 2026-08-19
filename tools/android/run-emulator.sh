@@ -1600,21 +1600,13 @@ fi
 # six scenes would leave every gate green. Any future divergence has to
 # be written down right here.
 #
-# THE ONE DIVERGENCE TODAY IS `clipboard`, a MEASURED gap in two files.
-# It was wired, run and WATCHED FAILING before it came back out:
-#
-#   panic: failed to make the scene's directory:
-#          mkdir /data/local/tmp/kaya-clip-3565: permission denied
-#
-# guests/go/clipboard's sceneRoot still answers os.TempDir(), which
-# reads $TMPDIR — EMPTY under the JNI attach (tools/check-go-env.sh) —
-# so Go falls back to /data/local/tmp while the interpreter expands
-# $TMP to the shared Documents collection. The fix is that guest's:
-# EXTERNAL_STORAGE (or /sdcard) + "/Documents", through kaya.Env. Behind
-# it sits a second blocker: milestone2go's manifest carries no
-# `<queries><package android:name="dev.kaya.cliphelper" />`, without
-# which an explicit broadcast to the helper is filtered out with no
-# error anywhere.
+# THE CLIPBOARD DIVERGENCE IS CLOSED (2026-08-19): sceneRoot answers
+# the shared Documents collection on android through kaya.Env (the
+# 2026-08-18 measured failure was os.TempDir falling back to
+# /data/local/tmp with $TMPDIR empty under the JNI attach), and
+# milestone2go's manifest declares the cliphelper under `<queries>` —
+# without it an explicit broadcast to the helper is filtered out with
+# no error anywhere.
 
 # Machine-read by check-steps' wired(), which demands a `run_apk
 # <scene>-` leg for every scene not declared here (milestone2 is the
@@ -1785,6 +1777,10 @@ if [ "$SUITE" = go ] || [ "$SUITE" = all ]; then
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity commands \
         --es KAYA_SELFTEST_SCRIPT "'$(scene_script commands)'"
+    run_apk clipboard-go \
+        "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
+        dev.kaya.milestone2go/.MainActivity clipboard \
+        --es KAYA_SELFTEST_SCRIPT "'$(scene_script clipboard)'"
     run_apk background-go \
         "$ROOT/android/milestone2go/build/outputs/apk/debug/milestone2go-debug.apk" \
         dev.kaya.milestone2go/.MainActivity background \

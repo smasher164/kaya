@@ -326,7 +326,7 @@ crops the report cites. **This arm created and modified no repo file** —
 no probe code went into `crates/`, `guests/`, or `tools/`. (`git status`
 does show `tools/guest/record-win/Program.cs` modified: that is a
 concurrent sibling arm's recording-mode fix, not mine.)
-Note `scratchpad/dirtyprobe/` belongs to a **concurrent sibling arm**
+Note `scratchpad/dirtyprobe/ (gone)` belongs to a **concurrent sibling arm**
 (its `probe.c`, `x11-leg.sh`, `wayland-leg.sh`, `out/`) — I created that
 directory name first by accident, moved my files out to `winarm/`, and
-left theirs alone. Do not delete `scratchpad/dirtyprobe/` on my account.
+left theirs alone. Do not delete `scratchpad/dirtyprobe/ (gone)` on my account.

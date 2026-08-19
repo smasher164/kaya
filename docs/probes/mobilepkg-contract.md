@@ -14,7 +14,7 @@ recommendation.
 ### 1.1 The one backend
 
 There is one iOS backend and it is the SwiftUI interpreter, compiled to a
-dylib and embedded in the app bundle. `crates/kaya/src/lib.rs:135-150` — for
+dylib and embedded in the app bundle. `crates/kaya/src/lib.rs:135-150 (gone)` — for
 `macos`/`ios`, `kaya::run` spawns the app thread and then calls
 `swiftui_host::run()`, which never returns. `tools/ios/run-sim.sh:1276-1279`
 says it directly: "The one iOS backend is the SwiftUI interpreter: every
@@ -107,13 +107,13 @@ The lane sets the path explicitly per launch:
 
 ### 1.5 Entry point and threads
 
-- **Rust guest:** `fn main()` → `kaya::run(app)` (`guests/rust/milestone2.rs:171-172`).
+- **Rust guest:** `fn main()` → `kaya::run(app)` (`guests/rust/milestone2.rs:171-172 (gone)`).
   `kaya::run` spawns a thread named `kaya-app` running `app_main(ctx)`
   (`lib.rs:144-147`), installs the presentation sink (`:148`), then
   `std::process::exit(swiftui_host::run())` on the calling (main) thread (`:149`).
 - **Swift guest:** the guest's top-level code is `main.swift`
   (`run-sim.sh:1310-1312, 1332`); it ends with `app.run()`
-  (`guests/swift/milestone2.swift:108`). `KayaApp.run()`
+  (`guests/swift/milestone2.swift:108 (gone)`). `KayaApp.run()`
   (`bindings/swift/KayaApp.swift:1521-1535`) checks `kaya_spec_hash() ==
   kayaSpecHash`, starts a `Thread { self.dispatchLoop() }`, and calls
   `exit(kaya_run())` on the main thread.

@@ -345,7 +345,7 @@ make a wrong implementation fail rather than pass quietly.
 
 Where it goes, all four layers, because this is the historic miss layer:
 `swift/KayaSwiftUI.swift` (constants, panel reader, drive function,
-step-verb arm) and `android/.../KayaCompose.kt` (the same four), plus the
+step-verb arm) and `android/.../KayaCompose.kt (gone)` (the same four), plus the
 `Stage` trait in `crates/kaya/src/harness.rs` (`file_dialog_state`,
 `choose_file`, `goto_directory` today — MEASURED: three methods, no
 defaults, implemented in `gtk.rs` and `winui/mod.rs`) and both Rust-native
@@ -435,7 +435,7 @@ binaries and the `createdir` fixture are deleted. **This arm's remaining
 artifacts total 40K** — three probe sources, two AX logs, one steps file,
 kept as the evidence behind the measurements.
 
-`scratchpad/saveprobe/` itself measures 180M, but it is SHARED with
+`scratchpad/saveprobe/ (gone)` itself measures 180M, but it is SHARED with
 concurrent platform arms and 180M of it is theirs: `target/` 163M (another
 arm's cargo build) and `app/` 17M (another arm's gradle build). Same
 sharing overwrote `saveprobe/probe_write.py` mid-session. The scratchpad

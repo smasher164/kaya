@@ -58,7 +58,7 @@ executable**, and kaya's main executable is never the Swift dylib.
 
 ## 2. THE PROBE — what was built and what it measured
 
-`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/chrome/probe-mac/`
+`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/chrome/probe-mac/ (gone)`
 (`Probe.swift`, `main.c`, `build.sh`, `run.sh`). It imports **no** repo
 code and reproduces kaya's window mechanism exactly:
 
@@ -409,7 +409,7 @@ window in this probe.
 The claim in Q3 — that kaya's sectioned-sidebar windows already sit in
 the tall geometry — was verified against a capture of the real
 interpreter, taken on this host by an earlier session:
-`scratchpad/sect-sidebar-dark.png` (the `sections` scene, sidebar
+`scratchpad/sect-sidebar-dark.png (gone)` (the `sections` scene, sidebar
 presentation, 1080x660 = a 540x330pt window at 2x).
 
 Method: convert to BMP with `sips`, walk a column at 75% width from the

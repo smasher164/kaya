@@ -23,9 +23,9 @@ gate exposes**. Both the constructs this report recommends
 **[DOC]**, so they are inside the existing gate — no Cargo.toml move.
 
 Probe scripts (read-only, outside the repo, all run against
-`kaya-linux:latest` under Xvfb): `…/scratchpad/chrome/adw_probe.py`
+`kaya-linux:latest` under Xvfb): `…/scratchpad/chrome/adw_probe.py (gone)`
 through `adw_probe9.py` (+ the `.sh` wrappers), `a11y_app.py`,
-`a11y_read.py`, `a11y_run.sh`; renders in `…/scratchpad/chrome/out/`.
+`a11y_read.py`, `a11y_run.sh`; renders in `…/scratchpad/chrome/out/ (gone)`.
 
 ## 1. What gtk.rs builds today (the starting position)
 
@@ -449,7 +449,7 @@ effect with zero new styling vocabulary in the protocol.**
 ## Cleanup (per the standing side-effects rule)
 
 - **No repo edits of any kind.** Everything here lives under
-  `…/scratchpad/chrome/`. (`git status` in the repo shows
+  `…/scratchpad/chrome/ (gone)`. (`git status` in the repo shows
   `M docs/deferred.md` — that is NOT from this agent; it was already
   moving when this work started and belongs to another arm of the run.)
 - **Containers**: every `docker run` used `--rm`. One container

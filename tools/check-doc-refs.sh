@@ -474,11 +474,14 @@ MORTAL_FLOOR = 400
 
 
 def mortal_scan(text):
-    """Every un-exempt scratchpad citation in one file's text."""
+    """Every un-exempt scratchpad citation in one file's text. The same
+    two escapes as the main scan: the GONE marker, and a `<placeholder>`
+    right after the token (a family name, not a path)."""
     hits = []
     for n, line in enumerate(text.split("\n"), 1):
         for m in MORTAL.finditer(line):
-            if GONE in line[m.end():][:12]:
+            rest = line[m.end():]
+            if GONE in rest[:12] or rest[:1] == "<":
                 continue
             hits.append((n, m.group(0)))
     return hits

@@ -787,14 +787,21 @@ wired() {
             esac
             case "$runner" in
                 tools/ios/run-sim.sh)
+                    # Two wiring forms: the list-driven suites, and the
+                    # HAND-QUEUED legs below them (the rust-swiftui
+                    # suite and the editor) — a `queue_leg
+                    # run_swiftui_on <scene>-...` line is as structural
+                    # as a list entry.
                     ok=1
                     if printf '%s\n' "$ios_wired" | grep -qFx "$scene"; then
+                        ok=0
+                    elif grep -qE "run_swiftui_on[[:space:]]+\"?$scene-" "$runner"; then
                         ok=0
                     elif printf '%s\n' "$ios_declared" | grep -qFx "$scene"; then
                         ok=0
                     fi
                     if [ "$ok" = 1 ]; then
-                        echo "check-steps: scene \"$scene\" has no live legs in $runner (not in IOS_*_SCENES and not declared off)" >&2
+                        echo "check-steps: scene \"$scene\" has no live legs in $runner (not in IOS_*_SCENES, not hand-queued, not declared off)" >&2
                         status=1
                     fi
                     ;;

@@ -2,7 +2,7 @@
 
 Research arm: FYNE and the gomobile lineage. RESEARCH ONLY — no repo file
 was changed; probes live in
-`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/goentry/`.
+`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/goentry/ (gone)`.
 
 Sources read at these exact revisions (both cloned into that directory):
 
@@ -440,16 +440,16 @@ Confirmed:
   `/Users/akhilindurti/Projects/kaya/bindings/go/android.go:170-194`
   (`go func(){ runtime.LockOSThread(); app() }()`, then `return presentGuest`).
 - The guest split is per-tail, not per-scene:
-  `guests/go/milestone2/main_desktop.go:1` (`//go:build !android`) and
+  `guests/go/milestone2/main_desktop.go:1 (gone)` (`//go:build !android`) and
   `main_android.go:1` (`//go:build android`); MEASURED, `milestone2` is
   the only Go guest carrying an `main_android.go` — every other scene is
-  a library under `guests/go/scenes/` with a `!android` desktop tail.
+  a library under `guests/go/scenes (gone)/` with a `!android` desktop tail.
 
 ### 5.1 The comparison
 
 | | gomobile / Fyne (`gomobile build`, `fyne package -os android`) | kaya today |
 |---|---|---|
-| Android entry symbol | `ANativeActivity_onCreate` in `app/android.c:72`, in the app's own .so | `Java_dev_kaya_KayaGo_attach`, `bindings/go/android.go:170` |
+| Android entry symbol | `ANativeActivity_onCreate` in `app/android.c:72`, in the app's own .so | `Java_dev_kaya_KayaGo_attach`, `bindings/go/android.go:170 (gone)` |
 | who calls Go's app code | `dlsym(RTLD_DEFAULT, "main.main")` → `callMain` → `go callfn.CallFn(mainPC)` (`android.c:93-97`, `android.go:101`) | `KayaGo.attach(this)` from `onCreate` → `go func(){…app()}()` |
 | Go guest code thread | a goroutine; **not** the UI thread | a `LockOSThread`'d goroutine; **not** the UI thread |
 | who owns the Looper | ActivityThread; `onCreate` returns to it immediately | ActivityThread; `attach` returns to it immediately |
@@ -460,7 +460,7 @@ Confirmed:
 | UI | one EGL surface, framework draws every pixel itself | Jetpack Compose widgets |
 | soft keyboard / file picker / a11y | framework hand-writes Java into its fixed Activity (663 lines) and calls it by JNI name with soft failure | Compose and the platform provide them |
 | custom Activity / intent filter / Android library | not possible; escape hatch is a *different* tool, `gomobile bind` (`doc.go:44-56`) | already how it works |
-| env vars at startup | gomobile patches `TMPDIR`/`PATH`/`LD_LIBRARY_PATH` from C `getenv` in `callMain` (`android.go:81-85`) — same underlying problem | `kaya.Env` reads C `getenv`; guarded by `tools/check-go-env.sh` and a runtime panic (`guests/go/milestone2/main_android.go`) |
+| env vars at startup | gomobile patches `TMPDIR`/`PATH`/`LD_LIBRARY_PATH` from C `getenv` in `callMain` (`android.go:81-85`) — same underlying problem | `kaya.Env` reads C `getenv`; guarded by `tools/check-go-env.sh` and a runtime panic (`guests/go/milestone2/main_android.go (gone)`) |
 
 ### 5.2 The conclusion I would defend
 
@@ -490,8 +490,8 @@ does not remove the second entry, it moves it one file down, and it does
 know — `kaya.Env` instead of `os.Getenv` (a whole milestone, and the
 reason `tools/check-go-env.sh` exists), the one-APK-many-scenes library
 split that forced 30 scenes out of `main` packages
-(`guests/go/milestone2/main_android.go`), and the re-attach panic on
-configuration change (`bindings/go/android.go:150-160`). gomobile pays
+(`guests/go/milestone2/main_android.go (gone)`), and the re-attach panic on
+configuration change (`bindings/go/android.go:150-160 (gone)`). gomobile pays
 those same costs — its `callMain` patches three env vars by hand for
 exactly the reason kaya's `kaya.Env` exists — it just pays them inside the
 toolchain instead of in the guest.
@@ -501,7 +501,7 @@ cheap and worth considering on its own merits: gomobile's guard against a
 second entry is `static int main_running` in C (`app/android.c:62,73,98`),
 which makes re-`onCreate` **idempotent** — the Activity may be recreated
 and Go's `main` is simply not started again. kaya's equivalent
-(`bindings/go/android.go:150-160`) **panics**, on the stated reasoning
+(`bindings/go/android.go:150-160 (gone)`) **panics**, on the stated reasoning
 that the shell must survive rotation itself. Both are defensible; they are
 not the same choice, and gomobile's is evidence that the idempotent one is
 survivable in practice. (kaya's comment already anticipates this and
@@ -513,7 +513,7 @@ divergence exists and is a choice, not an oversight.)
 ## Appendix: probe inventory (all disposable)
 
 ```
-/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/goentry/
+/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/goentry/ (gone)
   x-mobile/      shallow clone of github.com/golang/mobile @ 62cee167
   fyne/          shallow clone of github.com/fyne-io/fyne  @ 57f5b071
   classes.dex    x/mobile's dexStr decoded (2192 bytes)

@@ -20,7 +20,7 @@ f2526901cd27e5162fb4c3efc07566e2251e9e1e16fce61b01191c307e05b61f  guests/rust/to
 9e49fabfd2b7cb84c031e99a5eea00870f2ed063b57760a94e1e940b1b6dd408  crates/kaya/src/app.rs
 ```
 
-Copies saved to `scratchpad/baseline/` (restoration source — never
+Copies saved to `scratchpad/baseline/ (gone)` (restoration source — never
 `git checkout`, sibling work is uncommitted).
 
 ---
@@ -39,7 +39,7 @@ add), `tools/scenes/undo.steps`, `crates/kaya/src/app.rs`
 wrapper), `swift/KayaSwiftUI.swift` (the `set_text` verb),
 `bindings/csharp/KayaApp.cs:468-482` (the comment to adapt),
 `docs/deferred.md` (the retracted entry),
-`scratchpad/fresh-key-depth.md` §3 (the moved-expectation precedent).
+`scratchpad/fresh-key-depth.md (gone)` §3 (the moved-expectation precedent).
 
 ## 1. Why the reshape is sound — the mechanism, re-derived
 
@@ -257,7 +257,7 @@ The derive line is untouched, and the file still registers no
 
 ## 5. THE FLIP PROOF — measured
 
-`scratchpad/dp-perturb.py`, one perturbation: `tx.undoable(step);` ->
+`scratchpad/dp-perturb.py (gone)`, one perturbation: `tx.undoable(step);` ->
 `let _ = &step;`. The substitution count is printed and a count of 0 is
 a failed self-test, not a passed one.
 
@@ -278,7 +278,7 @@ The redo line is falsifiable by a DIFFERENT defect and is not
 decoration: a step that banked the inverse but not the forward passes
 the post-undo line and fails the post-redo one.
 
-Restoration was from the saved bytes (`scratchpad/dp-todos.rs.good`),
+Restoration was from the saved bytes (`scratchpad/dp-todos.rs.good (gone)`),
 never `git checkout`, and proven:
 
 ```
@@ -312,7 +312,7 @@ restored  939cf9537965d7e9e6f6e40258b969d0df3f8465cb07d877e9dfbd3988cb03a8  MATC
 
 ### 7a. The leg — GREEN TWICE after a verified build
 
-`scratchpad/derive-pin-leg.sh` builds (`cargo build --locked --lib
+`scratchpad/derive-pin-leg.sh (gone)` builds (`cargo build --locked --lib
 --example todos`), verifies `target/debug/libkaya.dylib`, builds the
 SwiftUI dylib, verifies it with `--component swiftui` (the bare
 `--verify` on that file can never pass — fresh-key-depth.md F2), then
@@ -439,7 +439,7 @@ guest work and the string contract are identical either way.
   ~6 cargo builds; 3 SwiftUI dylib builds; one `check-targets`
   cross-compile sweep. No load generator, fixture, watcher, emulator or
   scheduled task was started at any point. PROVEN STOPPED:
-  `pgrep -fl "examples/todos|guests/python/todos|derive-pin-leg|dp-perturb|check-targets"`
+  `pgrep -fl "examples/todos|guests/python/todos (gone)|derive-pin-leg|dp-perturb|check-targets"`
   returns nothing, and the shared GUI lock directory does not exist.
 - **The GUI leg lock** was acquired and released around every leg,
   including the perturbed one and the python hold-open.

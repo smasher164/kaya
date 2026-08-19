@@ -210,7 +210,7 @@ app command framework. The collision is visible in wx's own documentation.
   executing code. The framework will take care of calling `Undo` and `Do` functions as
   appropriate, so long as the `wxID_UNDO` and `wxID_REDO` menu items are defined in the
   view menu."
-  ([docs/doxygen/overviews/docview.h](https://raw.githubusercontent.com/wxWidgets/wxWidgets/master/docs/doxygen/overviews/docview.h))
+  ([docs/doxygen/overviews/docview.h (gone)](https://raw.githubusercontent.com/wxWidgets/wxWidgets/master/docs/doxygen/overviews/docview.h))
 
 Two subsystems, one command id, and **the docview overview never mentions text control
 undo at all**. wx documents no precedence rule, no routing rule, and no way to ask "does
@@ -476,7 +476,7 @@ React Native / React
 
 wxWidgets
 [interface/wx/textctrl.h](https://raw.githubusercontent.com/wxWidgets/wxWidgets/master/interface/wx/textctrl.h) ·
-[docs/doxygen/overviews/docview.h](https://raw.githubusercontent.com/wxWidgets/wxWidgets/master/docs/doxygen/overviews/docview.h) ·
+[docs/doxygen/overviews/docview.h (gone)](https://raw.githubusercontent.com/wxWidgets/wxWidgets/master/docs/doxygen/overviews/docview.h) ·
 [eventhandling.h](https://raw.githubusercontent.com/wxWidgets/wxWidgets/master/docs/doxygen/overviews/eventhandling.h) ·
 [wxCommandProcessor](https://docs.wxwidgets.org/3.2/classwx_command_processor.html) ·
 [forum: Ctrl+Z accelerator and edit boxes](https://forums.wxwidgets.org/viewtopic.php?t=419) ·

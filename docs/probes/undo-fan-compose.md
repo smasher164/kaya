@@ -14,10 +14,10 @@ entry/textarea migration) and the run-emulator leg wiring. NOTHING else.
 - `docs/undo-plan.md` IN FULL — §0 D1-D8, §1 the measured platform
   charges (§1.4 = Compose), §2 A1-A8, §3 episode banking, §3a THE
   AMENDMENT (measure, never inherit "native undo emits text_changed").
-- `scratchpad/undo-depth-2-arm.md` — the mac REFERENCE arm.
-- `scratchpad/undo-integrate.md` — the vtable, Q1's widened emit, Q2's
+- `scratchpad/undo-depth-2-arm.md (gone)` — the mac REFERENCE arm.
+- `scratchpad/undo-integrate.md (gone)` — the vtable, Q1's widened emit, Q2's
   one-reporter + ledger-quiet bracket, the three findings.
-- `scratchpad/undo-probe-compose.md` — P3-compose, the measurements this
+- `scratchpad/undo-probe-compose.md (gone)` — P3-compose, the measurements this
   arm is built on.
 - `tools/scenes/undo.steps` (byte-frozen) and
   `crates/kaya/src/harness.rs`'s type-verb contract (six points).
@@ -48,8 +48,8 @@ to bypass, because the undo IS a write to the observed value.
 Instrument: the TRACKED probe app `tools/android/undoprobe` (unmodified;
 its `tfsObserved` counter is a `snapshotFlow { state.text }` collector,
 which is exactly the channel this arm's emission rides), driven by
-`scratchpad/undo3a.sh` on **emulator-5558**. Raw transcript:
-`scratchpad/undo3a.txt`.
+`scratchpad/undo3a.sh (gone)` on **emulator-5558**. Raw transcript:
+`scratchpad/undo3a.txt (gone)`.
 
 | # | act | `tfs` | `canUndo/canRedo` | **`tfsObserved`** | `tfsLast` |
 |---|---|---|---|---|---|
@@ -92,8 +92,8 @@ at Q-c), which is D7 for free on this backend.
 Point 3 — "before the first keystroke the insertion point goes to the
 END of the widget's current text with nothing selected" — exists because
 macOS SELECTS A FIELD'S WHOLE CONTENTS when it becomes first responder.
-Asked of Compose before writing the verb (`scratchpad/undocaret.sh`,
-transcript `scratchpad/undocaret.txt`, emulator-5558):
+Asked of Compose before writing the verb (`scratchpad/undocaret.sh (gone)`,
+transcript `scratchpad/undocaret.txt (gone)`, emulator-5558):
 
 | # | script | result |
 |---|---|---|
@@ -114,8 +114,8 @@ probe app; this was measured on `KayaCompose.kt` itself, built and
 build-id VERIFIED the way `tools/android/run-emulator.sh` builds it, on
 **emulator-5554**. Only the observation was temporary (one log line at
 the emission site, two throwaway harness verbs); every code path under
-test is the shipped one. Instrument: `scratchpad/undoprobe-leg.sh`,
-transcript `scratchpad/undoprobe-leg.txt`.
+test is the shipped one. Instrument: `scratchpad/undoprobe-leg.sh (gone)`,
+transcript `scratchpad/undoprobe-leg.txt (gone)`.
 
 ```
 KAYA_UNDO_PROBE: id=2 widget=[] model=[] canUndo=false canRedo=false     <- 1
@@ -306,7 +306,7 @@ item dies on this backend at the first enablement read** — which is what
 a depth stub means, and is why the legs are held off rather than wired.
 
 The complete two-file change is written out in
-`scratchpad/undo-compose-jni-handoff.md`.
+`scratchpad/undo-compose-jni-handoff.md (gone)`.
 
 ### And that is why the undo LEGS ARE NOT WIRED
 
@@ -411,7 +411,7 @@ file, `kayaWriteText` and the KayaTextField observer.
 
 1. **THE ONE OPEN ITEM: the core tier is not implemented** (§5). Five
    named functions, five one-line bodies, two files outside this charge.
-   `scratchpad/undo-compose-jni-handoff.md` is the whole change.
+   `scratchpad/undo-compose-jni-handoff.md (gone)` is the whole change.
 2. **The undo legs are NOT wired into run-emulator.sh**, and that is
    check-stubs' refusal rather than an omission (§5). The charge asked
    for them green ×3; §6.1 is what was run in their place, and it is not
@@ -535,6 +535,6 @@ file, `kayaWriteText` and the KayaTextField observer.
   — the arm (+749 / −68).
 - `/Users/akhilindurti/Projects/kaya/guests/rust/milestone2_android.rs`
   — the undo scene's arm in the one-APK selector (+10), see deviation 7.
-- `/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/undo-compose-jni-handoff.md`
+- `/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/undo-compose-jni-handoff.md (gone)`
   — the five JNI entries, the five one-line bodies, and the two leg
   lines. The whole remaining change.

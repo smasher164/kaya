@@ -17,7 +17,7 @@ read from this tree, **[INFER]** flagged inference needing confirmation.
 | display / Dock | 1728x1117 pt, Dock at the bottom, `tilesize` 62, `autohide` 0 | `defaults read com.apple.dock`, CGWindowList **[MEASURED]** |
 
 **The probe** lives at
-`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/chrome/identitymac/`
+`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/chrome/identitymac/ (gone)`
 (`Identity.swift` -> `libidentity.dylib`, `main.c` -> `probe-main-sdk14`,
 `reader.swift` -> `reader`, `cmdtab.swift` -> `cmdtab`, `build.sh`,
 `run*.sh`, `mkpng.py`). It imports **no repo code** and reproduces kaya's
@@ -64,7 +64,7 @@ cross) so a Dock tile carrying one is unmistakable in a screenshot.
 Identical in every unbundled arm:
 
 ```
-PROBE: preNSApp bundlePath=/…/scratchpad/chrome/identitymac   <- the DIRECTORY
+PROBE: preNSApp bundlePath=/…/scratchpad/chrome/identitymac (gone)   <- the DIRECTORY
 PROBE: preNSApp id=nil
 PROBE: preNSApp infoDictionary keys=[]                        <- EMPTY, not partial
 PROBE: preNSApp processName=probe-main-sdk14 arg0=/…/probe-main-sdk14

@@ -80,7 +80,7 @@ page describing some other version. That is what makes them **[MEASURED]**.
 **[MEASURED]** — I generated bindings from the repo's own pinned winmd
 (`third_party/winappsdk/Microsoft.WindowsAppSDK.WinUI-2.2.1/extracted/metadata/Microsoft.UI.Xaml.winmd`)
 with a scratch copy of `tools/winui-bindgen` (helper:
-`scratchpad/chrome/probe-bindgen/`, output `probe-out-cb2.rs`).
+`scratchpad/chrome/probe-bindgen/ (gone)`, output `probe-out-cb2.rs`).
 Everything C2's Windows row needs is present in WinUI **2.2.1**:
 
     CommandBar         PrimaryCommands, SecondaryCommands,
@@ -523,7 +523,7 @@ observation (CLAUDE.md invariant 3 / `tools/check-diagnostics.sh`).
 - [microsoft-ui-xaml issue #9863 — TitleBar doesn't respect PreferredHeightOption](https://github.com/microsoft/microsoft-ui-xaml/issues/9863)
 
 Scratch artifacts backing the [MEASURED] claims (all outside the repo):
-`scratchpad/chrome/probe-bindgen/` (the generator),
+`scratchpad/chrome/probe-bindgen/ (gone)` (the generator),
 `probe-out-commandbar.rs` (CommandBar alone — no PrimaryCommands),
 `probe-out-cb2.rs` (the full command surface),
 `probe-out-titlebar2.rs` (TitleBar with slots),

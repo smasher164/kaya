@@ -53,6 +53,18 @@ func sceneRoot() string {
 	if runtime.GOOS == "ios" {
 		return filepath.Join(kaya.Env("HOME"), "Documents")
 	}
+	// Android uses the SHARED collection, and must: the outside reader
+	// is another app, which cannot see this one's cache — and
+	// os.TempDir falls back to /data/local/tmp here because $TMPDIR is
+	// empty under the JNI attach (tools/check-go-env.sh), a directory
+	// this app cannot even create. The JVM guest draws the same line.
+	if runtime.GOOS == "android" {
+		ext := kaya.Env("EXTERNAL_STORAGE")
+		if ext == "" {
+			ext = "/sdcard"
+		}
+		return filepath.Join(ext, "Documents")
+	}
 	return os.TempDir()
 }
 

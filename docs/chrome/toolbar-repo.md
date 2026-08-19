@@ -744,7 +744,7 @@ any iOS symbol work to confirm a rendering read exists outside
 **Mine:** no repo edits, nothing built, nothing launched, no processes
 started. My footprint in the shared scratch dir is two files —
 `toolbar-repo.md` (39 KB) and `symprobe.py` (1 KB). Everything else in
-`scratchpad/chrome/` belongs to the sibling platform agents (screenshots,
+`scratchpad/chrome/ (gone)` belongs to the sibling platform agents (screenshots,
 `m3aar/`, `probe-bindgen/`, `probe-out-*.rs`, `out/`, `probe-mac/`) and I
 left it alone; the directory measures **226 MB** total, and the four
 `probe-out-*.rs` files alone are ~1.5 MB. Whoever closes this sweep

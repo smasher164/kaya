@@ -21,7 +21,7 @@ android runner's undo legs, hold seven gates green, run the lane twice.
   todos scene carries `menu_activate "Edit>Undo"`, the Android lane runs
   todos on Compose AND on the jvm APK, and every path into it enters the
   stub (enablement at render, KayaCompose.kt:2197).
-- `scratchpad/undo-compose-jni-handoff.md` — the fan-out arm's written
+- `scratchpad/undo-compose-jni-handoff.md (gone)` — the fan-out arm's written
   handoff: five declarations, five registration rows, five one-line
   bodies, two leg blocks.
 - `tools/check-jni.sh` in full — the gate that pins BOTH directions.
@@ -132,7 +132,7 @@ spelling and a future slice must not invent a sentence.
 `undo-compose` (rust guest) at the end of the compose block, `undo-jvm`
 (Java guest) at the end of the jvm block. Both guest selector arms
 already existed (`guests/rust/milestone2_android.rs:125`,
-`android/milestone2kt/.../MainActivity.kt:75`), each with a comment
+`android/milestone2kt/.../MainActivity.kt:75 (gone)`), each with a comment
 saying it was registered ahead of the arm on purpose.
 
 **THE HOLD-OPEN GOING GREEN, watched in both directions:**
@@ -154,7 +154,7 @@ one.
 
 ### 3.1 WHICH TIER ANSWERS — the routing, observed (MEASURED)
 
-Instrument: `scratchpad/instrument-route.py` (three log lines, each
+Instrument: `scratchpad/instrument-route.py (gone)` (three log lines, each
 substitution count asserted 1/1/1 before the build). Read from the
 device's own logcat buffer after the leg — `undo-compose` is the last
 compose leg, and `logcat -c` runs at the START of each leg, so the buffer

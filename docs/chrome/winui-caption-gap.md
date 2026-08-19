@@ -74,7 +74,7 @@ so I did not measure it and I am not going to report a number I did not read.
 What I could measure is the other app the one-band design names as its shape.
 
 **Windows Terminal, probed by UIA on this machine at this DPI**
-(`scratchpad/chrome/gap/wt.ps1`, result `gap/wt-result.txt`): its caption band
+(`scratchpad/chrome/gap/wt.ps1 (gone)`, result `gap/wt-result.txt`): its caption band
 holds a tab strip, a `Close Tab` button and a `New Tab` split button, and then
 **nothing at all until the caption buttons** — everything Terminal puts in its
 caption is left-aligned. So Terminal has no commands-to-caption-buttons gap to
@@ -143,7 +143,7 @@ compensated for by kaya.
 
 ## 5. THE DRAG PROOF, RE-RUN AGAINST AN 8 DIP STRIP
 
-`scratchpad/chrome/gap/prove.ps1` phase `strip`, in the interactive session.
+`scratchpad/chrome/gap/prove.ps1 (gone)` phase `strip`, in the interactive session.
 The strip's own edges are READ from UIA (right edge of the last command, left
 edge of Minimize) and the grab point is that measured rect's middle - the
 script does not believe a number about where the strip is.
@@ -203,7 +203,7 @@ KAYA_SELFTEST: OK (..., menu "File>Save" enabled, exported)
 
 ## 6. THE CAPTURE, AND MY OWN VERDICT
 
-`scratchpad/chrome/ob/cap-one-band-c.png` - WGC (`record-win.exe`, 23 frames
+`scratchpad/chrome/ob/cap-one-band-c.png (gone)` - WGC (`record-win.exe`, 23 frames
 over the trailing settle; every GDI-family read returns a blank client area for
 a `WS_EX_NOREDIRECTIONBITMAP` window), midpoint frame, 946x536, same scene and
 same window size as `cap-one-band-b.png`. The guest's verdict for that run is
@@ -286,7 +286,7 @@ one backend file, two functions and one constant.
 |---|---|
 | Rust, Python, Go, C#, Java | **DO** - each carries windows `toolbar_*` and `menus_*` legs; all ten run below, and every one of those windows now wears the 8 DIP strip |
 | Swift, OCaml, Haskell | **DEFER on this lane only** - no toolchain on the VM; their guests run the identical scenes on the mac/iOS/linux runners, none of which this touches |
-| C floor | **DEFER** - no `guests/c/toolbar.c` exists; there is no leg to write |
+| C floor | **DEFER** - no `guests/c/toolbar.c (gone)` exists; there is no leg to write |
 
 The other four backends are untouched: `TitleBarMinDragRegionWidth` is a WinUI
 theme key and has no counterpart in SwiftUI, Compose or GTK, all three of which
@@ -321,7 +321,7 @@ appears only inside `mint_caption_titlebar`.
 
 **Eleven legs, on the final tree**, each run through the lane's own runner
 (`tools/deploy-win.sh akhil@192.168.64.2 <leg>`; logs in
-`scratchpad/chrome/gap/suites/`):
+`scratchpad/chrome/gap/suites/ (gone)`):
 
 ```
 toolbar_{rust,python,go,csharp,java}   PASS
@@ -330,8 +330,8 @@ editor_go                              PASS
 ```
 
 **Byte-identical verdicts**, compared programmatically against the pre-change
-lane (`scratchpad/chrome/ob/lane2.log`, the 170-leg run at 7c2bb39) by
-`scratchpad/chrome/gap/verdicts.py`, which REFUSES A VERDICT rather than
+lane (`scratchpad/chrome/ob/lane2.log (gone)`, the 170-leg run at 7c2bb39) by
+`scratchpad/chrome/gap/verdicts.py (gone)`, which REFUSES A VERDICT rather than
 reporting agreement when it read no verdict on either side - two empty reads
 compare equal and would print green:
 
@@ -404,7 +404,7 @@ being behaviour-preserving.
   scripts -> **NONE**. Top-CPU check for leaked load shows only the Android
   emulator's qemu processes, at 21-22 days of elapsed time, which predate this
   session.
-- **Disk**: this arm's scratch (`scratchpad/chrome/gap`) is **1.1 MB**. Session
+- **Disk**: this arm's scratch (`scratchpad/chrome/gap (gone)`) is **1.1 MB**. Session
   scratchpad **89 MB**. Host free **417 GB**.
 - **Repo**: `git status` shows `crates/kaya/src/winui/mod.rs` (mine, +167 lines)
   and `docs/deferred.md` (the coordinator's, untouched by me). Nothing

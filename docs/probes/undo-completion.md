@@ -11,7 +11,7 @@ tree unchanged on that item.
 - docs/undo-plan.md §0-§4 (D1-D8, A1-A8, §3 episode banking, §3a).
 - docs/probes/compose-undo-arm.md §3.1 routing measurements, §3.3 F1,
   §3.4 F2.
-- scratchpad/fresh-key-depth.md §1, §3, §4 (the reshaped scene and its
+- scratchpad/fresh-key-depth.md (gone) §1, §3, §4 (the reshaped scene and its
   byte-frozen string contract).
 - docs/deferred.md "Undo follow-ups" (lines 896-1020).
 
@@ -472,7 +472,7 @@ is core routing plus each backend's existing `role_enabled`.
 
 - Processes: every leg was a foreground `timeout 120` run; none
   backgrounded. `ps -Ao pid,etime,pcpu,command | grep -Ei
-  "examples/undo|c-guests/undo|guests/python/undo|record-suite|swiftui"`
+  "examples/undo|c-guests/undo|guests/python/undo (gone)|record-suite|swiftui"`
   → EMPTY. The GUI leg lock was taken once and `rmdir`'d; `ls` of
   `leg.lock` → "No such file or directory".
 - Scratch: saved perturbation copies (727 KB) deleted after every restore

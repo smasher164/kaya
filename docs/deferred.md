@@ -4073,31 +4073,24 @@ conformance scene's job above, and the reason that scene reads the
 sentence through a query rather than through a catch.~~
 
 
-## GAP — six iOS legs the android lane already runs (found 2026-08-19)
+## ~~GAP — six iOS legs the android lane already runs~~ (found 2026-08-19)
 KEY: IOS_UNWIRED_SCENES, dirty editor filedialog ranges save undo, run-sim wiring
 
-The comment sweep’s gate survey found check-steps’ wired() satisfied by
-COMMENT text for four (scene, runner) pairs, and the structural rewrite
-that fixed it (the maintainer’s ruling, 2026-08-19: “fix the gate and
-fix the issues”) exposed the honest coverage picture underneath. Two of
-the four ruled pairs were real gaps and were WIRED the same day: the
-background scene now runs on both phones (background-compose/-jvm/-go on
-the emulator, both iOS suites — all five legs green on landing day).
-The other two were policy — window/panels/split are desktop-only — and
-are now DECLARED, machine-read by the gate (IOS_DESKTOP_ONLY_SCENES,
-ANDROID_DESKTOP_ONLY_SCENES), with staleness checks on the declarations
-themselves.
-
-WHAT REMAINS OPEN is this entry: six scenes the android lane runs and
-the iOS lane never got — dirty, editor, filedialog, ranges, save, undo
-— declared in tools/ios/run-sim.sh’s IOS_UNWIRED_SCENES, which cites
-this entry. None has a stated iOS-cannot reason: the compose backend
-runs all six on the emulator, and docs/undo-plan.md even designed the
-iOS routing (P6, the gesture two-step). Each is a fan-out slice — a
-guest arm in the iOS suites plus whatever the SwiftUI-on-iOS backend
-still lacks — and wiring one moves its name from the declaration into
-the IOS_*_SCENES lists (the gate holds the two mutually exclusive).
-Closing this entry means the declaration variable is EMPTY.
+RESOLVED 2026-08-19, hours after filing, by reading the runner further:
+the entry was WRONG. All six scenes already run on the iOS lane — dirty,
+save, filedialog, ranges and undo as the rust-swiftui suite's
+hand-queued legs (each owning its host plumbing: simdrive watchers,
+phone-expressible cuts), editor as a hand-queued Go leg. The mistaken
+IOS_UNWIRED_SCENES declaration is deleted; wired() gained the
+hand-queued structural form (queue_leg run_swiftui_on <scene>-) so the
+truth is machine-checked rather than list-shaped; and what the six
+actually lack — SWIFT and GO guest legs, a language-breadth divergence
+exactly like the android runner's compose-only trio — is recorded where
+that convention lives, in the runner beside its scene lists. The real
+work item this entry leaves behind: the two mobile lanes each run five
+scenes single-guest, and a breadth fan-out (Swift and Go legs on iOS,
+Go legs on android where guests exist) is a milestone of its own, on
+the roster whenever the maintainer wants it.
 
 
 ## FLAKE, one occurrence — identity-ocaml-x11 exited dirty after an OK verdict (2026-08-19)

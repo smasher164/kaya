@@ -40,7 +40,7 @@ everywhere assertions and the sidebar rows are the desktops'.
   three switchers), `kayaSectionSymbolIdent`, `kayaSectionRowsMac`,
   `kayaSectionSymbolReadMac`, `kayaSectionRowsIOS`,
   `kayaSectionSymbolReadIOS`, `kayaSectionTrace`, the step arm.
-- `android/.../KayaCompose.kt` — `SECTION_TAG_PREFIX`, `kayaSectionTag`,
+- `android/.../KayaCompose.kt (gone)` — `SECTION_TAG_PREFIX`, `kayaSectionTag`,
   the `testTag` on the real `NavigationBarItem`, `kayaSectionRows`,
   `kayaSectionSymbolRead`, the step arm.
 - `tools/scenes/sections.steps` — two assertions, ABOVE the phone cut.
@@ -361,7 +361,7 @@ Byte-identical to the probe taken before the lanes ran: same pool
 counts, same panel mode, VM up. No simulator or emulator was created,
 booted or shut down; the Windows VM was never rebooted.
 
-Disk: `scratchpad/chrome` is 25 MB total; this slice added ~11 MB
+Disk: `scratchpad/chrome (gone)` is 25 MB total; this slice added ~11 MB
 (logs plus one 700 KB `sections.FIXED.swift` kept because the negative
 driver restores from it). Its PRISTINE twin was deleted after the last
 restore verified — git HEAD is that file.

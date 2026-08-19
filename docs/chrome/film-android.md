@@ -44,7 +44,7 @@ Device: emulator-5554 ONLY. Boot nothing, kill nothing.
 
 Four warm instances, qemu pids 1856/1859/1862 (+ tablet), etime ~21 days —
 they predate this session. I boot none and kill none. Saved verbatim to
-scratchpad/chrome/films/adb-before-editor.txt.
+scratchpad/chrome/films/adb-before-editor.txt (gone).
 
 ## 2. The script that was filmed
 
@@ -52,7 +52,7 @@ scratchpad/chrome/films/adb-before-editor.txt.
 extracted from tools/android/run-emulator.sh by locating the function and
 its `<<'PY'` heredoc, and run with the leg's arguments
 (`editor close_window expect_dirty`). Output:
-scratchpad/chrome/films/scene_script_cut.py (the extract),
+scratchpad/chrome/films/scene_script_cut.py (gone) (the extract),
 editor-cut.txt (96 steps), editor-script.txt (97 = + `settle 8000`).
 
 What the cut declines, printed by the runner's own code
@@ -224,6 +224,6 @@ arms that on every leg).
 
 Repo: `git status --short` empty. Nothing in the tree was edited.
 
-Disk: scratchpad/chrome/films is 8.4M total, of which mine is ~3.0M
+Disk: scratchpad/chrome/films (gone) is 8.4M total, of which mine is ~3.0M
 (2.5M raw recording kept as the unedited evidence, 1.6M probe sheets,
 324K the two films, 221K stills). No large artifacts anywhere else.

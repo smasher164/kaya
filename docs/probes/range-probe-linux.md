@@ -10,9 +10,9 @@ Environment:
 - `gtk4` 0.11.4 with feature `v4_10`, `pango` 0.22.8, `atspi` 0.30
   (crates/kaya/Cargo.toml:119,123)
 - probe sources (throwaway, outside the repo):
-  scratchpad/probe.rs, scratchpad/ime.rs, scratchpad/reader.py,
-  scratchpad/run.sh, scratchpad/ime-run.sh
-- raw logs: scratchpad/out4.txt (in-process + AT-SPI), scratchpad/ime2.txt
+  scratchpad/probe.rs (gone), scratchpad/ime.rs (gone), scratchpad/reader.py (gone),
+  scratchpad/run.sh (gone), scratchpad/ime-run.sh (gone)
+- raw logs: scratchpad/out4.txt (gone) (in-process + AT-SPI), scratchpad/ime2.txt (gone)
   (composition), with out1..out3/ime1 kept as the earlier passes
 
 ## Verdict
@@ -403,8 +403,8 @@ it is "a screen reader can see it", read the bus.
 ## 8. Reproducing
 
 ```
-bash scratchpad/run.sh      > out.txt   # in-process battery + AT-SPI reader
-bash scratchpad/ime-run.sh  > ime.txt   # composition, needs the intl layout
+bash scratchpad/run.sh (gone)      > out.txt   # in-process battery + AT-SPI reader
+bash scratchpad/ime-run.sh (gone)  > ime.txt   # composition, needs the intl layout
 ```
 
 Both build a cargo example of `crates/kaya` inside the `kaya-linux` image so the

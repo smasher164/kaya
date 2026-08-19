@@ -17,7 +17,7 @@ seeing the artifact page render at less than 1x.
 
 ## 1. GROUND TRUTH AT NATIVE SCALE — both defects are real, and I looked
 
-The rig: `scratchpad/chrome/clip/run.sh` + `clip-probe.ps1`. The guest runs
+The rig: `scratchpad/chrome/clip/run.sh (gone)` + `clip-probe.ps1`. The guest runs
 the SHIPPED toolbar scene with a trailing `settle` appended through
 `KAYA_SCENES_DIR` (the shipped file is never written); `record-win.exe`
 (WGC — every GDI-family read returns a blank client area for a
@@ -218,7 +218,7 @@ them, and 3-row dots.
 
 ## 5. ACCEPTANCE — pixel-measured, and the band is otherwise untouched
 
-`scratchpad/chrome/clip/measure.py`, which reads the button rects out of
+`scratchpad/chrome/clip/measure.py (gone)`, which reads the button rects out of
 each run's OWN probe (nothing is a constant carried between runs) and
 refuses a verdict rather than reporting agreement when it found no ink:
 
@@ -356,7 +356,7 @@ file: one backend file, two probe scripts beside it, one lane script.
 |---|---|
 | Rust, Python, Go, C#, Java | **DO** — each carries windows `toolbar_*`/`menus_*` legs; all eleven run above with byte-identical verdicts, and every one of those windows now draws its promoted commands' hover visual on its own icon and its "…" whole |
 | Swift, OCaml, Haskell | **DEFER on this lane only** — no toolchain on the VM; their guests run the identical scenes on the mac/iOS/linux runners, none of which this touches |
-| C floor | **DEFER** — no `guests/c/toolbar.c` exists; there is no leg to write |
+| C floor | **DEFER** — no `guests/c/toolbar.c (gone)` exists; there is no leg to write |
 
 Invariant 1 has nothing to say here: how a host paints a command's
 pointer-over background, and how tall a box it draws its own overflow glyph
@@ -381,10 +381,10 @@ tools/deploy-win.sh <host> caption-centre        OK (11 widths, 6 unclamped, DRI
 Deliverables, native scale (1:1, dpi 96) and x10 nearest-neighbour crops:
 
 ```
-scratchpad/chrome/ob/clip-dots-before.png     clip-dots-before-x10.png
-scratchpad/chrome/ob/clip-dots-after.png      clip-dots-after-x10.png
-scratchpad/chrome/ob/clip-hover-before.png    clip-hover-before-x10.png
-scratchpad/chrome/ob/clip-hover-after.png     clip-hover-after-x10.png
+scratchpad/chrome/ob/clip-dots-before.png (gone)     clip-dots-before-x10.png
+scratchpad/chrome/ob/clip-dots-after.png (gone)      clip-dots-after-x10.png
+scratchpad/chrome/ob/clip-hover-before.png (gone)    clip-hover-before-x10.png
+scratchpad/chrome/ob/clip-hover-after.png (gone)     clip-hover-after-x10.png
 ```
 
 The `-hover-` pair carries a LIVE pointer-over on the Find button; the
@@ -427,7 +427,7 @@ in both trees, and the band at x5.
   ffmpeg / ffprobe / `192.168.64.2` → **none**. Top-CPU shows only the two
   Android emulator qemu processes at 21–22 days of elapsed time, which
   predate this session.
-- **Disk**: this arm's scratch (`scratchpad/chrome/clip`) is **6.7 MB**;
+- **Disk**: this arm's scratch (`scratchpad/chrome/clip (gone)`) is **6.7 MB**;
   session scratchpad **94 MB**; host free **417 GB**.
 - **Repo**: `git status` shows exactly four paths —
   `crates/kaya/src/winui/mod.rs`, `crates/kaya/src/winui/title-centre-probe.ps1`,

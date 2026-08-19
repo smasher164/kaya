@@ -61,7 +61,7 @@ What the stock `TextEditor` resolves to, measured (E1):
 So macOS 15 and macOS 26 text APIs are available with **no `@available`
 guard**. The nix `apple-sdk-14.4` in the dev shell is a red herring:
 `kaya_swiftc` steers `SDKROOT`/`DEVELOPER_DIR` back at Xcode
-(`tools/lib/swift-toolchain.sh:55-63`).
+(`tools/lib/swift-toolchain.sh:55-63 (gone)`).
 
 ---
 
@@ -396,6 +396,6 @@ SwiftUI scope), which changes the text prop in all 8 bindings; and
 ## 9. Probe artifacts and cleanup
 
 Sources and logs lived in
-`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/range-probe-mac/`
+`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/range-probe-mac/ (gone)`
 (5 Swift probes, 5 binaries, 5 logs, one GUI-locked runner). See the
 cleanup section appended below for the proof they are gone.

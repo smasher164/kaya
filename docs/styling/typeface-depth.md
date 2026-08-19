@@ -138,7 +138,7 @@ validate-mac's SCENES/leg lines, both granted.
 ## 10. THE MAC LANE (rung 3), FULL RUN
 `tools/validate-mac.sh` — 287 legs, 0 FAIL, `validate-mac: ALL PASS`,
 with `typeface-rust-swiftui: PASS (0s)` among them. Log:
-scratchpad/styling/validate-mac.log (TIMING core-build+gates 145s,
+scratchpad/styling/validate-mac.log (gone) (TIMING core-build+gates 145s,
 guest-builds+bench 18s, legs 233s).
 
 ## 11. HOUSEKEEPING

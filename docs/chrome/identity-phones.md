@@ -86,7 +86,7 @@ the lane script rather than by Xcode:
   `UILaunchScreen {}`.
   **No `CFBundleDisplayName`. No `CFBundleIconName`. No
   `CFBundleIcons`. No `CFBundleAlternateIcons`.** [REPO]
-- `tools/check-steps.sh:2274-2277` already gates two of those keys
+- `tools/check-steps.sh:2274-2277 (gone)` already gates two of those keys
   (`UIFileSharingEnabled` / `LSSupportsOpeningDocumentsInPlace`) —
   i.e. there is a precedent in this tree for a gate that reads
   `Info.plist.in` and refuses on a missing key.
@@ -163,7 +163,7 @@ accepts image bytes.
 This is the one place an Android app pushes a label and an image into
 system chrome at runtime. `Activity.setTaskDescription(TaskDescription)`,
 added in API 21. [MEASURED — pinned SDK]
-`android-35/android-stubs-src.jar → android/app/Activity.java:559`:
+`android-35/android-stubs-src.jar → android/app/Activity.java:559 (gone)`:
 `public void setTaskDescription(android.app.ActivityManager.TaskDescription taskDescription)`.
 
 **Exact API levels, measured out of the pinned SDK** (not from a doc
@@ -194,7 +194,7 @@ Read that table twice, because it is the whole finding:
 - **A Bitmap IS accepted** — `TaskDescription(String label, Bitmap icon)`
   and `(String, Bitmap, int colorPrimary)`, since API 21. Cross-checked
   against the stubs source
-  (`android/app/ActivityManager.java:396,399`) and the reference page.
+  (`android/app/ActivityManager.java:396 (gone),399`) and the reference page.
   [MEASURED + DOC]
 - **Both Bitmap constructors have been deprecated since API 28**
   (Android 9, 2018) — deprecated at the same level that added the
@@ -473,7 +473,7 @@ the scene binary's name. [REPO]
 `RecentTaskInfo extends TaskInfo`, whose `public @Nullable
 ActivityManager.TaskDescription taskDescription` field is **not
 deprecated** at API 35. [MEASURED — pinned SDK stubs
-`android/app/TaskInfo.java:39`; `api-versions.xml` shows
+`android/app/TaskInfo.java:39 (gone)`; `api-versions.xml` shows
 `RecentTaskInfo.taskDescription` `{'since':'21','removed':'29'}`,
 meaning it MOVED UP to `TaskInfo` in API 29, not that it went away.]
 
@@ -626,7 +626,7 @@ not even `CFBundleDisplayName`. If kaya is to have a declared identity at
 all, the work is in `tools/ios/Info.plist.in` + an `actool` step in
 `tools/ios/run-sim.sh:93` (`make_bundle`), and in the android module
 manifests + a generated resource — and the guard belongs where invariant
-3 wants it: `tools/check-steps.sh:2274` already refuses on a missing
+3 wants it: `tools/check-steps.sh:2274 (gone)` already refuses on a missing
 `Info.plist.in` key, so the same clause extends to the identity keys for
 free.
 

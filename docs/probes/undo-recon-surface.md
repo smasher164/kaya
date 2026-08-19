@@ -392,7 +392,7 @@ Adding any verb touches **five** places, and check-verbs enforces three of them:
 5. **android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt** — same.
 
 tools/check-verbs.sh:247-255 extracts every verb from `parse()` and demands the
-literal string in BOTH interpreter files. tools/check-verbs.sh:353-392 demands
+literal string in BOTH interpreter files. tools/check-verbs.sh:353-392 (gone) demands
 every `expect_*` arm actually append to `observed` — "an expect that records
 nothing passes without verifying anything", the defect measured on the Compose
 `expect_ax` arm 2026-07-25 (check-verbs.sh:353-361). And any new scene

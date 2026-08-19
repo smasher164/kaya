@@ -23,7 +23,7 @@ sites + 1.
 
 The 5 non-guest copies of the 4x4: tools/win/clipprobe/src/main.rs,
 tools/linux/gdkclipprobe/probe.rs, tools/ios/clipprobe/main2.swift,
-tools/android/clipprobe/.../SeedReceiver.kt, and
+tools/android/clipprobe/.../SeedReceiver.kt (gone), and
 tools/android/cliphelper/run3.sh (base64 — the only base64 of it).
 
 **No base64 anywhere in guests [MEASURED].** **No pixel synthesis in
@@ -76,7 +76,7 @@ extent of the existing guard, and it is dimension-level, not byte-level.
    phones have no shared filesystem with the runner: the path, and
    `KAYA_SELFTEST_SCRIPT` carrying the CONTENT itself over an iOS bundle
    arg or an Android intent extra (harness.rs:62-72).
-3. **`tools/guest/minimal-resources.pri`** (1040 B) — an opaque Windows
+3. **`tools/guest/minimal-resources.pri (gone)`** (1040 B) — an opaque Windows
    MRT package resource index, committed as a blob, not regenerable from
    anything in-tree, no provenance file, mode `-rw----r-x`. Shipped by
    tools/deploy-win.sh and hashed into the deploy stamp.
@@ -94,7 +94,7 @@ Only #1 has ever been called an asset. #2 and #3 have every property of one.
 | **iOS** | **no file-push route for assets exists.** The only host→guest binary channel is a base64-over-container-file bridge in tools/ios/run-sim.sh, which is the clipboard/dialog protocol, not an asset installer | — |
 
 [MEASURED] `grep -c typeface`: validate-mac 5, linux/run-suites 19,
-deploy-win 15, android/run-emulator 21, **ios/run-sim 0**. The iOS scene
+deploy-win 15, android/run-emulator (gone) 21, **ios/run-sim 0**. The iOS scene
 lists (tools/ios/run-sim.sh:1340, :1456) do not contain `typeface`. The
 one asset the tree ships never reaches iOS.
 
@@ -102,7 +102,7 @@ one asset the tree ships never reaches iOS.
 
 swift/KayaSwiftUI.swift (SF Symbols), crates/kaya/src/gtk.rs:78 (Adwaita
 names), crates/kaya/src/winui/mod.rs (Fluent: 17 enum members + 3 raw
-code points), android/.../KayaCompose.kt (Material). 20 entries each,
+code points), android/.../KayaCompose.kt (gone) (Material). 20 entries each,
 hand-written from untracked research files under `styling/`.
 
 DESIGN.md:2360 already ruled this: "Icons want names, not bytes … The
@@ -153,6 +153,6 @@ lowering) and re-refuses per-platform icon ART "for now"
 | the corrupt 88-byte PNG | **KEEP INLINE, deliberately.** A file invites someone to "fix" it. |
 | `"not an image"`, `NOTE_BYTES` | keep; trivial. |
 | the vendored font | correct as an asset; the one gap is that nothing holds its provenance or the core's `include_bytes!` path. |
-| `tools/guest/minimal-resources.pri` | **SHOULD BECOME AN ASSET.** The survey's one genuine mis-filing outside the identity icon. |
+| `tools/guest/minimal-resources.pri (gone)` | **SHOULD BECOME AN ASSET.** The survey's one genuine mis-filing outside the identity icon. |
 | the scene corpus | already an asset; not to be moved. Its two-transport shape is the design input for reaching phones. |
 | the four icon tables | not assets; refuse. |

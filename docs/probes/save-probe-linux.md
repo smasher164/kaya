@@ -1,7 +1,7 @@
 # Save probe — Linux / GTK4 arm
 
 Repo: /Users/akhilindurti/Projects/kaya @ aeb135a (MEASURED: `git log -1`).
-No repo file changed. Probes: `/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/saveprobe/`
+No repo file changed. Probes: `/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/saveprobe/ (gone)`
 Every claim tagged MEASURED / DOCUMENTED / ASSUMED.
 
 Platform under test: the repo's own linux lane — the `kaya-linux` image
@@ -215,7 +215,7 @@ either.
   which means GtkStage (gtk.rs:5730), WinUiStage (winui/mod.rs:7520) and three
   mock stages in harness.rs; and tools/check-verbs.sh requires every harness
   verb to appear in BOTH interpreter files (swift/KayaSwiftUI.swift and
-  android/.../KayaCompose.kt), where the save panel has to be driven again in
+  android/.../KayaCompose.kt (gone)), where the save panel has to be driven again in
   Swift and in Kotlin.
 
 ## B.4 Honest size, in this repo's units: **a MILESTONE, not a depth slice**

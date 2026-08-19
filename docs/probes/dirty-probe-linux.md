@@ -19,7 +19,7 @@ Both session backends the lane actually runs were measured: X11 under
 `tools/linux/a11y-leg.sh`, the lane's own per-leg a11y session.
 
 Probe sources (throwaway):
-`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/dirtyprobe/`
+`/private/tmp/claude-501/-Users-akhilindurti-Projects-kaya/24aa5ebf-e439-4206-9ba0-de67540e4b06/scratchpad/dirtyprobe/ (gone)`
 — `probe.c`, `x11-leg.sh`, `wayland-leg.sh`, `wl-inner.sh`, `toggle-leg.sh`,
 `deep-leg.sh`, `deep_atspi.py`, `gir_props.py`, `icons.py`; outputs in `out/`.
 
@@ -387,7 +387,7 @@ name is a mark only a sighted user gets, and kaya's a11y milestone made
   `dirtyprobe|/probe/|sway|Xvfb|xvfb-run|at-spi|wl-inner|toggle-leg` is empty.
   Every Xvfb, sway, dbus and at-spi-bus-launcher instance lived inside the
   container and died with it.
-- Disk: `scratchpad/dirtyprobe/` was **468K** at peak (344K of it outputs) and
+- Disk: `scratchpad/dirtyprobe/ (gone)` was **468K** at peak (344K of it outputs) and
   is **deleted**. Kept beside this report: `dirty-probe-linux-evidence/`,
   **72K**, 14 files — the five renders and the nine measurement dumps this
   report quotes, so the claims stay checkable. This report is 24K.

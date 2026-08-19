@@ -61,7 +61,7 @@ witness (measured 2026-08-18)".
 
 ## The watched negative (perturbation proven, both directions)
 
-Driver: scratchpad/negative.sh — waits for the leg's own trace to reach
+Driver: scratchpad/negative.sh (gone) — waits for the leg's own trace to reach
 `settle 3000` after the seed, then writes the machine's pasteboard from
 OUTSIDE the leg (osascript PNG clip, or pbcopy text). pbpaste is read
 before and after, so the perturbation is measured, not assumed.

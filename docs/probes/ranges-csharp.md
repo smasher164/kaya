@@ -1,7 +1,7 @@
 # TEXT RANGES — C# ARM (guest + sugar)
 
-Charter: docs/ranges-plan.md. Frozen contract: scratchpad/ranges-depth.md
-(FROZEN CONTRACT). Units ruling: scratchpad/ranges-units.md.
+Charter: docs/ranges-plan.md. Frozen contract: scratchpad/ranges-depth.md (gone)
+(FROZEN CONTRACT). Units ruling: scratchpad/ranges-units.md (gone).
 
 Files this arm owns:
 `bindings/csharp/KayaApp.cs`, `guests/csharp/RangesScene.cs`, plus the
@@ -135,11 +135,11 @@ Standalone, spelled exactly as the lane spells it (`KAYA_SELFTEST=ranges`,
 fan-out's GUI lock, after rebuilding from the restored sources:
 
 ```
-21:37:59  ranges-csharp-swiftui rc=0   scratchpad/green1.log
-21:38:01  ranges-csharp-swiftui rc=0   scratchpad/green2.log
-21:43:__  ranges-csharp-swiftui rc=0   scratchpad/green3.log  (re-verify)
-21:48:44  ranges-csharp-swiftui rc=0   scratchpad/green4.log  } the FINAL
-21:48:45  ranges-csharp-swiftui rc=0   scratchpad/green5.log  } shipped bytes
+21:37:59  ranges-csharp-swiftui rc=0   scratchpad/green1.log (gone)
+21:38:01  ranges-csharp-swiftui rc=0   scratchpad/green2.log (gone)
+21:43:__  ranges-csharp-swiftui rc=0   scratchpad/green3.log (gone)  (re-verify)
+21:48:44  ranges-csharp-swiftui rc=0   scratchpad/green4.log (gone)  } the FINAL
+21:48:45  ranges-csharp-swiftui rc=0   scratchpad/green5.log (gone)  } shipped bytes
 KAYA_SELFTEST: OK (0 matches, expect_highlights , 3 matches,
   expect_highlights 57:62=alpha|203:208=alpha|753:758=alpha,
   expect_selection 203:208=alpha, 753:758 offscreen, 753:758 visible,
@@ -159,7 +159,7 @@ re-verification is at the end of this report.)
 
 ### The flip proofs — five, each watched failing
 
-Driver: `scratchpad/cs-flip.sh` + `scratchpad/cs-perturb.py`. Every
+Driver: `scratchpad/cs-flip.sh (gone)` + `scratchpad/cs-perturb.py (gone)`. Every
 perturbation is a counted substitution required to be exactly 1 (a
 count of 0 exits 2 as a REFUSED proof, never a passed one); a
 perturbation that fails to compile is an aborted proof, not a passed
@@ -302,5 +302,5 @@ scratchpad delta:     +224 KB, final. The throwaway conversion-check
 - `/Users/akhilindurti/Projects/kaya/guests/csharp/RangesScene.cs` (new)
 - `/Users/akhilindurti/Projects/kaya/guests/csharp/Program.cs` (one case)
 - `/Users/akhilindurti/Projects/kaya/tools/validate-mac.sh` (one leg)
-- harness: `scratchpad/ranges-cs-leg.sh`, `scratchpad/cs-flip.sh`,
-  `scratchpad/cs-perturb.py`, `scratchpad/cs-baseline/`
+- harness: `scratchpad/ranges-cs-leg.sh (gone)`, `scratchpad/cs-flip.sh (gone)`,
+  `scratchpad/cs-perturb.py (gone)`, `scratchpad/cs-baseline/ (gone)`
